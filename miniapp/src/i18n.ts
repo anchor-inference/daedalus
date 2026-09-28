@@ -3735,6 +3735,8 @@ Object.assign(DICT, {
   "rail.home": { en: "Home", ru: "Главная" },
   "rail.toggle": { en: "Toggle sidebar", ru: "Показать боковую панель" },
   "rail.account": { en: "Account", ru: "Аккаунт" },
+  "rail.unfold.chats": { en: "Chats", ru: "Чаты" },
+  "rail.unfold.projects": { en: "Projects", ru: "Проекты" },
   "mode.agents": { en: "Agents", ru: "Агенты" },
   "mode.orchestration": { en: "Orchestration", ru: "Оркестрация" },
   "mode.to.orchestration": { en: "Switch to orchestration", ru: "Перейти в оркестрацию" },

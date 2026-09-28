@@ -944,9 +944,12 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   /* The mode whose column is open, marked at the rail's edge even on a screen both modes share. */
   .rail-item.mode::before { content: ""; position: absolute; left: calc((var(--row-h) - var(--rail-w)) / 2); top: 9px; bottom: 9px; width: 3px; border-radius: 0 2px 2px 0; background: var(--fg); }
   .rail-home img { border-radius: var(--radius-xs); }
-  .rail-unfold { display: none; }
-  .rail-home.folded:hover img, .rail-home.folded:focus-visible img { display: none; }
-  .rail-home.folded:hover .rail-unfold, .rail-home.folded:focus-visible .rail-unfold { display: grid; place-items: center; }
+  /* Folded, Home is the unfold button and must read as one without a pointer: an outlined tile with
+     the sidebar's icon and a word under it, taller than its neighbours rather than a look-alike icon. */
+  .rail-home.folded { width: calc(var(--rail-w) - 6px); height: auto; min-height: var(--row-h); padding: 6px 0 4px; gap: 2px; align-content: center; border: 1px solid var(--line-strong); background: var(--surface-1); color: var(--fg); }
+  .rail-home.folded:hover, .rail-home.folded:focus-visible { background: var(--surface-2); }
+  .rail-unfold { display: grid; place-items: center; }
+  .rail-unfold-word { max-width: calc(var(--rail-w) - 4px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-11); font-weight: 600; line-height: 1.1; letter-spacing: -.01em; }
   .rail-badge { position: absolute; top: 1px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--bad); color: #fff; font-size: var(--fs-11); font-weight: 700; line-height: 16px; text-align: center; box-shadow: 0 0 0 2px var(--bg); }
   /* What waits in orchestration, seen from Agents: a neutral pill, not the red of an unread badge. */
   .rail-badge.quiet { background: var(--surface-3); color: var(--fg-2); }

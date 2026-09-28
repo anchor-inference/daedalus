@@ -3,9 +3,14 @@
 // two modes, terminals, the board, the inbox, services — and at its foot the menu with everything
 // else, Settings and the account. It is the folded sidebar as well: there is no separate strip.
 //
-// Home is the one item that changes. With the sidebar folded, it is the way to unfold it: pointing at
-// it shows the sidebar's icon and "Toggle sidebar" with the shortcut, and a click unfolds. With the
-// sidebar open it goes home, which is the current mode's own.
+// Home is the one item that changes. With the sidebar folded, it is the way to unfold it: it shows the
+// sidebar's icon in an outlined tile with a word under it (Chats, or Projects in orchestration), and
+// pointing at it adds "Toggle sidebar" with the shortcut. With the sidebar open it goes home, which is
+// the current mode's own.
+//
+// The folded tile used to be the logo, turning into the sidebar's icon only under a pointer. A tablet
+// has no pointer to hover with, and below 1280 px the sidebar starts folded, so a newcomer on a tablet
+// saw an empty start page and no sign that the chat list was one tap away.
 
 import type { RefObject } from "react";
 import { plural, t } from "./i18n";
@@ -89,8 +94,8 @@ export function Rail(p: RailProps) {
     <nav className="rail" aria-label={t("rail.label")}>
       {p.collapsed ? (
         <button className="rail-item rail-home folded" onClick={p.onToggle} aria-label={t("rail.toggle")} aria-expanded={false} data-rail="home">
-          <img src="/app/icons/icon-192.png" alt="" width={24} height={24} />
-          <span className="rail-unfold"><Icon name="columns" size={20} /></span>
+          <span className="rail-unfold"><Icon name="columns" size={18} /></span>
+          <span className="rail-unfold-word" aria-hidden>{t(p.mode === "orchestration" ? "rail.unfold.projects" : "rail.unfold.chats")}</span>
           <Tip text={t("rail.toggle")} keys={KEYS.sidebar} />
         </button>
       ) : (

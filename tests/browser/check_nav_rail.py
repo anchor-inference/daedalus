@@ -37,9 +37,9 @@ PID = "b4k3ry20f0c5"
 ORDER = ["home", "agents", "orchestration", "terminals", "board", "inbox", "services", "menu", "settings", "account"]
 WORDS = {
     "en": {"home": "Home", "agents": "Agents", "orchestration": "Orchestration", "terminals": "Terminals", "board": "Board", "inbox": "Inbox",
-           "services": "Services", "menu": "Menu", "settings": "Settings", "account": "Account", "toggle": "Toggle sidebar", "more": "More"},
+           "services": "Services", "menu": "Menu", "settings": "Settings", "account": "Account", "toggle": "Toggle sidebar", "unfold": "Chats", "unfold.projects": "Projects", "more": "More"},
     "ru": {"home": "Главная", "agents": "Агенты", "orchestration": "Оркестрация", "terminals": "Терминалы", "board": "Доска", "inbox": "Входящие",
-           "services": "Сервисы", "menu": "Меню", "settings": "Настройки", "account": "Аккаунт", "toggle": "Показать боковую панель", "more": "Ещё"},
+           "services": "Сервисы", "menu": "Меню", "settings": "Настройки", "account": "Аккаунт", "toggle": "Показать боковую панель", "unfold": "Чаты", "unfold.projects": "Проекты", "more": "Ещё"},
 }
 # The unseen notifications the bell and the Inbox count, and what waits in orchestration: Bakery's one
 # request and the main chat's own confirmation (the mirrored questions are Bakery's, counted there).
@@ -172,12 +172,22 @@ def desktop(page: Page, lang: str) -> None:
     expect(home).to_have_attribute("aria-label", words["toggle"])
     expect(home).to_have_attribute("aria-expanded", "false")
     page.mouse.move(700, 400)
-    expect(home.locator(".rail-unfold")).to_be_hidden()
-    expect(home.locator("img")).to_be_visible()
-    # Pointed at, Home turns into the unfold button with its words and its shortcut.
-    said = tip(page, "home")
+    # Folded, Home is the unfold button without being pointed at: a tablet has no hover, so the
+    # sidebar's icon and its word show at rest, and the word fits the rail uncut.
     expect(home.locator(".rail-unfold")).to_be_visible()
-    expect(home.locator("img")).to_be_hidden()
+    expect(home.locator(".rail-unfold-word")).to_have_text(words["unfold"])
+    cut = home.locator(".rail-unfold-word").evaluate("e => e.scrollWidth > e.clientWidth")
+    assert not cut, f"{lang}: the folded Home's word is cut"
+    expect(home.locator("img")).to_have_count(0)
+    # In orchestration the folded sidebar is the projects, and the longer Russian word must fit as well.
+    go(page, "/orchestration", lang)
+    expect(home.locator(".rail-unfold-word")).to_have_text(words["unfold.projects"])
+    cut = home.locator(".rail-unfold-word").evaluate("e => e.scrollWidth > e.clientWidth")
+    assert not cut, f"{lang}: the folded Home's word in orchestration is cut"
+    go(page, "/agents", lang)
+    expect(page.locator("nav.sidebar")).to_have_count(0)
+    # Pointed at, it adds its words and its shortcut.
+    said = tip(page, "home")
     assert said.startswith(words["toggle"]) and "\\" in said, f"{lang}: the folded Home's tooltip says {said!r}"
     expect(home.locator(".rail-tip kbd")).to_have_count(1)
     home.click()
