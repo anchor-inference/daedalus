@@ -22,6 +22,31 @@ export function LangPicker() {
   );
 }
 
+/** One of a small fixed set, picked in place: the one choice control Settings uses, so a mode, an
+ *  approval rule and an on/off setting all look and answer the same way. */
+export function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: { id: T; label: string }[]; onChange: (id: T) => void; label?: string }) {
+  return (
+    <div className="segmented inline" role="radiogroup" aria-label={label}>
+      {options.map((option) => (
+        <button key={option.id} type="button" role="radio" aria-checked={value === option.id} className={value === option.id ? "on" : ""} onClick={() => value !== option.id && onChange(option.id)}>
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** An on/off setting that takes effect at once. It is a switch and not a button labelled "on" or "off",
+ *  because such a button beside an action such as "Run now" read as a second action, and nobody
+ *  could tell whether its word was the state or what pressing it would do. */
+export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean }) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} aria-label={label} className={`switch ${checked ? "on" : ""}`} disabled={disabled} onClick={() => onChange(!checked)}>
+      <span className="switch-track" aria-hidden><span className="switch-knob" /></span>
+    </button>
+  );
+}
+
 export function Avatar({ status, seed }: { status: Status; seed: string }) {
   // Deterministic accessory per session so each "bot" stays recognisable.
   const hue = [...seed].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);

@@ -11,6 +11,8 @@
 .deps-job-title > span:last-child { display:grid; gap:3px; }
 .deps-job-icon { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; flex:none; border-radius:50%; color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, transparent); }
 .deps-job.failed .deps-job-icon { color:var(--bad); background:color-mix(in srgb, var(--bad) 10%, transparent); }
+.deps-job.offline { border-color:color-mix(in srgb, var(--warn) 42%, var(--line)); }
+.deps-job.offline .deps-job-icon { color:var(--warn); background:color-mix(in srgb, var(--warn) 10%, transparent); }
 .deps-label { display:block; margin-top:var(--space-2); font-size:var(--fs-13); font-weight:600; }
 .deps-request-card { display:grid; gap:var(--space-3); }
 .deps-request-card > p { margin:-6px 0 0; }
