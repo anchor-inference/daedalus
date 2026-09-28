@@ -3148,6 +3148,7 @@ Object.assign(DICT, {
   "focus.tone.review": { en: "something to look at", ru: "есть что посмотреть" },
   "focus.tone.waiting": { en: "waiting", ru: "ждёт" },
   "focus.tone.free": { en: "free", ru: "свободен" },
+  "focus.tone.off": { en: "off", ru: "выключен" },
   "focus.tone.silent": { en: "silent", ru: "молчит" },
   "focus.tone.error": { en: "error", ru: "ошибка" },
   "focus.wait.dependencies": { en: "waits for the tasks it depends on", ru: "ждёт задачи, от которых зависит" },

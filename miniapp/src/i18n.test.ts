@@ -218,7 +218,7 @@ describe("the keys the code asks for", () => {
       ["focus.wait.", listed("./project/focus.ts", "WAIT_REASONS")],
       ["focus.page.", listed("./project/focus.ts", "FOCUS_PAGES")],
       ["focus.autonomy.", listed("./project/focus.ts", "AUTONOMIES")],
-      ["focus.tone.", ["working", "review", "waiting", "free", "silent", "error"]],
+      ["focus.tone.", ["working", "review", "waiting", "free", "off", "silent", "error"]],
       ["focus.brief.section.", listed("./project/pages.tsx", "BRIEF_SECTIONS")],
       ["focus.kind.", listed("./project/pages.tsx", "JOURNAL_KINDS")],
       ["focus.author.", ["operator", "orchestrator", "staff", "system"]],

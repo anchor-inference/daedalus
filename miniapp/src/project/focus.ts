@@ -33,11 +33,13 @@ export function canFocus(project: Pick<Project, "system" | "settings"> | null | 
 // ── the team, as the sidebar draws it ─────────────────────────────────────────────────────────
 
 /** The colour of a member's dot, as the mock-up names them: at work, something to look at, waiting on
- *  someone, free. Silence is grey on purpose — silent is not failed — and an error is its own. */
-export type StaffTone = "working" | "review" | "waiting" | "free" | "silent" | "error";
+ *  someone, free. Silence is grey on purpose — silent is not failed — and an error is its own. A member
+ *  with nothing running is "off", not "free": a phone shows the word alone, and one word for both left
+ *  the operator unable to tell a member ready for a message from one that has to be launched first. */
+export type StaffTone = "working" | "review" | "waiting" | "free" | "off" | "silent" | "error";
 
 const TONES: Record<StaffStatus, StaffTone> = {
-  off: "free",
+  off: "off",
   starting: "working",
   working: "working",
   turn_done_unseen: "review",
@@ -45,7 +47,7 @@ const TONES: Record<StaffStatus, StaffTone> = {
   question: "waiting",
   permission: "waiting",
   error: "error",
-  exited: "free",
+  exited: "off",
   no_signal: "silent",
 };
 

@@ -2963,6 +2963,8 @@ button.staff-row:hover { background: var(--surface-2); }
 .focus-dot.tone-review { background: var(--ok); }
 .focus-dot.tone-waiting { background: var(--warn); }
 .focus-dot.tone-free { background: var(--surface-4); }
+/* Hollow: an idle member and a stopped one were the same grey dot, and on a phone the dot is all there is. */
+.focus-dot.tone-off { background: transparent; box-shadow: inset 0 0 0 1.5px var(--fg-3); }
 .focus-dot.tone-silent { background: var(--fg-3); }
 .focus-dot.tone-error { background: var(--bad); }
 
