@@ -2511,7 +2511,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   // A run does not always answer with the model it was set to: the provider chain steps down when an
   // endpoint refuses or stalls. What is said here is the difference between the two, never the chain.
   "session.model.via": { en: "via {model}", ru: "через {model}" },
-  "session.model.fallback": { en: "via {to} (fallback from {from})", ru: "через {to} (вместо {from})" },
+  "session.model.fallback": { en: "← {from}", ru: "← {from}" },
   "session.model.fallback.turn": { en: "answered by {to} — {from} unavailable", ru: "ответила {to} — {from} недоступна" },
   "session.model.fallback.why": { en: "{from} did not answer: {reason}. The run moved to {to} and stayed there.", ru: "{from} не ответила: {reason}. Запуск перешёл на {to} и остался на ней." },
   "session.model.fallback.calls": { en: "every call of this run, by model", ru: "все вызовы этого запуска, по моделям" },

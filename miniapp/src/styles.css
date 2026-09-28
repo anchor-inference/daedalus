@@ -700,6 +700,10 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .model-select .ic { flex:none; color:var(--fg-3); }
 .model-select .model-label { min-width:0; }
 .model-select.attn { color:var(--warn); }
+/* The fallback's two names: the stand-in, then an arrow and the configured model. */
+.model-select .model-label.model-fallback { display:inline-flex; align-items:baseline; gap:4px; }
+.model-select .model-to, .model-select .model-from { min-width:0; }
+.model-select .model-from { opacity:.85; }
 .model-select .model-dot { width:6px; height:6px; border-radius:50%; background:var(--warn); flex:none; }
 .composer-box .chip.recording { align-self:center; margin:0 2px; }
 .composer-box .attachments { margin:4px 6px 2px; width:auto; }
@@ -2504,6 +2508,12 @@ input.field[type="range"] {
   .composer-row .model-select { flex:0 1 auto; max-width:none; padding-inline:12px; gap:4px; font-size:var(--fs-12); }
   .composer-row .model-select > .ic:first-child { display:none; }
   .composer-row .model-select .model-effort { flex:none; white-space:nowrap; }
+  /* A fallback in a narrow pill: both names at once do not fit on a line, so they stack, the
+     configured one smaller under the stand-in, and the effort gives up its place (it is in the sheet). */
+  .composer-row .model-select .model-label.model-fallback { flex-direction:column; align-items:flex-start; gap:0; line-height:1.15; }
+  .composer-row .model-select .model-to, .composer-row .model-select .model-from { max-width:100%; }
+  .composer-row .model-select .model-from { font-size:var(--fs-11); }
+  .composer-row .model-select.attn .model-effort { display:none; }
 }
 @media (max-width: 1023px) {
   .composer-box textarea { min-height:calc(var(--fs-prose) * 1.4 + var(--space-2) * 2); }

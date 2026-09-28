@@ -62,7 +62,16 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
     onOpenChange(false);
     onChoose(choice);
   };
-  const label = fallback ? t("session.model.fallback", { to: shortModel(fallback.to, 14), from: shortModel(fallback.from, 14) }) : shortModel(model, 22);
+  // While a fallback answers, the pill names the stand-in and then the configured model behind an
+  // arrow, each in its own span. It used to be one sentence, "via DeepSeek Flash (fallback from
+  // Claude Opus 5)", which a phone cut to "via DeepSeek Fla…" and lost the configured model entirely;
+  // a narrow composer now stacks the two names and leaves the effort to the sheet (styles.css).
+  const label = fallback ? (
+    <>
+      <span className="model-to truncate">{shortModel(fallback.to, 18)}</span>
+      <span className="model-from truncate">{t("session.model.fallback", { from: shortModel(fallback.from, 18) })}</span>
+    </>
+  ) : shortModel(model, 22);
   const reason = fallback ? (DICT[`session.model.reason.${fallback.reason}`] ? t(`session.model.reason.${fallback.reason}`) : fallback.reason) : "";
   const title = fallback ? `${t("session.model.fallback.turn", { to: fallback.to, from: fallback.from })} — ${reason}` : t("composer.model.title");
   const list = <ModelList cat={cat} failed={failed} model={model} fallback={fallback} onPick={pick} />;
@@ -72,7 +81,7 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
         {fallback ? <span className="model-dot" aria-hidden /> : <Icon name="model" size={14} />}
         {/* The effort is its own span so a long model name is what gives way: in one span the
             ellipsis ate the effort first and the pill read "DeepSeek Flash · l…". */}
-        <span className="model-label truncate">{label}</span>
+        <span className={`model-label truncate ${fallback ? "model-fallback" : ""}`}>{label}</span>
         {onChooseEffort && thinking && <span className="model-effort">· {t(`add.effort.${effort || "medium"}`)}</span>}
         <Icon name="chevron" size={12} />
       </button>

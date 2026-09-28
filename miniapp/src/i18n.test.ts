@@ -52,6 +52,8 @@ const SAME_IN_BOTH = [
   "sched.cron",
   "sched.when.cron",
   "session.mcp.toggled",
+  // The fallback pill's second name: an arrow and the configured model, nothing to translate.
+  "session.model.fallback",
   "session.sched.cron",
   // Today's spend is a row made only of holes and arrows.
   "session.usage.today.line",

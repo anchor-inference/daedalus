@@ -92,9 +92,8 @@ describe("what the chip says", () => {
     expect(line).toContain("opus-5");
   });
 
-  it("names both models in the header", () => {
-    const label = t("session.model.fallback", { to: "flash", from: "opus-5" });
-    expect(label).toContain("flash");
-    expect(label).toContain("opus-5");
+  it("names the configured model behind the stand-in's name in the pill", () => {
+    const label = t("session.model.fallback", { from: "opus-5" });
+    expect(label).toBe("← opus-5");
   });
 });
