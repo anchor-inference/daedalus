@@ -17,7 +17,7 @@
       <p>{{.T "setup.lead"}}</p>
     </header>
 
-    {{if .DockerMissing}}<p class="banner rise" style="--i: 1">{{.T "docker.missing"}}</p>{{end}}
+    {{if .DockerMissing}}<section class="banner rise" style="--i: 1"><h2>{{.T "alert.docker"}}</h2><p>{{.T "docker.missing"}}</p></section>{{end}}
 
     <form method="post" action="/setup" id="setup">
       <input type="hidden" name="csrf" value="{{.CSRF}}" />

@@ -18,7 +18,10 @@
       <p>{{if .Native}}{{.T "status.close.native"}}{{else}}{{.T "status.close.docker"}}{{end}}</p>
     </header>
 
-    <p class="banner" id="alert" hidden></p>
+    <section class="banner" id="alert" role="status" hidden>
+      <h2 id="alert-title"></h2>
+      <p id="alert-body"></p>
+    </section>
 
     <section class="card decide rise" id="change" hidden style="--i: 1">
       <h2 id="change-title"></h2>

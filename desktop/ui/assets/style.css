@@ -348,8 +348,13 @@ button[disabled] { opacity: 0.45; cursor: default; transform: none; }
   background: var(--s1);
   color: #f7d79b;
   margin-bottom: clamp(14px, 1.4vw, 20px);
-  padding: 15px 18px;
+  padding: clamp(18px, 1.6vw, 26px);
 }
+/* A warning is built like the change card beside it — a heading in the warning colour, then the
+   sentence in the ordinary muted text — so two notices on one page read as one kind of thing. It
+   used to be a single amber line with no heading, next to a card that had one. */
+.banner h2 { font-size: 17px; }
+.banner p { color: var(--muted); margin-top: 8px; }
 .decide { border-color: rgba(86, 211, 100, 0.45); margin-bottom: clamp(14px, 1.4vw, 20px); }
 .decide.failed { border-color: rgba(240, 180, 41, 0.4); }
 .decide.failed h2 { color: #f7d79b; }

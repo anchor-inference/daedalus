@@ -196,11 +196,17 @@ function drawStatus(status) {
   open.classList.toggle("primary", !change.pending && status.running > 0);
   open.classList.toggle("quiet", !status.running);
   open.title = status.running ? "" : T("status.open.idle");
-  const message = status.docker_missing ? T("docker.missing") : status.failure;
-  el("alert").textContent = message || "";
-  el("alert").hidden = !message;
+  if (status.docker_missing) showAlert(T("alert.docker"), T("docker.missing"));
+  else if (status.failure) showAlert(T("alert.failure"), status.failure);
+  else el("alert").hidden = true;
   const log = status.log || [];
   el("log").textContent = log.length ? log.join("\n") : T("status.log.empty");
+}
+
+function showAlert(title, body) {
+  el("alert-title").textContent = title;
+  el("alert-body").textContent = body;
+  el("alert").hidden = false;
 }
 
 // The supervisor's word for what happened, in the operator's.
@@ -217,9 +223,8 @@ async function refresh() {
   try {
     status = await (await fetch("/api/status")).json();
   } catch (err) {
-    const alert = el("alert") || el("live");
-    if (alert) alert.textContent = T("status.silent");
-    if (alert && alert.id === "alert") alert.hidden = false;
+    if (page === "status") showAlert(T("alert.silent"), T("status.silent"));
+    else if (el("live")) el("live").textContent = T("status.silent");
     return;
   }
   if (page === "status") drawStatus(status);

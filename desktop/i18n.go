@@ -120,6 +120,9 @@ var messages = map[Lang]map[string]string{
 		"change.applied":         "The change is running",
 		"change.reverted":        "The change was reversed",
 		"change.failed":          "The change was not applied",
+		"alert.docker":           "Docker is not available",
+		"alert.failure":          "The last action did not finish",
+		"alert.silent":           "Lost touch with the launcher",
 		"docker.missing":         "Daedalus needs Docker: install Docker Desktop, start it, and try again. Or set this up to run on this machine instead.",
 
 		"watch.open":      "Open",
@@ -226,6 +229,9 @@ var messages = map[Lang]map[string]string{
 		"change.applied":         "Изменение работает",
 		"change.reverted":        "Изменение откачено",
 		"change.failed":          "Изменение не применилось",
+		"alert.docker":           "Docker недоступен",
+		"alert.failure":          "Последнее действие не завершилось",
+		"alert.silent":           "Связь с лаунчером потеряна",
 		"docker.missing":         "Daedalus нужен Docker: установите Docker Desktop, запустите его и попробуйте снова. Или выберите запуск прямо на этом компьютере.",
 
 		"watch.open":      "Открыть",
