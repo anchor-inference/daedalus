@@ -4,8 +4,8 @@
 //
 // It lives inside the conversation's column, never the page: with the panel open it is left of the
 // panel, never over it, and a dual view gives each pane its own. It is not there while the Browser tab
-// already shows the page, nor while the panel covers the chat. Below 520 px of column it shrinks to a
-// pill, so it never covers the words being read, and it can be dragged to any corner, which this
+// already shows the page, nor while the panel covers the chat. Below 520 px of column (960 on a touch
+// screen, model.ts says why) it shrinks to a pill, so it never covers the words being read, and it can be dragged to any corner, which this
 // device remembers. ✕ hides it until the group does something new or asks for the operator.
 
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
@@ -14,8 +14,9 @@ import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { askTake, handOff, useLiveSnapshot, useLiveView } from "./data";
 import { Favicon } from "./favicon";
-import { agentName, domainOf, driveState, extraCount, nearestCorner, needsOf, needWords, PIP_PILL_BELOW, pipGroup, pipHidden, readCorner, rememberCorner, type Corner, type DriveState } from "./model";
+import { agentName, domainOf, driveState, extraCount, nearestCorner, needsOf, needWords, PIP_PILL_BELOW, PIP_PILL_BELOW_TOUCH, pipGroup, pipHidden, readCorner, rememberCorner, type Corner, type DriveState } from "./model";
 import { BrowserViewer } from "./viewer";
+import { useMedia } from "../shell";
 
 /** Groups hidden with ✕ this visit, and the activity they were hidden at. */
 const HIDDEN = new Map<string, string>();
@@ -50,7 +51,8 @@ function PipCard({ group, extra, onOpen, onHide }: { group: BrowserGroup; extra:
   const [corner, setCorner] = useState<Corner>(() => readCorner());
   const [column, setColumn] = useState({ w: 0, h: 0, bottom: INSET.bottom });
   const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
-  const pill = column.w > 0 && column.w < PIP_PILL_BELOW;
+  const touch = useMedia("(hover: none) and (pointer: coarse)");
+  const pill = column.w > 0 && column.w < (touch ? PIP_PILL_BELOW_TOUCH : PIP_PILL_BELOW);
   const live = useLiveView(pill ? null : group.id, "thumb", { readOnly: true, box: () => ({ max_w: 320, max_h: 200 }) });
   const snap = useLiveSnapshot(live);
   const drive: DriveState = driveState({ ...group, needs_you: needsOf(group.needs_you, snap) }, snap.control);

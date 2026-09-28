@@ -175,6 +175,16 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
         say(f"the preview is a card in a {m['column']['w']} px column")
     context.close()
 
+    # A touch tablet in landscape with the panel open: a column of about 650 px, which a mouse keeps
+    # as a card, is a pill under a finger, which cannot hover to reach the card's buttons.
+    context = browser.new_context(viewport={"width": 1180, "height": 820}, has_touch=True, color_scheme="dark")
+    page = open_page(context, bs, stub, f"{BASE}/agents/{S1}?panel=details&token=t&scheme=dark&lang={lang}", wait=".bp-pip")
+    m = placement(page, say, "touch tablet with the panel")
+    print(f"[{lang}] touch 1180: pill {m['pill']} column {m['column']}")
+    if not m["pill"]:
+        say(f"on a touch tablet the preview is a card in a {m['column']['w']} px column")
+    context.close()
+
     # A dual view: the preview belongs to the pane whose session has the browser.
     context = browser.new_context(viewport={"width": 1920, "height": 1000}, color_scheme="dark")
     page = open_page(context, bs, stub, f"{BASE}/agents/{S2}?with={S1}&token=t&scheme=dark&lang={lang}", wait=".bp-pip")
