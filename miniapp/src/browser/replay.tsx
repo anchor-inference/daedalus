@@ -115,7 +115,7 @@ export function ReplayStage({ group, viewportW, frames, index, rows, agent, onIn
   }, [index, frames.length, onIndex, onLive]);
 
   const row = useMemo(() => (frame?.action_id ? rows.find((r) => (r.action_id || r.id) === frame.action_id) ?? null : null), [frame, rows]);
-  const rect = frame ? fit(size.w, size.h, frame.w, frame.h, "top") : { x: 0, y: 0, w: 0, h: 0 };
+  const rect = frame ? fit(size.w, size.h, frame.w, frame.h) : { x: 0, y: 0, w: 0, h: 0 };
   const cssW = frame ? frameCssWidth(frame, viewportW) : viewportW;
   const placed = row?.box && rect.w ? placeBox(row.box, rect, cssW) : null;
   const point = row?.point && rect.w ? placeBox({ ...row.point, w: 0, h: 0 }, rect, cssW) : null;

@@ -43,8 +43,6 @@ export type ViewerProps = {
   onChord?: (chord: ViewerChord) => void;
   /** Two presses of Escape: the keyboard goes back to the app. */
   onRelease?: () => void;
-  /** Where a picture narrower in proportion than its box sits: at the top (a panel), or centred. */
-  align?: "center" | "top";
   /** Called with the viewer's element, for the handoff animation. */
   stageRef?: (el: HTMLDivElement | null) => void;
   className?: string;
@@ -52,7 +50,7 @@ export type ViewerProps = {
   children?: ReactNode;
 };
 
-export function BrowserViewer({ live, snap, tier, interactive, touch = false, compact = false, agent, saving = false, align = "center", onChord, onRelease, stageRef, className, style, children }: ViewerProps) {
+export function BrowserViewer({ live, snap, tier, interactive, touch = false, compact = false, agent, saving = false, onChord, onRelease, stageRef, className, style, children }: ViewerProps) {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -89,7 +87,7 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
     return () => window.clearTimeout(timer);
   }, [live, tier, size.w, size.h, saving, snap.state.kind]);
 
-  const base = useMemo<Rect>(() => (meta ? fit(size.w, size.h, meta.w, meta.h, align) : { x: 0, y: 0, w: 0, h: 0 }), [meta, size.w, size.h, align]);
+  const base = useMemo<Rect>(() => (meta ? fit(size.w, size.h, meta.w, meta.h) : { x: 0, y: 0, w: 0, h: 0 }), [meta, size.w, size.h]);
   const rect = useMemo(() => zoomed(base, size.w, size.h, zoom), [base, size.w, size.h, zoom]);
   const rectRef = useRef(rect);
   rectRef.current = rect;

@@ -9,7 +9,6 @@ describe("fitting the picture", () => {
     expect(fit(640, 800, 1280, 800)).toEqual({ x: 0, y: 200, w: 640, h: 400 });
     expect(fit(1000, 400, 1280, 800)).toEqual({ x: 180, y: 0, w: 640, h: 400 });
     expect(fit(0, 400, 1280, 800)).toEqual({ x: 0, y: 0, w: 0, h: 0 });
-    expect(fit(640, 800, 1280, 800, "top")).toEqual({ x: 0, y: 0, w: 640, h: 400 });
   });
 });
 

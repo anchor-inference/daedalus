@@ -20,16 +20,17 @@ export const NO_ZOOM: Zoom = { scale: 1, panX: 0, panY: 0 };
 export const ZOOM_MAX = 3;
 
 /**
- * The image contained in the box, its proportions kept (`object-fit: contain`): centred, or held to
- * the top as a browser window holds its page, so a narrow panel's spare height is below the page and
- * not split around it.
+ * The image contained in the box, its proportions kept (`object-fit: contain`), and centred both ways.
+ * The panel used to hold it to the top, as a browser window holds its page, but the remote browser's
+ * proportions are fixed, so a tall panel showed the page and then a third of its height in plain
+ * black above the action log, which read as a page that had failed to render.
  */
-export function fit(boxW: number, boxH: number, imageW: number, imageH: number, align: "center" | "top" = "center"): Rect {
+export function fit(boxW: number, boxH: number, imageW: number, imageH: number): Rect {
   if (boxW <= 0 || boxH <= 0 || imageW <= 0 || imageH <= 0) return { x: 0, y: 0, w: 0, h: 0 };
   const scale = Math.min(boxW / imageW, boxH / imageH);
   const w = imageW * scale;
   const h = imageH * scale;
-  return { x: (boxW - w) / 2, y: align === "top" ? 0 : (boxH - h) / 2, w, h };
+  return { x: (boxW - w) / 2, y: (boxH - h) / 2, w, h };
 }
 
 /** The fitted rectangle with the pinch applied: scaled about the box's centre, then moved. */
