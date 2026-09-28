@@ -337,6 +337,14 @@ export function App() {
   // column, the list the column holds is a page of its own and the home, and the chat is a detail of it.
   const orchestrationList = route.screen === "orchestration" && !focusProject && route.detail === "projects";
   const mainChat = route.screen === "orchestration" && !focusProject && !orchestrationList;
+  // A wide window with its column open already holds that list there, so the list's address (a
+  // bookmark, a link, a window widened from a phone's size) opens the main chat instead: drawn as a
+  // page, it repeated the column beside it and left most of the screen empty. With the column folded
+  // (a tablet's default) the page is the only list on screen, and it stays.
+  const listInColumn = orchestrationList && wide && !folded;
+  useEffect(() => {
+    if (listInColumn) navigate(ORCHESTRATION, { replace: true });
+  }, [listInColumn]);
   const focusChat = (!!focusProject && (route.page === null || route.page === "s" || route.page === "staff")) || mainChat;
   // Telegram's own back button leaves a detail; the vertical swipe must not close the app mid-chat.
   // Orchestration's list is the mode's top on a phone, as the start screen is Agents'; on a desktop the
@@ -512,7 +520,7 @@ export function App() {
         {route.screen === "health" && <HealthScreen toast={showToast} />}
         {route.screen === "settings" && <SettingsScreen toast={showToast} section={route.detail} />}
         {mainChat && <MainScreen toast={showToast} />}
-        {orchestrationList && <OrchestrationList />}
+        {orchestrationList && !listInColumn && <OrchestrationList />}
         {focusProject !== null &&
           (!route.project ? (
             <div className="empty"><b>{t("team.noproject")}</b></div>

@@ -16,7 +16,7 @@ import { plural, t } from "../i18n";
 import { Icon, type IconName } from "../icons";
 import { go, PageHeader } from "../shell";
 import { ORCHESTRATION_LIST, navigate, pathFor, projectHome, projectPagePath, projectSessionPath, projectStaffPath } from "../router";
-import { alwaysServer, answeredBy, canAlways, composerWhen, nowChoice } from "../staff/model";
+import { alwaysServer, answeredBy, askWords, canAlways, composerWhen, nowChoice } from "../staff/model";
 import { HealthLine } from "../staff/health";
 import { invalidate, useQuery } from "../store";
 import { PhoneTerminal, type PhoneTerminalProps } from "../terminal/mobile";
@@ -226,7 +226,7 @@ export function NeedsYouBanner({ projectId, toast }: { projectId: string; toast:
         {waiting > 1 && <span className="needs-banner-more">{t("phone.needs.more", { n: waiting - 1 })}</span>}
         <span className="needs-banner-when">{relTime(ask.created_at)}</span>
       </div>
-      <div className="needs-banner-text"><b>{askerLine(ask, names)}</b> {ask.text}</div>
+      <div className="needs-banner-text"><b>{askerLine(ask, names)}</b> {askWords(ask)}</div>
       <AskAnswers key={ask.id} ask={ask} projectId={projectId} toast={toast} />
     </section>
   );
@@ -313,7 +313,7 @@ function PhoneStaffRow({ member, task, spend, onOpen, onEdit }: { member: Staff;
           <span className="truncate">{member.name}</span>
           {!member.one_off && member.role && <span className="phone-staff-role truncate">{member.role}</span>}
           <HarnessBadge harness={member.harness} />
-          {member.env === "host" && <span className="focus-host">{t("team.env.host")}</span>}
+          {member.env === "host" && <span className="chip tiny env-chip host" title={t("team.env.host")}>{t("term.env.short.host")}</span>}
         </span>
         {/* Two lines before it gives up: a wait's reason is the one thing that says why the member is
             stuck, and one line cut "the machine's terminal limit is reached" before its verb. */}
@@ -334,15 +334,17 @@ function PhoneStaffRow({ member, task, spend, onOpen, onEdit }: { member: Staff;
 
 // ── the board ────────────────────────────────────────────────────────────────────────────────
 
-export function PhoneBoard({ projectId, toast, board }: { projectId: string; toast: (text: string) => void; board: ReactNode }) {
+/** `board` is handed the request the banner shows, so the board does not show it a second time. */
+export function PhoneBoard({ projectId, toast, board }: { projectId: string; toast: (text: string) => void; board: (bannered: string | null) => ReactNode }) {
   const { project } = useProject(projectId);
+  const { ask } = useOperatorAsks(projectId);
   // The board's own bar under the header carries its counts and its "+": the header only names it.
   return (
     <>
       <ProjectPhoneHead projectId={projectId} title={project ? t("pboard.title.of", { name: project.name }) : t("focus.page.board")} subtitle="" />
       <div className="phone-project phone-board">
         <NeedsYouBanner projectId={projectId} toast={toast} />
-        {board}
+        {board(ask?.id ?? null)}
       </div>
     </>
   );

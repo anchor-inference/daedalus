@@ -137,6 +137,15 @@ export function ruleWords(rule: string): string {
   return whole && !whole[1].includes("__") ? t("staff.rules.server", { server: whole[1] }) : rule;
 }
 
+/** A request's text with an MCP tool's name read the way a standing rule is: the host writes
+ *  "<tool>: <what>", and `mcp__daedalus_browser__BrowserNavigate` in front of a URL asked the operator
+ *  to parse an internal identifier before granting it. The raw text stays the card's tooltip. */
+export function askWords(ask: Pick<Ask, "text" | "detail">): string {
+  const tool = typeof ask.detail?.tool === "string" ? ask.detail.tool : "";
+  if (!tool.startsWith("mcp__") || !ask.text.startsWith(tool)) return ask.text;
+  return ruleWords(tool) + ask.text.slice(tool.length);
+}
+
 // The column beside the terminal: the operator drags it wider or narrower, and the width is kept per
 // browser. Until they do, the stylesheet's own width stands (a quarter of the window, 280–360 px).
 

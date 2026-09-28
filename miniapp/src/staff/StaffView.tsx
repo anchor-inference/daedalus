@@ -37,7 +37,7 @@ import { deviceSaving, useBrowsers } from "../browser/data";
 import { BrowserHeadButton } from "../browser/phone";
 import { BrowserPip } from "../browser/pip";
 import { StaffDetails } from "./StaffDetails";
-import { ASIDE_STEP, alwaysServer, attention, canAlways, channelWords, clampAside, composerWhen, defaultMode, keyboardBlocks, listRows, nowChoice, openRequests, outboxRows, readAsideWidth, rememberAsideWidth, ruleWords, turnFacts, type StaffViewMode } from "./model";
+import { ASIDE_STEP, alwaysServer, askWords, attention, canAlways, channelWords, clampAside, composerWhen, defaultMode, keyboardBlocks, listRows, nowChoice, openRequests, outboxRows, readAsideWidth, rememberAsideWidth, ruleWords, turnFacts, type StaffViewMode } from "./model";
 import { PaneHandle, pixelDrag } from "../layout";
 
 const enc = encodeURIComponent;
@@ -327,7 +327,7 @@ function PermissionBar({ projectId, staffId, caps, toast }: { projectId: string;
         <section key={ask.id} className={`staff-request ${ask.kind}`} data-ask={ask.short_id}>
           <div className="staff-request-head">
             <Icon name={ask.kind === "permission" ? "shield" : "question"} size={14} />
-            <span className="staff-request-text truncate" title={ask.text}>{ask.text}</span>
+            <span className="staff-request-text truncate" title={ask.text}>{askWords(ask)}</span>
             <span className="staff-request-id mono">#{ask.short_id}</span>
           </div>
           {ask.routed_to === "orchestrator" && <div className="staff-request-routed">{t("perm.routed.orchestrator")}</div>}

@@ -85,6 +85,8 @@ describe("the team in the sidebar", () => {
     expect(staffTone(member({ status: "permission" }))).toBe("waiting");
     expect(staffTone(member({ status: "turn_done_unseen" }))).toBe("review");
     expect(staffTone(member({ status: "idle" }))).toBe("free");
+    expect(staffTone(member({ status: "off" }))).toBe("off");
+    expect(staffTone(member({ status: "exited" }))).toBe("off");
     // Silence is grey, not red: silent is not failed.
     expect(staffTone(member({ status: "no_signal" }))).toBe("silent");
     expect(staffTone(member({ status: "error" }))).toBe("error");

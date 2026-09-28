@@ -60,9 +60,11 @@ function launchText(launch: Launch): string | null {
  * panel passes nothing, because its address belongs to the conversation beside it, while a phone's
  * board is the whole page and a link to one of its tasks (a notification, the review's `?task=`) has to
  * open the task there. Keying this on `embedded` alone once left a phone deaf to that link.
- * `back` is the page header's way back (null for none).
+ * `back` is the page header's way back (null for none). `bannered` is the request a "Needs you" banner
+ * above the board already shows with its answers: the board leaves it out rather than showing the same
+ * question twice, in two different sets of controls, across the top half of a phone.
  */
-export function ProjectBoard({ projectId, toast, selected, layout = "auto", embedded = false, back }: { projectId: string; toast: (text: string) => void; selected?: string | null; layout?: "auto" | "list"; embedded?: boolean; back?: string | null }) {
+export function ProjectBoard({ projectId, toast, selected, layout = "auto", embedded = false, back, bannered = null }: { projectId: string; toast: (text: string) => void; selected?: string | null; layout?: "auto" | "list"; embedded?: boolean; back?: string | null; bannered?: string | null }) {
   const [showDone, setShowDone] = useState(false);
   const key = `${boardKey(projectId)}?include_done=${showDone ? 1 : 0}`;
   // While the event stream is up the board is read again when its project changes; the poll is only
@@ -83,7 +85,10 @@ export function ProjectBoard({ projectId, toast, selected, layout = "auto", embe
     invalidate("/api/board");
     refresh();
   };
-  const arranged = useMemo<Arranged>(() => arrange(data ?? { tasks: [], needs_you: [] }), [data]);
+  const arranged = useMemo<Arranged>(() => {
+    const all = arrange(data ?? { tasks: [], needs_you: [] });
+    return bannered ? { ...all, needs: all.needs.filter((need) => need.id !== bannered) } : all;
+  }, [data, bannered]);
   const titles = useMemo(() => Object.fromEntries((data?.tasks ?? []).map((task) => [task.id, { title: task.title, status: task.status }])), [data]);
   const inAddress = selected !== undefined;
   const chosen = inAddress ? selected : picked;

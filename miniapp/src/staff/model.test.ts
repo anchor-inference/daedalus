@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChannelHealth, StaffMessage, StaffTurn } from "../api";
 import { setLang } from "../i18n";
-import { ASIDE_KEY, ASIDE_TERMINAL_MIN, ASIDE_W_MAX, ASIDE_W_MIN, alwaysServer, clampAside, mcpServer, readAsideWidth, rememberAsideWidth, ruleWords } from "./model";
+import { ASIDE_KEY, ASIDE_TERMINAL_MIN, ASIDE_W_MAX, ASIDE_W_MIN, alwaysServer, askWords, clampAside, mcpServer, readAsideWidth, rememberAsideWidth, ruleWords } from "./model";
 import { answeredBy, applyMessageEvent, attention, canAlways, channelWords, composerWhen, defaultMode, healthParts, keyboardBlocks, listRows, mergeTurns, nextSince, nowChoice, openRequests, outboxRows, stripRows, turnFacts } from "./model";
 
 const msg = (id: string, state: StaffMessage["state"], created_at: string, origin: StaffMessage["origin"] = "orchestrator"): StaffMessage => ({
@@ -193,6 +193,14 @@ describe("always for a whole MCP server", () => {
     expect(ruleWords("mcp__daedalus_browser")).toBe("все инструменты daedalus_browser");
     setLang("en");
     expect(ruleWords("Bash(npm test:*)")).toBe("Bash(npm test:*)");
+  });
+
+  it("names an MCP tool in a request the way a rule names it, and leaves every other request alone", () => {
+    setLang("en");
+    const tool = "mcp__daedalus_browser__BrowserNavigate";
+    expect(askWords({ text: `${tool}: https://example.com`, detail: { tool } })).toBe("BrowserNavigate of daedalus_browser: https://example.com");
+    expect(askWords({ text: "Bash: npm install", detail: { tool: "Bash" } })).toBe("Bash: npm install");
+    expect(askWords({ text: "Which colour?", detail: {} })).toBe("Which colour?");
   });
 });
 

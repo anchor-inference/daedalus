@@ -78,7 +78,9 @@ export function StaffHeader({ projectId, staffId, toast, facts, details, childre
           <div className="staff-head-actions">
             <button className="btn small" onClick={() => void act("interrupt")}>{t("focus.staff.interrupt")}</button>
             <button className="btn small" onClick={() => void act("pause")} disabled={live.pause_requested}>{t("focus.staff.pause")}</button>
-            <button className="btn small ghost" onClick={() => void act("release")}>{t("focus.staff.release")}</button>
+            {/* Outlined in the warning colour: as a ghost it was quiet enough to read as a caption, not as
+                the third of three actions, and releasing the member is the weightiest of them. */}
+            <button className="btn small warn" onClick={() => void act("release")}>{t("focus.staff.release")}</button>
           </div>
         )}
       </div>

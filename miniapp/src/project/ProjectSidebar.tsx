@@ -178,10 +178,12 @@ function StaffRow({ projectId, member, taskTitle, current, compact }: { projectI
         <span className="focus-staff-name truncate">
           {member.name}
           {member.role && !compact && <span className="focus-staff-role"> · {member.role}</span>}
-          {member.env === "host" && <span className="focus-host"> {t("team.env.host")}</span>}
         </span>
         {!compact && <span className={`focus-staff-line truncate ${wait ? "waits" : ""}`}>{line}</span>}
       </span>
+      {/* The same outlined chip that marks a host terminal: an amber word inside the name once read as
+          part of the role, or as a warning that had leaked out of the status line. */}
+      {member.env === "host" && <span className="chip tiny env-chip host" title={t("team.env.host")}>{t("term.env.short.host")}</span>}
       <HarnessBadge harness={member.harness} />
       <span className={`focus-dot tone-${tone}`} aria-label={t(`focus.tone.${tone}`)} role="img" />
     </button>

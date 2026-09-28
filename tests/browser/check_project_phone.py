@@ -103,6 +103,18 @@ def run_one(page: Page, lang: str, width: int) -> None:
     tall_enough(page, ".phone-staff-row", where)
     fits(page, f"{where} team")
 
+    # The board leaves out the request the banner above it already shows: the same question twice, in
+    # two different sets of controls, took the top half of the screen. The orchestrator's stays listed.
+    page.locator("nav.project-tabs a[data-tab='board']").tap()
+    page.wait_for_url(f"**/project/{PID}/board**")
+    expect(page.locator(".needs-banner")).to_have_attribute("data-ask", "q9w2e1")
+    needs = page.locator(".pboard-list .pcard.need")
+    expect(needs).to_have_count(1)
+    expect(needs.locator(".pcard-short")).to_have_text("q4r8tz")
+    page.locator("nav.project-tabs a[data-tab='team']").tap()
+    page.wait_for_url(f"**/project/{PID}/team**")
+    expect(banner).to_have_attribute("data-ask", "q9w2e1")
+
     # One tap answers Ira; the orchestrator's own question takes the banner, and is answered in words.
     banner.locator(".ask-answers-row .btn", has_text=invented["ask.before"]).tap()
     expect(banner).to_have_attribute("data-ask", "q4r8tz")

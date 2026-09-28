@@ -285,8 +285,11 @@ function TaskSheet({ t, owner, board, onClose, onMove, onCheck, onRemove, onOpen
       <section className="sheet-section">
         <div className="sheet-section-title">{t2("board.moveto")}</div>
         <div className="btnrow" style={{ marginTop: 0 }}>
+          {/* "Done" is filled only once the checklist is closed: filled on every task it read as the
+              state the task was already in, beside a status chip saying "Doing" and a checklist at 2/3.
+              A task without a checklist gives no such sign, so its "Done" stays plain too. */}
           {NEXT[t.status].map((s) => (
-            <button key={s} className={`btn small ${s === "done" ? "primary" : ""}`} onClick={() => onMove(t, s)}>
+            <button key={s} className={`btn small ${s === "done" && t.checklist.length > 0 && done === t.checklist.length ? "primary" : ""}`} onClick={() => onMove(t, s)}>
               {columnLabel(s)}
             </button>
           ))}
