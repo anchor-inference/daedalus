@@ -2703,6 +2703,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "composer.context.label": { en: "Context in use", ru: "Занято контекста" },
   "composer.model.title": { en: "Model for this session (Ctrl M)", ru: "Модель этой сессии (Ctrl M)" },
   "composer.effort": { en: "Reasoning effort for this session", ru: "Глубина рассуждения этой сессии" },
+  "composer.effort.heading": { en: "Reasoning effort", ru: "Глубина рассуждения" },
   "composer.effort.select": { en: "Select effort", ru: "Глубина" },
   "composer.model.fast": { en: "fast", ru: "быстрая" },
   "composer.model.thinking": { en: "thinking", ru: "думающая" },

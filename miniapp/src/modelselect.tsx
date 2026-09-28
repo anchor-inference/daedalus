@@ -117,6 +117,7 @@ function ModelList({ cat, failed, model, fallback, onPick }: { cat: Catalogue | 
   };
   return (
     <div className="model-list">
+      <div className="menu-heading sub">{t("session.model")}</div>
       {fallback && (
         <>
           <div className="model-row-note sub attn">{t("composer.model.configured", { model: fallback.from })}</div>

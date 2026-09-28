@@ -456,7 +456,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             effort={phone ? props.reasoningEffort : undefined} thinking={props.thinking} onChooseEffort={phone ? props.onChooseEffort : undefined} />}
           <div className="composer-tools">
             {!phone && props.onChooseEffort && (
-              <EffortSelect effort={props.reasoningEffort} thinking={props.thinking} model={props.model} onChoose={props.onChooseEffort} />
+              <EffortSelect effort={props.reasoningEffort} thinking={props.thinking} onChoose={props.onChooseEffort} />
             )}
             {pct !== null && ctx && (
               <button type="button" className={`ctx-ring ${pct >= 90 ? "bad" : pct >= 60 ? "attn" : ""}`} onClick={props.onContext} title={t("composer.context", { pct, used: fmtTok(ctx.tokens), window: fmtTok(ctx.window), n: fmtInt(ctx.messages) })} aria-label={t("composer.context.label")}>
