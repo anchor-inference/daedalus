@@ -36,6 +36,17 @@ export function Segmented<T extends string>({ value, options, onChange, label }:
   );
 }
 
+/** An on/off setting that takes effect at once. It is a switch and not a button labelled "on" or "off",
+ *  because such a button beside an action such as "Run now" read as a second action, and nobody
+ *  could tell whether its word was the state or what pressing it would do. */
+export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean }) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} aria-label={label} className={`switch ${checked ? "on" : ""}`} disabled={disabled} onClick={() => onChange(!checked)}>
+      <span className="switch-track" aria-hidden><span className="switch-knob" /></span>
+    </button>
+  );
+}
+
 export function Avatar({ status, seed }: { status: Status; seed: string }) {
   // Deterministic accessory per session so each "bot" stays recognisable.
   const hue = [...seed].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);

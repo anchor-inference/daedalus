@@ -19,7 +19,7 @@ import { ON_DEMAND_CHOICES, REASONING_EFFORTS, onDemandGroups, orchestratorPrese
 import { mainPreset } from "../main/model";
 import { Sheet } from "../dialogs";
 import { t } from "../i18n";
-import { LangPicker, Segmented } from "../components";
+import { LangPicker, Segmented, Switch } from "../components";
 import { AppearancePanel } from "./Appearance";
 import { modeHome, storedMode } from "../mode";
 import { useQuery } from "../store";
@@ -781,10 +781,11 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
       <div className="card">
         <div className="section-title" style={{ marginTop: 0 }}>{t("settings.heartbeat.title")}</div>
         <div className="sub">{t("settings.heartbeat.sub")}</div>
+        <div className="settings-choice">
+          <b>{t("settings.heartbeat.enabled")}</b>
+          <Switch checked={hb.enabled} onChange={(enabled) => put({ enabled })} label={t("settings.heartbeat.enabled")} />
+        </div>
         <div className="btnrow">
-          <button className={`btn small ${hb.enabled ? "primary" : ""}`} onClick={() => put({ enabled: !hb.enabled })}>
-            {t(hb.enabled ? "common.on" : "common.off")}
-          </button>
           <button className="btn small" onClick={runNow} disabled={!text.trim() || hb.running}>
             {t("common.runnow")}
           </button>

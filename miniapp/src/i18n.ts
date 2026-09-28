@@ -2205,6 +2205,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "settings.heartbeat.hours": { en: "Active hours (UTC, HH:MM-HH:MM)", ru: "Часы работы (UTC, ЧЧ:ММ-ЧЧ:ММ)" },
   "settings.heartbeat.max": { en: "Max runs per day", ru: "Не больше запусков в день" },
   "settings.heartbeat.preset": { en: "Model preset (empty = default)", ru: "Модель (пусто — основная)" },
+  "settings.heartbeat.enabled": { en: "Wake up on schedule", ru: "Просыпаться по расписанию" },
   "settings.heartbeat.default": { en: "default", ru: "основная" },
   "settings.heartbeat.started": { en: "heartbeat started in {id}", ru: "пульс запущен в сессии {id}" },
   "settings.heartbeat.template": { en: "insert template", ru: "вставить шаблон" },
