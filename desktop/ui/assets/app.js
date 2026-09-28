@@ -189,6 +189,13 @@ function drawStatus(status) {
     el("change-body").textContent = change.pending ? change.summary : change.detail || change.summary;
     el("change-apply").hidden = !change.pending;
   }
+  // One primary button per page. A pending change owns it, because restarting is the step that
+  // matters; with nothing running, opening the app leads to a page that does not answer, so the
+  // button steps back instead of being the brightest thing under a warning that says so.
+  const open = document.querySelector('button[data-action="open"]');
+  open.classList.toggle("primary", !change.pending && status.running > 0);
+  open.classList.toggle("quiet", !status.running);
+  open.title = status.running ? "" : T("status.open.idle");
   const message = status.docker_missing ? T("docker.missing") : status.failure;
   el("alert").textContent = message || "";
   el("alert").hidden = !message;

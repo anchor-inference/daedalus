@@ -244,6 +244,10 @@ button:hover, .button:hover { background: var(--s3); }
 button:active, .button:active { transform: scale(0.985); }
 button.primary { background: var(--accent); border-color: transparent; color: var(--accent-ink); font-weight: 600; }
 button.primary:hover { background: #8cbcff; }
+/* Open the app with nothing running: still clickable (the operator may know better, and a start
+   may be moments away), but it no longer looks like the step to take. */
+button.quiet { background: transparent; color: var(--muted); }
+button.quiet:hover { background: var(--s2); }
 button[disabled] { opacity: 0.45; cursor: default; transform: none; }
 .button[aria-disabled="true"] { opacity: 0.45; cursor: default; pointer-events: none; transform: none; }
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: clamp(18px, 2vw, 26px); }
