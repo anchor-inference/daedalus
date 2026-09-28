@@ -334,15 +334,17 @@ function PhoneStaffRow({ member, task, spend, onOpen, onEdit }: { member: Staff;
 
 // ── the board ────────────────────────────────────────────────────────────────────────────────
 
-export function PhoneBoard({ projectId, toast, board }: { projectId: string; toast: (text: string) => void; board: ReactNode }) {
+/** `board` is handed the request the banner shows, so the board does not show it a second time. */
+export function PhoneBoard({ projectId, toast, board }: { projectId: string; toast: (text: string) => void; board: (bannered: string | null) => ReactNode }) {
   const { project } = useProject(projectId);
+  const { ask } = useOperatorAsks(projectId);
   // The board's own bar under the header carries its counts and its "+": the header only names it.
   return (
     <>
       <ProjectPhoneHead projectId={projectId} title={project ? t("pboard.title.of", { name: project.name }) : t("focus.page.board")} subtitle="" />
       <div className="phone-project phone-board">
         <NeedsYouBanner projectId={projectId} toast={toast} />
-        {board}
+        {board(ask?.id ?? null)}
       </div>
     </>
   );

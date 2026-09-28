@@ -882,6 +882,7 @@ class FocusStub:
                 return 409, {"detail": f"request {ask['short_id']} was already answered by the {ask['resolved_by']}"}
             payload = dict(body or {})
             self.answers.append((ask["id"], payload))
+            self.board.needs_you = [n for n in self.board.needs_you if n["id"] != ask["id"]]
             ask.update(resolved_at="2026-09-24T10:00:00Z", resolved_by="operator", resolution={"allow": payload.get("allow"), "text": payload.get("text") or "", "selected": payload.get("selected") or [], "via": "app"})
             tool = str((ask.get("detail") or {}).get("tool") or "")
             view = self.staff_views.get(ask.get("staff_id") or "")
@@ -1184,6 +1185,12 @@ class FocusStub:
         }
         self.asks.insert(0, ask)
         ira = next(m for m in self.team.staff if m["id"] == "st-ira")
+        # The host derives the board's "Needs you" from the same open requests, so hers is there too.
+        self.board.needs_you.insert(0, {
+            "id": ask["id"], "short_id": ask["short_id"], "origin": "staff", "kind": "question", "text": ask["text"], "suggestion": "",
+            "created_at": ask["created_at"], "task_id": "t-checkout", "task_title": words["task.checkout"],
+            "staff": {k: ira[k] for k in ("id", "name", "color", "harness")}, "session_id": None,
+        })
         ira["live"]["terminal_id"] = "tm-ira"
         self.terminals.insert(0, {
             "id": "tm-ira", "env": "container", "title": "claude · Ira", "owner": {"kind": "staff", "id": "st-ira", "label": "Ira"}, "project_id": pid, "profile": "harness:claude",

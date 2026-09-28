@@ -53,7 +53,7 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
   } else if (!wide && view.page === "team") {
     body = <PhoneTeam projectId={projectId} toast={toast} />;
   } else if (!wide && view.page === "board") {
-    body = <PhoneBoard projectId={projectId} toast={toast} board={<ProjectBoard projectId={projectId} toast={toast} embedded selected={route.query.get("task")} />} />;
+    body = <PhoneBoard projectId={projectId} toast={toast} board={(bannered) => <ProjectBoard projectId={projectId} toast={toast} embedded selected={route.query.get("task")} bannered={bannered} />} />;
   } else if (!wide && view.page === "terminals") {
     body = <PhoneTerminals projectId={projectId} toast={toast} />;
   } else if (view.page === "team") {
