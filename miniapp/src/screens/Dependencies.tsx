@@ -93,7 +93,6 @@ export function DependenciesTab() {
     <div className="card deps-overview">
     <div><div className="section-title">{t("settings.sec.dependencies")}</div>
     <p className="sub">{t("deps.intro")}</p></div>
-    {offline && <div className="sub attn" role="status">{t("deps.offline")}</div>}
     {problem && <div className="sub attn" role="alert">{problem}</div>}
     {!view && !offline && <p className="sub">{t("common.loading")}</p>}
     {view && <>
@@ -102,6 +101,11 @@ export function DependenciesTab() {
       {!view.capability.system && view.capability.mode === "native" && <p className="sub">{t("deps.noSystem")}</p>}
     </>}
     </div>
+    {/* Losing the host is a failure of the same feature as a failed install, so it takes the same
+        card, icon first, rather than a line of coloured text inside the description. */}
+    {offline && <section className="card deps-job offline" role="status">
+        <div className="deps-job-title"><span className="deps-job-icon"><Icon name="alert" size={18} /></span><span><b>{t("deps.offline.title")}</b><span className="sub">{t("deps.offline")}</span></span></div>
+      </section>}
     {view && view.job && (installing || view.job.state === "failed") && <section className={`card deps-job ${view.job.state}`} aria-label={t("deps.installProgress")}>
         <div className="deps-job-title"><span className="deps-job-icon"><Icon name={view.job.state === "failed" ? "close" : "download"} size={18} /></span><span><b>{t(`deps.job.${view.job.state}`)}</b><span className="sub">{installing ? t("deps.installingHint") : view.job.error}</span></span></div>
         <DependencyProgress value={view.job} active={installing} installation />
