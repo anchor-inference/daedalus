@@ -1,7 +1,7 @@
 // The screen you land on: a greeting and the composer, so a chat begins by typing it.
 // Naming it, choosing a folder and a loop stay in the new-agent sheet for when they matter.
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type FocusEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, Preset, Project, Settings } from "../api";
 import { fieldHeight } from "../composer";
 import { ModelChoice, ModelSelect } from "../modelselect";
@@ -18,16 +18,17 @@ export function StartScreen({ onOpen, toast, project = "", projects = [], onProj
   const route = useRoute();
   const creating = route.query.get("new") === "1";
   const closeNew = () => navigate(pathFor("agents"), { replace: true });
+  const finding = useFinding();
   return (
     <>
-      <div className="start">
+      <div className={`start ${phone && finding.on ? "finding" : ""}`}>
         <div className="start-hero">
           <h1 className="start-greeting">{t("start.greeting")}</h1>
           <StartComposer phone={phone} project={project} toast={toast} />
         </div>
       </div>
       {phone && (
-        <div className="start-list">
+        <div className="start-list" onFocus={finding.focus} onBlur={finding.blur}>
           <div className="start-list-head">
             <div className="section-title">{t("start.chats")}</div>
             {onProjects && <button type="button" className="iconbtn" onClick={onProjects} title={t("shell.projects")} aria-label={t("shell.projects")}><Icon name="skill" /></button>}
@@ -38,6 +39,42 @@ export function StartScreen({ onOpen, toast, project = "", projects = [], onProj
       {creating && <NewAgentSheet onClose={closeNew} onCreated={onOpen} toast={toast} project={project} />}
     </>
   );
+}
+
+/** Whether the phone's search field has the reader: the greeting and its composer step aside then.
+ *
+ * On a phone the composer took the upper half of the screen above the search field, so the one
+ * result a search found sat in the lower third behind an idle block. It hides while the field is
+ * focused and stays hidden while a query is typed, so tapping a result does not bring it back first.
+ * An empty field gives the composer back only once the finger is up: returning it on the blur that a
+ * press causes would push the list down under that finger and the tap would land on another row. */
+function useFinding() {
+  const [on, setOn] = useState(false);
+  const held = useRef(false);
+  useEffect(() => {
+    const down = () => { held.current = true; };
+    const up = () => { held.current = false; };
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", up, true);
+    return () => {
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", up, true);
+    };
+  }, []);
+  const isSearch = (el: EventTarget) => el instanceof HTMLInputElement && el.type === "search";
+  const focus = (event: FocusEvent<HTMLDivElement>) => {
+    if (isSearch(event.target)) setOn(true);
+  };
+  const blur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!isSearch(event.target) || (event.target as HTMLInputElement).value.trim()) return;
+    // Back in a search field by the time the finger is up (the reader tapped it again): stay aside.
+    const release = () => setTimeout(() => { if (!isSearch(document.activeElement ?? document.body)) setOn(false); }, 0);
+    if (!held.current) release();
+    else window.addEventListener("pointerup", release, { once: true });
+  };
+  return { on, focus, blur };
 }
 
 type Chosen = { preset: string } | { provider: string; model: string } | { model: string };
