@@ -313,7 +313,7 @@ function PhoneStaffRow({ member, task, spend, onOpen, onEdit }: { member: Staff;
           <span className="truncate">{member.name}</span>
           {!member.one_off && member.role && <span className="phone-staff-role truncate">{member.role}</span>}
           <HarnessBadge harness={member.harness} />
-          {member.env === "host" && <span className="focus-host">{t("team.env.host")}</span>}
+          {member.env === "host" && <span className="chip tiny env-chip host" title={t("team.env.host")}>{t("term.env.short.host")}</span>}
         </span>
         {/* Two lines before it gives up: a wait's reason is the one thing that says why the member is
             stuck, and one line cut "the machine's terminal limit is reached" before its verb. */}

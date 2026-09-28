@@ -2956,7 +2956,6 @@ button.staff-row:hover { background: var(--surface-2); }
 .focus-staff-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .focus-staff-name { font-size: var(--fs-13); font-weight: 500; }
 .focus-staff-role { color: var(--fg-2); font-weight: 400; }
-.focus-host { color: var(--warn); font-size: var(--fs-11); }
 .focus-staff-line { color: var(--fg-3); font-size: var(--fs-11); }
 .focus-staff-line.waits { color: var(--warn); }
 .focus-dot { width: var(--dot); height: var(--dot); border-radius: 50%; flex: none; background: var(--fg-3); }
@@ -3225,7 +3224,7 @@ button.staff-row:hover { background: var(--surface-2); }
    "langpt" to "l." beside a long role; the cap keeps a very long name from taking the whole line. */
 .phone-staff-name > .truncate:first-child { flex: 0 0 auto; max-width: 60%; }
 .phone-staff-role { color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; }
-.phone-staff-name .harness-badge, .phone-staff-name .focus-host { flex: none; }
+.phone-staff-name .harness-badge, .phone-staff-name .env-chip { flex: none; }
 .phone-staff-line { color: var(--fg-2); font-size: var(--fs-12); }
 .phone-staff-line.waits { color: var(--warn); }
 .phone-terms { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
