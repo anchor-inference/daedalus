@@ -16,7 +16,7 @@ import { plural, t } from "../i18n";
 import { Icon, type IconName } from "../icons";
 import { go, PageHeader } from "../shell";
 import { ORCHESTRATION_LIST, navigate, pathFor, projectHome, projectPagePath, projectSessionPath, projectStaffPath } from "../router";
-import { alwaysServer, answeredBy, canAlways, composerWhen, nowChoice } from "../staff/model";
+import { alwaysServer, answeredBy, askWords, canAlways, composerWhen, nowChoice } from "../staff/model";
 import { HealthLine } from "../staff/health";
 import { invalidate, useQuery } from "../store";
 import { PhoneTerminal, type PhoneTerminalProps } from "../terminal/mobile";
@@ -226,7 +226,7 @@ export function NeedsYouBanner({ projectId, toast }: { projectId: string; toast:
         {waiting > 1 && <span className="needs-banner-more">{t("phone.needs.more", { n: waiting - 1 })}</span>}
         <span className="needs-banner-when">{relTime(ask.created_at)}</span>
       </div>
-      <div className="needs-banner-text"><b>{askerLine(ask, names)}</b> {ask.text}</div>
+      <div className="needs-banner-text"><b>{askerLine(ask, names)}</b> {askWords(ask)}</div>
       <AskAnswers key={ask.id} ask={ask} projectId={projectId} toast={toast} />
     </section>
   );
