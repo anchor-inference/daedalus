@@ -187,7 +187,9 @@ function drawStatus(status) {
   if (change.commit) {
     el("change-title").textContent = change.pending ? T("change.pending") : changeOutcome(change.status);
     el("change-body").textContent = change.pending ? change.summary : change.detail || change.summary;
-    el("change-apply").hidden = !change.pending;
+    // The whole row goes, not only its button: an empty row kept its spacing and left a finished
+    // card with a blank strip at the bottom where the button had been.
+    el("change-actions").hidden = !change.pending;
   }
   // One primary button per page. A pending change owns it, because restarting is the step that
   // matters; with nothing running, opening the app leads to a page that does not answer, so the

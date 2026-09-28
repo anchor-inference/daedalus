@@ -358,7 +358,8 @@ button[disabled] { opacity: 0.45; cursor: default; transform: none; }
 .decide { border-color: rgba(86, 211, 100, 0.45); margin-bottom: clamp(14px, 1.4vw, 20px); }
 .decide.failed { border-color: rgba(240, 180, 41, 0.4); }
 .decide.failed h2 { color: #f7d79b; }
-.decide p { color: var(--muted); margin: 8px 0 16px; }
+.decide p { color: var(--muted); margin-top: 8px; }
+.decide .actions { margin-top: 16px; }
 .log {
   background: var(--bg);
   border: 1px solid var(--line);
