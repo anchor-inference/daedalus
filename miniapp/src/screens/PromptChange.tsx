@@ -3,6 +3,7 @@ import { api } from "../api";
 import { Sheet } from "../dialogs";
 import { Icon } from "../icons";
 import { t } from "../i18n";
+import { duration } from "../format";
 import { DiffView } from "../previewparts";
 import { errorText } from "../ui";
 import "./promptchange.css";
@@ -21,9 +22,9 @@ type Proposal = {
 };
 type View = { proposal: Proposal | null; models: { id: string; label: string }[] };
 
+// The shared formatter rolls minutes into hours; a hand-rolled one here read "187m 12s" on a long run.
 function elapsed(since: number) {
-  const seconds = Math.max(0, Math.floor(Date.now() / 1000 - since));
-  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return duration(Date.now() - since * 1000);
 }
 
 export function PromptChange({ onApplied }: { onApplied: (rules: string) => void }) {
