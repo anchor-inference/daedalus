@@ -691,7 +691,8 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .roundbtn.primary:disabled { opacity:.3; cursor:default; }
 .roundbtn.primary.stop { background:var(--bad); color:#fff; }
 .roundbtn.primary.queue, .roundbtn.primary.reply { background:var(--accent); color:var(--accent-ink); }
-.ctx-ring { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); cursor:pointer; padding:0; flex:none; }
+.ctx-ring { display:inline-flex; align-items:center; justify-content:center; gap:3px; min-width:28px; height:28px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); cursor:pointer; padding:0 4px; flex:none; }
+.ctx-pct { font-size:var(--fs-11); font-variant-numeric:tabular-nums; line-height:1; }
 .ctx-ring:hover { background:var(--surface-2); color:var(--fg); }
 .ctx-ring.attn { color:var(--warn); }
 .ctx-ring.bad { color:var(--bad); }

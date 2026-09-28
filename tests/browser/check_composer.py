@@ -214,6 +214,9 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     ring = page.locator(".composer .ctx-ring").get_attribute("title") or ""
     if "21%" not in ring or "38" not in ring:
         problems.append(f"the ring's tooltip does not carry the numbers ({ring!r})")
+    # The percentage is written beside the ring: an unlabelled partial circle at rest read as a spinner.
+    if page.locator(".composer .ctx-ring .ctx-pct").inner_text().strip() != "21%":
+        problems.append("the ring has no percentage beside it")
     if not page.locator(".composer .effort-select").count():
         problems.append("the effort selector is not in the pill")
     if "high" not in page.locator(".composer .effort-select").inner_text().lower():
