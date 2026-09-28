@@ -149,6 +149,16 @@ def _is_a_number(text: str) -> bool:
     return bool(text) and text.isdigit()
 
 
+class _NoSuchPath(GitError):
+    """A 404 from the API: this path names nothing.
+
+    The status is kept as a type rather than read back out of the message text, because one caller
+    has a second way to answer the same name: an all-digit branch name is legal in git
+    (``git check-ref-format refs/heads/12345`` accepts it), so a number that names no pull request
+    may be a head branch, and only the 404 says which question was asked.
+    """
+
+
 class RestForge:
     """The pull-request operations the host drives, over the REST API, with the token the push uses."""
 
@@ -171,7 +181,8 @@ class RestForge:
         ) as client:
             response = await client.request(method, path, **kwargs)
         if response.status_code >= 400:
-            raise GitError(self._refusal(method, path, response))
+            message = self._refusal(method, path, response)
+            raise (_NoSuchPath if response.status_code == 404 else GitError)(message)
         return response
 
     async def _call(self, method: str, path: str, **kwargs: Any) -> Any:
@@ -261,7 +272,10 @@ class RestForge:
         if sub in {"list", "view"}:
             head = str(opts.get("head") or (positional[0] if positional else ""))
             if sub == "view" and _is_a_number(head):
-                return json.dumps(await self.pr_number(slug, head, _fields(opts), asked))
+                try:
+                    return json.dumps(await self.pr_number(slug, head, _fields(opts), asked))
+                except _NoSuchPath:
+                    pass  # an all-digit branch name is legal: ask the same name again as a head
             rows = await self.pr_list(slug, head, _fields(opts), asked)
             if sub == "view" and not rows:
                 raise GitError(f"no pull request found for head {head}")

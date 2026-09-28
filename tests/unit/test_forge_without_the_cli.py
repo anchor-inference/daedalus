@@ -350,3 +350,84 @@ async def test_every_call_the_tree_makes_is_a_route_this_module_answers() -> Non
         assert isinstance(out, str) and out, f"{where}: gh {' '.join(args)} was answered with nothing"
         subs.add(parse_gh_args(args)[0])
     assert {"list", "create", "view", "edit", "merge", "close", "diff"} <= subs, f"the tree drives {sorted(subs)}"
+
+
+def the_gh_spawns_the_tree_makes() -> list[tuple[str, int]]:
+    """Every place the tree spawns the CLI as a command, found by the argument list, not by a name.
+
+    `the_gh_calls_the_tree_makes` reads `gh(...)` calls -- the wrapper. A direct
+    `subprocess.run(["gh", ...])`, an `os.system` or a second wrapper walks past that scan, so this
+    reading looks for the literal in command position instead.
+    """
+    spawns: list[tuple[str, int]] = []
+    for path in sorted((ROOT / "daedalus").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.List, ast.Tuple)) or not node.elts:
+                continue
+            first = node.elts[0]
+            if isinstance(first, ast.Constant) and first.value == "gh":
+                spawns.append((str(path.relative_to(ROOT)), node.lineno))
+    return spawns
+
+
+def test_the_tree_spawns_gh_in_one_place_and_that_place_is_behind_the_fallback() -> None:
+    """One spawn, and the branch that guards it asks whether the CLI is installed.
+
+    A second spawn added later would answer no route this module knows and would not fail this
+    module's tests, so the count is asserted rather than described.
+    """
+    spawns = the_gh_spawns_the_tree_makes()
+    assert [where for where, _ in spawns] == ["daedalus/extensions/selfdev.py"], f"gh is spawned at {spawns}"
+    source = (ROOT / "daedalus/extensions/selfdev.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    guard = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "gh"
+    )
+    body = ast.get_source_segment(source, guard) or ""
+    assert 'shutil.which("gh")' in body, "the one spawn is not guarded by the question the fallback answers"
+    assert "self.forge(" in body, "the guarded method does not route to the REST fallback"
+
+
+@pytest.mark.asyncio
+async def test_a_number_that_names_no_pull_request_is_asked_again_as_a_head() -> None:
+    """`gh pr view 12345` is a number until the API says no pull request carries it.
+
+    An all-digit branch name is legal in git (`git check-ref-format refs/heads/12345` accepts it), so
+    the number cut alone would answer the wrong question for a branch named `12345`.
+    """
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path + ("?" + request.url.query.decode() if request.url.query else ""))
+        if request.url.path.endswith("/pulls/12345"):
+            return httpx.Response(404, json={"message": "Not Found"})
+        return httpx.Response(200, json=[{"number": 9, "html_url": "u", "state": "open"}])
+
+    out = await forge(handler).run(("pr", "view", "12345", "--json", "number,url"), SLUG)
+    assert json.loads(out) == {"number": 9, "url": "u"}
+    assert len(requests) == 2, f"the fallback chain made {requests}"
+    assert requests[0].endswith("/pulls/12345")
+    assert "head=anchor-inference%3A12345" in requests[1], requests[1]
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_that_is_not_a_404_is_not_asked_again_as_a_head() -> None:
+    """A 403 is an answer about permission, not a missing pull request: it is raised, not retried."""
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        return httpx.Response(403, json={"message": "Resource not accessible by integration"})
+
+    with pytest.raises(GitError, match="403"):
+        await forge(handler).run(("pr", "view", "8", "--json", "number,url"), SLUG)
+    assert len(requests) == 1, f"a refusal was retried: {requests}"
+
+
+def test_combined_short_flags_are_refused_with_the_command_in_the_message() -> None:
+    """`-tb` is not `-t -b`: the parser neither splits it nor swallows it as a positional."""
+    with pytest.raises(GitError, match=r"unsupported option -tb"):
+        parse_gh_args(("pr", "create", "--head", "b", "-tb", "title and body"))
