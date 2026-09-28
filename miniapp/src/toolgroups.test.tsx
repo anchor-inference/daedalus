@@ -117,7 +117,7 @@ describe("the panels", () => {
     expect(browser.textContent).toContain("2 tools");
     expect(browser.textContent).toContain("used in 1% of sessions · 30 days");
     expect(browser.querySelector('[aria-checked="true"]')!.textContent).toBe("On demand");
-    expect(host.querySelector('[data-group="board"] .tgroup-default.changed')!.textContent).toBe("default: When it fits");
+    expect(host.querySelector('[data-group="board"] .tgroup-default.changed')!.textContent).toBe("(default: When it fits)");
     const always = [...browser.querySelectorAll("button")].find((b) => b.textContent === "Always")!;
     await act(async () => always.click());
     const put = fetcher.mock.calls.find(([, init]) => init?.method === "PUT")!;
