@@ -47,7 +47,8 @@ def run() -> None:
             page.locator(".composer .model-select").click()
             assert page.locator('.sheet input[type="radio"]').count() == 5
             for label in page.locator(".effort-option").all():
-                assert label.bounding_box()["height"] >= 44
+                # Rounded: a row of exactly the touch height at a fractional top measures 43.99997.
+                assert round(label.bounding_box()["height"]) >= 44
             page.locator('.sheet input[value="high"]').click()
             page.wait_for_timeout(200)
             assert HOST.effort == "high"

@@ -2516,7 +2516,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   // A run does not always answer with the model it was set to: the provider chain steps down when an
   // endpoint refuses or stalls. What is said here is the difference between the two, never the chain.
   "session.model.via": { en: "via {model}", ru: "через {model}" },
-  "session.model.fallback": { en: "via {to} (fallback from {from})", ru: "через {to} (вместо {from})" },
+  "session.model.fallback": { en: "← {from}", ru: "← {from}" },
   "session.model.fallback.turn": { en: "answered by {to} — {from} unavailable", ru: "ответила {to} — {from} недоступна" },
   "session.model.fallback.why": { en: "{from} did not answer: {reason}. The run moved to {to} and stayed there.", ru: "{from} не ответила: {reason}. Запуск перешёл на {to} и остался на ней." },
   "session.model.fallback.calls": { en: "every call of this run, by model", ru: "все вызовы этого запуска, по моделям" },
@@ -2708,6 +2708,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "composer.context.label": { en: "Context in use", ru: "Занято контекста" },
   "composer.model.title": { en: "Model for this session (Ctrl M)", ru: "Модель этой сессии (Ctrl M)" },
   "composer.effort": { en: "Reasoning effort for this session", ru: "Глубина рассуждения этой сессии" },
+  "composer.effort.heading": { en: "Reasoning effort", ru: "Глубина рассуждения" },
   "composer.effort.select": { en: "Select effort", ru: "Глубина" },
   "composer.model.fast": { en: "fast", ru: "быстрая" },
   "composer.model.thinking": { en: "thinking", ru: "думающая" },
@@ -3741,6 +3742,8 @@ Object.assign(DICT, {
   "rail.home": { en: "Home", ru: "Главная" },
   "rail.toggle": { en: "Toggle sidebar", ru: "Показать боковую панель" },
   "rail.account": { en: "Account", ru: "Аккаунт" },
+  "rail.unfold.chats": { en: "Chats", ru: "Чаты" },
+  "rail.unfold.projects": { en: "Projects", ru: "Проекты" },
   "mode.agents": { en: "Agents", ru: "Агенты" },
   "mode.orchestration": { en: "Orchestration", ru: "Оркестрация" },
   "mode.to.orchestration": { en: "Switch to orchestration", ru: "Перейти в оркестрацию" },

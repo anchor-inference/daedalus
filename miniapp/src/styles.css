@@ -699,7 +699,8 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .roundbtn.primary:disabled { opacity:.3; cursor:default; }
 .roundbtn.primary.stop { background:var(--bad); color:#fff; }
 .roundbtn.primary.queue, .roundbtn.primary.reply { background:var(--accent); color:var(--accent-ink); }
-.ctx-ring { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); cursor:pointer; padding:0; flex:none; }
+.ctx-ring { display:inline-flex; align-items:center; justify-content:center; gap:3px; min-width:28px; height:28px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); cursor:pointer; padding:0 4px; flex:none; }
+.ctx-pct { font-size:var(--fs-11); font-variant-numeric:tabular-nums; line-height:1; }
 .ctx-ring:hover { background:var(--surface-2); color:var(--fg); }
 .ctx-ring.attn { color:var(--warn); }
 .ctx-ring.bad { color:var(--bad); }
@@ -708,6 +709,10 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .model-select .ic { flex:none; color:var(--fg-3); }
 .model-select .model-label { min-width:0; }
 .model-select.attn { color:var(--warn); }
+/* The fallback's two names: the stand-in, then an arrow and the configured model. */
+.model-select .model-label.model-fallback { display:inline-flex; align-items:baseline; gap:4px; }
+.model-select .model-to, .model-select .model-from { min-width:0; }
+.model-select .model-from { opacity:.85; }
 .model-select .model-dot { width:6px; height:6px; border-radius:50%; background:var(--warn); flex:none; }
 .composer-box .chip.recording { align-self:center; margin:0 2px; }
 .composer-box .attachments { margin:4px 6px 2px; width:auto; }
@@ -952,9 +957,12 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   /* The mode whose column is open, marked at the rail's edge even on a screen both modes share. */
   .rail-item.mode::before { content: ""; position: absolute; left: calc((var(--row-h) - var(--rail-w)) / 2); top: 9px; bottom: 9px; width: 3px; border-radius: 0 2px 2px 0; background: var(--fg); }
   .rail-home img { border-radius: var(--radius-xs); }
-  .rail-unfold { display: none; }
-  .rail-home.folded:hover img, .rail-home.folded:focus-visible img { display: none; }
-  .rail-home.folded:hover .rail-unfold, .rail-home.folded:focus-visible .rail-unfold { display: grid; place-items: center; }
+  /* Folded, Home is the unfold button and must read as one without a pointer: an outlined tile with
+     the sidebar's icon and a word under it, taller than its neighbours rather than a look-alike icon. */
+  .rail-home.folded { width: calc(var(--rail-w) - 6px); height: auto; min-height: var(--row-h); padding: 6px 0 4px; gap: 2px; align-content: center; border: 1px solid var(--line-strong); background: var(--surface-1); color: var(--fg); }
+  .rail-home.folded:hover, .rail-home.folded:focus-visible { background: var(--surface-2); }
+  .rail-unfold { display: grid; place-items: center; }
+  .rail-unfold-word { max-width: calc(var(--rail-w) - 4px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-11); font-weight: 600; line-height: 1.1; letter-spacing: -.01em; }
   .rail-badge { position: absolute; top: 1px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--bad); color: #fff; font-size: var(--fs-11); font-weight: 700; line-height: 16px; text-align: center; box-shadow: 0 0 0 2px var(--bg); }
   /* What waits in orchestration, seen from Agents: a neutral pill, not the red of an unread badge. */
   .rail-badge.quiet { background: var(--surface-3); color: var(--fg-2); }
@@ -2479,7 +2487,8 @@ input.field[type="range"] {
 .composer-mode .mode-yagni { flex:none; color:var(--accent); font-size:var(--fs-11); font-weight:600; }
 .mode-menu { width:min(340px, 92vw); max-height:70vh; overflow-y:auto; }
 .mode-list { display:flex; flex-direction:column; }
-.mode-section { padding:var(--space-1) 10px; font-size:var(--fs-12); }
+/* The one heading of the composer's menus: mode, model and effort open under the same small title. */
+.menu-heading { padding:var(--space-1) 10px; font-size:var(--fs-12); font-weight:400; }
 .mode-row .model-text .sub { white-space:normal; }
 .mode-row[aria-checked="true"] > .ic { color:var(--accent); }
 .mode-switch { flex:none; position:relative; width:28px; height:16px; border-radius:8px; background:var(--line-strong); transition:background var(--t-fast); }
@@ -2493,7 +2502,7 @@ input.field[type="range"] {
 .effort-select:hover, .effort-select.on { color:var(--fg); }
 .effort-select .ic { flex:none; color:var(--fg-3); }
 .menu.pop.effort-menu { width:min(280px, 92vw); }
-.effort-menu { padding:var(--space-3); gap:var(--space-2); }
+.effort-menu .effort-options { margin:0; }
 .composer-place { display:flex; gap:var(--space-2); min-width:0; padding-inline:var(--space-2); }
 .composer-place-chip { display:inline-flex; align-items:center; gap:var(--space-1); min-width:0; color:var(--fg-3); font-size:var(--fs-11); }
 .composer-place-chip .ic { flex:none; }
@@ -2509,6 +2518,12 @@ input.field[type="range"] {
   .composer-row .model-select { flex:0 1 auto; max-width:none; padding-inline:12px; gap:4px; font-size:var(--fs-12); }
   .composer-row .model-select > .ic:first-child { display:none; }
   .composer-row .model-select .model-effort { flex:none; white-space:nowrap; }
+  /* A fallback in a narrow pill: both names at once do not fit on a line, so they stack, the
+     configured one smaller under the stand-in, and the effort gives up its place (it is in the sheet). */
+  .composer-row .model-select .model-label.model-fallback { flex-direction:column; align-items:flex-start; gap:0; line-height:1.15; }
+  .composer-row .model-select .model-to, .composer-row .model-select .model-from { max-width:100%; }
+  .composer-row .model-select .model-from { font-size:var(--fs-11); }
+  .composer-row .model-select.attn .model-effort { display:none; }
 }
 @media (max-width: 1023px) {
   .composer-box textarea { min-height:calc(var(--fs-prose) * 1.4 + var(--space-2) * 2); }
@@ -2539,11 +2554,11 @@ input.field[type="range"] {
 @media (max-width:600px) { .folder-top .folder-add { min-width:44px; min-height:var(--row-h-touch); padding:8px; } }
 
 .effort-options { border:0; padding:0; margin:0 0 var(--space-3); min-width:0; }
-.effort-options legend { padding:var(--space-2) 0; font-weight:600; }
-.effort-option { display:flex; align-items:center; gap:var(--space-3); min-height:var(--row-h); padding:var(--space-2); cursor:pointer; border-radius:var(--radius-sm); }
-.effort-option:hover { background:var(--surface-2); }
-.effort-option input { accent-color:var(--accent); }
-.effort-option > span { display:flex; flex-direction:column; gap:var(--space-1); }
+.effort-options legend { width:100%; }
+/* An effort row is a model row; its radio lies invisibly over it (effortselect.tsx says why). */
+.effort-option { position:relative; }
+.effort-option input { position:absolute; inset:0; width:100%; height:100%; margin:0; opacity:0; cursor:pointer; }
+.effort-option:has(input:focus-visible) { background:var(--surface-3); }
 .composer-steering { padding-inline:var(--space-2); color:var(--accent); font-size:var(--fs-12); }
 .turn-content { display:contents; }
 .turn-content[hidden] { display:none; }
@@ -2619,6 +2634,9 @@ input.field[type="range"] {
 h1.start-greeting { margin:0; max-width:18em; font-size:var(--fs-18); font-weight:560; letter-spacing:-0.02em; text-align:center; line-height:1.3; }
 .start-composer, .start-files { width:min(100%, var(--chat-w)); }
 .start-files { text-align:center; }
+/* A phone searching its chats: the list takes the screen and the composer waits (Start.tsx, useFinding). */
+.start.finding { display:none; }
+.start.finding + .start-list { padding-top:calc(var(--space-3) + env(safe-area-inset-top)); }
 .start-list-head { display:flex; align-items:center; gap:var(--space-2); padding:0 14px; }
 .start-list-head .section-title { flex:1; margin-bottom:0; }
 /* The list below keeps its 14 px gutter; the search field ran from one edge of the glass to the other. */

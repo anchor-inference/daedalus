@@ -157,6 +157,14 @@ export function mergeActions(listed: BrowserActionRow[], live: BrowserActionRow[
  */
 export const PIP_PILL_BELOW = 520;
 
+/**
+ * The same threshold on a touch screen with no hover. A landscape tablet with the panel open leaves
+ * the conversation about 650 px, where the card sat over the run summary and cut a sentence in half;
+ * a finger cannot hover to reveal the card's buttons either, so dragging it aside was the only way
+ * out. On touch the card waits for a column this wide, which a tablet reaches only with the panel shut.
+ */
+export const PIP_PILL_BELOW_TOUCH = 960;
+
 export type Corner = "tr" | "tl" | "br" | "bl";
 export const CORNERS: Corner[] = ["tr", "tl", "br", "bl"];
 

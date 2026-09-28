@@ -57,7 +57,7 @@ export function ModeSelect({ mode, modes, yagni, onChooseMode, onYagni, sheet }:
   };
   const list = (
     <div className="mode-list">
-      <div className="mode-section sub">{t("session.mode")}</div>
+      <div className="menu-heading sub">{t("session.mode")}</div>
       {[null, ...modes].map((m) => {
         const name = m?.name ?? "";
         const current = name === mode;

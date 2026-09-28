@@ -66,6 +66,12 @@ def run() -> int:
         page.locator('[data-project="empty"] .folder-head').click()
         expect(page.locator('[data-project="empty"] .folder-add')).to_be_visible()
         search = page.get_by_role('searchbox', name='Search conversations')
+        # The phone's composer stands above the list and steps aside while the search has the reader,
+        # so what a search finds is under the field rather than in the lower third of the screen.
+        composer = page.locator('.start-composer')
+        expect(composer).to_be_visible()
+        search.focus()
+        expect(composer).to_be_hidden()
         search.fill('vegetables outside')
         expect(page.locator('.search-passage')).to_have_text('Grow tomatoes on the balcony')
         expect(page.locator('.erow')).to_have_count(1)
@@ -78,11 +84,18 @@ def run() -> int:
         expect(page.locator('.erow')).to_have_count(0)
         search.fill('')
         expect(page.locator('.folder')).to_have_count(3)
+        expect(composer).to_be_hidden()
+        search.blur()
+        expect(composer).to_be_visible()
         agents.append({**agents[0], 'id': 'second', 'title': 'Watering schedule', 'last_message_at': '2026-09-19T01:00:00Z'})
         projects[0].update(total=2, members=2, last_message_at=agents[-1]['last_message_at'])
         expect(garden.locator('.erow')).to_have_count(2, timeout=10000)
         assert 'single' not in garden.get_attribute('class').split()
         expect(garden.locator('.erow-title').first).to_have_text('Watering schedule')
+        # A row pressed while the empty field still has focus: the composer returns only after the
+        # press, so the list does not slide under the pointer and the click opens the row it was on.
+        search.focus()
+        expect(composer).to_be_hidden()
         garden.get_by_text('Planting plan', exact=True).click()
         expect(page).to_have_url(f'{BASE}/agents/{S1}')
         expect(page.locator('.chat-scroll')).to_be_visible()

@@ -181,7 +181,6 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
         interactive={drive === "you" && !phone}
         agent={agent}
         saving={saving}
-        align="top"
         onChord={onChord}
         stageRef={(el) => { stage.current = el; }}
         className="bp-viewer"
