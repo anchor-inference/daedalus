@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { FONT_CATALOG, FONT_ROLES, FontRole, THEMES, ThemeId, fontUrlAllowed, readPrefs, resolvedTheme, resetColors, updatePrefs, type ColorKey, type Column, type Leading, type Prefs, type ProseStep, type Radius, type Scale } from "../appearance";
 import { t } from "../i18n";
-import { Segmented } from "../components";
+import { Segmented, Switch } from "../components";
 
 function usePrefs(): [Prefs, (patch: Partial<Prefs>) => void, (next: Prefs) => void] {
   const [prefs, setPrefs] = useState(readPrefs);
@@ -62,9 +62,7 @@ export function AppearancePanel() {
             <b>{t("theme.follow")}</b>
             <div className="sub">{t("theme.follow.sub", { dark: t(`theme.${prefs.dark}`), light: t(`theme.${prefs.light}`) })}</div>
           </div>
-          <button type="button" className={`btn small ${prefs.follow ? "primary" : ""}`} aria-pressed={prefs.follow} onClick={() => update({ follow: !prefs.follow })}>
-            {t(prefs.follow ? "common.on" : "common.off")}
-          </button>
+          <Switch checked={prefs.follow} onChange={(follow) => update({ follow })} label={t("theme.follow")} />
         </div>
         {prefs.follow && (
           <>
@@ -105,7 +103,7 @@ export function AppearancePanel() {
             <b>{t("theme.wash")}</b>
             <div className="sub">{t("theme.wash.sub")}</div>
           </div>
-          <button type="button" className={`btn small ${prefs.wash ? "primary" : ""}`} aria-pressed={prefs.wash} onClick={() => update({ wash: !prefs.wash })}>{t(prefs.wash ? "common.on" : "common.off")}</button>
+          <Switch checked={prefs.wash} onChange={(wash) => update({ wash })} label={t("theme.wash")} />
         </div>
         <div className="btnrow">
           <button type="button" className="btn small" onClick={() => replace(resetColors())}>{t("theme.reset")}</button>
