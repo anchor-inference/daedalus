@@ -3,22 +3,11 @@
 import { useState } from "react";
 import { FONT_CATALOG, FONT_ROLES, FontRole, THEMES, ThemeId, fontUrlAllowed, readPrefs, resolvedTheme, resetColors, updatePrefs, type ColorKey, type Column, type Leading, type Prefs, type ProseStep, type Radius, type Scale } from "../appearance";
 import { t } from "../i18n";
+import { Segmented } from "../components";
 
 function usePrefs(): [Prefs, (patch: Partial<Prefs>) => void, (next: Prefs) => void] {
   const [prefs, setPrefs] = useState(readPrefs);
   return [prefs, (patch) => setPrefs(updatePrefs(patch)), setPrefs];
-}
-
-function Choice<T extends string>({ value, options, onChange }: { value: T; options: { id: T; label: string }[]; onChange: (id: T) => void }) {
-  return (
-    <div className="segmented inline">
-      {options.map((option) => (
-        <button key={option.id} type="button" className={value === option.id ? "on" : ""} aria-pressed={value === option.id} onClick={() => onChange(option.id)}>
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 function familyOf(prefs: Prefs, role: FontRole): string {
@@ -126,7 +115,7 @@ export function AppearancePanel() {
       <div className="section-title">{t("theme.font")}</div>
       <p className="sub">{t("theme.font.lead")}</p>
       <div className="card">
-        <Choice value={role} onChange={setRole} options={FONT_ROLES.map((id) => ({ id, label: t(`theme.font.${id}`) }))} />
+        <Segmented value={role} onChange={setRole} options={FONT_ROLES.map((id) => ({ id, label: t(`theme.font.${id}`) }))} />
         <h2 className="settings-specimen" style={{ fontFamily: familyOf(prefs, role) ? `"${familyOf(prefs, role)}"` : undefined }}>{t("theme.font.sample")}</h2>
         <div className="sub">{familyOf(prefs, role) || t("theme.font.system")}{urlOf(prefs, role) ? ` · ${urlOf(prefs, role)}` : ""}</div>
         <input className="field" value={query} placeholder={t("theme.font.search")} aria-label={t("theme.font.search")} onChange={(e) => setQuery(e.target.value)} />
@@ -164,19 +153,19 @@ export function AppearancePanel() {
       <div className="section-title">{t("theme.size")}</div>
       <p className="sub">{t("theme.size.lead")}</p>
       <div className="card">
-        <div className="settings-choice"><b>{t("theme.size.step")}</b><Choice value={prefs.scale} onChange={(scale: Scale) => update({ scale })} options={(["sm", "md", "lg", "xl"] as const).map((id) => ({ id, label: t(`theme.scale.${id}`) }))} /></div>
-        <div className="settings-choice"><div><b>{t("theme.prose")}</b><div className="sub">{t("theme.prose.sub")}</div></div><Choice value={prefs.prose} onChange={(prose: ProseStep) => update({ prose })} options={([{ id: "auto" as const, label: t("theme.prose.auto") }, { id: "17" as const, label: "17" }, { id: "19" as const, label: "19" }])} /></div>
-        <div className="settings-choice"><b>{t("theme.leading")}</b><Choice value={prefs.leading} onChange={(leading: Leading) => update({ leading })} options={(["tight", "normal", "open"] as const).map((id) => ({ id, label: t(`theme.leading.${id}`) }))} /></div>
-        <div className="settings-choice"><div><b>{t("theme.column")}</b><div className="sub">{t("theme.column.sub")}</div></div><Choice value={prefs.column} onChange={(column: Column) => update({ column })} options={(["narrow", "normal", "wide"] as const).map((id) => ({ id, label: t(`theme.column.${id}`) }))} /></div>
+        <div className="settings-choice"><b>{t("theme.size.step")}</b><Segmented value={prefs.scale} onChange={(scale: Scale) => update({ scale })} options={(["sm", "md", "lg", "xl"] as const).map((id) => ({ id, label: t(`theme.scale.${id}`) }))} /></div>
+        <div className="settings-choice"><div><b>{t("theme.prose")}</b><div className="sub">{t("theme.prose.sub")}</div></div><Segmented value={prefs.prose} onChange={(prose: ProseStep) => update({ prose })} options={([{ id: "auto" as const, label: t("theme.prose.auto") }, { id: "17" as const, label: "17" }, { id: "19" as const, label: "19" }])} /></div>
+        <div className="settings-choice"><b>{t("theme.leading")}</b><Segmented value={prefs.leading} onChange={(leading: Leading) => update({ leading })} options={(["tight", "normal", "open"] as const).map((id) => ({ id, label: t(`theme.leading.${id}`) }))} /></div>
+        <div className="settings-choice"><div><b>{t("theme.column")}</b><div className="sub">{t("theme.column.sub")}</div></div><Segmented value={prefs.column} onChange={(column: Column) => update({ column })} options={(["narrow", "normal", "wide"] as const).map((id) => ({ id, label: t(`theme.column.${id}`) }))} /></div>
       </div>
 
       <div className="section-title">{t("theme.more")}</div>
       <div className="card">
-        <div className="settings-choice"><b>{t("theme.radius")}</b><Choice value={prefs.radius} onChange={(radius: Radius) => update({ radius })} options={(["sharp", "normal", "round"] as const).map((id) => ({ id, label: t(`theme.radius.${id}`) }))} /></div>
-        <div className="settings-choice"><b>{t("theme.motion")}</b><Choice value={prefs.motion} onChange={(motion) => update({ motion })} options={([{ id: "full" as const, label: t("theme.motion.full") }, { id: "reduce" as const, label: t("theme.motion.reduce") }])} /></div>
-        <div className="settings-choice"><div><b>{t("theme.contrast")}</b><div className="sub">{t("theme.contrast.sub")}</div></div><Choice value={prefs.contrast} onChange={(contrast) => update({ contrast })} options={([{ id: "normal" as const, label: t("theme.contrast.normal") }, { id: "high" as const, label: t("theme.contrast.high") }])} /></div>
-        <div className="settings-choice"><div><b>{t("theme.code")}</b><div className="sub">{t("theme.code.sub")}</div></div><Choice value={prefs.code} onChange={(code) => update({ code })} options={([{ id: "theme" as const, label: t("theme.code.theme") }, { id: "dark" as const, label: t("theme.code.dark") }])} /></div>
-        <div className="settings-choice"><b>{t("theme.bubble")}</b><Choice value={prefs.bubble} onChange={(bubble) => update({ bubble })} options={([{ id: "card" as const, label: t("theme.bubble.card") }, { id: "plain" as const, label: t("theme.bubble.plain") }])} /></div>
+        <div className="settings-choice"><b>{t("theme.radius")}</b><Segmented value={prefs.radius} onChange={(radius: Radius) => update({ radius })} options={(["sharp", "normal", "round"] as const).map((id) => ({ id, label: t(`theme.radius.${id}`) }))} /></div>
+        <div className="settings-choice"><b>{t("theme.motion")}</b><Segmented value={prefs.motion} onChange={(motion) => update({ motion })} options={([{ id: "full" as const, label: t("theme.motion.full") }, { id: "reduce" as const, label: t("theme.motion.reduce") }])} /></div>
+        <div className="settings-choice"><div><b>{t("theme.contrast")}</b><div className="sub">{t("theme.contrast.sub")}</div></div><Segmented value={prefs.contrast} onChange={(contrast) => update({ contrast })} options={([{ id: "normal" as const, label: t("theme.contrast.normal") }, { id: "high" as const, label: t("theme.contrast.high") }])} /></div>
+        <div className="settings-choice"><div><b>{t("theme.code")}</b><div className="sub">{t("theme.code.sub")}</div></div><Segmented value={prefs.code} onChange={(code) => update({ code })} options={([{ id: "theme" as const, label: t("theme.code.theme") }, { id: "dark" as const, label: t("theme.code.dark") }])} /></div>
+        <div className="settings-choice"><b>{t("theme.bubble")}</b><Segmented value={prefs.bubble} onChange={(bubble) => update({ bubble })} options={([{ id: "card" as const, label: t("theme.bubble.card") }, { id: "plain" as const, label: t("theme.bubble.plain") }])} /></div>
       </div>
     </>
   );

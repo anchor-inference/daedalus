@@ -22,6 +22,20 @@ export function LangPicker() {
   );
 }
 
+/** One of a small fixed set, picked in place: the one choice control Settings uses, so a mode, an
+ *  approval rule and an on/off setting all look and answer the same way. */
+export function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: { id: T; label: string }[]; onChange: (id: T) => void; label?: string }) {
+  return (
+    <div className="segmented inline" role="radiogroup" aria-label={label}>
+      {options.map((option) => (
+        <button key={option.id} type="button" role="radio" aria-checked={value === option.id} className={value === option.id ? "on" : ""} onClick={() => value !== option.id && onChange(option.id)}>
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Avatar({ status, seed }: { status: Status; seed: string }) {
   // Deterministic accessory per session so each "bot" stays recognisable.
   const hue = [...seed].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);

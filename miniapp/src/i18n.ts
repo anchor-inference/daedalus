@@ -1940,9 +1940,12 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "settings.rules.review.apply": { en: "Apply change", ru: "Применить изменение" },
   "settings.selfchange": { en: "Self-change", ru: "Самоизменения" },
   "settings.selfchange.sub": { en: "How a pull request the agent opens on its own code is handled.", ru: "Что происходит с запросом на изменение, который агент открывает в своём коде." },
-  "settings.selfchange.manual": { en: "manual approval", ru: "одобряю вручную" },
-  "settings.selfchange.auto": { en: "auto approval", ru: "одобрять автоматически" },
-  "settings.selfchange.rebuild": { en: "auto rebuild {state}", ru: "автосборка {state}" },
+  "settings.selfchange.approval": { en: "Approval", ru: "Одобрение" },
+  "settings.selfchange.manual": { en: "Manual", ru: "Вручную" },
+  "settings.selfchange.auto": { en: "Automatic", ru: "Автоматически" },
+  "settings.selfchange.rebuild": { en: "Rebuild after merging", ru: "Пересборка после слияния" },
+  "settings.selfchange.rebuild.off": { en: "Off", ru: "Выкл" },
+  "settings.selfchange.rebuild.on": { en: "On", ru: "Вкл" },
 
   "settings.models.title": { en: "Models", ru: "Модели" },
   "settings.models.sub": {

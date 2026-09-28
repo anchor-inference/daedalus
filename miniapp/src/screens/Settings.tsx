@@ -19,7 +19,7 @@ import { ON_DEMAND_CHOICES, REASONING_EFFORTS, onDemandGroups, orchestratorPrese
 import { mainPreset } from "../main/model";
 import { Sheet } from "../dialogs";
 import { t } from "../i18n";
-import { LangPicker } from "../components";
+import { LangPicker, Segmented } from "../components";
 import { AppearancePanel } from "./Appearance";
 import { modeHome, storedMode } from "../mode";
 import { useQuery } from "../store";
@@ -1223,15 +1223,15 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.selfchange")}</div>
               <div className="sub">{t("settings.selfchange.sub")}</div>
-              <div className="btnrow" style={{ marginTop: 8 }}>
-                {["manual", "auto"].map((m) => (
-                  <button key={m} className={`btn small ${s.self_change.approval === m ? "primary" : ""}`} onClick={() => save({ self_change: { ...s.self_change, approval: m } })}>
-                    {t(`settings.selfchange.${m}`)}
-                  </button>
-                ))}
-                <button className={`btn small ${s.self_change.auto_rebuild ? "primary" : ""}`} onClick={() => save({ self_change: { ...s.self_change, auto_rebuild: !s.self_change.auto_rebuild } })}>
-                  {t("settings.selfchange.rebuild", { state: t(s.self_change.auto_rebuild ? "common.on" : "common.off") })}
-                </button>
+              {/* Two separate rules, each a segmented pick like every other choice in Settings. They
+                  were three loose buttons once, the third a toggle that looked like a third mode. */}
+              <div className="settings-choice">
+                <span>{t("settings.selfchange.approval")}</span>
+                <Segmented label={t("settings.selfchange.approval")} value={s.self_change.approval} onChange={(approval) => save({ self_change: { ...s.self_change, approval } })} options={["manual", "auto"].map((id) => ({ id, label: t(`settings.selfchange.${id}`) }))} />
+              </div>
+              <div className="settings-choice">
+                <span>{t("settings.selfchange.rebuild")}</span>
+                <Segmented label={t("settings.selfchange.rebuild")} value={s.self_change.auto_rebuild ? "on" : "off"} onChange={(state) => save({ self_change: { ...s.self_change, auto_rebuild: state === "on" } })} options={(["off", "on"] as const).map((id) => ({ id, label: t(`settings.selfchange.rebuild.${id}`) }))} />
               </div>
             </div>
           </>
