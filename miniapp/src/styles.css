@@ -1631,7 +1631,11 @@ body.resizing iframe { pointer-events: none; }
 .notice-toasts { position: fixed; z-index: 44; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
 .notice-toasts > * { pointer-events: auto; }
 .notice-toasts.stack { right: 16px; bottom: 16px; width: 360px; }
-.notice-toasts.banner { top: calc(8px + env(safe-area-inset-top)); left: 8px; right: 8px; }
+/* On a phone the banner and its foot are one strip over the top of the page, on the page's own colour:
+   as two floating cards the 8 px between them let the page show through, the half of a heading cut
+   across the foot's upper edge. */
+.notice-toasts.banner { top: 0; left: 0; right: 0; gap: 6px; padding: calc(8px + env(safe-area-inset-top)) 8px 8px; background: var(--bg); border-bottom: 1px solid var(--line); pointer-events: auto; }
+.notice-toasts.banner .notice-foot { padding: 3px 4px; box-shadow: none; }
 .notice-toast { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-pop); cursor: pointer; touch-action: pan-x; animation: notice-in var(--t-base) var(--ease-out); }
 .notice-toast.urgent { border-color: color-mix(in srgb, var(--warn) 55%, var(--line-strong)); }
 .notice-toast-head { display: flex; align-items: flex-start; gap: 8px; }
