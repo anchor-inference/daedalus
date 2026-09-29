@@ -41,6 +41,14 @@ def version_guard(view: dict[str, Any]) -> str:
     return "verified" if check.get("ok") and check.get("version") == version else "unverified"
 
 
+def offered_models(listed: list[str], offered: list[str] | None) -> list[str]:
+    """The chosen models in the CLI's own order, then any chosen one its last check did not list: a
+    model the operator named is still named after a check that could not read the list."""
+    if offered is None:
+        return list(listed)
+    return [m for m in listed if m in offered] + [m for m in offered if m not in listed]
+
+
 class HarnessCatalog:
     def __init__(self, store: HarnessStore) -> None:
         self.store = store
@@ -55,11 +63,19 @@ class HarnessCatalog:
         hiring form shows every executor and says why one cannot be chosen.
         """
         rows = {row.harness: row for row in await self.store.catalog_rows(env)}
-        return [self._entry(env, caps, rows.get(name)) for name, caps in CAPABILITIES.items()]
+        return [self._entry(env, caps, rows.get(name), await self.store.offered_models(env, name)) for name, caps in CAPABILITIES.items()]
 
-    def _entry(self, env: str, caps: Capabilities, row: CatalogRow | None) -> dict[str, Any]:
+    def _entry(self, env: str, caps: Capabilities, row: CatalogRow | None, offered: list[str] | None = None) -> dict[str, Any]:
+        """``models`` is what is offered — the operator's choice, or everything when there is none —
+        and ``all_models`` everything the CLI listed. Every model stays usable either way: the choice
+        only shortens what the hiring form and the orchestrator are shown first."""
         view: dict[str, Any] = row.view() if row is not None else never_checked(env, caps.harness)
         version = view["installed_version"]
+        view.update(
+            all_models=list(view["models"]),
+            models=offered_models(view["models"], offered),
+            models_chosen=offered is not None,
+        )
         view.update(
             label=caps.label,
             status_channel=caps.status_channel,

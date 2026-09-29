@@ -14,7 +14,7 @@ from protocore.contracts.tools import ToolContext
 from daedalus.config import ORCHESTRATOR_ONLY_TOOLS, Settings
 from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.harness.catalog import HarnessCatalog
-from daedalus.harness.contract import AgentEntry, Catalog
+from daedalus.harness.contract import AgentEntry, Catalog, InstallInfo, LoginState
 from daedalus.host.services import SessionServices, locator
 from daedalus.staff_runtime import Availability, FakeStaffRuntime, LiveSession, ReadPage, Receipt
 from daedalus.stores.database import Database
@@ -454,6 +454,14 @@ async def test_harnesses_lists_the_executors_and_is_the_orchestrators_alone(sett
         said = await r.call(sid, "harnesses")
         assert "Claude Code in the container: not installed" in said and "no staff runtime here yet" in said
         assert "Claude Code in the container: steer" in await r.call(sid, "harnesses", harness="claude")
+        # The models the operator chose to offer are the ones named; the rest are counted and still usable.
+        store = r.team.app.extensions["harness"].store
+        install = InstallInfo(True, "/home/operator/.local/bin/claude", "2.1.281", "native")
+        await store.record_check("container", "claude", install=install, login=LoginState("yes"), catalog=Catalog(models=("opus", "sonnet", "claude-opus-5-5", "claude-sonnet-5-5")))
+        assert "  models: opus, sonnet, claude-opus-5-5, claude-sonnet-5-5" in await r.call(sid, "harnesses", harness="claude")
+        await store.set_offered_models("container", "claude", ["claude-opus-5-5"])
+        said = await r.call(sid, "harnesses", harness="claude")
+        assert "  models the operator offers: claude-opus-5-5; 3 other models of this CLI can still be named when asked for" in said, said
         ordinary = await r.manager.create_session("work", project_id=r.project.id)
         assert "Harnesses" in r.manager.blocked_tools_for(ordinary)
     finally:

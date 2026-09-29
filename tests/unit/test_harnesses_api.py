@@ -10,7 +10,7 @@ import httpx
 
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
-from daedalus.harness.contract import InstallInfo, LoginState
+from daedalus.harness.contract import Catalog, InstallInfo, LoginState
 from daedalus.harness.manager import HarnessManager
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
@@ -100,5 +100,48 @@ async def test_a_hire_on_a_cli_the_last_check_found_missing_is_refused(settings:
             assert (await client.post(f"/api/projects/{pid}/staff", headers=HEADERS, json={"name": "Cc", "harness": "claude"})).status_code == 201
             assert (await client.post(f"/api/projects/{pid}/staff", headers=HEADERS, json={"name": "Pi", "harness": "pi"})).status_code == 201
             assert (await client.post(f"/api/projects/{pid}/staff", headers=HEADERS, json={"name": "Ada"})).status_code == 201
+    finally:
+        await manager.close()
+
+
+async def test_the_operator_chooses_which_models_are_offered_and_every_one_stays_usable(settings: Settings, config: RuntimeConfig, db: Database) -> None:
+    manager = SessionManager(settings, config, db=db)
+    await manager.start()
+    harness = _harness(db, config, reachable=True)
+    listed = ("fable", "opus", "sonnet", "haiku", "claude-opus-5-5", "claude-opus-4-8", "claude-sonnet-5-5")
+    install = InstallInfo(True, "/home/operator/.local/bin/claude", "2.1.281", "native")
+    await harness.store.record_check("container", "claude", install=install, login=LoginState("yes"), catalog=Catalog(models=listed))
+    try:
+        async with _client(settings, config, db, manager, harness) as client:
+            row = (await client.get("/api/harnesses?env=container", headers=HEADERS)).json()["rows"][0]
+            assert (row["models"], row["all_models"], row["models_chosen"]) == (list(listed), list(listed), False)
+
+            put = await client.put("/api/harnesses/claude/models", headers=HEADERS, json={"env": "container", "models": ["claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5-5"]})
+            assert put.status_code == 200
+            # Chosen models come back in the CLI's own order, once each.
+            assert (put.json()["row"]["models"], put.json()["row"]["models_chosen"]) == (["claude-opus-5-5", "claude-sonnet-5-5"], True)
+            row = (await client.get("/api/harnesses?env=container", headers=HEADERS)).json()["rows"][0]
+            assert (row["models"], row["all_models"]) == (["claude-opus-5-5", "claude-sonnet-5-5"], list(listed))
+            form = (await client.get("/api/harnesses/catalog?env=container", headers=HEADERS)).json()["claude"]
+            assert (form["models"], form["all_models"], form["models_chosen"]) == (["claude-opus-5-5", "claude-sonnet-5-5"], list(listed), True)
+            # The choice is the container's alone, and a hire still takes any model the CLI lists.
+            host = (await client.get("/api/harnesses?env=host", headers=HEADERS)).json()["rows"][0]
+            assert host["models_chosen"] is False
+            assert (await harness.catalog("container", "claude")).models == listed
+
+            # A later check keeps the choice.
+            await harness.store.record_check("container", "claude", install=install, login=LoginState("yes"), catalog=Catalog(models=listed))
+            assert (await harness.entry("container", "claude"))["models"] == ["claude-opus-5-5", "claude-sonnet-5-5"]
+
+            unknown = await client.put("/api/harnesses/claude/models", headers=HEADERS, json={"env": "container", "models": ["claude-opus-9"]})
+            assert (unknown.status_code, unknown.json()["detail"]) == (400, "Claude Code in the container environment lists no model 'claude-opus-9'")
+            assert (await client.put("/api/harnesses/vim/models", headers=HEADERS, json={"models": None})).status_code == 404
+            assert (await client.put("/api/harnesses/claude/models", headers=HEADERS, json={"models": [""]})).status_code == 422
+
+            reset = await client.put("/api/harnesses/claude/models", headers=HEADERS, json={"env": "container", "models": None})
+            assert (reset.json()["row"]["models"], reset.json()["row"]["models_chosen"]) == (list(listed), False)
+            await client.put("/api/harnesses/claude/models", headers=HEADERS, json={"env": "container", "models": ["haiku"]})
+            emptied = await client.put("/api/harnesses/claude/models", headers=HEADERS, json={"env": "container", "models": []})
+            assert emptied.json()["row"]["models_chosen"] is False, "an empty choice offers everything, never nothing"
     finally:
         await manager.close()

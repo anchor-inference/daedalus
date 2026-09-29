@@ -226,6 +226,25 @@ class HarnessStore:
             rows = await self._db.fetchall("SELECT * FROM harness_catalog WHERE env = ? ORDER BY harness", (env,))
         return [_catalog(r) for r in rows]
 
+    # -- the models offered -----------------------------------------------------------------
+
+    # A choice of the operator's, not something a check found, so it lives beside the catalog rather
+    # than in it: a check rewrites the row, and the choice must outlive every check.
+    @staticmethod
+    def _offered_key(env: str, harness: str) -> str:
+        return f"harness.offered_models.{env}.{harness}"
+
+    async def offered_models(self, env: str, harness: str) -> list[str] | None:
+        """The models the operator chose to offer of this CLI in ``env``; None when every one is."""
+        value = await self._db.kv_get(self._offered_key(env, harness))
+        return [str(m) for m in value] if isinstance(value, list) and value else None
+
+    async def set_offered_models(self, env: str, harness: str, models: Sequence[str] | None) -> None:
+        """Offer only ``models`` of this CLI in ``env``; None or an empty list offers every one again."""
+        if env not in ENVIRONMENTS:
+            raise HarnessStoreError(f"an environment is container or host, not {env!r}")
+        await self._db.kv_set(self._offered_key(env, harness), list(dict.fromkeys(models)) if models else None)
+
     # -- launches --------------------------------------------------------------------------
 
     async def open_launch(self, launch: Launch) -> Launch:

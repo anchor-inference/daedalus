@@ -195,8 +195,8 @@ class HarnessManager(HarnessCatalog):
             raise HarnessRefused(f"the {env} environment's terminal service is not available", status=503)
         return port
 
-    def _entry(self, env: str, caps: Any, row: CatalogRow | None) -> dict[str, Any]:
-        view = super()._entry(env, caps, row)
+    def _entry(self, env: str, caps: Any, row: CatalogRow | None, offered: list[str] | None = None) -> dict[str, Any]:
+        view = super()._entry(env, caps, row, offered)
         operation = self.operations.get((env, caps.harness))
         check = view.get("self_check") or {}
         view.update(
@@ -258,7 +258,24 @@ class HarnessManager(HarnessCatalog):
 
     async def entry(self, env: str, harness: str) -> dict[str, Any]:
         capabilities(harness)
-        return self._entry(env, CAPABILITIES[harness], await self.store.catalog_row(env, harness))
+        return self._entry(env, CAPABILITIES[harness], await self.store.catalog_row(env, harness), await self.store.offered_models(env, harness))
+
+    async def offer_models(self, env: str, harness: str, models: list[str] | None) -> dict[str, Any]:
+        """Offer only ``models`` of a CLI in ``env`` — on the hiring form and in the orchestrator's
+        ``Harnesses`` — or every one again with None or an empty list. Only a model the CLI listed can
+        be chosen, so a typo never becomes the one model offered. Answers the row as it now is."""
+        if env not in ("container", "host"):
+            raise HarnessRefused(f"an environment is container or host, not {env!r}")
+        capabilities(harness)
+        if models:
+            listed = (await self.entry(env, harness))["all_models"]
+            unknown = [m for m in models if m not in listed]
+            if unknown:
+                raise HarnessRefused(f"{CAPABILITIES[harness].label} in the {env} environment lists no model {', '.join(repr(m) for m in unknown)}")
+        await self.store.set_offered_models(env, harness, models)
+        entry = await self.entry(env, harness)
+        await self._publish("harness.models", {"env": env, "harness": harness, "models": entry["models"] if entry["models_chosen"] else None})
+        return entry
 
     async def unavailable(self, env: str, harness: str) -> str:
         """For the staff runtime before a launch: why this CLI cannot run a staff member now."""
@@ -336,6 +353,8 @@ class HarnessManager(HarnessCatalog):
                 "login_detail": entry["login_detail"],
                 "agents": agents,
                 "models": entry["models"],
+                "all_models": entry["all_models"],
+                "models_chosen": entry["models_chosen"],
                 "modes": entry["modes"] or list(tooling(harness).modes),
                 "efforts": entry["efforts"] or list(tooling(harness).efforts),
                 "profiles": entry["profiles"],

@@ -11,11 +11,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from daedalus.harness.capabilities import CAPABILITIES
 from daedalus.harness.manager import HarnessManager, HarnessRefused
@@ -37,6 +37,14 @@ class CheckBody(BaseModel):
 
     env: Env = "container"
     harness: str | None = None
+
+
+class ModelsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    env: Env = "container"
+    models: list[Annotated[str, StringConstraints(min_length=1, max_length=200)]] | None = Field(default=None, max_length=500)
+    """The models to offer; null or an empty list offers every one again."""
 
 
 def refused(exc: HarnessRefused) -> JSONResponse:
@@ -83,6 +91,14 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def harness_catalog(harness: str, env: Env = "container", folder_id: str | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         catalog = await manager().catalog(env, known(harness), folder_id)
         return {"env": env, "harness": harness, **asdict(catalog)}
+
+    @api.put("/api/harnesses/{harness}/models")
+    async def harness_models(harness: str, body: ModelsBody, _: dict[str, Any] = Depends(auth)) -> Any:
+        """Which of a CLI's models the hiring form and the orchestrator offer; every one stays usable."""
+        try:
+            return {"row": await manager().offer_models(body.env, known(harness), body.models)}
+        except HarnessRefused as exc:
+            return refused(exc)
 
     @api.post("/api/harnesses/check")
     async def harness_check(body: CheckBody, _: dict[str, Any] = Depends(auth)) -> Any:

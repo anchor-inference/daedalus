@@ -512,7 +512,8 @@ async def release(context: ToolContext, staff: str, keep_worktree: bool = True) 
     name="Harnesses",
     description=(
         "The executors staff can run on. No arguments: each one per environment — installed, version, signed in, "
-        "whether it can run staff here. harness: what it offers (models, agents, permission modes, efforts); folder "
+        "whether it can run staff here. harness: what it offers (models — the ones the operator chose to offer, when "
+        "there is a choice; the others still work when named —, agents, permission modes, efforts); folder "
         "adds the agents that folder defines; env narrows to container or host. Check here before Hire."
     ),
 )
