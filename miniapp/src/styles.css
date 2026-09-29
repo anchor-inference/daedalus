@@ -581,6 +581,9 @@ input.field, select.field, textarea.field {
 /* A field that cannot be changed says so before it is tried: a disabled select drew exactly like the
    live one beside it, and a memory's fixed scope read as editable. */
 input.field:disabled, select.field:disabled, textarea.field:disabled { opacity: .55; cursor: not-allowed; }
+/* A value shown to be copied (a share link, a key) says it goes on past the edge: cut flush, a link
+   ended at "…/s/site-pre" and looked broken. The whole value is in the tooltip and on the clipboard. */
+input.field[readonly] { text-overflow: ellipsis; }
 /* A choice longer than its box ends in an ellipsis. Clipped mid-letter, the voice model's
    "… vllm" read as "vllr", a different word rather than a shortened one. */
 select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }

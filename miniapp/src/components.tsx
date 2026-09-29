@@ -319,7 +319,7 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
             <>
               <label className="field">{t("svc.link")}</label>
               <div className="share-field">
-                <input className="field mono" readOnly value={s.share.url} onFocus={(e) => e.target.select()} aria-label={t("svc.sharelink")} />
+                <input className="field mono" readOnly value={s.share.url} title={s.share.url} onFocus={(e) => e.target.select()} aria-label={t("svc.sharelink")} />
                 <button className="btn small" onClick={() => copy(s.share!.url!, "link")}><Icon name="copy" size={13} /> {t("common.copy")}</button>
               </div>
               {mode === "key" && s.share.key && (
