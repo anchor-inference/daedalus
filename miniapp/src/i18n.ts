@@ -792,6 +792,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "project.notmounted.bot": { en: "the folder is not reachable from where the bot runs", ru: "папка недоступна оттуда, где работает бот" },
   "project.snapshots": { en: "Snapshots", ru: "Снимки" },
   "project.snapshots.badge": { en: "snapshots", ru: "снимки" },
+  "project.system.badge": { en: "built in", ru: "встроенный" },
+  "project.system.title": { en: "the app's own workspace: it has settings, but no team and no board", ru: "собственное рабочее место приложения: у него есть настройки, но нет команды и доски" },
   "project.snapshots.title": { en: "every turn is snapshotted, so a change can be undone", ru: "перед каждым ходом делается снимок, поэтому изменение можно отменить" },
   "project.intro": {
     en: "A project is a folder you add. Agents you start in it work in that folder and nowhere else.",
