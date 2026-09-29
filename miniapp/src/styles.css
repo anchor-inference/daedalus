@@ -189,13 +189,18 @@ a { color: var(--accent); text-decoration: none; }
 .pagehead .iconbtn { background: transparent; }
 .pagehead .iconbtn:hover { background: var(--surface-2); }
 .pagehead .iconbtn.primary { background: var(--primary); color: var(--primary-ink); }
+/* A finger gets no hover to find a target by, so the header's plain icons show the box they are
+   pressed in. Bare glyphs beside a filled "+" read as smaller, weaker targets than it, though all
+   three are the same size. */
+@media (pointer: coarse) { .pagehead .iconbtn:not(.primary) { background: var(--surface-1); } }
 .pagehead .filters { margin: 4px 0 2px; }
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
   display: grid; grid-template-columns: repeat(4, 1fr);
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  /* Opaque: at 88 % over a blur the rows scrolling under it stayed readable between the tab labels,
+     a line of an inbox card legible behind "Board" and "Inbox", and blur is not drawn everywhere. */
+  background: var(--bg);
   border-top: 1px solid var(--line);
 }
 .tabbar > a, .tabbar > button {
@@ -255,7 +260,10 @@ a { color: var(--accent); text-decoration: none; }
 .pill.waiting, .pill.pending { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 .pill.failed { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 .pill.done, .pill.merged, .pill.approved { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-.pill.idle, .pill.rejected, .pill.closed { color: var(--fg-2); }
+.pill.idle, .pill.closed { color: var(--fg-2); }
+/* A refusal is a decision, not an absence: in grey beside an amber pending and a green approved it read
+   as a disabled row. Softer than a failure's red, so a rejected change does not look like a broken one. */
+.pill.rejected { color: color-mix(in srgb, var(--bad) 75%, var(--fg-2)); border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--ctl-h);
   border: 1px solid var(--line); background: var(--surface-2); border-radius: var(--radius-sm);
@@ -282,7 +290,14 @@ a { color: var(--accent); text-decoration: none; }
    start in lower case ("the board did not answer") beside hand-written lines that do not. */
 .empty > div::first-letter { text-transform: uppercase; }
 .empty b { color: var(--fg); font-weight: 600; font-size: var(--fs-15); }
+/* A page's error state draws its "Try again" as a primary button: it is the one thing to do there,
+   and in the quiet outline it read as a footnote under the message. */
 .empty .btn { margin-top: 8px; }
+/* A page that holds nothing but its empty or error state shows it in the middle of the page, a
+   little above centre, not pinned under the header with the rest of the window blank below it: a
+   desktop read as a header whose body had failed to load. */
+.screen:has(> .empty:only-child) { display: flex; flex-direction: column; justify-content: center; }
+.screen > .empty:only-child { margin-bottom: 12vh; }
 .section-title { color: var(--fg-2); font-size: var(--fs-12); text-transform: uppercase; letter-spacing: 0.06em; margin: 16px 2px 6px; display: flex; align-items: baseline; gap: 6px; }
 .section-title .n, .group-n { color: var(--fg-3); font-weight: 500; letter-spacing: 0; text-transform: none; }
 .skeleton { border-radius: 8px; background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
@@ -583,6 +598,9 @@ input.field, select.field, textarea.field {
 /* A field that cannot be changed says so before it is tried: a disabled select drew exactly like the
    live one beside it, and a memory's fixed scope read as editable. */
 input.field:disabled, select.field:disabled, textarea.field:disabled { opacity: .55; cursor: not-allowed; }
+/* A value shown to be copied (a share link, a key) says it goes on past the edge: cut flush, a link
+   ended at "…/s/site-pre" and looked broken. The whole value is in the tooltip and on the clipboard. */
+input.field[readonly] { text-overflow: ellipsis; }
 /* A choice longer than its box ends in an ellipsis. Clipped mid-letter, the voice model's
    "… vllm" read as "vllr", a different word rather than a shortened one. */
 select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
@@ -630,7 +648,12 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .switch.on .switch-knob { transform: translateX(16px); background: var(--accent-ink); }
 .switch:focus-visible .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
 .usage-row { display:grid; grid-template-columns: 52px 1fr auto; gap:6px 10px; align-items:center; padding:8px 0; border-top:1px solid var(--line); cursor:pointer; }
+/* On a phone the counts take their own line and the two buttons share the one under it: squeezed
+   beside them the counts broke in two, "· 1 failures" alone on a line next to the buttons. */
+.health-summary { flex-wrap: wrap; }
+@media (max-width: 560px) { .health-summary > .grow { flex: 1 1 100%; } .health-summary > .btn { flex: 1 1 0; } }
 .usage-row:first-child { border-top:0; }
+.tablecard td.usage-none { text-align:center; padding:16px 4px; border-bottom:0; }
 .usage-row .when { color:var(--muted); font-variant-numeric:tabular-nums; font-size:var(--fs-12); }
 .usage-row .what { min-width:0; }
 .usage-row .what .l1 { display:flex; gap:8px; align-items:center; min-width:0; }
@@ -976,6 +999,11 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .rail-tip { position: absolute; left: calc(100% + 10px); top: 50%; translate: 0 -50%; display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--fg); color: var(--bg); font-size: var(--fs-12); font-weight: 500; white-space: nowrap; pointer-events: none; opacity: 0; visibility: hidden; z-index: 40; }
   .rail-tip kbd { font: var(--fs-11) var(--mono); opacity: .7; }
   .rail-item:hover .rail-tip, .rail-item:focus-visible .rail-tip { opacity: 1; visibility: visible; }
+  /* A landscape tablet keeps the desktop's rows but is pressed with a finger: its rail icons were the
+     mouse's 36 px, below what a thumb hits reliably. The rail alone takes the touch row, which still
+     fits its 52 px width, and the mode stripe's offset follows because it is computed from the same
+     variable. */
+  @media (pointer: coarse) { .rail { --row-h: var(--row-h-touch); } }
   /* The menu over the content: anchored bottom-left, opening upward, never centred, never a modal. */
   .navmenu-backdrop { display: block; position: fixed; inset: 0; z-index: 35; background: transparent; }
   /* As tall as the window allows, from its foot to 8 px under the top: capped at 70 % it ended at
@@ -1038,14 +1066,16 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .msg.user { max-width: min(86%, var(--chat-w)); }
   /* A sheet on a wide screen is a dialog, not a full-width drawer. */
   .sheet-backdrop { align-items: center; justify-content: center; }
-  .sheet { width: min(720px, 92vw); max-height: 86%; border-radius: var(--radius-lg); padding-bottom: 16px; }
+  .sheet { width: min(720px, 92vw); max-height: 86%; border-radius: var(--radius-lg); padding-top: 14px; padding-bottom: 16px; }
   .sheet.narrow { width: min(480px, 92vw); }
+  /* The grip says "drag me down" on a sheet that rises from the bottom edge; a centred dialog has
+     nothing to drag, and the bar read as a phone part left over on the desktop. */
+  .sheet .grip { display: none; }
 }
 /* A wide window is room to read in, not margin to look at. */
 @media (min-width: 1600px) { :root { --chat-w: 1120px; } }
 @media (min-width: 2100px) { :root { --chat-w: 1320px; }
   .sheet.wide { width: min(1100px, 94vw); }
-  .sheet .grip { display: none; }
   .menu { right: 24px; }
 }
 @media (min-width: 1600px) {
@@ -1161,7 +1191,10 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .service-name { font-size: var(--fs-13); font-weight: 600; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .service-url { color: var(--info); font-weight: 400; font-size: var(--fs-12); text-decoration: none; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .service-name { min-width: 0; }
-.service-cmd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-11); }
+/* The command wraps, up to three lines: cut to one it lost its flags ("--host 0.0.…") on a phone, and
+   nothing else on the screen shows the whole line. Breaks fall anywhere because a flag is one long
+   word. */
+.service-cmd { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: var(--fs-11); }
 
 .linkbtn { background: none; border: 0; padding: 0; color: var(--fg); font: inherit; cursor: pointer; text-align: left; }
 .linkbtn:hover { color: var(--info); }
@@ -1634,7 +1667,11 @@ body.resizing iframe { pointer-events: none; }
 .notice-toasts { position: fixed; z-index: 44; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
 .notice-toasts > * { pointer-events: auto; }
 .notice-toasts.stack { right: 16px; bottom: 16px; width: 360px; }
-.notice-toasts.banner { top: calc(8px + env(safe-area-inset-top)); left: 8px; right: 8px; }
+/* On a phone the banner and its foot are one strip over the top of the page, on the page's own colour:
+   as two floating cards the 8 px between them let the page show through, the half of a heading cut
+   across the foot's upper edge. */
+.notice-toasts.banner { top: 0; left: 0; right: 0; gap: 6px; padding: calc(8px + env(safe-area-inset-top)) 8px 8px; background: var(--bg); border-bottom: 1px solid var(--line); pointer-events: auto; }
+.notice-toasts.banner .notice-foot { padding: 3px 4px; box-shadow: none; }
 .notice-toast { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-pop); cursor: pointer; touch-action: pan-x; animation: notice-in var(--t-base) var(--ease-out); }
 .notice-toast.urgent { border-color: color-mix(in srgb, var(--warn) 55%, var(--line-strong)); }
 .notice-toast-head { display: flex; align-items: flex-start; gap: 8px; }
@@ -1716,8 +1753,18 @@ pre.diff .file { color: var(--fg); font-weight: 600; }
 .chip.kind-decision { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 .chip.kind-preference { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); }
 .chip.kind-reflection { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-.chip.kind-skill { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-.pagehead select.field.scope { margin: 0 0 6px; width: auto; max-width: 100%; }
+.chip.kind-skill, .chip.kind-howto { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.chip.kind-identifier { font-family: var(--mono); }
+/* The scope picker sits under the filter chips and is drawn as one of them: a pill on the chips'
+   surface with a drawn caret. As the plain field with the browser's own arrow it read as an older
+   control dropped into the row. The caret is two gradients so it takes the theme's colour. */
+.pagehead select.field.scope {
+  margin: 0 0 6px; width: auto; max-width: 100%; min-height: var(--ctl-h-sm); padding: 4px 30px 4px 12px;
+  border-radius: var(--radius-pill); background-color: var(--surface-2); color: var(--fg); cursor: pointer;
+  appearance: none; -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--fg-2) 50%), linear-gradient(135deg, var(--fg-2) 50%, transparent 50%);
+  background-position: calc(100% - 17px) 55%, calc(100% - 12px) 55%; background-size: 5px 5px; background-repeat: no-repeat;
+}
 .bulkbar { position: fixed; left: 0; right: 0; bottom: calc(64px + env(safe-area-inset-bottom)); z-index: 19; display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--surface-1); border-top: 1px solid var(--line); }
 @media (min-width: 1024px) {
   .bulkbar { left: calc(var(--rail-w) + var(--sidebar-w)); bottom: 0; }
@@ -1826,10 +1873,14 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 .main.chat-open .nudge-strip { flex: none; }
 .palette-sheet .field { margin-bottom: 8px; }
 .palette-list { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
-.palette-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%; min-height: var(--row-h-dense); padding: 5px 10px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; border-radius: var(--radius-sm); cursor: pointer; }
+/* The hint's column is at most 40 % of the row and no wider than its text. A max-width in percent on
+   the hint itself resolved against its own auto column, a cycle the browser settled at a few
+   characters: "Al…" for "All projects" with half the row empty. */
+.palette-row { display: grid; grid-template-columns: auto minmax(0, 1fr) fit-content(40%); gap: 10px; align-items: center; width: 100%; min-height: var(--row-h-dense); padding: 5px 10px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; border-radius: var(--radius-sm); cursor: pointer; }
 .palette-row .ic { color: var(--fg-2); }
 .palette-row.on { background: var(--surface-2); }
-.palette-row .sub { max-width: 40%; }
+.palette-row .sub { text-align: right; }
+.palette-row .sub.tail { direction: rtl; }
 /* the first item of a meta line keeps its width; what follows truncates */
 .erow-meta > span:first-child, .erow-meta > .nowrap, .erow-meta > .chip, .erow-meta > span[title], .erow-meta > .pill { flex: none; }
 .erow-meta > .mono:not(:first-child) { flex: 0 1 auto; }
@@ -3433,6 +3484,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .harness-signin.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 .harness-models { color: var(--fg-2); }
 .harness-action { text-align: right; white-space: nowrap; }
+.harness-table th.harness-action { text-align: right; }
 .harness-screen .btn.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .harness-busy { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); }
 .harness-busy .spinner { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: harness-spin 900ms linear infinite; }

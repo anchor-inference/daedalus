@@ -32,6 +32,9 @@
 .deps-tools .kv > span { text-align:right; overflow-wrap:anywhere; }
 .dependencies details { margin:0; border-top:1px solid var(--line); }
 .dependencies summary { cursor:pointer; min-height:44px; display:flex; align-items:center; color:var(--fg-2); }
+/* A caret says the row opens: plain text between hairlines gave no sign there was more behind it. */
+.dependencies summary::after { content:""; flex:none; width:6px; height:6px; margin:0 4px 3px auto; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:rotate(45deg); transition:transform var(--t-fast); }
+.dependencies details[open] > summary::after { transform:translateY(3px) rotate(-135deg); }
 .dependencies pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:var(--fs-12); }
 .deps-explanation { white-space:pre-wrap; overflow-wrap:anywhere; }
 .deps-patch { padding:12px; background:var(--bg); border-radius:var(--radius-sm); max-height:40vh; overflow:auto; }
@@ -50,6 +53,7 @@
 .deps-progress-disclosures { display:flex; flex-wrap:wrap; gap:8px; }
 .deps-progress-disclosures details { position:relative; flex:1 1 180px; border:0; }
 .deps-progress-disclosures summary { width:max-content; min-height:36px; padding:0 10px; border-radius:var(--radius-sm); background:var(--surface-2); font-size:var(--fs-12); }
+.deps-progress-disclosures summary::after { margin-left:10px; }
 .deps-progress-disclosures details[open] { flex-basis:100%; }
 .deps-events { padding:4px 0; list-style:none; max-height:220px; overflow:auto; }
 .deps-events li { display:flex; align-items:baseline; gap:12px; margin:8px 0; }

@@ -31,9 +31,9 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "b4k3ry20f0c5"
 
 WORDS = {
-    "en": {"tabs": ["Orchestrator", "Team", "Board", "Terminals"], "needs": "Needs you", "ira": "Ira asks:", "orchestrator": "The orchestrator asks:", "write": "Answer…", "head": "3 working · 1 in review",
+    "en": {"tabs": ["Orchestrator", "Team", "Terminals", "Board"], "needs": "Needs you", "ira": "Ira asks:", "orchestrator": "The orchestrator asks:", "write": "Answer…", "head": "3 working · 1 in review",
            "own": "Your own answer…", "send": "Answer", "working": "working", "review": "Review", "merge": "Merge", "board": "Board · Bakery 2.0"},
-    "ru": {"tabs": ["Оркестратор", "Команда", "Доска", "Терминалы"], "needs": "Нужны вы", "ira": "Ira спрашивает:", "orchestrator": "Оркестратор спрашивает:", "write": "Ответить…", "head": "3 работают · 1 на проверке",
+    "ru": {"tabs": ["Оркестратор", "Команда", "Терминалы", "Доска"], "needs": "Нужны вы", "ira": "Ira спрашивает:", "orchestrator": "Оркестратор спрашивает:", "write": "Ответить…", "head": "3 работают · 1 на проверке",
            "own": "Свой ответ…", "send": "Ответить", "working": "работает", "review": "Проверка", "merge": "Слить", "board": "Доска · Bakery 2.0"},
 }
 

@@ -9,7 +9,9 @@ import { hold, prime, release, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { plural, t } from "../i18n";
 
-const KINDS = ["fact", "decision", "preference", "reflection", "skill", "note"];
+// The host's own extractor writes "howto" and "identifier" beside the core's kinds; unnamed here, they
+// showed raw and grey, and a how-to card could not be told from a fact by its colour.
+const KINDS = ["fact", "decision", "preference", "reflection", "skill", "howto", "identifier", "note"];
 
 /** The kinds the app has a word for; a kind the agent invents is shown as it wrote it. */
 const kindWord = (kind: string) => (KINDS.includes(kind) ? t(`memory.kind.${kind}`) : kind);
@@ -30,15 +32,22 @@ export function MemoryScreen({ toast, onOpen }: { toast: (t: string) => void; on
 
   const q = query.trim().toLowerCase();
   const all = data?.records ?? [];
+  // What the scope and the search leave, before the kind: the chips count this, so each promises what a
+  // tap on it shows. They counted the whole library, and "fact · 3" beside "1 of 6 memories" under a
+  // search gave one or none when tapped. Every kind keeps its chip, at 0 when nothing of it matches.
+  const pool = useMemo(
+    () => all.filter((r) => (bucket === "all" || `${r.scope}:${r.scope_key}` === bucket) && (!q || r.text.toLowerCase().includes(q))),
+    [all, bucket, q],
+  );
   const kinds = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const r of all) counts.set(r.kind, (counts.get(r.kind) ?? 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [all]);
-  const records = useMemo(
-    () => all.filter((r) => (bucket === "all" || `${r.scope}:${r.scope_key}` === bucket) && (kind === "all" || r.kind === kind) && (!q || r.text.toLowerCase().includes(q))),
-    [all, bucket, kind, q],
-  );
+    for (const r of all) counts.set(r.kind, 0);
+    for (const r of pool) counts.set(r.kind, (counts.get(r.kind) ?? 0) + 1);
+    const order = new Map<string, number>();
+    for (const r of all) order.set(r.kind, (order.get(r.kind) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => (order.get(b[0]) ?? 0) - (order.get(a[0]) ?? 0));
+  }, [all, pool]);
+  const records = useMemo(() => pool.filter((r) => kind === "all" || r.kind === kind), [pool, kind]);
   const bucketLabel = (scope: string, k: string) => (scope === "global" ? t("memory.scope.global") : scope === "session" ? data?.sessions[k] ?? t("memory.scope.deleted", { id: k }) : `${scope}: ${k}`);
 
   function toggle(id: string) {
@@ -98,7 +107,7 @@ export function MemoryScreen({ toast, onOpen }: { toast: (t: string) => void; on
       >
         {searching && <input className="field search" autoFocus placeholder={t("memory.search")} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setQuery(""); setSearching(false); } }} aria-label={t("memory.search.label")} />}
         <div className="chips">
-          <button className="chip select" aria-pressed={kind === "all"} onClick={() => setKind("all")}>{t("common.all")} · {all.length}</button>
+          <button className="chip select" aria-pressed={kind === "all"} onClick={() => setKind("all")}>{t("common.all")} · {pool.length}</button>
           {kinds.map(([k, n]) => (
             <button key={k} className="chip select" aria-pressed={kind === k} onClick={() => setKind(k)}>{kindWord(k)} · {n}</button>
           ))}
@@ -114,7 +123,7 @@ export function MemoryScreen({ toast, onOpen }: { toast: (t: string) => void; on
       </PageHeader>
       <div className="screen narrow memory">
         {loading && !error && <Skeleton rows={5} />}
-        {error && !data && <div className="empty"><b>{t("memory.error")}</b><div>{error}</div><button className="btn" onClick={refresh}>{t("common.retry")}</button></div>}
+        {error && !data && <div className="empty"><b>{t("memory.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
         {data && records.length === 0 && (
           <div className="empty">
             <b>{t(all.length === 0 ? "memory.empty" : "memory.nomatch")}</b>

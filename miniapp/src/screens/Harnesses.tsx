@@ -106,7 +106,7 @@ export function HarnessesScreen({ toast }: { toast: (text: string) => void }) {
           <div className="empty">
             <b>{t("harness.error")}</b>
             <div>{error}</div>
-            <button className="btn" onClick={() => void refresh()}>{t("common.retry")}</button>
+            <button className="btn primary" onClick={() => void refresh()}>{t("common.retry")}</button>
           </div>
         )}
         {refused["all:update"]?.length ? <Refused names={refused["all:update"]} /> : null}
@@ -121,7 +121,8 @@ export function HarnessesScreen({ toast }: { toast: (text: string) => void }) {
                 <th>{t("harness.col.agents")}</th>
                 <th>{t("harness.col.models")}</th>
                 <th>{t("harness.col.channel")}</th>
-                <th aria-label={t("harness.col.state")} />
+                {/* A named column: the bare one read as an orphan next to seven labelled ones. */}
+                <th className="harness-action">{t("harness.col.state")}</th>
               </tr>
             </thead>
             <tbody>

@@ -36,7 +36,7 @@ export function ServicesScreen({ onOpen, toast }: { onOpen: (id: string) => void
       </PageHeader>
       <div className="screen narrow">
         {loading && !error && <Skeleton rows={3} />}
-        {error && !rows && <div className="empty"><b>{t("services.error")}</b><div>{error}</div><button className="btn" onClick={refresh}>{t("common.retry")}</button></div>}
+        {error && !rows && <div className="empty"><b>{t("services.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
         {rows && rows.length === 0 && (
           <div className="empty">
             <b>{t("services.empty")}</b>

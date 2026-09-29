@@ -175,13 +175,22 @@ export function Palette({ items, onClose }: { items: PaletteItem[]; onClose: () 
           <button key={it.id} role="option" aria-selected={i === cursor} className={`palette-row ${i === cursor ? "on" : ""}`} onMouseEnter={() => setCursor(i)} onClick={() => run(it)}>
             <Icon name={it.icon} size={16} />
             <span className="truncate">{it.label}</span>
-            {it.hint && <span className="sub truncate">{it.hint}</span>}
+            {it.hint && <PaletteHint hint={it.hint} />}
           </button>
         ))}
         {shown.length === 0 && <div className="sub" style={{ padding: "10px 12px" }}>{t("shell.search.nomatch")}</div>}
       </div>
     </Sheet>
   );
+}
+
+/** A folder is cut from its start, not its end: every project lives under the same home folder, so
+ *  an end-cut left six rows of an identical "/home/o…" and lost the one part that told them apart.
+ *  The marks on both sides keep the leading slash where it belongs inside the right-to-left box the
+ *  start-cut relies on. The full value stays in the tooltip. */
+function PaletteHint({ hint }: { hint: string }) {
+  const path = hint.startsWith("/") || hint.startsWith("~");
+  return <span className={`sub truncate ${path ? "tail" : ""}`} title={hint}>{path ? `\u200e${hint}\u200e` : hint}</span>;
 }
 
 const GO_KEYS: Record<string, Screen> = { a: "agents", o: "orchestration", v: "voice", i: "inbox", b: "board", t: "terminals", c: "changes", m: "memory", u: "usage", s: "settings" };

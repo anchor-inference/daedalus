@@ -108,6 +108,14 @@ export function tokens(n: number | null | undefined): string {
   return num(v);
 }
 
+/** A host's refusal as the start of a sentence. The host words its details in lower case, to be read
+ *  after a colon in a log ("the registry did not answer"); shown alone under a heading they read as a
+ *  cut-off line. Only a plain word is raised: "npm: not found" or "ffmpeg_x missing" name something
+ *  whose spelling matters and stay as they are. */
+export function asSentence(text: string): string {
+  return /^[a-z]+ /.test(text) ? text[0].toUpperCase() + text.slice(1) : text;
+}
+
 /** "$3.90", "< $0.01", "$0", "free" for a missing price. */
 export function usd(value: number | null | undefined): string {
   if (value === null || value === undefined) return t("fmt.free");

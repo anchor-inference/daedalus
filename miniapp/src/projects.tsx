@@ -80,6 +80,9 @@ export function ProjectSwitcher({ projects, current, onPick, onClose, toast }: {
               {p.name}
               {!projectReachable(p) && <span className="badge attn" title={t("project.notmounted.bot")}>{t("project.notmounted")}</span>}
               {p.settings.snapshots && <span className="badge" title={t("project.snapshots.title")}>{t("project.snapshots.badge")}</span>}
+              {/* Says why this row has the gear alone: without it the missing team and board
+                  buttons looked like icons that had failed to draw. */}
+              {(p.system || p.settings.ephemeral) && <span className="badge" title={t("project.system.title")}>{t("project.system.badge")}</span>}
             </span>
             <span className="sub mono truncate">{projectPath(p)}</span>
             <span className="sub">{p.sessions.length ? plural("project.agents", p.sessions.length) : t("project.noagents")}</span>

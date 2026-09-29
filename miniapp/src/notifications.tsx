@@ -69,7 +69,9 @@ export function resolutionLabel(resolution: string): string {
 export function noticeLine(entry: Notification, projects: Map<string, string>): string {
   const parts = [categoryLabel(entry.category)];
   const project = entry.project_id ? projects.get(entry.project_id) : undefined;
-  if (project) parts.push(project);
+  // Every line names where the entry came from, the whole app when no project: a bare "System" or
+  // "Spending" among "Finished · Bakery site · …" lines read as a line that had failed to fill in.
+  parts.push(project ?? t("notice.anywhere"));
   const session = entry.session_id ? peek<SessionList>("/api/sessions")?.sessions.find((s) => s.id === entry.session_id) : undefined;
   // An orchestrator's session is titled "Orchestrator · <project>", so its whole title repeated the
   // project already named and the line read "Anchor Inference · Orchestrator · Anchor Inference".

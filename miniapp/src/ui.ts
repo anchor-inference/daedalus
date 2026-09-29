@@ -2,7 +2,7 @@
 
 import { ApiError, telegram } from "./api";
 import { confirmDialog } from "./dialogs";
-import { bytes, tokens } from "./format";
+import { asSentence, bytes, tokens } from "./format";
 import { t } from "./i18n";
 
 /** The Telegram bridge only when the app really runs inside Telegram: the script also loads in a plain
@@ -52,5 +52,5 @@ export function errorText(e: unknown): string {
   if (e instanceof ApiError && e.status === 413) return t("upload.toolarge");
   const msg = e instanceof Error ? e.message : String(e);
   if (!msg || msg === "Failed to fetch" || msg === "Load failed" || msg === "NetworkError when attempting to fetch resource.") return t("common.noconnection");
-  return msg;
+  return asSentence(msg);
 }
