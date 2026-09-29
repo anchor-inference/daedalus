@@ -38,7 +38,7 @@ WORDS = {
         "all": "All projects", "orchestrator": "Orchestrator", "team": "Team", "oneoff": "One-off", "terminals": "Terminals", "board": "Board", "brief": "Brief",
         "wakeups": "Wake-ups", "journal": "Journal", "folders": "Folders", "machine": "the machine's terminal limit is reached", "placeholder": "Write to the orchestrator…",
         "lev": "Write to Lev…", "folder": "Folder added", "created": "Task created", "assigned": "Assigned", "watch": "Watch set", "asked": "Asked you",
-        "waiting": "1 question waiting", "questions": "Questions", "events": "3 events since 09:51", "onlyyou": "only you", "byorch": "changed by the orchestrator", "older": "Older entries",
+        "questions": "Questions", "events": "3 events since 09:51", "onlyyou": "edited by you only", "byorch": "changed by the orchestrator", "older": "Older entries",
         "note": "Add a note", "enable": "Switch the orchestrator on", "on": "Switch on", "cost": "fifteen times", "pause": "Pause after the turn", "accepted": "accepted",
         "staff": "6 staff", "needs": "1 needs you", "autonomy": "autonomy: normal",
         "spent": "$2.05 today", "levspend": "$1.20 today · 412k tokens", "iraspend": "subscription · window 23 %", "totals": "Today $2.05 · 7 days $10.90 · All $33.80",
@@ -48,7 +48,7 @@ WORDS = {
         "all": "Все проекты", "orchestrator": "Оркестратор", "team": "Команда", "oneoff": "Разовые", "terminals": "Терминалы", "board": "Доска", "brief": "Бриф",
         "wakeups": "Будильники", "journal": "Журнал", "folders": "Папки", "machine": "достигнут предел терминалов машины", "placeholder": "Напишите оркестратору…",
         "lev": "Написать сотруднику Lev…", "folder": "Папка добавлена", "created": "Задача создана", "assigned": "Назначено", "watch": "Наблюдение поставлено", "asked": "Спросил вас",
-        "waiting": "1 вопрос ждёт ответа", "questions": "Вопросы", "events": "3 события с 09:51", "onlyyou": "только вы", "byorch": "изменено оркестратором", "older": "Более ранние записи",
+        "questions": "Вопросы", "events": "3 события с 09:51", "onlyyou": "правите только вы", "byorch": "изменено оркестратором", "older": "Более ранние записи",
         "note": "Добавить заметку", "enable": "Включить оркестратор", "on": "Включить", "cost": "в пятнадцать раз", "pause": "После хода — пауза", "accepted": "принято",
         "staff": "6 сотрудников", "needs": "1 ждёт вас", "autonomy": "самостоятельность: обычная",
         "spent": "$2.05 сегодня", "levspend": "$1.20 сегодня · токенов: 412k", "iraspend": "подписка · окно 23 %", "totals": "Сегодня $2.05 · 7 дней $10.90 · Всего $33.80",
@@ -154,12 +154,14 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(steps.filter(has_text=words["asked"])).to_have_count(1)
     assert chat.get_by_text(words["created"], exact=True).count() == 2, "a step is drawn once, inside its group"
     expect(chat.locator(".composer textarea")).to_have_attribute("placeholder", words["placeholder"])
-    # The question it asked is no card in the chat: one line stands for what waits, and opens the
-    # Questions tab, where it is answered (check_questions_panel.py follows it further).
+    # The question it asked is no card in the chat: it waits in the Questions tab, which the panel
+    # opens on, and is answered there (check_questions_panel.py follows it further). The chat's line
+    # for what waits stays away while that tab is open beside it: its "Open" would open what is shown.
     expect(chat.locator(".ask-card, .timeline .q-card")).to_have_count(0)
-    line = chat.locator(".timeline > .questions-line")
-    expect(line).to_contain_text(words["waiting"])
-    line.click()
+    questions_tab = page.locator(".panel .panel-tab[data-tab='questions']")
+    expect(questions_tab).to_have_attribute("aria-selected", "true")
+    expect(questions_tab.locator(".count")).to_have_text("1")
+    expect(chat.locator(".timeline > .questions-line")).to_have_count(0)
     ask = page.locator(".panel .q-card[data-ask='q4r8tz']")
     expect(ask).to_be_visible()
     ask.locator(".q-chip", has_text=invented["ask.before"]).click()
@@ -179,6 +181,8 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(page.locator(".panel .pboard.embedded .pcard.need")).to_contain_text("q4r8tz")
     page.locator(".panel .panel-tab[data-tab='brief']").click()
     expect(page.locator(".panel .brief-card")).to_have_count(6)
+    # The badge says who edits the section: a bare "only you" beside "Allowed without you" read as
+    # contradicting the heading.
     expect(page.locator(".panel .brief-card.allowed_without_operator")).to_contain_text(words["onlyyou"])
     expect(page.locator(".panel .brief-card.notes")).to_contain_text(words["byorch"])
     assert f"/app/orchestration/project/{PID}?" in page.url and "panel=brief" in page.url, page.url

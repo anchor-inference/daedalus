@@ -85,13 +85,13 @@ def desktop(page: Page, lang: str) -> None:
     expect(entry.locator(".main-pill")).to_have_text(words["pill"])
     expect(entry).to_have_class(re.compile(r"\bcurrent\b"))
 
-    # The dispatches are in the conversation's flow, after its latest turn, and after them the one
-    # line for what waits; nothing stands over the chat, and no question is a card in it.
+    # The dispatches are in the conversation's flow, after its latest turn; nothing stands over the
+    # chat, and no question is a card in it. The one line for what waits stays away while the
+    # Questions tab is open beside the chat, where its "Open" would open what is already shown; the
+    # phone below, with the panel shut, sees it after the flow.
     board = page.locator(".chat .timeline > .main-flow")
     expect(board).to_be_visible()
-    line = page.locator(".chat .timeline > .questions-line")
-    expect(line).to_contain_text(words["line"])
-    assert line.evaluate("el => el === el.parentElement.lastElementChild && el.previousElementSibling.classList.contains('main-flow')"), "the line is not after the flow"
+    expect(page.locator(".chat .timeline > .questions-line")).to_have_count(0)
     expect(page.locator(".main-board, .main-answered, .main-closed")).to_have_count(0)
     expect(page.locator(".timeline .q-card, .timeline .ask-card")).to_have_count(0)
     # The panel leads with every project's questions, grouped by project, oldest first.
@@ -176,7 +176,9 @@ def phone(page: Page, lang: str) -> None:
     # questions a sheet away, behind the header's button.
     first.click()
     page.wait_for_url(re.compile(r"/app/orchestration(\?|$)"))
-    expect(page.locator(".timeline > .questions-line")).to_contain_text(WORDS[lang]["line"])
+    line = page.locator(".timeline > .questions-line")
+    expect(line).to_contain_text(WORDS[lang]["line"])
+    assert line.evaluate("el => el === el.parentElement.lastElementChild && el.previousElementSibling.classList.contains('main-flow')"), "the line is not after the flow"
     expect(page.locator("nav.tabbar")).to_have_count(0)
     expect(page.locator(".main-board")).to_have_count(0)
     fits(page, f"{lang} phone main chat")

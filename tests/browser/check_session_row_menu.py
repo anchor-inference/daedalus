@@ -35,7 +35,8 @@ def run() -> None:
         row.locator('.session-row-menu button').click()
         menu = page.get_by_role("menu")
         expect(menu.get_by_role("menuitem", name="Rename", exact=True)).to_be_visible()
-        expect(menu.get_by_role("menuitem", name="Delete session", exact=True)).to_be_visible()
+        # Delete is a bare verb like the other items: the row it hangs off already names the session.
+        expect(menu.get_by_role("menuitem", name="Delete", exact=True)).to_be_visible()
         box = menu.bounding_box()
         assert box and box["x"] >= 8 and box["x"] + box["width"] <= 1432
         menu.get_by_role("menuitem", name="Rename", exact=True).click()
