@@ -33,9 +33,9 @@ DESK = {"width": 1440, "height": 900}
 PHONE = {"width": 390, "height": 844}
 
 WORDS = {
-    "en": {"details": "Details", "today": "Today", "compacted": "Last compacted", "cli": "Claude Code 2.1.281", "nowindow": "window not reported by Claude Code",
+    "en": {"details": "Details", "today": "Today", "compacted": "Last compacted", "cli": "Claude Code 2.1.281", "nowindow": "context window size not reported by Claude Code",
            "nolimits": "Subscription limits: not reported by Claude Code.", "opencode": "Not reported by OpenCode yet.", "replies": "3 replies · 2 from the orchestrator · 1 from you"},
-    "ru": {"details": "Сведения", "today": "Сегодня", "compacted": "Последнее сжатие", "cli": "Claude Code 2.1.281", "nowindow": "Claude Code не сообщает размер окна",
+    "ru": {"details": "Сведения", "today": "Сегодня", "compacted": "Последнее сжатие", "cli": "Claude Code 2.1.281", "nowindow": "Claude Code не сообщает размер окна контекста",
            "nolimits": "Лимиты подписки: Claude Code их не сообщает.", "opencode": "OpenCode пока этого не сообщил.", "replies": "3 ответа · 2 от оркестратора · 1 от вас"},
 }
 

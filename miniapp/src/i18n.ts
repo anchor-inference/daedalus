@@ -3493,7 +3493,7 @@ Object.assign(DICT, {
 // host still hears it.
 Object.assign(DICT, {
   "staff.facts": { en: "turn {turn} · {minutes} min", ru: "ход {turn} · {minutes} мин" },
-  "staff.worktree": { en: "worktree {branch}", ru: "worktree {branch}" },
+  "staff.worktree": { en: "branch {branch}", ru: "ветка {branch}" },
   "staff.mode": { en: "What to show", ru: "Что показывать" },
   "staff.mode.feed": { en: "Feed", ru: "Лента" },
   "staff.mode.terminal": { en: "Terminal", ru: "Терминал" },
@@ -3533,7 +3533,8 @@ Object.assign(DICT, {
   "staff.details.conversation.value": { en: "{replies} · {orchestrator} from the orchestrator · {operator} from you", ru: "{replies} · {orchestrator} от оркестратора · {operator} от вас" },
   "staff.details.replies": { en: "{n} reply|{n} replies", ru: "{n} ответ|{n} ответа|{n} ответов" },
   "staff.details.notreported": { en: "Not reported by {cli} yet.", ru: "{cli} пока этого не сообщил." },
-  "staff.details.nowindow": { en: "window not reported by {cli}", ru: "{cli} не сообщает размер окна" },
+  "staff.details.nowindow": { en: "context window size not reported by {cli}", ru: "{cli} не сообщает размер окна контекста" },
+  "staff.details.fill.used": { en: "{n} tokens in context", ru: "{n} токенов в контексте" },
   "staff.details.asof": { en: "As of the end of the last turn, {when}.", ru: "На конец последнего хода, {when}." },
   "staff.details.spend.metered": { en: "Totals of this session, read from the transcript of {cli}.", ru: "Итог этой сессии по транскрипту {cli}." },
   "staff.details.spend.equivalent": { en: "Totals of this session from the transcript of {cli}; on a subscription the cost is what the same use would cost metered.", ru: "Итог этой сессии по транскрипту {cli}; при подписке стоимость — сколько то же стоило бы по тарифу." },

@@ -835,6 +835,9 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .panel-body.tab-preview { padding: 0; display: flex; flex-direction: column; }
 .panel-viewer { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px 16px; }
 .panel-viewer .preview-body { flex: 1; }
+/* A side column with more below its fold fades its lower edge, as a sheet's body does: on a tablet
+   the last event sat on the screen's edge with nothing to say the list went on. */
+.panel-body[data-more="below"] { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
 .panel-viewer .preview-image { max-height: none; }
 .panel-viewer .preview-frame { min-height: 0; flex: 1; }
 .panel.phone-width .panel-viewer { width: 390px; max-width: 100%; margin: 0 auto; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
@@ -3291,6 +3294,8 @@ button.staff-row:hover { background: var(--surface-2); }
 .feed-tools { font-size: var(--fs-13); color: var(--fg-2); }
 .feed-tools-head { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--row-h-dense); padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; cursor: pointer; }
 .feed-tools-failed { color: var(--bad); }
+.feed-tools-chevron { flex: none; display: inline-flex; color: var(--fg-3); transition: transform var(--t-fast); }
+.feed-tools.open .feed-tools-chevron { transform: rotate(90deg); }
 .feed-tool-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; }
 .feed-tool { display: flex; gap: var(--space-2); min-width: 0; min-height: var(--row-h-dense); align-items: center; }
 .feed-tool-name { flex: none; font-size: var(--fs-12); color: var(--fg); }
@@ -3321,8 +3326,9 @@ button.staff-row:hover { background: var(--surface-2); }
 .staff-compose-field { flex: 1; min-width: 0; min-height: var(--ctl-h); max-height: 30vh; padding: 6px 10px; resize: none; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); color: var(--fg); font: inherit; font-size: var(--fs-14); line-height: var(--lh-ui); field-sizing: content; }
 .staff-compose .staff-when { flex: none; }
 .staff-when button[disabled] { opacity: .45; cursor: not-allowed; }
-.staff-health { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 6px; color: var(--fg-2); font-size: var(--fs-12); }
-.staff-health .ic { flex: none; color: var(--ok); }
+.staff-health { display: flex; align-items: flex-start; gap: 10px; margin-top: 6px; color: var(--fg-2); font-size: var(--fs-12); }
+.staff-health-parts { display: flex; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.staff-health .ic { flex: none; margin-top: 1px; color: var(--ok); }
 .staff-health.warn .ic { color: var(--warn); }
 .staff-health-part.warn { color: var(--warn); }
 .staff-health.compact { margin-top: 2px; }
@@ -3340,7 +3346,10 @@ button.staff-row:hover { background: var(--surface-2); }
 .staff-details .dt-row > .grow { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .staff-panel-body { display: grid; align-content: start; gap: var(--space-3); font-size: var(--fs-13); }
 .staff-aside-section { display: grid; gap: 4px; }
-.staff-aside-label { color: var(--fg-3); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: .06em; }
+/* The Session tab's headings are the Details tab's (.dt-label): one heading style in one column. The
+   Session tab once had small capitals and the Details tab sentence case, side by side on one panel. */
+.staff-aside-label { color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; }
+.staff-session > .staff-aside-section + .staff-aside-section { padding-top: 10px; border-top: 1px solid var(--line); }
 .staff-aside-line { min-width: 0; overflow-wrap: anywhere; }
 .staff-aside-line.mono { font-size: var(--fs-12); }
 .staff-events { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }

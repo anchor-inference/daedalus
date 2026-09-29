@@ -45,7 +45,9 @@ export function StaffDetails({ member, view, turns, now = Date.now() }: { member
         {(launch?.branch || session?.branch) && <Row label={t("staff.details.branch")} mono>{launch?.branch || session?.branch}</Row>}
       </Section>
 
-      <Section ids={ids} id="staff-state" label={t("staff.details.state")} aside={t(`team.status.${status}`)}>
+      {/* The heading names the state only when no session has a Status row to say it: both at once
+          read "working" twice, one line under the other. */}
+      <Section ids={ids} id="staff-state" label={t("staff.details.state")} aside={session ? undefined : t(`team.status.${status}`)}>
         {!session && <p className="sub">{t("staff.details.nosession")}</p>}
         {session && (
           <>
@@ -65,7 +67,9 @@ export function StaffDetails({ member, view, turns, now = Date.now() }: { member
           <>
             {fill.pct !== null && <div className={`bar ${fill.pct >= 90 ? "bad" : fill.pct >= 60 ? "attn" : ""}`} style={{ ["--v" as string]: fill.pct }}><i /></div>}
             <div className="sub" data-context-fill>
-              {tokens(fill.tokens)}{fill.window ? ` / ${tokens(fill.window)}` : ` · ${t("staff.details.nowindow", { cli })}`}
+              {/* Named, not a bare number: "386k · window not reported" read as if 386k were the window
+                  the sentence says is unknown. */}
+              {fill.window ? `${tokens(fill.tokens)} / ${tokens(fill.window)}` : `${t("staff.details.fill.used", { n: tokens(fill.tokens) })} · ${t("staff.details.nowindow", { cli })}`}
             </div>
             <p className="sub">{t("staff.details.asof", { when: relTimeLong(usage?.at, now) || "—" })}</p>
           </>

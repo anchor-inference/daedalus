@@ -88,7 +88,7 @@ describe("the panels", () => {
     expect(text).toContain("medium");
     expect(text).toContain("turn 2");
     expect(text).toContain("2 replies · 1 from the orchestrator · 1 from you");
-    expect(host.querySelector("[data-context-fill]")!.textContent).toContain("window not reported by Claude Code");
+    expect(host.querySelector("[data-context-fill]")!.textContent).toContain("context window size not reported by Claude Code");
     // No meter without a window: 386k of an unknown window is not a share.
     expect(host.querySelector("#staff-st1-info-staff-context .bar")).toBeNull();
     expect(host.querySelector("[data-staff-spend]")!.textContent).toContain("$1.25");

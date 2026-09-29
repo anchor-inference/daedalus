@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Sheet, useLayer } from "./dialogs";
-import { useEdgeFade } from "./edgefade";
+import { useEdgeFade, useMoreBelow } from "./edgefade";
 import { Icon, IconName } from "./icons";
 import {
   PANEL_CLOSED,
@@ -236,6 +236,7 @@ function Body(props: HostProps) {
   const [visited, setVisited] = useState(state.tab === "files");
   const split = wide && state.tab === "preview";
   useEffect(() => { if (state.tab === "files" || split) setVisited(true); }, [state.tab, split]);
+  useMoreBelow(box, state.tab);
   const progress = local.nav?.busy ? null : local.info?.progress;
   const loading = state.tab === "preview" && (local.info?.loading || local.nav?.busy);
   return (
