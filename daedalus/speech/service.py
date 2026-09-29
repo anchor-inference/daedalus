@@ -20,11 +20,13 @@ import io
 import logging
 import shutil
 import wave
+from dataclasses import dataclass
 from pathlib import Path
 
 from daedalus.config import RuntimeConfig, SttConfig
 from daedalus.speech import catalog
-from daedalus.speech.engine import CACHE, SAMPLE_RATE, Engine, SpeechError, StreamSession
+from daedalus.speech.chunks import join_transcripts, split_pcm, wav_bytes
+from daedalus.speech.engine import BATCH_MAX_SECONDS, CACHE, SAMPLE_RATE, Engine, SpeechError, StreamSession
 from daedalus.speech.models import Downloads
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,19 @@ message below is what an installation without it gets."""
 
 CONVERT_TIMEOUT = 120.0
 """A conversion that has not finished by now is not going to; the file is longer than anything spoken."""
+
+LOCAL_PIECE_SECONDS = BATCH_MAX_SECONDS
+"""A local model hears a long recording in pieces of this length. A batch model decodes a piece in one
+pass with attention over all of it, so ten minutes at once is ten minutes of activations in memory;
+thirty seconds is what the live listener already hands it."""
+
+CLOUD_PIECE_BYTES = 8 << 20
+"""The most one piece sent to an endpoint may weigh. The hosted endpoint in use refuses a file somewhere
+past ten megabytes with a bare HTTP 400 (ten and a third passed, eleven and a half did not), and a
+browser that could not be asked to resample sends 48 kHz WAV, which reaches that in under two minutes."""
+
+CLOUD = "cloud"
+"""The ``[asr]`` value naming the endpoint, as opposed to a local model's id."""
 
 
 class LocalSpeech:
@@ -81,6 +96,15 @@ class LocalSpeech:
         """Whether an utterance would be recognised here rather than sent anywhere."""
         return self.active() is not None
 
+    def installed(self, model_id: str) -> catalog.SpeechModel | None:
+        """A catalog model by id if its files are here; else None. Like :meth:`active`, the files are the
+        test: a missing engine is a failure worth reporting when the model is asked, not a silent skip."""
+        try:
+            model = catalog.get(model_id)
+        except KeyError:
+            return None
+        return model if self.downloads.is_installed(model.id) else None
+
     def language(self) -> str:
         """The language the model is loaded for; empty where it chooses for itself."""
         value = (self.settings.local_language or "").strip().lower()
@@ -88,9 +112,13 @@ class LocalSpeech:
 
     # -- using it ---------------------------------------------------------------------------
 
-    async def engine(self) -> Engine:
-        """The loaded model, loading it first if this is the first utterance since it was chosen."""
-        model = self.active()
+    async def engine(self, model: catalog.SpeechModel | None = None) -> Engine:
+        """The loaded model, loading it first if this is the first utterance since it was chosen.
+
+        ``model`` is for a voice note sent to a model other than the voice page's. The cache holds one
+        model, so alternating between two costs a load each time; that is the operator's choice to make.
+        """
+        model = model or self.active()
         if model is None:
             raise SpeechError("no local speech model is installed and selected")
         return await CACHE.get(
@@ -104,12 +132,23 @@ class LocalSpeech:
         """Raw samples as words."""
         return await (await self.engine()).transcribe(pcm16, sample_rate)
 
-    async def transcribe_file(self, path: Path) -> str:
-        """A recording in any container the converter reads, as words."""
+    async def transcribe_file(self, path: Path, model: str = "") -> str:
+        """A recording in any container the converter reads, as words, heard in pieces.
+
+        ``model`` names an installed catalog model; empty is the voice page's own.
+        """
+        chosen = None
+        if model:
+            chosen = self.installed(model)
+            if chosen is None:
+                raise SpeechError(f"the local model {model} is not installed (Voice page)")
         pcm, rate = await decode_file(path)
         if not pcm:
             raise SpeechError("the recording held no audio")
-        return await self.transcribe(pcm, rate)
+        engine = await self.engine(chosen)
+        pieces = split_pcm(pcm, rate, LOCAL_PIECE_SECONDS)
+        heard = [await engine.transcribe(piece.pcm16, rate) for piece in pieces]
+        return join_transcripts(heard, [piece.overlaps for piece in pieces])
 
     async def session(self) -> StreamSession:
         """A stream to feed while the operator talks."""
@@ -291,48 +330,142 @@ async def decode_file(path: Path) -> tuple[bytes, int]:
     )
 
 
-async def transcribe_recording(speech: LocalSpeech, config: RuntimeConfig, manager: object, path: Path) -> str:
-    """The words in a recording: Voice Notes endpoint first, local model only if none is set.
+@dataclass(frozen=True)
+class Transcriber:
+    """One way a voice note can become words: the endpoint, or a local model by id."""
 
-    The composer microphone and a Telegram voice note are the Voice Notes setting (an
-    ``/audio/transcriptions`` endpoint). The local catalog model is the voice page's live listener;
-    using it here stole those notes from the endpoint the operator picked. It remains the fallback
-    so a machine with a zipformer and no key still has a microphone. A failure on the chosen route
-    is not hidden behind the other.
+    kind: str
+    model: str = ""
+
+    @property
+    def label(self) -> str:
+        return "the speech-to-text endpoint" if self.kind == CLOUD else f"the local model {self.model}"
+
+
+def _transcriber(value: str) -> Transcriber | None:
+    value = (value or "").strip()
+    if not value:
+        return None
+    return Transcriber(CLOUD) if value == CLOUD else Transcriber("local", value)
+
+
+def _usable(speech: LocalSpeech, config: RuntimeConfig, who: Transcriber) -> bool:
+    from daedalus.transport.telegram.voice import asr_configured  # Lazy: the transport imports this module
+
+    return asr_configured(config.asr) if who.kind == CLOUD else speech.installed(who.model) is not None
+
+
+def note_transcribers(speech: LocalSpeech, config: RuntimeConfig) -> list[Transcriber]:
+    """What a voice note is tried with, in order: the chosen transcriber, then the fallback.
+
+    The endpoint chosen but not configured falls to the voice page's model when one is installed: that
+    is what an installation with a model and no key has always done, and choosing "cloud" there was
+    never a choice. Anything in the list that cannot run here is left out, so an empty list means
+    nothing can transcribe at all.
+    """
+    chain: list[Transcriber] = []
+    first = _transcriber(config.asr.transcriber) or Transcriber(CLOUD)
+    if first.kind == CLOUD and not _usable(speech, config, first) and (active := speech.active()) is not None:
+        first = Transcriber("local", active.id)
+    second = _transcriber(config.asr.fallback)
+    for who in (first, second):
+        if who is not None and who not in chain and _usable(speech, config, who):
+            chain.append(who)
+    return chain
+
+
+async def transcribe_recording(speech: LocalSpeech, config: RuntimeConfig, manager: object, path: Path) -> str:
+    """The words in a recording, by the chosen transcriber and then by the fallback.
+
+    The composer microphone, a Telegram voice note and the voice page's recorded utterance all come
+    here, so the choice made in Settings is the same everywhere. A failure of the first is logged and
+    the second is tried; when both fail, both reasons are in the one error.
 
     Raises ``TranscriptionError`` either way, so every call site keeps the one exception it already
-    catches.
+    catches. The recording itself is the caller's, and is never deleted here.
     """
+    from daedalus.transport.telegram.voice import TranscriptionError  # Lazy: the transport imports this module
+
+    chain = note_transcribers(speech, config)
+    if not chain:
+        raise TranscriptionError("no speech-to-text endpoint is configured")
+    failures: list[str] = []
+    last: Exception | None = None
+    for index, who in enumerate(chain):
+        try:
+            return await _transcribe_with(who, speech, config, manager, path)
+        except TranscriptionError as exc:
+            failures.append(f"{who.label}: {exc}")
+            if index + 1 < len(chain):
+                logger.warning("voice note: %s failed (%s); trying %s", who.label, exc, chain[index + 1].label)
+            last = exc
+    raise TranscriptionError("; ".join(failures) if len(failures) > 1 else str(last))
+
+
+async def _transcribe_with(who: Transcriber, speech: LocalSpeech, config: RuntimeConfig, manager: object, path: Path) -> str:
     from daedalus.transport.telegram.voice import (  # Lazy: the transport imports this module
         TranscriptionError,
-        asr_configured,
         effective_asr,
-        transcribe,
     )
 
-    if asr_configured(config.asr):
-        return await transcribe(path, effective_asr(config.asr, manager))
-    if speech.available():
+    if who.kind == CLOUD:
+        return await transcribe_in_pieces(path, effective_asr(config.asr, manager))
+    try:
+        words = await speech.transcribe_file(path, model=who.model)
+    except SpeechError as exc:
+        raise TranscriptionError(f"the local speech model could not transcribe this: {exc}") from exc
+    if not words:
+        raise TranscriptionError("the local speech model heard nothing in this recording")
+    return words
+
+
+async def transcribe_in_pieces(path: Path, asr: object) -> str:
+    """The endpoint's transcript of a recording, sent in pieces it accepts when it is too long for one.
+
+    A recording nothing here can decode is sent whole, as before: the endpoint reads more containers
+    than this host does, and one that is short enough still works. A decodable one that fits is sent
+    as it came. Otherwise it is cut in its pauses (:mod:`daedalus.speech.chunks`), the pieces go one
+    after another, and one piece failing fails the recording — a transcript with a hole in the middle
+    is worse than the fallback hearing all of it.
+    """
+    from daedalus.transport.telegram import voice  # Lazy, and by module: the tests replace ``transcribe``
+
+    seconds = int(getattr(asr, "chunk_seconds", 180))
+    try:
+        pcm, rate = await decode_file(path)
+    except SpeechError:
+        return await voice.transcribe(path, asr)  # type: ignore[arg-type]
+    window = min(float(seconds), CLOUD_PIECE_BYTES / (2 * max(rate, 1)))
+    if len(pcm) / 2 / max(rate, 1) <= window and path.stat().st_size <= CLOUD_PIECE_BYTES:
+        return await voice.transcribe(path, asr)  # type: ignore[arg-type]
+    pieces = split_pcm(pcm, rate, window)
+    logger.info("voice note of %.0f s goes to the endpoint in %d pieces", len(pcm) / 2 / rate, len(pieces))
+    heard: list[str] = []
+    for number, piece in enumerate(pieces):
+        part = path.with_name(f"{path.stem}.part{number:03d}.wav")
+        part.write_bytes(wav_bytes(piece.pcm16, rate))
         try:
-            words = await speech.transcribe_file(path)
-        except SpeechError as exc:
-            raise TranscriptionError(f"the local speech model could not transcribe this: {exc}") from exc
-        if not words:
-            raise TranscriptionError("the local speech model heard nothing in this recording")
-        return words
-    raise TranscriptionError("no speech-to-text endpoint is configured")
+            heard.append(await voice.transcribe(part, asr, allow_empty=True))  # type: ignore[arg-type]
+        except voice.TranscriptionError as exc:
+            raise voice.TranscriptionError(f"piece {number + 1} of {len(pieces)}: {exc}") from exc
+        finally:
+            part.unlink(missing_ok=True)
+    words = join_transcripts(heard, [piece.overlaps for piece in pieces])
+    if not words:
+        raise voice.TranscriptionError("empty transcript")
+    return words
 
 
 def recogniser_available(speech: LocalSpeech, config: RuntimeConfig) -> bool:
-    """Whether a recording can be turned into words at all, by either route."""
-    from daedalus.transport.telegram.voice import asr_configured  # Lazy: the transport imports this module
-
-    return speech.available() or asr_configured(config.asr)
+    """Whether a recording can be turned into words at all, by any route."""
+    return bool(note_transcribers(speech, config))
 
 
 __all__ = [
+    "CLOUD",
     "CONVERTER",
     "OPUS_DECODER",
+    "Transcriber",
     "can_decode_recordings",
     "decoders",
     "LocalSpeech",
@@ -340,6 +473,8 @@ __all__ = [
     "decode_file",
     "engine_present",
     "forget_engine",
+    "note_transcribers",
     "recogniser_available",
+    "transcribe_in_pieces",
     "transcribe_recording",
 ]

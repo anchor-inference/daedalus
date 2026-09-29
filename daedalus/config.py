@@ -976,6 +976,17 @@ class AsrConfig(BaseModel):
     """Longer voice notes are not transcribed."""
     autosend: bool = False
     """Send the transcript to the agent without the confirm step (dictation is error-prone; off by default)."""
+    transcriber: str = "cloud"
+    """What turns a voice note into words: ``cloud`` is the endpoint above, anything else is the id of a
+    local model installed on the Voice page. With ``cloud`` and no endpoint set, the Voice page's own
+    model is used if one is installed, which is what an installation without a key always had."""
+    fallback: str = ""
+    """What is tried when the transcriber fails: empty for nothing, ``cloud``, or a local model id. A
+    recording is never thrown away on a failure either way; this decides whether one is retried by itself."""
+    chunk_seconds: int = Field(default=180, ge=20, le=290)
+    """A recording longer than this goes to the endpoint in pieces of at most this length, cut in the
+    pauses. The hosted endpoint in use refuses anything over five minutes, and anything over about ten
+    megabytes, with a bare HTTP 400; three minutes of the site's 16 kHz recording is under six."""
 
 
 class SttConfig(BaseModel):
@@ -984,8 +995,8 @@ class SttConfig(BaseModel):
     Empty ``local_model`` is the default and means nothing changes: the voice page uses the
     browser's own recognition, or the configured ``[asr]`` endpoint for a recorded utterance.
     Naming a catalog model is the voice page's live listener. Voice notes in the composer and
-    Telegram still go to ``[asr]`` when that endpoint is set; the local model only transcribes a
-    file when no endpoint is.
+    Telegram follow ``[asr].transcriber`` and ``[asr].fallback``, which may name this model or
+    another installed one.
     """
 
     local_model: str = ""
