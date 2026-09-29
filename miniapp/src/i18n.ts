@@ -1346,6 +1346,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "sched.actions": { en: "Schedule actions", ru: "Действия с расписанием" },
   "sched.when": { en: "When", ru: "Когда" },
   "sched.cron": { en: "Cron (UTC)", ru: "Cron (UTC)" },
+  "sched.when.local": { en: "When (your time)", ru: "Когда (ваше время)" },
   "sched.next": { en: "Next run", ru: "Следующий запуск" },
   "sched.lastrun": { en: "Last run", ru: "Последний запуск" },
   "sched.kind": { en: "Kind", ru: "Тип" },

@@ -115,7 +115,7 @@ export function SchedulesScreen({ toast, onOpen, selected }: { toast: (t: string
       />
       <div className="screen narrow">
         {loading && !error && <Skeleton rows={4} />}
-        {error && !items && <div className="empty"><b>{t("sched.error")}</b><div>{error}</div><button className="btn" onClick={refresh}>{t("common.retry")}</button></div>}
+        {error && !items && <div className="empty"><b>{t("sched.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
         {items && items.length === 0 && (
           <div className="empty">
             <b>{t("sched.empty")}</b>
@@ -153,7 +153,9 @@ export function SchedulesScreen({ toast, onOpen, selected }: { toast: (t: string
             />
           }
         >
-          <div className="kv"><span>{t("sched.when")}</span><b>{describeSchedule(open)}</b></div>
+          {/* Named as local time: beside "Cron (UTC)" an unqualified clock that disagreed with it read as a
+              second schedule rather than the same one in the reader's zone. */}
+          <div className="kv"><span>{t("sched.when.local")}</span><b>{describeSchedule(open)}</b></div>
           {open.cron && <div className="kv"><span>{t("sched.cron")}</span><b className="mono">{open.cron}</b></div>}
           <div className="kv"><span>{t("sched.next")}</span><b>{open.enabled && open.next_run_at ? `${absTime(open.next_run_at)} · ${untilShort(open.next_run_at)}` : open.enabled ? "—" : t("sched.paused.word")}</b></div>
           {open.last_run_at && <div className="kv"><span>{t("sched.lastrun")}</span><b>{absTime(open.last_run_at)}{open.failure_count ? ` · ${t("sched.failed", { n: open.failure_count })}` : ""}</b></div>}
