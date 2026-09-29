@@ -77,6 +77,15 @@ export function ToolResultView({ sessionId, item, toast, initial, keep }: { sess
   }
   return (
     <>
+      {/* Above the text, not under it: under a whole result of fifty thousand characters the copy
+          and download were a full scroll away from the button that had just opened it. */}
+      {full !== null && (
+        <div className="result-tools">
+          <span className="num">{t("session.result.size", { n: fmtInt(full.text.length) })}</span>
+          <button type="button" className="btn small" onClick={copyAll}>{t("session.result.copy")}</button>
+          <button type="button" className="btn small" onClick={() => saveText(text, `${item.name || "result"}-${item.id}.txt`)}>{t("common.download")}</button>
+        </div>
+      )}
       {/* Focusable once whole, so a long result can be scrolled to its end from the keyboard too. */}
       <pre className={`result ${item.error ? "error" : ""} ${full !== null ? "full" : ""}`} tabIndex={full !== null ? 0 : undefined}>{text}</pre>
       {approval && (
@@ -91,13 +100,6 @@ export function ToolResultView({ sessionId, item, toast, initial, keep }: { sess
       )}
       {pending && <div className="result-note">{t("session.result.pending")}</div>}
       {failed && <div className="result-note error">{t("session.result.failed", { error: failed })}</div>}
-      {full !== null && (
-        <div className="result-tools">
-          <span className="num">{t("session.result.size", { n: fmtInt(full.text.length) })}</span>
-          <button type="button" className="btn small" onClick={copyAll}>{t("session.result.copy")}</button>
-          <button type="button" className="btn small" onClick={() => saveText(text, `${item.name || "result"}-${item.id}.txt`)}>{t("common.download")}</button>
-        </div>
-      )}
       {full !== null && !full.complete && <div className="result-note">{t("session.result.partial")}</div>}
     </>
   );

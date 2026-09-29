@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ModelFallback, Preset } from "./api";
 import { Popover, Sheet } from "./dialogs";
 import { Icon } from "./icons";
-import { shortModel } from "./format";
+import { shortModel, tokens } from "./format";
 import { readCustomModel, rememberCustomModel } from "./composer";
 import { DICT, num, t } from "./i18n";
 import { EffortOptions } from "./effortselect";
@@ -117,7 +117,13 @@ function ModelList({ cat, failed, model, fallback, onPick }: { cat: Catalogue | 
   };
   return (
     <div className="model-list">
-      <div className="menu-heading sub">{t("session.model")}</div>
+      {/* The heading carries the key to the two marks, so what they mean is on the screen and not
+          only in a tooltip a touch screen never shows. */}
+      <div className="menu-heading sub model-heading">
+        <span className="grow">{t("session.model")}</span>
+        <span className="model-legend"><span className="model-kind thinking" aria-hidden>✦</span> {t("composer.model.thinking")}</span>
+        <span className="model-legend"><span className="model-kind fast" aria-hidden>⚡</span> {t("composer.model.fast")}</span>
+      </div>
       {fallback && (
         <>
           <div className="model-row-note sub attn">{t("composer.model.configured", { model: fallback.from })}</div>
@@ -144,7 +150,7 @@ function ModelList({ cat, failed, model, fallback, onPick }: { cat: Catalogue | 
               <span className="truncate">{p.label || p.model}</span>
               <span className="sub truncate">{p.provider}/{p.model}</span>
             </span>
-            {p.context_window > 0 && <span className="sub" title={t("composer.model.context", { n: num(p.context_window) })}>{num(p.context_window / 1000)}k</span>}
+            {p.context_window > 0 && <span className="sub" title={t("composer.model.context", { n: num(p.context_window) })}>{tokens(p.context_window)}</span>}
             {current && <Icon name="check" size={16} />}
           </button>
         );

@@ -45,7 +45,9 @@
   --fs-14: 14px;   /* ui-lg: row titles, nav items, headers, step rows, the user's card */
   --fs-15: 15px;   /* prose on a desktop */
   --fs-16: 16px;   /* prose on a phone, and any text field on a touch screen (or Safari zooms) */
-  --fs-18: 18px;   /* h2 in an answer, a sheet's title */
+  --fs-18: 18px;   /* a sheet's title, the smallest heading in an answer */
+  --fs-20: 20px;   /* the middle heading in an answer */
+  --fs-22: 22px;   /* the top heading in an answer */
   --fs-mono: 12.5px;
   --fs-prose: var(--fs-15);
   --lh-ui: 1.35;
@@ -158,6 +160,9 @@ button, input, textarea, select { font: inherit; color: inherit; }
 a { color: var(--accent); text-decoration: none; }
 .num { font-variant-numeric: tabular-nums; }
 .mono { font-family: var(--mono); }
+/* A monospaced field still speaks in prose until something is typed: the pairing hint clipped
+   mid-word at phone width in the wider mono face. */
+.field.mono::placeholder { font-family: var(--font); }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -456,7 +461,10 @@ a { color: var(--accent); text-decoration: none; }
 .act .detail.link:hover { color:var(--accent); text-decoration:underline; }
 .act.head { grid-template-columns:16px minmax(0, 1fr) auto; }
 .act.head .act-end { grid-column:3; }
-.act .detail { color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; font-family:var(--mono); font-size:var(--fs-mono); }
+/* One clamped line rather than a clipped one: the line breaks between words, so the ellipsis lands
+   after a whole word or path ("… && ls -la…") instead of inside one ("images/her…"). A single token
+   longer than the line still breaks where it must. */
+.act .detail { color:var(--fg); overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:1; line-clamp:1; overflow-wrap:anywhere; min-width:0; font-family:var(--mono); font-size:var(--fs-mono); }
 .act.prose .detail { font-family:var(--font); font-size:1em; color:var(--fg-2); }
 .act.running .verb { color:var(--fg); }
 .act.running .ic { animation:pulse 1.2s ease-in-out infinite; }
@@ -495,14 +503,20 @@ a { color: var(--accent); text-decoration: none; }
 /* The answer's own label when another model wrote it: above the text, never inside it. */
 .fallback-note { margin: 6px 0 2px; }
 .fallback-note .chip { cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* The glyph and the chevron keep their size and the words give way: as a bare line of text in a
+   full-width chip the words won, and on a phone the glyph shrank to nothing. */
+.fallback-note .chip .ic, .fallback-note .chev { flex: none; }
+.fallback-note .chip .truncate { min-width: 0; }
 .fallback-note .chev { margin-left: 2px; }
 .fallback-note .sub { margin: 4px 0 0 2px; line-height: 1.45; }
 .answer { font-family: var(--font-prose, var(--font)); font-size:var(--fs-prose); line-height:var(--lh-prose); word-break:break-word; padding-top:4px; }
 .answer.streaming::after { content:""; display:inline-block; width:6px; height:6px; margin-left:6px; border-radius:50%; background:var(--accent); animation:pulse 1s infinite; }
 .answer p, .summary-body p, .sheet-body p { margin:0 0 10px; }
-.answer h2, .summary-body h2 { font-size:var(--fs-18); margin:16px 0 8px; }
-.answer h3, .summary-body h3 { font-size:var(--fs-16); margin:14px 0 6px; }
-.answer h4, .summary-body h4 { font-size:var(--fs-15); margin:12px 0 4px; }
+/* Every heading stands at least two steps above the prose it heads. The smallest one was the
+   prose's own size, and an answer's title read the same as the bold line under it. */
+.answer h2, .summary-body h2 { font-size:var(--fs-22); margin:18px 0 8px; }
+.answer h3, .summary-body h3 { font-size:var(--fs-20); margin:16px 0 6px; }
+.answer h4, .summary-body h4 { font-size:var(--fs-18); margin:14px 0 4px; }
 .answer ul, .answer ol, .summary-body ul, .summary-body ol { margin:0 0 10px; padding-left:22px; }
 .answer li, .summary-body li { margin:3px 0; }
 .answer li.task { list-style:none; margin-left:-20px; }
@@ -536,7 +550,10 @@ a { color: var(--accent); text-decoration: none; }
 /* The block is the frame; its text is not an inline code span again. The answer's inline-code tint
    reached into it and drew a rounded chip behind every line of a fenced block. */
 .codecard pre code { background:none; padding:0; border-radius:0; }
+.codecard .nobreak { white-space:nowrap; }
 .toolcard .codecard { margin:0; }
+/* Inside the card the halves meet its frame: their own rounded corners drew a card in a card. */
+.diffcard .diff .del, .diffcard .diff .add { border-radius:0; padding:8px 10px 8px 26px; }
 
 .summary { border:1px solid var(--line); border-radius:var(--radius-md); background:var(--card); padding:4px 12px; }
 .summary-head { display:flex; align-items:center; gap:8px; width:100%; background:none; border:0; color:var(--muted); font-size:var(--fs-14); padding:6px 0; cursor:pointer; text-align:left; }
@@ -562,11 +579,16 @@ a { color: var(--accent); text-decoration: none; }
 .artifact:hover .artifact-glyph { background:var(--surface-3); }
 .artifact-text { display:flex; flex-direction:column; min-width:0; gap:1px; }
 .artifact-name { font-size:var(--fs-14); font-weight:500; }
+/* Clamped to a line between words, like a step's detail: a narrow phone cut "sent to you" to
+   "sent t…". */
 .artifact-meta { font-size:var(--fs-12); color:var(--fg-2); }
+.artifact-meta.truncate { white-space:normal; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:1; line-clamp:1; overflow-wrap:anywhere; }
 .artifact-actions { display:inline-flex; align-items:center; gap:2px; padding:0 6px; }
 .artifact-actions .iconbtn.small { background:transparent; color:var(--fg-2); }
 .artifact-actions .iconbtn.small:hover { background:var(--surface-3); color:var(--fg); }
 .artifact-thumb { grid-column:1 / -1; padding:0 10px 10px; }
+.artifact-open-panel { display:contents; }
+.artifact-open-full { display:none; }
 .artifact-thumb .tool-image { max-height:220px; }
 
 /* ── the first paint: three turn-shaped blocks ── */
@@ -695,7 +717,10 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .msg-actions .iconbtn.small { width:24px; height:24px; background:transparent; color:var(--fg-2); }
 .msg-actions .iconbtn.small:hover { background:var(--surface-2); color:var(--fg); }
 .msg-wrap .msg-actions { justify-content:flex-end; padding-right:4px; }
-.msg-actions .iconbtn.danger { color:var(--bad); }
+/* The one undoing action turns red when it is pointed at, not before: red at rest it was the loudest
+   mark in a row of grey ones and read as an alert with no word to explain it. The confirmation it
+   opens says what it removes. */
+.msg-actions .iconbtn.small.danger:hover, .msg-actions .iconbtn.small.danger:focus-visible { color:var(--bad); }
 @media (hover: hover) {
   .msg-actions { opacity:0; transition:opacity .15s; }
   .turn:hover .msg-actions, .msg-actions:focus-within, .msg-actions:hover { opacity:1; }
@@ -756,12 +781,22 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .steer-text { color:var(--fg); }
 .steer-hint { white-space:nowrap; }
 .steer-x { background:transparent; }
-@media (max-width: 719px) { .steer-hint { display:none; } }
+/* Narrow, the hint goes under the message instead of away: it is the only thing on the card that
+   says the message is waiting and not yet read. */
+@media (max-width: 719px) {
+  .steer { grid-template-columns:auto minmax(0, 1fr) auto; row-gap:2px; }
+  .steer > .ic { grid-row:1; grid-column:1; }
+  .steer-text { grid-row:1; grid-column:2; }
+  .steer-hint { grid-row:2; grid-column:2; white-space:normal; font-size:var(--fs-11); }
+  .steer-x { grid-row:1 / span 2; grid-column:3; }
+}
 /* A narrow pill — a phone, or a pane of the dual view — has room for the field, the model and the
    circle: the ring lives in Details there, and the model name is cut short. */
 .composer-box { container-type: inline-size; }
 @container (max-width: 560px) {
-  .ctx-ring { display:none; }
+  /* Narrow, the context stays as its number alone rather than going away: a phone otherwise had no
+     sight of how full the window is. The number without the arc does not read as a spinner. */
+  .ctx-ring svg { display:none; }
   .composer-box textarea { padding:9px 4px; }
   .composer-tools { gap:0; }
 }
@@ -1023,9 +1058,11 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .navmenu-item .ic { color: var(--fg-2); flex: none; }
   .navmenu-item:hover, .navmenu-item:focus-visible { background: var(--surface-3); outline: none; }
   .navmenu-item.active .ic { color: var(--accent); }
-  .navmenu-item .count { margin-left: auto; font-size: var(--fs-11); font-weight: 700; color: var(--bg); background: var(--fg); border-radius: var(--radius-pill); padding: 1px 6px; min-width: 18px; text-align: center; }
-  .navmenu-item .count.attn { background: var(--warn); }
-  .navmenu-item .count.ok { background: var(--ok); }
+  /* The same count is the same red it is on the rail's icon a few pixels away; a white one here
+     looked like a different number. */
+  .navmenu-item .count { margin-left: auto; font-size: var(--fs-11); font-weight: 700; color: #fff; background: var(--bad); border-radius: var(--radius-pill); padding: 1px 6px; min-width: 18px; text-align: center; }
+  .navmenu-item .count.attn { background: var(--warn); color: var(--bg); }
+  .navmenu-item .count.ok { background: var(--ok); color: var(--bg); }
   .navmenu-item kbd { margin-left: auto; font: var(--fs-11) var(--mono); color: var(--fg-3); }
   .navmenu-item .beta-tag { margin-left: 0; }
   .navmenu-lang { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: var(--row-h); padding: 0 10px; font-size: var(--fs-14); font-weight: 500; }
@@ -1203,6 +1240,12 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .service-cmd { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: var(--fs-11); }
 
 .linkbtn { background: none; border: 0; padding: 0; color: var(--fg); font: inherit; cursor: pointer; text-align: left; }
+/* A word-sized link in the details panel is a small target for a thumb ("Move…", a shared session,
+   the Files row on a touch tablet): it takes a small control's height there, the text unchanged. */
+@media (pointer: coarse) {
+  .details .dt-row .linkbtn { min-height: var(--ctl-h-sm); padding-inline: 4px; margin-inline: -4px; }
+  .details .aside-row.link { min-height: var(--ctl-h); }
+}
 .linkbtn:hover { color: var(--info); }
 
 
@@ -1500,6 +1543,7 @@ body.resizing iframe { pointer-events: none; }
 .mfield { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .mfield.end { justify-content: flex-end; }
 .mfield > span { color: var(--muted); font-size: var(--fs-12); }
+.mfield > span .faint { color: var(--fg-3); }
 .mfield .field { margin: 0; width: 100%; }
 .segmented.inline { display: inline-flex; margin: 0; }
 .segmented.inline button { flex: none; padding: 4px 12px; font-size: var(--fs-13); }
@@ -2266,6 +2310,10 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 .pick-top .pill { flex: none; }
 .pick .sub { font-size: var(--fs-12); }
 .pick .mtags { padding: 4px 0 0; }
+.mtags-break { flex-basis: 100%; height: 0; }
+.addmodel-run { align-items: center; gap: 10px 16px; }
+.addmodel-run .segmented { margin: 0; }
+.addmodel-opt { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-13); color: var(--fg); cursor: pointer; }
 /* The filter and the typed id are one row of two fields with their labels on the same line, so the
    two boxes start and end together instead of sitting at two different heights. */
 .modelbar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px 12px; align-items: end; }
@@ -2437,9 +2485,8 @@ input.field[type="range"] {
 .explorer-search .field { margin:0; font-size:var(--fs-12); height:var(--ctl-h); }
 .explorer-search select { width:100px; padding:0 4px; }
 .explorer-crumbs { padding:0 8px; display:flex; flex-wrap:wrap; gap:2px; font-size:var(--fs-12); }
-.explorer-tools { display:flex; align-items:center; gap:4px; padding:0 8px 4px; }
-.explorer-tools > .linkbtn { margin-right:auto; color:var(--fg-3); font-size:var(--fs-12); }
-.explorer-tools > .linkbtn[aria-pressed=true] { color:var(--fg); }
+.explorer-tools { display:flex; align-items:center; gap:4px; padding:0 8px 4px; margin-bottom:4px; border-bottom:1px solid var(--line); }
+.explorer-hidden { display:inline-flex; align-items:center; gap:8px; margin-right:auto; color:var(--fg-2); font-size:var(--fs-12); cursor:pointer; }
 .explorer-tree { overflow:auto; flex:1; min-height:0; }
 .files .tree-row { display:flex; align-items:center; gap:6px; height:var(--row-h-dense); min-height:var(--row-h-dense); padding:0 4px; border:0; border-radius:0; margin:0; background:none; cursor:pointer; }
 .tree-row:hover, .tree-row.selected { background:var(--surface-2); }
@@ -2550,6 +2597,9 @@ input.field[type="range"] {
 .run-outcome.cause-cancelled { border-color:var(--line-strong); background:var(--surface-2); }
 .run-outcome.cause-cancelled svg { color:var(--muted); }
 .run-outcome-detail { margin-top:2px; color:var(--muted); }
+.run-outcome-more { margin-top:2px; }
+.run-outcome-more summary { width:fit-content; min-height:var(--row-h-dense); display:flex; align-items:center; color:var(--muted); cursor:pointer; }
+.run-outcome-more summary:hover { color:var(--fg); }
 
 /* Composer card: the text owns its row; controls never compete with its width. */
 .composer { gap:var(--space-2); }
@@ -2572,6 +2622,9 @@ input.field[type="range"] {
 .mode-list { display:flex; flex-direction:column; }
 /* The one heading of the composer's menus: mode, model and effort open under the same small title. */
 .menu-heading { padding:var(--space-1) 10px; font-size:var(--fs-12); font-weight:400; }
+.model-heading { display:flex; align-items:center; gap:10px; }
+.model-legend { display:inline-flex; align-items:center; gap:3px; color:var(--fg-3); font-size:var(--fs-11); white-space:nowrap; }
+.model-legend .model-kind { width:auto; height:auto; min-width:0; font-size:var(--fs-11); }
 .mode-row .model-text .sub { white-space:normal; }
 .mode-row[aria-checked="true"] > .ic { color:var(--accent); }
 .mode-switch { flex:none; position:relative; width:28px; height:16px; border-radius:8px; background:var(--line-strong); transition:background var(--t-fast); }
@@ -2617,7 +2670,9 @@ input.field[type="range"] {
 
 /* Keep the newest-message shortcut above a card of any height. */
 .composer-jump-anchor { position:relative; flex:none; height:0; }
-.composer-jump-anchor .jump-down { bottom:var(--space-2); right:var(--space-3); width:var(--ctl-h); height:var(--ctl-h); }
+/* A ring of the page's own colour around it: on a phone the text runs to the button's edge, and
+   without the gap it sat on the last lines of a log instead of over them. */
+.composer-jump-anchor .jump-down { bottom:var(--space-2); right:var(--space-3); width:var(--ctl-h); height:var(--ctl-h); background:var(--surface-2); box-shadow:0 0 0 4px var(--bg), 0 6px 18px rgba(0,0,0,.45); }
 /* Project controls keep their place when a conversation gains a neighbour. */
 .folder-top { display: flex; align-items: center; gap: var(--space-1); background: var(--surface-2); border-radius: var(--radius-sm); }
 .folder-top > .folder-head { background: transparent; }
@@ -2649,7 +2704,9 @@ input.field[type="range"] {
 .sysnote-row { display:flex; align-items:center; gap:var(--space-2); min-width:0; }
 .sysnote-row .sysnote-head { min-width:0; flex:1; }
 .run-disclosure { display:flex; align-items:center; gap:var(--space-2); min-height:var(--row-h-touch); padding:0; border:0; background:none; color:var(--fg-2); font:inherit; font-size:var(--fs-12); cursor:pointer; }
-.activity-current { color:var(--accent); min-width:0; max-width:50%; }
+/* It shrinks only when the row runs out of room. A cap of half the head's width was half of a head
+   that shrinks to fit its content, so a short line was cut to "Writing the ans…" beside empty space. */
+.activity-current { color:var(--accent); min-width:0; flex:0 1 auto; }
 
 /* The scroll viewport ends at the header; neither streaming content nor a translated child
    may paint over navigation. Touch controls keep their area while secondary containers flatten. */
@@ -2659,7 +2716,9 @@ input.field[type="range"] {
   .chat-head .head-status { max-width:40%; gap:var(--space-1); font-size:var(--fs-12); }
   .chat-head .head-status > span:not(.dot):not(.num) { display:none; }
   .thinking-head { min-height:var(--row-h-touch); flex-wrap:wrap; gap:var(--space-1); }
-  .thinking-head .families { display:none; }
+  /* What the run did wraps under the head rather than going missing: without it a phone said less
+     about the same run than the other two sizes. */
+  .thinking-head .families { flex:1 1 100%; order:1; }
   .sysnote-head { min-height:var(--row-h-touch); }
   .run-disclosure { flex:none; }
   .activity { border-left:1px solid var(--line-strong); padding-left:var(--space-2); }
@@ -2667,9 +2726,11 @@ input.field[type="range"] {
   .msg-actions .iconbtn.small { width:auto; gap:var(--space-2); padding-inline:var(--space-2); }
   .msg-actions { opacity:1; }
   .composer-row .model-select, .composer-row .composer-mode { min-height:var(--row-h-touch); }
-  .composer-tools .ctx-ring { display:none; }
+  .composer-tools .ctx-ring { min-width:36px; height:var(--row-h-touch); }
+  .composer-tools .ctx-pct { font-size:var(--fs-12); }
   .composer-row > .iconbtn, .composer-tools > .iconbtn, .composer-tools > .roundbtn { width:var(--row-h-touch); height:var(--row-h-touch); }
-  .artifact-actions > button { display:none; }
+  .artifact-open-panel { display:none; }
+  .artifact-open-full { display:contents; }
   .artifact-main { padding-block:var(--space-2); }
   .artifacts { gap:0; border:1px solid var(--line); border-radius:var(--radius-md); overflow:hidden; }
   .artifact { border:0; border-radius:0; }
@@ -2711,9 +2772,11 @@ input.field[type="range"] {
 
 /* The agents screen is a canvas: type the first message and the chat exists. The list of chats
    lives in the sidebar. A phone has no sidebar, so the same list follows the canvas, and the
-   hero keeps to the upper half so the chats are on the first screen rather than under a fold. */
+   hero takes only the room it needs so the chats are on the first screen rather than under a fold. */
 .start { display:flex; flex-direction:column; }
-.start-hero { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--space-5); min-height:46dvh; padding:var(--space-6) var(--space-4) var(--space-4); }
+/* Without a sidebar the hero is as tall as what it holds: held to half the screen and centred in it,
+   a phone showed a blank band above the question and another under the field, and four chats. */
+.start-hero { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--space-5); padding:var(--space-6) var(--space-4) var(--space-5); }
 h1.start-greeting { margin:0; max-width:18em; font-size:var(--fs-18); font-weight:560; letter-spacing:-0.02em; text-align:center; line-height:1.3; }
 .start-composer { width:min(100%, var(--chat-w)); }
 /* Where the attachments were while they upload: the percentage, in figures that do not jitter. */
@@ -4016,6 +4079,10 @@ button.staff-row:hover { background: var(--surface-2); }
 .shared-kicker { font-size: var(--fs-12); color: var(--fg-3); }
 .shared-head h1 { margin: 0; font-size: var(--fs-14); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shared-scroll { flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 12px 16px 24px; }
+.shared-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 50dvh; padding: 16px 8px; text-align: center; }
+.shared-state .sub { margin: 0; max-width: 42ch; line-height: var(--lh-ui); }
+.shared-state .btn { margin-top: 6px; }
+.shared-state-icon { display: inline-grid; place-items: center; width: var(--ctl-h); height: var(--ctl-h); border-radius: 50%; background: var(--surface-2); color: var(--fg-2); }
 .shared-time { display: block; margin-top: 4px; font-size: var(--fs-11); color: var(--fg-3); }
 .shared .msg.user .shared-time { text-align: right; }
 .shared-audio { display: block; width: 100%; margin: 6px 0; }

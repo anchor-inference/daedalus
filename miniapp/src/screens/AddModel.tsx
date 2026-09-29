@@ -12,8 +12,8 @@
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { api, Preset, Settings } from "../api";
 import { Icon } from "../icons";
-import { t, useLang } from "../i18n";
-import { LangPicker } from "../components";
+import { plural, t, useLang } from "../i18n";
+import { LangPicker, Switch } from "../components";
 import { errorText, numInput } from "../ui";
 import { BLANK, ModelEntry, Picked, REASONING_EFFORTS, prefilled, presetIdFor, priceFor, retyped } from "../models";
 
@@ -193,7 +193,9 @@ function ModelStep({ entries, loading, error, chosen, typed, onPick, onType, onR
     <>
       <div className="modelbar">
         <label className="mfield">
-          <span>{entries ? t("add.filter", { n: entries.length }) : t("add.filter.plain")}</span>
+          {/* The field's name, then how many there are, apart: run together as "Filter 6 models" it
+              read as an instruction to filter six of them. */}
+          <span>{t("add.filter.plain")}{entries && <span className="faint"> · {plural("add.filter.count", entries.length)}</span>}</span>
           <input className="field" placeholder={t("add.filter.plain")} value={filter} onChange={(e) => setFilter(e.target.value)} disabled={!entries} />
         </label>
         <label className="mfield">
@@ -227,7 +229,12 @@ function ModelStep({ entries, loading, error, chosen, typed, onPick, onType, onR
                 {e.images ? <span className="pill">{t("add.pill.images")}</span> : null}
                 {e.reasoning ? <span className="pill">{t("add.pill.reasoning")}</span> : null}
                 {e.pricing?.input !== undefined && e.pricing?.output !== undefined ? (
+                  <>
+                  {/* The price always starts its own line: left to wrap, it sat beside the tags on
+                      one card and under them on its neighbour, and the cards stopped matching. */}
+                  <span className="mtags-break" />
                   <span className="pill num">{t("add.pill.price", { in: money(e.pricing.input), out: money(e.pricing.output) })}</span>
+                  </>
                 ) : null}
               </span>
             </button>
@@ -367,10 +374,14 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
             <input className="field num" type="number" min={1024} step={1000} value={preset.max_output_tokens} onChange={(e) => { const v = numInput(e.target.value); if (v !== null) setPreset({ ...preset, max_output_tokens: v }); }} />
           </label>
         </div>
-        <div className="btnrow">
-          <button className={`btn small ${preset.thinking ? "primary" : ""}`} aria-pressed={preset.thinking} onClick={() => setPreset({ ...preset, thinking: !preset.thinking })}>
-            {preset.thinking ? t("add.thinking.on") : t("add.thinking.off")}
-          </button>
+        {/* Two switches and one picker, each with its own word. They were two filled "thinking on"
+            and "images on" buttons around a segmented picker: two visual languages for "on" in one
+            row, and a word on a button that could be read as the state or as the action. */}
+        <div className="btnrow addmodel-run">
+          <label className="addmodel-opt">
+            <Switch checked={preset.thinking} onChange={(thinking) => setPreset({ ...preset, thinking })} label={t("add.thinking")} />
+            <span>{t("add.thinking")}</span>
+          </label>
           <div className="segmented inline" role="group" aria-label={t("add.effort")}>
             {REASONING_EFFORTS.map((e) => (
               <button key={e} className={preset.reasoning_effort === e ? "on" : ""} disabled={!preset.thinking} onClick={() => setPreset({ ...preset, reasoning_effort: e })}>
@@ -378,9 +389,10 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
               </button>
             ))}
           </div>
-          <button className={`btn small ${preset.images ? "primary" : ""}`} aria-pressed={preset.images} title={t("add.images.title")} onClick={() => setPreset({ ...preset, images: !preset.images })}>
-            {preset.images ? t("add.images.on") : t("add.images.off")}
-          </button>
+          <label className="addmodel-opt" title={t("add.images.title")}>
+            <Switch checked={preset.images} onChange={(images) => setPreset({ ...preset, images })} label={t("add.images")} />
+            <span>{t("add.images")}</span>
+          </label>
         </div>
       </Step>
 

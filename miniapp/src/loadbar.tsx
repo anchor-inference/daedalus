@@ -111,6 +111,13 @@ export function LoadBar({ load, cap, compact = false }: { load: TerminalLoad; ca
  * colour and the warning are the two together's, since both fill the same memory; the sentences name
  * each. Where the installation has only one kind, it is that kind's own bar.
  */
+/** A part of the track that is there at all is at least a sliver wide. Half a gigabyte of browsers
+ *  beside fourteen of terminals was a fraction of a pixel, and the legend's colour for browsers had
+ *  nothing on the bar to point at. */
+function segment(width: number): { width: string; minWidth: number } {
+  return { width: `${width}%`, minWidth: width > 0 ? 4 : 0 };
+}
+
 export function WorkloadsBar({ load, caps = {} }: { load: WorkloadsLoad; caps?: { terminals?: number; browsers?: number } }) {
   if (!load.browsers && load.terminals) return <LoadBar load={load.terminals} cap={caps.terminals} />;
   const f = workloadFigures(load.terminals, load.browsers, caps);
@@ -146,11 +153,11 @@ export function WorkloadsBar({ load, caps = {} }: { load: WorkloadsLoad; caps?: 
         aria-valuenow={pct(f.memPercentAtCap)}
         aria-label={t("load.together.aria", { percent: pct(f.memPercentAtCap) })}
       >
-        <i className="loadbar-other" style={{ width: `${otherW}%` }} />
-        <i className="loadbar-now" style={{ width: `${tNowW}%` }} />
-        <i className="loadbar-browsers" style={{ width: `${bNowW}%` }} />
-        <i className="loadbar-extra" style={{ width: `${tExtraW}%` }} />
-        <i className="loadbar-browsers-extra" style={{ width: `${bExtraW}%` }} />
+        <i className="loadbar-other" style={segment(otherW)} />
+        <i className="loadbar-now" style={segment(tNowW)} />
+        <i className="loadbar-browsers" style={segment(bNowW)} />
+        <i className="loadbar-extra" style={segment(tExtraW)} />
+        <i className="loadbar-browsers-extra" style={segment(bExtraW)} />
       </div>
       <div className="loadbar-head">
         <b>{t("load.together", { used: size(f.machineAtCap), total: size(f.total) })}</b>

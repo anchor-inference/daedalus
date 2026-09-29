@@ -114,10 +114,17 @@ function renderTable(lines: string[]): string {
 const COPY_GLYPH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 9h11v11H9zM15 9V4H4v11h5"/></svg>';
 const DONE_GLYPH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-11"/></svg>';
 
+/** A command-line flag held together: a wrapped block may break after any hyphen, and a phone
+ *  showed "-resize 1600x -" on one line and "quality 78" on the next, which reads as a broken
+ *  flag. The span changes no text, so what the copy button takes is the command as it ran. */
+function keepFlags(html: string): string {
+  return html.replace(/(^|[\s(])(--?[A-Za-z][\w-]*)/gm, '$1<span class="nobreak">$2</span>');
+}
+
 export function codeBlock(code: string, lang = ""): string {
   const label = lang || "text";
   const copy = escape(t("common.copy"));
-  return `<div class="codecard"><div class="codehead"><span>${escape(label)}</span><button class="copy" data-copy="1" type="button" aria-label="${copy}" title="${copy}"><span class="glyph-copy">${COPY_GLYPH}</span><span class="glyph-done">${DONE_GLYPH}</span></button></div><pre><code>${escape(code)}</code></pre></div>`;
+  return `<div class="codecard"><div class="codehead"><span>${escape(label)}</span><button class="copy" data-copy="1" type="button" aria-label="${copy}" title="${copy}"><span class="glyph-copy">${COPY_GLYPH}</span><span class="glyph-done">${DONE_GLYPH}</span></button></div><pre><code>${keepFlags(escape(code))}</code></pre></div>`;
 }
 
 const LIST_RE = /^\s*(?:[-*+]|\d+[.)])\s+/;
@@ -247,7 +254,9 @@ if (typeof document !== "undefined") {
     }
     const button = target?.closest?.("button[data-copy]") as HTMLButtonElement | null;
     if (!button) return;
-    const code = button.closest(".codecard")?.querySelector("code")?.textContent ?? "";
+    // A block whose text is not one <code> (an edit drawn as removed and added halves) carries
+    // what to copy on the button itself.
+    const code = button.dataset.copyText ?? button.closest(".codecard")?.querySelector("code")?.textContent ?? "";
     navigator.clipboard?.writeText(code).then(
       () => {
         button.dataset.state = "done";

@@ -1473,7 +1473,8 @@ function FallbackChip({ fallback }: { fallback: ModelFallback }) {
   return (
     <div className="fallback-note">
       <button className="chip attn" onClick={() => setOpen((o) => !o)}>
-        <Icon name="model" size={14} /> {t("session.model.fallback.turn", { to: fallback.to, from: fallback.from })}
+        <Icon name="model" size={14} />
+        <span className="truncate">{t("session.model.fallback.turn", { to: fallback.to, from: fallback.from })}</span>
         <Chevron open={open} size={12} />
       </button>
       {open && (
@@ -1674,21 +1675,29 @@ function RunOutcomeLine({ outcome }: { outcome: RunOutcome }) {
     .join(", ");
   return (
     <div className={`run-outcome cause-${outcome.cause}`} role="status" aria-label={t("run.outcome.title")}>
-      <Icon name="question" size={14} />
+      {/* An alert, not a question mark: on the red card a "?" read as a glyph that failed to load. */}
+      <Icon name="alert" size={14} />
       <div>
         <b>{t("run.outcome.title")}</b> — {t(`run.outcome.cause.${outcome.cause}`)}
-        {outcome.detail && <div className="run-outcome-detail">{outcome.detail}</div>}
-        {pass && (
-          <div className="run-outcome-detail">
-            {t("run.outcome.compaction", { outcome: pass.outcome || "—" })}
-            {failures && <>{" · "}{t("run.outcome.failures", { list: failures })}</>}
-            {!!pass.floor_dropped && <>{" · "}{t("run.outcome.floor", { n: pass.floor_dropped })}</>}
-          </div>
-        )}
         {!!outcome.steps && (
           <div className="run-outcome-detail">
             {outcome.last_tool ? t("run.outcome.steps.last", { n: outcome.steps, tool: outcome.last_tool }) : t("run.outcome.steps", { n: outcome.steps })}
           </div>
+        )}
+        {/* The engine's own words ("force_compaction", "at_floor") are for whoever debugs the run;
+            the sentence above is the explanation, and these wait behind a disclosure. */}
+        {(outcome.detail || pass) && (
+          <details className="run-outcome-more">
+            <summary>{t("run.outcome.more")}</summary>
+            {outcome.detail && <div className="run-outcome-detail">{outcome.detail}</div>}
+            {pass && (
+              <div className="run-outcome-detail">
+                {t("run.outcome.compaction", { outcome: pass.outcome || "—" })}
+                {failures && <>{" · "}{t("run.outcome.failures", { list: failures })}</>}
+                {!!pass.floor_dropped && <>{" · "}{t("run.outcome.floor", { n: pass.floor_dropped })}</>}
+              </div>
+            )}
+          </details>
         )}
       </div>
     </div>
@@ -1939,7 +1948,8 @@ function describe(item: ToolItem, workspace?: string): { verb: string; family: s
         const first = Object.values(a).find((v) => typeof v === "string") as string | undefined;
         return { verb: `${server} · ${tool}`.trim(), family: item.name, detail: (first ?? "").slice(0, 60), icon: "plug" };
       }
-      return { verb: item.name, family: item.name, detail: Object.keys(a).length ? JSON.stringify(a).slice(0, 60) : "", icon: "dot" };
+      // A wrench, not the dot: at the step list's size the dot read as an icon that failed to load.
+      return { verb: item.name, family: item.name, detail: Object.keys(a).length ? JSON.stringify(a).slice(0, 60) : "", icon: "wrench" };
     }
   }
 }
@@ -2129,13 +2139,28 @@ function ToolCard({ item }: { item: ToolItem }) {
   const parts: ReactNode[] = [];
   if (item.name === "Exec") parts.push(<div key="c" dangerouslySetInnerHTML={{ __html: codeBlock(String(a.command ?? ""), "bash") }} />);
   else if (item.name === "Write") parts.push(<div key="c" dangerouslySetInnerHTML={{ __html: codeBlock(String(a.content ?? "").slice(0, 4000), langOf(String(a.path ?? ""))) }} />);
-  else if (item.name === "Edit")
+  else if (item.name === "Edit") {
+    const before = String(a.old_string ?? a.old ?? "");
+    const after = String(a.new_string ?? a.new ?? "");
+    const patch = [...before.split("\n").map((l) => `-${l}`), ...after.split("\n").map((l) => `+${l}`)].join("\n");
+    // The same head as the written file and the command beside it — a label and a copy button —
+    // so the three expanded steps read as one kind of block; the copy takes the change as a patch.
     parts.push(
-      <div key="c" className="diff">
-        <pre className="del">{String(a.old_string ?? a.old ?? "")}</pre>
-        <pre className="add">{String(a.new_string ?? a.new ?? "")}</pre>
+      <div key="c" className="codecard diffcard">
+        <div className="codehead">
+          <span>diff</span>
+          <button className="copy" data-copy="1" data-copy-text={patch} type="button" aria-label={t("common.copy")} title={t("common.copy")}>
+            <span className="glyph-copy"><Icon name="copy" size={14} /></span>
+            <span className="glyph-done"><Icon name="check" size={14} /></span>
+          </button>
+        </div>
+        <div className="diff">
+          <pre className="del">{before}</pre>
+          <pre className="add">{after}</pre>
+        </div>
       </div>,
     );
+  }
   else parts.push(<div key="c" dangerouslySetInnerHTML={{ __html: codeBlock(JSON.stringify(a, null, 2), "args") }} />);
   if (item.result !== undefined) parts.push(<ToolResultText key="r" item={item} />);
   return <div className="toolcard">{parts}</div>;
