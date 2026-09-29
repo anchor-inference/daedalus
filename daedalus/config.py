@@ -1589,6 +1589,15 @@ class BrowserConfig(BaseModel):
     injection_monitor_preset: str = ""
     """The model preset the monitor asks; empty = a middle one of the table (the weaker of two), which
     is what reading one page for one word needs."""
+    extract_preset: str = ""
+    """The model preset ``BrowserText(query=…)`` reads a page with, part by part, to hand the agent
+    only what it asked for; empty = a middle one of the table, as for the monitor. Its answer is
+    fenced as page content: the model read the page, so it speaks for the page, not the operator."""
+    point_clicks: bool = False
+    """Whether the agent may click, hover or double-click at a point of the viewport rather than on a
+    ref, for what the outline does not name (a canvas, a map). Off by default: a point is harder for
+    the operator to read in the action log. The element found at the point is hit-tested and
+    classified as a ref's would be, so a sensitive one is still asked about."""
 
 
 class HeartbeatConfig(BaseModel):

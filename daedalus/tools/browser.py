@@ -31,7 +31,7 @@ from daedalus.tools.vision import VisionUnavailable, look
 
 BROWSER_TOOLS = (
     "BrowserOpen", "BrowserNavigate", "BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserAct",
-    "BrowserTabs", "BrowserWait", "BrowserDialog", "BrowserHandoff", "BrowserClose", "BrowserDownload",
+    "BrowserTabs", "BrowserWait", "BrowserDialog", "BrowserHandoff", "BrowserClose", "BrowserDownload", "BrowserNote",
 )
 READ_ONLY_TOOLS = ("BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserTabs", "BrowserWait")
 """The tools that only read the page or wait on it: a command-line agent's own permission rules may
@@ -121,6 +121,9 @@ def _caller(context: ToolContext) -> Caller | None:
     state = manager.live_state(context.session_id)
     metadata = state.metadata if state is not None else {}
     project = state.project.id if state is not None and state.project is not None else None
+    # A chat's own throwaway project goes with its last session; a site note learnt there is kept for
+    # every agent rather than filed under a project nobody will open again.
+    lasting = project if state is not None and state.project is not None and not state.project.settings.ephemeral else ""
     owner = Owner("session", context.session_id, project_id=project, session_id=context.session_id, staff_id=str(metadata.get("staff_id") or "") or None)
 
     async def gate(ask: SensitiveAsk) -> tuple[bool, str]:
@@ -135,7 +138,7 @@ def _caller(context: ToolContext) -> Caller | None:
         return answer
 
     budget = max(4000, output_limit(context) - FRAME_CHARS - 600)
-    return Caller(owner=owner, actor=f"agent:{context.session_id}", gate=gate, files=SessionFiles(services, manager, owner), look=looked, budget=budget)
+    return Caller(owner=owner, actor=f"agent:{context.session_id}", gate=gate, files=SessionFiles(services, manager, owner), look=looked, budget=budget, note_scope=lasting)
 
 
 async def _run(context: ToolContext, name: str, arguments: dict[str, Any]) -> ToolResult:
@@ -206,11 +209,24 @@ async def browser_snapshot(context: ToolContext, tab: str | None = None, scope: 
     name="BrowserText",
     description=(
         "Read the page's main text as a reader view gives it — an article, documentation, a result list — without "
-        "the outline. ref reads one element's text; max_chars bounds it. For acting on the page use BrowserSnapshot."
+        "the outline. ref reads one element's text; max_chars bounds it. find searches the visible text like Ctrl+F "
+        "(regex=true for a regular expression) and returns each match with the ref of the control it is in or beside. "
+        "query pulls out only what you ask ('every product with its price') through a smaller model reading the page "
+        "part by part; schema (a JSON schema of one item) shapes the items; the same query on the next page adds to "
+        "what was collected. For acting on the page use BrowserSnapshot."
     ),
 )
-async def browser_text(context: ToolContext, tab: str | None = None, ref: str | None = None, max_chars: int | None = None) -> ToolResult:
-    return await _run(context, "BrowserText", {"tab": tab, "ref": ref, "max_chars": max_chars})
+async def browser_text(
+    context: ToolContext,
+    tab: str | None = None,
+    ref: str | None = None,
+    max_chars: int | None = None,
+    find: str | None = None,
+    regex: bool = False,
+    query: str | None = None,
+    schema: dict[str, Any] | None = None,
+) -> ToolResult:
+    return await _run(context, "BrowserText", {"tab": tab, "ref": ref, "max_chars": max_chars, "find": find, "regex": regex or None, "query": query, "schema": schema})
 
 
 @tool_group("browser")
@@ -241,16 +257,20 @@ async def browser_look(context: ToolContext, question: str, tab: str | None = No
     description=(
         "Act on the page by ref from BrowserSnapshot. action: click, double_click, right_click, hover, type (text; "
         "submit=true presses Enter after), press (keys: 'Enter', 'Tab', 'Escape', 'Ctrl+A'), select (option by label), "
-        "check, uncheck, scroll (a ref into view, or direction 'up'/'down'), drag (to to_ref), upload (paths of files "
+        "check, uncheck, scroll (a ref into view; direction 'up', 'down', 'left' or 'right' scrolls the page, or with a "
+        "ref the pane it is in; text scrolls to the first place that says it), drag (to to_ref), upload (paths of files "
         "in your workspace, or file handles). element is required: say in words what you act on ('the Add to cart "
-        "button'). A purchase, a message sent, a deletion, terms accepted or an upload is asked about first; a "
-        "password, code or payment field refuses you (use BrowserHandoff). Returns what changed."
+        "button'). x and y (CSS pixels of the viewport) click or hover at a point instead of a ref, where the operator "
+        "allows it. steps=[{action, ref, element, …}, …] does up to 5 actions planned from one snapshot, stopping at a "
+        "navigation, a new tab, a dialog, a failure or a question. A purchase, a message sent, a deletion, terms "
+        "accepted or an upload is asked about first; a password, code or payment field refuses you (use "
+        "BrowserHandoff). Returns what changed."
     ),
 )
 async def browser_act(
     context: ToolContext,
-    action: str,
-    element: str,
+    action: str | None = None,
+    element: str | None = None,
     ref: str | None = None,
     text: str | None = None,
     keys: str | None = None,
@@ -259,9 +279,15 @@ async def browser_act(
     to_ref: str | None = None,
     direction: str | None = None,
     paths: list[str] | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    steps: list[dict[str, Any]] | None = None,
     tab: str | None = None,
 ) -> ToolResult:
-    return await _run(context, "BrowserAct", {"action": action, "element": element, "ref": ref, "text": text, "keys": keys, "option": option, "submit": submit, "to_ref": to_ref, "direction": direction, "paths": paths, "tab": tab})
+    return await _run(context, "BrowserAct", {
+        "action": action, "element": element, "ref": ref, "text": text, "keys": keys, "option": option, "submit": submit or None, "to_ref": to_ref, "direction": direction,
+        "paths": paths, "x": x, "y": y, "steps": steps, "tab": tab,
+    })
 
 
 @tool_group("browser")
@@ -352,6 +378,23 @@ async def browser_download(context: ToolContext, name: str, to: str | None = Non
     return await _run(context, "BrowserDownload", {"name": name, "to": to})
 
 
-TOOLS = [browser_open, browser_navigate, browser_snapshot, browser_text, browser_look, browser_act, browser_tabs, browser_wait, browser_dialog, browser_handoff, browser_close, browser_download]
+@tool_group("browser")
+@search_hint(
+    "remember site note what worked on this website tip next time propose note learned "
+    "заметка о сайте запомнить что сработало на сайте совет на будущее предложить заметку"
+)
+@tool(
+    name="BrowserNote",
+    description=(
+        "After a hard-won success on a site, propose a short note for the next agent there: what worked that was not "
+        "obvious ('search answers only to Enter, not the button'). host defaults to the current tab's. The operator "
+        "reads it first; only an approved note is shown, on that site. Never put secrets or personal data in it."
+    ),
+)
+async def browser_note(context: ToolContext, note: str, host: str | None = None) -> ToolResult:
+    return await _run(context, "BrowserNote", {"note": note, "host": host})
+
+
+TOOLS = [browser_open, browser_navigate, browser_snapshot, browser_text, browser_look, browser_act, browser_tabs, browser_wait, browser_dialog, browser_handoff, browser_close, browser_download, browser_note]
 
 __all__ = ["BROWSER_TOOLS", "READ_ONLY_TOOLS", "TOOLS", "SessionFiles"]

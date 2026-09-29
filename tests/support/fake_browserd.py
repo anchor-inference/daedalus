@@ -16,6 +16,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import re
 import secrets
 import struct
 import time
@@ -207,6 +208,9 @@ class FakeBrowserd:
         """Group → its recording switch."""
         self.frames: dict[str, list[dict[str, Any]]] = {}
         """Group → its keyframes, each with its ``data``: one after every action while recording."""
+        self.legacy = False
+        """A daemon older than the host: no ``page.find``, no point, no scroll to a text or sideways, and
+        unknown parameters refused as the real daemon's strict decoding refuses them."""
 
     # -- lifecycle ------------------------------------------------------------------------
 
@@ -610,6 +614,11 @@ class FakeBrowserd:
             return {"format": "jpeg", "width": 1280, "height": 800, "data_b64": base64.b64encode(self.screenshot).decode(), "masked": masked}
         if method == "page.act":
             return await self._act(params)
+        if method == "page.find" and not self.legacy:
+            group, tab = self._tab(params)
+            await self._held_back(group, params)
+            self._page_call(tab)
+            return self._find(tab.page, str(params.get("query") or ""), regex=bool(params.get("regex")), limit=int(params.get("max") or 20))
         if method == "page.wait":
             group, tab = self._tab(params)
             await self._held_back(group, params)
@@ -745,12 +754,46 @@ class FakeBrowserd:
             kinds.append("cross_origin_post")
         return {"kinds": kinds, "evidence": {"name": element.name, "role": element.role, "words": words, "page_origin": page_origin, "fields": [e.ref for e in fields]}}
 
+    @staticmethod
+    def _find(page: Page, query: str, *, regex: bool, limit: int) -> dict[str, Any]:
+        """``page.find``: the page's text and its elements' names searched, each hit with its ref."""
+        pattern = re.compile(query if regex else re.escape(query), re.IGNORECASE)
+        matches: list[dict[str, Any]] = []
+        for element in page.elements.values():
+            if not element.secret and pattern.search(element.name):
+                matches.append({"text": element.name, "in": {"ref": element.ref, "role": element.role, "name": element.name}})
+        for line in page.text.splitlines():
+            if pattern.search(line):
+                near = [{"ref": e.ref, "role": e.role, "name": e.name} for e in list(page.elements.values())[:2]]
+                matches.append({"text": line.strip()[:200], "near": near})
+        shown = matches[:limit]
+        lines = []
+        for m in shown:
+            where = f" [in {m['in']['role']} \"{m['in']['name']}\" ref={m['in']['ref']}]" if m.get("in") else "".join(f" [near {n['role']} \"{n['name']}\" ref={n['ref']}]" for n in m.get("near") or [])
+            lines.append(f"- \"{m['text']}\"{where}")
+        return {"url": page.url, "matches": shown, "total": len(matches), "text": "\n".join(lines)}
+
     async def _act(self, params: dict[str, Any]) -> dict[str, Any]:
         group, tab = self._tab(params)
         await self._held_back(group, params)
         self._page_call(tab)
         action = str(params.get("action"))
+        if self.legacy:
+            unknown = sorted(set(params) & {"x", "y", "allow_point"})
+            if unknown:
+                raise _Fail(-32602, f'params: json: unknown field "{unknown[0]}"')
+            if action == "scroll" and not params.get("ref") and params.get("direction") not in ("up", "down"):
+                raise _Fail(-32602, "scroll needs a ref, or direction up or down")
         ref = str(params.get("ref") or "")
+        pointed = "x" in params
+        if pointed:
+            if not params.get("allow_point"):
+                raise _Fail(1004, "acting at a point is off for this session; act on a ref from a snapshot")
+            x, y = float(params["x"]), float(params["y"])
+            hit = [e for e in tab.page.elements.values() if e.box["x"] <= x < e.box["x"] + e.box["w"] and e.box["y"] <= y < e.box["y"] + e.box["h"]]
+            if not hit:
+                raise _Fail(1001, "nothing that can be acted on is at that point")
+            ref = hit[-1].ref
         element = tab.page.elements.get(ref) if ref else None
         if ref and element is None:
             raise _Fail(1103, f"{ref} is not on the page any more", {"ref": ref})
@@ -760,7 +803,7 @@ class FakeBrowserd:
         described = {"role": element.role, "name": element.name, "tag": element.tag, "type": element.type, "autocomplete": element.autocomplete, "href": element.href, "form_action": element.form_action,
                      "secret": element.secret, "secret_kind": element.field_kind() if element.secret else "", "disabled": False, "checked": element.checked, "file": element.type == "file", "select": element.tag == "select"} if element is not None else {}
         if params.get("dry_run"):
-            return {"action_id": "", "ok": True, "effects": {}, "element": described, "point": point, "box": box, "sensitive": sensitive}
+            return {"action_id": "", "ok": True, "effects": {}, "element": described, "point": point, "box": box, "sensitive": sensitive, **({"ref": ref} if pointed else {})}
         keys = str(params.get("keys") or "")
         typing = action in ("type", "select") or (action == "press" and keys not in ("Enter", "Tab"))
         if element is not None and typing and (element.secret or element.ref in self.human_typed):
@@ -789,6 +832,16 @@ class FakeBrowserd:
         if action == "upload":
             names = [self.uploads[u]["name"] for u in params.get("upload_ids") or [] if u in self.uploads]
             effects["uploaded"] = names
+        if action == "scroll":
+            wanted = str(params.get("text") or "").strip()
+            if wanted:
+                found = next((e.ref for e in tab.page.elements.values() if wanted.lower() in e.name.lower()), "")
+                if not found and wanted.lower() not in tab.page.text.lower():
+                    raise _Fail(1001, f"no visible text on the page holds {wanted!r}")
+                effects["found"] = found or "e0"
+            elif params.get("direction") and ref:
+                effects["scrolled"] = {"by": 0 if tab.page.heading == "End" else 480, "at_end": tab.page.heading == "End", "pane": ref}
+            effects["scroll"] = {"top": 800, "height": 4000, "view": 800, "above": 1.0, "below": 3.0}
         if action in ("click", "double_click") and element is not None:
             if element.opens_dialog is not None:
                 tab.dialog = dict(element.opens_dialog)
@@ -805,6 +858,8 @@ class FakeBrowserd:
         self.emit("action_done", {"action_id": action_id, "group_id": group.id, "tab_id": tab.id, "ok": True, "effects": effects})
         self.keyframe(group.id, "action", action_id)
         reply: dict[str, Any] = {"action_id": action_id, "ok": True, "effects": effects, "point": point, "box": box, "element": described, "sensitive": sensitive}
+        if pointed:
+            reply["ref"] = ref
         if not effects.get("navigated"):
             # What the action changed in the outline, as lines that came and went; none after a navigation.
             old_lines, new_lines = before.splitlines(), tab.page.outline().splitlines()
