@@ -191,11 +191,13 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
         say(f"the lists were saved as {saved['watch_domains']} and {saved['lan_allow']}")
 
     # Reading for the agent and clicks at a point: off until switched, then saved with the rest.
-    point = page.locator(".bs-reading .btnrow button")
-    if point.get_attribute("aria-pressed") != "false":
+    # A switch and a compact picker in their rows, like every other browser setting.
+    point = page.locator(".bs-reading [role=switch]")
+    if point.get_attribute("aria-checked") != "false":
         say("clicks at a point are not off by default")
     point.click()
-    page.select_option("#browser-extract-model", "q")
+    page.locator("#browser-extract-model").click()
+    page.locator(".dropdown-list [role=option][data-value='q']").click()
     page.wait_for_timeout(900)
     saved = host.settings["browser"]
     print(f"[{lang}] reading: point {saved.get('point_clicks')}, model {saved.get('extract_preset')!r}")

@@ -1794,7 +1794,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "bs.agent.title": { en: "Reading and pointing", ru: "Чтение и указание" },
   "bs.agent.sub": { en: "When the agent asks a page for something particular (every product with its price), a smaller model reads the page part by part and hands back only that. Its answer is treated as the page's words, never as yours.", ru: "Когда агент просит у страницы что-то конкретное (все товары с ценами), модель поменьше читает страницу по частям и возвращает только это. Её ответ считается словами страницы, а не вашими." },
   "bs.agent.extract": { en: "Model that reads for the agent", ru: "Модель, читающая для агента" },
-  "bs.agent.point": { en: "Clicks at a point: {state}", ru: "Клики по точке: {state}" },
+  "bs.agent.point": { en: "Clicks at a point", ru: "Клики по точке" },
   "bs.agent.point.sub": { en: "Lets the agent click or hover at a place on the screen when the page's outline does not name what is there (a map, a canvas). What is under the point is checked like any element: a purchase or a message there is still asked about.", ru: "Разрешает агенту кликать или наводить курсор в место на экране, когда в структуре страницы нет того, что там нарисовано (карта, холст). То, что под точкой, проверяется как любой элемент: покупка или отправка сообщения там всё равно требует вашего согласия." },
   "bs.notes.title": { en: "Site notes", ru: "Заметки о сайтах" },
   "bs.notes.sub": { en: "What an agent learned the hard way about a site, for the next agent there. A note is shown to agents only after you approve it.", ru: "То, что агент с трудом выяснил о сайте, — для следующего агента на нём. Агенты видят заметку только после вашего одобрения." },

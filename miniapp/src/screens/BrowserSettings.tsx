@@ -382,17 +382,12 @@ function Reading({ b, set, presets }: { b: BrowserSettings; set: (patch: Partial
     <div className="card bs-reading">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.agent.title")}</div>
       <div className="sub">{t("bs.agent.sub")}</div>
-      <label className="field" htmlFor="browser-extract-model">{t("bs.agent.extract")}</label>
-      <select id="browser-extract-model" className="field" value={b.extract_preset} onChange={(e) => set({ extract_preset: e.target.value })}>
-        <option value="">{t("bs.monitor.model.auto")}</option>
-        {presets.map((p) => <option key={p} value={p}>{p}</option>)}
-      </select>
-      <div className="btnrow">
-        <button type="button" className={`btn small ${b.point_clicks ? "primary" : ""}`} aria-pressed={b.point_clicks} onClick={() => set({ point_clicks: !b.point_clicks })}>
-          {t("bs.agent.point", { state: t(b.point_clicks ? "common.on" : "common.off") })}
-        </button>
-      </div>
-      <div className="sub">{t("bs.agent.point.sub")}</div>
+      <Row title={t("bs.agent.extract")} stack>
+        <Dropdown id="browser-extract-model" label={t("bs.agent.extract")} value={b.extract_preset} onChange={(extract_preset) => set({ extract_preset })} options={[{ id: "", label: t("bs.monitor.model.auto") }, ...presets.map((p) => ({ id: p, label: p }))]} />
+      </Row>
+      <Row title={t("bs.agent.point")} desc={t("bs.agent.point.sub")}>
+        <Switch checked={b.point_clicks} onChange={(point_clicks) => set({ point_clicks })} label={t("bs.agent.point")} />
+      </Row>
     </div>
   );
 }
