@@ -71,6 +71,15 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _whole(text: str) -> str:
+    """A project's report or result for an event line, whole and with its line breaks.
+
+    Cut at 600 and 800 characters, an orchestrator's detailed answer reached the main agent as a stub
+    it could only guess the rest of. Lines after the first are indented so they stay with their event.
+    """
+    return "\n  ".join(line.rstrip() for line in (text or "").strip().splitlines())
+
+
 def _one_line(text: str, limit: int) -> str:
     flat = " / ".join(line.strip() for line in (text or "").strip().splitlines() if line.strip())
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
@@ -486,7 +495,7 @@ class Dispatcher:
         dispatch = f"dispatch {p.get('dispatch_id')}" + (f" \"{_one_line(str(p.get('title')), 80)}\"" if p.get("title") else "")
         if event.type == "dispatch.closed":
             status = str(p.get("status") or "")
-            said = _one_line(str(p.get("result") or ""), 800)
+            said = _whole(str(p.get("result") or ""))
             if status == "done" and p.get("kind") == "setup" and project is not None:
                 brief = await self.manager.projects.brief(project.id)
                 goals = _one_line(brief["goals"].body, 240) if "goals" in brief else ""
@@ -495,7 +504,7 @@ class Dispatcher:
         if event.type == "dispatch.stalled":
             return f"{dispatch} of {name} has been quiet for {p.get('minutes')} min and nobody there is working — tell the operator; do not prod the project yourself"
         if event.type == "dispatch.message":
-            return f"{name} reported {p.get('kind')} on {dispatch}: {_one_line(str(p.get('text') or ''), 600)}{refs_line(p.get('files'))}"
+            return f"{name} reported {p.get('kind')} on {dispatch}: {_whole(str(p.get('text') or ''))}{refs_line(p.get('files'))}"
         if event.type == "ask.answered":
             ask = await self._ask_by_ref(str(p.get("request_ref") or ""))
             outcome = str((ask.resolution or {}).get("outcome") or "") if ask is not None else ""

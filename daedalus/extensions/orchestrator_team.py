@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.orchestrator_ops import Refused, _folder
+from daedalus.host.events import EventFilter
 from daedalus.staff_runtime import LiveSession, ReadRequest
 from daedalus.stores.files import FileRefused, StoredFile
 from daedalus.stores.projects import Project, ProjectFolder
@@ -40,7 +41,7 @@ ROUND_RE = re.compile(r"\] round \d+ begins")
 CONTRACT_FIELDS = ("objective", "deliverable", "boundaries", "done_when")
 CONTRACT_MIN = 8
 """The least each part of a task's brief may be: enough to be a sentence, so "tbd" is not a contract."""
-READ_WHATS = ("last", "turns", "screen", "diff")
+READ_WHATS = ("last", "turns", "screen", "diff", "reports")
 READ_TURNS_MAX = 20
 RUNTIME_TIMEOUT_SECONDS = 30.0
 """How long a read or an interrupt may take before the orchestrator is told it did not answer: a runtime
@@ -454,6 +455,28 @@ def _cursor(staff_session_id: str, inner: str | None) -> str | None:
     return f"{staff_session_id}{CURSOR_SEPARATOR}{inner}" if inner else None
 
 
+async def _reports(orch: Orchestrators, member: Staff, count: int, limit: int) -> str:
+    """A member's last reports, whole, oldest first.
+
+    A command-line member often puts its real answer in a report and ends the turn on a line such as
+    "answered above", so its last reply says nothing; and a long wake-up is compacted away. Without
+    this the orchestrator had no way back to what the member reported.
+    """
+    events = await orch.manager.bus.latest(EventFilter(types=("staff.report",), staff_id=member.id), limit=count)
+    if not events:
+        return f"{member.name} has sent no reports yet"
+    parts = []
+    for event in events:
+        p = event.payload
+        kind = str(p.get("kind") or "report") + (" (made from the turn's last message)" if p.get("implicit") else "")
+        task = f" on task {p['task_id']}" if p.get("task_id") else ""
+        parts.append(f"— {event.at[:16].replace('T', ' ')} {kind}{task}:\n{str(p.get('text') or '').strip()}")
+    text = f"{member.name}'s last {len(parts)} report{'s' if len(parts) != 1 else ''}, oldest first:\n" + "\n\n".join(parts)
+    if len(text) > limit:
+        text = text[:limit].rstrip() + f"\n[cut to {limit} characters; ask for fewer reports (turns) or a larger max_chars]"
+    return text
+
+
 async def read_staff(
     orch: Orchestrators,
     project: Project,
@@ -471,6 +494,10 @@ async def read_staff(
         raise Refused(f"what is one of {', '.join(READ_WHATS)}")
     team = _team(orch)
     member = await _member(orch, project, staff, active=False)
+    config = orch.manager.config.staff
+    limit = config.read_default_chars if max_chars is None else max(200, min(int(max_chars), config.read_max_chars))
+    if what == "reports":
+        return await _reports(orch, member, max(1, min(int(turns), READ_TURNS_MAX)), limit)
     session = await orch.manager.staff.live(member.id)
     if session is None:
         latest = await orch.manager.staff.sessions(member.id, limit=1)
@@ -482,8 +509,6 @@ async def read_staff(
         owner, _, inner = cursor.partition(CURSOR_SEPARATOR)
         if owner != session.id or not inner:
             raise Refused(f"that cursor belongs to another of {member.name}'s sessions; read again without it")
-    config = orch.manager.config.staff
-    limit = config.read_default_chars if max_chars is None else max(200, min(int(max_chars), config.read_max_chars))
     live = LiveSession(member, session)
     try:
         async with asyncio.timeout(RUNTIME_TIMEOUT_SECONDS):

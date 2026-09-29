@@ -427,7 +427,7 @@ tell().definition.parameters.properties["when"]["enum"] = ["now", "after_turn", 
 
 
 @search_hint(
-    "what did member do last reply turns terminal screen diff of staff recent actions activity "
+    "what did member do last reply turns terminal screen diff reports of staff recent actions activity full report "
     "что сделал сотрудник посмотреть работу ответ сотрудника его изменения дифф экран успел сделать активность"
 )
 @tool(
@@ -435,7 +435,9 @@ tell().definition.parameters.properties["when"]["enum"] = ["now", "after_turn", 
     description=(
         "Read what a member did, in a bounded page. what: last (their last reply, the default), turns (the last "
         "turns, one line per tool call), screen (a command-line agent's terminal), diff (their changes against the "
-        "base). cursor from an earlier read shows only what came after it; max_chars widens the page up to a limit. "
+        "base), reports (their last reports whole — turns says how many; where a member put its answer when its "
+        "last reply only says it answered). cursor from an earlier read shows only what came after it; max_chars "
+        "widens the page up to a limit. "
         "Reading a finished turn marks it seen."
     ),
 )
