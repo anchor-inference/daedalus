@@ -159,6 +159,9 @@ class AnswerItem(BaseModel):
     note: str | None = None
     allow: bool | None = None
     always: bool = False
+    # "Always" for every tool of the asked tool's MCP server. The Questions list sends it with the
+    # server-wide choice, and a model without it refused the whole send as extra input.
+    server: bool = False
 
 
 def host_bridge(settings: Any, terminals: Any = None) -> bool:
