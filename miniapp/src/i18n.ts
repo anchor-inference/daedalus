@@ -3279,7 +3279,7 @@ Object.assign(DICT, {
   "focus.brief.section.allowed_without_operator": { en: "Allowed without you", ru: "Можно без вас" },
   "focus.brief.section.notes": { en: "Notes", ru: "Заметки" },
   "focus.brief.hint.allowed_without_operator": { en: "One allowance per line. The orchestrator may grant a request only by quoting a line from here, and only you write this section.", ru: "По одному разрешению на строку. Оркестратор может выдать разрешение, только процитировав строку отсюда, а пишете этот раздел только вы." },
-  "focus.brief.onlyyou": { en: "only you", ru: "только вы" },
+  "focus.brief.onlyyou": { en: "edited by you only", ru: "правите только вы" },
   "focus.brief.byorch": { en: "changed by the orchestrator", ru: "изменено оркестратором" },
   "focus.brief.empty": { en: "Empty", ru: "Пусто" },
   "focus.brief.saved": { en: "{section} saved", ru: "Раздел «{section}» сохранён" },

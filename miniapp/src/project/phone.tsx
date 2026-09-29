@@ -189,7 +189,9 @@ export function AskAnswers({ ask, projectId, toast, always = false, server = "" 
             ))
           )}
           {ask.kind !== "folder" && (
-            <button className="btn ghost" disabled={busy} onClick={() => setWriting(true)}>{t(ask.kind === "permission" ? "phone.ask.denyWhy" : "phone.ask.write")}</button>
+            // A pen and a dashed frame: as a bare grey word under two solid buttons it read as a
+            // caption, and nobody found the way to type an answer of their own.
+            <button className="btn ask-answers-write" disabled={busy} onClick={() => setWriting(true)}><Icon name="pen" size={14} />{t(ask.kind === "permission" ? "phone.ask.denyWhy" : "phone.ask.write")}</button>
           )}
         </div>
       )}
@@ -224,8 +226,10 @@ export function NeedsYouBanner({ projectId, toast }: { projectId: string; toast:
       <div className="needs-banner-head">
         <Icon name="alert" size={14} />
         <span className="grow">{t("phone.needs")}</span>
-        {waiting > 1 && <span className="needs-banner-more">{t("phone.needs.more", { n: waiting - 1 })}</span>}
+        {/* The age first, then the count behind a dot: "+1 more 4d" run together left it unclear whose
+            age that was. The age is the shown question's. */}
         <span className="needs-banner-when">{relTime(ask.created_at)}</span>
+        {waiting > 1 && <span className="needs-banner-more">· {t("phone.needs.more", { n: waiting - 1 })}</span>}
       </div>
       <div className="needs-banner-text"><b>{askerLine(ask, names)}</b> {askWords(ask)}</div>
       <AskAnswers key={ask.id} ask={ask} projectId={projectId} toast={toast} />

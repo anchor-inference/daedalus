@@ -3121,6 +3121,9 @@ button.staff-row:hover { background: var(--surface-2); }
 .focus-enable .empty { max-width: 560px; margin: 0 auto; }
 .focus-enable .empty .ic { color: var(--accent); }
 .autonomy-choice { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; min-width: 0; }
+/* The first thing a new project shows: centred in the free height, not pinned under the header with
+   the rest of a desktop screen left empty below it, which read as a page that had not finished. */
+.focus-enable { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; min-height: 0; padding-bottom: 8vh; }
 .autonomy-option { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; }
 .autonomy-option.on { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); background: color-mix(in srgb, var(--accent) 6%, transparent); }
 .autonomy-option input { margin-top: 3px; }
@@ -3260,6 +3263,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .ask-answers-own { display: flex; align-items: center; gap: var(--space-2); }
 .ask-answers-own .field { flex: 1; min-width: 0; min-height: var(--row-h-touch); margin: 0; }
 .ask-answers-own .btn { min-height: var(--row-h-touch); }
+.ask-answers-write { background: transparent; border-style: dashed; border-color: var(--line-strong); color: var(--fg-2); }
 .phone-staff { display: grid; }
 .phone-staff-item { display: flex; align-items: center; gap: 2px; min-width: 0; border-bottom: 1px solid var(--line); }
 .phone-staff-row { flex: 1; display: flex; align-items: center; gap: var(--space-3); min-width: 0; min-height: calc(var(--row-h-touch) + var(--space-3)); padding: 6px 4px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }

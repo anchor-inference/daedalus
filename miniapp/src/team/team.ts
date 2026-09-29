@@ -176,8 +176,11 @@ export function branchPreview(name: string, task: string): string {
 }
 
 /** The session-status class the dot is drawn with: the colours the rest of the app already uses for "running", "waiting" and "failed". */
-export function statusTone(status: StaffStatus): "running" | "waiting" | "failed" | "idle" {
+export function statusTone(status: StaffStatus): "running" | "waiting" | "failed" | "done" | "idle" {
   if (status === "working" || status === "starting") return "running";
+  // A finished turn nobody has read is something to look at: green like the member's dot in the
+  // sidebar, not the grey of an idle member it used to share and be lost beside.
+  if (status === "turn_done_unseen") return "done";
   if (status === "question" || status === "permission") return "waiting";
   if (status === "error") return "failed";
   return "idle";
