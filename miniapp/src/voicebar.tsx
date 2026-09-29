@@ -46,7 +46,9 @@ export function useVoiceNote({ sessionId, asr, onWords, onAttach, toast }: Optio
   const [startedAt, setStartedAt] = useState(0);
   const recorder = useRef<MediaRecorder | null>(null);
   const audio = useRef<Blob | null>(null);
-  const discardOnStop = useRef(false);
+  // What the recorder's last bytes are for when it stops: words, or only keeping (the operator left the
+  // session mid-sentence, and that is not a request to throw away what he said), or nothing (✕).
+  const ending = useRef<"transcribe" | "keep" | "discard">("transcribe");
   const abort = useRef<AbortController | null>(null);
   const levels = useRef<number[]>([]);
   // Whether ↑ rather than ■ ended the recording; read when the recorder has delivered its last bytes.
@@ -63,16 +65,14 @@ export function useVoiceNote({ sessionId, asr, onWords, onAttach, toast }: Optio
     meter.current = null;
   }, []);
 
-  const release = useCallback(() => {
+  const release = useCallback((then: "keep" | "discard") => {
     const r = recorder.current;
     recorder.current = null;
     stopMeter();
     if (r) {
+      ending.current = then;
+      if (r.state !== "inactive") r.stop();
       r.stream.getTracks().forEach((track) => track.stop());
-      if (r.state !== "inactive") {
-        discardOnStop.current = true;
-        r.stop();
-      }
     }
     abort.current?.abort();
     abort.current = null;
@@ -89,14 +89,13 @@ export function useVoiceNote({ sessionId, asr, onWords, onAttach, toast }: Optio
     });
     return () => {
       alive = false;
-      release();
+      release("keep");
       dispatch({ type: "cancel" });
       dispatch({ type: "settled" });
     };
   }, [sessionId, release]);
 
-  const transcribe = useCallback(async (blob: Blob, kept: string, send: boolean) => {
-    const session = live.current.sessionId;
+  const transcribe = useCallback(async (blob: Blob, kept: string, send: boolean, session: string) => {
     const controller = new AbortController();
     abort.current = controller;
     const post = async (name: string) => {
@@ -144,17 +143,20 @@ export function useVoiceNote({ sessionId, asr, onWords, onAttach, toast }: Optio
     const type = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"].find((x) => MediaRecorder.isTypeSupported?.(x));
     const r = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
     const parts: Blob[] = [];
-    discardOnStop.current = false;
+    // The session the recording belongs to, fixed now: by the time it stops the page may show another.
+    const owner = live.current.sessionId;
+    ending.current = "transcribe";
     r.ondataavailable = (e) => { if (e.data.size) parts.push(e.data); };
     r.onstop = () => {
       stream.getTracks().forEach((track) => track.stop());
       stopMeter();
-      if (discardOnStop.current) return;
+      if (ending.current === "discard" || !parts.length) return;
       const blob = new Blob(parts, { type: r.mimeType || type || "audio/webm" });
-      audio.current = blob;
       // Kept before anything is sent: whatever happens to the request, the recording outlives it.
-      void keepNote(live.current.sessionId, { blob, error: "", kept: "", at: Date.now() });
-      void transcribe(blob, "", sendOnStop.current);
+      void keepNote(owner, { blob, error: "", kept: "", at: Date.now() });
+      if (ending.current === "keep") return;
+      audio.current = blob;
+      void transcribe(blob, "", sendOnStop.current, owner);
     };
     levels.current = [];
     try {
@@ -200,7 +202,7 @@ export function useVoiceNote({ sessionId, asr, onWords, onAttach, toast }: Optio
   }, [state.phase, startedAt, stop]);
 
   const cancel = useCallback(() => {
-    release();
+    release("discard");
     audio.current = null;
     void forgetNote(live.current.sessionId);
     dispatch({ type: "cancel" });
@@ -210,7 +212,7 @@ export function useVoiceNote({ sessionId, asr, onWords, onAttach, toast }: Optio
     const blob = audio.current;
     if (!blob) return;
     dispatch({ type: "retry", send: false });
-    void transcribe(blob, state.kept, false);
+    void transcribe(blob, state.kept, false, live.current.sessionId);
   }, [state.kept, transcribe]);
 
   const letGo = useCallback((kept: string) => {
