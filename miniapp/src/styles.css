@@ -256,7 +256,10 @@ a { color: var(--accent); text-decoration: none; }
 .pill.waiting, .pill.pending { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 .pill.failed { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 .pill.done, .pill.merged, .pill.approved { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-.pill.idle, .pill.rejected, .pill.closed { color: var(--fg-2); }
+.pill.idle, .pill.closed { color: var(--fg-2); }
+/* A refusal is a decision, not an absence: in grey beside an amber pending and a green approved it read
+   as a disabled row. Softer than a failure's red, so a rejected change does not look like a broken one. */
+.pill.rejected { color: color-mix(in srgb, var(--bad) 75%, var(--fg-2)); border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--ctl-h);
   border: 1px solid var(--line); background: var(--surface-2); border-radius: var(--radius-sm);
