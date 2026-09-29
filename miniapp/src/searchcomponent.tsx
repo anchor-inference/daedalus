@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { Switch } from "./components";
+import { Row } from "./settingsrow";
 import { api } from "./api";
 import { modelSize } from "./format";
 import { t } from "./i18n";
@@ -33,13 +35,18 @@ export function SearchComponent() {
     {problem && <p className="sub attn">{problem}</p>}
     {state && <>
       <div className="sub">{state.label} · {state.licence} · {modelSize(state.size_bytes)}</div>
-      <label className="toggle-row"><input type="checkbox" checked={state.mode === "local"} onChange={(e) => void action("/api/conversation-search/settings", "put", { mode: e.target.checked ? "local" : "off", paused: state.paused })} /><span>{t("search.local")}</span></label>
+      {/* Switches like every other on/off in Settings; a bare checkbox here was the one of its kind. */}
+      <Row title={t("search.local")}>
+        <Switch checked={state.mode === "local"} onChange={(on) => void action("/api/conversation-search/settings", "put", { mode: on ? "local" : "off", paused: state.paused })} label={t("search.local")} />
+      </Row>
       <div className="sub" role="status">{t(`search.reason.${state.reason}`)}</div>
       {state.reason === "no_runtime" && <code className="mono">{"uv sync --frozen --inexact --extra speech"}</code>}
       {state.mode === "local" && <>
         <div className="sub">{t("search.progress", { n: state.indexed, pending: state.pending })}</div>
         {state.busy && <div className="sub">{t("search.waiting")}</div>}
-        <label className="toggle-row"><input type="checkbox" checked={state.paused} onChange={(e) => void action("/api/conversation-search/settings", "put", { mode: state.mode, paused: e.target.checked })} /><span>{t("search.pause")}</span></label>
+        <Row title={t("search.pause")}>
+          <Switch checked={state.paused} onChange={(paused) => void action("/api/conversation-search/settings", "put", { mode: state.mode, paused })} label={t("search.pause")} />
+        </Row>
       </>}
       {downloading && <><progress max={progress.total_bytes || 1} value={progress.done_bytes} aria-label={t("search.download")} /><div className="sub">{modelSize(progress.done_bytes)} / {modelSize(progress.total_bytes)}</div></>}
       {progress?.state === "failed" && <div className="sub attn">{t("search.download.failed")}</div>}

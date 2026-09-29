@@ -1938,8 +1938,8 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 /* A short text value in the lane numbers use, ending where their fields end (before the units' slot). */
 .settings-inline-field { width: 180px; padding: 6px 10px; margin-right: 72px !important; }
 .settings-name-field { width: 220px; padding: 6px 10px; }
+.mpanel-rows { margin-top: 8px; border-top: 1px solid var(--line); }
 .settings-value { color: var(--fg-2); font-size: var(--fs-13); text-align: right; overflow-wrap: anywhere; }
-.settings-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 /* Total spend against its cap, as a thin bar over the rows that set it. */
 .spend-meter { display: grid; gap: 6px; margin: 10px 0 4px; }
 .spend-meter-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
@@ -1972,6 +1972,7 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 .dropdown-item .ic { flex: none; color: var(--fg-2); }
 .dropdown-item-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .dropdown-item-text .sub { font-size: var(--fs-12); }
+.dropdown-order { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: var(--fs-12); font-weight: 600; }
 /* A phone keeps a compact control beside its words; a control that cannot be compact takes its own
    right-aligned line under them (Row's `stack`), rather than squeezing the title to a word a line. */
 @media (max-width: 599px) {
@@ -2487,9 +2488,13 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
    are nearly the same shade. The grid fills the width it is given — one column at 400 px, as many
    as fit on a wide screen — because a list of twelve read one at a time is a list nobody finishes. */
 
-.stt-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0 4px; }
-.stt-filters .field { flex: 1 1 180px; min-width: 140px; }
-.stt-filters .chip.select.on { background: var(--fg); color: var(--bg); border-color: transparent; }
+/* A catalogue's filters (speech models, voices): the search takes the room, the rest are compact. */
+.catalogue-filters { display: flex; gap: 8px 14px; flex-wrap: wrap; align-items: center; margin: 12px 0 4px; }
+.catalogue-filters > .field { flex: 1 1 200px; min-width: 160px; margin: 0; padding: 6px 10px; }
+.filter-switch { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; }
+.catalogue-settings { margin-top: 10px; border-top: 1px solid var(--line); }
+.settings-range { display: inline-flex; align-items: center; gap: 10px; }
+.settings-range input[type="range"] { width: 200px; accent-color: var(--accent); }
 
 /* Each card keeps its own height: stretched to the row, a one-button voice beside a long model card
    ended in a block of empty panel that read as a missing part. */
@@ -2535,9 +2540,7 @@ input.field[type="range"] {
    that is already installed sits on --surface-3 — lighter to come forward, never a darker slab, with
    a hairline for the seam. The grid is the same auto-fill the two speech pickers use, so the three
    sections of Settings that are lists of things read as one thing. */
-.comp-mode { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
-.comp-mode > .sub { flex: 1 1 220px; margin: 0; }
-.comp-disk { font-size: var(--fs-12); white-space: nowrap; }
+.comp-mode { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .comp-restart { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-3); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
 .comp-restart > b { font-size: var(--fs-14); }
 /* The minimum is capped at the column's width and a card may shrink below its content: a card's fix
@@ -2546,8 +2549,10 @@ input.field[type="range"] {
 /* Sized to content for the same reason as the voice cards: a short card stretched to its neighbour
    was a third empty. */
 .comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); align-items: start; gap: 10px; margin-top: 12px; }
-.comp-card { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); }
-.comp-card-on { background: var(--surface-3); }
+/* Tiles on the card's own surface with a hairline, like the rows around them; an installed one is
+   marked by its chip, not by a brighter fill that made the grid a patchwork. */
+.comp-card { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: transparent; }
+.comp-card-on { border-color: var(--line-strong); }
 .comp-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .comp-head b { font-size: var(--fs-14); flex: 1 1 auto; }
 .comp-what { margin: 0; }

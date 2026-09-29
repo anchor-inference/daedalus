@@ -16,6 +16,8 @@ import { modelSize as size } from "../format";
 import { plural, t } from "../i18n";
 import { invalidate } from "../store";
 import { errorText, haptic } from "../ui";
+import { Dropdown, Switch } from "../components";
+import { NumInput, Row } from "../settingsrow";
 import type { SpeechModel, SpeechView } from "../sttview";
 import { fetchSttView, mergeSttView, postSttSelect, sttFrame } from "../sttview";
 
@@ -198,30 +200,26 @@ export function SpeechModels({ toast }: { toast: (t: string) => void }) {
       <div className="section-title" style={{ marginTop: 0 }}>{t("stt.title")}</div>
       <div className="sub">{t("stt.intro")}</div>
 
-      <div className="kv" style={{ marginTop: 10 }}>
-        <span>{t("stt.inuse")}</span>
-        <b>{view.selected ? view.models.find((m) => m.id === view.selected)?.label ?? view.selected : t("stt.inuse.none")}</b>
-      </div>
-      <div className="kv">
-        <span>{t("stt.ondisk")}</span>
-        <b>{installedCount ? plural("stt.ondisk.some", installedCount, { size: size(view.disk_bytes) }) : t("stt.ondisk.none")}</b>
-      </div>
+      <Row title={t("stt.inuse")}>
+        <span className="settings-value">{view.selected ? view.models.find((m) => m.id === view.selected)?.label ?? view.selected : t("stt.inuse.none")}</span>
+      </Row>
+      <Row title={t("stt.ondisk")}>
+        <span className="settings-value">{installedCount ? plural("stt.ondisk.some", installedCount, { size: size(view.disk_bytes) }) : t("stt.ondisk.none")}</span>
+      </Row>
       {view.selected && <LoadLine load={view.load} />}
       {view.selected && !view.decoders?.opus && !view.decoders?.any && (
         <div className="sub attn" style={{ marginTop: 6 }}>{t("stt.nodecoder")}</div>
       )}
 
-      <div className="stt-filters">
-        <input className="field" style={{ margin: 0 }} placeholder={t("stt.search")} value={query} onChange={(e) => setQuery(e.target.value)} />
-        <select className="field" style={{ margin: 0 }} value={language} onChange={(e) => setLanguage(e.target.value)}>
-          <option value="">{t("stt.language.any")}</option>
-          {view.languages.map((code) => (
-            <option key={code} value={code}>{name(code)}</option>
-          ))}
-        </select>
-        <button className={`chip select ${streamingOnly ? "on" : ""}`} aria-pressed={streamingOnly} onClick={() => setStreamingOnly((v) => !v)}>
-          {t("stt.streaming.only")}
-        </button>
+      {/* The catalogue's filters: the search takes the room, the language is a compact picker and
+          "streaming only" a labelled switch, the same controls as every setting above them. */}
+      <div className="catalogue-filters">
+        <input className="field" placeholder={t("stt.search")} aria-label={t("stt.search")} value={query} onChange={(e) => setQuery(e.target.value)} />
+        <Dropdown label={t("stt.language")} value={language} onChange={setLanguage} options={[{ id: "", label: t("stt.language.any") }, ...view.languages.map((code) => ({ id: code, label: name(code) }))]} />
+        <span className="filter-switch">
+          <span>{t("stt.streaming.only")}</span>
+          <Switch checked={streamingOnly} onChange={setStreamingOnly} label={t("stt.streaming.only")} />
+        </span>
       </div>
 
       {problem && <div className="sub attn" style={{ marginTop: 8 }}>{problem}</div>}
@@ -294,27 +292,18 @@ export function SpeechModels({ toast }: { toast: (t: string) => void }) {
       </div>
 
       {view.selected && (
-        <div className="grid2" style={{ marginTop: 12 }}>
-          <div>
-            <label className="field">{t("stt.language")}</label>
-            <select className="field" value={view.language} onChange={(e) => void postSttSelect({ language: e.target.value }).then(take).catch((x) => setProblem(errorText(x)))}>
-              <option value="auto">{t(autoDetects ? "stt.language.auto" : "stt.language.auto.english")}</option>
-              {view.languages.map((code) => (
-                <option key={code} value={code}>{name(code)}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="field">{t("stt.threads")}</label>
-            <input
-              className="field"
-              type="number"
-              min={1}
-              max={16}
-              defaultValue={view.threads}
-              onBlur={(e) => void postSttSelect({ threads: Number(e.target.value) || 2 }).then(take).catch((x) => setProblem(errorText(x)))}
+        <div className="catalogue-settings">
+          <Row title={t("stt.language")} stack>
+            <Dropdown
+              label={t("stt.language")}
+              value={view.language}
+              onChange={(language) => void postSttSelect({ language }).then(take).catch((x) => setProblem(errorText(x)))}
+              options={[{ id: "auto", label: t(autoDetects ? "stt.language.auto" : "stt.language.auto.english") }, ...view.languages.map((code) => ({ id: code, label: name(code) }))]}
             />
-          </div>
+          </Row>
+          <Row title={t("stt.threads")}>
+            <NumInput label={t("stt.threads")} value={view.threads} min={1} max={16} onSave={(threads) => void postSttSelect({ threads }).then(take).catch((x) => setProblem(errorText(x)))} />
+          </Row>
         </div>
       )}
     </div>

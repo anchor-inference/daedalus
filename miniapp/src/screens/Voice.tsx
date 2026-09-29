@@ -698,10 +698,10 @@ export function VoiceSettings({ toast }: { toast: (t: string) => void }) {
           ]}
         />
       </Row>
-      <Row title={t("voice.card.out")}>
+      <Row title={t("voice.card.out")} stack>
         <span className="settings-value">{spokenLine(data)}</span>
       </Row>
-      <Row title={t("voice.card.in")}>
+      <Row title={t("voice.card.in")} stack>
         <span className="settings-value">{listens}</span>
       </Row>
       {local?.active && (

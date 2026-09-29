@@ -21,6 +21,7 @@ import { api } from "../api";
 import { Icon } from "../icons";
 import { modelSize as size } from "../format";
 import { plural, t } from "../i18n";
+import { Row } from "../settingsrow";
 import { pathFor } from "../router";
 import { go } from "../shell";
 import { errorText, haptic } from "../ui";
@@ -263,12 +264,11 @@ export function ComponentsTab({ toast }: { toast: (t: string) => void }) {
         {t("comp.title")}
       </div>
       <div className="sub">{t("comp.intro")}</div>
-      <div className="btnrow"><a className="btn" href={pathFor("settings", "dependencies")} onClick={(event) => go(event, pathFor("settings", "dependencies"))}>{t("settings.sec.dependencies")}</a></div>
-      <div className="comp-mode">
-        <Icon name={view.mode === "native" ? "settings" : "inbox"} size={16} />
-        <span className="sub">{t(`comp.mode.${view.mode === "native" ? "native" : "docker"}`)}</span>
-        {view.disk_bytes > 0 && <b className="comp-disk">{t("comp.disk", { size: size(view.disk_bytes) })}</b>}
-      </div>
+      {/* How the installation runs and what the downloads take, as a row with the way to the other
+          half of "what agents can use" as its action. */}
+      <Row className="comp-mode" title={t(`comp.mode.${view.mode === "native" ? "native" : "docker"}`)} desc={view.disk_bytes > 0 ? t("comp.disk", { size: size(view.disk_bytes) }) : undefined}>
+        <a className="btn small" href={pathFor("settings", "dependencies")} onClick={(event) => go(event, pathFor("settings", "dependencies"))}>{t("settings.sec.dependencies")}</a>
+      </Row>
 
       {restartPending(view) && (
         <div className="comp-restart">

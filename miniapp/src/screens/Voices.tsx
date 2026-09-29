@@ -17,6 +17,8 @@ import { plural, t } from "../i18n";
 import { mergeTtsView } from "../ttsview";
 import type { TtsView } from "../ttsview";
 import { errorText, haptic } from "../ui";
+import { Dropdown, Switch } from "../components";
+import { NumInput, Row } from "../settingsrow";
 
 const name = (code: string) => t(`lang.of.${code}`);
 
@@ -194,31 +196,25 @@ export function TtsVoices({ toast }: { toast: (message: string) => void }) {
       <div className="section-title" style={{ marginTop: 0 }}>{t("tts.title")}</div>
       <div className="sub">{t("tts.intro")}</div>
 
-      <div className="kv" style={{ marginTop: 10 }}>
-        <span>{t("tts.inuse")}</span>
-        <b>
+      <Row title={t("tts.inuse")}>
+        <span className="settings-value">
           {chosen ? chosen.label : t("tts.inuse.none")}
-          {chosen && view.state.state === "loading" && <span className="sub faint"> · {t("tts.state.loading")}</span>}
-          {chosen && view.state.state === "error" && <span className="sub attn"> · {t("tts.state.error")}</span>}
-        </b>
-      </div>
-      <div className="kv">
-        <span>{t("tts.ondisk")}</span>
-        <b>{installedCount ? plural("tts.ondisk.some", installedCount, { size: size(view.disk_bytes) }) : t("tts.ondisk.none")}</b>
-      </div>
+          {chosen && view.state.state === "loading" && <span className="faint"> · {t("tts.state.loading")}</span>}
+          {chosen && view.state.state === "error" && <span className="attn"> · {t("tts.state.error")}</span>}
+        </span>
+      </Row>
+      <Row title={t("tts.ondisk")}>
+        <span className="settings-value">{installedCount ? plural("tts.ondisk.some", installedCount, { size: size(view.disk_bytes) }) : t("tts.ondisk.none")}</span>
+      </Row>
       {view.state.error && <div className="sub attn" style={{ marginTop: 6 }}>{view.state.error}</div>}
 
-      <div className="stt-filters">
-        <input className="field" style={{ margin: 0 }} placeholder={t("tts.search")} value={query} onChange={(e) => setQuery(e.target.value)} />
-        <select className="field" style={{ margin: 0 }} value={language} onChange={(e) => setLanguage(e.target.value)}>
-          <option value="">{t("tts.language.any")}</option>
-          {view.languages.map((code) => (
-            <option key={code} value={code}>{name(code)}</option>
-          ))}
-        </select>
-        <button className={`chip select ${fastOnly ? "on" : ""}`} aria-pressed={fastOnly} onClick={() => setFastOnly((v) => !v)}>
-          {t("tts.fast.only")}
-        </button>
+      <div className="catalogue-filters">
+        <input className="field" placeholder={t("tts.search")} aria-label={t("tts.search")} value={query} onChange={(e) => setQuery(e.target.value)} />
+        <Dropdown label={t("tts.language")} value={language} onChange={setLanguage} options={[{ id: "", label: t("tts.language.any") }, ...view.languages.map((code) => ({ id: code, label: name(code) }))]} />
+        <span className="filter-switch">
+          <span>{t("tts.fast.only")}</span>
+          <Switch checked={fastOnly} onChange={setFastOnly} label={t("tts.fast.only")} />
+        </span>
       </div>
 
       {problem && <div className="sub attn" style={{ marginTop: 8 }}>{problem}</div>}
@@ -300,47 +296,35 @@ export function TtsVoices({ toast }: { toast: (message: string) => void }) {
       </div>
 
       {chosen && (
-        <div className="grid2" style={{ marginTop: 12 }}>
+        <div className="catalogue-settings">
           {chosen.speakers.length > 1 && (
-            <div>
-              <label className="field">{t("tts.speaker")}</label>
-              <select className="field" value={view.state.speaker} onChange={(e) => void settings({ speaker: e.target.value })}>
-                <option value="">{t("tts.speaker.first")}</option>
-                {chosen.speakers.map((who) => (
-                  <option key={who} value={who}>{who}</option>
-                ))}
-              </select>
-            </div>
+            <Row title={t("tts.speaker")} stack>
+              <Dropdown label={t("tts.speaker")} value={view.state.speaker} onChange={(speaker) => void settings({ speaker })} options={[{ id: "", label: t("tts.speaker.first") }, ...chosen.speakers.map((who) => ({ id: who, label: who }))]} />
+            </Row>
           )}
-          <div>
-            {/* The number under the thumb follows the drag; the configuration file is written when the
-                drag ends. Saving on every change was a POST and a full rewrite of the operator's TOML
-                per pixel — about thirty of each for one pull from 1.0 to 2.0. */}
-            <label className="field">{t("tts.speed.label", { speed: (dragging ?? view.state.speed).toFixed(2) })}</label>
-            <input
-              className="field"
-              type="range"
-              min={0.5}
-              max={2}
-              step={0.05}
-              defaultValue={view.state.speed}
-              onChange={(e) => setDragging(Number(e.target.value))}
-              onPointerUp={(e) => void commitSpeed(Number((e.target as HTMLInputElement).value))}
-              onKeyUp={(e) => void commitSpeed(Number((e.target as HTMLInputElement).value))}
-              onBlur={(e) => void commitSpeed(Number(e.target.value))}
-            />
-          </div>
-          <div>
-            <label className="field">{t("tts.threads")}</label>
-            <input
-              className="field"
-              type="number"
-              min={1}
-              max={16}
-              defaultValue={view.state.threads}
-              onBlur={(e) => void settings({ threads: Number(e.target.value) || 2 })}
-            />
-          </div>
+          {/* The number beside the thumb follows the drag; the configuration file is written when the
+              drag ends. Saving on every change was a POST and a full rewrite of the operator's TOML
+              per pixel — about thirty of each for one pull from 1.0 to 2.0. */}
+          <Row title={t("tts.speed.title")} stack>
+            <span className="settings-range">
+              <input
+                type="range"
+                min={0.5}
+                max={2}
+                step={0.05}
+                aria-label={t("tts.speed.title")}
+                defaultValue={view.state.speed}
+                onChange={(e) => setDragging(Number(e.target.value))}
+                onPointerUp={(e) => void commitSpeed(Number((e.target as HTMLInputElement).value))}
+                onKeyUp={(e) => void commitSpeed(Number((e.target as HTMLInputElement).value))}
+                onBlur={(e) => void commitSpeed(Number(e.target.value))}
+              />
+              <span className="settings-unit">{(dragging ?? view.state.speed).toFixed(2)}×</span>
+            </span>
+          </Row>
+          <Row title={t("tts.threads")}>
+            <NumInput label={t("tts.threads")} value={view.state.threads} min={1} max={16} onSave={(threads) => void settings({ threads })} />
+          </Row>
         </div>
       )}
     </div>

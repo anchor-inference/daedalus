@@ -4,6 +4,8 @@ import { Sheet } from "../dialogs";
 import { Icon } from "../icons";
 import { plural, t } from "../i18n";
 import { errorText } from "../ui";
+import { Dropdown } from "../components";
+import { Row } from "../settingsrow";
 import { DependencyProgress, type Progress } from "./dependencyprogress";
 import "./dependencies.css";
 
@@ -91,12 +93,12 @@ export function DependenciesTab() {
   const missing = view?.tools.filter((tool) => !tool.available) ?? [];
   return <div className="dependencies">
     <div className="card deps-overview">
-    <div><div className="section-title">{t("settings.sec.dependencies")}</div>
+    <div><div className="section-title">{t("deps.overview")}</div>
     <p className="sub">{t("deps.intro")}</p></div>
     {problem && <div className="sub attn" role="alert">{problem}</div>}
     {!view && !offline && <p className="sub">{t("common.loading")}</p>}
     {view && <>
-      <div className="deps-mode"><Icon name={view.capability.mode === "native" ? "terminal" : "skill"} size={16} /><span><b>{t(view.capability.mode === "native" ? "deps.mode.native" : "deps.mode.docker")}</b><span className="sub">{t(view.capability.mode === "native" ? "deps.native" : "deps.docker")}</span></span></div>
+      <Row className="deps-mode" title={t(view.capability.mode === "native" ? "deps.mode.native" : "deps.mode.docker")} desc={t(view.capability.mode === "native" ? "deps.native" : "deps.docker")} />
       {!view.capability.python && <p className="sub attn">{view.capability.reason}</p>}
       {!view.capability.system && view.capability.mode === "native" && <p className="sub">{t("deps.noSystem")}</p>}
     </>}
@@ -118,10 +120,12 @@ export function DependenciesTab() {
       <div className="section-title">{t("deps.add.title")}</div><p className="sub">{t("deps.add.sub")}</p>
       <label className="deps-label" htmlFor="dependency-request">{t("deps.request")}</label>
       <textarea id="dependency-request" className="field" rows={3} maxLength={2000} value={request} disabled={blocked} onChange={(event) => setRequest(event.target.value)} placeholder={t("deps.placeholder")} />
-      <div className="deps-request-actions"><select id="dependency-model" aria-label={t("deps.model")} className="field compact" value={preset} disabled={blocked} onChange={(event) => setPreset(event.target.value)}>
-        {!view.models.length && <option value="">{t("deps.noModels")}</option>}
-        {view.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
-      </select><div className="btnrow">
+      {/* The planner's model is a setting of the request, so it is a row like every other choice; the
+          actions follow on their own line. */}
+      <Row title={t("deps.model")} stack>
+        <Dropdown id="dependency-model" label={t("deps.model")} value={preset} disabled={blocked || !view.models.length} onChange={setPreset} options={view.models.length ? view.models.map((model) => ({ id: model.id, label: model.label })) : [{ id: "", label: t("deps.noModels") }]} />
+      </Row>
+      <div className="deps-request-actions"><div className="btnrow">
         <button className="btn primary" disabled={blocked || !view.capability.python || !request.trim() || !preset} onClick={() => void act("/api/dependencies/request", { request, preset })}><Icon name="bolt" size={15} /> {t(planning ? "deps.planning" : "deps.prepare")}</button>
         {proposal && ["planning", "validating", "ready"].includes(proposal.state) && <button className="btn" disabled={busy || offline} onClick={() => void act(`/api/dependencies/${proposal.id}/cancel`)}>{t("common.cancel")}</button>}
         {proposal?.state === "ready" && <button className="btn" onClick={() => { setAccepted(false); setReview(true); }}>{t("deps.review")}</button>}

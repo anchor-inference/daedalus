@@ -2,9 +2,8 @@
 .dependencies .section-title { margin-top:0; }
 .deps-overview { display:grid; gap:var(--space-3); }
 .deps-overview p { margin:6px 0 0; }
-.deps-mode { display:flex; align-items:flex-start; gap:var(--space-2); padding:var(--space-2) var(--space-3); border-radius:var(--radius-md); background:var(--surface-2); }
-.deps-mode > .ic { margin-top:2px; color:var(--accent); flex:none; }
-.deps-mode > span { display:grid; gap:2px; }
+/* Where dependencies go is a settings row like the rest (settingsrow.tsx), under a hairline. */
+.deps-mode { border-top:1px solid var(--line); }
 .deps-job { display:grid; gap:var(--space-3); border-color:color-mix(in srgb, var(--accent) 42%, var(--line)); }
 .deps-job.failed { border-color:color-mix(in srgb, var(--bad) 42%, var(--line)); }
 .deps-job-title { display:flex; align-items:flex-start; gap:var(--space-3); }
@@ -17,12 +16,13 @@
 .deps-request-card { display:grid; gap:var(--space-3); }
 .deps-request-card > p { margin:-6px 0 0; }
 .deps-request-card .field { margin:0; }
-.deps-request-actions { display:flex; align-items:center; justify-content:space-between; gap:var(--space-2); }
-.deps-request-actions > select { width:min(340px, 48%); }
+.deps-request-actions { display:flex; align-items:center; justify-content:flex-end; gap:var(--space-2); padding-top:10px; border-top:1px solid var(--line); }
 .deps-request-actions .btnrow { margin:0; }
 .deps-environment { display:grid; gap:var(--space-2); }
 .deps-environment-head { display:flex; align-items:flex-start; justify-content:space-between; gap:var(--space-3); }
 .deps-environment-head > span:first-child { display:grid; gap:3px; }
+/* The card's heading in the same size and weight as every other card heading in Settings. */
+.deps-environment-head b { font-size:var(--fs-14); font-weight:650; }
 .deps-environment-head > .chip { flex:none; color:var(--ok); }
 .deps-tool-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:var(--space-1); }
 .deps-tool-chips .chip { min-height:28px; padding:0 9px; background:var(--surface-2); }
@@ -62,6 +62,6 @@
 .deps-live-log { max-height:240px; overflow:auto; padding:12px; background:var(--bg); border-radius:var(--radius-sm); }
 @media (max-width:560px) {
   .deps-request-actions { align-items:stretch; flex-direction:column; }
-  .deps-request-actions > select, .deps-request-actions .btnrow, .deps-request-actions .btn { width:100%; }
+  .deps-request-actions .btnrow, .deps-request-actions .btn { width:100%; }
   .deps-environment-head { align-items:flex-start; }
 }

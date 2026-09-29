@@ -417,7 +417,14 @@ SETTINGS = {
     "providers": {}, "prompt": {"rules": ""}, "vision": {"preset": "gpt-5.6-luna", "max_output_tokens": 800},
     "orchestrator": {"preset": "", "strongest": "claude-opus-5"},
     "asr": {"provider": "", "url": "", "api_key": "", "model": "", "language": "auto", "timeout_seconds": 60, "max_seconds": 120, "autosend": False},
-    "tools": {"web": {"fetch_timeout_seconds": 30, "proxy": "", "user_agent": "", "fetch_max_chars": 40000, "search": {"backend": "searxng", "fallback": [], "results": 8, "timeout_seconds": 20, "searxng": {"url": "", "engines": "", "categories": "", "safesearch": 0}, "duckduckgo": {"url": "", "region": ""}, "serper": {"base_url": "", "gl": "", "hl": ""}, "keenable": {"base_url": "", "snippet_max_length": 0}, "tavily": {"base_url": "", "depth": ""}, "exa": {"base_url": "", "type": ""}, "perplexity": {"base_url": ""}}}, "exec": {"max_output_chars": 20000}},
+    "tools": {"web": {"fetch_timeout_seconds": 30, "proxy": "", "user_agent": "", "fetch_max_chars": 40000, "search": {"backend": "searxng", "fallback": ["duckduckgo"], "results": 8, "timeout_seconds": 20, "searxng": {"url": "", "engines": "", "categories": "", "safesearch": 0}, "duckduckgo": {"url": "", "region": ""}, "serper": {"base_url": "", "gl": "", "hl": ""}, "keenable": {"base_url": "", "snippet_max_length": 0}, "tavily": {"base_url": "", "depth": ""}, "exa": {"base_url": "", "type": ""}, "perplexity": {"base_url": ""}}}, "exec": {"max_output_chars": 20000}},
+    # The backends the host offers: the pictures of WebSearch show a primary, a fallback and one waiting for its key.
+    "search_backends": [
+        {"id": "searxng", "label": "SearXNG", "needs_key": False},
+        {"id": "duckduckgo", "label": "DuckDuckGo", "needs_key": False},
+        {"id": "serper", "label": "Serper (Google)", "needs_key": True, "available": True},
+        {"id": "tavily", "label": "Tavily", "needs_key": True, "available": False},
+    ],
     "self_change": {"approval": "manual", "auto_rebuild": True},
     "limits": {"max_iterations": 200, "tool_timeout_seconds": 900, "usd_per_run": 5, "usd_total": 0, "usd_total_per_provider": {}, "total_since": ""},
     "balance": {"enabled": True, "poll_seconds": 60, "thresholds_usd": [5, 2, 0.5]},
@@ -1949,7 +1956,7 @@ def run_browser() -> int:
         page.route("**/api/workloads/load", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"terminals": terminal_load(), "browsers": browser_load(running=1), "together": None})))
         page.goto(f"{BASE}/settings/environments?token=t&scheme=dark&lang={LANG}")
         page.wait_for_selector(".bs-running .bs-row", timeout=15000)
-        page.wait_for_selector(".bs-limits .loadbar.workloads", timeout=15000)
+        page.wait_for_selector(".env-load .loadbar.workloads", timeout=15000)
         page.locator("#browser-sessions").evaluate("el => el.scrollIntoView({block: 'start'})")
         page.wait_for_timeout(400)
         page.screenshot(path=str(OUT / "settings-browser.png"))

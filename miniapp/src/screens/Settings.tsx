@@ -20,15 +20,14 @@ import { ON_DEMAND_CHOICES, REASONING_EFFORTS, onDemandGroups, orchestratorPrese
 import { mainPreset } from "../main/model";
 import { Sheet } from "../dialogs";
 import { plural, t } from "../i18n";
-import { Dropdown, LangPicker, Segmented, Switch } from "../components";
+import { Dropdown, LangPicker, MultiDropdown, Segmented, Switch } from "../components";
 import { NumInput, NumRow, Row, TextBlock } from "../settingsrow";
 import { AppearancePanel } from "./Appearance";
 import { modeHome, storedMode } from "../mode";
 import { useQuery } from "../store";
 import { Capabilities, componentsNeedAttention } from "../capabilities";
 import { NotificationSettings } from "./NotificationSettings";
-import { TerminalCap } from "./TerminalCap";
-import { BrowserSettingsTab } from "./BrowserSettings";
+import { EnvironmentsTab } from "./Environments";
 import { ToolGroupsSettings } from "../toolgroupsview";
 import { CompactionModelSelect } from "../compactionmodel";
 import { AsrSettingsCard } from "./AsrSettings";
@@ -121,14 +120,6 @@ function ModelsMenu({ load, current, onPick }: { load: () => Promise<string[] | 
   );
 }
 
-function Toggle({ on, onClick, children, title, disabled }: { on: boolean; onClick: () => void; children: React.ReactNode; title?: string; disabled?: boolean }) {
-  return (
-    <button className={`btn small ${on ? "primary" : ""}`} onClick={onClick} title={title} disabled={disabled} aria-pressed={on}>
-      {children}
-    </button>
-  );
-}
-
 /** One model: a compact line to scan, an expanded panel to edit. */
 function PresetRow({ id, p, onDemandByModel, isDefault, inChain, providers, onDefault, onChain, onPatch, onDelete, onLookup }: {
   id: string;
@@ -200,19 +191,25 @@ function PresetRow({ id, p, onDemandByModel, isDefault, inChain, providers, onDe
               <input className="field" type="number" min={1024} step={1000} defaultValue={p.max_output_tokens} onBlur={(e) => { const v = numInput(e.target.value); if (v !== null && v !== p.max_output_tokens) onPatch({ max_output_tokens: v }); }} />
             </label>
           </div>
-          <div className="btnrow">
-            <Toggle on={p.thinking} onClick={() => onPatch({ thinking: !p.thinking })}>{t("settings.preset.thinking", { state: t(p.thinking ? "common.on" : "common.off") })}</Toggle>
-            <div className="segmented inline" role="group" aria-label={t("settings.preset.effort")}>
-              {REASONING_EFFORTS.map((e) => (
-                <button key={e} className={p.reasoning_effort === e ? "on" : ""} disabled={!p.thinking} onClick={() => onPatch({ reasoning_effort: e })}>{t(`add.effort.${e}`)}</button>
-              ))}
-            </div>
-            <Toggle on={p.images} onClick={() => onPatch({ images: !p.images })} title={t("settings.preset.images.title")}>{t("settings.preset.imagestoggle", { state: t(p.images ? "common.on" : "common.off") })}</Toggle>
-            {/* The words and their control wrap as one: apart, the words were left at the end of the
-                row with the control on the next line and read as an orphaned caption. */}
-            <span className="btnrow-labelled">
-              <span className="sub" title={t("settings.preset.ondemand.title")}>{t("settings.preset.ondemand")}</span>
-              <span className="segmented inline" role="group" aria-label={t("settings.preset.ondemand")} title={t("settings.preset.ondemand.title")}>
+          {/* The model's switches as rows like every other setting: "thinking on" and "images on"
+              were buttons whose label was their own state, and nobody could tell the state from
+              the action. */}
+          <div className="mpanel-rows">
+            <Row title={t("settings.preset.thinking")}>
+              <Switch checked={p.thinking} onChange={(thinking) => onPatch({ thinking })} label={t("settings.preset.thinking")} />
+            </Row>
+            <Row title={t("settings.preset.effort")} desc={p.thinking ? undefined : t("settings.preset.effort.off")}>
+              <div className="segmented inline" role="group" aria-label={t("settings.preset.effort")}>
+                {REASONING_EFFORTS.map((e) => (
+                  <button key={e} className={p.reasoning_effort === e ? "on" : ""} disabled={!p.thinking} onClick={() => onPatch({ reasoning_effort: e })}>{t(`add.effort.${e}`)}</button>
+                ))}
+              </div>
+            </Row>
+            <Row title={t("settings.preset.imagestoggle")} desc={t("settings.preset.images.title")}>
+              <Switch checked={p.images} onChange={(images) => onPatch({ images })} label={t("settings.preset.imagestoggle")} />
+            </Row>
+            <Row title={t("settings.preset.ondemand")} desc={t("settings.preset.ondemand.title")} stack>
+              <span className="segmented inline" role="group" aria-label={t("settings.preset.ondemand")}>
                 {ON_DEMAND_CHOICES.map((choice) => (
                   <button
                     key={String(choice)}
@@ -226,11 +223,15 @@ function PresetRow({ id, p, onDemandByModel, isDefault, inChain, providers, onDe
                   </button>
                 ))}
               </span>
-            </span>
-            {!isDefault && <Toggle on={inChain} onClick={onChain} title={t("settings.preset.fallback.title")}>{t(inChain ? "settings.preset.isfallback" : "settings.preset.usefallback")}</Toggle>}
-            <span className="sub mono mid">{id}</span>
+            </Row>
+            {!isDefault && (
+              <Row title={t("settings.preset.usefallback")} desc={t("settings.preset.fallback.title")}>
+                <Switch checked={inChain} onChange={() => onChain()} label={t("settings.preset.usefallback")} />
+              </Row>
+            )}
           </div>
           <div className="btnrow mrow-foot">
+            <span className="sub mono">{id}</span>
             {isDefault ? <span className="sub">{t("settings.preset.opens")}</span> : <button className="btn small primary" onClick={onDefault}>{t("settings.preset.makedefault")}</button>}
             <span className="grow" />
             <button className="btn small danger" disabled={isDefault} title={t(isDefault ? "settings.preset.cannotdelete" : "settings.preset.remove.title")} onClick={async () => { if (await confirmAsync(t("settings.preset.delete.title", { title }), { body: t("settings.preset.delete.body"), action: t("settings.preset.delete.action") })) onDelete(); }}>
@@ -500,23 +501,14 @@ function SearchBlock({ s, save }: { s: Settings; save: (patch: any) => Promise<v
         />
       </Row>
       <Row title={t("settings.search.fallbacks")} desc={t("settings.search.fallbacks.sub")} stack>
-        <span className="settings-chips">
-          {backends.filter((b) => b.id !== search.backend).map((b) => {
-            const on = fallbackIds.includes(b.id);
-            return (
-              <button
-                key={b.id}
-                className={`chip select ${on ? "on" : ""}`}
-                aria-pressed={on}
-                disabled={!on && !usable(b)}
-                title={optionLabel(b)}
-                onClick={() => saveSearch({ fallback: on ? fallbackIds.filter((x) => x !== b.id) : [...fallbackIds, b.id] })}
-              >
-                {on ? `${fallbackIds.indexOf(b.id) + 1}. ` : ""}{b.id}
-              </button>
-            );
-          })}
-        </span>
+        <MultiDropdown
+          id="search-fallbacks"
+          label={t("settings.search.fallbacks")}
+          none={t("settings.search.fallbacks.none")}
+          values={fallbackIds.filter((id) => id !== search.backend)}
+          onChange={(fallback) => saveSearch({ fallback })}
+          options={backends.filter((b) => b.id !== search.backend).map((b) => ({ id: b.id, label: b.label, hint: optionLabel(b).slice(b.label.length).replace(/^ — /, "") || undefined, disabled: !fallbackIds.includes(b.id) && !usable(b) }))}
+        />
       </Row>
       <NumRow title={t("settings.search.results")} value={search.results} min={1} onSave={(v) => saveSearch({ results: v })} />
       <NumRow title={t("settings.search.timeout")} unit={t("settings.unit.seconds")} value={search.timeout_seconds} min={1} onSave={(v) => saveSearch({ timeout_seconds: v })} />
@@ -1257,14 +1249,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
           </div>
         );
       case "environments":
-        // Terminals and browsers are one decision — how many may run at once on this machine, and
-        // for how long — so they are one page, each half under its own heading.
-        return (
-          <>
-            <div id="terminal-sessions"><TerminalCap s={s} save={save} /></div>
-            <div id="browser-sessions"><BrowserSettingsTab s={s} save={save} toast={toast} /></div>
-          </>
-        );
+        return <EnvironmentsTab s={s} save={save} toast={toast} />;
       case "tools":
         return <ToolsTab s={s} save={save} toast={toast} onSettings={(next) => setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) })} />;
       case "voice":
@@ -1324,50 +1309,52 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
         return <SecurityTab toast={toast} />;
       case "heartbeat":
         return <HeartbeatTab s={s} toast={toast} />;
-      case "about":
+      case "about": {
+        const logout = async () => {
+          try {
+            await api.post("/api/auth/logout");
+            sessionStorage.removeItem("daedalus_token");
+          } finally {
+            window.location.reload();
+          }
+        };
+        const value = (text: React.ReactNode, mono = false) => <span className={`settings-value ${mono ? "mono" : ""}`}>{text}</span>;
         return (
-          <div className="card">
-            <div className="section-title" style={{ marginTop: 0 }}>{t("settings.about.runtime")}</div>
-            {status ? (
-              <>
-                <div className="kv"><span>{t("settings.about.providers")}</span><b>{status.providers?.join(", ")}</b></div>
-                {status.supervisor ? (
-                  <>
-                    <div className="kv"><span>{t("settings.about.bot")}</span><b className="mono">{String(status.supervisor.bot).slice(0, 10)}</b></div>
-                    <div className="kv"><span>{t("settings.about.core")}</span><b className="mono">{String(status.supervisor.core).slice(0, 10)}</b></div>
-                    <div className="kv"><span>{t("settings.about.process")}</span><b>{t(status.supervisor.child_running ? "settings.about.running" : "settings.about.stopped")}</b></div>
-                  </>
-                ) : (
-                  <div className="sub">{t("settings.about.nosupervisor")}</div>
-                )}
-                {status.budget_exceeded && <div className="sub" style={{ color: "var(--bad)" }}>{t("settings.about.budget", { what: String(status.budget_exceeded) })}</div>}
-              </>
-            ) : (
-              <div className="sub">{t("settings.about.nostatus")}</div>
-            )}
+          <>
+            <div className="card">
+              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.about.runtime")}</div>
+              {status ? (
+                <>
+                  <Row title={t("settings.about.providers")}>{value(status.providers?.length ? status.providers.join(", ") : "—")}</Row>
+                  {status.supervisor ? (
+                    <>
+                      <Row title={t("settings.about.bot")}>{value(String(status.supervisor.bot).slice(0, 10), true)}</Row>
+                      <Row title={t("settings.about.core")}>{value(String(status.supervisor.core).slice(0, 10), true)}</Row>
+                      <Row title={t("settings.about.process")}>{value(t(status.supervisor.child_running ? "settings.about.running" : "settings.about.stopped"))}</Row>
+                    </>
+                  ) : (
+                    <Row title={t("settings.about.supervisor")}>{value(t("settings.about.nosupervisor.short"))}</Row>
+                  )}
+                  {status.budget_exceeded && <div className="sub" style={{ color: "var(--bad)" }}>{t("settings.about.budget", { what: String(status.budget_exceeded) })}</div>}
+                </>
+              ) : (
+                <div className="sub">{t("settings.about.nostatus")}</div>
+              )}
+            </div>
             {!telegram()?.initData && (
-              <>
-                <div className="section-title">{t("settings.about.browser")}</div>
-                <div className="sub"><a href={pathFor("settings", "appearance")} onClick={(e) => go(e, pathFor("settings", "appearance"))}>{t("settings.about.appearance")}</a></div>
-                <div className="btnrow">
-                  <button
-                    className="btn small"
-                    onClick={async () => {
-                      try {
-                        await api.post("/api/auth/logout");
-                        sessionStorage.removeItem("daedalus_token");
-                      } finally {
-                        window.location.reload();
-                      }
-                    }}
-                  >
-                    {t("settings.logout")}
-                  </button>
-                </div>
-              </>
+              <div className="card">
+                <div className="section-title" style={{ marginTop: 0 }}>{t("settings.about.browser")}</div>
+                <Row title={t("settings.sec.appearance")} desc={t("settings.about.appearance")}>
+                  <a className="btn small" href={pathFor("settings", "appearance")} onClick={(e) => go(e, pathFor("settings", "appearance"))}>{t("settings.about.open")}</a>
+                </Row>
+                <Row title={t("settings.logout")} desc={t("settings.about.logout.sub")}>
+                  <button className="btn small" onClick={() => void logout()}>{t("settings.about.logout.action")}</button>
+                </Row>
+              </div>
             )}
-          </div>
+          </>
         );
+      }
     }
   };
 

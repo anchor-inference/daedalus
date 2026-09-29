@@ -81,13 +81,76 @@ export function Dropdown<T extends string>({ value, options, onChange, label, id
   disabled?: boolean;
   className?: string;
 }) {
+  const current = options.find((o) => o.id === value);
+  return (
+    <PickList
+      options={options}
+      chosen={(o) => o.id === value}
+      shown={current?.label ?? ""}
+      value={value}
+      onPick={(o) => o.id !== value && onChange(o.id)}
+      label={label}
+      id={id}
+      invalid={invalid}
+      disabled={disabled}
+      className={className}
+    />
+  );
+}
+
+/** Several of a list, in the order they were picked: the same compact button, showing the picked
+ *  ones joined (or `none`), and a list that stays open while choices are ticked on and off. A row of
+ *  toggle chips did this before, and with no choices to show it left the row with no control at all. */
+export function MultiDropdown<T extends string>({ values, options, onChange, label, none, id, disabled, className = "" }: {
+  values: T[];
+  options: DropdownOption<T>[];
+  onChange: (next: T[]) => void;
+  label: string;
+  none: string;
+  id?: string;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const shown = values.length ? values.map((v) => options.find((o) => o.id === v)?.label ?? v).join(", ") : none;
+  return (
+    <PickList
+      options={options}
+      chosen={(o) => values.includes(o.id)}
+      order={(o) => (values.includes(o.id) ? values.indexOf(o.id) + 1 : 0)}
+      shown={shown}
+      value={values.join(",")}
+      onPick={(o) => onChange(values.includes(o.id) ? values.filter((v) => v !== o.id) : [...values, o.id])}
+      keepOpen
+      multi
+      label={label}
+      id={id}
+      disabled={disabled || options.length === 0}
+      className={className}
+    />
+  );
+}
+
+function PickList<T extends string>({ options, chosen, order, shown, value, onPick, keepOpen, multi, label, id, invalid, disabled, className = "" }: {
+  options: DropdownOption<T>[];
+  chosen: (o: DropdownOption<T>) => boolean;
+  order?: (o: DropdownOption<T>) => number;
+  shown: string;
+  value: string;
+  onPick: (o: DropdownOption<T>) => void;
+  keepOpen?: boolean;
+  multi?: boolean;
+  label: string;
+  id?: string;
+  invalid?: boolean;
+  disabled?: boolean;
+  className?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const [up, setUp] = useState(false);
   const wrap = useRef<HTMLSpanElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const listId = useId();
-  const current = options.find((o) => o.id === value);
   useEffect(() => {
     if (!open) return;
     const away = (e: PointerEvent) => {
@@ -107,14 +170,16 @@ export function Dropdown<T extends string>({ value, options, onChange, label, id
     const below = box ? window.innerHeight - box.bottom : Infinity;
     const wanted = Math.min(320, options.length * 40 + 12);
     setUp(below < wanted && (box?.top ?? 0) > below);
-    setActive(Math.max(0, options.findIndex((o) => o.id === value)));
+    setActive(Math.max(0, options.findIndex(chosen)));
     setOpen(true);
   }
   function pick(option: DropdownOption<T>) {
     if (option.disabled) return;
-    setOpen(false);
-    button.current?.focus();
-    if (option.id !== value) onChange(option.id);
+    if (!keepOpen) {
+      setOpen(false);
+      button.current?.focus();
+    }
+    onPick(option);
   }
   function step(from: number, by: number): number {
     for (let i = 1; i <= options.length; i++) {
@@ -156,39 +221,44 @@ export function Dropdown<T extends string>({ value, options, onChange, label, id
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
         aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
-        aria-label={`${label}: ${current?.label ?? ""}`}
+        aria-label={`${label}: ${shown}`}
         aria-invalid={invalid || undefined}
         data-value={value}
         disabled={disabled}
-        title={current?.label}
+        title={shown}
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={onKey}
       >
-        <span className="dropdown-value">{current?.label ?? ""}</span>
+        <span className="dropdown-value">{shown}</span>
         <Icon name="chevron" size={14} />
       </button>
       {open && (
-        <span id={listId} role="listbox" aria-label={label} className={`dropdown-list ${up ? "up" : ""}`}>
-          {options.map((option, i) => (
-            <span
-              key={option.id}
-              id={`${listId}-${i}`}
-              data-index={i}
-              data-value={option.id}
-              role="option"
-              aria-selected={option.id === value}
-              aria-disabled={option.disabled || undefined}
-              className={`dropdown-item ${i === active ? "active" : ""} ${option.id === value ? "on" : ""}`}
-              onPointerEnter={() => !option.disabled && setActive(i)}
-              onClick={() => pick(option)}
-            >
-              <span className="dropdown-item-text">
-                <span>{option.label}</span>
-                {option.hint && <span className="sub">{option.hint}</span>}
+        <span id={listId} role="listbox" aria-label={label} aria-multiselectable={multi || undefined} className={`dropdown-list ${up ? "up" : ""}`}>
+          {options.map((option, i) => {
+            const on = chosen(option);
+            const n = order?.(option) ?? 0;
+            return (
+              <span
+                key={option.id}
+                id={`${listId}-${i}`}
+                data-index={i}
+                data-value={option.id}
+                role="option"
+                aria-selected={on}
+                aria-disabled={option.disabled || undefined}
+                className={`dropdown-item ${i === active ? "active" : ""} ${on ? "on" : ""}`}
+                onPointerEnter={() => !option.disabled && setActive(i)}
+                onClick={() => pick(option)}
+              >
+                <span className="dropdown-item-text">
+                  <span>{option.label}</span>
+                  {option.hint && <span className="sub">{option.hint}</span>}
+                </span>
+                {/* Several picked: the place each has in the order, which is the order they are tried in. */}
+                {on && (multi ? <span className="dropdown-order">{n}</span> : <Icon name="check" size={14} />)}
               </span>
-              {option.id === value && <Icon name="check" size={14} />}
-            </span>
-          ))}
+            );
+          })}
         </span>
       )}
     </span>
