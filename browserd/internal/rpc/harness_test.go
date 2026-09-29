@@ -106,6 +106,25 @@ func fixture(t *testing.T) *httptest.Server {
 		`<p id="st">unpaid</p></form>`+
 		`<iframe src="http://deep.example/xsite/deep" title="Deep" style="width:300px;height:50px;border:0"></iframe>`)
 	xsite("/xsite/deep", `<title>Deep</title><button onclick="this.textContent='deep clicked'">Deep button</button>`)
+	// A frame placed as a real page places one: centred, with a border, holding small controls, each
+	// page with the browser's own margins.
+	whole := func(path, doc string) {
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, doc)
+		})
+	}
+	whole("/xsite/centred", `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Centred</title>`+
+		`<style>body{font-family:sans-serif;max-width:900px;margin:2em auto}iframe{width:100%;height:260px;border:1px solid #ccc}</style></head>`+
+		`<body><h1>Contents insurance</h1><p>The best offer is shown by the insurer's own widget.</p>`+
+		`<iframe src="http://pay.example/xsite/quote" title="Insurer quote"></iframe></body></html>`)
+	whole("/xsite/quote", `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Quote</title><style>body{font-family:sans-serif}</style></head>`+
+		`<body><h3>Oakline</h3><p>Contents cover.</p>`+
+		`<label><input type="radio" name="term" value="monthly" checked> Pay monthly</label>`+
+		`<label><input type="radio" name="term" value="yearly"> Pay yearly</label>`+
+		`<p><button id="save">Save</button></p><p id="m"></p>`+
+		`<script>document.getElementById('save').onclick = () => { document.getElementById('m').textContent = 'saved ' + document.querySelector('input:checked').value; };</script>`+
+		`</body></html>`)
 	xsite("/xsite/widget", `<title>Widget</title><button onclick="this.textContent='widget clicked'">Widget button</button>`)
 	// A text a pattern of nested repeats takes forever over, for the search's time limit.
 	page("/backtrack", "Backtrack", "<p>"+strings.Repeat("a", 40)+"!</p>")

@@ -1188,6 +1188,13 @@
     return { ref: ref(controlOf(t) || t) };
   }
 
+  // hovered says the pointer is over the element, as the page itself sees it.
+  function hovered(r) {
+    const el = lookup(r);
+    if (!el) return { error: "stale", ref: r };
+    return { hovered: el.matches(":hover") || who(el).matches(":hover") };
+  }
+
   function focus(r) {
     const el = lookup(r);
     if (!el) return { error: "stale", ref: r };
@@ -1521,7 +1528,7 @@
   }
 
   globalThis.__browserd = {
-    snapshot, readable, prepare, measure, hit, focus, selectAll, selectOption, element, evidence, mask, markHumanTyped,
+    snapshot, readable, prepare, measure, hit, hovered, focus, selectAll, selectOption, element, evidence, mask, markHumanTyped,
     hasText, exists, captchas, ref, describe, focusedRef, region, find, elementAt, scrollInfo, scrollBy, scrollToText,
     route, frameElement, frameOrigin, prepareFrame, hitFrame, crossFrames, setPrefix, markListened, listenerRoot,
     scrollState: () => {

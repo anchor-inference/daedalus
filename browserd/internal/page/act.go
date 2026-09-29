@@ -519,8 +519,41 @@ func (p *Model) mouse(ctx context.Context, t *browser.Tab, typ string, pt point,
 	return p.input(ctx, t, "Input.dispatchMouseEvent", params)
 }
 
-func (p *Model) click(ctx context.Context, t *browser.Tab, pt point, button string, count int) error {
-	if err := p.mouse(ctx, t, "mouseMoved", pt, "", 0, 0); err != nil {
+// reach moves the mouse to the point and, for an element in a frame of another site, waits until
+// the frame's page sees the pointer over it. Right after a screenshot (the host's thumbnail before
+// it asks, the recording's keyframe after an action) Chromium routes input at such a frame to the
+// page around it for a moment: the press would focus the frame and do nothing in it (measured on
+// the pinned build: 12 clicks of 12 lost after a screenshot, none after a second's pause). The
+// tab's own elements are reached at once and not asked about.
+func (p *Model) reach(ctx context.Context, t *browser.Tab, d *doc, ref string, pt point) error {
+	for attempt := 0; ; attempt++ {
+		if err := p.mouse(ctx, t, "mouseMoved", pt, "", 0, 0); err != nil {
+			return err
+		}
+		if d.parent == nil || ref == "" || attempt >= 20 {
+			return nil
+		}
+		raw, err := p.callIn(ctx, t, d, "hovered", ref)
+		if err != nil {
+			return err
+		}
+		var h struct {
+			Hovered bool `json:"hovered"`
+		}
+		if json.Unmarshal(raw, &h) == nil && h.Hovered {
+			return nil
+		}
+		select {
+		case <-time.After(50 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// clickIn is click on an element of d, reached first as reach says.
+func (p *Model) clickIn(ctx context.Context, t *browser.Tab, d *doc, ref string, pt point, button string, count int) error {
+	if err := p.reach(ctx, t, d, ref, pt); err != nil {
 		return err
 	}
 	for i := 1; i <= count && t.Dialog() == nil; i++ {
@@ -641,13 +674,13 @@ func (p *Model) dispatch(ctx context.Context, t *browser.Tab, ap ActParams, d *d
 		}
 		switch ap.Action {
 		case "click":
-			return p.click(ctx, t, pt, "left", 1)
+			return p.clickIn(ctx, t, d, ref, pt, "left", 1)
 		case "double_click":
-			return p.click(ctx, t, pt, "left", 2)
+			return p.clickIn(ctx, t, d, ref, pt, "left", 2)
 		}
-		return p.click(ctx, t, pt, "right", 1)
+		return p.clickIn(ctx, t, d, ref, pt, "right", 1)
 	case "hover":
-		return p.mouse(ctx, t, "mouseMoved", pt, "", 0, 0)
+		return p.reach(ctx, t, d, ref, pt)
 	case "check", "uncheck":
 		want := ap.Action == "check"
 		if pr.Element.Checked == want {
@@ -657,7 +690,7 @@ func (p *Model) dispatch(ctx context.Context, t *browser.Tab, ap ActParams, d *d
 		if err := hit(); err != nil {
 			return err
 		}
-		return p.click(ctx, t, pt, "left", 1)
+		return p.clickIn(ctx, t, d, ref, pt, "left", 1)
 	case "type":
 		if disabled {
 			return wire.Errorf(wire.CodeForbidden, "%s is disabled", ref)
@@ -665,7 +698,7 @@ func (p *Model) dispatch(ctx context.Context, t *browser.Tab, ap ActParams, d *d
 		// Focused by a real click where the field can be clicked, so the page sees what a person's
 		// typing makes it see; then its content selected and replaced.
 		if err := hit(); err == nil {
-			if err := p.click(ctx, t, pt, "left", 1); err != nil {
+			if err := p.clickIn(ctx, t, d, ref, pt, "left", 1); err != nil {
 				return err
 			}
 		}

@@ -358,6 +358,39 @@ func TestFramesOfOtherSites(t *testing.T) {
 	}
 }
 
+// A small control in a frame that sits centred and bordered on the page is clicked where it is.
+func TestSmallControlsInACentredFrame(t *testing.T) {
+	h := crossSites(t)
+	o := h.open("g1", "project-a", "")
+	tab := o.Tab.ID
+	h.must("page.navigate", map[string]any{"tab_id": tab, "url": "http://shop.example/xsite/centred"}, nil)
+	var s page.Snapshot
+	deadline := time.Now().Add(10 * time.Second)
+	for s = h.snapshot(tab); !strings.Contains(s.Text, "Pay yearly"); s = h.snapshot(tab) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the frame was not read:\n%s", s.Text)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	// As the host does it before a question: a dry run, a picture of the element, then the click. A
+	// click right after a screenshot is where Chromium used to send the input to the page around the
+	// frame, every time.
+	for i, name := range []string{"Pay yearly", "Pay monthly", "Pay yearly"} {
+		ref := refOf(t, s, "radio", name)
+		h.mustAct(tab, map[string]any{"action": "click", "ref": ref, "element": name, "dry_run": true})
+		var shot page.Screenshot
+		h.must("page.screenshot", map[string]any{"tab_id": tab, "ref": ref, "max_width": 320, "format": "jpeg", "quality": 60}, &shot)
+		r := h.mustAct(tab, map[string]any{"action": "click", "ref": ref, "element": name})
+		if !strings.Contains(r.Diff, `radio "`+name+`" [ref=`+ref+`] [checked]`) {
+			t.Fatalf("click %d: the radio in the frame did not change: %q (point %+v, box %+v)\n%s", i, r.Diff, r.Point, r.Box, h.snapshot(tab).Text)
+		}
+	}
+	h.mustAct(tab, map[string]any{"action": "click", "ref": refOf(t, s, "button", "Save"), "element": "save"})
+	if s := h.snapshot(tab); !strings.Contains(s.Text, "saved yearly") {
+		t.Fatalf("after saving:\n%s", s.Text)
+	}
+}
+
 // axRoles are the roles of the accessibility tree whose nodes the outline must show with the same
 // role and name.
 var axRoles = map[string]bool{"button": true, "link": true, "textbox": true, "searchbox": true, "checkbox": true,
