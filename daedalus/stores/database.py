@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-from contextlib import suppress
 import logging
 import os
 from collections.abc import Callable, Iterable, Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
