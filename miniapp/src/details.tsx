@@ -7,7 +7,7 @@ import { api, LoopView, ProviderUsage, Schedule, SessionDetail } from "./api";
 import { projectPath } from "./folders";
 import { Dot, ServiceRow, ToolPicker, copyText, fmtInt, fmtUsd, loopLabel, statusWord, timeAgo } from "./components";
 import { readLayout, writeLayout } from "./layout";
-import { clock, relTimeLong, shortDateTime, untilShort } from "./format";
+import { clock, planName, relTimeLong, shortDateTime, untilShort } from "./format";
 import { Icon } from "./icons";
 import { confirmAsync, errorText, fmtTok } from "./ui";
 import { plural, t } from "./i18n";
@@ -107,7 +107,7 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, modes,
             <span className="dt-sep">·</span>
             <span>{t(detail.context.estimated ? "session.context.estimated" : "session.context.measured")}</span>
           </div>
-          <p className="sub">{t("session.context.messages", { n: detail.context.messages, s: detail.context.summaries, o: detail.context.operator_turns })}</p>
+          <p className="sub">{t("session.context.messages", { n: plural("session.context.n", detail.context.messages), s: plural("session.context.s", detail.context.summaries), o: plural("session.context.o", detail.context.operator_turns) })}</p>
           {detail.context.last_compaction?.at && (
             <p className="sub" data-last-compaction>{t("session.context.lastcompaction", { when: relTimeLong(detail.context.last_compaction.at), reason: detail.context.last_compaction.reason || "—" })}</p>
           )}
@@ -382,7 +382,14 @@ function LoopPanel({ sessionId, loop, onChange, toast }: { sessionId: string; lo
 
 // ── side panels: usage, cron, attachments ─────────────────────────────────────────────────
 
-const SUBSCRIPTION_LABEL: Record<string, string> = { codex: "Codex · ChatGPT", claude: "Claude · Max", grok: "Grok · SuperGrok" };
+// The section is titled by the provider alone and the plan is the badge beside it. The title used
+// to carry a plan too ("Claude · Max") for some providers and not for others ("opencode"), and the
+// Claude one then said its plan twice.
+const PROVIDER_LABEL: Record<string, string> = { codex: "Codex", claude: "Claude", grok: "Grok", opencode: "OpenCode Go", openrouter: "OpenRouter", deepseek: "DeepSeek" };
+
+function providerLabel(id: string): string {
+  return PROVIDER_LABEL[id] ?? (id ? id[0].toUpperCase() + id.slice(1) : id);
+}
 
 function resetIn(at: number | string | null | undefined): string {
   if (!at) return "";
@@ -398,9 +405,9 @@ function ProviderUsageCard({ ids, provider, usage }: { ids: string; provider: st
   const sub = usage?.subscription;
   const today = usage?.today ?? {};
   return (
-    <Section ids={ids} id="provider" label={SUBSCRIPTION_LABEL[provider] ?? provider} aside={<>
-      {sub?.plan && <span className="badge">{sub.plan}</span>}
-      {sub?.limit_reached && <span className="badge" style={{ color: "var(--bad)" }}>limit</span>}
+    <Section ids={ids} id="provider" label={providerLabel(provider)} aside={<>
+      {sub?.plan && <span className="badge">{planName(sub.plan)}</span>}
+      {sub?.limit_reached && <span className="badge" style={{ color: "var(--bad)" }}>{t("usage.limitreached")}</span>}
     </>}>
       {!usage && <div className="sub">…</div>}
       {sub && !sub.logged_in && <div className="sub">{t("usage.notloggedin")}</div>}

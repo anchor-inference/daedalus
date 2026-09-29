@@ -1178,6 +1178,12 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .service-cmd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-11); }
 
 .linkbtn { background: none; border: 0; padding: 0; color: var(--fg); font: inherit; cursor: pointer; text-align: left; }
+/* A word-sized link in the details panel is a small target for a thumb ("Move…", a shared session,
+   the Files row on a touch tablet): it takes a small control's height there, the text unchanged. */
+@media (pointer: coarse) {
+  .details .dt-row .linkbtn { min-height: var(--ctl-h-sm); padding-inline: 4px; margin-inline: -4px; }
+  .details .aside-row.link { min-height: var(--ctl-h); }
+}
 .linkbtn:hover { color: var(--info); }
 
 
