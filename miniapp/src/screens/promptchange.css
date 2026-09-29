@@ -22,8 +22,11 @@
   .prompt-change-actions { align-items:stretch; flex-direction:column; }
   .prompt-change-actions select, .prompt-change-actions .btn { width:100%; }
   .rules-editor-field { min-height:180px; max-height:44vh; }
-  .sheet.prompt-review-sheet { height:100%; max-height:100%; border-radius:0; }
-  .prompt-review-sheet .sheet-body { display:flex; }
+  /* A bottom sheet as tall as its diff, up to nearly the whole screen, where the diff scrolls inside
+     and the buttons stay in reach. Pinned to the full height, a one-line change left the top 40 % in
+     use and a dimmed empty page under the buttons. */
+  .sheet.prompt-review-sheet { max-height:calc(100% - 12px); }
+  .prompt-review-sheet .sheet-body { display:flex; min-height:0; }
   .prompt-review-sheet .prompt-review { flex:1; min-height:0; grid-template-rows:auto minmax(0, 1fr) auto auto; }
   .prompt-review-sheet .prompt-review-diff { max-height:none; }
 }
