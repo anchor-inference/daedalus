@@ -468,7 +468,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             {props.asr?.configured && !draft.trim() && <MicButton sessionId={sessionId} asr={props.asr} onText={(text) => { setDraft(draft.trim() ? `${draft.trimEnd()}\n\n${text}` : text); textarea.current?.focus(); }} onAutosend={(text) => onSend(text, [])} toast={toast} />}
             {props.onVoice && !draft.trim() && (
               <button type="button" className="iconbtn flat voice" onClick={props.onVoice} aria-label={t("composer.voice")} title={t("composer.voice")}>
-                <Icon name="play" />
+                {/* A voice's wave, not a play triangle: beside the red stop of a live run a triangle
+                    read as a second "start". */}
+                <Icon name="wave" />
               </button>
             )}
             <button type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled} aria-label={primaryLabel} title={action === "queue" ? `${primaryLabel} — ${t("composer.queue.hint")}` : primaryLabel} data-action={action}>

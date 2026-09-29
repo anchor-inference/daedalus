@@ -749,12 +749,23 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .steer-text { color:var(--fg); }
 .steer-hint { white-space:nowrap; }
 .steer-x { background:transparent; }
-@media (max-width: 719px) { .steer-hint { display:none; } }
+/* Narrow, the hint goes under the message instead of away: it is the only thing on the card that
+   says the message is waiting and not yet read. */
+@media (max-width: 719px) {
+  .steer { grid-template-columns:auto minmax(0, 1fr) auto; row-gap:2px; }
+  .steer > .ic { grid-row:1; grid-column:1; }
+  .steer-text { grid-row:1; grid-column:2; }
+  .steer-hint { grid-row:2; grid-column:2; white-space:normal; font-size:var(--fs-11); }
+  .steer-x { grid-row:1 / span 2; grid-column:3; }
+}
 /* A narrow pill — a phone, or a pane of the dual view — has room for the field, the model and the
    circle: the ring lives in Details there, the voice page is a tab away, and the model name is cut short. */
 .composer-box { container-type: inline-size; }
 @container (max-width: 560px) {
-  .ctx-ring, .iconbtn.flat.voice { display:none; }
+  .iconbtn.flat.voice { display:none; }
+  /* Narrow, the context stays as its number alone rather than going away: a phone otherwise had no
+     sight of how full the window is. The number without the arc does not read as a spinner. */
+  .ctx-ring svg { display:none; }
   .composer-box textarea { padding:9px 4px; }
   .composer-tools { gap:0; }
 }
@@ -2527,6 +2538,9 @@ input.field[type="range"] {
 .mode-list { display:flex; flex-direction:column; }
 /* The one heading of the composer's menus: mode, model and effort open under the same small title. */
 .menu-heading { padding:var(--space-1) 10px; font-size:var(--fs-12); font-weight:400; }
+.model-heading { display:flex; align-items:center; gap:10px; }
+.model-legend { display:inline-flex; align-items:center; gap:3px; color:var(--fg-3); font-size:var(--fs-11); white-space:nowrap; }
+.model-legend .model-kind { width:auto; height:auto; min-width:0; font-size:var(--fs-11); }
 .mode-row .model-text .sub { white-space:normal; }
 .mode-row[aria-checked="true"] > .ic { color:var(--accent); }
 .mode-switch { flex:none; position:relative; width:28px; height:16px; border-radius:8px; background:var(--line-strong); transition:background var(--t-fast); }
