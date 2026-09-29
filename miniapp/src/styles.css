@@ -3398,6 +3398,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .harness-signin.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 .harness-models { color: var(--fg-2); }
 .harness-action { text-align: right; white-space: nowrap; }
+.harness-table th.harness-action { text-align: right; }
 .harness-screen .btn.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .harness-busy { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); }
 .harness-busy .spinner { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: harness-spin 900ms linear infinite; }

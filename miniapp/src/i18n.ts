@@ -3631,7 +3631,7 @@ Object.assign(DICT, {
   "harness.col.agents": { en: "Agents", ru: "Агенты" },
   "harness.col.models": { en: "Models", ru: "Модели" },
   "harness.col.channel": { en: "Status channel", ru: "Канал статусов" },
-  "harness.col.state": { en: "State", ru: "Состояние" },
+  "harness.col.state": { en: "Update", ru: "Обновление" },
   "harness.node.pinned": { en: "pinned {version}, installed here from this screen", ru: "закреплена {version}, ставится отсюда" },
   "harness.node.install": { en: "Install Node", ru: "Установить Node" },
   "harness.footnote": { en: "The CLIs' own auto-update is off: a version changes only from here. After an update the adapter runs a short self-check: launch, hook, one line delivered, exit.", ru: "Автообновление CLI выключено: версия меняется только отсюда. После обновления адаптер проходит короткую самопроверку: запуск, хук, отправка строки, выход." },
