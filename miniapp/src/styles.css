@@ -771,8 +771,35 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .model-select .model-to, .model-select .model-from { min-width:0; }
 .model-select .model-from { opacity:.85; }
 .model-select .model-dot { width:6px; height:6px; border-radius:50%; background:var(--warn); flex:none; }
-.composer-box .chip.recording { align-self:center; margin:0 2px; }
 .composer-box .attachments { margin:4px 6px 2px; width:auto; }
+
+/* A voice note being recorded is the whole pill: cancel, the waveform with the time, stop, send. The
+   bar is as tall as the field and its row were, so the conversation above does not jump when it opens. */
+/* The field and its row stay mounted under the bar, so the draft and its measured height survive it. */
+.composer-box.voicing > textarea[hidden], .composer-box.voicing > .composer-row[hidden] { display:none; }
+.voicebar { display:flex; align-items:center; gap:6px; min-height:calc(38px + var(--ctl-h-lg) + 2px); padding:0 2px; }
+.voicebar-wave { flex:1; min-width:0; height:32px; color:var(--fg-2); }
+.voicebar-time { flex:none; min-width:3.5ch; text-align:right; font-variant-numeric:tabular-nums; font-size:var(--fs-13); color:var(--fg-2); }
+.voicebar-busy { flex:1; min-width:0; display:flex; align-items:center; gap:8px; color:var(--fg-2); font-size:var(--fs-13); }
+.voicebar-spinner { width:14px; height:14px; border-radius:50%; border:2px solid var(--line-strong); border-top-color:var(--fg-2); animation:voicebar-spin .8s linear infinite; flex:none; }
+@keyframes voicebar-spin { to { transform:rotate(360deg); } }
+.voicebar .roundbtn.voicebar-stop { background:var(--surface-2); color:var(--fg); }
+.voicebar .roundbtn:disabled { opacity:.35; cursor:default; }
+/* A thumb gets the touch size on every control in the bar: these are the only way out of a recording.
+   The microphone too, on a touch tablet, where the desktop's row would otherwise keep it at 40. */
+@media (pointer: coarse), (max-width: 1023px) {
+  .voicebar .iconbtn, .voicebar .roundbtn, .composer-tools > .iconbtn.mic { width:var(--row-h-touch); height:var(--row-h-touch); }
+}
+/* A recording that was not transcribed: why, and retry, attach, discard. Above the pill so the field
+   stays free to type in meanwhile. */
+.voicenote-failed { display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px; padding:8px 8px 8px 12px; background:var(--surface-2); border:1px solid color-mix(in srgb, var(--bad) 45%, var(--line)); border-radius:var(--radius-md); font-size:var(--fs-13); }
+.voicenote-failed > .ic { color:var(--bad); flex:none; }
+.voicenote-failed-text { flex:1 1 220px; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.voicenote-failed-reason { overflow-wrap:anywhere; }
+.voicenote-failed-actions { display:flex; align-items:center; gap:6px; flex:none; margin-left:auto; }
+@media (pointer: coarse), (max-width: 1023px) {
+  .voicenote-failed-actions .btn, .voicenote-failed-actions .iconbtn { min-height:var(--row-h-touch); min-width:var(--row-h-touch); }
+}
 
 /* the steers the host is holding, as small cards above the pill */
 .steers { display:flex; flex-direction:column; gap:4px; }
@@ -1496,8 +1523,6 @@ body.resizing iframe { pointer-events: none; }
 
 /* ── the microphone ────────────────────────────────────────────────────────────────────── */
 .roundbtn:disabled { opacity: .4; cursor: default; }
-.chip.recording { border-color: color-mix(in srgb, var(--bad) 60%, transparent); color: var(--bad); font-variant-numeric: tabular-nums; }
-.rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); animation: pulse 1s ease-in-out infinite; display: inline-block; }
 
 /* ── memory ────────────────────────────────────────────────────────────────────────────── */
 .memory-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }

@@ -10,7 +10,8 @@ import { enterSends, errorText, fmtBytes, fmtTok, haptic } from "./ui";
 import { ModelChoice, ModelSelect } from "./modelselect";
 import { EffortSelect } from "./effortselect";
 import { ModeInfo, ModeSelect } from "./modeselect";
-import { blobToWav } from "./wav";
+import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "./voicebar";
+import { landWords } from "./voicenote";
 import {
   Approval,
   ComposerStatus,
@@ -211,8 +212,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   // ── send / stop / queue ──
   const { action, enabled } = primaryAction({ status, hasDraft: !!draft.trim(), hasFiles: files.length > 0, asking, sending });
-  async function send() {
-    const text = draft.trim();
+  async function send(override?: string) {
+    const text = (override ?? draft).trim();
     const going = files;
     if (sending || (!text && going.length === 0)) return;
     if (text.startsWith("/") && going.length === 0 && commands.some((c) => c.name === text.slice(1).split(" ")[0].toLowerCase())) {
@@ -248,6 +249,27 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     else if (action === "reply") void reply();
     else void send();
   }
+
+  // ── the voice note ──
+  // Read at the moment the words arrive, not when the recording began: the draft may have been
+  // restored from another tab or edited while a note was on its way.
+  const draftNow = useRef(draft);
+  draftNow.current = draft;
+  const note = useVoiceNote({
+    sessionId,
+    asr: props.asr,
+    onWords: (words, go) => {
+      const landed = landWords(draftNow.current, words, go);
+      if (landed.send) void send(landed.text);
+      else {
+        setDraft(landed.text);
+        window.setTimeout(() => textarea.current?.focus(), 0);
+      }
+    },
+    onAttach: (file) => addFiles([file]),
+    toast,
+  });
+  const voiceBar = note.state.phase === "recording" || note.state.phase === "transcribing";
 
   // ── keys ──
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -414,9 +436,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           ))}
         </div>
       )}
-      <div className="composer-box">
-        {status === "running" && <div className="composer-steering">{t("composer.steering")}</div>}
-        {!phone && place.length > 0 && (
+      <VoiceNoteFailed note={note} />
+      <div className={`composer-box ${voiceBar ? "voicing" : ""}`}>
+        {voiceBar && <VoiceBar note={note} />}
+        {status === "running" && !voiceBar && <div className="composer-steering">{t("composer.steering")}</div>}
+        {!phone && !voiceBar && place.length > 0 && (
           <div className="composer-place" aria-label={t("composer.place")}>
             {place.map((chip) => <span key={chip.kind} className="composer-place-chip" title={t(`composer.place.${chip.kind}`, { name: chip.name })}>
               <Icon name="folder" size={12} /><span className="truncate">{chip.name}</span>
@@ -424,7 +448,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           </div>
         )}
         {progress !== null && <div className="sub upload-progress" role="status">{t("upload.progress", { percent: Math.floor(progress * 100) })}</div>}
-        {files.length > 0 && (
+        {files.length > 0 && !voiceBar && (
           <div className="attachments" aria-label={t("session.attachments")}>
             {files.map((f, i) => (
               <AttachmentCard key={`${f.name}-${f.size}-${f.lastModified}-${i}`} file={f} onOpen={() => props.onPreviewFile?.(f)} onRemove={() => setFiles((p) => p.filter((_, j) => j !== i))} />
@@ -432,6 +456,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           </div>
         )}
         <textarea
+          hidden={voiceBar}
           ref={textarea}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -441,7 +466,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onKeyDown={onKeyDown}
           aria-label={props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : t(placeholderKey(status, asking))}
         />
-        <div className="composer-row">
+        <div className="composer-row" hidden={voiceBar}>
           <input ref={fileInput} type="file" multiple hidden onChange={(e) => { addFiles(e.target.files ?? []); e.target.value = ""; }} />
           <input ref={photoInput} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { addFiles(e.target.files ?? []); e.target.value = ""; }} />
           <button ref={plusButton} type="button" className={`iconbtn flat plus ${plusOpen ? "on" : ""}`} onClick={() => setPlusOpen((o) => !o)} aria-label={t("composer.plus")} title={t("composer.plus")} aria-haspopup="menu" aria-expanded={plusOpen}>
@@ -470,7 +495,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 <span className="ctx-pct" aria-hidden>{`${pct}%`}</span>
               </button>
             )}
-            {props.asr?.configured && !draft.trim() && <MicButton sessionId={sessionId} asr={props.asr} onText={(text) => { setDraft(draft.trim() ? `${draft.trimEnd()}\n\n${text}` : text); textarea.current?.focus(); }} onAutosend={(text) => onSend(text, [])} toast={toast} />}
+            {props.asr?.configured && <MicButton note={note} />}
             <button type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled} aria-label={primaryLabel} title={action === "queue" ? `${primaryLabel} — ${t("composer.queue.hint")}` : primaryLabel} data-action={action}>
               <Icon name={action === "stop" ? "stop" : action === "reply" ? "send" : "up"} />
             </button>
@@ -513,82 +538,5 @@ export function AttachmentCard({ file, onOpen, onRemove }: { file: File; onOpen:
         <Icon name="close" size={12} />
       </button>
     </div>
-  );
-}
-
-/** Hold-free recording: one tap starts, the next stops and the words land in the field (or go straight out with autosend). */
-function MicButton({ sessionId, asr, onText, onAutosend, toast }: { sessionId: string; asr: AsrStatus; onText: (text: string) => void; onAutosend: (text: string) => Promise<void>; toast: (t: string) => void }) {
-  const [rec, setRec] = useState<MediaRecorder | null>(null);
-  const [seconds, setSeconds] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const chunks = useRef<Blob[]>([]);
-  const startedAt = useRef(0);
-  const supported = typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
-  useEffect(() => {
-    if (!rec) return;
-    const timer = setInterval(() => setSeconds(Math.round((Date.now() - startedAt.current) / 1000)), 500);
-    return () => clearInterval(timer);
-  }, [rec]);
-  useEffect(() => () => rec?.stream.getTracks().forEach((tr) => tr.stop()), [rec]);
-  async function transcribe(blob: Blob, took: number) {
-    if (took > asr.max_seconds) {
-      toast(t("session.transcribe.long", { n: took, max: asr.max_seconds }));
-      return;
-    }
-    setBusy(true);
-    try {
-      const wav = await blobToWav(blob);
-      const form = new FormData();
-      form.append("audio", wav, "recording.wav");
-      const res = await fetch(`/api/sessions/${sessionId}/transcribe`, { method: "POST", headers: api.authHeaders(), body: form });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? `transcription failed (${res.status})`);
-      const r = (await res.json()) as { transcript: string; text: string; autosend: boolean };
-      if (r.autosend) {
-        await onAutosend(r.text);
-        toast(t("session.transcribe.sent", { text: r.transcript.slice(0, 80) }));
-      } else {
-        onText(r.text);
-        haptic("success");
-      }
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function start() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const type = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"].find((x) => MediaRecorder.isTypeSupported(x));
-      const r = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
-      chunks.current = [];
-      r.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
-      r.onstop = () => {
-        stream.getTracks().forEach((tr) => tr.stop());
-        const blob = new Blob(chunks.current, { type: r.mimeType || "audio/webm" });
-        const took = Math.round((Date.now() - startedAt.current) / 1000);
-        setRec(null);
-        setSeconds(0);
-        if (blob.size > 0 && took >= 1) void transcribe(blob, took);
-      };
-      startedAt.current = Date.now();
-      r.start(250);
-      setRec(r);
-      haptic("light");
-    } catch {
-      setRec(null);
-    }
-  }
-  if (rec) {
-    return (
-      <button type="button" className="chip recording" onClick={() => rec.stop()} title={t("session.mic.stop")} aria-label={t("session.mic.stop.label")}>
-        <span className="rec-dot" /> {t("session.mic.seconds", { n: seconds })}
-      </button>
-    );
-  }
-  return (
-    <button type="button" className="iconbtn flat mic" onClick={start} disabled={!supported || busy} title={t(!supported ? "session.mic.none" : busy ? "session.mic.busy" : "session.mic.title")} aria-label={t("session.mic")}>
-      <Icon name={busy ? "dot" : "mic"} />
-    </button>
   );
 }

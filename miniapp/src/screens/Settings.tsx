@@ -30,6 +30,7 @@ import { TerminalCap } from "./TerminalCap";
 import { BrowserSettingsTab } from "./BrowserSettings";
 import { ToolGroupsSettings } from "../toolgroupsview";
 import { CompactionModelSelect } from "../compactionmodel";
+import { AsrSettingsCard } from "./AsrSettings";
 
 const DEFAULT_KINDS = ["deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"];
 /** Self-hosted endpoints: temperature is a sampling pin, not a vendor default. */
@@ -599,44 +600,10 @@ function SearchBlock({ s, save }: { s: Settings; save: (patch: any) => Promise<v
 
 function ToolsTab({ s, save, toast, onSettings }: { s: Settings; save: (patch: any) => Promise<void>; toast: (t: string) => void; onSettings: (next: Settings) => void }) {
   const web = s.tools.web;
-  const asr = s.asr;
   return (
     <>
       <ToolGroupsSettings toast={toast} revision={s.revision} onSettings={onSettings} />
-      <div className="card">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("settings.asr.title")}</div>
-        <div className="sub">{t("settings.asr.sub")}</div>
-        <label className="field">{t("settings.asr.provider")}</label>
-        <select className="field" value={asr.provider || ""} onChange={(e) => save({ asr: { ...asr, api_key: "", provider: e.target.value } })}>
-          <option value="">{t("settings.asr.custom")}</option>
-          {Object.keys(s.providers).map((pid) => (
-            <option key={pid} value={pid}>{pid}{s.providers[pid].base_url ? ` · ${s.providers[pid].base_url.replace(/^https?:\/\//, "")}` : ""}</option>
-          ))}
-        </select>
-        {!asr.provider && (
-          <>
-            <label className="field">{t("settings.asr.url")}</label>
-            <input className="field" defaultValue={asr.url} placeholder="https://api.openai.com/v1" onBlur={(e) => save({ asr: { ...asr, api_key: "", url: e.target.value.trim() } })} />
-            <label className="field">{t(asr.api_key_set ? "settings.asr.key.set" : "settings.asr.key")}</label>
-            <input className="field" type="password" defaultValue="" placeholder={asr.api_key_set ? "••••••" : ""} onBlur={(e) => e.target.value && save({ asr: { ...asr, api_key: e.target.value } })} />
-          </>
-        )}
-        <div className="grid2">
-          <div>
-            <label className="field">{t("settings.asr.model")}</label>
-            <input className="field" defaultValue={asr.model} placeholder={asr.provider === "openrouter" ? "openai/whisper-1" : "whisper-1"} onBlur={(e) => save({ asr: { ...asr, api_key: "", model: e.target.value.trim() } })} />
-          </div>
-          <div>
-            <label className="field">{t("settings.asr.language")}</label>
-            <input className="field" defaultValue={asr.language} onBlur={(e) => save({ asr: { ...asr, api_key: "", language: e.target.value.trim() } })} />
-          </div>
-        </div>
-        <div className="btnrow">
-          <button className={`btn small ${asr.autosend ? "primary" : ""}`} onClick={() => save({ asr: { ...asr, api_key: "", autosend: !asr.autosend } })}>
-            {t("settings.asr.autosend", { state: t(asr.autosend ? "common.on" : "common.off") })}
-          </button>
-        </div>
-      </div>
+      <AsrSettingsCard s={s} save={save} />
       <div className="card">
         <div className="section-title" style={{ marginTop: 0 }}>{t("settings.vision.title")}</div>
         <div className="sub">{t("settings.vision.sub")}</div>
