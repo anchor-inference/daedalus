@@ -87,6 +87,28 @@ func fixture(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/go", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, r.URL.Query().Get("to"), http.StatusFound)
 	})
+	// Pages of three sites for the frames tests, told apart by the name they are asked for (the
+	// tests' wall sends every name to this fixture).
+	xsite := func(path, body string) {
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, "<!doctype html><html><head><meta charset=\"utf-8\"></head><body style=\"margin:0;font:16px sans-serif\">"+body+"</body></html>")
+		})
+	}
+	xsite("/xsite/outer", `<title>Outer</title><h1>Checkout</h1>`+
+		`<iframe src="http://pay.example/xsite/pay" title="Payment" style="width:600px;height:320px;border:0"></iframe>`+
+		`<iframe src="http://cdn.shop.example/xsite/widget" title="Widget" style="width:400px;height:80px;border:0"></iframe>`)
+	xsite("/xsite/pay", `<title>Pay</title><form>`+
+		`<p><label>Name on card <input autocomplete="cc-name" value="SECRET-cc-name" style="width:300px;height:30px"></label></p>`+
+		`<p><label>Card <input autocomplete="cc-number" value="SECRET-cc-number" style="width:300px;height:30px"></label></p>`+
+		`<p><label>Note <input id="note"></label></p>`+
+		`<button type="button" style="width:120px;height:30px" onclick="document.getElementById('st').textContent='paid'">Pay now</button>`+
+		`<p id="st">unpaid</p></form>`+
+		`<iframe src="http://deep.example/xsite/deep" title="Deep" style="width:300px;height:50px;border:0"></iframe>`)
+	xsite("/xsite/deep", `<title>Deep</title><button onclick="this.textContent='deep clicked'">Deep button</button>`)
+	xsite("/xsite/widget", `<title>Widget</title><button onclick="this.textContent='widget clicked'">Widget button</button>`)
+	// A text a pattern of nested repeats takes forever over, for the search's time limit.
+	page("/backtrack", "Backtrack", "<p>"+strings.Repeat("a", 40)+"!</p>")
 	mux.HandleFunc("/after-login", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "<title>Signed in</title>signed in")
 	})

@@ -1,3 +1,4 @@
+- [viewport 1280x800, the page fits]
 - banner
   - link "Fixture shop" [ref=e1] url="http://SITE/site/shop/index.html"
   - text "Cart (0)"
@@ -9,3 +10,4 @@
   - search
     - searchbox "Search products" [ref=e4]
     - button "Search" [ref=e5]
+- [end of page]

@@ -1,0 +1,32 @@
+- [viewport 1280x800, the page fits]
+- navigation "Top"
+  - generic "Account" [ref=e1] [collapsed]
+    - text "Account"
+- main
+  - heading "Clickables" [level=1]
+  - generic "Open the plain card" [ref=e2]
+  - heading "Linked card" [level=3]
+  - link "Read more" [ref=e3] url="http://SITE/still"
+  - generic "Save" [ref=e4]
+  - text "for later"
+  - generic "Filter: red" [ref=e5]
+  - text "Posted by"
+  - link "someone" [ref=e6] url="http://SITE/still?u=1"
+  - text "today."
+  - checkbox "Dark mode" [ref=e7]
+  - button "Upload a picture" [ref=e8]
+  - combobox "Country" [ref=e9] value="Austria" options=["Austria","Belgium","Croatia","Denmark","Estonia","Finland","Germany","Hungary"] +4 more
+  - generic [ref=e10] [scrollable]
+    - text "Row 1"
+    - text "Row 2"
+    - text "Row 3"
+    - text "Row 4"
+    - text "Row 5"
+    - text "Row 6"
+    - text "Row 7"
+    - text "Row 8"
+    - text "Row 9"
+    - text "Row 10"
+    - text "Row 11"
+    - text "Row 12"
+- [end of page]

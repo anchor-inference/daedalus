@@ -1,0 +1,17 @@
+- [viewport 1280x800, 4.2 screens above, 5.1 screens below]
+- [4.2 screens above; scroll up to see them]
+- main
+  - heading "Section 8" [level=2]
+  - text "Words of section 8."
+  - link "More on 8" [ref=e2] url="http://SITE/still?s=8"
+  - heading "Section 9" [level=2]
+  - text "Words of section 9."
+  - link "More on 9" [ref=e3] url="http://SITE/still?s=9"
+  - heading "Section 10" [level=2]
+  - text "Words of section 10."
+  - link "More on 10" [ref=e4] url="http://SITE/still?s=10"
+  - heading "Section 11" [level=2]
+  - text "Words of section 11."
+  - link "More on 11" [ref=e5] url="http://SITE/still?s=11"
+  - heading "Section 12" [level=2]
+- [5.1 screens below; scroll down to see them]

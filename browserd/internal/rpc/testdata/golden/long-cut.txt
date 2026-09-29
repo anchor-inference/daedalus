@@ -1,0 +1,30 @@
+- [viewport 1280x800, at the top, 9.3 screens below]
+- banner
+  - navigation "Top"
+    - link "First" [ref=e1] url="http://SITE/site/long.html#s1"
+    - link "Last" [ref=e2] url="http://SITE/site/long.html#s20"
+- main
+  - heading "A long page" [level=1]
+  - heading "Section 1" [level=2]
+  - text "Words of section 1."
+  - link "More on 1" [ref=e3] url="http://SITE/still?s=1"
+  - heading "Section 2" [level=2]
+  - text "Words of section 2."
+  - link "More on 2" [ref=e4] url="http://SITE/still?s=2"
+  - heading "Section 3" [level=2]
+  - text "Words of section 3."
+  - link "More on 3" [ref=e5] url="http://SITE/still?s=3"
+  - heading "Section 4" [level=2]
+  - text "Words of section 4."
+  - link "More on 4" [ref=e6] url="http://SITE/still?s=4"
+  - heading "Section 5" [level=2]
+  - text "Words of section 5."
+  - link "More on 5" [ref=e7] url="http://SITE/still?s=5"
+  - heading "Section 6" [level=2]
+  - text "Words of section 6."
+  - link "More on 6" [ref=e8] url="http://SITE/still?s=6"
+- [the focused element's region:]
+  - form "Subscribe"
+    - textbox "Email" [ref=e11] [focused]
+    - button "Subscribe" [ref=e12]
+- [the outline was cut at 1500 characters; not shown: the rest of section "Section 7" [ref=e13], section "Section 8" [ref=e14], section "Section 9" [ref=e15], section "Section 10" [ref=e16], …; take a snapshot with scope=<ref> for one part]

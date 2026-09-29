@@ -384,7 +384,7 @@ func TestDownloadAndUpload(t *testing.T) {
 	if err := h.call("upload.put", map[string]any{"group_id": "g1", "name": "../etc/passwd", "offset": 0, "data_b64": part1}, nil); code(err) != -32602 {
 		t.Fatalf("a name with a path: %v", err)
 	}
-	upRef := refOf(t, s, "button", "Choose file")
+	upRef := refOf(t, s, "button", "Choose File")
 	if dry := h.mustAct(tab, map[string]any{"action": "click", "ref": upRef, "element": "?", "dry_run": true}); dry.Element == nil || !dry.Element.File {
 		t.Fatalf("not a file input: %+v", dry.Element)
 	}
@@ -472,16 +472,49 @@ func TestNoSecretInAnyOutput(t *testing.T) {
 }
 
 // The outline of a known page, held as a golden file: a change to how pages are read shows as a
-// change to this file, reviewed like code. -update rewrites it.
+// change to this file, reviewed like code. -update rewrites it. The long page's geometry is fixed in
+// pixels, so its scroll figures are the same in every Chromium. Each page is its browser's first:
+// the header says the viewport's size, and Debian's Chromium gives a browser's later windows a page
+// taller than the group's viewport (the pinned build does not), which is the window sizing's matter,
+// not the outline's.
 func TestSnapshotGolden(t *testing.T) {
 	h := start(t, nil)
-	for _, c := range []struct{ path, golden string }{
-		{"/site/shop/index.html", "testdata/golden/shop-index.txt"},
-		{"/site/shop/checkout.html", "testdata/golden/shop-checkout.txt"},
-		{"/site/widgets.html", "testdata/golden/widgets.txt"},
+	for _, c := range []struct {
+		path, golden string
+		params       map[string]any
+		before       map[string]any // an action taken first
+	}{
+		{path: "/site/shop/index.html", golden: "testdata/golden/shop-index.txt"},
+		{path: "/site/shop/checkout.html", golden: "testdata/golden/shop-checkout.txt"},
+		{path: "/site/widgets.html", golden: "testdata/golden/widgets.txt"},
+		{path: "/site/clickables.html", golden: "testdata/golden/clickables.txt"},
+		{path: "/site/long.html", golden: "testdata/golden/long-cut.txt", params: map[string]any{"max_chars": 1500}},
+		{path: "/site/long.html", golden: "testdata/golden/long-viewport.txt", params: map[string]any{"view": "viewport"},
+			before: map[string]any{"action": "scroll", "text": "Section 10", "element": "section 10"}},
 	} {
-		o := h.open("g"+strings.NewReplacer("/", "", ".", "").Replace(c.path), "project-a", c.path)
-		got := strings.ReplaceAll(h.snapshot(o.Tab.ID).Text, h.site.URL, "http://SITE")
+		o := h.open("golden", "golden", c.path)
+		if c.before != nil {
+			h.mustAct(o.Tab.ID, c.before)
+		}
+		params := map[string]any{"tab_id": o.Tab.ID}
+		for k, v := range c.params {
+			params[k] = v
+		}
+		var s page.Snapshot
+		h.must("page.snapshot", params, &s)
+		got := strings.ReplaceAll(s.Text, h.site.URL, "http://SITE")
+		var list struct {
+			Browsers []struct {
+				ID      string `json:"id"`
+				Profile string `json:"profile"`
+			} `json:"browsers"`
+		}
+		h.must("browser.list", map[string]any{}, &list)
+		for _, b := range list.Browsers {
+			if b.Profile == "golden" {
+				h.must("browser.close", map[string]any{"browser_id": b.ID}, nil)
+			}
+		}
 		if *update {
 			if err := os.MkdirAll(filepath.Dir(c.golden), 0o755); err != nil {
 				t.Fatal(err)
@@ -496,7 +529,7 @@ func TestSnapshotGolden(t *testing.T) {
 			t.Fatal(err)
 		}
 		if got+"\n" != string(want) {
-			t.Errorf("%s:\n got:\n%s\nwant:\n%s", c.path, got, want)
+			t.Errorf("%s:\n got:\n%s\nwant:\n%s", c.golden, got, want)
 		}
 	}
 }
