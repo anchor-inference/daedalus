@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import suppress
 import logging
 import os
 from collections.abc import Callable, Iterable, Sequence
@@ -1698,8 +1699,18 @@ class Database:
             await self.db._lock.acquire()
             try:
                 await self.db.conn.execute("BEGIN IMMEDIATE")
-            except Exception:
-                self.db._lock.release()
+            except BaseException:
+                # A cancellation is a BaseException, and catching only Exception let a task cancelled
+                # while its BEGIN was in flight keep the lock forever: every later query waited on it,
+                # which hung a shutdown (and the test suite, about one run in ten) with nothing in the
+                # log. The BEGIN still runs on the connection's thread after a cancellation, so a
+                # ROLLBACK is queued behind it before the lock is let go; the next writer would
+                # otherwise find a transaction already open.
+                try:
+                    with suppress(Exception):
+                        await self.db.conn.execute("ROLLBACK")
+                finally:
+                    self.db._lock.release()
                 raise
             return self.db.conn
 
