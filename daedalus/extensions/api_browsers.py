@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from daedalus import load as load_math
 from daedalus.browser.gateway import BrowserGateway
 from daedalus.browser.model import BrowserError, EnvUnavailable, InvalidRequest, NotFound
+from daedalus.browser.notes import SiteNotes
 from daedalus.gateway import SocketGone, ticket_who
 from daedalus.stores.files import FileRefused, safe_name
 
@@ -209,6 +210,34 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def browsers_recordings(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """The recorded keyframes on disk per environment, against the size and age they are kept to."""
         return {"envs": await service().recordings()}
+
+    def site_notes() -> SiteNotes:
+        found = app.extensions.get("browser_notes")
+        if found is None:
+            raise HTTPException(404, "this installation has no browser")
+        return cast("SiteNotes", found)
+
+    @api.get("/api/browsers/notes")
+    async def browsers_notes(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The site notes agents proposed, waiting ones first, each with the project it is for."""
+        notes = await site_notes().list()
+        names = {p.id: p.name for p in await manager.projects.list()}
+        for note in notes:
+            note["project"] = names.get(note["project_id"], "") if note["project_id"] else ""
+        notes.sort(key=lambda n: (n["status"] != "proposed", -(n["approved_at"] or n["proposed_at"])))
+        return {"notes": notes}
+
+    @api.post("/api/browsers/notes/{note_id}/approve")
+    async def browsers_note_approve(note_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """From now on agents on the note's site (in its project) are shown it."""
+        return {"note": await site_notes().approve(note_id)}
+
+    @api.delete("/api/browsers/notes/{note_id}")
+    async def browsers_note_delete(note_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Discard a waiting note, or take back an approved one."""
+        if not await site_notes().delete(note_id):
+            raise NotFound(f"no site note {note_id}")
+        return {"ok": True}
 
     @api.get("/api/browsers/{group_id}")
     async def browsers_get(group_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

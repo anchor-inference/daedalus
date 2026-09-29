@@ -215,6 +215,7 @@ GATES: dict[str, object] = {
     "/api/browsers/running": {"browsers": []},
     "/api/browsers/profiles": {"profiles": []},
     "/api/browsers/recordings": {"envs": []},
+    "/api/browsers/notes": {"notes": []},
     # Without a browser installed, the workloads are the terminals alone: their own bar.
     "/api/workloads/load": {"terminals": terminal_load(), "browsers": None, "together": None},
     # Terminal environments and the terminals in them: a container environment that works, a host
