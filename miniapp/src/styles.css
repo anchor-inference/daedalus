@@ -2487,7 +2487,10 @@ input.field[type="range"] {
 .composer-box { gap:var(--space-2); padding:var(--space-2); border-radius:var(--radius-lg); transition:none; }
 .composer-box textarea { flex:none; display:block; width:100%; min-height:calc(var(--fs-prose) * 1.4 + var(--space-2) * 2); padding:var(--space-2); font-size:var(--fs-prose); }
 .composer-row { align-items:center; flex-wrap:nowrap; gap:var(--space-1); }
-.composer-row > .iconbtn.plus { margin:0; border-radius:50%; }
+/* The plus wears the same filled ground as the mode and model chips beside it: bare on the card, its
+   tap area was the one control in the row nothing marked. */
+.composer-row > .iconbtn.plus { margin:0; border-radius:50%; background:var(--surface-2); }
+.composer-row > .iconbtn.plus:hover, .composer-row > .iconbtn.plus.on { background:var(--surface-3); }
 .composer-row .model-select { max-width:none; padding-inline:var(--space-2); gap:var(--space-1); border-radius:var(--radius-lg); background:var(--surface-2); }
 /* The mode chip stays on every width, a running phone included: it is the one place that says the
    session plans, or holds to YAGNI, and the model chip is the one that gives way when the row is short. */
