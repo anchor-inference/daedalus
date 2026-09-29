@@ -1178,7 +1178,20 @@ class Team:
         await self.manager.projects.record(ask.project_id, "system", "escalation", f"Request {ask.short_id} went to the operator{': ' + why if why else ''}", {"ask_id": ask.id})
         routed = await self.manager.asks.get(ask.id)
         await self._release_hold(routed or ask)
+        await self._announce_to_operator(routed or ask)
         return True
+
+    async def _announce_to_operator(self, ask: Ask) -> None:
+        """Say that a request now waits on the operator.
+
+        Handing a request over only changed its row and posted the notification: nothing reached the
+        app's event stream, so its Questions list and count learnt of it at the next poll or a reload,
+        and the operator read "the request went to you" with nothing on screen to answer. ``ask.routed``
+        is only that news; the notification and the orchestrator's wake-ups have their own paths.
+        """
+        member = await self.manager.staff.get(ask.staff_id) if ask.staff_id else None
+        ref = str(ask.detail.get("event_ref") or ask.request_ref)
+        await self.publish("ask.routed", {"request_id": ask.id, "request_ref": ref, "routed_to": ask.routed_to}, member=member, project_id=ask.project_id)
 
     async def claim_answer(self, session_id: str, tool_call_id: str, via: str) -> str | None:
         """An answer typed into a Daedalus member's session is the operator's answer to the request."""
@@ -1595,7 +1608,9 @@ class Ingress:
             staff_session_id=live.id,
             task_id=live.session.task_id,
             request_ref=request_ref,
-            detail={**detail, "event_ref": event_ref or ""},
+            # The risk is kept with the request: handed to the operator later, an elevated one must still
+            # be answered in the app, never from a lock screen.
+            detail={**detail, "event_ref": event_ref or "", "risk": risk},
         )
         if event_ref is None:
             # A command-line member's request has no session to announce it, so the ingress does,
