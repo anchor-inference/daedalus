@@ -1019,9 +1019,11 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .navmenu-item .ic { color: var(--fg-2); flex: none; }
   .navmenu-item:hover, .navmenu-item:focus-visible { background: var(--surface-3); outline: none; }
   .navmenu-item.active .ic { color: var(--accent); }
-  .navmenu-item .count { margin-left: auto; font-size: var(--fs-11); font-weight: 700; color: var(--bg); background: var(--fg); border-radius: var(--radius-pill); padding: 1px 6px; min-width: 18px; text-align: center; }
-  .navmenu-item .count.attn { background: var(--warn); }
-  .navmenu-item .count.ok { background: var(--ok); }
+  /* The same count is the same red it is on the rail's icon a few pixels away; a white one here
+     looked like a different number. */
+  .navmenu-item .count { margin-left: auto; font-size: var(--fs-11); font-weight: 700; color: #fff; background: var(--bad); border-radius: var(--radius-pill); padding: 1px 6px; min-width: 18px; text-align: center; }
+  .navmenu-item .count.attn { background: var(--warn); color: var(--bg); }
+  .navmenu-item .count.ok { background: var(--ok); color: var(--bg); }
   .navmenu-item kbd { margin-left: auto; font: var(--fs-11) var(--mono); color: var(--fg-3); }
   .navmenu-item .beta-tag { margin-left: 0; }
   .navmenu-lang { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: var(--row-h); padding: 0 10px; font-size: var(--fs-14); font-weight: 500; }
@@ -1070,12 +1072,14 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .sheet-backdrop { align-items: center; justify-content: center; }
   .sheet { width: min(720px, 92vw); max-height: 86%; border-radius: var(--radius-lg); padding-bottom: 16px; }
   .sheet.narrow { width: min(480px, 92vw); }
+  /* A centred dialog has nothing to pull down: the grip is a bottom sheet's, and only a window
+     wider than 2100 px used to lose it. */
+  .sheet .grip { display: none; }
 }
 /* A wide window is room to read in, not margin to look at. */
 @media (min-width: 1600px) { :root { --chat-w: 1120px; } }
 @media (min-width: 2100px) { :root { --chat-w: 1320px; }
   .sheet.wide { width: min(1100px, 94vw); }
-  .sheet .grip { display: none; }
   .menu { right: 24px; }
 }
 @media (min-width: 1600px) {
@@ -2688,9 +2692,11 @@ input.field[type="range"] {
 
 /* The agents screen is a canvas: type the first message and the chat exists. The list of chats
    lives in the sidebar. A phone has no sidebar, so the same list follows the canvas, and the
-   hero keeps to the upper half so the chats are on the first screen rather than under a fold. */
+   hero takes only the room it needs so the chats are on the first screen rather than under a fold. */
 .start { display:flex; flex-direction:column; }
-.start-hero { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--space-5); min-height:46dvh; padding:var(--space-6) var(--space-4) var(--space-4); }
+/* Without a sidebar the hero is as tall as what it holds: held to half the screen and centred in it,
+   a phone showed a blank band above the question and another under the field, and four chats. */
+.start-hero { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--space-5); padding:var(--space-6) var(--space-4) var(--space-5); }
 h1.start-greeting { margin:0; max-width:18em; font-size:var(--fs-18); font-weight:560; letter-spacing:-0.02em; text-align:center; line-height:1.3; }
 .start-composer, .start-files { width:min(100%, var(--chat-w)); }
 .start-files { text-align:center; }

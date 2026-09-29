@@ -51,8 +51,10 @@ export const CursorOverlay = memo(function CursorOverlay({ action, meta, rect, p
         <svg viewBox="0 0 24 24" width={compact ? 14 : 22} height={compact ? 14 : 22} aria-hidden="true">
           <path className="bv-cursor-arrow" d="M4 2.5l15.2 8.3-6.6 1.7-3.1 6.9z" />
         </svg>
-        {/* The chip under a field already says who is typing; the tag would sit on top of it. */}
-        {!compact && (parked || (!typing && !pressing)) && <span className="bv-cursor-tag">{parked ? t("browser.cursor.waiting", { name: agent }) : agent}</span>}
+        {/* The chip under a field already says who is typing; the tag would sit on top of it. A
+            parked pointer has no tag at all: the banner above the page says the agent is waiting,
+            and a dark pill left under a search box read as the site's own suggestion list. */}
+        {!compact && !parked && !typing && !pressing && <span className="bv-cursor-tag">{agent}</span>}
       </div>
     </div>
   );

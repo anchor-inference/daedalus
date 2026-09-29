@@ -3887,7 +3887,6 @@ Object.assign(DICT, {
   "browser.dialog.dismiss": { en: "Dismiss", ru: "Отклонить" },
   "browser.dialog.take": { en: "take control to answer", ru: "чтобы ответить, возьмите управление" },
   "browser.cursor.typing": { en: "typing {n} character|typing {n} characters", ru: "вводит {n} символ|вводит {n} символа|вводит {n} символов" },
-  "browser.cursor.waiting": { en: "{name} is waiting", ru: "{name} ждёт" },
   "browser.log": { en: "Actions", ru: "Действия" },
   "browser.log.empty": { en: "Nothing done in this browser yet", ru: "В этом браузере пока ничего не делали" },
   "browser.actor.you": { en: "You", ru: "Вы" },
