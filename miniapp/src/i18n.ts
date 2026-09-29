@@ -1151,6 +1151,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "notice.cat.orchestrator_report": { en: "Report", ru: "Отчёт" },
   "notice.cat.agent_notify": { en: "From an agent", ru: "От агента" },
   "notice.cat.reminder": { en: "Reminder", ru: "Напоминание" },
+  "notice.anywhere": { en: "the whole app", ru: "всё приложение" },
   "notice.cat.spend": { en: "Spending", ru: "Расходы" },
   "notice.cat.system": { en: "System", ru: "Система" },
 

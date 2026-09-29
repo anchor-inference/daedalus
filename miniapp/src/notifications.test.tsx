@@ -117,5 +117,6 @@ describe("the line under a notification", () => {
     const names = new Map([["p1", "Anchor Inference"]]);
     expect(noticeLine(entry(1, { category: "system", project_id: "p1", session_id: "o1" }), names)).toBe("System · Anchor Inference · Orchestrator");
     expect(noticeLine(entry(2, { category: "system", project_id: "p1", session_id: "s1" }), names)).toBe("System · Anchor Inference");
+    expect(noticeLine(entry(3, { category: "spend" }), names)).toBe("Spending · the whole app");
   });
 });
