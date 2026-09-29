@@ -1163,7 +1163,10 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .service-name { font-size: var(--fs-13); font-weight: 600; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .service-url { color: var(--info); font-weight: 400; font-size: var(--fs-12); text-decoration: none; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .service-name { min-width: 0; }
-.service-cmd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-11); }
+/* The command wraps, up to three lines: cut to one it lost its flags ("--host 0.0.…") on a phone, and
+   nothing else on the screen shows the whole line. Breaks fall anywhere because a flag is one long
+   word. */
+.service-cmd { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: var(--fs-11); }
 
 .linkbtn { background: none; border: 0; padding: 0; color: var(--fg); font: inherit; cursor: pointer; text-align: left; }
 .linkbtn:hover { color: var(--info); }
