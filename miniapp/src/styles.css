@@ -441,7 +441,10 @@ a { color: var(--accent); text-decoration: none; }
 .act .detail.link:hover { color:var(--accent); text-decoration:underline; }
 .act.head { grid-template-columns:16px minmax(0, 1fr) auto; }
 .act.head .act-end { grid-column:3; }
-.act .detail { color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; font-family:var(--mono); font-size:var(--fs-mono); }
+/* One clamped line rather than a clipped one: the line breaks between words, so the ellipsis lands
+   after a whole word or path ("… && ls -la…") instead of inside one ("images/her…"). A single token
+   longer than the line still breaks where it must. */
+.act .detail { color:var(--fg); overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:1; line-clamp:1; overflow-wrap:anywhere; min-width:0; font-family:var(--mono); font-size:var(--fs-mono); }
 .act.prose .detail { font-family:var(--font); font-size:1em; color:var(--fg-2); }
 .act.running .verb { color:var(--fg); }
 .act.running .ic { animation:pulse 1.2s ease-in-out infinite; }
@@ -521,7 +524,10 @@ a { color: var(--accent); text-decoration: none; }
 /* The block is the frame; its text is not an inline code span again. The answer's inline-code tint
    reached into it and drew a rounded chip behind every line of a fenced block. */
 .codecard pre code { background:none; padding:0; border-radius:0; }
+.codecard .nobreak { white-space:nowrap; }
 .toolcard .codecard { margin:0; }
+/* Inside the card the halves meet its frame: their own rounded corners drew a card in a card. */
+.diffcard .diff .del, .diffcard .diff .add { border-radius:0; padding:8px 10px 8px 26px; }
 
 .summary { border:1px solid var(--line); border-radius:var(--radius-md); background:var(--card); padding:4px 12px; }
 .summary-head { display:flex; align-items:center; gap:8px; width:100%; background:none; border:0; color:var(--muted); font-size:var(--fs-14); padding:6px 0; cursor:pointer; text-align:left; }
@@ -2542,7 +2548,9 @@ input.field[type="range"] {
 
 /* Keep the newest-message shortcut above a card of any height. */
 .composer-jump-anchor { position:relative; flex:none; height:0; }
-.composer-jump-anchor .jump-down { bottom:var(--space-2); right:var(--space-3); width:var(--ctl-h); height:var(--ctl-h); }
+/* A ring of the page's own colour around it: on a phone the text runs to the button's edge, and
+   without the gap it sat on the last lines of a log instead of over them. */
+.composer-jump-anchor .jump-down { bottom:var(--space-2); right:var(--space-3); width:var(--ctl-h); height:var(--ctl-h); background:var(--surface-2); box-shadow:0 0 0 4px var(--bg), 0 6px 18px rgba(0,0,0,.45); }
 /* Project controls keep their place when a conversation gains a neighbour. */
 .folder-top { display: flex; align-items: center; gap: var(--space-1); background: var(--surface-2); border-radius: var(--radius-sm); }
 .folder-top > .folder-head { background: transparent; }
@@ -2574,7 +2582,9 @@ input.field[type="range"] {
 .sysnote-row { display:flex; align-items:center; gap:var(--space-2); min-width:0; }
 .sysnote-row .sysnote-head { min-width:0; flex:1; }
 .run-disclosure { display:flex; align-items:center; gap:var(--space-2); min-height:var(--row-h-touch); padding:0; border:0; background:none; color:var(--fg-2); font:inherit; font-size:var(--fs-12); cursor:pointer; }
-.activity-current { color:var(--accent); min-width:0; max-width:50%; }
+/* It shrinks only when the row runs out of room. A cap of half the head's width was half of a head
+   that shrinks to fit its content, so a short line was cut to "Writing the ans…" beside empty space. */
+.activity-current { color:var(--accent); min-width:0; flex:0 1 auto; }
 
 /* The scroll viewport ends at the header; neither streaming content nor a translated child
    may paint over navigation. Touch controls keep their area while secondary containers flatten. */

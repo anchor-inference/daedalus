@@ -1940,7 +1940,8 @@ function describe(item: ToolItem, workspace?: string): { verb: string; family: s
         const first = Object.values(a).find((v) => typeof v === "string") as string | undefined;
         return { verb: `${server} · ${tool}`.trim(), family: item.name, detail: (first ?? "").slice(0, 60), icon: "plug" };
       }
-      return { verb: item.name, family: item.name, detail: Object.keys(a).length ? JSON.stringify(a).slice(0, 60) : "", icon: "dot" };
+      // A wrench, not the dot: at the step list's size the dot read as an icon that failed to load.
+      return { verb: item.name, family: item.name, detail: Object.keys(a).length ? JSON.stringify(a).slice(0, 60) : "", icon: "wrench" };
     }
   }
 }
@@ -2130,13 +2131,28 @@ function ToolCard({ item }: { item: ToolItem }) {
   const parts: ReactNode[] = [];
   if (item.name === "Exec") parts.push(<div key="c" dangerouslySetInnerHTML={{ __html: codeBlock(String(a.command ?? ""), "bash") }} />);
   else if (item.name === "Write") parts.push(<div key="c" dangerouslySetInnerHTML={{ __html: codeBlock(String(a.content ?? "").slice(0, 4000), langOf(String(a.path ?? ""))) }} />);
-  else if (item.name === "Edit")
+  else if (item.name === "Edit") {
+    const before = String(a.old_string ?? a.old ?? "");
+    const after = String(a.new_string ?? a.new ?? "");
+    const patch = [...before.split("\n").map((l) => `-${l}`), ...after.split("\n").map((l) => `+${l}`)].join("\n");
+    // The same head as the written file and the command beside it — a label and a copy button —
+    // so the three expanded steps read as one kind of block; the copy takes the change as a patch.
     parts.push(
-      <div key="c" className="diff">
-        <pre className="del">{String(a.old_string ?? a.old ?? "")}</pre>
-        <pre className="add">{String(a.new_string ?? a.new ?? "")}</pre>
+      <div key="c" className="codecard diffcard">
+        <div className="codehead">
+          <span>diff</span>
+          <button className="copy" data-copy="1" data-copy-text={patch} type="button" aria-label={t("common.copy")} title={t("common.copy")}>
+            <span className="glyph-copy"><Icon name="copy" size={14} /></span>
+            <span className="glyph-done"><Icon name="check" size={14} /></span>
+          </button>
+        </div>
+        <div className="diff">
+          <pre className="del">{before}</pre>
+          <pre className="add">{after}</pre>
+        </div>
       </div>,
     );
+  }
   else parts.push(<div key="c" dangerouslySetInnerHTML={{ __html: codeBlock(JSON.stringify(a, null, 2), "args") }} />);
   if (item.result !== undefined) parts.push(<ToolResultText key="r" item={item} />);
   return <div className="toolcard">{parts}</div>;

@@ -191,7 +191,12 @@ export function plainPreview(md: string, max = 120): string {
     .replace(/^\s*\d+\.\s+/gm, "")
     .replace(/\s+/g, " ")
     .trim();
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  if (text.length <= max) return text;
+  // Cut on a word boundary when there is one near the limit: cut on the character, a preview ended
+  // "…generate the page fro…" and read as a broken string rather than a shortened one.
+  const cut = text.slice(0, max - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${space > max * 0.6 ? cut.slice(0, space).replace(/[\s,;:.—-]+$/, "") : cut}…`;
 }
 
 // ── schedules ────────────────────────────────────────────────────────────────────────────
