@@ -1840,7 +1840,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "comp.name.stt-models": { en: "Recognition models", ru: "Модели распознавания" },
   "comp.what.stt-models": { en: "The models that turn speech into words. Chosen one at a time in Settings → Voice.", ru: "Модели, превращающие речь в слова. Выбираются по одной в «Настройки → Голос»." },
   "comp.name.tts-voices": { en: "Voices", ru: "Голоса" },
-  "comp.what.tts-voices": { en: "The voices the answers are read in. Chosen one at a time in Settings → Voice.", ru: "Голоса, которыми читаются ответы. Выбираются по одному в «Настройки → Голос»." },
+  "comp.what.tts-voices": { en: "The voices that read the answers aloud. Chosen one at a time in Settings → Voice.", ru: "Голоса, которыми читаются ответы. Выбираются по одному в «Настройки → Голос»." },
   "comp.name.browser": { en: "Headless browser", ru: "Браузер без окна" },
   "comp.what.browser": { en: "Opens pages, drives them and takes pictures of them. Several skills need it and say so when it is not there.", ru: "Открывает страницы, управляет ими и снимает их. Нескольким навыкам он нужен, и без него они об этом говорят." },
   "comp.name.node": { en: "Node", ru: "Node" },
