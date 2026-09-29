@@ -18,7 +18,7 @@ import { endTerminal } from "../terminal/actions";
 import { EnvPill } from "../envpill";
 import type { TerminalState } from "../terminal/instance";
 import { fontSizeStep } from "../terminal/instance";
-import { gridIds, ownerPath } from "../terminal/preview";
+import { gridIds, ownerLine, ownerPath } from "../terminal/preview";
 import { instanceFor, setTerminalEnvs, terminals } from "../terminal/terminals";
 import { CopyOutputButton, TerminalView } from "../terminal/view";
 import { PhoneTerminal } from "../terminal/mobile";
@@ -137,7 +137,9 @@ export function TerminalFullScreen({ id, beside, toast }: { id: string; beside: 
         {row && <EnvPill env={row.env} />}
         {row && owner && (
           <a className="term-page-owner sub truncate" href={owner} onClick={(e) => { e.preventDefault(); navigate(owner); }}>
-            {row.owner.label || t(`term.owner.${row.owner.kind}`)}
+            {/* Said as the cards say it, "staff Ira": a bare "Ira" after a title that already ends in
+                "Ira" read as the same word printed twice. */}
+            {ownerLine(row, null)}
           </a>
         )}
         <div className="grow" />

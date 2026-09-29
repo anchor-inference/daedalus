@@ -3190,6 +3190,9 @@ button.staff-row:hover { background: var(--surface-2); }
 .loadbar-browsers { background: var(--accent); }
 .loadbar-browsers-extra { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 55%, transparent) 0 4px, color-mix(in srgb, var(--accent) 28%, transparent) 4px 8px); }
 .loadbar-kind { display: flex; align-items: baseline; gap: 6px; }
+.loadbar-legend { display: flex; flex-wrap: wrap; gap: 2px 14px; color: var(--fg-2); font-size: var(--fs-12); }
+.loadbar-key { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.loadbar-key i { flex: none; width: 14px; height: 8px; border-radius: 2px; }
 .loadbar-kind i { flex: none; width: 8px; height: 8px; border-radius: 2px; transform: translateY(-1px); }
 .loadbar-kind.terminals i { background: var(--ok); }
 .loadbar[data-level="warn"] .loadbar-kind.terminals i { background: var(--warn); }
