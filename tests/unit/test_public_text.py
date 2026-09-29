@@ -31,7 +31,9 @@ def test_the_public_audit_refuses_a_committed_binary_and_a_machine_path() -> Non
     0 but that it is able to exit anything else. Its own self-check plants one fault per rule family
     and requires each to be refused by name, then proves the history arm: a credential that lives only
     in an older commit, a shallow checkout, a commit list that repeats one id, and an enumeration that
-    fails must each be refused rather than reported clean. Each arm is asserted here by its line, so a
+    fails must each be refused rather than reported clean. It also proves the other place: a credential
+    that lives only in the working tree of a tracked file is named by the section that reads the tree,
+    and not by the one that reads history. Each arm is asserted here by its line, so a
     self-check that stopped running one of them fails this test instead of passing quietly.
     """
     import subprocess
@@ -44,6 +46,7 @@ def test_the_public_audit_refuses_a_committed_binary_and_a_machine_path() -> Non
         "refuses a committed binary and a machine path, a provider token, an internal address and a tooling trailer",
         "passes this tree",
         "refuses a pattern that survives only in history",
+        "refuses a fault that lives only in the working tree",
         "carries the commit once",
         "refuses to certify a checkout whose history git records as short",
         "counts distinct commits, not lines",
