@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import re
+import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -22,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 from daedalus import supervisor_client
 from daedalus.extensions.notifications import Draft
 from daedalus.host import reachability
+from daedalus.host.forge import RestForge, remote_slug
 from daedalus.host.gitrun import GitError, run_command, run_git
 from daedalus.security import redact
 
@@ -483,7 +485,25 @@ class SelfDevelopment:
         return await run_git(["-C", str(cwd or repo.checkout), *args], env=self._git_env())
 
     async def gh(self, *args: str, cwd: Path) -> str:
+        """``gh`` when it is installed, the REST API when it is not.
+
+        The CLI is a convenience, not a dependency. Driving it unconditionally meant that on a machine
+        without it a proposal died *after* the branch had been pushed -- leaving a branch whose whole
+        purpose was a pull request that does not exist -- and the failure named only the missing binary.
+        The operations the proposal path uses are HTTP calls to one API with the token the push already
+        carries, so the fallback answers in the same shape and nothing above this method branches.
+        """
+        if shutil.which("gh") is None:
+            return await self.forge(*args, cwd=cwd)
         return await run_command(["gh", *args], cwd=cwd, env=self._git_env())
+
+    async def forge(self, *args: str, cwd: Path) -> str:
+        """A ``gh`` argument list answered over the REST API, against the remote of ``cwd``."""
+        token = self.app.settings.github_token
+        if not token:
+            raise GitError("the GitHub CLI is not installed and no GitHub token is configured, so a pull request cannot be opened")
+        url = await run_git(["-C", str(cwd), "remote", "get-url", "origin"], env=self._git_env())
+        return await RestForge(token).run(args, remote_slug(url))
 
     def repo(self, name: str) -> RepoSpec:
         if name not in self.repos:

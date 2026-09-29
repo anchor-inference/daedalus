@@ -63,8 +63,77 @@ audit() {
   if git grep -InE "$PATTERNS" -- . 2>/dev/null | grep -EvI "$PATTERN_EXEMPT" | grep -vi "$OWN_TRAILER"; then failed=1; else echo "clean"; fi
 
   echo "== history (all blobs)"
-  if git rev-list --all | while read -r c; do git grep -InE "$PATTERNS" "$c" -- . 2>/dev/null | sed "s/^/$c:/"; done |
-    grep -EvI "$PATTERN_EXEMPT" | grep -vi "$OWN_TRAILER"; then failed=1; else echo "clean"; fi
+  local history_hits history_report walked unreadable commit_list enum_rc shallow duplicate_ids
+  # Captured, then tested -- never tested by the pipeline's status. Under pipefail the status of
+  # `cmd | while ...; done | grep ...` is the status of the loop's LAST iteration, so a pattern
+  # present in an older commit and absent from the newest one printed its line here and answered
+  # "clean": the verdict hung on the order `git rev-list --all` happens to visit commits in.
+  # The walk that reads is also the walk that counts. A finding proves only that the reader reached
+  # the commit the finding is in, so a walk cut short after it prints the same line and answers the
+  # same way; the number of commits visited is the only part of the answer that does not depend on
+  # where the finding sits. It is taken inside the substitution that does the grepping, because a
+  # count read from a second, untruncated enumeration would agree with itself and prove nothing.
+  # The enumeration's own status is taken where the list is produced. `< <(git rev-list --all)`
+  # hides it and `$(... || true)` below hides it again, so an enumeration that failed printed the
+  # same two words as one that found nothing: "clean" over a section that never ran. A list that
+  # came back non-zero, and a commit the reader could not read, are both a reader that cannot
+  # answer -- a commit nobody could read is not a commit that was cleared.
+  commit_list=$(mktemp)
+  enum_rc=0
+  git rev-list --all > "$commit_list" || enum_rc=$?
+  # A list of the right length is not a list of the right commits. An enumeration that named one
+  # commit as many times as the repository has commits would walk the expected number of lines,
+  # read every one without error, and never visit the finding. So the walk reads the distinct ids
+  # -- the number printed below counts commits, not lines -- and repeats are refused outright
+  # rather than quietly deduplicated, because a substituted list is not a repository to be tidied.
+  # `git rev-list` never repeats an id, so this cannot fire on a healthy tree.
+  duplicate_ids=$(sort "$commit_list" | uniq -d)
+  history_report=$(
+    walked=0
+    unreadable=0
+    while read -r c; do
+      walked=$((walked + 1))
+      out=""
+      rc=0
+      out=$(git grep -InE "$PATTERNS" "$c" -- . 2>/dev/null) || rc=$?
+      [ "$rc" -le 1 ] || unreadable=$((unreadable + 1))
+      # `git grep <commit>` already prefixes every line it prints with the commit it found it in,
+      # so the line goes out as it comes back. Prefixing it again printed the same id twice:
+      # `<sha>:<sha>:<path>:<line>:<text>`, which a reader comparing this output with plain
+      # `git grep` sees as a prefix the tool did not generate.
+      [ -z "$out" ] || printf '%s\n' "$out"
+    done < <(sort -u "$commit_list")
+    printf 'walked %d\nunreadable %d\n' "$walked" "$unreadable"
+  )
+  rm -f "$commit_list"
+  walked=$(printf '%s\n' "$history_report" | sed -n 's/^walked \([0-9][0-9]*\)$/\1/p')
+  unreadable=$(printf '%s\n' "$history_report" | sed -n 's/^unreadable \([0-9][0-9]*\)$/\1/p')
+  history_hits=$(printf '%s\n' "$history_report" | grep -v '^walked [0-9][0-9]*$' |
+    grep -v '^unreadable [0-9][0-9]*$' | grep -EvI "$PATTERN_EXEMPT" | grep -vi "$OWN_TRAILER" || true)
+  echo "history: ${walked:-0} commit(s) walked"
+  # A walk cannot tell a cut from a small repository: `--max-count=1` and a one-commit
+  # repository print the same line and answer the same way, and nothing inside the walk
+  # separates them. The commit-object store does not either, and it was tried and rejected:
+  # 353 commits walked against 367 stored in one repository, 1054 against 1563 in another,
+  # because a store keeps commits no ref reaches after a rebase or a gc -- a reading that
+  # fires on healthy trees is a reading that gets switched off.
+  #
+  # What can be separated is a checkout whose history git itself records as short. A depth-1
+  # clone walks every commit it has, reports one, and would answer "clean" over a history it
+  # never saw; the credential in the oldest commit is simply not there to be found. So the
+  # shallowness is read, and the verdict is never printed without the number it rests on.
+  shallow=$(git rev-parse --is-shallow-repository 2>/dev/null || echo unknown)
+  if [ -n "$duplicate_ids" ]; then
+    echo "history: the enumeration named the same commit more than once (${duplicate_ids} ) -- a list of the right length is not a list of the right commits, so this section certifies nothing"
+    failed=1
+  elif [ "$shallow" = true ]; then
+    echo "history: this checkout is shallow -- older commits are not here to be read, so this section certifies nothing"
+    failed=1
+  elif [ "$enum_rc" -ne 0 ] || [ "${unreadable:-0}" -ne 0 ]; then
+    echo "history: the reader could not answer -- enumeration exit $enum_rc, ${unreadable:-0} commit(s) unreadable"
+    failed=1
+  elif [ -n "$history_hits" ]; then printf '%s\n' "$history_hits"; failed=1
+  else echo "history: clean over the ${walked:-0} commit(s) this checkout has"; fi
 
   echo "== commit messages"
   if git log --all --format='%H %s%n%b' | grep -inE "$PATTERNS" | grep -vi "$OWN_TRAILER"; then failed=1; else echo "clean"; fi
@@ -111,8 +180,16 @@ audit() {
 
 # -- the self-check ---------------------------------------------------------------------------
 #
-# Builds a throwaway repository holding one committed ELF binary and one file naming the account this
-# is running as, and requires the audit above to refuse it. Then requires the real tree to pass.
+# Builds a throwaway repository holding one of each fault the audit above looks for -- a committed
+# ELF binary, a file naming the account this is running as, a provider token, an internal address,
+# and a commit message carrying tooling trailers -- and requires the audit to refuse every one of
+# them by name. Then requires the real tree to pass.
+#
+# One fault per rule, and the rules are the whole of `PATTERNS`: a fixture carrying only the faults
+# the scanner was written against first proves nothing about the rest of the list. Measured before
+# this fixture was widened: deleting all four provider-token patterns from `PATTERNS` left this
+# self-check green, so a repository carrying a token was scanned clean by an audit that still said
+# it had checked itself.
 
 self_check() {
   local fixture status
@@ -125,8 +202,25 @@ self_check() {
     printf '\177ELF\002\001\001\000 built somewhere\n' > tool
     mkdir -p notes
     printf 'the build ran in /home/%s/checkout\n' "$(id -un)" > notes/build.md
+    # One credential-shaped line per kind `PATTERNS` knows, and one file naming an address on each
+    # of the two private blocks it looks for. Every value here is ASSEMBLED at run time rather than
+    # written down, for the same reason the account name above is read from the environment: the
+    # file that guards against a value has no business carrying it. None of these is real; each is
+    # a repeated byte behind the prefix that gives it its shape.
+    filler=$(printf 'A%.0s' $(seq 1 40))
+    {
+      printf '%s_%s\n' ghp "$filler"
+      printf '%s-%s\n' sk "$filler"
+      printf '%s_%s\n' github_pat "$filler"
+      printf '%s:%s\n' 1234567 "$filler"
+    } > config.env
+    printf 'the console answers at http://%s.%s.9.9:8080 and the proxy at http://%s.%s.0.9:9000\n' \
+      192 168 10 10 > notes/network.md
     git add -A
-    git commit -qm "a fixture"
+    git commit -qm "a fixture
+
+Co-authored-by: someone <someone@example.invalid>
+Generated with a tool: see the session log at https://example.invalid/session_01"
   )
   status=0
   bash "$SELF" "$fixture" > "$fixture/out.txt" 2>&1 || status=$?
@@ -142,7 +236,13 @@ self_check() {
     echo "SELF-CHECK FAILED: the committed binary was not named"; printf '%s\n' "$report"; return 1; }
   printf '%s' "$report" | grep -q "notes/build.md" || {
     echo "SELF-CHECK FAILED: the machine path was not named"; printf '%s\n' "$report"; return 1; }
-  echo "self-check: the audit refuses a committed binary and a machine path"
+  printf '%s' "$report" | grep -q "config.env" || {
+    echo "SELF-CHECK FAILED: the provider token was not named"; printf '%s\n' "$report"; return 1; }
+  printf '%s' "$report" | grep -q "notes/network.md" || {
+    echo "SELF-CHECK FAILED: the internal address was not named"; printf '%s\n' "$report"; return 1; }
+  printf '%s' "$report" | grep -q "someone@example.invalid" || {
+    echo "SELF-CHECK FAILED: the tooling trailer was not named"; printf '%s\n' "$report"; return 1; }
+  echo "self-check: the audit refuses a committed binary and a machine path, a provider token, an internal address and a tooling trailer"
 
   local out
   out=$(bash "$SELF" "$ROOT" 2>&1) || {
@@ -151,6 +251,215 @@ self_check() {
     return 1
   }
   echo "self-check: the audit passes this tree"
+
+  # A place, not a family: the same rule, applied where the fixture never puts it. Every fault in the
+  # fixture above is committed, so it lives in the working tree AND in history at once and nothing in
+  # it separates "the history reader works" from "it is dead and another check caught the bytes".
+  # Here the pattern exists ONLY in an older commit: it is in no file of the tree and in no message.
+  local older status2 report2
+  older=$(mktemp -d)
+  (
+    cd "$older"
+    git init -q .
+    git config user.email a@b.c
+    git config user.name a
+    git commit -q --allow-empty -m "an empty tree"
+    printf 'a key %s_%s\n' ghp "$(printf 'A%.0s' $(seq 1 40))" > gone.txt
+    git add -A
+    git commit -qm "a file that will not stay"
+    git rm -q gone.txt
+    git commit -qm "and is gone from the tree"
+  )
+  local walked_expected
+  walked_expected=$(cd "$older" && git rev-list --all | wc -l | tr -d ' ')
+  status2=0
+  bash "$SELF" "$older" > "$older/out.txt" 2>&1 || status2=$?
+  report2=$(cat "$older/out.txt")
+  rm -rf "$older"
+  if [ "$status2" -eq 0 ]; then
+    echo "SELF-CHECK FAILED: the audit passed a repository whose only credential is in an older commit"
+    printf '%s\n' "$report2"
+    return 1
+  fi
+  # The credential is in the fixture's middle commit, so the refusal above witnesses only the region
+  # that commit sits in: an enumeration cut short after it still finds the credential and still
+  # refuses. This is the other half, and it holds wherever the credential sits -- the audit must
+  # report having visited every commit the fixture has.
+  if ! printf '%s\n' "$report2" | grep -q "^history: $walked_expected commit(s) walked$"; then
+    echo "SELF-CHECK FAILED: the history reader did not report visiting all of the fixture's commits"
+    printf '%s\n' "$report2"
+    return 1
+  fi
+  echo "self-check: the audit refuses a pattern that survives only in history"
+
+  # A hit line is what gets quoted back at this file, so it must be the line `git grep` printed and
+  # nothing else. `git grep <commit>` already carries the commit, and prefixing it again printed
+  # `<sha>:<sha>:<path>...` -- a reader comparing this output with plain `git grep` would see a
+  # prefix the tool never generated.
+  if printf '%s\n' "$report2" | grep -Eq '^[0-9a-f]{40}:[0-9a-f]{40}:'; then
+    echo "SELF-CHECK FAILED: a history hit printed the commit id twice"
+    printf '%s\n' "$report2"
+    return 1
+  fi
+  echo "self-check: a history hit carries the commit once, as git grep printed it"
+
+  # A checkout git itself records as short. The walk succeeds, visits every commit the clone
+  # has, and reports one -- a section that answered "clean" here would certify a history it
+  # never saw, and the credential in the oldest commit is not in the clone to be found. The
+  # credential is written first and deleted second, so the depth-1 clone has only its absence.
+  local shallow status4 report4
+  shallow=$(mktemp -d)
+  mkdir -p "$shallow/origin"
+  (
+    cd "$shallow/origin"
+    git init -q .
+    git config user.email a@b.c
+    git config user.name a
+    printf 'a key %s_%s\n' ghp "$(printf 'A%.0s' $(seq 1 40))" > gone.txt
+    git add -A
+    git commit -qm "a credential that will not stay"
+    git rm -q gone.txt
+    git commit -qm "and is gone from the tree"
+  )
+  git clone -q --depth 1 "file://$shallow/origin" "$shallow/clone"
+  status4=0
+  bash "$SELF" "$shallow/clone" > "$shallow/out.txt" 2>&1 || status4=$?
+  report4=$(cat "$shallow/out.txt")
+  rm -rf "$shallow"
+  if [ "$status4" -eq 0 ]; then
+    echo "SELF-CHECK FAILED: the audit passed a shallow checkout whose older commits it could not read"
+    printf '%s\n' "$report4"
+    return 1
+  fi
+  printf '%s' "$report4" | grep -q "this checkout is shallow" || {
+    echo "SELF-CHECK FAILED: a shallow checkout was refused, but not for being shallow"
+    printf '%s\n' "$report4"
+    return 1; }
+  echo "self-check: the audit refuses to certify a checkout whose history git records as short"
+
+  # And the arm rests on that line and no other: with the shallowness branch cut out of a copy,
+  # the same shallow clone is passed -- so the refusal above was the branch and not some accident
+  # of the fixture. The copy is compared with the original first, so a substitution that did not
+  # land fails the run instead of passing it.
+  local cut status5 report5
+  cut=$(mktemp -d)
+  mkdir -p "$cut/tool" "$cut/origin"
+  cp "$SELF" "$cut/tool/audit.sh"
+  sed -i.bak 's#^  elif \[ "\$shallow" = true \]; then#  elif false; then#' "$cut/tool/audit.sh"
+  if cmp -s "$SELF" "$cut/tool/audit.sh"; then
+    echo "SELF-CHECK FAILED: the shallowness branch could not be cut out, so this arm measured nothing"
+    rm -rf "$cut"
+    return 1
+  fi
+  (
+    cd "$cut/origin"
+    git init -q .
+    git config user.email a@b.c
+    git config user.name a
+    printf 'a key %s_%s\n' ghp "$(printf 'B%.0s' $(seq 1 40))" > gone.txt
+    git add -A
+    git commit -qm "a credential that will not stay"
+    git rm -q gone.txt
+    git commit -qm "and is gone from the tree"
+  )
+  git clone -q --depth 1 "file://$cut/origin" "$cut/clone"
+  status5=0
+  bash "$cut/tool/audit.sh" "$cut/clone" > "$cut/out.txt" 2>&1 || status5=$?
+  report5=$(cat "$cut/out.txt")
+  rm -rf "$cut"
+  if [ "$status5" -ne 0 ]; then
+    echo "SELF-CHECK FAILED: with the shallowness branch cut out, a shallow clone was still refused"
+    printf '%s\n' "$report5"
+    return 1
+  fi
+  printf '%s' "$report5" | grep -q "^history: clean over the 1 commit(s) this checkout has$" || {
+    echo "SELF-CHECK FAILED: the cut copy did not answer clean over the shallow clone it walked"
+    printf '%s\n' "$report5"
+    return 1; }
+  echo "self-check: with the branch cut out, the same shallow clone is passed -- the arm is the line"
+
+  # A list of the right length is not a list of the right commits. Here the enumeration is replaced
+  # by a loop that writes HEAD's id as many times as the repository has commits. The list has the expected number of lines, every line reads
+  # without error, and the credential -- which lives only in an older commit -- is never visited.
+  # A section that prints a count of lines as a count of commits certifies a history it scanned
+  # once; the count must be a count of distinct commits, and the refusal must say what it saw.
+  local dup status6 report6
+  dup=$(mktemp -d)
+  mkdir -p "$dup/tool" "$dup/origin"
+  cp "$SELF" "$dup/tool/audit.sh"
+  sed -i.bak 's#^  git rev-list --all > "\$commit_list" || enum_rc=\$?#  for _i in $(seq 1 $(git rev-list --all --count)); do git rev-parse HEAD >> "$commit_list"; done#' "$dup/tool/audit.sh"
+  if cmp -s "$SELF" "$dup/tool/audit.sh"; then
+    echo "SELF-CHECK FAILED: the enumeration could not be replaced by a list of repeated ids, so this arm measured nothing"
+    rm -rf "$dup"
+    return 1
+  fi
+  (
+    cd "$dup/origin"
+    git init -q .
+    git config user.email a@b.c
+    git config user.name a
+    printf 'a key %s_%s\n' ghp "$(printf 'C%.0s' $(seq 1 40))" > gone.txt
+    git add -A
+    git commit -qm "a credential that will not stay"
+    git rm -q gone.txt
+    git commit -qm "and is gone from the tree"
+    printf 'a note\n' > note.md
+    git add -A
+    git commit -qm "a third commit"
+  )
+  status6=0
+  bash "$dup/tool/audit.sh" "$dup/origin" > "$dup/out.txt" 2>&1 || status6=$?
+  report6=$(cat "$dup/out.txt")
+  rm -rf "$dup"
+  if [ "$status6" -eq 0 ]; then
+    echo "SELF-CHECK FAILED: the audit passed a commit list of the expected length that never visits the finding"
+    printf '%s\n' "$report6"
+    return 1
+  fi
+  printf '%s' "$report6" | grep -q "named the same commit more than once" || {
+    echo "SELF-CHECK FAILED: a commit list that repeats one id was refused, but not for repeating it"
+    printf '%s\n' "$report6"
+    return 1; }
+  echo "self-check: the count the history section prints counts distinct commits, not lines"
+
+  # A reader that breaks is not a reader that found nothing. Here the enumeration exits non-zero
+  # without printing anything, so the section never ran; "clean" would be a sentence about nothing,
+  # and a scanner whose whole history arm can go dead in silence is the scanner this file exists to
+  # replace. The mutation is applied to a copy, and the copy is compared with the original first:
+  # an arm that could not be planted measured nothing.
+  local broken status3 report3
+  broken=$(mktemp -d)
+  mkdir -p "$broken/tool" "$broken/repo"
+  cp "$SELF" "$broken/tool/audit.sh"
+  sed -i.bak 's|^  git rev-list --all > "\$commit_list"|  false > "$commit_list"|' "$broken/tool/audit.sh"
+  if cmp -s "$SELF" "$broken/tool/audit.sh"; then
+    echo "SELF-CHECK FAILED: the history enumeration could not be replaced, so this arm measured nothing"
+    rm -rf "$broken"
+    return 1
+  fi
+  (
+    cd "$broken/repo"
+    git init -q .
+    git config user.email a@b.c
+    git config user.name a
+    printf 'a note\n' > note.md
+    git add -A
+    git commit -qm "a first commit"
+  )
+  status3=0
+  bash "$broken/tool/audit.sh" "$broken/repo" > "$broken/out.txt" 2>&1 || status3=$?
+  report3=$(cat "$broken/out.txt")
+  rm -rf "$broken"
+  if [ "$status3" -eq 0 ]; then
+    echo "SELF-CHECK FAILED: the audit passed a repository whose history it could not enumerate"
+    printf '%s\n' "$report3"
+    return 1
+  fi
+  printf '%s' "$report3" | grep -q "the reader could not answer" || {
+    echo "SELF-CHECK FAILED: a failed enumeration was not named as a failed reader"
+    printf '%s\n' "$report3"
+    return 1; }
+  echo "self-check: the audit refuses to call a section clean when its reader failed"
 }
 
 SELF=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
