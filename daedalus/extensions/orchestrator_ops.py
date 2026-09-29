@@ -18,11 +18,12 @@ from typing import TYPE_CHECKING, Any
 from daedalus.extensions import wakeups
 from daedalus.extensions.notifications import Draft
 from daedalus.extensions.watches import WatchRefused
-from daedalus.host.peek import LocalFolderAccess, PeekRefused, text_window
+from daedalus.host.peek import LocalFolderAccess, PeekRefused
 from daedalus.staff_runtime import LiveSession
 from daedalus.stores.files import HANDOVER_MAX_FILES, MAIN, FileRefused, human_size, parse_handle
 from daedalus.stores.projects import BRIEF_SECTIONS, OPERATOR_ONLY_SECTIONS, Project, ProjectError, ProjectFolder
 from daedalus.stores.staff import HARNESS_NAMES, Ask, StaffError
+from daedalus.tools.vision import VisionUnavailable, kept_body
 
 if TYPE_CHECKING:
     from daedalus.extensions.orchestrator import Orchestrators
@@ -345,8 +346,8 @@ async def read_kept(orch: Orchestrators, scope: str, handle_text: str, *, offset
         raise Refused(str(exc)) from exc
     data = await orch.manager.files.read(stored)
     try:
-        body = text_window(data, stored.name, offset=offset, limit=limit)
-    except PeekRefused as exc:
+        body = await kept_body(orch.manager, data, stored, offset=offset, limit=limit)
+    except (PeekRefused, VisionUnavailable) as exc:
         raise Refused(str(exc)) from exc
     return f"{stored.handle} {stored.name} ({stored.mime}, {stored.size} bytes):\n{body}"
 

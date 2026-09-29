@@ -51,6 +51,41 @@ async def image_view(context: ToolContext, path: str, task: str, detail: str = "
     return ok(context, text, model=model, image=str(target))
 
 
+KEPT_IMAGE_TASK = (
+    "Describe this image fully for an agent that cannot see it: what it shows, its layout, and every piece of "
+    "text on it quoted verbatim, including error messages, numbers, labels and identifiers."
+)
+
+
+async def describe_kept(manager: Any, data: bytes, mime: str, name: str) -> str:
+    """A kept image (an operator's screenshot, a member's picture) in words.
+
+    Reading one was refused as a binary file, so an orchestrator handed a screenshot of a bug could only
+    pass it on without knowing what was in it. The vision model describes it, as ImageView does; when no
+    model can look, the refusal says why and that the file can still be handed on.
+    """
+    if mime not in SUPPORTED:
+        raise VisionUnavailable(f"{name} is a {mime or 'binary'} file; it cannot be shown here, but it can be handed on with files=[…]")
+    if len(data) > MAX_IMAGE_BYTES:
+        raise VisionUnavailable(f"{name} is {len(data)} bytes, past what the vision model takes; it can still be handed on with files=[…]")
+    vision = manager.vision_model() if manager is not None and hasattr(manager, "vision_model") else None
+    try:
+        text, model = await look(vision, manager, data, mime, KEPT_IMAGE_TASK, detail="full")
+    except VisionUnavailable as exc:
+        raise VisionUnavailable(f"{name} is an image and {exc}; it can still be handed on with files=[…]") from exc
+    return f"[{name}, described by {model}]\n{text}"
+
+
+async def kept_body(manager: Any, data: bytes, stored: Any, *, offset: int = 1, limit: int = 200) -> str:
+    """What reading a kept file shows: an image described, anything else as numbered lines."""
+    mime = str(getattr(stored, "mime", "") or mimetypes.guess_type(stored.name)[0] or "")
+    if mime.startswith("image/"):
+        return await describe_kept(manager, data, mime, stored.name)
+    from daedalus.host.peek import text_window  # Lazy: peek is host code this tool module need not load
+
+    return text_window(data, stored.name, offset=offset, limit=limit)
+
+
 class VisionUnavailable(Exception):
     """No vision model can look now; the message says what to change."""
 

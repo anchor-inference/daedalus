@@ -34,12 +34,13 @@ from daedalus.extensions.dispatcher_telegram import DispatcherTelegram
 from daedalus.extensions.dispatches import SETUP_BY, Dispatches
 from daedalus.extensions.notifications import Draft
 from daedalus.host.events import AppEvent, EventFilter
-from daedalus.host.peek import PeekRefused, text_window
+from daedalus.host.peek import PeekRefused
 from daedalus.host.wake_queue import Batch, TargetState, Wake, WakeQueue
 from daedalus.stores.dispatches import Dispatch, DispatchError
 from daedalus.stores.files import HANDOVER_MAX_FILES, MAIN, FileRefused, StoredFile, human_size, refs_line
 from daedalus.stores.projects import BRIEF_SECTIONS, Project, ProjectError
 from daedalus.stores.staff import Ask, StaffError
+from daedalus.tools.vision import VisionUnavailable, kept_body
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -780,8 +781,8 @@ async def op_files(d: Dispatcher, session_id: str, *, op: str = "list", file: st
     except FileRefused as exc:
         raise ValueError(f"{exc}; Files() lists them") from exc
     try:
-        body = text_window(await d.manager.files.read(stored), stored.name, offset=offset, limit=limit)
-    except PeekRefused as exc:
+        body = await kept_body(d.manager, await d.manager.files.read(stored), stored, offset=offset, limit=limit)
+    except (PeekRefused, VisionUnavailable) as exc:
         raise ValueError(str(exc)) from exc
     return f"{stored.handle} {stored.name} ({stored.mime}, {stored.size} bytes):\n{body}"
 
