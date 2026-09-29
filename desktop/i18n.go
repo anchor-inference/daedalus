@@ -27,6 +27,7 @@ var messages = map[Lang]map[string]string{
 
 		"setup.mode.native":      "On this machine",
 		"setup.mode.native.line": "Light and quick. Nothing else to install.",
+		"setup.mode.suggested":   "Works without Docker",
 		"setup.mode.docker":      "In a container",
 		"setup.mode.docker.line": "Walled off from your files. Needs Docker.",
 		"setup.mode.more":        "Which should I pick?",
@@ -148,6 +149,7 @@ var messages = map[Lang]map[string]string{
 
 		"setup.key.lead":   "Хватит одного ключа.",
 		"setup.key.field":  "API-ключ",
+		"setup.mode.suggested":   "Работает без Docker",
 		"setup.key.remove": "Удалить этот ключ",
 		"setup.key.skip":   "Пропустить — добавлю позже в приложении",
 		"setup.key.note":   "Ключи остаются на этом компьютере и уходят к провайдеру через прокси, который агент не может прочитать. Если здесь выполнен вход в Codex, Claude Code или SuperGrok CLI — это тоже ключ.",

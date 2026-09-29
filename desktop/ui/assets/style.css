@@ -90,7 +90,7 @@ code {
    cut at its start rather than its end — right-to-left overflow, with the path itself isolated as
    left-to-right so its slashes stay put — because the tail ("…/Daedalus/data") is the part that
    says which installation this is; the whole path is in the title and copies whole. */
-.hero code.path {
+.hero code.path, .where code.path {
   display: inline-block;
   max-width: 100%;
   overflow: hidden;
