@@ -16,7 +16,9 @@ export function fileIcon(name: string): IconName {
     case "image":
       return "image";
     case "json":
-      return "terminal";
+      // Braces, not a terminal or a picture: a data file drawn with either read as a command or
+      // as an image attachment.
+      return "braces";
     case "diff":
       return "changes";
     case "html":
@@ -69,8 +71,12 @@ export function ArtifactCard({ item, src, downloadUrl, onOpen }: ArtifactCardPro
           <Icon name="download" size={15} />
         </a>
         {openable && (
-          <button type="button" className="iconbtn small" onClick={() => onOpen(src)} aria-label={t("turn.artifact.open")} title={t("turn.artifact.open")}>
-            <Icon name="panel" size={15} />
+          <button type="button" className="iconbtn small artifact-open" onClick={() => onOpen(src)} aria-label={t("turn.artifact.open")} title={t("turn.artifact.open")}>
+            {/* Beside the chat it opens in the side panel; on a phone the same press opens the
+                file over the whole screen, so the glyph says that rather than the button vanishing
+                and leaving a phone with one action where the other sizes have two. */}
+            <span className="artifact-open-panel"><Icon name="panel" size={15} /></span>
+            <span className="artifact-open-full"><Icon name="expand" size={15} /></span>
           </button>
         )}
       </span>

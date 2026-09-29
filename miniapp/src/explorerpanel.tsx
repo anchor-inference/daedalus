@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, SessionFolder } from "./api";
-import { copyText } from "./components";
+import { Switch, copyText } from "./components";
 import { OverflowMenu } from "./dialogs";
 import { fileIcon } from "./artifact";
 import { folderBase, folderName } from "./folders";
@@ -171,7 +171,12 @@ export function Explorer({ base: sessionBase, root, upload: canUpload = false, f
         {crumbs.map((c, i) => <span key={i}> › <button className="crumb" onClick={() => void reveal(crumbs.slice(0, i + 1).join("/"))}>{c}</button></span>)}
       </div>
       <div className="explorer-tools">
-        <button className="linkbtn" aria-pressed={showHidden} onClick={() => setShowHidden((s) => !s)}>{t("explorer.hidden")}</button>
+        {/* A switch with its words, on a row ruled off from the tree: as a bare grey line of text
+            straight above the files it read as a heading over them, not as a control. */}
+        <label className="explorer-hidden">
+          <Switch checked={showHidden} onChange={setShowHidden} label={t("explorer.hidden")} />
+          <span>{t("explorer.hidden")}</span>
+        </label>
         <button className="iconbtn small" aria-label={t("panel.reload")} onClick={() => { if (tree[""]?.error) void load(""); setGeneration((n) => n + 1); }}><Icon name="reload" size={14} /></button>
         {uploadUrl && <><input ref={upload} type="file" multiple hidden onChange={(e) => void send(e.target.files)} /><button className="iconbtn small" disabled={uploading} aria-label={t("session.files.upload")} onClick={() => upload.current?.click()}><Icon name="up" size={14} /></button></>}
       </div>

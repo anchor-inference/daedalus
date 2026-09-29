@@ -125,7 +125,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "explorer.mode": { en: "Search mode", ru: "Режим поиска" },
   "explorer.names": { en: "Names", ru: "Имена" },
   "explorer.contents": { en: "Contents", ru: "Содержимое" },
-  "explorer.hidden": { en: "Hidden and ignored", ru: "Скрытые и исключённые" },
+  "explorer.hidden": { en: "Show hidden and ignored", ru: "Показывать скрытые и исключённые" },
   "explorer.copy": { en: "Copy path", ru: "Копировать путь" },
   "explorer.written": { en: "Written during this run", ru: "Записан в этом запуске" },
   "explorer.notfolder": { en: "This folder is no longer available.", ru: "Эта папка больше недоступна." },

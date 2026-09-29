@@ -561,11 +561,16 @@ a { color: var(--accent); text-decoration: none; }
 .artifact:hover .artifact-glyph { background:var(--surface-3); }
 .artifact-text { display:flex; flex-direction:column; min-width:0; gap:1px; }
 .artifact-name { font-size:var(--fs-14); font-weight:500; }
+/* Clamped to a line between words, like a step's detail: a narrow phone cut "sent to you" to
+   "sent t…". */
 .artifact-meta { font-size:var(--fs-12); color:var(--fg-2); }
+.artifact-meta.truncate { white-space:normal; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:1; line-clamp:1; overflow-wrap:anywhere; }
 .artifact-actions { display:inline-flex; align-items:center; gap:2px; padding:0 6px; }
 .artifact-actions .iconbtn.small { background:transparent; color:var(--fg-2); }
 .artifact-actions .iconbtn.small:hover { background:var(--surface-3); color:var(--fg); }
 .artifact-thumb { grid-column:1 / -1; padding:0 10px 10px; }
+.artifact-open-panel { display:contents; }
+.artifact-open-full { display:none; }
 .artifact-thumb .tool-image { max-height:220px; }
 
 /* ── the first paint: three turn-shaped blocks ── */
@@ -2388,9 +2393,8 @@ input.field[type="range"] {
 .explorer-search .field { margin:0; font-size:var(--fs-12); height:var(--ctl-h); }
 .explorer-search select { width:100px; padding:0 4px; }
 .explorer-crumbs { padding:0 8px; display:flex; flex-wrap:wrap; gap:2px; font-size:var(--fs-12); }
-.explorer-tools { display:flex; align-items:center; gap:4px; padding:0 8px 4px; }
-.explorer-tools > .linkbtn { margin-right:auto; color:var(--fg-3); font-size:var(--fs-12); }
-.explorer-tools > .linkbtn[aria-pressed=true] { color:var(--fg); }
+.explorer-tools { display:flex; align-items:center; gap:4px; padding:0 8px 4px; margin-bottom:4px; border-bottom:1px solid var(--line); }
+.explorer-hidden { display:inline-flex; align-items:center; gap:8px; margin-right:auto; color:var(--fg-2); font-size:var(--fs-12); cursor:pointer; }
 .explorer-tree { overflow:auto; flex:1; min-height:0; }
 .files .tree-row { display:flex; align-items:center; gap:6px; height:var(--row-h-dense); min-height:var(--row-h-dense); padding:0 4px; border:0; border-radius:0; margin:0; background:none; cursor:pointer; }
 .tree-row:hover, .tree-row.selected { background:var(--surface-2); }
@@ -2624,9 +2628,11 @@ input.field[type="range"] {
   .msg-actions .iconbtn.small { width:auto; gap:var(--space-2); padding-inline:var(--space-2); }
   .msg-actions { opacity:1; }
   .composer-row .model-select, .composer-row .composer-mode { min-height:var(--row-h-touch); }
-  .composer-tools .ctx-ring { display:none; }
+  .composer-tools .ctx-ring { min-width:36px; height:var(--row-h-touch); }
+  .composer-tools .ctx-pct { font-size:var(--fs-12); }
   .composer-row > .iconbtn, .composer-tools > .iconbtn, .composer-tools > .roundbtn { width:var(--row-h-touch); height:var(--row-h-touch); }
-  .artifact-actions > button { display:none; }
+  .artifact-open-panel { display:none; }
+  .artifact-open-full { display:contents; }
   .artifact-main { padding-block:var(--space-2); }
   .artifacts { gap:0; border:1px solid var(--line); border-radius:var(--radius-md); overflow:hidden; }
   .artifact { border:0; border-radius:0; }
