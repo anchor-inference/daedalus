@@ -77,9 +77,14 @@ var words = map[string][]string{
 }
 
 // refusals are the answers to a consent banner that are not an agreement: "reject all" contains
-// "all" but accepts nothing.
+// "all" but accepts nothing. The agent is told to prefer them, so each common wording of one must pass
+// without a question: "Accept only essential cookies" and "Продолжить без принятия" hold an accepting
+// word ("принятия" shares the stem of "принять") and would otherwise be asked about.
 var refusals = []string{"reject", "decline", "deny", "refuse", "only necessary", "necessary only", "essential only",
-	"отклонить", "отказаться", "только необходимые"}
+	"only essential", "only required", "required only", "strictly necessary", "necessary cookies", "essential cookies",
+	"without accepting", "don't accept", "do not accept",
+	"отклонить", "отказаться", "только необходимые", "только обязательные", "только технические", "без принятия",
+	"без согласия", "не принимать", "не согласен"}
 
 var patterns = map[string]*regexp.Regexp{}
 var refusal *regexp.Regexp
