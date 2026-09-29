@@ -1037,14 +1037,16 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .msg.user { max-width: min(86%, var(--chat-w)); }
   /* A sheet on a wide screen is a dialog, not a full-width drawer. */
   .sheet-backdrop { align-items: center; justify-content: center; }
-  .sheet { width: min(720px, 92vw); max-height: 86%; border-radius: var(--radius-lg); padding-bottom: 16px; }
+  .sheet { width: min(720px, 92vw); max-height: 86%; border-radius: var(--radius-lg); padding-top: 14px; padding-bottom: 16px; }
   .sheet.narrow { width: min(480px, 92vw); }
+  /* The grip says "drag me down" on a sheet that rises from the bottom edge; a centred dialog has
+     nothing to drag, and the bar read as a phone part left over on the desktop. */
+  .sheet .grip { display: none; }
 }
 /* A wide window is room to read in, not margin to look at. */
 @media (min-width: 1600px) { :root { --chat-w: 1120px; } }
 @media (min-width: 2100px) { :root { --chat-w: 1320px; }
   .sheet.wide { width: min(1100px, 94vw); }
-  .sheet .grip { display: none; }
   .menu { right: 24px; }
 }
 @media (min-width: 1600px) {
