@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from playwright.sync_api import Page, expect, sync_playwright  # noqa: E402
-from screenshots import S1, stub  # noqa: E402
+from screenshots import S1, detail, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -60,9 +60,20 @@ def share_body(mode: str) -> dict:
 
 
 def install(page: Page, transcript: dict | None, status: int = 200) -> None:
+    # The session's own detail carries its share, as the host's does. Served by the general stub it
+    # carried none, so a reload of the session in the middle of the sheet reset the mode the sheet had
+    # just set, and about one run in five lost the private link's key a moment after it appeared.
+    shared = {"mode": "local"}
+
     def answer_share(route) -> None:  # type: ignore[no-untyped-def]
         body = json.loads(route.request.post_data or "{}")
-        route.fulfill(status=200, content_type="application/json", body=json.dumps(share_body(body.get("mode") or "local")))
+        shared["mode"] = body.get("mode") or "local"
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(share_body(shared["mode"])))
+
+    def answer_detail(route) -> None:  # type: ignore[no-untyped-def]
+        if route.request.method != "GET":
+            return stub(route)
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({**detail(S1), "share": share_body(shared["mode"])}))
 
     def answer_transcript(route) -> None:  # type: ignore[no-untyped-def]
         if status != 200:
@@ -72,6 +83,7 @@ def install(page: Page, transcript: dict | None, status: int = 200) -> None:
 
     # Registered after the general stub, so these two win where they match.
     page.route("**/api/**", stub)
+    page.route(f"**/api/sessions/{S1}", answer_detail)
     page.route("**/api/sessions/*/share", answer_share)
     page.route(f"**/c/{SLUG}/transcript", answer_transcript)
 
