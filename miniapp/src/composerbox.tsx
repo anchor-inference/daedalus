@@ -48,7 +48,7 @@ export type ComposerProps = {
   sessionId: string;
   status: ComposerStatus;
   /** Send the text and the files; while a run is on, the host queues it as a steer. Rejects on failure. */
-  onSend: (text: string, files: File[], clientMessageId?: string) => Promise<void>;
+  onSend: (text: string, files: File[], clientMessageId?: string, onProgress?: (fraction: number) => void) => Promise<void>;
   onStop: () => void;
   commands: SlashCommand[];
   /** Run a slash command. Rejects on failure, and the draft comes back. */
@@ -93,6 +93,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [draft, setDraftState] = useState(() => readDraft(sessionId));
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -227,8 +228,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     clearDraft(sessionId);
     setFiles([]);
     if (fileInput.current) fileInput.current.value = "";
+    // The files leave the box when sending starts, so the upload's progress takes their place: a
+    // large video took minutes with nothing on screen to say it was still going.
+    if (going.length) setProgress(0);
     try {
-      await onSend(text, going, clientMessageId);
+      await onSend(text, going, clientMessageId, going.length ? setProgress : undefined);
       retryId.current = null;
       haptic("light");
     } catch (e) {
@@ -237,6 +241,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       toast(errorText(e));
     } finally {
       setSending(false);
+      setProgress(null);
     }
   }
   function primary() {
@@ -419,6 +424,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             </span>)}
           </div>
         )}
+        {progress !== null && <div className="sub upload-progress" role="status">{t("upload.progress", { percent: Math.floor(progress * 100) })}</div>}
         {files.length > 0 && (
           <div className="attachments" aria-label={t("session.attachments")}>
             {files.map((f, i) => (

@@ -880,15 +880,14 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   // The message goes out; while a run is on the host holds it as a steer for the next step, and the
   // queue is re-read so the card is there before the stream says so.
-  async function send(text: string, files: File[], clientMessageId?: string) {
+  async function send(text: string, files: File[], clientMessageId?: string, onProgress?: (fraction: number) => void) {
     const steer = busyRef.current && status === "running";
     if (files.length > 0) {
       const form = new FormData();
       form.append("text", text);
       if (clientMessageId) form.append("client_message_id", clientMessageId);
       for (const f of files) form.append("files", f, f.name);
-      const res = await fetch(`/api/sessions/${id}/upload`, { method: "POST", headers: api.authHeaders(), body: form });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? res.statusText);
+      await api.upload(`/api/sessions/${id}/upload`, form, onProgress);
     } else {
       await api.post(`/api/sessions/${id}/messages`, steer ? { text, steer: true, client_message_id: clientMessageId } : { text, client_message_id: clientMessageId });
     }

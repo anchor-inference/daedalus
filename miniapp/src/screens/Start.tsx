@@ -87,6 +87,7 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
   const [chosen, setChosen] = useState<Chosen | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -126,6 +127,7 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
     if (busy || (!text && files.length === 0)) return;
     setBusy(true);
     let created: { id: string } | null = null;
+    let sent = false;
     try {
       // The message goes out after the session exists, so a model picked here is the one that
       // reads it. Sending both in the create call would start the run on the default model.
@@ -142,21 +144,28 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
         const form = new FormData();
         if (text) form.append("text", text);
         for (const file of files) form.append("files", file);
-        const response = await fetch(`/api/sessions/${created.id}/upload`, { method: "POST", headers: api.authHeaders(), body: form });
-        if (!response.ok) throw new Error(errorText(await response.json().catch(() => response.statusText)));
+        setProgress(0);
+        await api.upload(`/api/sessions/${created.id}/upload`, form, setProgress);
       } else {
         await api.post(`/api/sessions/${created.id}/messages`, { text });
       }
+      sent = true;
       setDraft("");
       setFiles([]);
     } catch (e) {
       toast(errorText(e));
     } finally {
       setBusy(false);
+      setProgress(null);
     }
-    if (created) {
+    if (created && sent) {
       invalidate("/api/sessions");
       navigate(sessionPath(created.id));
+    } else if (created) {
+      // A 150 MB video refused mid-upload used to leave the screen for the new, empty session: the
+      // words and the file were gone and the list held a conversation with nothing in it. The draft
+      // stays here to send again, and the empty session goes.
+      void api.delete(`/api/sessions/${created.id}`).catch(() => undefined).finally(() => invalidate("/api/sessions"));
     }
   }
 
@@ -186,7 +195,7 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
           </div>
         </div>
       </div>
-      {files.length > 0 && <div className="sub start-files">{files.map((file) => file.name).join(", ")}</div>}
+      {files.length > 0 && <div className="sub start-files">{progress === null ? files.map((file) => file.name).join(", ") : t("upload.progress", { percent: Math.floor(progress * 100) })}</div>}
     </div>
   );
 }

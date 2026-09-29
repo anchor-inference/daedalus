@@ -614,6 +614,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "common.never": { en: "never", ru: "никогда" },
   "common.nothing": { en: "Nothing matches.", ru: "Ничего не нашлось." },
   "common.noconnection": { en: "No connection to the bot", ru: "Нет связи с ботом" },
+  "upload.toolarge": { en: "The file is larger than the server accepts. Nothing was sent; the message is still here.", ru: "Файл больше, чем принимает сервер. Ничего не отправлено, сообщение осталось здесь." },
+  "upload.progress": { en: "Uploading {percent}%", ru: "Загрузка {percent}%" },
   "common.download": { en: "Download", ru: "Скачать" },
   "media.loading": { en: "Loading media", ru: "Загружаем медиа" },
   "media.open": { en: "Open {name}", ru: "Открыть {name}" },

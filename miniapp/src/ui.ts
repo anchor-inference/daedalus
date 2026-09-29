@@ -1,6 +1,6 @@
 // Small UI helpers shared by the screens: Telegram bridge, confirmations, formatting.
 
-import { telegram } from "./api";
+import { ApiError, telegram } from "./api";
 import { confirmDialog } from "./dialogs";
 import { bytes, tokens } from "./format";
 import { t } from "./i18n";
@@ -49,6 +49,7 @@ export function numInput(raw: string, min?: number): number | null {
 
 /** A readable message for a failed request. */
 export function errorText(e: unknown): string {
+  if (e instanceof ApiError && e.status === 413) return t("upload.toolarge");
   const msg = e instanceof Error ? e.message : String(e);
   if (!msg || msg === "Failed to fetch" || msg === "Load failed" || msg === "NetworkError when attempting to fetch resource.") return t("common.noconnection");
   return msg;

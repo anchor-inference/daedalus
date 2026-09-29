@@ -106,6 +106,34 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   return (await response.json()) as T;
 }
 
+/** A message with its files, sent with progress.
+ *
+ *  `fetch` reports nothing until the whole body is out, and a large video takes minutes: the send
+ *  looked stuck and then failed with nothing on screen. XHR's upload progress says how far it is.
+ *  A proxy's size refusal comes back as HTML, not the host's JSON, so the status alone is kept (413);
+ *  a dropped connection is reported as `fetch` would, so every caller reads it the same way. */
+function upload<T>(path: string, form: FormData, onProgress?: (fraction: number) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", path);
+    for (const [name, value] of Object.entries(authHeaders())) xhr.setRequestHeader(name, value);
+    if (onProgress) xhr.upload.onprogress = (event) => event.lengthComputable && onProgress(event.loaded / event.total);
+    xhr.onerror = () => reject(new TypeError("Failed to fetch"));
+    xhr.onload = () => {
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(xhr.responseText);
+      } catch {
+        /* a proxy's HTML page */
+      }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(parsed as T);
+      const detail = typeof parsed?.detail === "string" && parsed.detail ? parsed.detail : `Request failed (${xhr.status})`;
+      reject(new ApiError(xhr.status, detail, parsed && typeof parsed === "object" ? parsed : {}));
+    };
+    xhr.send(form);
+  });
+}
+
 export const api = {
   get: <T>(path: string) => call<T>("GET", path),
   post: <T>(path: string, body?: unknown) => call<T>("POST", path, body),
@@ -118,6 +146,7 @@ export const api = {
     return `/api/sessions/${sessionId}/download?path=${encodeURIComponent(path)}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
   },
   authHeaders,
+  upload,
   /** A workspace file as a blob URL: <img>/<iframe> cannot send the auth header, so the bytes are fetched here. */
   fetchBlob: async (sessionId: string, path: string): Promise<{ url: string; type: string; size: number }> => {
     const res = await fetch(`/api/sessions/${sessionId}/download?path=${encodeURIComponent(path)}`, { headers: authHeaders() });
