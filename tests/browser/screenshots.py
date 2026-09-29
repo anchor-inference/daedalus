@@ -657,7 +657,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     if rel == "/api/voice/tts":
         return respond(route, SILENCE, content_type="audio/wav")
     if rel.startswith("/api/harnesses"):
-        posted = json.loads(request.post_data or "{}") if request.method == "POST" and request.post_data else None
+        posted = json.loads(request.post_data or "{}") if request.method in ("POST", "PUT") and request.post_data else None
         harnesses = HARNESSES.answer(request.method, rel, urlsplit(url).query, posted)
         if harnesses is not None:
             return respond(route, harnesses[1], status=harnesses[0])

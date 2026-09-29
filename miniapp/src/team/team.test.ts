@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HARNESSES, HARNESS_BADGES, availability, branchPreview, placeExecutor, branchSlug, colourVar, defaultIsolation, foldersFor, initials, statusTone } from "./team";
+import { HARNESSES, HARNESS_BADGES, availability, branchPreview, placeExecutor, branchSlug, colourVar, defaultIsolation, foldersFor, initials, modelGroups, statusTone } from "./team";
 
 describe("the executor badge", () => {
   it("gives every executor its own two letters", () => {
@@ -114,5 +114,16 @@ describe("folders and isolation", () => {
     expect(defaultIsolation(folders[0])).toBe("worktree");
     expect(defaultIsolation(folders[1])).toBe("shared");
     expect(defaultIsolation(undefined)).toBe("shared");
+  });
+});
+
+describe("the hiring form's models", () => {
+  it("lists the offered ones first and keeps every other model reachable", () => {
+    const all = ["opus", "claude-opus-5-5", "claude-sonnet-5-5", "haiku"];
+    expect(modelGroups({ models: all, all_models: all, models_chosen: false })).toEqual({ offered: all, others: [] });
+    expect(modelGroups({ models: ["claude-sonnet-5-5", "claude-opus-5-5"], all_models: all, models_chosen: true })).toEqual({ offered: ["claude-sonnet-5-5", "claude-opus-5-5"], others: ["opus", "haiku"] });
+    // A catalog from before the choice existed, or none at all.
+    expect(modelGroups({ models: ["opus"] })).toEqual({ offered: ["opus"], others: [] });
+    expect(modelGroups(null)).toEqual({ offered: [], others: [] });
   });
 });

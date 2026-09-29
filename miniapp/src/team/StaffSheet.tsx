@@ -26,6 +26,7 @@ import {
   colourVar,
   defaultIsolation,
   foldersFor,
+  modelGroups,
 } from "./team";
 
 const DAEDALUS_EFFORTS = ["", "off", "low", "medium", "high", "xhigh"];
@@ -103,7 +104,8 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
   };
 
   const agents = useMemo(() => (daedalus ? team.choices.personas : (entry?.agents ?? []).map((a) => a.name)), [daedalus, team.choices.personas, entry]);
-  const models = daedalus ? team.choices.presets : (entry?.models ?? []).map((m) => ({ id: m, label: m }));
+  const groups = modelGroups(daedalus ? null : entry);
+  const models = daedalus ? team.choices.presets : [...groups.offered, ...groups.others].map((m) => ({ id: m, label: m }));
   const defaultModel = team.choices.presets.find((p) => p.id === team.choices.default_preset)?.label ?? "";
   const worktreeProblem = isolation === "worktree" && folder && (folder.readonly ? t("team.isolation.readonlyfolder") : folder.env === project.local_env && !folder.is_git ? t("team.isolation.nogit") : "");
   const canSave = !busy && name.trim().length > 0 && name.trim().length <= 32 && (editing || reason === "") && !worktreeProblem && folders.length > 0;
@@ -228,7 +230,14 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
           {models.length > 0 || daedalus ? (
             <select id="staff-model" className="field" value={model} onChange={(e) => setModel(e.target.value)}>
               <option value="">{daedalus && defaultModel ? t("team.model.default.named", { name: defaultModel }) : t("team.model.default")}</option>
-              {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+              {groups.others.length > 0 ? (
+                <>
+                  <optgroup label={t("team.model.offered")}>{groups.offered.map((m) => <option key={m} value={m}>{m}</option>)}</optgroup>
+                  <optgroup label={t("team.model.others")}>{groups.others.map((m) => <option key={m} value={m}>{m}</option>)}</optgroup>
+                </>
+              ) : (
+                models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)
+              )}
               {model && !models.some((m) => m.id === model) && <option value={model}>{model}</option>}
             </select>
           ) : (

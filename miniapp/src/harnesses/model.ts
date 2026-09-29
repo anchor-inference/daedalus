@@ -18,7 +18,11 @@ export type HarnessRow = {
   logged_in: "yes" | "no" | "unknown";
   login_detail: string;
   agents: { name: string; source?: string; description?: string }[];
+  /** What is offered: the operator's choice, or every model when there is none. */
   models: string[];
+  /** Every model the CLI listed; any of them can still be named on a hire. */
+  all_models: string[];
+  models_chosen: boolean;
   self_check: SelfCheck | Record<string, never>;
   checked_at: string | null;
   error: string;
@@ -99,4 +103,18 @@ export function agentSource(source: string | undefined): string {
   if (source === "project") return "harness.agent.project";
   if (source === "builtin") return "harness.agent.builtin";
   return "harness.agent.user";
+}
+
+/** The checklist a row's "Models to offer" starts from: the chosen models, or nothing ticked when
+ *  there is no choice. Picking a few out of many is the point, so the operator ticks the few rather
+ *  than unticking the many. */
+export function offeredDraft(row: Pick<HarnessRow, "models" | "all_models" | "models_chosen">): string[] {
+  return row.models_chosen ? row.models.filter((m) => row.all_models.includes(m)) : [];
+}
+
+/** What a save sends: null — offer everything — when nothing or everything is ticked, since offering
+ *  nothing would leave the hiring form without a list and offering all is no choice at all. */
+export function offeredToSend(draft: string[], all: string[]): string[] | null {
+  const ticked = all.filter((m) => draft.includes(m));
+  return ticked.length === 0 || ticked.length === all.length ? null : ticked;
 }
