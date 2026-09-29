@@ -4,6 +4,7 @@
 import { type FocusEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, Preset, Project, Settings } from "../api";
 import { fieldHeight } from "../composer";
+import { AttachmentCard } from "../composerbox";
 import { ModelChoice, ModelSelect } from "../modelselect";
 import { NewAgentSheet, SessionsScreen } from "./Sessions";
 import { Icon } from "../icons";
@@ -169,9 +170,29 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
     }
   }
 
+  // The picked files are read before the input is cleared: read inside the state update, which runs
+  // later, they came from a list the clearing had already emptied, and nothing attached ever showed.
+  const addFiles = (incoming: Iterable<File>) => {
+    const picked = Array.from(incoming);
+    if (picked.length) setFiles((held) => [...held, ...picked]);
+  };
+  const openFile = (file: File) => {
+    const url = URL.createObjectURL(file);
+    window.open(url, "_blank", "noopener");
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
   return (
-    <div className="start-composer composer">
+    <div className="start-composer composer" onDragOver={(event) => { if (event.dataTransfer?.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (!event.dataTransfer?.files.length) return; event.preventDefault(); addFiles(event.dataTransfer.files); }}>
       <div className="composer-box">
+        {progress !== null && <div className="sub upload-progress" role="status">{t("upload.progress", { percent: Math.floor(progress * 100) })}</div>}
+        {files.length > 0 && (
+          <div className="attachments" aria-label={t("session.attachments")}>
+            {files.map((file, i) => (
+              <AttachmentCard key={`${file.name}-${file.size}-${file.lastModified}-${i}`} file={file} onOpen={() => openFile(file)} onRemove={() => setFiles((held) => held.filter((_, j) => j !== i))} />
+            ))}
+          </div>
+        )}
         <textarea
           ref={field}
           value={draft}
@@ -179,6 +200,12 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
           placeholder={t("session.composer.idle")}
           aria-label={t("session.composer.idle")}
           onChange={(event) => setDraft(event.target.value)}
+          onPaste={(event) => {
+            const pasted = Array.from(event.clipboardData?.items ?? []).filter((item) => item.kind === "file").map((item) => item.getAsFile()).filter((file): file is File => !!file);
+            if (!pasted.length) return;
+            event.preventDefault();
+            addFiles(pasted);
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && enterSends()) {
               event.preventDefault();
@@ -187,7 +214,7 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
           }}
         />
         <div className="composer-row">
-          <input ref={fileInput} type="file" multiple hidden onChange={(event) => { setFiles((held) => [...held, ...Array.from(event.target.files ?? [])]); event.target.value = ""; }} />
+          <input ref={fileInput} type="file" multiple hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
           <button type="button" className="iconbtn flat plus" onClick={() => fileInput.current?.click()} aria-label={t("composer.plus")} title={t("composer.plus")}><Icon name="plus" /></button>
           <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone} />
           <div className="composer-tools">
@@ -195,7 +222,6 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
           </div>
         </div>
       </div>
-      {files.length > 0 && <div className="sub start-files">{progress === null ? files.map((file) => file.name).join(", ") : t("upload.progress", { percent: Math.floor(progress * 100) })}</div>}
     </div>
   );
 }

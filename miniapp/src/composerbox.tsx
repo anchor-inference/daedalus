@@ -494,14 +494,16 @@ function Ring({ pct }: { pct: number }) {
   );
 }
 
-function AttachmentCard({ file, onOpen, onRemove }: { file: File; onOpen: () => void; onRemove: () => void }) {
+export function AttachmentCard({ file, onOpen, onRemove }: { file: File; onOpen: () => void; onRemove: () => void }) {
   const isImage = file.type.startsWith("image/") || previewKind(file.name) === "image";
-  const url = useMemo(() => (isImage ? URL.createObjectURL(file) : null), [file, isImage]);
+  // A video shows its first frame, as a picture does itself: a clapperboard glyph said only "video".
+  const isVideo = file.type.startsWith("video/");
+  const url = useMemo(() => (isImage || isVideo ? URL.createObjectURL(file) : null), [file, isImage, isVideo]);
   useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
   return (
-    <div className={`attachment ${isImage ? "image" : ""}`}>
+    <div className={`attachment ${isImage || isVideo ? "image" : ""}`}>
       <button type="button" className="attachment-open" onClick={onOpen} title={canPreview(file.name) ? t("preview.open") : file.name}>
-        {url ? <img src={url} alt={file.name} /> : <span className="attachment-glyph" aria-hidden>{fileGlyph(file.name)}</span>}
+        {url && isVideo ? <video src={`${url}#t=0.1`} muted playsInline preload="metadata" aria-hidden /> : url ? <img src={url} alt={file.name} /> : <span className="attachment-glyph" aria-hidden>{fileGlyph(file.name)}</span>}
         <span className="attachment-meta">
           <span className="attachment-name">{file.name}</span>
           <span className="sub">{fmtBytes(file.size)}</span>

@@ -1186,7 +1186,7 @@ body.resizing iframe { pointer-events: none; }
 .attachment { position: relative; display: flex; max-width: 100%; }
 .attachment-open { display: flex; align-items: center; gap: 8px; max-width: 260px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 4px 30px 4px 4px; color: var(--fg); font: inherit; cursor: pointer; text-align: left; min-height: var(--row-h); }
 .attachment-open:hover { background: var(--card-2); }
-.attachment-open img { width: 36px; height: 36px; object-fit: cover; border-radius: var(--radius-xs); flex: none; background: var(--bg-2); }
+.attachment-open img, .attachment-open video { width: 36px; height: 36px; object-fit: cover; border-radius: var(--radius-xs); flex: none; background: var(--bg-2); }
 .attachment.image .attachment-open { padding: 4px 30px 4px 4px; }
 .attachment-glyph { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; font-size: var(--fs-18); flex: none; }
 .attachment-meta { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
@@ -2632,10 +2632,9 @@ input.field[type="range"] {
 .start { display:flex; flex-direction:column; }
 .start-hero { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--space-5); min-height:46dvh; padding:var(--space-6) var(--space-4) var(--space-4); }
 h1.start-greeting { margin:0; max-width:18em; font-size:var(--fs-18); font-weight:560; letter-spacing:-0.02em; text-align:center; line-height:1.3; }
-.start-composer, .start-files { width:min(100%, var(--chat-w)); }
-.start-files { text-align:center; }
+.start-composer { width:min(100%, var(--chat-w)); }
 /* Where the attachments were while they upload: the percentage, in figures that do not jitter. */
-.composer .upload-progress, .start-files { font-variant-numeric: tabular-nums; }
+.composer .upload-progress { font-variant-numeric: tabular-nums; }
 .composer .upload-progress { padding: 8px 14px 0; }
 /* A phone searching its chats: the list takes the screen and the composer waits (Start.tsx, useFinding). */
 .start.finding { display:none; }
