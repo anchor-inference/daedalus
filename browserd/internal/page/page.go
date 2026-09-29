@@ -295,3 +295,22 @@ func (p *Model) HumanInput(t *browser.Tab, kind string) {
 		_, _ = p.call(ctx, t, "markHumanTyped")
 	}()
 }
+
+// Selection is what the operator copies while they drive: the text selected on the page, at most max
+// characters, and whether it was cut short. withheld says the focus is on a password field, whose
+// value never leaves the page this way (js/page.js, selection).
+func (p *Model) Selection(ctx context.Context, t *browser.Tab, max int) (text string, truncated, withheld bool, err error) {
+	raw, err := p.call(ctx, t, "selection", max)
+	if err != nil {
+		return "", false, false, err
+	}
+	var r struct {
+		Text      string `json:"text"`
+		Truncated bool   `json:"truncated"`
+		Withheld  bool   `json:"withheld"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return "", false, false, fmt.Errorf("the page script answered a selection that is not one: %w", err)
+	}
+	return r.Text, r.Truncated, r.Withheld, nil
+}

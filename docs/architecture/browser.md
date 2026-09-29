@@ -402,7 +402,8 @@ the tab has painted before, since the daemon keeps each watched tab's newest fra
 - `action`, `action_done`, `control`, `dialog`, `download`, `needs_you`: as the daemon's events of the
   same names, for this group.
 - `error {code, message}`: `bad_frame`, `not_holder` (INPUT from a client that does not hold
-  control), `tab_closed`.
+  control), `tab_closed`, `input`.
+- `copied {id, text, truncated, withheld, error?}`: the answer to this client's `copy`, to it alone.
 - `ping {at}` every 20 s.
 
 ### Frames, rate and flow control
@@ -446,6 +447,18 @@ from the image with the frame's meta). `mods` is a bit set: 1 Alt, 2 Ctrl, 4 Met
 | `text` | `text` (at most 1000 characters) | `Input.insertText`: composed text, paste, a phone's keyboard |
 | `touch` | `type: "start" \| "move" \| "end" \| "cancel", points[{x, y, id}]` | `Input.dispatchTouchEvent` |
 | `nav` | `action: "url" \| "back" \| "forward" \| "reload", url?` | the address bar and the toolbar while the operator drives; the same scheme rules as `page.navigate` |
+| `copy` | `id` (1–64 bytes, the client's own) | the page's selected text read in the daemon's isolated world, answered `copied` |
+
+**The clipboard.** The page's browser has a clipboard of its own, which holds nothing of the
+operator's, so a paste is never sent as keys: the app lets the browser's own `paste` fire on its
+hidden field and sends the operator's clipboard as `text` (at most 40 000 characters, since the
+daemon's per-viewer queue of 64 inputs drops what overflows it). A copy goes the other way: `copy`
+reads the selection in the focused field, or else in the document holding the focus (through
+same-origin frames and open shadow roots), at most 262 144 characters, trimmed further if the answer
+would not fit one socket frame (`truncated`). A password field (`type="password"`, or an
+`autocomplete` naming a password) is never read: the answer is `withheld: true` and no text. The copy
+runs in the client's input order, so the key of a cut sent after it deletes only what was read. The
+text reaches that one client and nothing else: no event, log or audit holds it.
 
 A human's keystrokes are counted, never recorded: `view.detach`'s audit counterpart on the host gets
 the count of inputs by kind, and nothing reaches the daemon's log. Every field a human typed into is

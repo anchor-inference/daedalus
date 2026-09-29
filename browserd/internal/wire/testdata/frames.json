@@ -112,6 +112,21 @@
    }
   },
   {
+   "name": "event-copied-utf8",
+   "direction": "server",
+   "hex": "227b2274797065223a22636f70696564222c226964223a226b31222c2274657874223a22d0bbd0bed0b3d0b8d0bd3a20736f6d656f6e655c6e5c22785c22203c6126623e222c227472756e6361746564223a66616c73652c227769746868656c64223a66616c73657d",
+   "value": {
+    "kind": "event",
+    "event": {
+     "type": "copied",
+     "id": "k1",
+     "text": "логин: someone\n\"x\" <a&b>",
+     "truncated": false,
+     "withheld": false
+    }
+   }
+  },
+  {
    "name": "attach",
    "direction": "client",
    "hex": "307b2274696572223a226c697665222c22746162223a227431222c226d61785f77223a313630302c226d61785f68223a313030302c22647072223a322c227175616c697479223a36307d",
@@ -222,6 +237,18 @@
      "t": "nav",
      "action": "url",
      "url": "https://example.com/"
+    }
+   }
+  },
+  {
+   "name": "input-copy",
+   "direction": "client",
+   "hex": "337b2274223a22636f7079222c226964223a226b31227d",
+   "value": {
+    "kind": "input",
+    "input": {
+     "t": "copy",
+     "id": "k1"
     }
    }
   }

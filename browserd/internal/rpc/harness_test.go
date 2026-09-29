@@ -158,6 +158,7 @@ func startWall(t *testing.T, edit func(*config.Limits), args []string, makeWall 
 	hub = view.New(m, evlog, log)
 	model := page.New(m, cfg, log)
 	hub.HumanInput = model.HumanInput
+	hub.Selection = model.Selection
 	m.Listen(hub)
 	m.Listen(model)
 	recorder := &record.Recorder{Store: record.Open(filepath.Join(cfg.StateDir, "recordings")), Log: log, Groups: m.Group,

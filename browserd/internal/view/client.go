@@ -453,6 +453,12 @@ func (cl *Client) run() {
 				continue
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if in.T == "copy" {
+				cl.copySelection(ctx, t, in.ID)
+				cl.hub.log.Debug("input", "t", in.T)
+				cancel()
+				continue
+			}
 			err := cl.hub.dispatch(ctx, t, in)
 			cl.hub.log.Debug("input", "t", in.T, "type", in.Type, "error", err)
 			if err != nil {

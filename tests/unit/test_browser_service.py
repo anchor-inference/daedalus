@@ -376,6 +376,16 @@ def test_the_gateway_hears_whether_a_view_is_in_view() -> None:
     assert seen == [{"tier": "live", "max_w": 640, "max_h": 400}, {"hidden": True}]
 
 
+def test_a_copy_is_input_the_audit_counts_and_a_viewer_never_sends() -> None:
+    frame = b"\x33" + json.dumps({"t": "copy", "id": "k1"}).encode()
+    result = RelayResult(code=1000, reason="", ended_by="app")
+    assert check_frame(False)(frame, result) == frame
+    assert result.counts == {"copy": 1}
+    watcher = RelayResult(code=1000, reason="", ended_by="app")
+    assert check_frame(True)(frame, watcher) is None
+    assert watcher.input_dropped == 1
+
+
 async def test_watchers_count_only_views_in_view(service: Browsers) -> None:
     a = service.watch("g1")
     b = service.watch("g1")

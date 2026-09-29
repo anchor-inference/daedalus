@@ -723,6 +723,65 @@
     return el && el !== document.body && el !== document.documentElement ? el : null;
   }
 
+  // selection is what the operator copies while they drive: the text selected in the focused field,
+  // or else in the document that holds the focus (through same-origin frames and open shadow roots),
+  // at most max characters. A password field's value is withheld even from the operator: the copy
+  // lands in a clipboard other programs read, and a password that leaves the page that way is one
+  // nobody meant to move. A field only the operator typed into is theirs to copy, so it is not
+  // withheld the way it is from the agent.
+  function selection(max) {
+    let doc = document;
+    let el = doc.activeElement;
+    let root = null;
+    for (;;) {
+      if (el && (tag(el) === "iframe" || tag(el) === "frame")) {
+        let inner = null;
+        try {
+          inner = el.contentDocument;
+        } catch (e) {}
+        if (!inner) break;
+        doc = inner;
+        el = inner.activeElement;
+        root = null;
+        continue;
+      }
+      if (el && el.shadowRoot && el.shadowRoot.activeElement) {
+        root = el.shadowRoot;
+        el = root.activeElement;
+        continue;
+      }
+      break;
+    }
+    let text = "";
+    if (el && (tag(el) === "input" || tag(el) === "textarea")) {
+      const ac = (el.getAttribute("autocomplete") || "").toLowerCase();
+      if ((tag(el) === "input" && inputType(el) === "password") || /password/.test(ac)) {
+        return { text: "", truncated: false, withheld: true };
+      }
+      let start = null, end = null;
+      try {
+        start = el.selectionStart;
+        end = el.selectionEnd;
+      } catch (e) {}
+      // An email or number field has no selection offsets to read; the document's selection then
+      // holds what Chromium shows selected in it.
+      if (start !== null && end !== null) text = String(el.value || "").slice(start, end);
+    }
+    if (!text) {
+      const sel = root && typeof root.getSelection === "function" ? root.getSelection() : doc.getSelection();
+      text = sel ? sel.toString() : "";
+    }
+    const truncated = text.length > max;
+    if (truncated) {
+      // Never between the halves of a surrogate pair: half a character is not text.
+      let cut = max;
+      const c = text.charCodeAt(cut - 1);
+      if (c >= 0xd800 && c <= 0xdbff) cut--;
+      text = text.slice(0, cut);
+    }
+    return { text, truncated, withheld: false };
+  }
+
   function focusedRef() {
     const el = deepFocus();
     return el ? ref(el) : "";
@@ -765,7 +824,7 @@
   }
 
   globalThis.__browserd = {
-    snapshot, readable, prepare, hit, focus, selectAll, selectOption, element, evidence, mask, markHumanTyped,
+    snapshot, readable, prepare, hit, focus, selectAll, selectOption, element, evidence, mask, markHumanTyped, selection,
     hasText, exists, captchas, ref, describe, focusedRef, region, href: () => location.href,
   };
 })();

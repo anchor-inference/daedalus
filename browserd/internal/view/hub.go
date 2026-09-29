@@ -32,6 +32,9 @@ type Hub struct {
 	// HumanInput is told of every input a person sends to a tab, so the page model can remember the
 	// fields they typed into as secret. It may be nil.
 	HumanInput func(t *browser.Tab, kind string)
+	// Selection reads the text selected on a tab for a person's copy (page.Model.Selection). It may
+	// be nil, and a copy is then answered with an error.
+	Selection func(ctx context.Context, t *browser.Tab, max int) (text string, truncated, withheld bool, err error)
 
 	mu      sync.Mutex
 	casts   map[*browser.Tab]*cast
