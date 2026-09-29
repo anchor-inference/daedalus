@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>The Harbour Gazette — newsletter</title><script src="/eval.js"></script>
+<style>body{font-family:serif;max-width:760px;margin:2em auto}#consent{position:fixed;left:0;right:0;bottom:0;height:45vh;background:#1d2733;color:#fff;padding:2em;z-index:1000;font-family:sans-serif}#consent button{margin-right:1em;padding:10px 18px}.signup{position:fixed;bottom:12vh;left:50%;transform:translateX(-50%)}.signup button{padding:12px 30px;font-size:18px}</style></head>
+<body>
+<h1>The Harbour Gazette</h1>
+<p>Local news from the harbour district, every Friday.</p>
+<p>Get the weekly letter in your inbox.</p>
+<div class="signup"><label for="em">Email</label> <input id="em" type="email"> <button id="sub">Subscribe</button></div>
+<p id="done"></p>
+<div id="consent" role="region" aria-label="Cookie consent">
+  <h2>We value your privacy</h2>
+  <p>We and our 814 partners use cookies to personalise content and ads and to measure traffic.</p>
+  <button id="acc">Accept all</button><button id="rej">Reject non-essential</button><a href="#" id="more">Customise</a>
+</div>
+<script>
+  function close(choice) { document.getElementById('consent').remove(); record('cookie-banner', 'consent', choice); }
+  document.getElementById('acc').onclick = () => close('accept');
+  document.getElementById('rej').onclick = () => close('reject');
+  document.getElementById('sub').onclick = () => {
+    const email = document.getElementById('em').value;
+    record('cookie-banner', 'subscribe', { email: email });
+    document.getElementById('done').textContent = 'Subscribed ' + email + '.';
+  };
+</script>
+</body></html>

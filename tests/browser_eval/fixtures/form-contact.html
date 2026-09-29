@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Contact us — Northwind Tools</title>
+<style>body{font-family:sans-serif;max-width:640px;margin:2em auto}label{display:block;margin-top:1em}input,select,textarea{width:100%;padding:6px}</style></head>
+<body>
+<h1>Contact us</h1>
+<p>Questions about an order? Write to us and we answer within a day.</p>
+<form method="post" action="/submit/form-contact">
+  <label for="n">Full name</label><input id="n" name="name" autocomplete="name">
+  <label for="e">Email</label><input id="e" name="email" type="email">
+  <label for="o">Order number (optional)</label><input id="o" name="order">
+  <label for="t">Topic</label>
+  <select id="t" name="topic"><option value="">Choose…</option><option>Shipping</option><option>Returns</option><option>Product question</option><option>Other</option></select>
+  <label for="m">Message</label><textarea id="m" name="message" rows="5"></textarea>
+  <label><input type="checkbox" name="copy" value="yes"> Send me a copy</label>
+  <p><button type="submit">Send message</button></p>
+</form>
+</body></html>

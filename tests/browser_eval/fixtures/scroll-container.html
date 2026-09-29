@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Warehouse bins</title>
+<style>body{font-family:sans-serif;max-width:900px;margin:2em auto}#bins{height:260px;overflow-y:auto;border:1px solid #888}#bins div{padding:6px;border-bottom:1px solid #eee;display:flex;justify-content:space-between}</style></head>
+<body>
+<h1>Warehouse bins</h1>
+<p>Each bin's location label. The list scrolls inside its box.</p>
+<div id="bins" tabindex="0"></div>
+<script>
+  const box = document.getElementById('bins');
+  const aisles = 'ABCDEFGHJK';
+  for (let i = 1; i <= 240; i++) {
+    const row = document.createElement('div');
+    const loc = aisles[(i * 7) % 10] + '-' + String((i * 37) % 97).padStart(2, '0') + '-' + ((i * 13) % 9 + 1);
+    row.innerHTML = '<span>Bin ' + i + '</span><span>' + loc + '</span>';
+    box.appendChild(row);
+  }
+</script>
+</body></html>

@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Flights — search filters</title><script src="/eval.js"></script>
+<style>body{font-family:sans-serif;max-width:760px;margin:2em auto}</style></head>
+<body>
+<h1>Flights from Lisbon to Oslo</h1>
+<p>Filters: nonstop only · departure 06:00–10:00 · max €180 · carry-on included</p>
+<p><button id="reset">Reset filters</button></p>
+<p id="m">4 flights match.</p>
+<script>
+  document.getElementById('reset').onclick = () => {
+    if (confirm('Reset all 4 filters to their defaults?')) { record('confirm-dialog', 'reset'); document.getElementById('m').textContent = 'Filters reset. 37 flights match.'; }
+    else { record('confirm-dialog', 'kept'); }
+  };
+</script>
+</body></html>

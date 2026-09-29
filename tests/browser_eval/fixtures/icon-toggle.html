@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Reading list — Longform</title><script src="/eval.js"></script>
+<style>body{font-family:sans-serif;max-width:760px;margin:2em auto}article{border-bottom:1px solid #ddd;padding:1em 0;display:flex;justify-content:space-between}.save{font-size:22px;color:#888}</style></head>
+<body>
+<h1>This week's long reads</h1>
+<article><div><h2>The quiet economics of ferries</h2><p>How island routes survive winter.</p></div><span class="save" data-id="ferries" title="Save for later">☆</span></article>
+<article><div><h2>A year inside a seed bank</h2><p>Keeping twenty thousand varieties alive.</p></div><span class="save" data-id="seeds" title="Save for later">☆</span></article>
+<article><div><h2>Why lighthouses still matter</h2><p>GPS did not make them obsolete.</p></div><span class="save" data-id="lighthouses" title="Save for later">☆</span></article>
+<script>
+  document.querySelectorAll('.save').forEach(s => s.addEventListener('click', () => {
+    s.textContent = s.textContent === '☆' ? '★' : '☆';
+    record('icon-toggle', 'save', { id: s.dataset.id, saved: s.textContent === '★' });
+  }));
+</script>
+</body></html>

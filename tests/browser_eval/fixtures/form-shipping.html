@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Checkout — shipping address</title>
+<style>body{font-family:sans-serif;max-width:720px;margin:2em auto}.row{display:flex;gap:1em}.row>div{flex:1}label{display:block;margin-top:.8em}input,select{width:100%;padding:6px}</style></head>
+<body>
+<h1>Shipping address</h1>
+<ol class="steps"><li><b>Address</b></li><li>Payment</li><li>Review</li></ol>
+<form method="post" action="/submit/form-shipping">
+  <div class="row"><div><label for="fn">First name</label><input id="fn" name="first"></div><div><label for="ln">Last name</label><input id="ln" name="last"></div></div>
+  <label for="s1">Street and number</label><input id="s1" name="street">
+  <div class="row"><div><label for="pc">Postcode</label><input id="pc" name="postcode"></div><div><label for="c">City</label><input id="c" name="city"></div></div>
+  <label for="cn">Country</label>
+  <select id="cn" name="country"><option>Austria</option><option>Belgium</option><option selected>Germany</option><option>Netherlands</option><option>Portugal</option><option>Spain</option></select>
+  <fieldset style="margin-top:1em"><legend>Delivery</legend>
+    <label><input type="radio" name="delivery" value="standard" checked> Standard (3–5 days)</label>
+    <label><input type="radio" name="delivery" value="express"> Express (next day)</label>
+    <label><input type="radio" name="delivery" value="pickup"> Pick up at a locker</label>
+  </fieldset>
+  <label><input type="checkbox" name="gift" value="yes"> This is a gift (no prices on the slip)</label>
+  <p><button type="submit">Continue to payment</button></p>
+</form>
+</body></html>
