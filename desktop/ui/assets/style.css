@@ -307,14 +307,14 @@ button[disabled] { opacity: 0.45; cursor: default; transform: none; }
   margin-top: 18px;
   min-height: 22px;
 }
+/* The launcher's last line wraps rather than ending in an ellipsis: cut, it lost its end at one
+   width and not at another, with nothing to read the rest by. */
 .live {
   color: var(--faint);
   font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   margin-top: 4px;
   min-height: 20px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .trouble { border-color: rgba(240, 180, 41, 0.4); }
 .trouble h2 { font-size: 17px; }
@@ -322,6 +322,15 @@ button[disabled] { opacity: 0.45; cursor: default; transform: none; }
    the page's own text rather than at a footnote's. */
 .trouble .what { color: var(--text); margin-top: 10px; }
 .trouble .detail { margin-top: 14px; }
+/* The one way to the error itself: at the muted grey of a caption it read as disabled text. */
+.trouble .detail > summary { color: var(--text); }
+.trouble .detail > summary:hover { color: var(--accent); }
+.trouble .raw {
+  color: var(--muted);
+  font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
 .trouble pre {
   background: var(--bg);
   border: 1px solid var(--line);

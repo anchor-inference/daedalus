@@ -63,6 +63,7 @@ var messages = map[Lang]map[string]string{
 		"progress.error.retry":   "Try again",
 		"progress.error.setup":   "Change the configuration",
 		"progress.error.details": "What happened",
+		"progress.error.raw":     "Something went wrong that the launcher does not recognise. The program said:",
 
 		"step.runtime":     "Downloading the runtime",
 		"step.images":      "Fetching the images",
@@ -184,6 +185,7 @@ var messages = map[Lang]map[string]string{
 		"step.checkouts":   "Загрузка кода",
 		"step.environment": "Сборка окружения",
 		"step.start":       "Запуск",
+		"progress.error.raw":     "Что-то пошло не так, и лаунчер не знает, что именно. Программа сообщила:",
 
 		"live.runtime":     "Загружаем то, на чём он работает. Это бывает один раз.",
 		"live.images":      "Загружаем образы контейнеров — самая долгая часть первого запуска.",
