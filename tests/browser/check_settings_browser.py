@@ -118,10 +118,10 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
     if not any(p.endswith("/running/container/b1a2b3c4/close") for m, p, _ in bs.requests if m == "POST"):
         say("Close did not ask the host to close that browser")
 
-    # The cap: the bar follows the draft, both kinds on one track.
-    bar = page.locator(".bs-limits .loadbar.workloads")
+    # The cap: the one bar at the top of the page follows the draft, both kinds on one track.
+    bar = page.locator(".env-load .loadbar.workloads")
     bar.wait_for(timeout=5000)
-    kinds = page.locator(".bs-limits .loadbar-kind").all_inner_texts()
+    kinds = page.locator(".env-load .loadbar-kind").all_inner_texts()
     print(f"[{lang}] kinds: {kinds}; level {bar.get_attribute('data-level')}")
     if len(kinds) != 2:
         say(f"the bar does not name both kinds: {kinds}")
@@ -131,7 +131,7 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
     cap.fill("32")
     page.wait_for_timeout(200)
     level = bar.get_attribute("data-level")
-    browsers_width = page.evaluate("() => parseFloat(document.querySelector('.bs-limits .loadbar-browsers-extra').style.width)")
+    browsers_width = page.evaluate("() => parseFloat(document.querySelector('.env-load .loadbar-browsers-extra').style.width)")
     print(f"[{lang}] at 32: {level}, browsers' extra {browsers_width}%")
     if level not in ("warn", "bad") or browsers_width < 10:
         say(f"at a cap of 32 the bar is {level} with the browsers' part at {browsers_width}%")

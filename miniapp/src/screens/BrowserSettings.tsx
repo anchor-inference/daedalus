@@ -13,7 +13,7 @@ import type { BrowserEnv, BrowserList, BrowserProfile, BrowserRecordings, Browse
 import { api } from "../api";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
-import { WorkloadsBar, size } from "../loadbar";
+import { size } from "../loadbar";
 import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { Dropdown, Switch, timeAgo } from "../components";
@@ -55,7 +55,7 @@ const RECORDINGS = "/api/browsers/recordings";
  *  apart would otherwise race, the second sent against the revision the first had just replaced. */
 const SAVE_GATHER_MS = 350;
 
-export function BrowserSettingsTab({ s, save, toast }: { s: Settings; save: (patch: Partial<Settings>) => Promise<void>; toast: (text: string) => void }) {
+export function BrowserSettingsTab({ s, save, toast, onDraft }: { s: Settings; save: (patch: Partial<Settings>) => Promise<void>; toast: (text: string) => void; onDraft?: (cap: number | null) => void }) {
   const saved: BrowserSettings = { ...DEFAULT_BROWSER, ...(s.browser ?? {}) };
   const [draft, setDraft] = useState<Partial<BrowserSettings>>({});
   // What is shown is what was saved with what is about to be: a button answers at once.
@@ -93,7 +93,7 @@ export function BrowserSettingsTab({ s, save, toast }: { s: Settings; save: (pat
     <div className="bs">
       <Environments envs={envs} />
       <Running toast={toast} />
-      <Limits b={b} set={set} />
+      <Limits b={b} set={set} onDraft={onDraft} />
       <Profiles toast={toast} />
       <Recording b={b} set={set} toast={toast} />
       <Watch b={b} set={set} />
@@ -170,12 +170,13 @@ function Running({ toast }: { toast: (text: string) => void }) {
   );
 }
 
-function Limits({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserSettings>) => void }) {
+function Limits({ b, set, onDraft }: { b: BrowserSettings; set: (patch: Partial<BrowserSettings>) => void; onDraft?: (cap: number | null) => void }) {
   const [cap, setCap] = useState(String(b.running_cap));
   const [idle, setIdle] = useState(String(b.idle_close_minutes));
   useEffect(() => setCap(String(b.running_cap)), [b.running_cap]);
   useEffect(() => setIdle(String(b.idle_close_minutes)), [b.idle_close_minutes]);
   const capValue = wholeIn(cap, 1, 32);
+  useEffect(() => onDraft?.(capValue), [onDraft, capValue]);
   const idleValue = wholeIn(idle, 0, 1440);
   const load = useQuery<WorkloadsLoad>("/api/workloads/load", { pollMs: 10000 });
   return (
@@ -201,7 +202,6 @@ function Limits({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserSe
         </span>
       </Row>
       {capValue === null && <div className="sub push-error">{t("bs.limits.cap.invalid")}</div>}
-      {load.data && (load.data.browsers || load.data.terminals) && <WorkloadsBar load={load.data} caps={{ browsers: capValue ?? b.running_cap }} />}
       <Row title={t("bs.limits.idle")} htmlFor="browser-idle" desc={t("bs.limits.idle.sub")} stack>
         <span className="settings-num">
           <input

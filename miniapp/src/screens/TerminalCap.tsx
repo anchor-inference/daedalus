@@ -1,5 +1,5 @@
-// Settings → Environments → terminal sessions: the machine-wide cap on running terminals, with the
-// load bar under it.
+// Settings → Environments → terminal sessions: the machine-wide cap on running terminals. The load
+// bar it moves is drawn once, at the top of the page (Environments.tsx).
 //
 // The cap has no upper bound on purpose. The bar follows the value as it is typed, and a value the
 // estimate says the machine cannot carry is saved with a warning rather than refused: the operator
@@ -8,7 +8,6 @@
 import { useEffect, useState } from "react";
 import type { Settings, WorkloadsLoad } from "../api";
 import { plural, t } from "../i18n";
-import { WorkloadsBar } from "../loadbar";
 import { useQuery } from "../store";
 import { Row } from "../settingsrow";
 
@@ -20,15 +19,16 @@ export function capValue(draft: string): number | null {
   return draft.trim() !== "" && Number.isInteger(v) && v >= 1 ? v : null;
 }
 
-export function TerminalCap({ s, save }: { s: Settings; save: (patch: Partial<Settings>) => Promise<void> }) {
+/** `onDraft` hands the page the cap as it is typed (null while it is not a number), so the one load
+ *  bar at the top of Environments follows the field rather than the saved value. */
+export function TerminalCap({ s, save, onDraft }: { s: Settings; save: (patch: Partial<Settings>) => Promise<void>; onDraft?: (cap: number | null) => void }) {
   const configured = s.terminals?.running_cap ?? DEFAULT_CAP;
   const [draft, setDraft] = useState(String(configured));
   useEffect(() => setDraft(String(configured)), [configured]);
-  // Every ten seconds, the daemon's own measuring period: polling faster shows the same numbers.
-  // Terminals and browsers share the machine: where there are browsers too, the bar is both, each
-  // filled to its own cap and judged together (WorkloadsBar); without them it is the terminals' own.
+  // Read for the running count only; the same query, shared, draws the page's bar.
   const load = useQuery<WorkloadsLoad>("/api/workloads/load", { pollMs: 10000 });
   const value = capValue(draft);
+  useEffect(() => onDraft?.(value), [onDraft, value]);
 
   function commit() {
     if (value === null) {
@@ -63,13 +63,6 @@ export function TerminalCap({ s, save }: { s: Settings; save: (patch: Partial<Se
         </span>
       </Row>
       {value === null && <div className="sub push-error">{t("settings.cap.invalid")}</div>}
-      {load.data?.terminals ? (
-        <WorkloadsBar load={load.data} caps={{ terminals: value ?? configured }} />
-      ) : load.error ? (
-        <div className="sub">{t("settings.cap.noload", { reason: load.error })}</div>
-      ) : (
-        <div className="sub">{t("common.loading")}</div>
-      )}
     </div>
   );
 }
