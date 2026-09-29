@@ -173,6 +173,11 @@ async def test_escalating_hands_the_request_to_the_operator_with_the_suggestion(
         ask = await r.manager.asks.get(ask_id)
         assert ask is not None and ask.open and ask.routed_to == "operator" and ask.suggestion.startswith("deny:")
         assert any("went to the operator: not in the allowances" in t for t in await journal_texts(r))
+        # The app's Questions list is told at once: it once learnt of the hand-over only on a reload.
+        from daedalus.host.events import EventFilter
+
+        routed = await r.manager.bus.replay(0, EventFilter(types=("ask.routed",)))
+        assert [(e.payload["request_id"], e.payload["routed_to"], e.project_id) for e in routed] == [(ask_id, "operator", r.project.id)]
         urgent = r.team.app.notifications.posted[-1]
         assert urgent.level == "urgent" and "waiting for you" in urgent.title and "The orchestrator suggests: deny" in urgent.body
         with pytest.raises(Refused, match="operator's to answer"):

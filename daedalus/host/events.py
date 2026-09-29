@@ -100,6 +100,14 @@ class AskPending(TypedDict):
     telegram: bool
 
 
+class AskRouted(TypedDict):
+    """A request handed to someone else to answer (the orchestrator escalating to the operator)."""
+
+    request_id: str
+    request_ref: str
+    routed_to: str
+
+
 class AskAnswered(TypedDict):
     request_id: str
     request_ref: str
@@ -479,6 +487,7 @@ REGISTRY: dict[str, EventSpec] = {
     "session.unread_result": EventSpec(SessionUnreadResult),
     "ask.pending": EventSpec(AskPending),
     "ask.answered": EventSpec(AskAnswered),
+    "ask.routed": EventSpec(AskRouted),
     "ask.batch": EventSpec(AskBatch),
     "permission.pending": EventSpec(PermissionPending),
     "permission.resolved": EventSpec(PermissionResolved),
