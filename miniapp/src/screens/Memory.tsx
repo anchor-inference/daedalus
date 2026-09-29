@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { api, MemoryListing, MemoryRecord } from "../api";
-import { Skeleton } from "../components";
+import { ChipRow, Skeleton } from "../components";
 import { Sheet, deleteWithUndo } from "../dialogs";
 import { absTime, relTime } from "../format";
 import { Icon } from "../icons";
@@ -106,12 +106,12 @@ export function MemoryScreen({ toast, onOpen }: { toast: (t: string) => void; on
         }
       >
         {searching && <input className="field search" autoFocus placeholder={t("memory.search")} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setQuery(""); setSearching(false); } }} aria-label={t("memory.search.label")} />}
-        <div className="chips">
+        <ChipRow label={t("memory.kind")}>
           <button className="chip select" aria-pressed={kind === "all"} onClick={() => setKind("all")}>{t("common.all")} · {pool.length}</button>
           {kinds.map(([k, n]) => (
             <button key={k} className="chip select" aria-pressed={kind === k} onClick={() => setKind(k)}>{kindWord(k)} · {n}</button>
           ))}
-        </div>
+        </ChipRow>
         {(data?.buckets.length ?? 0) > 1 && (
           <select className="field scope" value={bucket} onChange={(e) => setBucket(e.target.value)} aria-label={t("memory.scope")}>
             <option value="all">{t("memory.scope.every")}</option>

@@ -25,6 +25,20 @@ function share(part: number, total: number, used: number): number {
   return Math.max(0, Math.min(100 - used, (100 * part) / total));
 }
 
+/**
+ * What the grey and the striped parts of the track are. The sentences name the coloured parts, but
+ * nothing named these two, so a reader had to infer from the warning that the stripes are only a
+ * projection — "what the limit would add" — and not memory in use now.
+ */
+function Legend({ both = false }: { both?: boolean }) {
+  return (
+    <div className="sub faint loadbar-legend">
+      <span><i className="loadbar-other" aria-hidden="true" />{t("load.legend.rest")}</span>
+      <span><i className="loadbar-legend-extra" aria-hidden="true" />{t(both ? "load.legend.projected.both" : "load.legend.projected")}</span>
+    </div>
+  );
+}
+
 export function LoadBar({ load, cap, compact = false }: { load: TerminalLoad; cap?: number; compact?: boolean }) {
   const f = loadFigures(load, cap ?? load.cap);
   if (!f.known) {
@@ -154,6 +168,7 @@ export function WorkloadsBar({ load, caps = {} }: { load: WorkloadsLoad; caps?: 
           {plural("load.kind.browsers", f.browsers.running, { used: size(f.browsers.now), cap: f.browsers.cap, atcap: size(f.browsers.atCap) })}
         </div>
       )}
+      <Legend both />
       <div className="sub">{t("load.machine", { now: pct(f.memPercentNow), atcap: pct(f.memPercentAtCap) })}</div>
       <div className="sub loadbar-cpu" data-level={f.cpuLevel}>{t("load.cpu", { now: pct(f.cpuNow), atcap: pct(f.cpuAtCap) })}</div>
       {over && (

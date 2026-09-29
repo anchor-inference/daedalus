@@ -423,7 +423,7 @@ SETTINGS = {
     "balance": {"enabled": True, "poll_seconds": 60, "thresholds_usd": [5, 2, 0.5]},
     "scheduler": {"topic_mode": "per_task", "catch_up_missed": True},
     "compaction": {"auto_ratio": 0.7, "keep_recent_messages": 6, "max_words": 900, "chunk_tokens": 30000, "min_messages": 12, "call_timeout_seconds": 90, "core_trigger_ratio": 0.85, "preset": ""},
-    "telegram": {"verbosity": 1, "reactions": True, "topic_status_emoji": True, "stale_after_seconds": 600, "max_inbound_file_mb": 200, "forward_unknown_commands": True, "slow_tool_seconds": 30},
+    "telegram": {"verbosity": 1, "reactions": True, "topic_status_emoji": True, "stale_after_seconds": 600, "max_inbound_file_mb": 200, "forward_unknown_commands": True, "slow_tool_seconds": 30, "photo_caption_wait_seconds": 8},
     "terminals": {"running_cap": 20},
 }
 

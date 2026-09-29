@@ -567,7 +567,10 @@ function Captions({ ui }: { ui: VoiceUi }) {
           </span>
         ))}
         {!ui.spoken.length && ui.partial && <span className="voice-sentence writing">{ui.partial}</span>}
-        {!ui.spoken.length && !ui.partial && <span className="voice-waiting" aria-hidden />}
+        {/* The breathing mark stands where the answer is about to appear, so it is drawn only while
+            one is awaited. Drawn at rest too, it was a bare bar under the orb — above it on a phone —
+            that read as a grab handle belonging to nothing. */}
+        {!ui.spoken.length && !ui.partial && (ui.phase === "thinking" || ui.phase === "delegating") && <span className="voice-waiting" aria-hidden />}
       </div>
       {ui.problem && <p className="voice-problem">{ui.problem}</p>}
     </div>

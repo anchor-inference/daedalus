@@ -115,7 +115,12 @@ function Environments({ envs }: { envs: BrowserEnv[] }) {
           </div>
           {e.available && (
             <>
-              <div className="kv"><span>{t("bs.env.chromium")}</span><b className="mono">{e.chromium?.version || t("bs.env.unknown")}{e.chromium?.kind ? ` · ${t(`bs.env.kind.${e.chromium.kind === "system" ? "system" : "bundled"}`)}` : ""}</b></div>
+              <div className="kv"><span>{t("bs.env.chromium")}</span><b className="mono">
+                {/* Each half keeps its words together, so a narrow screen breaks the line between the
+                    version and where it came from, not inside "installed with Daedalus". */}
+                <span className="kv-part">{e.chromium?.version || t("bs.env.unknown")}</span>
+                {e.chromium?.kind ? <> · <span className="kv-part">{t(`bs.env.kind.${e.chromium.kind === "system" ? "system" : "bundled"}`)}</span></> : null}
+              </b></div>
               <div className="kv"><span>{t("bs.env.sandbox")}</span><b className={e.sandbox === "ok" ? "" : "bs-warn"}>{e.sandbox === "ok" ? t("bs.env.sandbox.ok") : e.sandbox === "unknown" || !e.sandbox ? t("bs.env.sandbox.unknown") : e.sandbox}</b></div>
               <div className="kv"><span>{t("bs.env.walls")}</span><b>{t(e.env === "host" ? "bs.env.walls.host" : "bs.env.walls.container")}</b></div>
             </>
