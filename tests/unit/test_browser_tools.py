@@ -176,6 +176,19 @@ async def test_a_scripted_agent_shops_by_refs_and_is_stopped_at_the_purchase(rig
     assert typed["text_len"] == len("trail shoes") and "trail shoes" not in json.dumps(audit)
 
 
+async def test_the_snapshot_passes_its_view_to_the_daemon(rig: Rig) -> None:
+    sid = await rig.session()
+    await rig.call(sid, "BrowserOpen", url="https://shop.test/")
+    text, failed = await rig.call(sid, "BrowserSnapshot", view="viewport")
+    assert not failed
+    sent = [p for m, p in rig.daemon.calls if m == "page.snapshot"]
+    assert sent[-1]["view"] == "viewport"
+    await rig.call(sid, "BrowserSnapshot")
+    assert "view" not in [p for m, p in rig.daemon.calls if m == "page.snapshot"][-1]
+    text, failed = await rig.call(sid, "BrowserSnapshot", view="everything")
+    assert failed and "viewport" in text
+
+
 async def test_secret_fields_refuse_the_agent_and_ask_for_the_operator(rig: Rig) -> None:
     sid = await rig.session()
     await rig.call(sid, "BrowserOpen", url="https://login.test/")
