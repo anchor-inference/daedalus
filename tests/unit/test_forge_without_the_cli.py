@@ -12,6 +12,7 @@ answers is a sentence about what existed when it was written, and the diff was m
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 from pathlib import Path
 
@@ -389,6 +390,60 @@ def test_the_tree_spawns_gh_in_one_place_and_that_place_is_behind_the_fallback()
     body = ast.get_source_segment(source, guard) or ""
     assert 'shutil.which("gh")' in body, "the one spawn is not guarded by the question the fallback answers"
     assert "self.forge(" in body, "the guarded method does not route to the REST fallback"
+
+
+class _Spawned(Exception):
+    """Raised by the watch: a spawn is recorded instead of performed."""
+
+
+def _watch_spawns(monkeypatch) -> list[tuple[str, ...]]:  # noqa: ANN001
+    """Record every process the code under test tries to start, and start none of them.
+
+    The scan above reads literals in command position out of the source, so an argv built at runtime
+    (`["gh"] + rest`), an `os.system("gh ...")` or a spawn inside a helper it does not parse walks past
+    it. This watches the one surface every spawn goes through, whatever built the argv.
+    """
+    spawned: list[tuple[str, ...]] = []
+
+    async def spy(*argv, **kwargs):  # noqa: ANN002, ANN003
+        spawned.append(tuple(str(part) for part in argv))
+        raise _Spawned
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", spy)
+    return spawned
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_spawns_no_process_at_all(monkeypatch) -> None:
+    """With the CLI absent the proposal path starts nothing -- not the CLI, not a git command.
+
+    The guard is the spawn surface, not the source: a second reader of the same code that could only
+    fail where the scan already failed would say nothing about a spawn built at runtime.
+    """
+    spawned = _watch_spawns(monkeypatch)
+    monkeypatch.setattr("daedalus.extensions.selfdev.shutil.which", lambda name: None)
+    dev = _Recorder(token="t")
+    routes = (
+        ("pr", "list", "--json", "number,url"),
+        ("pr", "view", "7", "--json", "number,url"),
+        ("pr", "merge", "7", "--merge"),
+    )
+    for args in routes:
+        await SelfDevelopment.gh(dev, *args, cwd=Path("/tmp"))
+    assert spawned == [], f"the fallback started {spawned}"
+    assert dev.forge_calls == list(routes), dev.forge_calls
+
+
+@pytest.mark.asyncio
+async def test_the_watch_sees_the_cli_when_it_is_installed(monkeypatch) -> None:
+    """A watch that records nothing would pass the test above for the wrong reason, so it is shown working."""
+    spawned = _watch_spawns(monkeypatch)
+    monkeypatch.setattr("daedalus.extensions.selfdev.shutil.which", lambda name: "/usr/bin/gh")
+    dev = _Recorder(token="t")
+    with pytest.raises(_Spawned):
+        await SelfDevelopment.gh(dev, "pr", "list", "--json", "number,url", cwd=Path("/tmp"))
+    assert spawned == [("gh", "pr", "list", "--json", "number,url")], spawned
+    assert dev.forge_calls == []
 
 
 @pytest.mark.asyncio
