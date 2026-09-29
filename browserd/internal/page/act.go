@@ -318,6 +318,11 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 	}
 	if dl := t.Dialog(); dl != nil {
 		res.Effects["dialog"] = dl
+		// The page cannot be read while the dialog is open; what the action and the answer change
+		// together is told when the dialog is answered, against the page as it was before.
+		if ref != "" {
+			t.SetValue(dialogBeforeKey{}, &dialogBefore{loader: loaderBefore, lines: before})
+		}
 	}
 	if dl := p.latestDownload(t.Group.ID, downloadsBefore); dl != nil {
 		res.Effects["download"] = map[string]any{"id": dl.ID, "name": dl.Name, "state": dl.State}
@@ -332,6 +337,15 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 		p.AfterAction(t, id)
 	}
 	return res, nil
+}
+
+// dialogBeforeKey keeps, among a tab's values, the outline from before the action that opened the
+// dialog now open.
+type dialogBeforeKey struct{}
+
+type dialogBefore struct {
+	loader string
+	lines  []string
 }
 
 // atPoint is the element a click at pt would act on, and its document: into frames of other sites

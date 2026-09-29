@@ -496,28 +496,45 @@ func isRef(s string) bool {
 	return true
 }
 
-// AnswerDialog accepts or dismisses the page's dialog.
-func (p *Model) AnswerDialog(ctx context.Context, t *browser.Tab, accept bool, text string) error {
+// AnswerDialog accepts or dismisses the page's dialog. When an action opened it, the reply's
+// difference is what the action and the answer changed together, since the page could not be read
+// between them; a navigation the answer started is waited for and said instead.
+func (p *Model) AnswerDialog(ctx context.Context, t *browser.Tab, accept bool, text string) (map[string]any, error) {
 	if t.Dialog() == nil {
-		return wire.Errorf(wire.CodeNotFound, "no dialog is open on this page")
+		return nil, wire.Errorf(wire.CodeNotFound, "no dialog is open on this page")
 	}
+	before, _ := t.Value(dialogBeforeKey{}).(*dialogBefore)
+	t.SetValue(dialogBeforeKey{}, (*dialogBefore)(nil))
+	loaderBefore, urlBefore := t.Loader(), t.URL()
 	params := map[string]any{"accept": accept}
 	if text != "" {
 		params["promptText"] = text
 	}
 	if err := t.Call(ctx, "Page.handleJavaScriptDialog", params, nil); err != nil {
-		return err
+		return nil, err
 	}
+	out := map[string]any{}
 	// The reply means the dialog is gone: wait for the event that says so.
 	deadline := time.After(5 * time.Second)
 	for t.Dialog() != nil {
 		select {
 		case <-t.Wake():
 		case <-deadline:
-			return nil
+			return out, nil
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
 	}
-	return nil
+	p.settle(ctx, t, loaderBefore)
+	switch {
+	case t.Loader() != loaderBefore || t.URL() != urlBefore:
+		out["effects"] = map[string]any{"navigated": true, "url": t.URL()}
+	case t.Dialog() != nil:
+		out["effects"] = map[string]any{"dialog": t.Dialog()}
+	case before != nil && before.loader == loaderBefore:
+		if d := diff(before.lines, p.region(ctx, t), 2000); d != "" {
+			out["diff"] = d
+		}
+	}
+	return out, nil
 }

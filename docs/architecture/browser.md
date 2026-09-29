@@ -130,7 +130,7 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 | `page.screenshot` | `{tab_id, ref?, full_page?, max_width? ≤ 2560 = 1280, format? "jpeg" \| "png", quality?, origin?}` → `{format, width, height, data_b64, masked}` |
 | `page.act` | see Actions → `{action_id, ok, effects, point?, box?, diff?, ref?}` |
 | `page.wait` | `{tab_id, for: "load" \| "idle" \| "text" \| "gone" \| "url", value?, timeout_ms ≤ 60000, origin?}` → `{matched: <for> \| "timeout", url}` |
-| `dialog.answer` | `{tab_id, accept, text?, origin?}` → `{}`; `1001` with no dialog open |
+| `dialog.answer` | `{tab_id, accept, text?, origin?}` → `{diff?, effects?{navigated, url} \| {dialog}}`: when an action opened the dialog, `diff` is what the action and the answer changed together (the page cannot be read between them); a navigation or a next dialog the answer started is said in `effects`. `1001` with no dialog open |
 | `download.list` | `{group_id}` → `{downloads: [Download]}` |
 | `download.read` | `{id, offset, max? ≤ 512 KiB}` → `{data_b64, offset, size, eof}` |
 | `download.delete` | `{id}` → `{}` |

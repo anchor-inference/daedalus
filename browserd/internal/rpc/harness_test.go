@@ -61,6 +61,7 @@ func fixture(t *testing.T) *httptest.Server {
 	page("/anim", "Anim", `<div style="position:fixed;inset:0;background:conic-gradient(red,yellow,lime,aqua,blue,magenta,red);animation:s 2s linear infinite"></div><style>@keyframes s{to{transform:rotate(360deg)}}</style>`)
 	page("/button", "Button", `<button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:60px" onclick="document.title='clicked '+event.isTrusted">Press</button>`)
 	page("/popup", "Popup", `<a id="a" href="/still" target="_blank" style="position:absolute;left:100px;top:100px;width:200px;height:60px;display:block">open</a>`)
+	page("/confirm-writes", "Confirm", `<button onclick="if (confirm('Reset?')) document.getElementById('m').textContent = 'Filters reset.'">Reset</button><p id="m">Four filters.</p>`)
 	page("/dialog", "Dialog", `<button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:60px" onclick="document.title=confirm('Leave?')?'yes':'no'">Ask</button>`)
 	mux.Handle("/site/", http.StripPrefix("/site/", http.FileServer(http.Dir("testdata/site"))))
 	mux.HandleFunc("/file.txt", func(w http.ResponseWriter, r *http.Request) {

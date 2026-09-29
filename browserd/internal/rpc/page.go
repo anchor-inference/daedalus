@@ -143,10 +143,7 @@ func (d *Daemon) dialogAnswer(ctx context.Context, c *server.Conn, params json.R
 	if err != nil {
 		return nil, err
 	}
-	if err := d.Page.AnswerDialog(ctx, t, p.Accept, p.Text); err != nil {
-		return nil, err
-	}
-	return map[string]any{}, nil
+	return d.Page.AnswerDialog(ctx, t, p.Accept, p.Text)
 }
 
 func (d *Daemon) downloadList(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {

@@ -323,13 +323,28 @@ func TestDialogBlocksThePage(t *testing.T) {
 	if err := h.call("page.navigate", map[string]any{"tab_id": tab, "url": h.site.URL + "/still"}, nil); code(err) != 1107 {
 		t.Fatalf("a navigation under a dialog: %v", err)
 	}
-	h.must("dialog.answer", map[string]any{"tab_id": tab, "accept": true}, nil)
+	var answered struct {
+		Diff string `json:"diff"`
+	}
+	h.must("dialog.answer", map[string]any{"tab_id": tab, "accept": true}, &answered)
 	if err := h.call("dialog.answer", map[string]any{"tab_id": tab, "accept": true}, nil); code(err) != 1001 {
 		t.Fatalf("no dialog: %v", err)
 	}
 	s = h.snapshot(tab)
 	if s.Title != "yes" {
 		t.Fatalf("title after accepting: %q", s.Title)
+	}
+	// The page's answer to the answer, which no read could see while the dialog was open, is the
+	// reply's difference: here only the title changed, so there is none; a page that writes shows it.
+	if answered.Diff != "" {
+		t.Fatalf("a difference where the outline did not change: %q", answered.Diff)
+	}
+	h.must("page.navigate", map[string]any{"tab_id": tab, "url": h.site.URL + "/confirm-writes"}, nil)
+	s = h.snapshot(tab)
+	h.mustAct(tab, map[string]any{"action": "click", "ref": refOf(t, s, "button", "Reset"), "element": "reset"})
+	h.must("dialog.answer", map[string]any{"tab_id": tab, "accept": true}, &answered)
+	if !strings.Contains(answered.Diff, "Filters reset") {
+		t.Fatalf("the answer's difference: %q", answered.Diff)
 	}
 }
 
