@@ -2,7 +2,7 @@
 
 import { telegram } from "./api";
 import { confirmDialog } from "./dialogs";
-import { bytes, tokens } from "./format";
+import { asSentence, bytes, tokens } from "./format";
 import { t } from "./i18n";
 
 /** The Telegram bridge only when the app really runs inside Telegram: the script also loads in a plain
@@ -51,5 +51,5 @@ export function numInput(raw: string, min?: number): number | null {
 export function errorText(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
   if (!msg || msg === "Failed to fetch" || msg === "Load failed" || msg === "NetworkError when attempting to fetch resource.") return t("common.noconnection");
-  return msg;
+  return asSentence(msg);
 }
