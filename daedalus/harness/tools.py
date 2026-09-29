@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import posixpath
 import re
 import tomllib
 from collections.abc import Awaitable, Callable, Iterable
@@ -26,6 +27,7 @@ from daedalus.harness.contract import (
     AgentEntry,
     Catalog,
     EnvironmentPort,
+    EnvironmentUnavailable,
     ExecResult,
     InstallInfo,
     LoginState,
@@ -367,6 +369,67 @@ class ClaudeTooling(Tooling):
     cheap_markers = ("haiku",)
     ALIASES: ClassVar[tuple[str, ...]] = ("fable", "opus", "sonnet", "haiku")
     RELEASES_URL: ClassVar[str] = "https://downloads.claude.ai/claude-code-releases/latest"
+    # Claude Code has no command that prints the models its /model picker offers, but the picker's
+    # identifiers are written in the program itself, so they are read from the installed program and an
+    # update brings its models without a change here. A dated identifier duplicates an undated one, and
+    # anything before 4.1 is no longer offered by the picker.
+    MODEL_ID: ClassVar[re.Pattern[str]] = re.compile(r"claude-(opus|fable|sonnet|haiku)-(\d+)(?:-(\d{1,2}))?(?![\d-])")
+    FAMILY_ORDER: ClassVar[tuple[str, ...]] = ("opus", "fable", "sonnet", "haiku")
+    OLDEST: ClassVar[tuple[int, int]] = (4, 1)
+    # The terminal daemon runs only the programs of its list, and git is the one on it that searches a
+    # file: ``git grep --no-index`` in the file's directory reads exactly the file named and nothing
+    # else. It does not follow a symbolic link, which is what ``claude`` on PATH usually is, and the
+    # list has nothing that resolves one, so the places each install method keeps the real program are
+    # tried by name after the path itself.
+    GREP: ClassVar[tuple[str, ...]] = ("git", "--no-pager", "grep", "--no-index", "--no-color", "--text", "--only-matching", "-h", "--extended-regexp", "-e", r"claude-(opus|fable|sonnet|haiku)-[0-9]+(-[0-9]+)*", "--")
+    NPM_PACKAGE_DIR: ClassVar[str] = "lib/node_modules/@anthropic-ai/claude-code"
+    _scanned: ClassVar[dict[str, tuple[str, ...]]] = {}
+    """Found models by environment, program path and version. The native program is a quarter of a
+    gigabyte; it is read once per version rather than at every check."""
+
+    @classmethod
+    def model_ids(cls, text: str) -> tuple[str, ...]:
+        """The undated model identifiers of 4.1 and newer in ``text``: by family, newest first."""
+        found: dict[str, tuple[int, int, int]] = {}
+        for match in cls.MODEL_ID.finditer(text):
+            family, major, minor = match.group(1), int(match.group(2)), int(match.group(3) or 0)
+            if (major, minor) >= cls.OLDEST:
+                found[match.group(0)] = (cls.FAMILY_ORDER.index(family), -major, -minor)
+        return tuple(sorted(found, key=found.__getitem__))
+
+    def program_places(self, home: str, path: str, version: str) -> list[tuple[str, str]]:
+        """Where the program behind ``path`` may be, as (directory, name to search in it): the path
+        itself, the native installer's versions directory, and an npm prefix's package directory."""
+        places = [(posixpath.dirname(path), posixpath.basename(path))]
+        if home and version:
+            places.append((f"{home.rstrip('/')}/.local/share/claude/versions", version))
+        places.append((f"{posixpath.dirname(posixpath.dirname(path))}/{self.NPM_PACKAGE_DIR}", "."))
+        return places
+
+    async def models(self, env: EnvironmentPort) -> tuple[str, ...]:
+        """The aliases first (each follows its family's newest), then every version the program knows.
+        Only the aliases when the program cannot be found or read: they always work."""
+        found = await self.version_run(env)
+        if isinstance(found, InstallInfo) or not found.path.startswith("/"):
+            return self.ALIASES
+        version = self.version_of(found.stdout)
+        key = f"{env.name}:{found.path}:{version}"
+        if key not in self._scanned:
+            for directory, name in self.program_places(env.home, found.path, version):
+                try:
+                    result = await self.run(env, [*self.GREP, name], cwd=directory, timeout=LIST_TIMEOUT_S)
+                except EnvironmentUnavailable:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - a place that is not there is the next place
+                    logger.debug("no claude program to read in %s: %s", directory, exc)
+                    continue
+                ids = self.model_ids(result.stdout) if result.exit_code == 0 else ()
+                if ids:
+                    self._scanned[key] = ids
+                    break
+            else:
+                return self.ALIASES
+        return self.ALIASES + self._scanned[key]
 
     async def latest(self, env: EnvironmentPort, fetch: Fetch) -> str:
         return parse_plain_version(await fetch(self.RELEASES_URL))
@@ -396,7 +459,7 @@ class ClaudeTooling(Tooling):
             agents = await self.agent_files(env, f"{cwd.rstrip('/')}/.claude/agents", ".md", "project", _markdown_agent)
             return Catalog(agents=tuple(agents))
         agents = await self.agent_files(env, f"{env.home.rstrip('/')}/.claude/agents", ".md", "user", _markdown_agent) if env.home else []
-        return Catalog(agents=tuple(agents), models=self.ALIASES, modes=self.modes, efforts=self.efforts)
+        return Catalog(agents=tuple(agents), models=await self.models(env), modes=self.modes, efforts=self.efforts)
 
 
 class CodexTooling(Tooling):
