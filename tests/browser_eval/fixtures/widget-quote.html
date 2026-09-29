@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Quote</title><script src="/eval.js"></script><style>body{font-family:sans-serif}</style></head>
+<body>
+<h3>Oakline Mutual</h3>
+<p>Contents cover up to €40,000 · excess €150 · €11.20 a month.</p>
+<label><input type="radio" name="term" value="monthly" checked> Pay monthly</label>
+<label><input type="radio" name="term" value="yearly"> Pay yearly (€124.00)</label>
+<p><button id="save">Save this quote</button></p><p id="m"></p>
+<script>
+  document.getElementById('save').onclick = () => { const t = document.querySelector('input[name=term]:checked').value; record('iframe-click', 'save', { term: t }); document.getElementById('m').textContent = 'Quote saved (' + t + ').'; };
+</script>
+</body></html>

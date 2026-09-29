@@ -357,6 +357,9 @@ const Row = memo(function Row({ s, kids, onOpen, current, fork, compact, project
     // The sidebar's row: a dot for the state, the name, the time, and a second line only when it
     // carries something the reader needs now — a loop's next run, what a fork was taken from, a
     // leader that is gone. Never the model: it is in the open session, and in the tooltip here.
+    // "Needs you" sits on that second line, not beside the name: beside it, it squeezed a short
+    // title like "Weekly digest" down to "Weekly di…" in the sidebar's width. The text goes in a
+    // span because a bare text node in the flex line was clipped mid-word with no ellipsis.
     const needs = status === "waiting" || status === "failed";
     const second = projectName ? `${shortModel(s.model ?? "", 28)} · ${statusWord(status)}` : fork ? t("agents.fork.at", { n: fork.seq }) : loop || (orphan ? t("agents.orphan") : "");
     return (
@@ -365,13 +368,19 @@ const Row = memo(function Row({ s, kids, onOpen, current, fork, compact, project
         <div className="erow-main">
           <div className="erow-head">
             <span className="erow-title truncate">{projectName && projectName !== agentName(s) && <span className="erow-project">{projectName} · </span>}{agentName(s)}</span>
-            {needs && <span className={`erow-state ${status}`}>{statusWord(status)}</span>}
             <TerminalCount n={s.terminals} />
             {unreadDot}
             <span className="erow-time num" title={new Date(s.last_message_at).toLocaleString()}>{relTime(s.last_message_at)}</span>
           </div>
           {s.match && <div className="search-passage truncate">{s.match.snippet}</div>}
-          {second && <div className={`erow-meta ${s.metadata?.loop?.status === "paused" ? "waiting" : ""}`}>{fork && <Icon name="fork" size={11} />}{second}</div>}
+          {(needs || second) && (
+            <div className={`erow-meta ${s.metadata?.loop?.status === "paused" ? "waiting" : ""}`}>
+              {needs && <span className={`erow-state ${status}`}>{statusWord(status)}</span>}
+              {needs && second && <span className="sep">·</span>}
+              {fork && <Icon name="fork" size={11} />}
+              {second && <span>{second}</span>}
+            </div>
+          )}
         </div>
         <SessionRowMenu session={s} onProject={onProject} projectName={projectName} />
       </div>
@@ -398,7 +407,7 @@ const Row = memo(function Row({ s, kids, onOpen, current, fork, compact, project
         </div>
         {s.match && <div className="search-passage truncate">{s.match.snippet}</div>}
         {fork && <div className="erow-meta"><Icon name="fork" size={12} /> <span title={t("agents.fork.of", { name: fork.of, n: fork.seq })}>{t("agents.fork.at", { n: fork.seq })}</span></div>}
-        {loop && <div className={`erow-meta ${s.metadata?.loop?.status === "paused" ? "waiting" : ""}`}>{loop}</div>}
+        {loop && <div className={`erow-meta ${s.metadata?.loop?.status === "paused" ? "waiting" : ""}`}><span>{loop}</span></div>}
         {kids.length > 0 && (
           <div className="erow-children" onClick={(e) => e.stopPropagation()}>
             {visibleKids.map((c) => (
@@ -457,8 +466,8 @@ function SessionRowMenu({ session, onProject, projectName }: { session: SessionS
       { label: t("session.rename"), icon: "pen", onSelect: () => { setTitle(session.title); setEditing(true); } },
       { label: t("session.project.move"), icon: "folder", onSelect: () => setMoving(true) },
       ...(onProject ? [{ label: t("project.settings.for", { name: projectName ?? session.project }), onSelect: onProject }] : []),
-      { label: t(session.archived ? "agents.restore" : "agents.archive"), icon: "folder", onSelect: () => void archive() },
-      { label: t("session.delete.action"), icon: "trash", danger: true, onSelect: () => void remove() },
+      { label: t(session.archived ? "agents.restore" : "agents.archive"), icon: "archive", onSelect: () => void archive() },
+      { label: t("common.delete"), icon: "trash", danger: true, onSelect: () => void remove() },
     ]} />
     {moving && <MoveSessionSheet sessionId={session.id} current={session.project_id} currentOwn={!!session.workspace_own} onClose={() => setMoving(false)} onMoved={() => invalidate("/api/sessions")} toast={toast} />}
     {editing && <Sheet title={t("session.rename")} onClose={() => setEditing(false)} size="narrow">

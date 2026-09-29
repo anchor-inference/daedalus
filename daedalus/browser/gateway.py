@@ -42,7 +42,9 @@ logger = logging.getLogger(__name__)
 BROWSER_WS_MAX_BYTES = 1 << 20
 """The largest WebSocket message the server takes from the app; what it legitimately sends is at most
 a few kilobytes, and the daemon's frames to it are bounded by the socket framing."""
-INPUT_KINDS = ("mouse", "wheel", "key", "text", "touch", "nav")
+INPUT_KINDS = ("mouse", "wheel", "key", "text", "touch", "nav", "copy")
+"""The kinds the audit counts by name. A copy is the operator reading the page's selection into their
+own clipboard: the daemon answers it on this socket alone, and the audit counts it, never its text."""
 
 
 def _json_object(frame: bytes, name: str, limit: int) -> dict[str, Any]:

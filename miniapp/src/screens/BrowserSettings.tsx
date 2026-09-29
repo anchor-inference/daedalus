@@ -1,7 +1,8 @@
 // Settings → Browser: the agent's browser as the operator runs it — which Chromium, whether its
 // sandbox holds, what runs now and what it costs, the profiles that keep its logins, how many may run
 // at once, how long an idle one lives, what is recorded, where the agent may act only while watched,
-// which addresses on the local network it may be let into, and the injection monitor.
+// which addresses on the local network it may be let into, the injection monitor, the model that reads
+// a page for the agent and whether it may click at a point, and the site notes agents proposed.
 //
 // Everything here is the host's `[browser]` section; the host hands the daemon its part at once, so a
 // cap typed here is the daemon's cap, not a number only the load bar believes. What cannot be undone —
@@ -9,7 +10,7 @@
 // goes with it.
 
 import { useEffect, useRef, useState } from "react";
-import type { BrowserEnv, BrowserList, BrowserProfile, BrowserRecordings, BrowserSettings, RunningBrowser, Settings, WorkloadsLoad } from "../api";
+import type { BrowserEnv, BrowserList, BrowserProfile, BrowserRecordings, BrowserSettings, BrowserSiteNote, RunningBrowser, Settings, WorkloadsLoad } from "../api";
 import { api } from "../api";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
@@ -33,6 +34,8 @@ export const DEFAULT_BROWSER: BrowserSettings = {
   watch_domains: [],
   injection_monitor: false,
   injection_monitor_preset: "",
+  extract_preset: "",
+  point_clicks: false,
 };
 
 /** A whole number within `lo`..`hi` from a draft, or null while it is not one. */
@@ -49,6 +52,7 @@ export function lines(text: string): string[] {
 const RUNNING = "/api/browsers/running";
 const PROFILES = "/api/browsers/profiles";
 const RECORDINGS = "/api/browsers/recordings";
+const NOTES = "/api/browsers/notes";
 
 /** How long changes are gathered before they are saved as one: a toggle and a list edited a moment
  *  apart would otherwise race, the second sent against the revision the first had just replaced. */
@@ -98,6 +102,8 @@ export function BrowserSettingsTab({ s, save, toast }: { s: Settings; save: (pat
       <Watch b={b} set={set} />
       <Network b={b} set={set} />
       <Monitor b={b} set={set} presets={Object.keys(s.presets ?? {})} />
+      <Reading b={b} set={set} presets={Object.keys(s.presets ?? {})} />
+      <SiteNotes toast={toast} />
     </div>
   );
 }
@@ -115,7 +121,12 @@ function Environments({ envs }: { envs: BrowserEnv[] }) {
           </div>
           {e.available && (
             <>
-              <div className="kv"><span>{t("bs.env.chromium")}</span><b className="mono">{e.chromium?.version || t("bs.env.unknown")}{e.chromium?.kind ? ` · ${t(`bs.env.kind.${e.chromium.kind === "system" ? "system" : "bundled"}`)}` : ""}</b></div>
+              <div className="kv"><span>{t("bs.env.chromium")}</span><b className="mono">
+                {/* Each half keeps its words together, so a narrow screen breaks the line between the
+                    version and where it came from, not inside "installed with Daedalus". */}
+                <span className="kv-part">{e.chromium?.version || t("bs.env.unknown")}</span>
+                {e.chromium?.kind ? <> · <span className="kv-part">{t(`bs.env.kind.${e.chromium.kind === "system" ? "system" : "bundled"}`)}</span></> : null}
+              </b></div>
               <div className="kv"><span>{t("bs.env.sandbox")}</span><b className={e.sandbox === "ok" ? "" : "bs-warn"}>{e.sandbox === "ok" ? t("bs.env.sandbox.ok") : e.sandbox === "unknown" || !e.sandbox ? t("bs.env.sandbox.unknown") : e.sandbox}</b></div>
               <div className="kv"><span>{t("bs.env.walls")}</span><b>{t(e.env === "host" ? "bs.env.walls.host" : "bs.env.walls.container")}</b></div>
             </>
@@ -365,6 +376,76 @@ function Monitor({ b, set, presets }: { b: BrowserSettings; set: (patch: Partial
         <option value="">{t("bs.monitor.model.auto")}</option>
         {presets.map((p) => <option key={p} value={p}>{p}</option>)}
       </select>
+    </div>
+  );
+}
+
+function Reading({ b, set, presets }: { b: BrowserSettings; set: (patch: Partial<BrowserSettings>) => void; presets: string[] }) {
+  return (
+    <div className="card bs-reading">
+      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.agent.title")}</div>
+      <div className="sub">{t("bs.agent.sub")}</div>
+      <label className="field" htmlFor="browser-extract-model">{t("bs.agent.extract")}</label>
+      <select id="browser-extract-model" className="field" value={b.extract_preset} onChange={(e) => set({ extract_preset: e.target.value })}>
+        <option value="">{t("bs.monitor.model.auto")}</option>
+        {presets.map((p) => <option key={p} value={p}>{p}</option>)}
+      </select>
+      <div className="btnrow">
+        <button type="button" className={`btn small ${b.point_clicks ? "primary" : ""}`} aria-pressed={b.point_clicks} onClick={() => set({ point_clicks: !b.point_clicks })}>
+          {t("bs.agent.point", { state: t(b.point_clicks ? "common.on" : "common.off") })}
+        </button>
+      </div>
+      <div className="sub">{t("bs.agent.point.sub")}</div>
+    </div>
+  );
+}
+
+/** The notes agents proposed about sites: the waiting ones to approve or discard, the approved ones to
+ *  take back. Nothing here is shown to an agent until it is approved. */
+function SiteNotes({ toast }: { toast: (text: string) => void }) {
+  const notes = useQuery<{ notes: BrowserSiteNote[] }>(NOTES, { pollMs: 30000 });
+  const list = notes.data?.notes ?? [];
+  async function approve(n: BrowserSiteNote) {
+    try {
+      await api.post(`${NOTES}/${encodeURIComponent(n.id)}/approve`, {});
+      invalidate(NOTES);
+      toast(t("bs.notes.approved", { host: n.host }));
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+  async function remove(n: BrowserSiteNote) {
+    // A waiting note was never shown to anyone: discarding it needs no second thought.
+    if (n.status === "active" && !(await confirmAsync(t("bs.notes.remove.title"), { body: t("bs.notes.remove.body", { host: n.host }), action: t("bs.notes.remove"), danger: true }))) return;
+    try {
+      await api.delete(`${NOTES}/${encodeURIComponent(n.id)}`);
+      invalidate(NOTES);
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+  return (
+    <div className="card bs-notes">
+      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.notes.title")}</div>
+      <div className="sub">{t("bs.notes.sub")}</div>
+      {list.length === 0 ? (
+        <div className="sub">{t("bs.notes.none")}</div>
+      ) : (
+        <ul className="bs-rows">
+          {list.map((n) => (
+            <li key={n.id} className="bs-row bs-note" data-note={n.id} data-status={n.status}>
+              <Icon name="globe" size={16} />
+              <span className="bs-row-main">
+                <b className="truncate mono">{n.host}</b>
+                <span className="bs-note-text">{n.text}</span>
+                <span className="sub truncate">{[t(n.status === "proposed" ? "bs.notes.waiting" : "bs.notes.active"), n.project || t("bs.notes.everyone"), timeAgo(new Date((n.approved_at || n.proposed_at) * 1000).toISOString())].join(" · ")}</span>
+              </span>
+              {n.status === "proposed" && <button type="button" className="btn small primary" onClick={() => void approve(n)}>{t("bs.notes.approve")}</button>}
+              <button type="button" className="btn small danger" onClick={() => void remove(n)}>{t(n.status === "proposed" ? "bs.notes.discard" : "bs.notes.remove")}</button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

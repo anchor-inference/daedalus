@@ -31,7 +31,7 @@ export function ProposalsScreen({ toast, selected }: { toast: (t: string) => voi
       </PageHeader>
       <div className="screen narrow">
         {loading && !error && <Skeleton rows={4} />}
-        {error && !items && <div className="empty"><b>{t("changes.error")}</b><div>{error}</div><button className="btn" onClick={refresh}>{t("common.retry")}</button></div>}
+        {error && !items && <div className="empty"><b>{t("changes.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
         {items && shown.length === 0 && (
           <div className="empty">
             <b>{t(filter === "pending" ? "changes.empty.pending" : "changes.empty")}</b>

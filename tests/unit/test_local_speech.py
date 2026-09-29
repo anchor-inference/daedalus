@@ -867,7 +867,7 @@ def test_a_voice_notes_endpoint_is_used_even_when_a_local_model_is_installed(tmp
     _install_fake_model(app)
     wav_bytes(tmp_path / "x.wav", tone(0.2))
 
-    async def boom(path: Path) -> str:
+    async def boom(path: Path, model: str = "") -> str:
         raise SpeechError("the local model must not be asked")
 
     app.speech.transcribe_file = boom  # type: ignore[method-assign]
@@ -898,7 +898,7 @@ def test_the_local_model_transcribes_a_file_only_when_no_endpoint_is_set(tmp_pat
     app = FakeApp(tmp_path)
     _install_fake_model(app)
 
-    async def hear(path: Path) -> str:
+    async def hear(path: Path, model: str = "") -> str:
         return "from the local model"
 
     app.speech.transcribe_file = hear  # type: ignore[method-assign]

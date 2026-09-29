@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "./api";
+import { asSentence } from "./format";
 
 type Entry = { data: unknown; at: number; error: string | null };
 
@@ -61,7 +62,7 @@ async function fetchInto<T>(key: string): Promise<T> {
       else setOffline(false);
       const prev = cache.get(key);
       if (inflight.get(key) === p) {
-        cache.set(key, { data: prev?.data, at: prev?.at ?? 0, error: e.message || "request failed" });
+        cache.set(key, { data: prev?.data, at: prev?.at ?? 0, error: asSentence(e.message || "Request failed") });
         notify(key);
       }
       throw e;

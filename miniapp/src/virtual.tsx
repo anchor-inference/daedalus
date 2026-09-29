@@ -74,15 +74,19 @@ export function keepOpened(host: HTMLElement, line: OpenedLine, now = performanc
   return true;
 }
 
-/** The first rendered item that reaches into the screen, and how far below the screen's top it starts. */
+/** The first rendered item that reaches into the screen, and how far below the screen's top it starts;
+ *  null when none does. A jump of a screen or more (a long wheel turn, a link, find in page) fires its
+ *  scroll event while the items of the old place are still the rendered ones, all of them off the
+ *  screen. Taking the first of those anyway made an item below the screen the anchor, and opening a
+ *  turn's steps above it then "held" that item by throwing the reader up by the steps' whole height. */
 function firstInView(host: HTMLElement): { key: string; top: number } | null {
-  const edge = host.getBoundingClientRect().top;
-  let best: HTMLElement | null = null;
+  const box = host.getBoundingClientRect();
   for (const slot of host.querySelectorAll<HTMLElement>("[data-slot]")) {
-    best = slot;
-    if (slot.getBoundingClientRect().bottom > edge) break;
+    const r = slot.getBoundingClientRect();
+    if (r.bottom <= box.top) continue;
+    return r.top < box.bottom ? { key: slot.dataset.slot!, top: r.top - box.top } : null;
   }
-  return best ? { key: best.dataset.slot!, top: best.getBoundingClientRect().top - edge } : null;
+  return null;
 }
 
 export type WindowedProps = {
@@ -213,8 +217,12 @@ export function Windowed({ keys, render, scroller, estimate = 260, overscan = 90
         const moved = slot.getBoundingClientRect().top - host.getBoundingClientRect().top - held.top;
         if (Math.abs(moved) >= 1) host.scrollTop += moved;
         anchor.current = { key: held.key, top: slot.getBoundingClientRect().top - host.getBoundingClientRect().top };
-      }
+      } else anchor.current = null;
     }
+    // After a jump the items of the new place are rendered only now, and nothing on screen was held:
+    // take the one there, so that their heights being measured next does not move the page under the
+    // reader.
+    if (!anchor.current) anchor.current = firstInView(host);
     if (dirty) bump((n) => n + 1);
   });
 

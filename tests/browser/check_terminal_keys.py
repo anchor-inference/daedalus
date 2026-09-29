@@ -146,7 +146,7 @@ def main() -> int:
         print("paste asks:", title)
         if "2" not in title:
             problems.append(f"the paste question does not count the lines: {title!r}")
-        page.locator(".dialog .btn.ghost").click()
+        page.locator(".dialog .dialog-actions .btn").first.click()
         page.wait_for_timeout(300)
         if since(term, mark):
             problems.append(f"a declined paste was sent: {since(term, mark)!r}")
@@ -169,7 +169,7 @@ def main() -> int:
         page.wait_for_timeout(400)
         if page.locator(".dialog").count():
             problems.append("a paste into a shell with bracketed paste still asked")
-            page.locator(".dialog .btn.ghost").click()
+            page.locator(".dialog .dialog-actions .btn").first.click()
         got = since(term, mark)
         if not (got.startswith(b"\x1b[200~") and got.endswith(b"\x1b[201~")):
             problems.append(f"a bracketed paste was not marked: {got!r}")

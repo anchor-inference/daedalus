@@ -166,7 +166,9 @@ function Matrix({ prefs, categories, onCell }: { prefs: NotificationPreferences;
                   <div className="segmented inline" role="radiogroup" aria-label={`${categoryName(category)} · ${t(`nset.channel.${ch}`)}`}>
                     {CELLS.map((c) => (
                       <button key={c} role="radio" aria-checked={cellOf(category, ch) === c} className={cellOf(category, ch) === c ? "on" : ""} onClick={() => onCell(category, ch, c)}>
-                        {t(`nset.cell.${c}.long`)}
+                        {/* The short word, as the matrix pill and the legend name the same state; the
+                            long "Urgent only" stays in the pill's title and the aria label. */}
+                        {t(`nset.cell.${c}`)}
                       </button>
                     ))}
                   </div>

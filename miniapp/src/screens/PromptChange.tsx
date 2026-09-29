@@ -5,7 +5,7 @@ import { Icon } from "../icons";
 import { t } from "../i18n";
 import { duration } from "../format";
 import { DiffView } from "../previewparts";
-import { errorText } from "../ui";
+import { errorText, sentence } from "../ui";
 import "./promptchange.css";
 
 type Proposal = {
@@ -132,9 +132,9 @@ export function PromptChange({ onApplied }: { onApplied: (rules: string) => void
           <Icon name="bolt" size={15} /> {t("settings.rules.assistant.prepare")}
         </button>
       </div>
-      {planning && <div className="prompt-change-status" role="status"><span className="live-dot" /><span><b>{t("settings.rules.assistant.working")}</b><span className="sub">{t("settings.rules.assistant.elapsed", { time: elapsed(proposal.started_at) })}</span></span><button className="btn small ghost" disabled={busy} onClick={() => void cancel()}>{t("common.cancel")}</button></div>}
+      {planning && <div className="prompt-change-status" role="status"><span className="live-dot" /><span><b>{t("settings.rules.assistant.working")}</b><span className="sub">{t("settings.rules.assistant.elapsed", { time: elapsed(proposal.started_at) })}</span></span><button className="btn small" disabled={busy} onClick={() => void cancel()}>{t("common.cancel")}</button></div>}
       {ready && <div className="prompt-change-ready"><span><b>{t("settings.rules.assistant.ready")}</b><span className="sub clamp-2">{proposal.summary}</span></span><button className="btn small" onClick={() => setReview(true)}>{t("settings.rules.assistant.review")}</button></div>}
-      {proposal?.state === "failed" && <div className="sub attn" role="alert">{proposal.error}</div>}
+      {proposal?.state === "failed" && <div className="sub attn" role="alert">{sentence(proposal.error ?? "")}</div>}
       {problem && <div className="sub attn" role="alert">{problem}</div>}
     </div>
     {review && ready && proposal.diff && <Sheet title={t("settings.rules.review.title")} size="wide" className="prompt-review-sheet" onClose={() => !busy && setReview(false)}>

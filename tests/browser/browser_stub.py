@@ -12,6 +12,8 @@ check's own Chromium once, before the app is opened, and keeps each as a JPEG wi
 named elements. An action replayed on "the Add to cart button" therefore lands on the button the
 picture shows, and a check can say where the app must have drawn the cursor.
 
+A copy is answered with the group's ``selection``, as the daemon answers it with the page's.
+
 Everything the page sends is recorded per connection (ATTACH, ACK, VIEW, INPUT), and every request
 to the REST routes, so a check can say which socket sent which input and what a give-back carried.
 """
@@ -133,6 +135,10 @@ class Group:
     frames: list[dict[str, Any]] = field(default_factory=list)
     """Keyframes while recording: one when it starts and one after every action, each the picture of
     the scene on screen then (``scene`` names it; the REST answer leaves it out)."""
+    selection: str = ""
+    """What the page has selected, which a copy (INPUT ``copy``) answers with."""
+    selection_withheld: bool = False
+    """The focus is on a password field: a copy answers ``withheld`` and no text, as the daemon does."""
 
 
 @dataclass
@@ -177,6 +183,8 @@ class BrowserStub:
         self.running: list[dict[str, Any]] = []
         """The browsers Settings lists as running (``/api/browsers/running``)."""
         self.profiles: list[dict[str, Any]] = []
+        self.notes: list[dict[str, Any]] = []
+        """The site notes agents proposed (``/api/browsers/notes``)."""
         self.envs: list[dict[str, Any]] = [{
             "env": "container", "configured": True, "available": True, "reason": "", "detail": "", "version": "src-4f1c2a9e0b7d",
             "chromium": {"version": "Chrome/151.0.7922.34", "kind": "bundled", "error": ""}, "sandbox": "ok",
@@ -432,6 +440,9 @@ class BrowserStub:
                     self.send(client, enc_event({"type": "error", "code": "not_holder", "message": "this client does not hold control"}))
                     return
                 g.last_activity = time.time()
+                if body.get("t") == "copy":
+                    withheld = g.selection_withheld
+                    self.send(client, enc_event({"type": "copied", "id": body.get("id", ""), "text": "" if withheld else g.selection, "truncated": False, "withheld": withheld}))
                 if body.get("t") == "nav" and body.get("action") == "url":
                     target = next((n for n, s in self.scenes.items() if s.url == body.get("url")), None)
                     if target:
@@ -444,7 +455,7 @@ class BrowserStub:
 
     def answer(self, method: str, path: str, query: dict[str, list[str]], body: Any) -> tuple[int, Any]:
         segments = path.strip("/").split("/")  # api, browsers, [group], [action]
-        if len(segments) >= 3 and segments[2] in ("running", "profiles", "recordings", "load"):
+        if len(segments) >= 3 and segments[2] in ("running", "profiles", "recordings", "load", "notes"):
             return self.answer_settings(method, segments[2:], body)
         if len(segments) == 2 and method == "GET":
             session = query.get("session", [None])[0]
@@ -533,6 +544,18 @@ class BrowserStub:
             return 200, {"envs": [{"env": "container", "groups": groups, "bytes": sum(x["bytes"] for x in groups), "max_bytes": 500 << 20, "retention_ms": 7 * 86_400_000}]}
         if what == "load" and method == "GET":
             return 200, browser_load(running=len(self.running))
+        if what == "notes" and method == "GET" and len(parts) == 1:
+            return 200, {"notes": sorted(self.notes, key=lambda n: n["status"] != "proposed")}
+        if what == "notes" and len(parts) >= 2:
+            note = next((n for n in self.notes if n["id"] == parts[1]), None)
+            if note is None:
+                return 404, {"detail": "no such note"}
+            if method == "POST" and parts[-1] == "approve":
+                note.update(status="active", approved_at=note["proposed_at"] + 60)
+                return 200, {"note": note}
+            if method == "DELETE":
+                self.notes = [n for n in self.notes if n["id"] != parts[1]]
+                return 200, {"ok": True}
         return 404, {"detail": "no such route"}
 
     def route(self, route: Any) -> None:

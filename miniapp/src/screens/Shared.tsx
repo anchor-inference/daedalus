@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { api, ApiError, type MediaPresentation } from "../api";
 import { timeAgo } from "../components";
+import { Icon, type IconName } from "../icons";
 import { t, useLang } from "../i18n";
 import { renderMarkdown } from "../md";
 import { splitMediaAnswer, type AnswerPart } from "../mediaformat";
@@ -57,10 +58,25 @@ function Answer({ message }: { message: SharedMessage }) {
   );
 }
 
+/** A page with nothing to show yet, or nothing it may show: said in the middle of the window, with
+ *  what to do next. Pinned under the header as one bold line it read as a blank page left unfinished,
+ *  and a refused link was a dead end with no way on. */
+function SharedState({ icon, title, body, action }: { icon?: IconName; title: string; body?: string; action?: { label: string; onClick: () => void } }) {
+  return (
+    <div className="shared-state" role="status">
+      {icon && <span className="shared-state-icon"><Icon name={icon} size={22} /></span>}
+      <b>{title}</b>
+      {body && <p className="sub">{body}</p>}
+      {action && <button type="button" className="btn" onClick={action.onClick}>{action.label}</button>}
+    </div>
+  );
+}
+
 export function SharedDialog({ slug }: { slug: string }) {
   useLang();
   const [page, setPage] = useState<SharedPage | null>(null);
   const [error, setError] = useState<number | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const had = useRef(false);
 
   useEffect(() => {
@@ -109,24 +125,30 @@ export function SharedDialog({ slug }: { slug: string }) {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [slug]);
+  }, [slug, attempt]);
 
+  const retry = () => {
+    setError(null);
+    setAttempt((n) => n + 1);
+  };
   const title = page?.title || t("share.page.kicker");
   return (
     <div className="shared">
       <div className="shared-column">
         <header className="shared-head">
           <div className="shared-titles">
-            <div className="shared-kicker">{t("share.page.kicker")}</div>
+            {/* The kicker says what kind of page this is above the dialog's own name; with no name
+                to show it would only repeat the heading under it. */}
+            {page?.title && <div className="shared-kicker">{t("share.page.kicker")}</div>}
             <h1>{title}</h1>
           </div>
         </header>
         <div className="shared-scroll">
-          {error === 404 && <div className="empty"><b>{t("share.page.gone")}</b></div>}
-          {error === 403 && <div className="empty"><b>{t("share.page.locked")}</b></div>}
-          {error !== null && error !== 404 && error !== 403 && <div className="empty"><b>{t("share.page.failed")}</b></div>}
-          {error === null && page && page.messages.length === 0 && <div className="empty"><b>{t("share.page.empty")}</b></div>}
-          {error === null && !page && <div className="empty">{t("common.loading")}</div>}
+          {error === 404 && <SharedState icon="unlink" title={t("share.page.gone")} body={t("share.page.gone.next")} />}
+          {error === 403 && <SharedState icon="lock" title={t("share.page.locked")} body={t("share.page.locked.next")} />}
+          {error !== null && error !== 404 && error !== 403 && <SharedState icon="alert" title={t("share.page.failed")} body={t("share.page.failed.next")} action={{ label: t("common.retry"), onClick: retry }} />}
+          {error === null && page && page.messages.length === 0 && <SharedState title={t("share.page.empty")} />}
+          {error === null && !page && <SharedState title={t("common.loading")} />}
           {page?.older && <div className="sub older-note">{t("share.page.older")}</div>}
           {page?.messages.map((message, index) => (
             <article key={`${message.at}-${index}`} className="turn">

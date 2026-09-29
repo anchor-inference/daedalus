@@ -8,6 +8,7 @@ import { confirmAsync, errorText, numInput } from "../ui";
 import * as passkeys from "../passkeys";
 import { timeAgo } from "../components";
 import { shortDateTime } from "../format";
+import { useMoreBelow } from "../edgefade";
 import { SpeechModels } from "./Speech";
 import { TtsVoices } from "./Voices";
 import { VoiceSettings } from "./Voice";
@@ -18,7 +19,7 @@ import { AddModel } from "./AddModel";
 import { ON_DEMAND_CHOICES, REASONING_EFFORTS, onDemandGroups, orchestratorPreset } from "../models";
 import { mainPreset } from "../main/model";
 import { Sheet } from "../dialogs";
-import { t } from "../i18n";
+import { plural, t } from "../i18n";
 import { LangPicker, Segmented, Switch } from "../components";
 import { AppearancePanel } from "./Appearance";
 import { modeHome, storedMode } from "../mode";
@@ -29,6 +30,7 @@ import { TerminalCap } from "./TerminalCap";
 import { BrowserSettingsTab } from "./BrowserSettings";
 import { ToolGroupsSettings } from "../toolgroupsview";
 import { CompactionModelSelect } from "../compactionmodel";
+import { AsrSettingsCard } from "./AsrSettings";
 
 const DEFAULT_KINDS = ["deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"];
 /** Self-hosted endpoints: temperature is a sampling pin, not a vendor default. */
@@ -37,6 +39,8 @@ const LOCAL_KINDS = new Set(["vllm", "llamacpp", "openai_compat"]);
 function RulesEditor({ rules, fallback, onSave }: { rules: string; fallback: string; onSave: (rules: string) => void }) {
   const [text, setText] = useState(rules || fallback);
   const [dirty, setDirty] = useState(false);
+  const field = useRef<HTMLTextAreaElement>(null);
+  useMoreBelow(field, text);
   useEffect(() => {
     setText(rules || fallback);
     setDirty(false);
@@ -45,7 +49,11 @@ function RulesEditor({ rules, fallback, onSave }: { rules: string; fallback: str
     <div className="card">
       <div className="section-title" style={{ marginTop: 0 }}>{t("settings.rules.title")}</div>
       <div className="sub">{t("settings.rules.sub")} {t(rules ? "settings.rules.custom" : "settings.rules.default")}</div>
-      <textarea className="field rules-editor-field" rows={10} value={text} onChange={(e) => (setText(e.target.value), setDirty(true))} style={{ fontFamily: "var(--mono)", fontSize: 12.5, marginTop: 8 }} />
+      {/* The eleventh line shows through the field's bottom padding sliced in half; the fade over
+          it (while more waits below) makes that read as "scroll for more" rather than broken text. */}
+      <div className="rules-editor">
+        <textarea ref={field} className="field rules-editor-field" rows={10} value={text} onChange={(e) => (setText(e.target.value), setDirty(true))} style={{ fontFamily: "var(--mono)", fontSize: 12.5 }} />
+      </div>
       <div className="btnrow">
         <button className="btn primary" disabled={!dirty} onClick={() => (onSave(text.trim() === fallback.trim() ? "" : text), setDirty(false))}>
           {t("common.save")}
@@ -193,14 +201,25 @@ function PresetRow({ id, p, onDemandByModel, isDefault, inChain, providers, onDe
               ))}
             </div>
             <Toggle on={p.images} onClick={() => onPatch({ images: !p.images })} title={t("settings.preset.images.title")}>{t("settings.preset.imagestoggle", { state: t(p.images ? "common.on" : "common.off") })}</Toggle>
-            <span className="sub" title={t("settings.preset.ondemand.title")}>{t("settings.preset.ondemand")}</span>
-            <div className="segmented inline" role="group" aria-label={t("settings.preset.ondemand")} title={t("settings.preset.ondemand.title")}>
-              {ON_DEMAND_CHOICES.map((choice) => (
-                <button key={String(choice)} className={(p.on_demand_tool_groups ?? null) === choice ? "on" : ""} onClick={() => onPatch({ on_demand_tool_groups: choice })}>
-                  {choice === null ? t("settings.preset.ondemand.bymodel", { state: t(onDemandByModel ?? true ? "common.on" : "common.off") }) : t(choice ? "common.on" : "common.off")}
-                </button>
-              ))}
-            </div>
+            {/* The words and their control wrap as one: apart, the words were left at the end of the
+                row with the control on the next line and read as an orphaned caption. */}
+            <span className="btnrow-labelled">
+              <span className="sub" title={t("settings.preset.ondemand.title")}>{t("settings.preset.ondemand")}</span>
+              <span className="segmented inline" role="group" aria-label={t("settings.preset.ondemand")} title={t("settings.preset.ondemand.title")}>
+                {ON_DEMAND_CHOICES.map((choice) => (
+                  <button
+                    key={String(choice)}
+                    className={(p.on_demand_tool_groups ?? null) === choice ? "on" : ""}
+                    title={choice === null ? t("settings.preset.ondemand.bymodel.title", { state: t(onDemandByModel ?? true ? "common.on" : "common.off") }) : undefined}
+                    onClick={() => onPatch({ on_demand_tool_groups: choice })}
+                  >
+                    {/* The model's own value goes in the title: written into the label it made the
+                        row read "as the model: on · on · off", a second "on" that looked like a typo. */}
+                    {choice === null ? t("settings.preset.ondemand.bymodel") : t(choice ? "common.on" : "common.off")}
+                  </button>
+                ))}
+              </span>
+            </span>
             {!isDefault && <Toggle on={inChain} onClick={onChain} title={t("settings.preset.fallback.title")}>{t(inChain ? "settings.preset.isfallback" : "settings.preset.usefallback")}</Toggle>}
             <span className="sub mono mid">{id}</span>
           </div>
@@ -380,7 +399,7 @@ function AddProviderRow({ kinds, onAdd, toast }: { kinds: string[]; onAdd: (id: 
           </select>
         </label>
         <label className="mfield wide">
-          <span>base_url</span>
+          <span>{t("settings.provider.baseurl.short")}</span>
           <input className="field" value={baseUrl} placeholder="http://<host>:<port>/v1" onChange={(e) => setBaseUrl(e.target.value)} />
         </label>
       </div>
@@ -505,7 +524,7 @@ function SearchBlock({ s, save }: { s: Settings; save: (patch: any) => Promise<v
       {search.backend === "searxng" || fallbackIds.includes("searxng") ? (
         <>
           <div className="section-title">SearXNG</div>
-          <TextField label={t("settings.search.url")} value={search.searxng.url} onSave={(v) => saveSearch({ searxng: { url: v } })} />
+          <TextField label={t("settings.search.url")} value={search.searxng.url} placeholder="http://127.0.0.1:8080" onSave={(v) => saveSearch({ searxng: { url: v } })} />
           <TextField label={t("settings.search.engines")} value={search.searxng.engines} placeholder="google,duckduckgo,bing" onSave={(v) => saveSearch({ searxng: { engines: v } })} />
           <div className="grid2">
             <TextField label={t("settings.search.categories")} value={search.searxng.categories} placeholder="general" onSave={(v) => saveSearch({ searxng: { categories: v } })} />
@@ -557,7 +576,7 @@ function SearchBlock({ s, save }: { s: Settings; save: (patch: any) => Promise<v
       ) : null}
       <div className="btnrow" style={{ marginTop: 12 }}>
         <button className="btn small primary" disabled={checking} onClick={() => runCheck("")}>{t(checking ? "settings.search.checking" : "settings.search.check")}</button>
-        <button className="btn small" disabled={checking || !info(search.backend)} onClick={() => runCheck(search.backend)}>{t("settings.search.checkone", { name: search.backend })}</button>
+        <button className="btn small" disabled={checking || !info(search.backend)} onClick={() => runCheck(search.backend)}>{t("settings.search.checkone", { name: info(search.backend)?.label ?? search.backend })}</button>
       </div>
       {checkError && <div className="sub" style={{ color: "var(--bad)" }}>{checkError}</div>}
       {check && (
@@ -581,44 +600,10 @@ function SearchBlock({ s, save }: { s: Settings; save: (patch: any) => Promise<v
 
 function ToolsTab({ s, save, toast, onSettings }: { s: Settings; save: (patch: any) => Promise<void>; toast: (t: string) => void; onSettings: (next: Settings) => void }) {
   const web = s.tools.web;
-  const asr = s.asr;
   return (
     <>
       <ToolGroupsSettings toast={toast} revision={s.revision} onSettings={onSettings} />
-      <div className="card">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("settings.asr.title")}</div>
-        <div className="sub">{t("settings.asr.sub")}</div>
-        <label className="field">{t("settings.asr.provider")}</label>
-        <select className="field" value={asr.provider || ""} onChange={(e) => save({ asr: { ...asr, api_key: "", provider: e.target.value } })}>
-          <option value="">{t("settings.asr.custom")}</option>
-          {Object.keys(s.providers).map((pid) => (
-            <option key={pid} value={pid}>{pid}{s.providers[pid].base_url ? ` · ${s.providers[pid].base_url.replace(/^https?:\/\//, "")}` : ""}</option>
-          ))}
-        </select>
-        {!asr.provider && (
-          <>
-            <label className="field">{t("settings.asr.url")}</label>
-            <input className="field" defaultValue={asr.url} placeholder="https://api.openai.com/v1" onBlur={(e) => save({ asr: { ...asr, api_key: "", url: e.target.value.trim() } })} />
-            <label className="field">{t(asr.api_key_set ? "settings.asr.key.set" : "settings.asr.key")}</label>
-            <input className="field" type="password" defaultValue="" placeholder={asr.api_key_set ? "••••••" : ""} onBlur={(e) => e.target.value && save({ asr: { ...asr, api_key: e.target.value } })} />
-          </>
-        )}
-        <div className="grid2">
-          <div>
-            <label className="field">{t("settings.asr.model")}</label>
-            <input className="field" defaultValue={asr.model} placeholder={asr.provider === "openrouter" ? "openai/whisper-1" : "whisper-1"} onBlur={(e) => save({ asr: { ...asr, api_key: "", model: e.target.value.trim() } })} />
-          </div>
-          <div>
-            <label className="field">{t("settings.asr.language")}</label>
-            <input className="field" defaultValue={asr.language} onBlur={(e) => save({ asr: { ...asr, api_key: "", language: e.target.value.trim() } })} />
-          </div>
-        </div>
-        <div className="btnrow">
-          <button className={`btn small ${asr.autosend ? "primary" : ""}`} onClick={() => save({ asr: { ...asr, api_key: "", autosend: !asr.autosend } })}>
-            {t("settings.asr.autosend", { state: t(asr.autosend ? "common.on" : "common.off") })}
-          </button>
-        </div>
-      </div>
+      <AsrSettingsCard s={s} save={save} />
       <div className="card">
         <div className="section-title" style={{ marginTop: 0 }}>{t("settings.vision.title")}</div>
         <div className="sub">{t("settings.vision.sub")}</div>
@@ -700,9 +685,9 @@ function HealthTab({ toast }: { toast: (t: string) => void }) {
   return (
     <>
       <div className="card">
-        <div className="row">
+        <div className="row health-summary">
           <div className="grow">
-            <b>{t("settings.health.ok", { n: summary.ok ?? 0 })}</b> · {t("settings.health.warn", { n: summary.warn ?? 0 })} · {t("settings.health.fail", { n: summary.fail ?? 0 })}
+            <b>{t("settings.health.ok", { n: summary.ok ?? 0 })}</b> · {plural("settings.health.warn", summary.warn ?? 0)} · {plural("settings.health.fail", summary.fail ?? 0)}
           </div>
           <button className="btn small" disabled={busy} onClick={() => load(false)}>
             {t("settings.health.recheck")}
@@ -1306,6 +1291,9 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
                 </button>
               ))}
             </div>
+            {/* The digits are the ones /verbosity takes in the chat, so they stay; this line is what
+                they mean, which nothing on the page said. */}
+            <div className="sub">{t("settings.chat.verbosity.sub")}</div>
             <div className="btnrow">
               <button className={`btn small ${s.telegram.reactions ? "primary" : ""}`} onClick={() => save({ telegram: { ...s.telegram, reactions: !s.telegram.reactions } })}>
                 {t("settings.chat.reactions", { state: t(s.telegram.reactions ? "common.on" : "common.off") })}

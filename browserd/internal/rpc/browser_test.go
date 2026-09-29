@@ -5,6 +5,7 @@ package rpc_test
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -348,6 +349,50 @@ func TestHumanControlBlocksTheAgentAndTakesInput(t *testing.T) {
 	}
 	h.must("control.set", map[string]any{"group_id": "g1", "owner": "agent"}, nil)
 	h.must("page.reload", map[string]any{"tab_id": o.Tab.ID}, nil)
+}
+
+func TestTheOperatorCopiesTheSelectionButNeverAPassword(t *testing.T) {
+	h := start(t, nil)
+	o := h.open("g1", "project-a", "/site/login.html")
+	tab := o.Tab.ID
+	email := refOf(t, h.snapshot(tab), "textbox", "Email")
+	h.mustAct(tab, map[string]any{"action": "click", "ref": email, "element": "email"})
+	v := h.attach("g1", wire.Attach{Tier: "thumb", MaxW: 320, MaxH: 200})
+	v.waitEvent("hello", 10*time.Second, nil)
+
+	// A copy is input: before this client holds control it is refused like any other.
+	v.input(map[string]any{"t": "copy", "id": "k0"})
+	v.waitEvent("error", 5*time.Second, func(e map[string]any) bool { return e["code"] == "not_holder" })
+	h.must("control.set", map[string]any{"group_id": "g1", "owner": "human", "client_id": v.id}, nil)
+
+	press := func(key, code string, keyCode, mods int) {
+		v.input(map[string]any{"t": "key", "type": "down", "key": key, "code": code, "key_code": keyCode, "mods": mods})
+		v.input(map[string]any{"t": "key", "type": "up", "key": key, "code": code, "key_code": keyCode, "mods": mods})
+	}
+	copied := func(id string) map[string]any {
+		v.input(map[string]any{"t": "copy", "id": id})
+		return v.waitEvent("copied", 10*time.Second, func(e map[string]any) bool { return e["id"] == id })
+	}
+	press("a", "KeyA", 65, 2)
+	if e := copied("k1"); e["text"] != "someone@example.com" || e["withheld"] != false {
+		t.Fatalf("the email field's selection: %v", e)
+	}
+	// Tab moves to the password field; everything in it is selected, and nothing of it is copied.
+	press("Tab", "Tab", 9, 0)
+	press("a", "KeyA", 65, 2)
+	if e := copied("k2"); e["text"] != "" || e["withheld"] != true {
+		t.Fatalf("the password field's selection: %v", e)
+	}
+	// The whole page selected: its words, never a field's secret value.
+	press("Escape", "Escape", 27, 0)
+	v.input(map[string]any{"t": "mouse", "type": "down", "x": 600, "y": 700, "button": "left", "clicks": 1})
+	v.input(map[string]any{"t": "mouse", "type": "up", "x": 600, "y": 700, "button": "left", "clicks": 1})
+	press("a", "KeyA", 65, 2)
+	e := copied("k3")
+	text, _ := e["text"].(string)
+	if !strings.Contains(text, "Sign in") || strings.Contains(text, "SECRET") {
+		t.Fatalf("the page's selection: %q", text)
+	}
 }
 
 func TestPopupJoinsTheOpenersGroup(t *testing.T) {

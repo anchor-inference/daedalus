@@ -25,6 +25,20 @@ function share(part: number, total: number, used: number): number {
   return Math.max(0, Math.min(100 - used, (100 * part) / total));
 }
 
+/**
+ * What the grey and the striped parts of the track are. The sentences name the coloured parts, but
+ * nothing named these two, so a reader had to infer from the warning that the stripes are only a
+ * projection — "what the limit would add" — and not memory in use now.
+ */
+function Legend({ both = false }: { both?: boolean }) {
+  return (
+    <div className="sub faint loadbar-legend">
+      <span><i className="loadbar-other" aria-hidden="true" />{t("load.legend.rest")}</span>
+      <span><i className="loadbar-legend-extra" aria-hidden="true" />{t(both ? "load.legend.projected.both" : "load.legend.projected")}</span>
+    </div>
+  );
+}
+
 export function LoadBar({ load, cap, compact = false }: { load: TerminalLoad; cap?: number; compact?: boolean }) {
   const f = loadFigures(load, cap ?? load.cap);
   if (!f.known) {
@@ -57,12 +71,30 @@ export function LoadBar({ load, cap, compact = false }: { load: TerminalLoad; ca
         <b>{plural("load.atcap", f.cap, { used: size(f.terminalsAtCap), total: size(f.total) })}</b>
         <span className="loadbar-percent">{t("load.percent", { percent: pct(f.memPercentAtCap) })}</span>
       </div>
-      <div className="sub">
-        {plural("load.now", f.running, { used: size(f.terminalsNow), free: size(Math.max(0, f.total - f.machineNow)) })}
-        {daemon > 0 && ` ${t("load.daemon", { used: size(daemon) })}`}
+      {/* What each fill of the track is, in its own colour and pattern: the solid and the striped
+          part had no key, and nobody could tell the terminals running now from the room the limit
+          keeps for them. */}
+      <div className="loadbar-legend">
+        <span className="loadbar-key"><i className="loadbar-other" />{t("load.legend.other", { used: size(other) })}</span>
+        <span className="loadbar-key" title={daemon > 0 ? t("load.daemon", { used: size(daemon) }) : undefined}><i className="loadbar-now" />{plural("load.legend.now", f.running, { used: size(f.terminalsNow) })}</span>
+        {f.extra > 0 && <span className="loadbar-key"><i className="loadbar-extra" />{t("load.legend.extra", { cap: f.cap, used: size(f.machineAtCap - f.machineNow) })}</span>}
       </div>
-      {!compact && <div className="sub">{t("load.machine", { now: pct(f.memPercentNow), atcap: pct(f.memPercentAtCap) })}</div>}
-      <div className="sub loadbar-cpu" data-level={f.cpuLevel}>{t("load.cpu", { now: pct(f.cpuNow), atcap: pct(f.cpuAtCap) })}</div>
+      {compact ? (
+        // The page's header keeps the facts short and named — free memory, the processors — where two
+        // sentences of figures used to make a newcomer parse prose for which number was now.
+        <div className="sub loadbar-cpu" data-level={f.cpuLevel}>
+          {t("load.stats.free", { free: size(Math.max(0, f.total - f.machineNow)) })} · {t("load.stats.cpu", { now: pct(f.cpuNow), atcap: pct(f.cpuAtCap), cap: f.cap })}
+        </div>
+      ) : (
+        <>
+          <div className="sub">
+            {plural("load.now", f.running, { used: size(f.terminalsNow), free: size(Math.max(0, f.total - f.machineNow)) })}
+            {daemon > 0 && ` ${t("load.daemon", { used: size(daemon) })}`}
+          </div>
+          <div className="sub">{t("load.machine", { now: pct(f.memPercentNow), atcap: pct(f.memPercentAtCap) })}</div>
+          <div className="sub loadbar-cpu" data-level={f.cpuLevel}>{t("load.cpu", { now: pct(f.cpuNow), atcap: pct(f.cpuAtCap) })}</div>
+        </>
+      )}
       {!compact && <div className="sub faint">{t(`load.basis.${load.likely.basis}`, { each: size(load.likely.rss_bytes) })}</div>}
       {overEstimate(f) && (
         <div className="loadbar-warning" role="status">
@@ -79,6 +111,13 @@ export function LoadBar({ load, cap, compact = false }: { load: TerminalLoad; ca
  * colour and the warning are the two together's, since both fill the same memory; the sentences name
  * each. Where the installation has only one kind, it is that kind's own bar.
  */
+/** A part of the track that is there at all is at least a sliver wide. Half a gigabyte of browsers
+ *  beside fourteen of terminals was a fraction of a pixel, and the legend's colour for browsers had
+ *  nothing on the bar to point at. */
+function segment(width: number): { width: string; minWidth: number } {
+  return { width: `${width}%`, minWidth: width > 0 ? 4 : 0 };
+}
+
 export function WorkloadsBar({ load, caps = {} }: { load: WorkloadsLoad; caps?: { terminals?: number; browsers?: number } }) {
   if (!load.browsers && load.terminals) return <LoadBar load={load.terminals} cap={caps.terminals} />;
   const f = workloadFigures(load.terminals, load.browsers, caps);
@@ -114,11 +153,11 @@ export function WorkloadsBar({ load, caps = {} }: { load: WorkloadsLoad; caps?: 
         aria-valuenow={pct(f.memPercentAtCap)}
         aria-label={t("load.together.aria", { percent: pct(f.memPercentAtCap) })}
       >
-        <i className="loadbar-other" style={{ width: `${otherW}%` }} />
-        <i className="loadbar-now" style={{ width: `${tNowW}%` }} />
-        <i className="loadbar-browsers" style={{ width: `${bNowW}%` }} />
-        <i className="loadbar-extra" style={{ width: `${tExtraW}%` }} />
-        <i className="loadbar-browsers-extra" style={{ width: `${bExtraW}%` }} />
+        <i className="loadbar-other" style={segment(otherW)} />
+        <i className="loadbar-now" style={segment(tNowW)} />
+        <i className="loadbar-browsers" style={segment(bNowW)} />
+        <i className="loadbar-extra" style={segment(tExtraW)} />
+        <i className="loadbar-browsers-extra" style={segment(bExtraW)} />
       </div>
       <div className="loadbar-head">
         <b>{t("load.together", { used: size(f.machineAtCap), total: size(f.total) })}</b>
@@ -136,6 +175,7 @@ export function WorkloadsBar({ load, caps = {} }: { load: WorkloadsLoad; caps?: 
           {plural("load.kind.browsers", f.browsers.running, { used: size(f.browsers.now), cap: f.browsers.cap, atcap: size(f.browsers.atCap) })}
         </div>
       )}
+      <Legend both />
       <div className="sub">{t("load.machine", { now: pct(f.memPercentNow), atcap: pct(f.memPercentAtCap) })}</div>
       <div className="sub loadbar-cpu" data-level={f.cpuLevel}>{t("load.cpu", { now: pct(f.cpuNow), atcap: pct(f.cpuAtCap) })}</div>
       {over && (

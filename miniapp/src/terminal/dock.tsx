@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import { api, TerminalCreate, TerminalEnv, TerminalEnvName, TerminalList, TerminalView as TerminalRow } from "../api";
 import { confirmDialog, MenuItem, OverflowMenu, Sheet } from "../dialogs";
 import { plural, t } from "../i18n";
+import { EnvPill } from "../envpill";
 import { Icon } from "../icons";
 import { useQuery } from "../store";
 import { errorText } from "../ui";
@@ -296,16 +297,6 @@ export function useTerminalDock(sessionId: string, terms: SessionTerminals, opti
 }
 
 // ── pieces ──────────────────────────────────────────────────────────────────────────────────
-
-export function EnvPill({ env }: { env: TerminalEnvName }) {
-  // The host is marked, never guarded: amber and a lock, and no extra question (operator's decision).
-  return (
-    <span className={`term-env ${env}`}>
-      {env === "host" && <Icon name="lock" size={11} />}
-      {t(`term.env.${env}`)}
-    </span>
-  );
-}
 
 /** The shield of a sandboxed terminal. */
 function Shield({ row }: { row: TerminalRow | null }) {

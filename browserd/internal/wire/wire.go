@@ -88,6 +88,8 @@ type Input struct {
 	Points  []TouchPoint `json:"points,omitempty"`
 	Action  string       `json:"action,omitempty"`
 	URL     string       `json:"url,omitempty"`
+	// ID names a copy, so the client can match the "copied" event that answers it.
+	ID string `json:"id,omitempty"`
 }
 
 type TouchPoint struct {

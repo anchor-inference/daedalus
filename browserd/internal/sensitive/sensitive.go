@@ -62,9 +62,9 @@ type Result struct {
 // Russian word of a phrase matches with any ending (купить, купите, оплатите), since the stem carries
 // the meaning: its last two letters are dropped and any letters may follow.
 var words = map[string][]string{
-	Purchase: {"buy", "buy now", "pay", "pay now", "place order", "checkout", "check out", "purchase", "subscribe",
+	Purchase: {"buy", "buy now", "pay", "pay now", "place order", "checkout", "check out", "purchase",
 		"donate", "book now", "complete order", "confirm order", "confirm purchase", "add payment", "payment", "billing",
-		"купить", "оплатить", "оплата", "оформить заказ", "заказать", "подписаться", "забронировать", "пожертвовать",
+		"купить", "оплатить", "оплата", "оформить заказ", "заказать", "забронировать", "пожертвовать",
 		"подтвердить заказ", "подтвердить оплату"},
 	Send: {"send", "post", "publish", "share", "reply", "submit", "tweet", "comment", "retweet", "repost",
 		"отправить", "опубликовать", "поделиться", "ответить", "комментировать", "запостить"},
@@ -77,12 +77,26 @@ var words = map[string][]string{
 }
 
 // refusals are the answers to a consent banner that are not an agreement: "reject all" contains
-// "all" but accepts nothing.
+// "all" but accepts nothing. The agent is told to prefer them, so each common wording of one must pass
+// without a question: "Accept only essential cookies" and "Продолжить без принятия" hold an accepting
+// word ("принятия" shares the stem of "принять") and would otherwise be asked about.
 var refusals = []string{"reject", "decline", "deny", "refuse", "only necessary", "necessary only", "essential only",
-	"отклонить", "отказаться", "только необходимые"}
+	"only essential", "only required", "required only", "strictly necessary", "necessary cookies", "essential cookies",
+	"without accepting", "don't accept", "do not accept",
+	"отклонить", "отказаться", "только необходимые", "только обязательные", "только технические", "без принятия",
+	"без согласия", "не принимать", "не согласен"}
+
+// subscriptions are a purchase only beside a price: "Subscribe" under a newsletter box costs nothing and
+// was asked about as a purchase on every sign-up, while "Subscribe — $9.99/month" is one. A paid plan
+// whose button names no price still meets the purchase words or the payment form on the next page.
+var subscriptions = []string{"subscribe", "subscribe now", "start subscription", "start trial", "подписаться", "оформить подписку"}
+
+// price is an amount of money, or a period that says it recurs.
+var price = regexp.MustCompile(`(?i)([$€£¥₽]\s*\d|\d\s*([$€£¥₽]|usd|eur|gbp|руб|р\.)|per month|per year|/\s*(mo|month|yr|year)\b|в месяц|в год|/\s*мес)`)
 
 var patterns = map[string]*regexp.Regexp{}
 var refusal *regexp.Regexp
+var subscription *regexp.Regexp
 
 func phrase(w string) string {
 	parts := strings.Fields(w)
@@ -119,6 +133,7 @@ func init() {
 		patterns[k] = compile(list)
 	}
 	refusal = compile(refusals)
+	subscription = compile(subscriptions)
 }
 
 // Classify says which kinds apply to an action on the element evidence describes. action is the
@@ -140,6 +155,9 @@ func Classify(action string, ev Evidence, submit bool) Result {
 			if m == nil && k == Purchase && ev.Submits {
 				// A checkout button named only "Continue" under a heading that says "Payment".
 				m = patterns[k].FindStringSubmatch(strings.ToLower(ev.Heading))
+			}
+			if m == nil && k == Purchase && price.MatchString(label) {
+				m = subscription.FindStringSubmatch(label)
 			}
 			if m == nil {
 				continue

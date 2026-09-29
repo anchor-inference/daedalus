@@ -261,6 +261,9 @@ async def test_the_routes_list_and_answer_in_a_batch(settings: Settings, db: Dat
             assert [i["state"] for i in again.json()["results"]] == ["conflict", "answered"]
             assert (await r.manager.asks.get(providers.id)).resolution["via"] == "main"  # type: ignore[union-attr]
             assert (await client.post("/api/asks/answer", json=[{"ask_id": providers.id, "colour": "red"}], headers=headers)).status_code == 422
+            # The server-wide "always" is a field of the batch too: the list sent it and was refused whole.
+            server_wide = await client.post("/api/asks/answer", json=[{"ask_id": database.id, "allow": True, "always": True, "server": True}], headers=headers)
+            assert server_wide.status_code == 200, server_wide.text
             assert (await client.get(f"/api/questions?project={r.project.id}", headers=headers)).json()["questions"] == []
     finally:
         await r.manager.close()

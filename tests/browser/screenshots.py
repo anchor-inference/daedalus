@@ -295,7 +295,7 @@ MEMORY = {
         {"id": "m2", "scope": "global", "scope_key": "", "kind": "fact", "text": "Deploys go through the `deploy` script in each project; never rsync by hand.", "salience": 0.8, "version": 2, "created_at": ago(days=5), "last_accessed_at": ago(days=1)},
         {"id": "m3", "scope": "session", "scope_key": S1, "kind": "fact", "text": "The bakery owner edits data files over SFTP; markup changes must not be required of them.", "salience": 0.85, "version": 1, "created_at": ago(days=3), "last_accessed_at": ago(minutes=9)},
         {"id": "m4", "scope": "session", "scope_key": S1, "kind": "fact", "text": "Images are capped at 60 KB and 1600 px; the shop's phone is on 3G.", "salience": 0.7, "version": 1, "created_at": ago(days=2), "last_accessed_at": ago(minutes=7)},
-        {"id": "m5", "scope": "session", "scope_key": S3, "kind": "procedure", "text": "Refund questions are answered with the template in templates/refund.md and put on the board for the operator.", "salience": 0.75, "version": 1, "created_at": ago(days=4), "last_accessed_at": ago(minutes=52)},
+        {"id": "m5", "scope": "session", "scope_key": S3, "kind": "howto", "text": "Refund questions are answered with the template in templates/refund.md and put on the board for the operator.", "salience": 0.75, "version": 1, "created_at": ago(days=4), "last_accessed_at": ago(minutes=52)},
         {"id": "m6", "scope": "session", "scope_key": S4, "kind": "preference", "text": "The digest goes out on Friday at 09:00; eight items, newest first.", "salience": 0.8, "version": 1, "created_at": ago(days=7), "last_accessed_at": ago(minutes=4)},
     ],
     "buckets": [{"scope": "global", "scope_key": "", "title": None, "count": 2}, {"scope": "session", "scope_key": S1, "title": "Bakery site", "count": 2}, {"scope": "session", "scope_key": S3, "title": "Support inbox", "count": 1}, {"scope": "session", "scope_key": S4, "title": "Weekly digest", "count": 1}],
@@ -423,7 +423,7 @@ SETTINGS = {
     "balance": {"enabled": True, "poll_seconds": 60, "thresholds_usd": [5, 2, 0.5]},
     "scheduler": {"topic_mode": "per_task", "catch_up_missed": True},
     "compaction": {"auto_ratio": 0.7, "keep_recent_messages": 6, "max_words": 900, "chunk_tokens": 30000, "min_messages": 12, "call_timeout_seconds": 90, "core_trigger_ratio": 0.85, "preset": ""},
-    "telegram": {"verbosity": 1, "reactions": True, "topic_status_emoji": True, "stale_after_seconds": 600, "max_inbound_file_mb": 200, "forward_unknown_commands": True, "slow_tool_seconds": 30},
+    "telegram": {"verbosity": 1, "reactions": True, "topic_status_emoji": True, "stale_after_seconds": 600, "max_inbound_file_mb": 200, "forward_unknown_commands": True, "slow_tool_seconds": 30, "photo_caption_wait_seconds": 8},
     "terminals": {"running_cap": 20},
 }
 

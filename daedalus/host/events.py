@@ -100,6 +100,14 @@ class AskPending(TypedDict):
     telegram: bool
 
 
+class AskRouted(TypedDict):
+    """A request handed to someone else to answer (the orchestrator escalating to the operator)."""
+
+    request_id: str
+    request_ref: str
+    routed_to: str
+
+
 class AskAnswered(TypedDict):
     request_id: str
     request_ref: str
@@ -486,6 +494,7 @@ REGISTRY: dict[str, EventSpec] = {
     "session.unread_result": EventSpec(SessionUnreadResult),
     "ask.pending": EventSpec(AskPending),
     "ask.answered": EventSpec(AskAnswered),
+    "ask.routed": EventSpec(AskRouted),
     "ask.batch": EventSpec(AskBatch),
     "permission.pending": EventSpec(PermissionPending),
     "permission.resolved": EventSpec(PermissionResolved),
@@ -948,6 +957,15 @@ class EventBus:
         rows = await self.db.fetchall(
             f"SELECT * FROM app_events WHERE seq > ? AND {where} ORDER BY seq LIMIT ?",
             (after, *params, max(1, limit)),
+        )
+        return [_row_event(row) for row in rows]
+
+    async def latest(self, flt: EventFilter | None = None, *, limit: int = 10) -> list[AppEvent]:
+        """The newest stored events that match, at most ``limit``, oldest first among them."""
+        where, params = (flt or EventFilter()).sql()
+        rows = await self.db.fetchall(
+            f"SELECT * FROM (SELECT * FROM app_events WHERE {where} ORDER BY seq DESC LIMIT ?) ORDER BY seq",
+            (*params, max(1, limit)),
         )
         return [_row_event(row) for row in rows]
 

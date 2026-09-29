@@ -243,6 +243,16 @@ async def test_the_audit_never_holds_what_anyone_typed_and_closing_the_owner_clo
     assert (await service.get("s-sess1"))["close_reason"] == "owner_gone"
 
 
+async def test_what_the_agent_read_out_of_a_page_and_noted_about_a_site_is_in_the_action_log(service: Browsers, owners: FakeOwners) -> None:
+    owners.add(SESSION)
+    await service.open(SESSION, actor="agent:sess1")
+    await service.audit("s-sess1", "container", "agent:sess1", "extract", {"tab": "t1", "url": "https://example.com/", "items": 3})
+    await service.audit("s-sess1", "container", "agent:sess1", "note", {"url": "https://example.com/"})
+    await service.audit("s-sess1", "container", "agent:sess1", "sensitive", {"kinds": ["purchase"]})
+    kinds = [r["kind"] for r in await service.actions("s-sess1")]
+    assert "extract" in kinds and "note" in kinds and "sensitive" not in kinds
+
+
 async def test_the_load_counts_browsers_under_their_own_profile(service: Browsers, owners: FakeOwners, daemon: FakeBrowserd) -> None:
     owners.add(SESSION)
     await service.open(SESSION, actor="agent:sess1")
@@ -374,6 +384,16 @@ def test_the_gateway_hears_whether_a_view_is_in_view() -> None:
     assert check(b"\x30" + json.dumps({"tier": "live", "max_w": 640, "max_h": 400}).encode(), result) is not None
     assert check(b"\x32" + json.dumps({"hidden": True}).encode(), result) is not None
     assert seen == [{"tier": "live", "max_w": 640, "max_h": 400}, {"hidden": True}]
+
+
+def test_a_copy_is_input_the_audit_counts_and_a_viewer_never_sends() -> None:
+    frame = b"\x33" + json.dumps({"t": "copy", "id": "k1"}).encode()
+    result = RelayResult(code=1000, reason="", ended_by="app")
+    assert check_frame(False)(frame, result) == frame
+    assert result.counts == {"copy": 1}
+    watcher = RelayResult(code=1000, reason="", ended_by="app")
+    assert check_frame(True)(frame, watcher) is None
+    assert watcher.input_dropped == 1
 
 
 async def test_watchers_count_only_views_in_view(service: Browsers) -> None:

@@ -2,7 +2,7 @@
 
 import { ApiError, telegram } from "./api";
 import { confirmDialog } from "./dialogs";
-import { bytes, tokens } from "./format";
+import { asSentence, bytes, tokens } from "./format";
 import { t } from "./i18n";
 
 /** The Telegram bridge only when the app really runs inside Telegram: the script also loads in a plain
@@ -47,10 +47,19 @@ export function numInput(raw: string, min?: number): number | null {
   return v;
 }
 
+/**
+ * A message from the host shown as a sentence of its own. The host writes its reasons in lower case
+ * so they read inside a longer line ("could not start: the model refused: …"); standing alone under
+ * a form, the same lower-case text read as a fragment next to the page's own capitalised copy.
+ */
+export function sentence(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /** A readable message for a failed request. */
 export function errorText(e: unknown): string {
   if (e instanceof ApiError && e.status === 413) return t("upload.toolarge");
   const msg = e instanceof Error ? e.message : String(e);
   if (!msg || msg === "Failed to fetch" || msg === "Load failed" || msg === "NetworkError when attempting to fetch resource.") return t("common.noconnection");
-  return msg;
+  return asSentence(msg);
 }

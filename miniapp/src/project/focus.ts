@@ -173,8 +173,10 @@ export type Autonomy = (typeof AUTONOMIES)[number];
 // ── the phone ────────────────────────────────────────────────────────────────────────────────
 
 /** A project's four tabs on a phone, in the order the bar shows them: they take the place of the
- *  app's own tabs while a project is open, and the header's back leads back to those. */
-export const PHONE_TABS = ["orchestrator", "team", "board", "terminals"] as const;
+ *  app's own tabs while a project is open, and the header's back leads back to those. Terminals comes
+ *  before the board because the app's own bar has them in that order; with the two swapped, a thumb
+ *  that learnt "the board is the fourth tab" landed on the wrong one on the way in and out. */
+export const PHONE_TABS = ["orchestrator", "team", "terminals", "board"] as const;
 export type PhoneTab = (typeof PHONE_TABS)[number];
 
 /**

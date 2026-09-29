@@ -50,7 +50,8 @@ def folders(browser, width: int) -> None:  # type: ignore[no-untyped-def]
     lock = page.locator(".explorer-folders .chip", has_text="read-only")
     expect(lock).to_be_visible()
     expect(lock.locator("svg")).to_have_count(1)
-    expect(page.locator(".explorer-folders .chip", has_text="container")).to_be_visible()
+    # Where the folder lives is the shared environment pill, spelt as on every other screen.
+    expect(page.locator(".explorer-folders .term-env.container")).to_have_text("Container")
     # A folder the session may not write offers no upload.
     expect(page.get_by_role("button", name="upload", exact=True)).to_have_count(0)
     expect(page.locator(".explorer-crumbs .crumb").first).to_have_text("Docs")
@@ -134,10 +135,10 @@ def run() -> int:
         page.keyboard.press("Enter")
         expect(page.locator(".preview-doc")).to_be_visible()
         page.locator('[data-tab="files"]').click()
-        page.get_by_role("button", name="Hidden and ignored", exact=True).click()
+        page.get_by_role("switch", name="Show hidden and ignored", exact=True).click()
         assert "dim" in tree.locator('[data-path=".env"]').get_attribute("class")
         expect(tree.locator('[data-path="node_modules"]')).to_be_visible()
-        page.get_by_role("button", name="Hidden and ignored", exact=True).click()
+        page.get_by_role("switch", name="Show hidden and ignored", exact=True).click()
         expect(tree.locator('[data-path=".env"]')).to_have_count(0)
         search = page.get_by_role("searchbox", name="Search files…")
         search.fill("helper")

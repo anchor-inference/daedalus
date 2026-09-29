@@ -81,6 +81,7 @@ describe("how a member is drawn", () => {
     expect(statusTone("question")).toBe("waiting");
     expect(statusTone("permission")).toBe("waiting");
     expect(statusTone("error")).toBe("failed");
+    expect(statusTone("turn_done_unseen")).toBe("done");
     expect(statusTone("off")).toBe("idle");
     expect(statusTone("no_signal")).toBe("idle");
   });

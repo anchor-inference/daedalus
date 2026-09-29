@@ -64,7 +64,7 @@ export function TeamPage({ projectId, toast, back }: { projectId: string; toast:
           <div className="empty">
             <b>{t("team.error")}</b>
             <div>{error}</div>
-            <button className="btn" onClick={refresh}>{t("common.retry")}</button>
+            <button className="btn primary" onClick={refresh}>{t("common.retry")}</button>
           </div>
         )}
         {team && closed && (

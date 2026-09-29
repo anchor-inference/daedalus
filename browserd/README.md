@@ -27,9 +27,9 @@ specified in [`docs/architecture/browser.md`](../docs/architecture/browser.md).
 | `internal/chrome` | finding a Chromium, its switches and preferences, starting it on a profile, ending its tree; its private memory and sandbox state from `/proc` |
 | `internal/browser` | browsers, groups, tabs and control; following Chromium's targets; navigation; idle close; statistics and the memory limit |
 | `internal/view` | live views: one screencast per watched tab, its pacing, each client's mailbox and acknowledgements, thumbnails, a person's input |
-| `internal/page` | what the agent reads and does on a page: the outline with refs and the readable text from `js/page.js` (run in an isolated world the page cannot reach), masked screenshots, actions as real input, waiting, dialogs, downloads and uploads, and the moments the operator is needed |
+| `internal/page` | what the agent reads and does on a page: the outline with refs, the readable text and the search from `js/page.js` (run in an isolated world the page cannot reach, and in one of each frame of another site), masked screenshots, actions as real input, waiting, dialogs, downloads and uploads, and the moments the operator is needed |
 | `internal/sensitive` | which consequences of an action the operator approves: the word lists in English and Russian and the classification |
-| `internal/rpc` | the methods; `testdata/site` is the local site the tests browse, `testdata/golden` the outlines of three of its pages (`go test ./internal/rpc -run Golden -update` rewrites them) |
+| `internal/rpc` | the methods; `testdata/site` is the local site the tests browse, `testdata/golden` the outlines of five of its pages, one of them in two ways (`go test ./internal/rpc -run Golden -update` rewrites them); `BROWSERD_MEASURE=1 go test ./internal/rpc -run Measure -v` times the snapshot on them, on long synthetic pages and on pages saved in `BROWSERD_MEASURE_DIR` |
 | `internal/wire` | the view frames; `testdata/frames.json` is shared byte for byte with the app |
 
 ## Testing

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Meeting settings — Calendly-ish</title><script src="/eval.js"></script>
+<style>body{font-family:sans-serif;max-width:640px;margin:2em auto}.cb{position:relative;width:320px}.cb input{width:100%;padding:6px}.list{position:absolute;left:0;right:0;top:100%;max-height:180px;overflow:auto;background:#fff;border:1px solid #888;display:none;z-index:5}.list div{padding:5px;cursor:pointer}.list div:hover{background:#def}</style></head>
+<body>
+<h1>Meeting settings</h1>
+<p>Time zone for your booking page</p>
+<div class="cb"><input id="tz" role="combobox" aria-expanded="false" aria-controls="tzl" aria-autocomplete="list" placeholder="Search time zones" autocomplete="off"><div class="list" id="tzl" role="listbox"></div></div>
+<p>Selected: <span id="chosen">none</span></p>
+<p><button id="save">Save</button></p><p id="m"></p>
+<script>
+  const zones = ['Africa/Cairo','America/Chicago','America/New_York','America/Sao_Paulo','Asia/Dubai','Asia/Kolkata','Asia/Tokyo','Atlantic/Azores','Atlantic/Madeira','Australia/Sydney','Europe/Berlin','Europe/Dublin','Europe/Helsinki','Europe/Lisbon','Europe/London','Europe/Madrid','Europe/Paris','Europe/Rome','Europe/Warsaw','Pacific/Auckland'];
+  const input = document.getElementById('tz'), list = document.getElementById('tzl');
+  let chosen = null;
+  function show() {
+    const q = input.value.toLowerCase();
+    list.innerHTML = '';
+    zones.filter(z => z.toLowerCase().includes(q)).forEach(z => {
+      const d = document.createElement('div'); d.setAttribute('role', 'option'); d.textContent = z.replace('_', ' ');
+      d.addEventListener('mousedown', e => { e.preventDefault(); chosen = z; input.value = z.replace('_', ' '); document.getElementById('chosen').textContent = z; list.style.display = 'none'; input.setAttribute('aria-expanded', 'false'); });
+      list.appendChild(d);
+    });
+    list.style.display = 'block'; input.setAttribute('aria-expanded', 'true');
+  }
+  input.addEventListener('focus', show); input.addEventListener('input', () => { chosen = null; document.getElementById('chosen').textContent = 'none'; show(); });
+  input.addEventListener('blur', () => { list.style.display = 'none'; input.setAttribute('aria-expanded', 'false'); });
+  document.getElementById('save').onclick = () => { record('combobox', 'save', { zone: chosen }); document.getElementById('m').textContent = chosen ? 'Saved ' + chosen + '.' : 'Pick a time zone from the list.'; };
+</script>
+</body></html>

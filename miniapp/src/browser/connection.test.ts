@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api";
 import type { SocketLike } from "../terminal/connection";
 import { BrowserConnection, type FrameSink, type ViewDeps, type ViewState } from "./connection";
+import { COPY_TIMEOUT_MS, LiveView } from "./live";
 import { VIEW, type FrameMeta } from "./protocol";
 
 class FakeSocket implements SocketLike {
@@ -268,5 +269,44 @@ describe("a view out of sight", () => {
     expect(s.json(VIEW.VIEW)).toEqual([{ hidden: true }, { hidden: false }]);
     conn.close();
     expect(told).toBeNull();
+  });
+});
+
+describe("a copy from the page", () => {
+  async function live() {
+    const view = new LiveView({ group: "g1", tier: "live", box: () => ({ max_w: 1600, max_h: 1000 }), deps });
+    await vi.advanceTimersByTimeAsync(0);
+    const s = sockets.at(-1)!;
+    s.open();
+    s.receive(hello);
+    return { view, s };
+  }
+
+  it("asks the daemon by id and takes the answer that names it, not another", async () => {
+    const { view, s } = await live();
+    const first = view.copy();
+    const second = view.copy();
+    const asked = s.json(VIEW.INPUT);
+    expect(asked).toEqual([{ t: "copy", id: "k1" }, { t: "copy", id: "k2" }]);
+    s.receive(event({ type: "copied", id: "k2", text: "two", truncated: false, withheld: false }));
+    s.receive(event({ type: "copied", id: "k1", text: "", truncated: false, withheld: true }));
+    s.receive(event({ type: "copied", id: "k9", text: "nobody asked" }));
+    await expect(second).resolves.toEqual({ text: "two", truncated: false, withheld: false });
+    await expect(first).resolves.toEqual({ text: "", truncated: false, withheld: true });
+    view.close();
+  });
+
+  it("fails on the page's error, on silence and on a closed view", async () => {
+    const { view, s } = await live();
+    const failed = view.copy();
+    s.receive(event({ type: "copied", id: "k1", text: "", error: "a dialog is open" }));
+    await expect(failed).rejects.toThrow("a dialog is open");
+    const silent = view.copy();
+    const caught = expect(silent).rejects.toThrow("timeout");
+    await vi.advanceTimersByTimeAsync(COPY_TIMEOUT_MS + 1);
+    await caught;
+    const left = view.copy();
+    view.close();
+    await expect(left).rejects.toThrow("closed");
   });
 });

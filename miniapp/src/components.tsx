@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useEdgeFade } from "./edgefade";
 import { int, relTime, usd } from "./format";
 import { api, LoopView, ServiceView, ShareMode, ToolInfo } from "./api";
 import { Icon } from "./icons";
@@ -18,6 +19,19 @@ export function LangPicker() {
           {l.toUpperCase()}
         </button>
       ))}
+    </div>
+  );
+}
+
+/** A row of filter chips that scrolls sideways and fades the edge with more behind it. A bare
+ *  `.chips` row cut its last chip at the screen's edge ("re…" of "reflection" on a phone) and the
+ *  filters past it went unseen; a screen with such a row uses this rather than the bare class. */
+export function ChipRow({ children, className = "", label }: { children: React.ReactNode; className?: string; label?: string }) {
+  const row = useRef<HTMLDivElement>(null);
+  useEdgeFade(row);
+  return (
+    <div ref={row} className={`chips ${className}`.trim()} role="group" aria-label={label}>
+      {children}
     </div>
   );
 }
@@ -319,7 +333,7 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
             <>
               <label className="field">{t("svc.link")}</label>
               <div className="share-field">
-                <input className="field mono" readOnly value={s.share.url} onFocus={(e) => e.target.select()} aria-label={t("svc.sharelink")} />
+                <input className="field mono" readOnly value={s.share.url} title={s.share.url} onFocus={(e) => e.target.select()} aria-label={t("svc.sharelink")} />
                 <button className="btn small" onClick={() => copy(s.share!.url!, "link")}><Icon name="copy" size={13} /> {t("common.copy")}</button>
               </div>
               {mode === "key" && s.share.key && (

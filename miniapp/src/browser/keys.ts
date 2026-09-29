@@ -95,6 +95,35 @@ export function viewerChord(e: KeyLike, mac: boolean): ViewerChord | null {
 }
 
 /**
+ * The clipboard's chords, which cross between the operator's machine and the page. A paste is never
+ * sent as keys: the page's browser would paste its own clipboard, which holds nothing of the
+ * operator's. It is left to the viewer's hidden field, whose `paste` event carries the operator's
+ * clipboard and goes to the page as text. A copy or a cut is sent as keys, so the page's own copy
+ * handlers and a web terminal's Ctrl+C still see them, and also asks the daemon for the selection,
+ * which the viewer puts on the operator's clipboard.
+ */
+export type ClipboardChord = "paste" | "copy" | "cut";
+
+export function clipboardChord(e: KeyLike, mac: boolean): ClipboardChord | null {
+  if (e.altKey) return null;
+  const primary = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+  // The letter by its key where the layout gives one, by its place where it does not: Ctrl+V on a
+  // Russian layout arrives as "м" with code KeyV.
+  const letter = e.key.length === 1 && /[a-z]/i.test(e.key) ? e.key.toLowerCase() : e.code === "KeyV" ? "v" : e.code === "KeyC" ? "c" : e.code === "KeyX" ? "x" : "";
+  if (primary) {
+    if (letter === "v") return "paste";
+    if (letter === "c" && !e.shiftKey) return "copy";
+    if (letter === "x" && !e.shiftKey) return "cut";
+  }
+  // The older chords a Linux or Windows keyboard still has.
+  if (!mac && e.key === "Insert" && !e.metaKey) {
+    if (e.shiftKey && !e.ctrlKey) return "paste";
+    if (e.ctrlKey && !e.shiftKey) return "copy";
+  }
+  return null;
+}
+
+/**
  * Escape belongs to the page first — a menu, a modal, a search field all close with it — so the viewer
  * lets go of the keyboard only on a second press within this long.
  */

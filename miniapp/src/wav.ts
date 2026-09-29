@@ -1,6 +1,13 @@
 // A browser recording is WebM or MP4. The local speech model reads WAV (or Ogg via opusdec);
 // ffmpeg is not in the runtime image. Decode with Web Audio and wrap PCM as a WAV the host
 // already knows how to open.
+//
+// The WAV is resampled to 16 kHz on the way. Every recogniser here hears 16 kHz anyway, and the
+// capture rate of 48 kHz made a WAV three times heavier than it needed to be: the hosted endpoint
+// refuses a file past about ten megabytes, which 48 kHz reached in under two minutes of talking.
+
+/** What a recording is sent at: the rate the speech models read, and a third of a microphone's. */
+export const SPEECH_RATE = 16000;
 
 export function pcmToWav(samples: Float32Array, sampleRate: number): Blob {
   const n = samples.length;
@@ -53,11 +60,32 @@ export async function blobToWav(blob: Blob): Promise<Blob> {
   try {
     const raw = await blob.arrayBuffer();
     const decoded = await ctx.decodeAudioData(raw.slice(0));
+    const resampled = await toSpeechRate(decoded);
+    if (resampled) return pcmToWav(resampled, SPEECH_RATE);
     const channels = Array.from({ length: decoded.numberOfChannels }, (_, i) => decoded.getChannelData(i));
     return pcmToWav(mixMono(channels), decoded.sampleRate);
   } catch {
     return blob;
   } finally {
     await ctx.close().catch(() => undefined);
+  }
+}
+
+/** The decoded recording as mono at {@link SPEECH_RATE}, or null where the browser cannot render offline. */
+async function toSpeechRate(decoded: AudioBuffer): Promise<Float32Array | null> {
+  const Offline = window.OfflineAudioContext;
+  if (!Offline || decoded.sampleRate === SPEECH_RATE) return null;
+  try {
+    const length = Math.max(1, Math.ceil(decoded.duration * SPEECH_RATE));
+    // One output channel: the context mixes the source down to mono as it renders.
+    const offline = new Offline(1, length, SPEECH_RATE);
+    const source = offline.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offline.destination);
+    source.start();
+    const rendered = await offline.startRendering();
+    return rendered.getChannelData(0);
+  } catch {
+    return null;
   }
 }

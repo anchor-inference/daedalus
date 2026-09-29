@@ -215,6 +215,7 @@ GATES: dict[str, object] = {
     "/api/browsers/running": {"browsers": []},
     "/api/browsers/profiles": {"profiles": []},
     "/api/browsers/recordings": {"envs": []},
+    "/api/browsers/notes": {"notes": []},
     # Without a browser installed, the workloads are the terminals alone: their own bar.
     "/api/workloads/load": {"terminals": terminal_load(), "browsers": None, "together": None},
     # Terminal environments and the terminals in them: a container environment that works, a host
@@ -267,6 +268,10 @@ def event_stream_hello() -> str:
     return ": no events from a stub\n\n"
 
 
+VOICE_NOTE_PREFIX = "🎙 Voice note, transcribed automatically (wording may be imperfect):"
+"""What the host puts before a transcript (daedalus/transport/telegram/voice.py)."""
+
+
 def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 
@@ -298,6 +303,13 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
         return 200, "application/json", json.dumps(session_tool_groups())
     if method.upper() == "PUT" and len(parts) == 4 and parts[2] == "tool-groups":
         return 200, "application/json", json.dumps(TOOL_GROUP_CATALOGUE)
+    if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "transcribe":
+        # A composer voice note: the words the stub heard, marked as the host marks a transcript.
+        # check_voice_note.py answers this itself to fail it, keep it and retry it.
+        heard = "hello from the stub"
+        return 200, "application/json", json.dumps({"transcript": heard, "text": f"{VOICE_NOTE_PREFIX}\n{heard}", "autosend": False})
+    if method.upper() == "DELETE" and len(parts) == 6 and parts[2] == "sessions" and parts[4] == "transcribe":
+        return 200, "application/json", json.dumps({"deleted": True})
     if method.upper() == "GET" and len(parts) == 6 and parts[2] == "sessions" and parts[4:] == ["tools", "timing"]:
         # A session's Details reads the time its tools took; nobody here timed any.
         return 200, "application/json", json.dumps({"items": []})
@@ -392,7 +404,7 @@ def expect_app(base: str) -> None:
 
 
 
-__all__ = ["CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tool_groups", "terminal_load"]
+__all__ = ["VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tool_groups", "terminal_load"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent

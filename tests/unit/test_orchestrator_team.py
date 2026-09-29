@@ -173,6 +173,11 @@ async def test_escalating_hands_the_request_to_the_operator_with_the_suggestion(
         ask = await r.manager.asks.get(ask_id)
         assert ask is not None and ask.open and ask.routed_to == "operator" and ask.suggestion.startswith("deny:")
         assert any("went to the operator: not in the allowances" in t for t in await journal_texts(r))
+        # The app's Questions list is told at once: it once learnt of the hand-over only on a reload.
+        from daedalus.host.events import EventFilter
+
+        routed = await r.manager.bus.replay(0, EventFilter(types=("ask.routed",)))
+        assert [(e.payload["request_id"], e.payload["routed_to"], e.project_id) for e in routed] == [(ask_id, "operator", r.project.id)]
         urgent = r.team.app.notifications.posted[-1]
         assert urgent.level == "urgent" and "waiting for you" in urgent.title and "The orchestrator suggests: deny" in urgent.body
         with pytest.raises(Refused, match="operator's to answer"):
@@ -413,6 +418,40 @@ async def test_read_staff_pages_are_bounded_carry_their_session_and_mark_the_tur
             await r.call(sid, "read_staff", staff="Ben")
     finally:
         await r.manager.close()
+
+
+async def test_a_report_reaches_the_orchestrator_whole_and_can_be_read_again(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """A member put its whole answer in a checkpoint and ended its turn on "answered above": the wake
+    line cut the report at 300 characters, ReadStaff's last reply said nothing, and a second, longer
+    report was cut at 2000 when it was taken in. The report now arrives whole, can be read again with
+    what="reports", and is cut only past a far larger bound, saying so."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r, page=ReadPage("I've answered the GPU question.", None, False))
+        sid = await office(r)
+        _, live = await working(r)
+        answer = "\n".join(f"{n}. " + "The frames are drawn in Chrome on the GPU. " * 8 for n in range(1, 9))
+        assert len(answer) > 2000
+        await r.team.ingress.report(live, "checkpoint", answer)
+        reported = (await r.manager.bus.latest(events_filter("staff.report"), limit=1))[0]
+        line = await r.orch.line(await r.refreshed(), reported)
+        assert "8. The frames" in line and "…" not in line, line[-200:]
+
+        said = await r.call(sid, "read_staff", staff="Ada", what="reports", max_chars=20000)
+        assert "1. The frames" in said and "8. The frames" in said and "checkpoint" in said
+
+        told = await r.team.ingress.report(live, "done", "x" * 20000)
+        assert "was cut there" in told
+        last = (await r.manager.bus.latest(events_filter("staff.report"), limit=1))[0]
+        assert "[cut at 12000 characters" in last.payload["text"]
+    finally:
+        await r.manager.close()
+
+
+def events_filter(kind: str) -> Any:
+    from daedalus.host.events import EventFilter
+
+    return EventFilter(types=(kind,))
 
 
 async def test_interrupt_pause_and_release_act_through_the_runtime_and_are_journaled(settings: Settings, db: Database, tmp_path: Path) -> None:

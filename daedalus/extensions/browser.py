@@ -24,12 +24,17 @@ from daedalus.browser.agent import BrowserAgent
 from daedalus.browser.cli import TOOL_SET, StaffBrowser
 from daedalus.browser.model import Owner
 from daedalus.browser.monitor import TIMEOUT_SECONDS, InjectionMonitor
+from daedalus.browser.notes import SiteNotes
 from daedalus.browser.owners import DatabaseOwners
 from daedalus.browser.service import Browsers
 from daedalus.config import keyproxy_base
+from daedalus.extensions.notifications import Draft
 from daedalus.host.engine_factory import TENANT
 from daedalus.terminals.update import DaemonUpdate
 
+EXTRACT_TIMEOUT_SECONDS = 60.0
+"""One part of a page read for ``BrowserText(query=…)``: longer than the monitor's word, since the
+answer is a list."""
 IMAGE_BINARY = Path("/usr/local/bin/browserd")
 """Where the image puts the browser daemon (``deploy/Dockerfile``), in both of its targets."""
 
@@ -109,25 +114,43 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     assert manager is not None
     service = build(app)
 
-    async def classify(text: str) -> str:
-        """The injection monitor's model: the preset named for it, else a middle one of the table."""
+    async def small_model(text: str, *, preset: str, purpose: str, max_tokens: int, timeout: float) -> str:
+        """One request to the preset named for the purpose, else a middle one of the table: reading a
+        page for a word or a list is not what the agent's own model is for."""
         config = app.config
-        preset = config.browser.injection_monitor_preset
         if preset not in config.presets:
             preset = config.middle_preset() or ""
         provider, model = manager.providers.rungs_for(config, preset or None)[0]
         request = LLMRequest(
             model=model,
             messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text=text)])],
-            max_tokens=120,
+            max_tokens=max_tokens,
             temperature=0.0,
             extra={"enable_thinking": False},
-            observability=LLMObservabilityContext(tenant_id=TENANT, call_purpose="browser_injection_monitor", call_category="browser"),
+            observability=LLMObservabilityContext(tenant_id=TENANT, call_purpose=purpose, call_category="browser"),
         )
-        response = await asyncio.wait_for(provider.complete_text(request), timeout=TIMEOUT_SECONDS)
+        response = await asyncio.wait_for(provider.complete_text(request), timeout=timeout)
         return "".join(b.text for b in response.message.content_blocks if isinstance(b, TextBlock))
 
-    agent = BrowserAgent(service, InjectionMonitor(classify))
+    async def classify(text: str) -> str:
+        return await small_model(text, preset=app.config.browser.injection_monitor_preset, purpose="browser_injection_monitor", max_tokens=120, timeout=TIMEOUT_SECONDS)
+
+    async def extract(text: str) -> str:
+        return await small_model(text, preset=app.config.browser.extract_preset, purpose="browser_extract", max_tokens=2000, timeout=EXTRACT_TIMEOUT_SECONDS)
+
+    async def noted(note: dict[str, Any]) -> None:
+        """The operator hears of a proposed note where they hear of everything waiting for them."""
+        notifications = getattr(app, "notifications", None)
+        if notifications is None:
+            return
+        await notifications.post(Draft(
+            "system", f"A site note for {note['host']} waits for you", f"{note['text']}\n\nSettings → Browser → Site notes: approve it, or discard it.",
+            kind="browser_note", project_id=note.get("project_id") or None, dedupe_key=f"browser_note:{note['id']}", source="browser",
+        ))
+
+    notes = SiteNotes(app.db)
+    agent = BrowserAgent(service, InjectionMonitor(classify), extract=extract, notes=notes, on_note=noted)
+    app.extensions["browser_notes"] = notes
     app.extensions["browser"] = service
     app.extensions["browser_agent"] = agent
     manager.service_hooks["browser"] = agent

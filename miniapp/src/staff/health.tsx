@@ -17,11 +17,15 @@ export function HealthLine({ health, compact }: { health: ChannelHealth | null; 
   return (
     <span className={`staff-health ${health.level} ${compact ? "compact" : ""}`} data-level={health.level} data-tools={health.team_tools}>
       <Icon name={health.level === "warn" ? "alert" : "check"} size={14} />
-      {shown.map((p) => (
-        <span key={p.key} className={`staff-health-part ${p.warn ? "warn" : ""}`} data-part={p.key}>
-          {t(p.key, { when: p.at ? relTime(p.at) : "", n: p.n ?? 0 })}
-        </span>
-      ))}
+      {/* The parts wrap inside their own box: wrapping beside the mark put the last one flush left,
+          under the mark, in the narrow side column. */}
+      <span className="staff-health-parts">
+        {shown.map((p) => (
+          <span key={p.key} className={`staff-health-part ${p.warn ? "warn" : ""}`} data-part={p.key}>
+            {t(p.key, { when: p.at ? relTime(p.at) : "", n: p.n ?? 0 })}
+          </span>
+        ))}
+      </span>
     </span>
   );
 }

@@ -89,14 +89,16 @@ def desktop(page: Page, feed: EventFeed, lang: str) -> None:
     expect(tab).to_have_attribute("aria-selected", "true")
     expect(page.locator(".panel .panel-tab").first).to_have_attribute("data-tab", "questions")
     expect(tab.locator(".count")).to_have_text("6")
-    # The chat has one line for the whole list, after its latest turn, and no card per question.
+    # The chat has one line for the whole list, after its latest turn, and no card per question —
+    # but not while the Questions tab is open beside it, where its "Open" would open what is shown.
     line = chat.locator(".timeline > .questions-line")
-    expect(line).to_contain_text(words["line"])
-    expect(line).to_contain_text(words["open"])
+    expect(line).to_have_count(0)
     expect(chat.locator(".timeline .q-card, .timeline .ask-card")).to_have_count(0)
-    # The line opens the tab when the panel is closed.
+    # With the panel closed the line is there, and opens the tab.
     page.locator(".panel .panel-actions button").last.click()
     expect(page.locator(".panel")).to_have_count(0)
+    expect(line).to_contain_text(words["line"])
+    expect(line).to_contain_text(words["open"])
     line.click()
     expect(tab).to_have_attribute("aria-selected", "true")
     page.wait_for_url(re.compile(r"panel=questions"))
@@ -230,7 +232,8 @@ def desktop(page: Page, feed: EventFeed, lang: str) -> None:
     expect(lost).to_have_count(0)
     shorts = page.locator(".questions-panel .q-card").evaluate_all("(cards) => cards.map((c) => c.dataset.ask)")
     assert shorts == ["qn3w06"], shorts
-    expect(chat.locator(".questions-line")).to_contain_text("1")
+    # The count left is on the tab; the chat's line stays away while the tab is open beside it.
+    expect(chat.locator(".questions-line")).to_have_count(0)
     assert page.evaluate("() => Object.keys(JSON.parse(localStorage.getItem('daedalus.questions.drafts') || '{}'))") == [], "a sent draft was kept"
     fits(page, f"{lang} 1440 after the send")
 

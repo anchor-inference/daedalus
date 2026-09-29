@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Your basket — Greenbox</title><script src="/eval.js"></script>
+<style>body{font-family:sans-serif;max-width:640px;margin:2em auto}</style></head>
+<body>
+<h1>Your basket</h1>
+<p>Vegetable box, large · €32.00</p>
+<promo-code></promo-code>
+<p id="total">Total: €32.00</p>
+<script>
+  customElements.define('promo-code', class extends HTMLElement {
+    constructor() {
+      super();
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = '<style>div{border:1px dashed #6a6;padding:10px}</style><div><label for="c">Voucher</label> <input id="c" placeholder="Enter voucher"> <button id="a">Apply voucher</button><p id="s"></p></div>';
+      root.getElementById('a').addEventListener('click', () => {
+        const v = root.getElementById('c').value.trim().toUpperCase();
+        record('shadow-dom', 'apply', { voucher: v });
+        if (v === 'AUTUMN10') { root.getElementById('s').textContent = 'Voucher applied: 10% off.'; document.getElementById('total').textContent = 'Total: €28.80'; }
+        else root.getElementById('s').textContent = 'That voucher is not valid.';
+      });
+    }
+  });
+</script>
+</body></html>

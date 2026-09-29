@@ -155,7 +155,9 @@ function ConfirmDialog({ pending, onDone }: { pending: Pending; onDone: (ok: boo
         <h3 id="confirm-title">{pending.title}</h3>
         {pending.body && <div className="dialog-body">{pending.body}</div>}
         <div className="dialog-actions">
-          <button className="btn ghost" onClick={() => onDone(false)}>{pending.cancel ?? t("common.cancel")}</button>
+          {/* A framed button like its neighbour, not a bare word: beside a filled "Delete task" the
+              way back read as the smaller, lesser choice, and on a touch screen looked like no target. */}
+          <button className="btn" onClick={() => onDone(false)}>{pending.cancel ?? t("common.cancel")}</button>
           <button className={`btn ${pending.danger ? "danger solid" : "primary"}`} onClick={() => onDone(true)}>
             {pending.action ?? t("common.ok")}
           </button>

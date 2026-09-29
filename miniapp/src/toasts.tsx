@@ -161,6 +161,30 @@ export class ToastQueue {
 export type ToastContext = { visible: boolean; shown: { sessions: Set<string>; terminals: Set<string>; projects: Set<string> } };
 
 /** Whether a `notify` event becomes a toast in this window. */
+/** A phone's banner publishes its height as `--banner-h` while it shows.
+ *
+ *  The start screen's hero is only as tall as what it holds, so its composer sits in the top band the
+ *  banner crosses: a notice arriving while the operator typed covered the field they were typing in.
+ *  The start screen pads itself by this height; a chat's composer is at the foot and needs nothing. */
+function useBannerRoom(stack: React.RefObject<HTMLDivElement | null>, active: boolean, count: number) {
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const el = stack.current;
+    if (!active || !el) {
+      root.style.removeProperty("--banner-h");
+      return;
+    }
+    const publish = () => root.style.setProperty("--banner-h", `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--banner-h");
+    };
+  }, [stack, active, count]);
+}
+
 export function shouldToast(payload: AppEvent["payload"], meta: EventMeta, ctx: ToastContext): boolean {
   if (meta.replayed || !payload.toast) return false;
   const entry = payload.notification as Notification | undefined;
@@ -275,6 +299,7 @@ export function NotificationToasts() {
   const bottom = useComposerClearance(stack, wide, queue.current.shown.length);
   const items = queue.current.visible();
   const waiting = queue.current.waiting.length;
+  useBannerRoom(stack, !wide && enabled && items.length > 0, items.length);
   if (!enabled || items.length === 0) return null;
   return (
     <div

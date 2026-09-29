@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Sheet } from "../dialogs";
 import { Icon } from "../icons";
-import { t } from "../i18n";
+import { plural, t } from "../i18n";
 import { errorText } from "../ui";
 import { DependencyProgress, type Progress } from "./dependencyprogress";
 import "./dependencies.css";
@@ -105,6 +105,9 @@ export function DependenciesTab() {
         card, icon first, rather than a line of coloured text inside the description. */}
     {offline && <section className="card deps-job offline" role="status">
         <div className="deps-job-title"><span className="deps-job-icon"><Icon name="alert" size={18} /></span><span><b>{t("deps.offline.title")}</b><span className="sub">{t("deps.offline")}</span></span></div>
+        {/* The poll retries on its own every few seconds; the button is for the reader who has just
+            fixed the host and wants the answer now, and it gives the card something to do. */}
+        <div className="btnrow"><button className="btn small" onClick={() => void load()}><Icon name="reload" size={14} /> {t("common.retry")}</button></div>
       </section>}
     {view && view.job && (installing || view.job.state === "failed") && <section className={`card deps-job ${view.job.state}`} aria-label={t("deps.installProgress")}>
         <div className="deps-job-title"><span className="deps-job-icon"><Icon name={view.job.state === "failed" ? "close" : "download"} size={18} /></span><span><b>{t(`deps.job.${view.job.state}`)}</b><span className="sub">{installing ? t("deps.installingHint") : view.job.error}</span></span></div>
@@ -127,7 +130,7 @@ export function DependenciesTab() {
       {proposal && <DependencyProgress value={proposal} active={planning} />}
       </div>}
       <div className="card deps-environment">
-        <div className="deps-environment-head"><span><b>{t("deps.environment")}</b><span className="sub">{t("deps.environment.summary", { available: String(available.length), missing: String(missing.length), python: String(view.packages.length) })}</span></span>{view.job?.state === "completed" && <span className="chip"><Icon name="check" size={13} />{t("deps.current")}</span>}</div>
+        <div className="deps-environment-head"><span><b>{t("deps.environment")}</b><span className="sub">{[plural("deps.environment.available", available.length), t("deps.environment.missing", { n: String(missing.length) }), plural("deps.environment.python", view.packages.length)].join(" · ")}</span></span>{view.job?.state === "completed" && <span className="chip"><Icon name="check" size={13} />{t("deps.current")}</span>}</div>
         {/* The missing ones are named beside the present ones: the summary counted them and nothing on
             the card said which they were. */}
         <div className="deps-tool-chips">

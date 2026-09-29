@@ -8,6 +8,7 @@ import type { StaffTurn } from "../api";
 import { useEvent } from "../events";
 import { clock, tokens, usd } from "../format";
 import { plural, t } from "../i18n";
+import { Icon } from "../icons";
 import { renderMarkdown } from "../md";
 import { api } from "../api";
 import { mergeTurns, nextSince } from "./model";
@@ -69,6 +70,9 @@ function TurnTools({ tools }: { tools: StaffTurn["tools"] }) {
       <button className="feed-tools-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <span>{plural("staff.feed.tools", tools.length)}</span>
         {failed > 0 && <span className="feed-tools-failed">{plural("staff.feed.failed", failed)}</span>}
+        {/* The chevron turns when the group opens: without it a folded and an open group looked the
+            same, and the rows under "3 tools" read as a separate list. */}
+        <span className="feed-tools-chevron"><Icon name="forward" size={12} /></span>
       </button>
       {open && (
         <ul className="feed-tool-list">

@@ -108,6 +108,14 @@ export function tokens(n: number | null | undefined): string {
   return num(v);
 }
 
+/** A host's refusal as the start of a sentence. The host words its details in lower case, to be read
+ *  after a colon in a log ("the registry did not answer"); shown alone under a heading they read as a
+ *  cut-off line. Only a plain word is raised: "npm: not found" or "ffmpeg_x missing" name something
+ *  whose spelling matters and stay as they are. */
+export function asSentence(text: string): string {
+  return /^[a-z]+ /.test(text) ? text[0].toUpperCase() + text.slice(1) : text;
+}
+
 /** "$3.90", "< $0.01", "$0", "free" for a missing price. */
 export function usd(value: number | null | undefined): string {
   if (value === null || value === undefined) return t("fmt.free");
@@ -191,7 +199,12 @@ export function plainPreview(md: string, max = 120): string {
     .replace(/^\s*\d+\.\s+/gm, "")
     .replace(/\s+/g, " ")
     .trim();
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  if (text.length <= max) return text;
+  // Cut on a word boundary when there is one near the limit: cut on the character, a preview ended
+  // "…generate the page fro…" and read as a broken string rather than a shortened one.
+  const cut = text.slice(0, max - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${space > max * 0.6 ? cut.slice(0, space).replace(/[\s,;:.—-]+$/, "") : cut}…`;
 }
 
 // ── schedules ────────────────────────────────────────────────────────────────────────────

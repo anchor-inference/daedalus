@@ -17,7 +17,7 @@ import { PageHeader, screenTitle } from "../shell";
 import { invalidate, peek, useQuery } from "../store";
 import { errorText } from "../ui";
 import { createTerminalConfirmed } from "../terminal/actions";
-import { EnvPill } from "../terminal/dock";
+import { EnvPill } from "../envpill";
 import { cardStatus, FILTERS, groupTerminals, headerCounts, matches, ownerLine, previewRows, runStyle, running, TerminalFilter } from "../terminal/preview";
 
 /** How often the load bar asks again: the daemon measures at most every ten seconds anyway. */
@@ -120,7 +120,7 @@ export function TerminalsScreen({ toast, project, projects }: { toast: (text: st
           <div className="empty">
             <b>{t("term.screen.error")}</b>
             <div>{list.error}</div>
-            <button className="btn" onClick={() => void list.refresh()}>{t("common.retry")}</button>
+            <button className="btn primary" onClick={() => void list.refresh()}>{t("common.retry")}</button>
           </div>
         )}
         {list.data && rows.length === 0 && (

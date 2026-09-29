@@ -34,12 +34,13 @@ from daedalus.extensions.dispatcher_telegram import DispatcherTelegram
 from daedalus.extensions.dispatches import SETUP_BY, Dispatches
 from daedalus.extensions.notifications import Draft
 from daedalus.host.events import AppEvent, EventFilter
-from daedalus.host.peek import PeekRefused, text_window
+from daedalus.host.peek import PeekRefused
 from daedalus.host.wake_queue import Batch, TargetState, Wake, WakeQueue
 from daedalus.stores.dispatches import Dispatch, DispatchError
 from daedalus.stores.files import HANDOVER_MAX_FILES, MAIN, FileRefused, StoredFile, human_size, refs_line
 from daedalus.stores.projects import BRIEF_SECTIONS, Project, ProjectError
 from daedalus.stores.staff import Ask, StaffError
+from daedalus.tools.vision import VisionUnavailable, kept_body
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -69,6 +70,15 @@ class NotCurrent(RuntimeError):
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _whole(text: str) -> str:
+    """A project's report or result for an event line, whole and with its line breaks.
+
+    Cut at 600 and 800 characters, an orchestrator's detailed answer reached the main agent as a stub
+    it could only guess the rest of. Lines after the first are indented so they stay with their event.
+    """
+    return "\n  ".join(line.rstrip() for line in (text or "").strip().splitlines())
 
 
 def _one_line(text: str, limit: int) -> str:
@@ -486,7 +496,7 @@ class Dispatcher:
         dispatch = f"dispatch {p.get('dispatch_id')}" + (f" \"{_one_line(str(p.get('title')), 80)}\"" if p.get("title") else "")
         if event.type == "dispatch.closed":
             status = str(p.get("status") or "")
-            said = _one_line(str(p.get("result") or ""), 800)
+            said = _whole(str(p.get("result") or ""))
             if status == "done" and p.get("kind") == "setup" and project is not None:
                 brief = await self.manager.projects.brief(project.id)
                 goals = _one_line(brief["goals"].body, 240) if "goals" in brief else ""
@@ -495,7 +505,7 @@ class Dispatcher:
         if event.type == "dispatch.stalled":
             return f"{dispatch} of {name} has been quiet for {p.get('minutes')} min and nobody there is working — tell the operator; do not prod the project yourself"
         if event.type == "dispatch.message":
-            return f"{name} reported {p.get('kind')} on {dispatch}: {_one_line(str(p.get('text') or ''), 600)}{refs_line(p.get('files'))}"
+            return f"{name} reported {p.get('kind')} on {dispatch}: {_whole(str(p.get('text') or ''))}{refs_line(p.get('files'))}"
         if event.type == "ask.answered":
             ask = await self._ask_by_ref(str(p.get("request_ref") or ""))
             outcome = str((ask.resolution or {}).get("outcome") or "") if ask is not None else ""
@@ -771,8 +781,8 @@ async def op_files(d: Dispatcher, session_id: str, *, op: str = "list", file: st
     except FileRefused as exc:
         raise ValueError(f"{exc}; Files() lists them") from exc
     try:
-        body = text_window(await d.manager.files.read(stored), stored.name, offset=offset, limit=limit)
-    except PeekRefused as exc:
+        body = await kept_body(d.manager, await d.manager.files.read(stored), stored, offset=offset, limit=limit)
+    except (PeekRefused, VisionUnavailable) as exc:
         raise ValueError(str(exc)) from exc
     return f"{stored.handle} {stored.name} ({stored.mime}, {stored.size} bytes):\n{body}"
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isKeyPress, keyInput, modsOf, mouseButton, tapKey, viewerChord } from "./keys";
+import { clipboardChord, isKeyPress, keyInput, modsOf, mouseButton, tapKey, viewerChord } from "./keys";
 
 const key = (k: string, code = "", mods: Partial<Record<"altKey" | "ctrlKey" | "metaKey" | "shiftKey", boolean>> = {}, keyCode = 0) => ({ key: k, code, keyCode, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...mods });
 
@@ -77,5 +77,39 @@ describe("the viewer's own chords", () => {
     expect(viewerChord(key("a", "KeyA", { ctrlKey: true }), false)).toBeNull();
     expect(viewerChord(key("l", "KeyL", { ctrlKey: true }), true)).toBeNull();
     expect(viewerChord(key("Enter", "Enter"), false)).toBeNull();
+  });
+});
+
+describe("the clipboard's chords", () => {
+  it("leaves a paste to the operator's clipboard rather than the page's", () => {
+    expect(clipboardChord(key("v", "KeyV", { ctrlKey: true }), false)).toBe("paste");
+    expect(clipboardChord(key("V", "KeyV", { ctrlKey: true, shiftKey: true }), false)).toBe("paste");
+    expect(clipboardChord(key("Insert", "Insert", { shiftKey: true }), false)).toBe("paste");
+    expect(clipboardChord(key("v", "KeyV", { metaKey: true }), true)).toBe("paste");
+    // A Russian layout: the letter is "м", the key is still V.
+    expect(clipboardChord(key("м", "KeyV", { ctrlKey: true }), false)).toBe("paste");
+  });
+
+  it("asks the page for its selection on a copy or a cut", () => {
+    expect(clipboardChord(key("c", "KeyC", { ctrlKey: true }), false)).toBe("copy");
+    expect(clipboardChord(key("x", "KeyX", { ctrlKey: true }), false)).toBe("cut");
+    expect(clipboardChord(key("Insert", "Insert", { ctrlKey: true }), false)).toBe("copy");
+    expect(clipboardChord(key("c", "KeyC", { metaKey: true }), true)).toBe("copy");
+    expect(clipboardChord(key("с", "KeyC", { ctrlKey: true }), false)).toBe("copy");
+  });
+
+  it("leaves everything else, and the other platform's modifier, alone", () => {
+    expect(clipboardChord(key("v", "KeyV"), false)).toBeNull();
+    expect(clipboardChord(key("v", "KeyV", { ctrlKey: true }), true)).toBeNull();
+    expect(clipboardChord(key("c", "KeyC", { metaKey: true }), false)).toBeNull();
+    expect(clipboardChord(key("v", "KeyV", { ctrlKey: true, altKey: true }), false)).toBeNull();
+    // Ctrl+Shift+C is the developer tools' chord on many pages, not a copy.
+    expect(clipboardChord(key("C", "KeyC", { ctrlKey: true, shiftKey: true }), false)).toBeNull();
+    expect(clipboardChord(key("a", "KeyA", { ctrlKey: true }), false)).toBeNull();
+  });
+
+  it("leaves the chords themselves keys, so the viewer asks about the clipboard first", () => {
+    expect(isKeyPress(key("c", "KeyC", { ctrlKey: true }))).toBe(true);
+    expect(isKeyPress(key("v", "KeyV", { ctrlKey: true }))).toBe(true);
   });
 });

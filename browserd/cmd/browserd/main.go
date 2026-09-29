@@ -140,6 +140,7 @@ func serve(args []string) error {
 	hub = view.New(manager, evlog, log)
 	model := page.New(manager, cfg, log)
 	hub.HumanInput = model.HumanInput
+	hub.Selection = model.Selection
 	manager.Listen(hub)
 	manager.Listen(model)
 	recorder := &record.Recorder{Store: record.Open(filepath.Join(cfg.StateDir, "recordings")), Log: log,

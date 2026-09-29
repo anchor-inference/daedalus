@@ -446,11 +446,65 @@ type Tab struct {
 	wake    chan struct{}
 	closed  bool
 	values  map[any]any
+	frames  map[string]string // frame id -> session, for the frames of other sites in their own process
 }
 
 // Call sends a command to the tab's page.
 func (t *Tab) Call(ctx context.Context, method string, params, result any) error {
 	return t.Group.Browser.conn.Call(ctx, t.Session, method, params, result)
+}
+
+// CallIn sends a command to one of the tab's sessions: its page's (session "") or a frame's.
+func (t *Tab) CallIn(ctx context.Context, session, method string, params, result any) error {
+	if session == "" {
+		session = t.Session
+	}
+	return t.Group.Browser.conn.Call(ctx, session, method, params, result)
+}
+
+// FrameSession is the session of the frame, when it runs in a process of its own; "" when it runs in
+// the page's.
+func (t *Tab) FrameSession(frameID string) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.frames[frameID]
+}
+
+func (t *Tab) setFrame(frameID, session string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.frames == nil {
+		t.frames = map[string]string{}
+	}
+	t.frames[frameID] = session
+}
+
+func (t *Tab) dropFrame(session string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for f, s := range t.frames {
+		if s == session {
+			delete(t.frames, f)
+		}
+	}
+}
+
+// FramesApart counts the frames of the tab that run in a process of their own and are followed
+// through their own session: what shows a page's frames of other sites are being read as such.
+func (t *Tab) FramesApart() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.frames)
+}
+
+func (t *Tab) frameSessions() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]string, 0, len(t.frames))
+	for _, s := range t.frames {
+		out = append(out, s)
+	}
+	return out
 }
 
 // Input sends one input event and waits for Chromium to have handled it, or for a dialog the event

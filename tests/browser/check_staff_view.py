@@ -47,11 +47,11 @@ DESK = {"width": 1440, "height": 900}
 PHONE = {"width": 390, "height": 844}
 
 WORDS = {
-    "en": {"working": "working", "turn": r"turn 3 · (18|19|20) min", "runs": "Claude Code 2.1.281 · opus · acceptEdits", "worktree": "worktree agent/ira/checkout", "task": "Checkout",
+    "en": {"working": "working", "turn": r"turn 3 · (18|19|20) min", "runs": "Claude Code 2.1.281 · opus · acceptEdits", "worktree": "branch agent/ira/checkout", "task": "Checkout",
            "tools": "team tools connected", "missing": "team tools not connected", "held": "You are typing in the terminal", "always": "Always", "allow": "Allow", "deny": "Deny", "no": "No, because…",
            "by": "Already answered by the orchestrator", "degrades": "OpenCode cannot take a message into a running turn", "changes": "+212 −31 · 3 files", "placeholder": "Write to Ira…",
            "permission": "needs permission", "answer": "Answer", "feed": "Feed", "terminal": "Terminal"},
-    "ru": {"working": "работает", "turn": r"ход 3 · (18|19|20) мин", "runs": "Claude Code 2.1.281 · opus · acceptEdits", "worktree": "worktree agent/ira/checkout", "task": "Оформление заказа",
+    "ru": {"working": "работает", "turn": r"ход 3 · (18|19|20) мин", "runs": "Claude Code 2.1.281 · opus · acceptEdits", "worktree": "ветка agent/ira/checkout", "task": "Оформление заказа",
            "tools": "инструменты команды подключены", "missing": "инструменты команды не подключены", "held": "Вы печатаете в терминале", "always": "Всегда", "allow": "Разрешить", "deny": "Запретить", "no": "Нет, потому что…",
            "by": "Уже ответил: оркестратор", "degrades": "OpenCode не принимает сообщения во время хода", "changes": "+212 −31 · 3 файла", "placeholder": "Написать сотруднику Ira…",
            "permission": "ждёт разрешения", "answer": "Ответить", "feed": "Лента", "terminal": "Терминал"},

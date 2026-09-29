@@ -361,7 +361,12 @@ export type BrowserSettings = {
   watch_domains: string[];
   injection_monitor: boolean;
   injection_monitor_preset: string;
+  extract_preset: string;
+  point_clicks: boolean;
 };
+
+/** A note an agent proposed about a site (`GET /api/browsers/notes`): shown to agents there only once approved. */
+export type BrowserSiteNote = { id: string; project_id: string; project: string; host: string; text: string; status: "proposed" | "active"; by: string; proposed_at: number; approved_at: number };
 
 export type TerminalView = {
   id: string;
@@ -1025,7 +1030,7 @@ export type SessionList = {
   next_cursor?: string | null;
 };
 
-export type AsrStatus = { configured: boolean; reason: string; provider: string; model: string; max_seconds: number; autosend: boolean };
+export type AsrStatus = { configured: boolean; reason: string; provider: string; model: string; max_seconds: number; autosend: boolean; transcriber?: string; fallback?: string };
 
 export type SlashCommand = { name: string; args: string; description: string; scope: string; confirm: boolean };
 
@@ -1228,7 +1233,7 @@ export type Settings = {
   /** A project orchestrator's defaults. `strongest` is what an empty `preset` means, sent by the host. */
   orchestrator?: { preset: string; strongest?: string };
   dispatcher?: { preset: string; middle?: string; stalled_minutes?: number };
-  asr: { provider: string; url: string; api_key: string; api_key_set?: boolean; model: string; language: string; timeout_seconds: number; max_seconds: number; autosend: boolean };
+  asr: { provider: string; url: string; api_key: string; api_key_set?: boolean; model: string; language: string; timeout_seconds: number; max_seconds: number; autosend: boolean; transcriber?: string; fallback?: string; chunk_seconds?: number };
   tools: {
     web: { fetch_timeout_seconds: number; proxy: string; user_agent: string; fetch_max_chars: number; search: WebSearchConf };
     exec: { max_output_chars: number };

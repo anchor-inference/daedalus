@@ -76,7 +76,13 @@ def check(page: Page, lang: str, where: str) -> None:
     chat = page.locator(".chat.in-project.orchestrator")
     expect(chat).to_be_visible()
     # The chat counts the question asked earlier and both folders, and draws none of them as a card.
-    expect(chat.locator(".timeline > .questions-line")).to_contain_text(words["line"])
+    # On a desktop the link opens the Questions tab beside the chat, and the line stays away there:
+    # its "Open" would open what is already on screen.
+    if where == "390":
+        expect(chat.locator(".timeline > .questions-line")).to_contain_text(words["line"])
+    else:
+        expect(chat.locator(".timeline > .questions-line")).to_have_count(0)
+        expect(page.locator(".panel .panel-tab[data-tab='questions'] .count")).to_have_text("3")
     expect(chat.locator(".timeline .q-card, .ask-card")).to_have_count(0)
     if where == "390":
         chat.locator(".questions-headbtn").tap()

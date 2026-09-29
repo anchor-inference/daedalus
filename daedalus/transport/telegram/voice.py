@@ -45,8 +45,12 @@ def voice_note_text(transcript: str, caption: str = "") -> str:
     return f"{head}{VOICE_NOTE_PREFIX}\n{transcript.strip()}"
 
 
-async def transcribe(path: Path, config: AsrConfig, *, client: httpx.AsyncClient | None = None) -> str:
-    """Return the transcript of an audio file, or raise :class:`TranscriptionError`."""
+async def transcribe(path: Path, config: AsrConfig, *, client: httpx.AsyncClient | None = None, allow_empty: bool = False) -> str:
+    """Return the transcript of an audio file, or raise :class:`TranscriptionError`.
+
+    ``allow_empty`` is for one piece of a longer recording, where a stretch of silence honestly has no
+    words in it; a whole recording that comes back empty is still a failure.
+    """
     if not config.url:
         raise TranscriptionError("no speech-to-text endpoint is configured (settings → asr.url)")
     url = config.url.rstrip("/") + "/audio/transcriptions"
@@ -65,14 +69,29 @@ async def transcribe(path: Path, config: AsrConfig, *, client: httpx.AsyncClient
         if owns:
             await client.aclose()
     if response.status_code >= 400:
-        raise TranscriptionError(f"transcription endpoint answered HTTP {response.status_code}")
+        # The status alone ("HTTP 400") told the operator nothing about a recording that was simply
+        # too long; whatever the endpoint said about it goes with it.
+        raise TranscriptionError(f"transcription endpoint answered HTTP {response.status_code}{_said(response)}")
     try:
         text = str(response.json().get("text") or "").strip()
     except ValueError as exc:
         raise TranscriptionError("transcription endpoint returned no JSON") from exc
-    if not text:
+    if not text and not allow_empty:
         raise TranscriptionError("empty transcript")
     return text
+
+
+def _said(response: httpx.Response) -> str:
+    """The endpoint's own reason for a refusal, short, or nothing."""
+    try:
+        body = response.json()
+    except ValueError:
+        body = response.text
+    if isinstance(body, dict):
+        error = body.get("error", body.get("detail", ""))
+        body = error.get("message", "") if isinstance(error, dict) else error
+    said = " ".join(str(body or "").split())[:200]
+    return f": {said}" if said else ""
 
 
 __all__ = ["VOICE_NOTE_PREFIX", "TranscriptionError", "asr_configured", "effective_asr", "transcribe", "voice_note_text"]
