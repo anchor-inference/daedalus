@@ -1819,10 +1819,14 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 .main.chat-open .nudge-strip { flex: none; }
 .palette-sheet .field { margin-bottom: 8px; }
 .palette-list { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
-.palette-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%; min-height: var(--row-h-dense); padding: 5px 10px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; border-radius: var(--radius-sm); cursor: pointer; }
+/* The hint's column is at most 40 % of the row and no wider than its text. A max-width in percent on
+   the hint itself resolved against its own auto column, a cycle the browser settled at a few
+   characters: "Al…" for "All projects" with half the row empty. */
+.palette-row { display: grid; grid-template-columns: auto minmax(0, 1fr) fit-content(40%); gap: 10px; align-items: center; width: 100%; min-height: var(--row-h-dense); padding: 5px 10px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; border-radius: var(--radius-sm); cursor: pointer; }
 .palette-row .ic { color: var(--fg-2); }
 .palette-row.on { background: var(--surface-2); }
-.palette-row .sub { max-width: 40%; }
+.palette-row .sub { text-align: right; }
+.palette-row .sub.tail { direction: rtl; }
 /* the first item of a meta line keeps its width; what follows truncates */
 .erow-meta > span:first-child, .erow-meta > .nowrap, .erow-meta > .chip, .erow-meta > span[title], .erow-meta > .pill { flex: none; }
 .erow-meta > .mono:not(:first-child) { flex: 0 1 auto; }
