@@ -999,6 +999,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "run.outcome.cause.provider": { en: "the model provider failed", ru: "провайдер модели отказал" },
   "run.outcome.cause.cancelled": { en: "it was stopped before it finished", ru: "его остановили до завершения" },
   "run.outcome.cause.error": { en: "it failed", ru: "он завершился ошибкой" },
+  "run.outcome.more": { en: "Technical details", ru: "Технические подробности" },
   "run.outcome.compaction": { en: "last compaction pass: {outcome}", ru: "последний проход сжатия: {outcome}" },
   "run.outcome.failures": { en: "summariser failures: {list}", ru: "сбои суммаризатора: {list}" },
   "run.outcome.floor": { en: "the floor removed {n} messages", ru: "пол убрал сообщений: {n}" },

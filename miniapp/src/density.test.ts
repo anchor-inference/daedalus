@@ -53,7 +53,7 @@ function rules(source: string): Rule[] {
   return out;
 }
 
-const TOKENS: Record<string, number> = { "--fs-11": 11, "--fs-12": 12, "--fs-13": 13, "--fs-14": 14, "--fs-15": 15, "--fs-16": 16, "--fs-18": 18, "--fs-mono": 12.5, "--fs-prose": 15 };
+const TOKENS: Record<string, number> = { "--fs-11": 11, "--fs-12": 12, "--fs-13": 13, "--fs-14": 14, "--fs-15": 15, "--fs-16": 16, "--fs-18": 18, "--fs-20": 20, "--fs-22": 22, "--fs-mono": 12.5, "--fs-prose": 15 };
 
 /** The document never re-sizes its root, so a rem is the browser's own step and an em is the 14 px body. */
 const ROOT_PX = 16;

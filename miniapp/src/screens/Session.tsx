@@ -1474,7 +1474,8 @@ function FallbackChip({ fallback }: { fallback: ModelFallback }) {
   return (
     <div className="fallback-note">
       <button className="chip attn" onClick={() => setOpen((o) => !o)}>
-        <Icon name="model" size={14} /> {t("session.model.fallback.turn", { to: fallback.to, from: fallback.from })}
+        <Icon name="model" size={14} />
+        <span className="truncate">{t("session.model.fallback.turn", { to: fallback.to, from: fallback.from })}</span>
         <Chevron open={open} size={12} />
       </button>
       {open && (
@@ -1675,21 +1676,29 @@ function RunOutcomeLine({ outcome }: { outcome: RunOutcome }) {
     .join(", ");
   return (
     <div className={`run-outcome cause-${outcome.cause}`} role="status" aria-label={t("run.outcome.title")}>
-      <Icon name="question" size={14} />
+      {/* An alert, not a question mark: on the red card a "?" read as a glyph that failed to load. */}
+      <Icon name="alert" size={14} />
       <div>
         <b>{t("run.outcome.title")}</b> — {t(`run.outcome.cause.${outcome.cause}`)}
-        {outcome.detail && <div className="run-outcome-detail">{outcome.detail}</div>}
-        {pass && (
-          <div className="run-outcome-detail">
-            {t("run.outcome.compaction", { outcome: pass.outcome || "—" })}
-            {failures && <>{" · "}{t("run.outcome.failures", { list: failures })}</>}
-            {!!pass.floor_dropped && <>{" · "}{t("run.outcome.floor", { n: pass.floor_dropped })}</>}
-          </div>
-        )}
         {!!outcome.steps && (
           <div className="run-outcome-detail">
             {outcome.last_tool ? t("run.outcome.steps.last", { n: outcome.steps, tool: outcome.last_tool }) : t("run.outcome.steps", { n: outcome.steps })}
           </div>
+        )}
+        {/* The engine's own words ("force_compaction", "at_floor") are for whoever debugs the run;
+            the sentence above is the explanation, and these wait behind a disclosure. */}
+        {(outcome.detail || pass) && (
+          <details className="run-outcome-more">
+            <summary>{t("run.outcome.more")}</summary>
+            {outcome.detail && <div className="run-outcome-detail">{outcome.detail}</div>}
+            {pass && (
+              <div className="run-outcome-detail">
+                {t("run.outcome.compaction", { outcome: pass.outcome || "—" })}
+                {failures && <>{" · "}{t("run.outcome.failures", { list: failures })}</>}
+                {!!pass.floor_dropped && <>{" · "}{t("run.outcome.floor", { n: pass.floor_dropped })}</>}
+              </div>
+            )}
+          </details>
         )}
       </div>
     </div>
