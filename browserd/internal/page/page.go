@@ -59,45 +59,59 @@ func New(m *browser.Manager, cfg *config.Config, log *slog.Logger) *Model {
 		byGUID: map[string]*Download{}, uploads: map[string]*upload{}, asked: map[string]string{}}
 }
 
-type worldKey struct{}
+// worldKey keys a document's world among a tab's values: the session and frame it was made in.
+type worldKey struct{ session, frame string }
 
 type world struct {
 	loader string
 	ctx    int
 }
 
-// errStale is what the script answers for a ref that is gone.
+// scriptError is what the script answers when it cannot do what it was asked.
 type scriptError struct {
 	Error      string   `json:"error"`
 	Ref        string   `json:"ref"`
 	Options    []string `json:"options"`
 	CoveredBy  string   `json:"covered_by"`
+	Message    string   `json:"message"`
 	Unexpected string   `json:"-"`
 }
 
-// world returns the tab's isolated world for its current document, creating it and running the
-// daemon's script in it the first time.
-func (p *Model) world(ctx context.Context, t *browser.Tab) (int, error) {
+// world returns the document's isolated world, creating it and running the daemon's script in it
+// the first time. A world is kept for the tab's current top document: a navigation of the tab
+// makes every world of it anew, and a frame's own navigation is met by the retry in eval.
+func (p *Model) world(ctx context.Context, t *browser.Tab, d *doc) (int, error) {
 	loader := t.Loader()
-	if w, ok := t.Value(worldKey{}).(*world); ok && w != nil && w.loader == loader {
+	key := worldKey{d.session, d.frame}
+	if w, ok := t.Value(key).(*world); ok && w != nil && w.loader == loader {
 		return w.ctx, nil
+	}
+	frame := d.frame
+	if frame == "" {
+		frame = t.TargetID
 	}
 	var r struct {
 		ExecutionContextID int `json:"executionContextId"`
 	}
-	if err := t.Call(ctx, "Page.createIsolatedWorld", map[string]any{"frameId": t.TargetID, "worldName": worldName,
+	if err := t.CallIn(ctx, d.session, "Page.createIsolatedWorld", map[string]any{"frameId": frame, "worldName": worldName,
 		"grantUniveralAccess": false}, &r); err != nil {
 		return 0, err
 	}
+	expr := pageJS
+	if d.prefix != "" {
+		// The frame's refs begin with its own ref, so each names the document it lives in.
+		b, _ := json.Marshal(d.prefix)
+		expr += "\n;__browserd.setPrefix(" + string(b) + ");"
+	}
 	var ev evalResult
-	if err := t.Call(ctx, "Runtime.evaluate", map[string]any{"expression": pageJS, "contextId": r.ExecutionContextID,
+	if err := t.CallIn(ctx, d.session, "Runtime.evaluate", map[string]any{"expression": expr, "contextId": r.ExecutionContextID,
 		"returnByValue": true}, &ev); err != nil {
 		return 0, err
 	}
 	if ev.ExceptionDetails != nil {
 		return 0, fmt.Errorf("the page script did not load: %s", ev.ExceptionDetails.text())
 	}
-	t.SetValue(worldKey{}, &world{loader: loader, ctx: r.ExecutionContextID})
+	t.SetValue(key, &world{loader: loader, ctx: r.ExecutionContextID})
 	return r.ExecutionContextID, nil
 }
 
@@ -124,10 +138,16 @@ func (e *exception) text() string {
 	return e.Text
 }
 
-// call runs __browserd.<fn>(args…) in the tab's world and returns its value. A page stopped under a
-// dialog cannot run anything, so an open dialog is refused before the call rather than waited on.
+// call runs __browserd.<fn>(args…) in the world of the tab's own document and returns its value. A
+// page stopped under a dialog cannot run anything, so an open dialog is refused before the call
+// rather than waited on.
 func (p *Model) call(ctx context.Context, t *browser.Tab, fn string, args ...any) (json.RawMessage, error) {
-	r, err := p.eval(ctx, t, fn, false, args...)
+	return p.callIn(ctx, t, top, fn, args...)
+}
+
+// callIn is call in one document's world.
+func (p *Model) callIn(ctx context.Context, t *browser.Tab, d *doc, fn string, args ...any) (json.RawMessage, error) {
+	r, err := p.eval(ctx, t, d, fn, false, 0, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -135,8 +155,8 @@ func (p *Model) call(ctx context.Context, t *browser.Tab, fn string, args ...any
 }
 
 // object is call returning a handle on the result (an element) rather than its value.
-func (p *Model) object(ctx context.Context, t *browser.Tab, fn string, args ...any) (string, error) {
-	r, err := p.eval(ctx, t, fn, true, args...)
+func (p *Model) object(ctx context.Context, t *browser.Tab, d *doc, fn string, args ...any) (string, error) {
+	r, err := p.eval(ctx, t, d, fn, true, 0, args...)
 	if err != nil {
 		return "", err
 	}
@@ -146,7 +166,10 @@ func (p *Model) object(ctx context.Context, t *browser.Tab, fn string, args ...a
 	return r.Result.ObjectID, nil
 }
 
-func (p *Model) eval(ctx context.Context, t *browser.Tab, fn string, byRef bool, args ...any) (*evalResult, error) {
+// eval runs one function of the script. timeout, when set, ends a script that runs longer (a
+// pattern of the agent's that backtracks forever), which the page's own thread would otherwise wait
+// out with it.
+func (p *Model) eval(ctx context.Context, t *browser.Tab, d *doc, fn string, byRef bool, timeout time.Duration, args ...any) (*evalResult, error) {
 	parts := make([]string, len(args))
 	for i, a := range args {
 		b, err := json.Marshal(a)
@@ -157,28 +180,39 @@ func (p *Model) eval(ctx context.Context, t *browser.Tab, fn string, byRef bool,
 	}
 	expr := "__browserd." + fn + "(" + strings.Join(parts, ",") + ")"
 	for attempt := 0; ; attempt++ {
-		if d := t.Dialog(); d != nil {
-			return nil, browser.ErrDialogOpen(d)
+		if dl := t.Dialog(); dl != nil {
+			return nil, browser.ErrDialogOpen(dl)
 		}
 		if t.Closed() {
 			return nil, wire.Errorf(browser.CodeNoSuchTab, "the tab was closed")
 		}
-		id, err := p.world(ctx, t)
+		id, err := p.world(ctx, t, d)
 		if err != nil {
 			return nil, err
 		}
+		params := map[string]any{"expression": expr, "contextId": id, "returnByValue": !byRef, "awaitPromise": true}
+		if timeout > 0 {
+			params["timeout"] = timeout.Milliseconds()
+		}
 		var r evalResult
-		err = t.Call(ctx, "Runtime.evaluate", map[string]any{"expression": expr, "contextId": id,
-			"returnByValue": !byRef, "awaitPromise": true}, &r)
+		began := time.Now()
+		err = t.CallIn(ctx, d.session, "Runtime.evaluate", params, &r)
+		if err != nil && timeout > 0 && time.Since(began) >= timeout {
+			// Chromium ends a script past its timeout with an internal error rather than an exception.
+			return nil, wire.Errorf(wire.CodeInvalidParams, "%s took longer than %s on this page and was stopped", fn, timeout)
+		}
 		if err != nil && attempt == 0 && strings.Contains(err.Error(), "context") {
 			// The document changed between the world's creation and the call: once more on the new one.
-			t.SetValue(worldKey{}, (*world)(nil))
+			t.SetValue(worldKey{d.session, d.frame}, (*world)(nil))
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
 		if r.ExceptionDetails != nil {
+			if timeout > 0 && strings.Contains(r.ExceptionDetails.text(), "Execution was terminated") {
+				return nil, wire.Errorf(wire.CodeInvalidParams, "%s took longer than %s on this page and was stopped", fn, timeout)
+			}
 			return nil, fmt.Errorf("the page script failed in %s: %s", fn, r.ExceptionDetails.text())
 		}
 		return &r, nil
@@ -206,6 +240,10 @@ func checkScript(raw json.RawMessage) error {
 		return e
 	case "not_select":
 		return wire.Errorf(wire.CodeInvalidParams, "select works on a <select>; click the option instead")
+	case "bad_regex":
+		return wire.Errorf(wire.CodeInvalidParams, "not a regular expression: %s", se.Message)
+	case "nothing":
+		return wire.Errorf(wire.CodeNotFound, "nothing is at that point of the page")
 	}
 	return fmt.Errorf("the page script answered %s", se.Error)
 }
@@ -284,7 +322,8 @@ func (p *Model) TabGone(t *browser.Tab) {
 	p.mu.Unlock()
 }
 
-// HumanInput remembers the field a person types into as secret, for the life of its document.
+// HumanInput remembers the field a person types into as secret, for the life of its document: in
+// the page, or in the frame of another site the focus is in.
 func (p *Model) HumanInput(t *browser.Tab, kind string) {
 	if kind != "key" && kind != "text" {
 		return
@@ -292,6 +331,21 @@ func (p *Model) HumanInput(t *browser.Tab, kind string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		_, _ = p.call(ctx, t, "markHumanTyped")
+		d := top
+		for depth := 0; depth <= maxFrameDepth; depth++ {
+			raw, err := p.callIn(ctx, t, d, "markHumanTyped")
+			if err != nil {
+				return
+			}
+			var r struct {
+				Frame string `json:"frame"`
+			}
+			if json.Unmarshal(raw, &r) != nil || r.Frame == "" {
+				return
+			}
+			if d, err = p.child(ctx, t, d, r.Frame, false); err != nil {
+				return
+			}
+		}
 	}()
 }
