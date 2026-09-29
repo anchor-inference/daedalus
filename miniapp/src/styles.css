@@ -194,8 +194,9 @@ a { color: var(--accent); text-decoration: none; }
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
   display: grid; grid-template-columns: repeat(4, 1fr);
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  /* Opaque: at 88 % over a blur the rows scrolling under it stayed readable between the tab labels,
+     a line of an inbox card legible behind "Board" and "Inbox", and blur is not drawn everywhere. */
+  background: var(--bg);
   border-top: 1px solid var(--line);
 }
 .tabbar > a, .tabbar > button {
