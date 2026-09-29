@@ -970,6 +970,11 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .rail-tip { position: absolute; left: calc(100% + 10px); top: 50%; translate: 0 -50%; display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--fg); color: var(--bg); font-size: var(--fs-12); font-weight: 500; white-space: nowrap; pointer-events: none; opacity: 0; visibility: hidden; z-index: 40; }
   .rail-tip kbd { font: var(--fs-11) var(--mono); opacity: .7; }
   .rail-item:hover .rail-tip, .rail-item:focus-visible .rail-tip { opacity: 1; visibility: visible; }
+  /* A landscape tablet keeps the desktop's rows but is pressed with a finger: its rail icons were the
+     mouse's 36 px, below what a thumb hits reliably. The rail alone takes the touch row, which still
+     fits its 52 px width, and the mode stripe's offset follows because it is computed from the same
+     variable. */
+  @media (pointer: coarse) { .rail { --row-h: var(--row-h-touch); } }
   /* The menu over the content: anchored bottom-left, opening upward, never centred, never a modal. */
   .navmenu-backdrop { display: block; position: fixed; inset: 0; z-index: 35; background: transparent; }
   /* As tall as the window allows, from its foot to 8 px under the top: capped at 70 % it ended at
