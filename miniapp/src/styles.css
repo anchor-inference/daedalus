@@ -4048,10 +4048,15 @@ button.staff-row:hover { background: var(--surface-2); }
 .bs-pair input.field { margin: 0; }
 .bs-list { width: 100%; font-family: var(--mono); font-size: var(--fs-13); resize: vertical; }
 .bs-rec-used { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+/* A site note is a sentence or two: it wraps in full, since the operator approves what it says. */
+.bs-note { align-items: flex-start; }
+.bs-note > svg { margin-top: 3px; }
+.bs-note-text { font-size: var(--fs-14); overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   .bs-row { flex-wrap: wrap; }
   .bs-row-main { flex-basis: calc(100% - 30px); }
   .bs-row-figure { margin-left: 26px; margin-right: auto; }
+  .bs-note .btn:first-of-type { margin-left: 26px; }
 }
 
 /* The recording played back: a layer over the live picture, which keeps running underneath. */
