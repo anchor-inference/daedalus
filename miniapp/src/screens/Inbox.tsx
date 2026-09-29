@@ -149,7 +149,7 @@ export function InboxScreen({ toast, onOpen }: { toast: (t: string) => void; onO
           </section>
         )}
         {loading && !error && <Skeleton rows={6} />}
-        {error && !data && <div className="empty"><b>{t("inbox.error")}</b><div>{error}</div><button className="btn" onClick={refresh}>{t("common.retry")}</button></div>}
+        {error && !data && <div className="empty"><b>{t("inbox.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
         {data && entries.length === 0 && pending.length === 0 && needs === 0 && (
           <div className="empty">
             <b>{t(filter === "unseen" ? "inbox.empty.unread" : filter === "problems" ? "inbox.empty.problems" : "inbox.empty")}</b>

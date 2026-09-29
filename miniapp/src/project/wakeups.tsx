@@ -48,7 +48,7 @@ export function WakeupsPage({ projectId, back, compact, toast }: Props) {
           {enabled && <button className="btn small" onClick={() => setAdding(true)}><Icon name="plus" size={14} /> {t("focus.wakeups.add")}</button>}
         </div>
         {!data && !error && <Skeleton rows={2} />}
-        {error && !data && <div className="empty"><div>{error}</div><button className="btn" onClick={refresh}>{t("common.retry")}</button></div>}
+        {error && !data && <div className="empty"><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
         {data && list.length === 0 && <div className="empty calm">{t(enabled ? "focus.wakeups.empty" : "focus.wakeups.off")}</div>}
         {list.map((w) => (
           <div key={w.id} className={`wakeup-row ${w.enabled ? "" : "off"}`}>
@@ -180,7 +180,7 @@ function WatchesSection({ projectId, toast }: { projectId: string; toast: (text:
         <button className="btn small" onClick={() => setAdding(true)}><Icon name="plus" size={14} /> {t("focus.watches.add")}</button>
       </div>
       {!data && !error && <Skeleton rows={2} />}
-      {error && !data && <div className="empty"><div>{error}</div><button className="btn" onClick={refresh}>{t("common.retry")}</button></div>}
+      {error && !data && <div className="empty"><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
       {data && list.length === 0 && <div className="empty calm">{t("focus.watches.empty")}</div>}
       {list.map((w) => (
         <div key={w.id} className={`wakeup-row watch-row ${w.enabled ? "" : "off"}`}>

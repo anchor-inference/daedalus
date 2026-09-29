@@ -90,7 +90,7 @@ export function UsageScreen({ onOpen }: { onOpen?: (id: string) => void }) {
       </PageHeader>
       <div className="screen wide usage">
         {loading && !error && <Skeleton rows={4} />}
-        {error && !usage && <div className="empty"><b>{t("usage.error")}</b><div>{error}</div><button className="btn" onClick={refresh}>{t("common.retry")}</button></div>}
+        {error && !usage && <div className="empty"><b>{t("usage.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
         {usage && (
           <>
             <div className="kpi-grid">

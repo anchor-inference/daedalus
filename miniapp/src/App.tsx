@@ -502,9 +502,13 @@ export function App() {
         {route.screen === "board" && <BoardScreen onOpen={open} toast={showToast} selected={route.detail} project={projectList.find((p) => p.id === project) ?? null} />}
         {route.screen === "changes" &&
           (selfdev === "off" ? (
-            <div className="empty">
-              <b>{t("app.selfdev.off.title")}</b>
-              <div>{t("app.selfdev.off.body")}</div>
+            // In a screen of its own so it takes the page's height and sits in its middle, as every
+            // other lone empty state does, rather than as two lines at the top of a blank page.
+            <div className="screen">
+              <div className="empty">
+                <b>{t("app.selfdev.off.title")}</b>
+                <div>{t("app.selfdev.off.body")}</div>
+              </div>
             </div>
           ) : (
             <ProposalsScreen toast={showToast} selected={route.detail} />

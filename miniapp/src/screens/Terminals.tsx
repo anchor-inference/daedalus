@@ -120,7 +120,7 @@ export function TerminalsScreen({ toast, project, projects }: { toast: (text: st
           <div className="empty">
             <b>{t("term.screen.error")}</b>
             <div>{list.error}</div>
-            <button className="btn" onClick={() => void list.refresh()}>{t("common.retry")}</button>
+            <button className="btn primary" onClick={() => void list.refresh()}>{t("common.retry")}</button>
           </div>
         )}
         {list.data && rows.length === 0 && (

@@ -35,7 +35,7 @@ export function BriefPage({ projectId, back, compact, toast }: { projectId: stri
   const body = (
     <div className={`brief ${compact ? "compact" : ""}`}>
       {!data && !error && <Skeleton rows={3} />}
-      {error && !data && <div className="empty"><div>{error}</div><button className="btn" onClick={refresh}>{t("common.retry")}</button></div>}
+      {error && !data && <div className="empty"><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
       {data && sections.map((s) => <BriefCard key={s.section} projectId={projectId} section={s} toast={toast} />)}
     </div>
   );
@@ -159,7 +159,7 @@ export function JournalPage({ projectId, back, toast }: { projectId: string; bac
           <button className="btn small primary" type="submit" disabled={busy || !note.trim()}>{t("focus.journal.add")}</button>
         </form>
         {!data && !error && <Skeleton rows={4} />}
-        {error && !data && <div className="empty"><div>{error}</div><button className="btn" onClick={refresh}>{t("common.retry")}</button></div>}
+        {error && !data && <div className="empty"><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
         {data && entries.length === 0 && <div className="empty"><b>{t("focus.journal.empty")}</b></div>}
         <ol className="journal-list">
           {entries.map((entry) => (

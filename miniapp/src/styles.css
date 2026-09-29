@@ -283,7 +283,14 @@ a { color: var(--accent); text-decoration: none; }
 .btnrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .empty { color: var(--fg-2); text-align: center; padding: 48px 16px; display: grid; gap: 6px; justify-items: center; }
 .empty b { color: var(--fg); font-weight: 600; font-size: var(--fs-15); }
+/* A page's error state draws its "Try again" as a primary button: it is the one thing to do there,
+   and in the quiet outline it read as a footnote under the message. */
 .empty .btn { margin-top: 8px; }
+/* A page that holds nothing but its empty or error state shows it in the middle of the page, a
+   little above centre, not pinned under the header with the rest of the window blank below it: a
+   desktop read as a header whose body had failed to load. */
+.screen:has(> .empty:only-child) { display: flex; flex-direction: column; justify-content: center; }
+.screen > .empty:only-child { margin-bottom: 12vh; }
 .section-title { color: var(--fg-2); font-size: var(--fs-12); text-transform: uppercase; letter-spacing: 0.06em; margin: 16px 2px 6px; display: flex; align-items: baseline; gap: 6px; }
 .section-title .n, .group-n { color: var(--fg-3); font-weight: 500; letter-spacing: 0; text-transform: none; }
 .skeleton { border-radius: 8px; background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }

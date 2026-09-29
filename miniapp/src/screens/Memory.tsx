@@ -114,7 +114,7 @@ export function MemoryScreen({ toast, onOpen }: { toast: (t: string) => void; on
       </PageHeader>
       <div className="screen narrow memory">
         {loading && !error && <Skeleton rows={5} />}
-        {error && !data && <div className="empty"><b>{t("memory.error")}</b><div>{error}</div><button className="btn" onClick={refresh}>{t("common.retry")}</button></div>}
+        {error && !data && <div className="empty"><b>{t("memory.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
         {data && records.length === 0 && (
           <div className="empty">
             <b>{t(all.length === 0 ? "memory.empty" : "memory.nomatch")}</b>

@@ -164,7 +164,7 @@ export function ProjectBoard({ projectId, toast, selected, layout = "auto", embe
           <div className="empty">
             <b>{t("pboard.error")}</b>
             <div>{error}</div>
-            <button className="btn" onClick={refresh}>{t("common.retry")}</button>
+            <button className="btn primary" onClick={refresh}>{t("common.retry")}</button>
           </div>
         )}
         {empty && (
