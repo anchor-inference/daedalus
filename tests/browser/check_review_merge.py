@@ -152,7 +152,9 @@ def conflicting(page: Page, lang: str) -> None:
     expect(card.locator(".chip")).to_contain_text(words["conflict"])
     card.locator(".pcard-title").click()
     panel = page.locator(".sheet.pboard-sheet .review-panel")
-    expect(panel.locator(".review-blockers li.bad")).to_contain_text("api/notify.py")
+    # Said once, under the Merge it holds back, in the red of a conflict.
+    expect(panel.locator(".review-why.bad")).to_contain_text("api/notify.py")
+    expect(panel.locator(".review-blockers")).to_have_count(0)
     expect(panel.locator(".review-actions").get_by_role("button", name=words["merge"])).to_be_disabled()
 
 

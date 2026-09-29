@@ -1187,6 +1187,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "board.history": { en: "History and results", ru: "История и результаты" },
   "board.assignee": { en: "Assigned to {name}", ru: "Исполнитель: {name}" },
   "board.on.project": { en: "Open on the board of {name}", ru: "Открыть на доске проекта {name}" },
+  "board.on.project.same": { en: "Open on the project's board", ru: "Открыть на доске проекта" },
   "board.moveto": { en: "Move to", ru: "Перенести" },
   "board.title": { en: "Title", ru: "Название" },
   "board.acceptance.label": { en: "Acceptance (how anyone can tell it is done)", ru: "Приёмка (как понять, что задача сделана)" },

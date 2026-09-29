@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, Project, SessionList, SessionSummary } from "../api";
 import { Skeleton, copyText } from "../components";
 import { OverflowMenu, Sheet } from "../dialogs";
 import { absTime, relTime } from "../format";
+import { useEdgeFade } from "../edgefade";
 import { Icon } from "../icons";
 import { navigate, pathFor, projectPagePath } from "../router";
 import { PageHeader, screenTitle } from "../shell";
@@ -118,6 +119,8 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
     },
   });
 
+  const kanban = useRef<HTMLDivElement>(null);
+  useEdgeFade(kanban, `${showDone}:${all.length}`);
   return (
     <>
       <PageHeader
@@ -145,7 +148,7 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
           </div>
         )}
         {tasks && tasks.length > 0 && (
-          <div className={`kanban ${showDone ? "five" : ""}`}>
+          <div ref={kanban} className={`kanban ${showDone ? "five" : ""}`} style={{ gridTemplateColumns: kanbanColumns([...COLUMNS.map((col) => column(col).length), ...(showDone ? [finished.length] : [])]) }}>
             {COLUMNS.map((col) => {
               const items = column(col);
               return (
@@ -208,6 +211,10 @@ function TaskRow({ t, owner, onOpen, onDragStart, onDragEnd, dragging }: { t: Ta
 
 function TaskSheet({ t, owner, board, onClose, onMove, onCheck, onRemove, onOpenSession, toast }: { t: Task; owner?: string; board?: string; onClose: () => void; onMove: (t: Task, s: Status) => void; onCheck: (t: Task, i: number) => void; onRemove: (t: Task) => void; onOpenSession: (id: string) => void; toast: (t: string) => void }) {
   const done = t.checklist.filter((c) => c.done).length;
+  // Acceptance that only restates the brief's "Done when" is one section, not two: the pair, one under
+  // the other and a clause apart, left nobody able to say what set them apart. The longer words stay.
+  const merged = Boolean(t.acceptance) && restates(t.acceptance!, t.brief?.done_when);
+  const briefText = (field: BriefField) => (field === "done_when" && merged && t.acceptance!.length > (t.brief?.done_when ?? "").length ? t.acceptance! : t.brief?.[field] ?? "");
   return (
     <Sheet
       title={t.title}
@@ -241,8 +248,12 @@ function TaskSheet({ t, owner, board, onClose, onMove, onCheck, onRemove, onOpen
           {t.assignee && <span>{t2("board.assignee", { name: t.assignee.name })}</span>}
           {t.assignee && t.project_id && <span className="sep">·</span>}
           {t.project_id && (
-            <button className="linkbtn" onClick={() => navigate(projectPagePath(t.project_id!, "board", { task: t.id }))}>
-              {t2("board.on.project", { name: t.project_name ?? t.project_id })}
+            // A link that looks like one, and the project named only when the line above has not
+            // just named it: "Board of Bakery site" over "Open on the board of Bakery site" read as
+            // the same words twice, with nothing to say the second was a way somewhere.
+            <button className="linkbtn accent board-task-open" onClick={() => navigate(projectPagePath(t.project_id!, "board", { task: t.id }))}>
+              {(t.project_name ?? t.project_id) === board ? t2("board.on.project.same") : t2("board.on.project", { name: t.project_name ?? t.project_id })}
+              <Icon name="forward" size={12} />
             </button>
           )}
         </div>
@@ -250,10 +261,10 @@ function TaskSheet({ t, owner, board, onClose, onMove, onCheck, onRemove, onOpen
       {BRIEF_FIELDS.filter((field) => (t.brief?.[field] ?? "").trim()).map((field) => (
         <section key={field} className="sheet-section board-task-brief">
           <div className="sheet-section-title">{t2(`pboard.brief.${field}`)}</div>
-          <div className="proposal-text">{t.brief![field]}</div>
+          <div className="proposal-text">{briefText(field)}</div>
         </section>
       ))}
-      {t.acceptance && (
+      {t.acceptance && !merged && (
         <section className="sheet-section">
           <div className="sheet-section-title">{t2("board.acceptance")}</div>
           <div className="proposal-text">{t.acceptance}</div>
@@ -331,9 +342,11 @@ function NewTaskSheet({ onClose, onCreated, toast }: { onClose: () => void; onCr
       <label className="field">{t("board.checklist.label")}</label>
       <textarea className="field" rows={3} value={form.checklist} onChange={(e) => setForm({ ...form, checklist: e.target.value })} />
       <label className="field">{t("board.priority")}</label>
-      <div className="segmented inline" role="radiogroup">
+      {/* P1 and P2 wear the red and amber of the pills on the cards, so the choice previews the mark
+          the task will carry; the rest stay neutral, as their pills do. */}
+      <div className="segmented inline priority-pick" role="radiogroup">
         {[1, 2, 3, 4, 5].map((p) => (
-          <button key={p} role="radio" aria-checked={form.priority === p} className={form.priority === p ? "on" : ""} onClick={() => setForm({ ...form, priority: p })}>P{p}</button>
+          <button key={p} role="radio" aria-checked={form.priority === p} className={`${form.priority === p ? "on" : ""} ${p === 1 ? "bad" : p === 2 ? "attn" : ""}`} onClick={() => setForm({ ...form, priority: p })}>P{p}</button>
         ))}
       </div>
       <div className="sub" style={{ marginTop: 4 }}>{t("board.priority.hint")}</div>
@@ -349,4 +362,23 @@ function NewTaskSheet({ onClose, onCreated, toast }: { onClose: () => void; onCr
       </div>
     </Sheet>
   );
+}
+
+/** Whether `text` says no more than `other`: one contains the other once case, spaces and the final
+ *  full stop are set aside. */
+export function restates(text: string, other: string | undefined): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim().replace(/[.;:!]+$/, "");
+  const a = norm(text);
+  const b = norm(other ?? "");
+  return Boolean(a && b) && (a.includes(b) || b.includes(a));
+}
+
+/**
+ * The board's columns on a wide screen: an empty column narrow, a column with cards wide enough for a
+ * title on one line, and the board scrolling sideways (its edge faded) when they do not all fit.
+ * Equal shares left two empty columns holding half of a desktop around a lone dash, and squeezed five
+ * columns on a tablet until every title broke over two lines.
+ */
+export function kanbanColumns(counts: number[]): string {
+  return counts.map((n) => (n === 0 ? "minmax(120px, 0.5fr)" : "minmax(240px, 1fr)")).join(" ");
 }

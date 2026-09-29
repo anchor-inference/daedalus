@@ -176,7 +176,7 @@ def desktop(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-de
     print("delete says:", body.replace("\n", " | "))
     if "terminals will end" not in body:
         problems.append("the delete dialog does not say the terminals end")
-    page.locator(".dialog .btn.ghost").click()
+    page.locator(".dialog .dialog-actions .btn").first.click()
     context.close()
 
 

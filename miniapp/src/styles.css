@@ -278,6 +278,9 @@ a { color: var(--accent); text-decoration: none; }
 .title-row .title { min-width: 0; flex: 0 1 auto; }
 .btnrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .empty { color: var(--fg-2); text-align: center; padding: 48px 16px; display: grid; gap: 6px; justify-items: center; }
+/* The line under an empty state's heading is a sentence, and often the server's own words, which
+   start in lower case ("the board did not answer") beside hand-written lines that do not. */
+.empty > div::first-letter { text-transform: uppercase; }
 .empty b { color: var(--fg); font-weight: 600; font-size: var(--fs-15); }
 .empty .btn { margin-top: 8px; }
 .section-title { color: var(--fg-2); font-size: var(--fs-12); text-transform: uppercase; letter-spacing: 0.06em; margin: 16px 2px 6px; display: flex; align-items: baseline; gap: 6px; }
@@ -1459,6 +1462,10 @@ body.resizing iframe { pointer-events: none; }
 .mfield .field { margin: 0; width: 100%; }
 .segmented.inline { display: inline-flex; margin: 0; }
 .segmented.inline button { flex: none; padding: 4px 12px; font-size: var(--fs-13); }
+.priority-pick button.bad { color: var(--bad); }
+.priority-pick button.attn { color: var(--warn); }
+.priority-pick button.bad.on { background: color-mix(in srgb, var(--bad) 16%, transparent); }
+.priority-pick button.attn.on { background: color-mix(in srgb, var(--warn) 16%, transparent); }
 .btnrow .sub.mid { margin-left: auto; align-self: center; }
 @media (min-width: 720px) {
   .mline { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "radio main tags actions"; }
@@ -1610,6 +1617,7 @@ body.resizing iframe { pointer-events: none; }
 .needs-you .notice-body { font-family: var(--mono); font-size: var(--fs-mono); }
 .linkbtn.accent { color: var(--accent); font-size: var(--fs-12); }
 .linkbtn.accent:disabled { color: var(--fg-3); cursor: default; }
+.linkbtn.board-task-open { display: inline-flex; align-items: center; gap: 3px; font-size: inherit; }
 .bell { position: relative; }
 .bell-badge { position: absolute; top: 2px; right: 1px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--info); color: #fff; font-size: 10px; font-weight: 700; line-height: 15px; text-align: center; pointer-events: none; }
 .bell-badge.urgent { background: var(--bad); }
@@ -1666,8 +1674,9 @@ pre.diff .file { color: var(--fg); font-weight: 600; }
 .kanban-col.is-empty { display: none; }
 .kanban-empty { display: none; }
 @media (min-width: 1024px) {
-  .kanban { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 12px; align-items: start; }
-  .kanban.five { grid-template-columns: repeat(5, minmax(200px, 1fr)); }
+  /* The columns are set by kanbanColumns (Board.tsx): narrow when empty, and sideways scrolling when
+     the rest do not fit. */
+  .kanban { display: grid; gap: 12px; align-items: start; overflow-x: auto; }
   .kanban-col { min-height: 240px; padding: 4px 8px 8px; border-radius: var(--radius-md); border: 1px dashed transparent; }
   .kanban-col.is-empty { display: block; }
   .kanban-col.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
@@ -2866,6 +2875,8 @@ button.staff-row:hover { background: var(--surface-2); }
 .review-reject { display: flex; flex-direction: column; gap: 4px; }
 .review-reject textarea.field { resize: vertical; font: inherit; }
 .review-diff .diff-view { font-size: var(--fs-mono); }
+.review-why.bad { color: var(--bad); }
+.review-why.attn { color: var(--warn); }
 @media (min-width: 1024px) {
   .pboard-cols { display: grid; grid-template-columns: repeat(4, minmax(200px, 1fr)) minmax(170px, 0.8fr); gap: 12px; align-items: start; }
   .pboard-col { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: 4px 6px 8px; border-radius: var(--radius-md); }
