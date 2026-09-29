@@ -281,9 +281,10 @@ def run() -> int:
             if not wait(page, lambda: badge.count() and badge.inner_text() == str(Centre.summary()["unseen"]), 3):
                 problems.append("with pop-ups off the bell stopped counting")
             page.goto(f"{BASE}/settings/notifications?token=t&lang=en", wait_until="commit")
-            switch = page.locator("[data-popups-card] button[aria-pressed]")
+            # A switch now, not a button labelled with its own state: its state is aria-checked.
+            switch = page.locator("[data-popups-card] [role=switch]")
             switch.wait_for(timeout=10000)
-            if switch.get_attribute("aria-pressed") != "false":
+            if switch.get_attribute("aria-checked") != "false":
                 problems.append("Settings does not show pop-ups as off")
             switch.click()
             if page.evaluate("() => localStorage.getItem('daedalus.notice.popups')") is not None:
