@@ -645,7 +645,12 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .switch.on .switch-knob { transform: translateX(16px); background: var(--accent-ink); }
 .switch:focus-visible .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
 .usage-row { display:grid; grid-template-columns: 52px 1fr auto; gap:6px 10px; align-items:center; padding:8px 0; border-top:1px solid var(--line); cursor:pointer; }
+/* On a phone the counts take their own line and the two buttons share the one under it: squeezed
+   beside them the counts broke in two, "· 1 failures" alone on a line next to the buttons. */
+.health-summary { flex-wrap: wrap; }
+@media (max-width: 560px) { .health-summary > .grow { flex: 1 1 100%; } .health-summary > .btn { flex: 1 1 0; } }
 .usage-row:first-child { border-top:0; }
+.tablecard td.usage-none { text-align:center; padding:16px 4px; border-bottom:0; }
 .usage-row .when { color:var(--muted); font-variant-numeric:tabular-nums; font-size:var(--fs-12); }
 .usage-row .what { min-width:0; }
 .usage-row .what .l1 { display:flex; gap:8px; align-items:center; min-width:0; }

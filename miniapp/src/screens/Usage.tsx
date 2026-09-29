@@ -65,7 +65,9 @@ export function UsageScreen({ onOpen }: { onOpen?: (id: string) => void }) {
   const todayRows = useMemo(() => (usage?.daily ?? []).filter((d) => d.day === today), [usage, today]);
   const providers = useMemo(() => Array.from(new Set((usage?.recent ?? []).map((r) => r.provider_id))), [usage]);
   const sum = (rows: Daily[], key: keyof Daily) => rows.reduce((a, r) => a + ((r[key] as number) ?? 0), 0);
-  const todayCost = todayRows.some((r) => r.cost_usd !== null) ? sum(todayRows, "cost_usd") : null;
+  // "free" is for calls that cost nothing, on a subscription; a day with no calls at all is $0, a number
+  // like every other state of this card, not a word that read as the name of a plan.
+  const todayCost = todayRows.length === 0 ? 0 : todayRows.some((r) => r.cost_usd !== null) ? sum(todayRows, "cost_usd") : null;
   const todayIn = sum(todayRows, "input_tokens");
   const todayCached = sum(todayRows, "cache_read_tokens");
   const hottest = useMemo(() => {
@@ -159,14 +161,13 @@ export function UsageScreen({ onOpen }: { onOpen?: (id: string) => void }) {
                       <div className="what">
                         <div className="l1"><span className="name">{s.title ?? (s.session_id ? s.session_id : t("usage.outside"))}</span></div>
                         <div className="l2">
-                          <span>{plural("usage.calls", s.calls)}</span>
+                          {/* The calls on a subscription belong with the count they are part of: under the
+                              price they made this one row two lines tall among rows of one. */}
+                          <span>{plural("usage.calls", s.calls)}{s.unmetered > 0 ? t("usage.onsubs", { n: int(s.unmetered) }) : ""}</span>
                           <span>{t("usage.inout", { in: tokens(s.input_tokens), out: tokens(s.output_tokens) })}</span>
                         </div>
                       </div>
-                      <div className="cost">
-                        {usd(s.cost_usd)}
-                        {s.unmetered > 0 && <div className="sub">{t("usage.onsubs", { n: int(s.unmetered) }).replace(/^ · /, "")}</div>}
-                      </div>
+                      <div className="cost">{usd(s.cost_usd)}</div>
                     </div>
                   ))}
                 </div>
@@ -188,6 +189,11 @@ export function UsageScreen({ onOpen }: { onOpen?: (id: string) => void }) {
                   </tr>
                 </thead>
                 <tbody>
+                  {/* Said in the body, as the recent calls say it: a header over nothing read as a load
+                      that had stalled. */}
+                  {byDay.size === 0 && (
+                    <tr><td colSpan={7} className="sub usage-none">{t("usage.nousage")}</td></tr>
+                  )}
                   {Array.from(byDay.entries()).map(([day, rows]) =>
                     rows.map((d, i) => (
                       <tr key={`${day}-${i}`}>

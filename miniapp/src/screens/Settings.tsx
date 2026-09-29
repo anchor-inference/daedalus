@@ -18,7 +18,7 @@ import { AddModel } from "./AddModel";
 import { ON_DEMAND_CHOICES, REASONING_EFFORTS, onDemandGroups, orchestratorPreset } from "../models";
 import { mainPreset } from "../main/model";
 import { Sheet } from "../dialogs";
-import { t } from "../i18n";
+import { plural, t } from "../i18n";
 import { LangPicker, Segmented, Switch } from "../components";
 import { AppearancePanel } from "./Appearance";
 import { modeHome, storedMode } from "../mode";
@@ -700,9 +700,9 @@ function HealthTab({ toast }: { toast: (t: string) => void }) {
   return (
     <>
       <div className="card">
-        <div className="row">
+        <div className="row health-summary">
           <div className="grow">
-            <b>{t("settings.health.ok", { n: summary.ok ?? 0 })}</b> · {t("settings.health.warn", { n: summary.warn ?? 0 })} · {t("settings.health.fail", { n: summary.fail ?? 0 })}
+            <b>{t("settings.health.ok", { n: summary.ok ?? 0 })}</b> · {plural("settings.health.warn", summary.warn ?? 0)} · {plural("settings.health.fail", summary.fail ?? 0)}
           </div>
           <button className="btn small" disabled={busy} onClick={() => load(false)}>
             {t("settings.health.recheck")}

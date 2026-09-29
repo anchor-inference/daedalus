@@ -1463,7 +1463,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "usage.notloggedin": { en: "not logged in on the host", ru: "на этой машине вход не выполнен" },
   "usage.balances": { en: "Balances", ru: "Балансы" },
   "usage.unavailable": { en: "unavailable", ru: "недоступен" },
-  "usage.alerts": { en: "alerts below {list}", ru: "предупреждать ниже {list}" },
+  "usage.alerts": { en: "Alerts when a balance falls below {list}", ru: "Предупреждение, когда баланс опускается ниже {list}" },
   "usage.bysession": { en: "By session", ru: "По сессиям" },
   "usage.outside": { en: "outside sessions", ru: "вне сессий" },
   "usage.inout": { en: "{in} in · {out} out", ru: "{in} вход · {out} выход" },
@@ -1481,6 +1481,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "usage.purpose.text": { en: "text", ru: "текст" },
   "usage.cached": { en: " · {n} cached", ru: " · {n} из кеша" },
   "usage.nocalls": { en: "No calls yet.", ru: "Вызовов пока не было." },
+  "usage.nousage": { en: "No usage yet.", ru: "Расхода пока нет." },
   "usage.showmore": { en: "Show {n} more", ru: "Показать ещё {n}" },
 
   // ── settings ───────────────────────────────────────────────────────────────────────────
@@ -2217,8 +2218,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "settings.heartbeat.clear": { en: "clear (switches off)", ru: "очистить (выключит пульс)" },
 
   "settings.health.ok": { en: "{n} ok", ru: "в порядке: {n}" },
-  "settings.health.warn": { en: "{n} warnings", ru: "предупреждений: {n}" },
-  "settings.health.fail": { en: "{n} failures", ru: "сбоев: {n}" },
+  "settings.health.warn": { en: "{n} warning|{n} warnings", ru: "{n} предупреждение|{n} предупреждения|{n} предупреждений" },
+  "settings.health.fail": { en: "{n} failure|{n} failures", ru: "{n} сбой|{n} сбоя|{n} сбоев" },
   "settings.health.recheck": { en: "Re-check", ru: "Проверить снова" },
   "settings.health.fix": { en: "Apply safe fixes", ru: "Применить безопасные исправления" },
   "settings.health.fixed": { en: "Fixes applied", ru: "Исправления применены" },
