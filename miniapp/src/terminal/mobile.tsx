@@ -17,6 +17,7 @@ import { createPortal } from "react-dom";
 import type { TerminalEnvName, TerminalView as TerminalRow } from "../api";
 import { MenuItem, OverflowMenu, toast } from "../dialogs";
 import { t } from "../i18n";
+import { EnvPill } from "../envpill";
 import { Icon } from "../icons";
 import { useEdgeFade } from "../edgefade";
 import { InputDeduper } from "./dedupe";
@@ -249,12 +250,11 @@ export function PhoneTerminal({ id, row, onBack, onEnd, onRestart, onRemove, wor
             {row?.sandbox && <Icon name="shield" size={12} />}
             <span className="truncate">{title}</span>
           </div>
-          <div className="term-phone-cwd truncate">{[t(`term.env.${env}`), cwd].filter(Boolean).join(" · ")}</div>
+          {/* The folder alone: the pill beside says the environment, and the line saying it again
+              read "Container" twice across one header. */}
+          <div className="term-phone-cwd truncate">{cwd}</div>
         </div>
-        <span className={`term-env ${env}`} title={t(`term.env.${env}`)}>
-          {env === "host" && <Icon name="lock" size={11} />}
-          {t(`term.env.short.${env}`)}
-        </span>
+        <EnvPill env={env} />
         <CopyOutputButton id={id} state={state ?? undefined} />
         <OverflowMenu items={items} label={t("term.phone.menu")} />
       </div>

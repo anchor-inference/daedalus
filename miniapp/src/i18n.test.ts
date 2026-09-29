@@ -239,10 +239,10 @@ describe("the keys the code asks for", () => {
       ["nset.mute.", listed("./notifyprefs.ts", "MUTE_ENDS")],
       ["load.basis.", ["running", "measured", "default"]],
       // A phone names each key of its terminal's row for a screen reader, the project's tabs, and the
-      // short environment on a terminal's header.
+      // environment pill's explanation.
       ["term.phone.key.", [...SOURCES["./terminal/phonekeys.ts"].matchAll(/\{ id: "([^"]+)", cap:/g)].map((m) => m[1])],
       ["phone.tab.", listed("./project/focus.ts", "PHONE_TABS")],
-      ["term.env.short.", ["container", "host"]],
+      ["term.env.title.", ["container", "host"]],
       // A command-line member's view names the state of its team tools, its column's tabs, who
       // answered a request first and its two views from lists the host and the model share.
       ["staff.health.tools.", ["connected", "missing", "waiting", "builtin", "none"]],

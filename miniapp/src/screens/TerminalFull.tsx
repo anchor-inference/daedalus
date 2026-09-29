@@ -15,7 +15,7 @@ import { useMedia } from "../shell";
 import { invalidate, useQuery } from "../store";
 import { errorText } from "../ui";
 import { endTerminal } from "../terminal/actions";
-import { EnvPill } from "../terminal/dock";
+import { EnvPill } from "../envpill";
 import type { TerminalState } from "../terminal/instance";
 import { fontSizeStep } from "../terminal/instance";
 import { gridIds, ownerPath } from "../terminal/preview";

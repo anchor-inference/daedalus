@@ -2243,7 +2243,6 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 .dir-path { font-size: var(--fs-12); word-break: break-all; }
 .dir-row .toggle-row { margin: 4px 0 0; }
 .dir-reach { font-size: var(--fs-12); }
-.badge.env-host { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); }
 .dir-form { margin-top: 8px; padding: 10px 12px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); }
 .dir-form-foot { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .dir-add-open { margin-top: 8px; }
@@ -2734,6 +2733,8 @@ button.staff-row:hover { background: var(--surface-2); }
 .term-env { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; margin-right: 4px; border-radius: var(--radius-pill); border: 1px solid; font-size: var(--fs-11); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
 .term-env.container { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .term-env.host { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+/* The small one, for a row of a list and a header's corner: the same pill, one size down. */
+.term-env.tiny { height: 18px; padding: 0 6px; margin-right: 0; flex: none; letter-spacing: .04em; }
 .term-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .term-panes.split { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
 .term-slot { min-width: 0; min-height: 0; display: flex; }
@@ -2956,9 +2957,6 @@ button.staff-row:hover { background: var(--surface-2); }
 .focus-project { display: grid; gap: 3px; padding: 6px 8px 10px; }
 .focus-project-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .focus-project-name { flex: 1; min-width: 0; font-weight: 650; font-size: var(--fs-14); }
-.env-chip { text-transform: uppercase; letter-spacing: 0.04em; }
-.env-chip.container { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-.env-chip.host { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
 .focus-project-meta { color: var(--fg-3); font-size: var(--fs-11); }
 .focus-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--row-h-dense); padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
 .focus-row:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
@@ -3089,8 +3087,13 @@ button.staff-row:hover { background: var(--surface-2); }
 .focus-folder > .ic { color: var(--fg-2); margin-top: 2px; flex: none; }
 .focus-folder-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .focus-folder-name { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: var(--fs-13); }
-.focus-folder-path { color: var(--fg-3); font-size: var(--fs-12); }
-.focus-folder-warn { color: var(--warn); font-size: var(--fs-12); }
+.focus-folder-path { display: flex; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
+.focus-folder-path-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.focus-folder-path-tail { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* Red with a mark, not amber: amber with a lock is how a host folder is drawn, a normal working state,
+   and a folder that is missing read as the same thing one row away. */
+.focus-folder-warn { display: flex; align-items: flex-start; gap: 5px; color: var(--bad); font-size: var(--fs-12); }
+.focus-folder-warn .ic { flex: none; margin-top: 2px; }
 .focus-folders > .btn { justify-self: start; }
 .focus-terminals { flex: 1; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; padding: 0 14px 14px; }
 .focus-terminal-list { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
@@ -3228,7 +3231,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .app.project-phone .screen { padding-bottom: var(--space-4); }
 .app.project-phone .main.chat-open .composer { padding-bottom: 10px; }
 :root[data-keyboard="open"] .app.project-phone .composer { padding-bottom: 6px; }
-.pagehead .env-chip { margin-right: 2px; }
+.pagehead .term-env { margin-right: 2px; flex: none; }
 .needs-banner { display: grid; gap: var(--space-2); margin: var(--space-2) 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--warn) 7%, transparent); }
 .chat > .needs-banner { flex: none; margin: var(--space-2) 10px 0; }
 .phone-board > .needs-banner { margin: var(--space-2) 12px 0; }
@@ -3252,7 +3255,7 @@ button.staff-row:hover { background: var(--surface-2); }
    "langpt" to "l." beside a long role; the cap keeps a very long name from taking the whole line. */
 .phone-staff-name > .truncate:first-child { flex: 0 0 auto; max-width: 60%; }
 .phone-staff-role { color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; }
-.phone-staff-name .harness-badge, .phone-staff-name .env-chip { flex: none; }
+.phone-staff-name .harness-badge, .phone-staff-name .term-env { flex: none; margin-right: 0; }
 .phone-staff-line { color: var(--fg-2); font-size: var(--fs-12); }
 .phone-staff-line.waits { color: var(--warn); }
 .phone-terms { display: grid; gap: var(--space-2); margin-top: var(--space-2); }

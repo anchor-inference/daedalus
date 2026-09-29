@@ -134,8 +134,6 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "explorer.nogrep": { en: "Content search needs ripgrep on the server. You can search by name instead.", ru: "Для поиска по содержимому на сервере нужен ripgrep. Можно искать по имени." },
   "explorer.folder": { en: "Folder", ru: "Папка" },
   "explorer.folder.readonly.title": { en: "This session can read this folder but not change it", ru: "Этот сеанс может читать папку, но не менять её" },
-  "explorer.env.container": { en: "container", ru: "контейнер" },
-  "explorer.env.host": { en: "host", ru: "хост" },
   "explorer.truncated": { en: "More matches exist. Refine your search to see them.", ru: "Есть и другие совпадения. Уточните поиск, чтобы увидеть их." },
   "preview.wrap": { en: "Wrap lines", ru: "Перенос строк" },
   "preview.goto": { en: "Go to line", ru: "К строке" },
@@ -957,8 +955,6 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "folder.primary": { en: "primary", ru: "основная" },
   "folder.primary.title": { en: "An agent works here unless it is given another folder", ru: "Агент работает здесь, если ему не указана другая папка" },
   "folder.env": { en: "Where it lives", ru: "Где находится" },
-  "folder.env.container": { en: "container", ru: "контейнер" },
-  "folder.env.host": { en: "host", ru: "хост" },
   "folder.env.container.long": { en: "In the container", ru: "В контейнере" },
   "folder.env.host.long": { en: "On the host", ru: "На хосте" },
   "folder.readonly": { en: "Read-only", ru: "Только чтение" },
@@ -3019,6 +3015,8 @@ Object.assign(DICT, {
   "term.end": { en: "End", ru: "Завершить" },
   "term.end.title": { en: "End the terminal?", ru: "Завершить терминал?" },
   "term.end.confirm": { en: "{command} stops.", ru: "{command} остановится." },
+  "term.env.title.container": { en: "Runs in the container, apart from your machine", ru: "Работает в контейнере, отдельно от вашего компьютера" },
+  "term.env.title.host": { en: "Runs on your machine, outside the container", ru: "Работает на вашем компьютере, вне контейнера" },
   "term.split": { en: "Split", ru: "Разделить" },
   "term.maximize": { en: "Full screen", ru: "На весь экран" },
   "term.restore": { en: "Back to the dock", ru: "Вернуть в док" },
@@ -3425,8 +3423,6 @@ Object.assign(DICT, {
 // A terminal on a phone: its header, the row of keys a soft keyboard lacks, the compose line and the
 // selection layer.
 Object.assign(DICT, {
-  "term.env.short.container": { en: "CONT.", ru: "КОНТ." },
-  "term.env.short.host": { en: "HOST", ru: "ХОСТ" },
   "term.phone.menu": { en: "Terminal actions", ru: "Действия с терминалом" },
   "term.phone.keys": { en: "Keys", ru: "Клавиши" },
   "term.phone.select": { en: "Select text", ru: "Выделить текст" },
