@@ -20,6 +20,7 @@ import hashlib
 import json
 import logging
 import os
+import posixpath
 import re
 import secrets
 import uuid
@@ -240,6 +241,20 @@ class Team:
             return await self.handoff.deliver(files, env=folder.env, cwd=cwd, box=box_name(task_id), actor=by, member=member.name)
         except FileRefused as exc:
             raise StaffError(f"the files for {member.name} could not be delivered: {exc}") from exc
+
+    async def brief_files(self, delivered: list[Delivered]) -> tuple[list[Delivered], list[Delivered]]:
+        """A task's files split into those new to the member and those it was handed before.
+
+        A task carries every file ever attached to it, and each new brief of the task listed them all
+        again as "files handed to you": a follow-up assigned with no attachment arrived naming twenty
+        screenshots from earlier rounds as if the operator had just sent them. The copies are still
+        put in place (a new worktree has none), but only the new ones are named in the brief.
+        """
+        fresh: list[Delivered] = []
+        earlier: list[Delivered] = []
+        for d in delivered:
+            (earlier if await self.manager.files.deliveries(d.file.id, d.path) > 1 else fresh).append(d)
+        return fresh, earlier
 
     def capacity(self) -> MachineCapacity | None:
         if self._capacity is not None:
@@ -622,7 +637,8 @@ class Team:
             team_token_hash=_hash(token),
         )
         await self.publish("staff.status", {"status": "starting", "previous": None, "actor": by}, member=member)
-        first = self.first_message(member, task, folder, worktree, predecessor, by, delivered)
+        fresh, earlier = await self.brief_files(delivered)
+        first = self.first_message(member, task, folder, worktree, predecessor, by, fresh, earlier)
         try:
             recorded = await self.manager.staff.add_message(member.id, first, origin=by, mode="after_turn", staff_session_id=session.id)
             first_id = recorded.id
@@ -687,7 +703,8 @@ class Team:
         if session.pause_requested:
             await self.manager.staff.request_pause(session.id, False)  # a new assignment resumes a paused member
         live = LiveSession(member, session)
-        text = prompts.STAFF_NEXT_TASK + self.first_message(member, task, folder, None, predecessor, by, delivered)
+        fresh, earlier = await self.brief_files(delivered)
+        text = prompts.STAFF_NEXT_TASK + self.first_message(member, task, folder, None, predecessor, by, fresh, earlier)
         try:
             message_id = (await self.manager.staff.add_message(member.id, text, origin=by, mode="after_turn", staff_session_id=session.id)).id
         except StaffError:
@@ -740,7 +757,7 @@ class Team:
         subagents = self.app.extensions.get("subagents")
         return subagents.persona(name) if subagents is not None else None
 
-    def first_message(self, member: Staff, task: BoardTask, folder: ProjectFolder, worktree: Worktree | None, predecessor: StaffSession | None, by: str, delivered: list[Delivered] | None = None) -> str:
+    def first_message(self, member: Staff, task: BoardTask, folder: ProjectFolder, worktree: Worktree | None, predecessor: StaffSession | None, by: str, delivered: list[Delivered] | None = None, earlier: list[Delivered] | None = None) -> str:
         before = ""
         if predecessor is not None:
             why = predecessor.end_reason or predecessor.status
@@ -761,7 +778,7 @@ class Team:
             folder=worktree.cwd if worktree is not None else folder.path,
             branch=f"\nBranch: {worktree.branch} (from {worktree.base_ref})" if worktree is not None else "",
             predecessor=before,
-            files=prompts.STAFF_FILES.format(lines="\n".join(d.line() for d in delivered)) if delivered else "",
+            files=(prompts.STAFF_FILES.format(lines="\n".join(d.line() for d in delivered)) if delivered else "") + (prompts.STAFF_EARLIER_FILES.format(n=len(earlier), where=posixpath.dirname(earlier[0].path)) if earlier else ""),
         )
 
     # -- control ---------------------------------------------------------------------------------------

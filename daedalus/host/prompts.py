@@ -269,6 +269,11 @@ Files handed to you (copies put where you can open them; read them before you st
 {lines}"""
 """The files of a brief or a message, by the paths the host wrote them to in the member's own folder."""
 
+STAFF_EARLIER_FILES = """
+
+{n} file(s) handed to you earlier for this task are still in {where}/ — nothing new there."""
+"""A later brief of the same task: the files it carried before, counted rather than named again."""
+
 STAFF_NEXT_TASK = (
     "Your previous task is closed. Here is your next one, in this same session: what you learned "
     "stays useful, the task is new. Report on it with the team tools as before.\n\n"
