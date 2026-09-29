@@ -158,6 +158,9 @@ button, input, textarea, select { font: inherit; color: inherit; }
 a { color: var(--accent); text-decoration: none; }
 .num { font-variant-numeric: tabular-nums; }
 .mono { font-family: var(--mono); }
+/* A monospaced field still speaks in prose until something is typed: the pairing hint clipped
+   mid-word at phone width in the wider mono face. */
+.field.mono::placeholder { font-family: var(--font); }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -1453,6 +1456,7 @@ body.resizing iframe { pointer-events: none; }
 .mfield { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .mfield.end { justify-content: flex-end; }
 .mfield > span { color: var(--muted); font-size: var(--fs-12); }
+.mfield > span .faint { color: var(--fg-3); }
 .mfield .field { margin: 0; width: 100%; }
 .segmented.inline { display: inline-flex; margin: 0; }
 .segmented.inline button { flex: none; padding: 4px 12px; font-size: var(--fs-13); }
@@ -2189,6 +2193,10 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 .pick-top .pill { flex: none; }
 .pick .sub { font-size: var(--fs-12); }
 .pick .mtags { padding: 4px 0 0; }
+.mtags-break { flex-basis: 100%; height: 0; }
+.addmodel-run { align-items: center; gap: 10px 16px; }
+.addmodel-run .segmented { margin: 0; }
+.addmodel-opt { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-13); color: var(--fg); cursor: pointer; }
 /* The filter and the typed id are one row of two fields with their labels on the same line, so the
    two boxes start and end together instead of sitting at two different heights. */
 .modelbar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px 12px; align-items: end; }
