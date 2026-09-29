@@ -182,8 +182,13 @@ def _age(at: str) -> float:
 
 ACTOR_OF = {"take": "operator", "give": "operator", "pause": "operator", "download": "page", "blocked": "page", "watch": "system", "monitor": "system"}
 KIND_OF = {"act": "", "tab_new": "new_tab", "download_saved": "download"}
-ACTION_LOG = ("act", "navigate", "tab_new", "look", "dialog", "handoff", "download", "download_saved", "take", "give", "pause", "open", "close", "blocked", "watch", "monitor")
-"""The audit's actions the app's action log shows."""
+ACTION_LOG = (
+    "act", "navigate", "tab_new", "look", "dialog", "handoff", "download", "download_saved", "take", "give", "pause", "open", "close", "blocked", "watch", "monitor",
+    "extract", "note",
+)
+"""The audit's actions the app's action log shows: what the agent did in the browser, and what it
+read out of a page (``extract``) or proposed to remember about a site (``note``), which the operator
+reviews like the rest."""
 
 
 def _action_row(row: dict[str, Any]) -> dict[str, Any]:

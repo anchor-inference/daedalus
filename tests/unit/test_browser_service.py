@@ -243,6 +243,16 @@ async def test_the_audit_never_holds_what_anyone_typed_and_closing_the_owner_clo
     assert (await service.get("s-sess1"))["close_reason"] == "owner_gone"
 
 
+async def test_what_the_agent_read_out_of_a_page_and_noted_about_a_site_is_in_the_action_log(service: Browsers, owners: FakeOwners) -> None:
+    owners.add(SESSION)
+    await service.open(SESSION, actor="agent:sess1")
+    await service.audit("s-sess1", "container", "agent:sess1", "extract", {"tab": "t1", "url": "https://example.com/", "items": 3})
+    await service.audit("s-sess1", "container", "agent:sess1", "note", {"url": "https://example.com/"})
+    await service.audit("s-sess1", "container", "agent:sess1", "sensitive", {"kinds": ["purchase"]})
+    kinds = [r["kind"] for r in await service.actions("s-sess1")]
+    assert "extract" in kinds and "note" in kinds and "sensitive" not in kinds
+
+
 async def test_the_load_counts_browsers_under_their_own_profile(service: Browsers, owners: FakeOwners, daemon: FakeBrowserd) -> None:
     owners.add(SESSION)
     await service.open(SESSION, actor="agent:sess1")
