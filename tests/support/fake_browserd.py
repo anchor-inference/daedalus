@@ -27,7 +27,7 @@ from typing import Any
 
 SECRET_AUTOCOMPLETE = ("current-password", "new-password", "one-time-code")
 SENSITIVE_WORDS = {
-    "purchase": ("buy", "pay", "place order", "checkout", "purchase", "subscribe", "donate", "book now", "купить", "оплатить", "оформить заказ"),
+    "purchase": ("buy", "pay", "place order", "checkout", "purchase", "donate", "book now", "купить", "оплатить", "оформить заказ"),
     "send": ("send", "post", "publish", "share", "reply", "submit", "отправить", "опубликовать"),
     "destroy": ("delete", "remove", "revoke", "удалить"),
     "accept": ("accept", "agree"),
@@ -752,7 +752,9 @@ class FakeBrowserd:
         page_origin = "/".join(tab.page.url.split("/")[:3]) if "://" in tab.page.url else tab.page.url
         if element.form_action and "/".join(element.form_action.split("/")[:3]) != page_origin:
             kinds.append("cross_origin_post")
-        return {"kinds": kinds, "evidence": {"name": element.name, "role": element.role, "words": words, "page_origin": page_origin, "fields": [e.ref for e in fields]}}
+        # Every field of the form, as the daemon lists them, not only the secret ones.
+        listed = [{"type": e.type or ("textarea" if e.tag == "textarea" else "text"), "name": e.name, "autocomplete": e.autocomplete} for e in tab.page.elements.values() if e.tag in ("input", "textarea", "select")]
+        return {"kinds": kinds, "evidence": {"name": element.name, "role": element.role, "words": words, "page_origin": page_origin, "fields": listed}}
 
     @staticmethod
     def _find(page: Page, query: str, *, regex: bool, limit: int) -> dict[str, Any]:

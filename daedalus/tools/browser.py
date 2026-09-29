@@ -263,7 +263,7 @@ async def browser_look(context: ToolContext, question: str, tab: str | None = No
         "button'). x and y (CSS pixels of the viewport) click or hover at a point instead of a ref, where the operator "
         "allows it. steps=[{action, ref, element, …}, …] does up to 5 actions planned from one snapshot, stopping at a "
         "navigation, a new tab, a dialog, a failure or a question. A purchase, a message sent, a deletion, terms "
-        "accepted or an upload is asked about first; a password, code or payment field refuses you (use "
+        "accepted or an upload is held for the operator's approval when you try it (do not ask first); a password, code or payment field refuses you (use "
         "BrowserHandoff). Returns what changed."
     ),
 )

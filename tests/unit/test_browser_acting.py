@@ -213,3 +213,51 @@ def test_a_step_is_read_as_one_call_is() -> None:
         assert "not both" in exc.message
     else:
         raise AssertionError("a point and a ref together were taken")
+
+
+async def test_a_site_search_is_not_a_sign_in_but_enter_beside_a_password_is(rig: Rig) -> None:
+    sid = await opened(rig, "https://shop.test/")
+    text, failed = await rig.call(sid, "BrowserAct", action="type", ref="e1", element="the search box", text="trail shoes", submit=True)
+    assert not failed and "Done: type" in text
+    await rig.call(sid, "BrowserNavigate", url="https://login.test/")
+    text, failed = await rig.call(sid, "BrowserAct", action="type", ref="e30", element="the email field", text="someone@example.com", submit=True)
+    assert failed and "needs the operator's approval" in text and "credentials" in (await acts(rig, sid))[-1]["sensitive"]
+
+
+async def test_a_made_up_ref_is_answered_with_where_refs_come_from(rig: Rig) -> None:
+    sid = await opened(rig)
+    for arguments in ({"action": "click", "ref": "text=43", "element": "the price"}, {"action": "click", "ref": "css=div", "element": "a div"}):
+        text, failed = await rig.call(sid, "BrowserAct", **arguments)
+        assert failed and "is not a ref" in text and "BrowserText(find=" in text and "latest BrowserSnapshot" in text
+    text, failed = await rig.call(sid, "BrowserSnapshot", scope="navigation")
+    assert failed and "'navigation' is not a ref" in text
+    text, failed = await rig.call(sid, "BrowserAct", action="click", element="the add button")
+    assert failed and "BrowserText(find=" in text
+    text, failed = await rig.call(sid, "BrowserAct", action="click", ref="f1", element="the shipping frame")
+    assert failed and "f1 names a frame, not an element in it" in text
+    assert actions(rig) == []
+
+
+async def test_a_run_of_calls_that_change_nothing_is_told_to_stop_guessing(rig: Rig) -> None:
+    sid = await opened(rig)
+    await rig.call(sid, "BrowserSnapshot")
+    said = []
+    for ref in ("text=1", "text=2", "body", "css=a", "e98"):
+        text, _ = await rig.call(sid, "BrowserAct", action="click", ref=ref, element="the thing without a ref")
+        said.append(text)
+    assert all("Stop guessing" not in t for t in said[:4])
+    assert "your last 5 browser calls changed nothing on the page. Stop guessing" in said[4] and "say plainly what is missing" in said[4]
+    # A change on the page starts the count again.
+    await rig.call(sid, "BrowserAct", action="type", ref="e40", element="the name field", text="Ada")
+    text, _ = await rig.call(sid, "BrowserAct", action="click", ref="text=3", element="x")
+    assert "Stop guessing" not in text
+
+
+def test_the_prompt_lets_the_gate_ask_and_the_scheme_refusal_names_what_reads_a_page() -> None:
+    from daedalus.host import prompts
+    from daedalus.host.policy import Policy
+
+    assert "Do not stop to ask the operator first" in prompts.BROWSER and "asked about before it happens" not in prompts.BROWSER
+    assert "say plainly what is missing" in prompts.BROWSER
+    decision = Policy().evaluate("BrowserNavigate", {"url": "view-source:https://shop.test/"})
+    assert decision.rule == "browser.scheme" and "BrowserText(find=" in decision.reason

@@ -16,6 +16,7 @@ import base64
 import hashlib
 import json
 import logging
+import re
 import time
 from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
@@ -80,6 +81,13 @@ STEPS_MAX = 5
 """Actions one ``BrowserAct(steps=…)`` carries. Few, because each is planned from one snapshot: past a
 handful the refs a model chose are more likely to have moved than not."""
 STEP_KEYS = ("action", "element", "ref", "text", "keys", "option", "submit", "to_ref", "direction", "paths", "x", "y")
+REF_SHAPE = re.compile(r"[a-z]\d+(?:[a-z]\d+)*")
+"""What a ref looks like: e14, f2e4 inside a frame, f1 for the frame itself."""
+NOT_A_REF = (
+    "{ref!r} is not a ref. Refs look like e14 (f2e4 inside a frame) and come from your latest BrowserSnapshot; "
+    "selectors, roles and texts are not refs. To find an element by its words use BrowserText(find='…'), which "
+    "gives the ref beside each match; an element the outline shows without a ref cannot be acted on by ref."
+)
 FIND_MATCHES = 30
 EXTRACT_MAX_CHARS = 120_000
 """Characters of a page extraction reads: about ten parts, which bounds what one call costs."""
@@ -199,7 +207,10 @@ class Step:
             if (self.x or 0) < 0 or (self.y or 0) < 0:
                 raise InvalidRequest("x and y are CSS pixels of the viewport, counted from its top left")
         elif action in NEEDS_REF and not self.ref:
-            raise InvalidRequest(f"{action} needs the ref of an element from BrowserSnapshot")
+            raise InvalidRequest(f"{action} needs the ref of an element from BrowserSnapshot (e14); BrowserText(find='…') finds one by its words")
+        for ref in (self.ref, self.to_ref):
+            if ref and not REF_SHAPE.fullmatch(ref):
+                raise InvalidRequest(NOT_A_REF.format(ref=ref))
         if action == "type" and self.text is None:
             raise InvalidRequest("type needs text")
         if self.text is not None and len(self.text) > TEXT_MAX:
@@ -282,62 +293,96 @@ class Collected:
     pages: list[str] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class _Trail:
+    log: deque[tuple[str, str, bool]]
+    still: int = 0
+    """Calls in a row that changed nothing on the page, failures included."""
+    page: tuple[str, str] = ("", "")
+    """The address and fingerprint of the page as last read."""
+
+
 class LoopHints:
     """Soft notes for an agent going round in circles in its browser, appended to a result, never a
     refusal.
 
     The core already stops a call repeated with the very same arguments; a browser loop seldom is one.
-    A model clicks the same ref with new words for it, or reads a page that has not changed since its
-    last read, and each call looks new. What is compared here is what the call did — the action and
-    its target on the same page, the page's own fingerprint — and a note says so once it repeats.
+    A model clicks the same ref with new words for it, invents one ref after another for an element
+    the outline gives none, or reads a page that has not changed since its last read, and each call
+    looks new. What is compared here is what the call did — the action and its target on the same
+    page, the page's own fingerprint, whether anything changed at all — and a note says so once it
+    repeats. The evaluation found failed tasks cost three to four times a success because a model
+    that is stuck keeps going to its step limit; the plain note after a run of calls that changed
+    nothing is there to let it stop and say what is missing instead.
     """
 
     WINDOW = 12
     OWNERS = 256
+    STILL = 5
+    """Calls in a row without a change to the page before the note that says to stop guessing."""
 
     def __init__(self) -> None:
-        self._seen: OrderedDict[str, deque[tuple[str, str, bool]]] = OrderedDict()
+        self._seen: OrderedDict[str, _Trail] = OrderedDict()
 
-    def _log(self, owner: str) -> deque[tuple[str, str, bool]]:
-        log = self._seen.pop(owner, None) or deque(maxlen=self.WINDOW)
-        self._seen[owner] = log
+    def _trail(self, owner: str) -> _Trail:
+        trail = self._seen.pop(owner, None) or _Trail(deque(maxlen=self.WINDOW))
+        self._seen[owner] = trail
         while len(self._seen) > self.OWNERS:
             self._seen.popitem(last=False)
-        return log
+        return trail
+
+    def _still(self, trail: _Trail, changed: bool) -> str:
+        trail.still = 0 if changed else trail.still + 1
+        if trail.still and trail.still % self.STILL == 0:
+            return (
+                f"Note: your last {trail.still} browser calls changed nothing on the page. Stop guessing: if what you need "
+                "has no ref, sits in another site's frame, or does not respond, say plainly what is missing and end the "
+                "task, rather than trying more ways at random."
+            )
+        return ""
+
+    def stalled(self, owner: str) -> str:
+        """A call refused before it reached the page: a made-up ref, a missing argument."""
+        return self._still(self._trail(owner), False)
 
     def acted(self, owner: str, action: str, target: str, url: str, changed: bool) -> str:
-        log = self._log(owner)
+        trail = self._trail(owner)
         key = f"act\x00{action}\x00{target}\x00{url}"
-        before = [c for k, _, c in log if k == key]
-        log.append((key, url, changed))
+        before = [c for k, _, c in trail.log if k == key]
+        trail.log.append((key, url, changed))
+        still = self._still(trail, changed)
         if len(before) >= 2 and not changed and not any(before):
             return (
                 f"Note: that was {action} on {target or 'the page'} {len(before) + 1} times on this page, and the page did not change "
                 "once. Something else is needed: a new BrowserSnapshot (it may be covered, disabled, or elsewhere now), "
                 "BrowserLook to see the page, a scroll, or another element."
-            )
+            ) + (f"\n{still}" if still else "")
         if len(before) >= 3:
             return f"Note: you have done {action} on {target or 'the page'} {len(before) + 1} times on this page. If it is not getting you closer, try another way."
-        return ""
+        return still
 
     def read(self, owner: str, what: str, url: str, text: str) -> str:
-        log = self._log(owner)
+        trail = self._trail(owner)
         key = f"read\x00{what}\x00{url}"
         fingerprint = hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
-        last = log[-1] if log else None
-        log.append((key, fingerprint, False))
+        last = trail.log[-1] if trail.log else None
+        trail.log.append((key, fingerprint, False))
+        changed = trail.page != (url, fingerprint)
+        trail.page = (url, fingerprint)
+        still = self._still(trail, changed)
         if last is not None and last[0] == key and last[1] == fingerprint:
-            return "Note: the page is exactly as it was at your last read; nothing changed since. Act on it, BrowserWait for a change, or move on."
-        return ""
+            return "Note: the page is exactly as it was at your last read; nothing changed since. Act on it, BrowserWait for a change, or move on." + (f"\n{still}" if still else "")
+        return still
 
     def went(self, owner: str, url: str) -> str:
-        log = self._log(owner)
+        trail = self._trail(owner)
         key = f"go\x00{url}"
-        before = sum(1 for k, _, _ in log if k == key)
-        log.append((key, url, True))
+        before = sum(1 for k, _, _ in trail.log if k == key)
+        trail.log.append((key, url, True))
+        still = self._still(trail, trail.page[0] != url)
         if before >= 2:
-            return f"Note: you have opened {url[:200]} {before + 1} times in a short while. If the page is not what you need, try another way to it."
-        return ""
+            return f"Note: you have opened {url[:200]} {before + 1} times in a short while. If the page is not what you need, try another way to it." + (f"\n{still}" if still else "")
+        return still
 
 
 @dataclass(slots=True)
@@ -413,7 +458,16 @@ def explain(exc: BrowserError) -> str:
     if isinstance(exc, FieldForbidden):
         return "This is a password, code or payment field, which only the operator types. Call BrowserHandoff(reason='login', what=…) and let them do it; end your turn afterwards."
     if isinstance(exc, StaleRef):
-        return f"{exc.details.get('ref') or 'that ref'} is not on the page any more. Take a new BrowserSnapshot and use its refs."
+        ref = str(exc.details.get("ref") or "")
+        if re.fullmatch(r"f\d+", ref):
+            # A frame's own ref is not an element; the eval saw models try it with every tool.
+            return (
+                f"{ref} names a frame, not an element in it. Act on the refs inside it (like {ref}e4) where the snapshot "
+                "shows them; where it shows none, the frame's content cannot be read here."
+            )
+        if ref and not REF_SHAPE.fullmatch(ref):
+            return NOT_A_REF.format(ref=ref)
+        return f"{ref or 'that ref'} is not on the page any more. Take a new BrowserSnapshot and use its refs."
     if isinstance(exc, DialogOpen):
         dialog = exc.details.get("dialog") or {}
         return f"The page shows a {dialog.get('type') or 'dialog'}: \"{str(dialog.get('message') or '')[:300]}\". Answer it with BrowserDialog(accept=true or false) first."
@@ -647,6 +701,9 @@ class BrowserAgent:
         current = await self._tab(group, tab)
         params: dict[str, Any] = {"tab_id": current["id"], "max_chars": max(2000, min(caller.budget, 200_000)), "origin": self._origin(caller)}
         if scope:
+            if not REF_SHAPE.fullmatch(scope):
+                self._stalled(caller)
+                raise InvalidRequest(NOT_A_REF.format(ref=scope))
             params["scope_ref"] = scope
         result = await self.service.call(group["id"], "page.snapshot", params, what="reading the page", timeout=40.0)
         url = str(result.get("url") or current.get("url") or "")
@@ -678,6 +735,9 @@ class BrowserAgent:
             raise InvalidRequest("schema shapes what query extracts; give query")
         group = await self._group(caller)
         current = await self._tab(group, tab)
+        if ref and not REF_SHAPE.fullmatch(ref):
+            self._stalled(caller)
+            raise InvalidRequest(NOT_A_REF.format(ref=ref))
         if find:
             return await self._find(caller, group, current, find, regex=regex)
         limit = EXTRACT_MAX_CHARS if query else max(500, min(max_chars or caller.budget, caller.budget, 200_000))
@@ -882,6 +942,10 @@ class BrowserAgent:
             return "the page opened a dialog"
         return ""
 
+    def _stalled(self, caller: Caller) -> None:
+        if hint := self.hints.stalled(self._who(caller)):
+            caller.notes.append(hint)
+
     def _acted(self, caller: Caller, step: Step, tab: dict[str, Any], result: dict[str, Any] | None) -> None:
         """Tell the loop hints what the action did; a note, when it repeats, goes after the result."""
         effects = (result or {}).get("effects") or {}
@@ -969,7 +1033,10 @@ class BrowserAgent:
             kinds = [str(k) for k in sensitive.get("kinds") or []]
             if action == "upload" and "upload" not in kinds:
                 kinds.append("upload")  # a file leaving the machine is asked about whatever the page looks like
-            if action == "type" and step.submit and "credentials" not in kinds and any(f for f in (sensitive.get("evidence") or {}).get("fields") or []):
+            if action == "type" and step.submit and "credentials" not in kinds and any(_secret_field(f) for f in (sensitive.get("evidence") or {}).get("fields") or []):
+                # Enter in the email box of a sign-in form sends the password beside it. Only a form
+                # with a secret field: every form lists its fields, and a site's search box was asked
+                # about as a sign-in on every search.
                 kinds.append("credentials")
             if kinds:
                 typed = text or "".join(n for n, _ in uploads)
@@ -1218,7 +1285,12 @@ class BrowserAgent:
                         raise InvalidRequest(f"steps carries at most {STEPS_MAX} actions; send the rest after seeing what these did")
                     parsed = [Step.parse(raw, f"step {i}: ") for i, raw in enumerate(steps, 1)]
                     return await self.act_steps(caller, parsed, tab=_str(a, "tab"))
-                return await self.act(caller, Step.parse({k: v for k, v in a.items() if k in STEP_KEYS}), tab=_str(a, "tab")), False
+                try:
+                    step = Step.parse({k: v for k, v in a.items() if k in STEP_KEYS})
+                except InvalidRequest:
+                    self._stalled(caller)  # a made-up ref is a call that changed nothing, for the loop notes
+                    raise
+                return await self.act(caller, step, tab=_str(a, "tab")), False
             if tool == "BrowserTabs":
                 return await self.tabs(caller, action=_str(a, "action") or "list", tab=_str(a, "tab"), url=_str(a, "url")), False
             if tool == "BrowserWait":
@@ -1250,6 +1322,17 @@ def _str(arguments: dict[str, Any], key: str) -> str | None:
         return None
     text = str(value)
     return text if text.strip() else None
+
+
+SECRET_AUTOCOMPLETE = ("current-password", "new-password", "one-time-code")
+
+
+def _secret_field(field: Any) -> bool:
+    """Whether a field of the form the daemon describes (``{type, name, autocomplete}``) holds a secret."""
+    if not isinstance(field, dict):
+        return False
+    autocomplete = str(field.get("autocomplete") or "").lower()
+    return str(field.get("type") or "").lower() == "password" or autocomplete in SECRET_AUTOCOMPLETE or autocomplete.startswith("cc-")
 
 
 def _float(arguments: dict[str, Any], key: str) -> float | None:
