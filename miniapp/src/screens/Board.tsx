@@ -136,12 +136,12 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
       </PageHeader>
       <div className="screen wide board">
         {loading && !error && <Skeleton rows={4} />}
-        {error && !tasks && <div className="empty"><b>{t("board.error")}</b><div>{error}</div><button className="btn" onClick={refresh}>{t("common.retry")}</button></div>}
+        {error && !tasks && <div className="empty"><b>{t("board.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
         {tasks && tasks.length === 0 && (
           <div className="empty">
             <b>{t("board.empty")}</b>
             <div>{t("board.empty.sub")}</div>
-            <button className="btn primary" onClick={() => setCreating(true)}>{t("board.add")}</button>
+            <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" size={15} /> {t("board.new")}</button>
           </div>
         )}
         {tasks && tasks.length > 0 && (

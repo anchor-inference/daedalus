@@ -1168,7 +1168,6 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "board.error": { en: "Could not load the board", ru: "Не удалось загрузить доску" },
   "board.empty": { en: "No tasks yet", ru: "Задач пока нет" },
   "board.empty.sub": { en: "The agent keeps this board itself; a task you add here is picked up on its next run.", ru: "Агент ведёт эту доску сам; задачу, добавленную здесь, он возьмёт на следующем запуске." },
-  "board.add": { en: "Add task", ru: "Добавить задачу" },
   "board.delete.title": { en: "Delete “{title}”?", ru: "Удалить «{title}»?" },
   "board.delete.body": { en: "The task leaves the board. Sessions that worked on it are not affected.", ru: "Задача уйдёт с доски. На сессии, которые ей занимались, это не повлияет." },
   "board.delete.action": { en: "Delete task", ru: "Удалить задачу" },
