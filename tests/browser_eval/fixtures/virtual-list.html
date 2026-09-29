@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Orders — Backoffice</title><script src="/eval.js"></script>
+<style>body{font-family:sans-serif;max-width:900px;margin:2em auto}#vp{height:300px;overflow-y:auto;border:1px solid #888;position:relative}#spacer{position:relative}.r{position:absolute;left:0;right:0;height:30px;display:flex;justify-content:space-between;align-items:center;padding:0 8px;border-bottom:1px solid #eee;box-sizing:border-box}.r button{font-size:12px}</style></head>
+<body>
+<h1>Open orders</h1>
+<p>Only the rows in view are drawn; scroll the list to see more.</p>
+<div id="vp"><div id="spacer"></div></div>
+<p id="msg"></p>
+<script>
+  const N = 500, H = 30, vp = document.getElementById('vp'), sp = document.getElementById('spacer');
+  sp.style.height = (N * H) + 'px';
+  const shipped = new Set();
+  function draw() {
+    const first = Math.max(0, Math.floor(vp.scrollTop / H) - 2), last = Math.min(N, first + Math.ceil(300 / H) + 4);
+    sp.innerHTML = '';
+    for (let i = first; i < last; i++) {
+      const id = 4000 + i;
+      const r = document.createElement('div'); r.className = 'r'; r.style.top = (i * H) + 'px';
+      r.innerHTML = '<span>Order #' + id + '</span><span>' + (shipped.has(id) ? 'shipped' : 'waiting') + '</span>';
+      const b = document.createElement('button'); b.textContent = 'Mark shipped';
+      b.onclick = () => { shipped.add(id); record('virtual-list', 'shipped', { order: id }); document.getElementById('msg').textContent = 'Order #' + id + ' marked shipped.'; draw(); };
+      r.appendChild(b); sp.appendChild(r);
+    }
+  }
+  vp.addEventListener('scroll', draw); draw();
+</script>
+</body></html>

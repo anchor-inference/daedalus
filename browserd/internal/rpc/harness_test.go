@@ -61,6 +61,7 @@ func fixture(t *testing.T) *httptest.Server {
 	page("/anim", "Anim", `<div style="position:fixed;inset:0;background:conic-gradient(red,yellow,lime,aqua,blue,magenta,red);animation:s 2s linear infinite"></div><style>@keyframes s{to{transform:rotate(360deg)}}</style>`)
 	page("/button", "Button", `<button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:60px" onclick="document.title='clicked '+event.isTrusted">Press</button>`)
 	page("/popup", "Popup", `<a id="a" href="/still" target="_blank" style="position:absolute;left:100px;top:100px;width:200px;height:60px;display:block">open</a>`)
+	page("/confirm-writes", "Confirm", `<button onclick="if (confirm('Reset?')) document.getElementById('m').textContent = 'Filters reset.'">Reset</button><p id="m">Four filters.</p>`)
 	page("/dialog", "Dialog", `<button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:60px" onclick="document.title=confirm('Leave?')?'yes':'no'">Ask</button>`)
 	mux.Handle("/site/", http.StripPrefix("/site/", http.FileServer(http.Dir("testdata/site"))))
 	mux.HandleFunc("/file.txt", func(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +88,47 @@ func fixture(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/go", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, r.URL.Query().Get("to"), http.StatusFound)
 	})
+	// Pages of three sites for the frames tests, told apart by the name they are asked for (the
+	// tests' wall sends every name to this fixture).
+	xsite := func(path, body string) {
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, "<!doctype html><html><head><meta charset=\"utf-8\"></head><body style=\"margin:0;font:16px sans-serif\">"+body+"</body></html>")
+		})
+	}
+	xsite("/xsite/outer", `<title>Outer</title><h1>Checkout</h1>`+
+		`<iframe src="http://pay.example/xsite/pay" title="Payment" style="width:600px;height:320px;border:0"></iframe>`+
+		`<iframe src="http://cdn.shop.example/xsite/widget" title="Widget" style="width:400px;height:80px;border:0"></iframe>`)
+	xsite("/xsite/pay", `<title>Pay</title><form>`+
+		`<p><label>Name on card <input autocomplete="cc-name" value="SECRET-cc-name" style="width:300px;height:30px"></label></p>`+
+		`<p><label>Card <input autocomplete="cc-number" value="SECRET-cc-number" style="width:300px;height:30px"></label></p>`+
+		`<p><label>Note <input id="note"></label></p>`+
+		`<button type="button" style="width:120px;height:30px" onclick="document.getElementById('st').textContent='paid'">Pay now</button>`+
+		`<p id="st">unpaid</p></form>`+
+		`<iframe src="http://deep.example/xsite/deep" title="Deep" style="width:300px;height:50px;border:0"></iframe>`)
+	xsite("/xsite/deep", `<title>Deep</title><button onclick="this.textContent='deep clicked'">Deep button</button>`)
+	// A frame placed as a real page places one: centred, with a border, holding small controls, each
+	// page with the browser's own margins.
+	whole := func(path, doc string) {
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, doc)
+		})
+	}
+	whole("/xsite/centred", `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Centred</title>`+
+		`<style>body{font-family:sans-serif;max-width:900px;margin:2em auto}iframe{width:100%;height:260px;border:1px solid #ccc}</style></head>`+
+		`<body><h1>Contents insurance</h1><p>The best offer is shown by the insurer's own widget.</p>`+
+		`<iframe src="http://pay.example/xsite/quote" title="Insurer quote"></iframe></body></html>`)
+	whole("/xsite/quote", `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Quote</title><style>body{font-family:sans-serif}</style></head>`+
+		`<body><h3>Oakline</h3><p>Contents cover.</p>`+
+		`<label><input type="radio" name="term" value="monthly" checked> Pay monthly</label>`+
+		`<label><input type="radio" name="term" value="yearly"> Pay yearly</label>`+
+		`<p><button id="save">Save</button></p><p id="m"></p>`+
+		`<script>document.getElementById('save').onclick = () => { document.getElementById('m').textContent = 'saved ' + document.querySelector('input:checked').value; };</script>`+
+		`</body></html>`)
+	xsite("/xsite/widget", `<title>Widget</title><button onclick="this.textContent='widget clicked'">Widget button</button>`)
+	// A text a pattern of nested repeats takes forever over, for the search's time limit.
+	page("/backtrack", "Backtrack", "<p>"+strings.Repeat("a", 40)+"!</p>")
 	mux.HandleFunc("/after-login", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "<title>Signed in</title>signed in")
 	})

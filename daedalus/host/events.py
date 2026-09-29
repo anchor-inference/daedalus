@@ -470,6 +470,13 @@ class HarnessCheck(TypedDict):
     error: NotRequired[str]
 
 
+class HarnessModels(TypedDict):
+    env: str
+    harness: str
+    models: list[str] | None
+    """The models now offered; None when every one is."""
+
+
 @dataclass(frozen=True, slots=True)
 class EventSpec:
     payload: type
@@ -533,6 +540,7 @@ REGISTRY: dict[str, EventSpec] = {
     "presence": EventSpec(Presence, persist=False, stream=False),
     "harness.updated": EventSpec(HarnessUpdated),
     "harness.check": EventSpec(HarnessCheck),
+    "harness.models": EventSpec(HarnessModels),
 }
 
 GAP = "bus.gap"

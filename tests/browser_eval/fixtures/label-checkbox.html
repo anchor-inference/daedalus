@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Display preferences — Tasklane</title>
+<style>body{font-family:sans-serif;max-width:640px;margin:2em auto}.opt{display:flex;align-items:center;gap:10px;margin:12px 0;cursor:pointer}.opt input{position:absolute;opacity:0;width:1px;height:1px}.box{width:18px;height:18px;border:2px solid #555;border-radius:4px}.opt input:checked+.box{background:#36c;border-color:#36c}</style></head>
+<body>
+<h1>Display preferences</h1>
+<form method="post" action="/submit/label-checkbox">
+<label class="opt"><input type="checkbox" name="dark" value="on"><span class="box"></span><span>Dark theme</span></label>
+<label class="opt"><input type="checkbox" name="compact" value="on"><span class="box"></span><span>Compact rows</span></label>
+<label class="opt"><input type="checkbox" name="weekends" value="on" checked><span class="box"></span><span>Show weekends</span></label>
+<label class="opt"><input type="checkbox" name="numbers" value="on"><span class="box"></span><span>Week numbers</span></label>
+<input type="hidden" name="sent" value="1">
+<p><button type="submit">Apply</button></p>
+</form>
+</body></html>

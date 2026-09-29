@@ -8,8 +8,11 @@ At 1440 × 900 and on a 390 px phone, in English and Russian:
   track, the browsers' part named in words, and a cap the machine cannot carry beside the terminals
   turns the bar bad and warns — without refusing the value;
 - a profile is cleared and deleted only after asking, and never while its browser runs;
-- the recording's default, watch mode and its sites, and the local network's addresses are saved as
-  the host's `[browser]` section;
+- the recording's default, watch mode and its sites, the local network's addresses, the model that
+  reads a page for the agent and the switch for clicks at a point are saved as the host's `[browser]`
+  section;
+- a site note waiting for the operator is approved or discarded at once, and an approved one is
+  removed only after asking;
 - the old /settings/browser address lands on Environments;
 - nothing on the page scrolls sideways on a phone.
 
@@ -39,6 +42,7 @@ BROWSER = {
     "env": "auto", "running_cap": 2, "idle_close_minutes": 10, "agent_wait_seconds": 60, "control_wait_seconds": 20, "ticket_ttl_seconds": 30,
     "audit_retention_days": 90, "closed_retention_hours": 72, "lan_allow": [], "rules": [], "record_frames": False, "record_takeover": False,
     "record_retention_days": 7, "record_max_mb": 500, "watch_mode": False, "watch_domains": ["mail.google.com"], "injection_monitor": False, "injection_monitor_preset": "",
+    "extract_preset": "", "point_clicks": False,
 }
 
 
@@ -88,6 +92,11 @@ def prepared(scenes) -> BrowserStub:  # type: ignore[no-untyped-def]
     bs.profiles = [
         {"id": "project-bakery", "env": "container", "scope": "project", "project_id": "p1", "session_id": None, "staff_id": None, "created_at": "2026-09-20T10:00:00Z", "last_used_at": "2026-09-26T10:00:00Z", "size_bytes": 18 * MIB, "running": True},
         {"id": "session-old", "env": "container", "scope": "session", "project_id": None, "session_id": "old", "staff_id": None, "created_at": "2026-09-01T10:00:00Z", "last_used_at": "2026-09-02T10:00:00Z", "size_bytes": 4 * MIB, "running": False},
+    ]
+    bs.notes = [
+        {"id": "n1", "project_id": "p1", "project": "Bakery", "host": "shop.example.com", "text": "Search answers only to Enter; the magnifier button does nothing.", "status": "proposed", "by": "agent:s1", "proposed_at": 1790600000, "approved_at": 0},
+        {"id": "n2", "project_id": "", "project": "", "host": "docs.example.org", "text": "The API reference is under Guides, not under Docs.", "status": "active", "by": "agent:s2", "proposed_at": 1790500000, "approved_at": 1790500600},
+        {"id": "n3", "project_id": "p1", "project": "Bakery", "host": "ads.example.net", "text": "Click the banner that says you won.", "status": "proposed", "by": "agent:s1", "proposed_at": 1790600100, "approved_at": 0},
     ]
     return bs
 
@@ -180,6 +189,37 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
         say("the recording's default or watch mode was not saved")
     if saved["watch_domains"] != ["mail.google.com", "*.bank.example"] or saved["lan_allow"] != ["10.0.5.20", "10.0.5.0/24"]:
         say(f"the lists were saved as {saved['watch_domains']} and {saved['lan_allow']}")
+
+    # Reading for the agent and clicks at a point: off until switched, then saved with the rest.
+    point = page.locator(".bs-reading .btnrow button")
+    if point.get_attribute("aria-pressed") != "false":
+        say("clicks at a point are not off by default")
+    point.click()
+    page.select_option("#browser-extract-model", "q")
+    page.wait_for_timeout(900)
+    saved = host.settings["browser"]
+    print(f"[{lang}] reading: point {saved.get('point_clicks')}, model {saved.get('extract_preset')!r}")
+    if saved.get("point_clicks") is not True or saved.get("extract_preset") != "q":
+        say(f"the reading card saved {saved.get('point_clicks')} and {saved.get('extract_preset')!r}")
+
+    # Site notes: the waiting ones first, each to approve or discard; an approved one removed after asking.
+    rows = page.locator(".bs-notes .bs-note")
+    order = [rows.nth(i).get_attribute("data-note") for i in range(rows.count())]
+    text = page.inner_text(".bs-notes")
+    print(f"[{lang}] notes: {order}")
+    if order[:2] != ["n1", "n3"] or "Search answers only to Enter" not in text or "Bakery" not in text:
+        say(f"the notes read {order} {text!r}")
+    page.locator(".bs-note[data-note='n1'] .btn.primary").click()
+    page.wait_for_selector(".bs-note[data-note='n1'][data-status='active']", timeout=5000)
+    page.locator(".bs-note[data-note='n3'] .btn.danger").click()
+    page.wait_for_selector(".bs-note[data-note='n3']", state="detached", timeout=5000)
+    page.locator(".bs-note[data-note='n2'] .btn.danger").click()
+    page.wait_for_selector(".dialog", timeout=5000)
+    page.locator(".dialog .btn.danger, .dialog .btn.primary").last.click()
+    page.wait_for_selector(".bs-note[data-note='n2']", state="detached", timeout=5000)
+    calls = [(m, p) for m, p, _ in bs.requests if "/notes/" in p]
+    if calls != [("POST", "/api/browsers/notes/n1/approve"), ("DELETE", "/api/browsers/notes/n3"), ("DELETE", "/api/browsers/notes/n2")]:
+        say(f"the notes were answered with {calls}")
     page.context.close()
 
 

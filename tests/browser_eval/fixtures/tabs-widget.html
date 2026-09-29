@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Aerolite 2 tent — Summit Supply</title>
+<style>body{font-family:sans-serif;max-width:760px;margin:2em auto}.tabs{display:flex;gap:4px;border-bottom:2px solid #333}.tabs div{padding:8px 16px;cursor:pointer;background:#eee}.tabs div.on{background:#333;color:#fff}.panel{display:none;padding:1em 0}.panel.on{display:block}</style></head>
+<body>
+<h1>Aerolite 2 tent</h1>
+<p>€389 · two-person, three-season.</p>
+<div class="tabs"><div class="on" data-p="d">Description</div><div data-p="s">Specifications</div><div data-p="r">Reviews (41)</div></div>
+<div class="panel on" id="d"><p>A freestanding tent that pitches in under three minutes.</p></div>
+<div class="panel" id="s"></div>
+<div class="panel" id="r"><p>"Survived a storm on the Kjølen ridge." — Mats</p></div>
+<script>
+  document.querySelectorAll('.tabs div').forEach(t => t.addEventListener('click', () => {
+    document.querySelectorAll('.tabs div').forEach(o => o.classList.remove('on'));
+    document.querySelectorAll('.panel').forEach(o => o.classList.remove('on'));
+    t.classList.add('on'); const p = document.getElementById(t.dataset.p); p.classList.add('on');
+    if (t.dataset.p === 's' && !p.innerHTML) p.innerHTML = '<ul><li>Packed weight: 1.37 kg</li><li>Floor area: 2.9 m²</li><li>Peak height: 102 cm</li><li>Poles: DAC Featherlite</li></ul>';
+  }));
+</script>
+</body></html>

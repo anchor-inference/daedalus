@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Annual report 2025 — Meridian Trust</title><script src="/eval.js"></script>
+<style>body{font-family:sans-serif;max-width:760px;margin:2em auto}#veil{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;display:none}#pop{position:fixed;top:15%;left:50%;transform:translateX(-50%);width:420px;background:#fff;padding:2em;z-index:51;display:none;border-radius:8px}.x{position:absolute;right:12px;top:8px;cursor:pointer;font-size:22px}.get{padding:12px 24px;background:#0b6;border:0;color:#fff;font-size:16px}</style></head>
+<body>
+<h1>Annual report 2025</h1>
+<p>Our results, our funds' performance and the letter from the chair.</p>
+<p><button class="get" id="get">Read the full report</button></p>
+<p id="status"></p>
+<article id="report" hidden><h2>Annual report 2025 — full version</h2><p>Assets under management rose 6.1% to €48.2 billion.</p></article>
+<div id="veil"></div>
+<div id="pop" role="dialog" aria-modal="true" aria-labelledby="ph"><span class="x" id="x">×</span><h2 id="ph">Stay in the loop</h2><p>Join 30,000 readers of our quarterly outlook.</p><input placeholder="Your email"> <button>Join</button></div>
+<script>
+  setTimeout(() => { document.getElementById('veil').style.display = 'block'; document.getElementById('pop').style.display = 'block'; }, 600);
+  function shut() { document.getElementById('veil').style.display = 'none'; document.getElementById('pop').style.display = 'none'; }
+  document.getElementById('x').addEventListener('click', shut);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') shut(); });
+  document.getElementById('get').onclick = () => { record('modal-overlay', 'get'); document.getElementById('status').textContent = 'The full report is now open below.'; document.getElementById('report').hidden = false; };
+</script>
+</body></html>

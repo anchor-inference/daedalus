@@ -293,6 +293,11 @@ class FileStore:
         )
         return [dict(r) for r in rows]
 
+    async def deliveries(self, file_id: str, target: str) -> int:
+        """How many times these bytes were written to that member-local path, this time included."""
+        row = await self.db.fetchone("SELECT count(*) AS n FROM file_transfers WHERE file_id = ? AND action = 'delivered' AND target = ?", (file_id, target))
+        return int(row["n"]) if row else 0
+
     async def delivered(self, file_id: str, target: str) -> bool:
         """Whether these bytes were already written to that member-local path."""
         row = await self.db.fetchone("SELECT 1 FROM file_transfers WHERE file_id = ? AND action = 'delivered' AND target = ? LIMIT 1", (file_id, target))

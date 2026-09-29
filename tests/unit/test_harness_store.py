@@ -169,3 +169,20 @@ async def test_the_catalog_lists_every_harness_with_what_is_derived_from_the_cod
     assert [name for name, e in entries.items() if e["adapter"]] == ["claude", "codex", "opencode", "pi", "grok"]
     assert all(not e["installed"] for e in await catalog.harnesses("host"))
     assert catalog.capabilities("grok").steer == "cancel_and_send"
+
+
+async def test_the_models_offered_are_a_choice_per_environment_that_outlives_a_check(db: Database) -> None:
+    catalog = HarnessCatalog(HarnessStore(db))
+    install = InstallInfo(True, "/opt/claude/bin/claude", "2.1.281", "native")
+    await catalog.store.record_check("container", "claude", install=install, login=LoginState("yes"), catalog=Catalog(models=("opus", "claude-opus-5-5", "claude-sonnet-5-5")))
+    assert await catalog.store.offered_models("container", "claude") is None
+    await catalog.store.set_offered_models("container", "claude", ["claude-sonnet-5-5", "claude-opus-5-5"])
+    assert await catalog.store.offered_models("host", "claude") is None and await catalog.store.offered_models("container", "codex") is None
+    # A check that could only read the aliases does not drop what the operator chose: it is still named.
+    await catalog.store.record_check("container", "claude", install=install, login=LoginState("yes"), catalog=Catalog(models=("opus", "claude-sonnet-5-5")))
+    claude = (await catalog.harnesses("container"))[0]
+    assert (claude["models"], claude["all_models"], claude["models_chosen"]) == (["claude-sonnet-5-5", "claude-opus-5-5"], ["opus", "claude-sonnet-5-5"], True)
+    await catalog.store.set_offered_models("container", "claude", None)
+    assert (await catalog.harnesses("container"))[0]["models"] == ["opus", "claude-sonnet-5-5"]
+    with pytest.raises(HarnessStoreError):
+        await catalog.store.set_offered_models("moon", "claude", ["opus"])

@@ -619,6 +619,18 @@ async def release(orch: Orchestrators, project: Project, session_id: str, *, sta
 # -- the command-line agents ---------------------------------------------------------------------------------------
 
 
+def _models_line(entry: dict[str, Any]) -> str:
+    """The models a CLI offers. When the operator chose some, those are the ones to hire with and to
+    call by name; the rest are counted, and said to be usable, so a model the operator asks for by
+    name is never refused as unknown."""
+    offered = [str(m) for m in entry.get("models") or []]
+    if not entry.get("models_chosen"):
+        return f"  models: {', '.join(offered) or 'unknown'}"
+    others = len([m for m in entry.get("all_models") or [] if m not in offered])
+    rest = f"; {others} other model{'' if others == 1 else 's'} of this CLI can still be named when asked for" if others else ""
+    return f"  models the operator offers: {', '.join(offered)}{rest}"
+
+
 async def harnesses(orch: Orchestrators, project: Project, session_id: str, *, harness: str | None = None, env: str | None = None, folder: str | None = None) -> str:
     """What each executor can do here, read from the harness catalog, with whether a runtime is there
     to start it — the two things a hire depends on."""
@@ -664,13 +676,12 @@ async def harnesses(orch: Orchestrators, project: Project, session_id: str, *, h
     for where in environments:
         caps = manager.capabilities(name)
         lines.append(f"{caps.label} in the {where}: steer {caps.steer}, status from {caps.status_channel_label}" + ("" if name in runtimes else "; no staff runtime here yet"))
+        found: dict[str, Any] = next((e for e in await manager.harnesses(where) if e.get("harness") == name), {})
+        lines.append(_models_line(found))
         if catalog_of is None:
-            found: dict[str, Any] = next((e for e in await manager.harnesses(where) if e.get("harness") == name), {})
-            lines.append(f"  models: {', '.join(found.get('models') or []) or 'unknown'}")
             lines.append(f"  agents: {', '.join(str(a.get('name')) for a in found.get('agents') or [] if isinstance(a, dict)) or 'none known'}")
             continue
         catalog = await catalog_of(where, name, target.id if target is not None and target.env == where else None)
-        lines.append(f"  models: {', '.join(catalog.models) or 'unknown'}")
         lines.append(f"  agents: {', '.join(f'{a.name} ({a.source})' for a in catalog.agents) or 'none known'}")
         if catalog.modes:
             lines.append(f"  permission modes: {', '.join(catalog.modes)}")

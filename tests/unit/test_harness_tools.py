@@ -4,14 +4,16 @@ ones answered, and the install and update commands it would run."""
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
-from daedalus.harness.contract import InstallInfo
+from daedalus.harness.contract import ExecResult, InstallInfo, ProgramNotFound
 from daedalus.harness.tools import (
     NODE_SHA256,
     NODE_VERSION,
     TOOLING,
+    ClaudeTooling,
     install_method,
     installer_script,
     node_install_script,
@@ -131,3 +133,83 @@ def test_every_cli_has_tooling_and_a_way_to_sign_in() -> None:
     assert tooling("codex").sign_in == ("codex", "login", "--device-auth")
     with pytest.raises(KeyError):
         tooling("daedalus")
+
+
+# What ``git grep --only-matching`` found in the native Claude Code 2.1.284 program, a line per match
+# (shortened): dated twins, versions the picker dropped, and a longer id no model has.
+CLAUDE_PROGRAM_IDS = """claude-opus-4-20250514
+claude-haiku-4-5
+claude-sonnet-3-7
+claude-opus-4-1-20250805
+claude-opus-5-5
+claude-fable-5
+claude-haiku-3-55
+claude-opus-4-8
+claude-opus-4
+claude-sonnet-4-5-20250929
+claude-sonnet-5-5
+claude-opus-4-1
+claude-fable-5-1
+claude-opus-5
+claude-sonnet-4-0
+claude-sonnet-5
+claude-opus-5-5
+"""
+
+
+class ProgramPort:
+    """An environment with ``claude`` on PATH as a link, answering ``git grep`` in the places named."""
+
+    name = "host"
+    home = "/home/operator"
+
+    def __init__(self, found: dict[str, str], *, version: str = "2.1.284 (Claude Code)") -> None:
+        self.found = found
+        self.version = version
+        self.greps: list[str] = []
+
+    async def run(self, argv: list[str], *, cwd: str | None = None, env: Any = None, timeout: float = 30.0) -> ExecResult:
+        if argv[:2] == ["claude", "--version"]:
+            return ExecResult(exit_code=0, stdout=self.version, stderr="", path="/home/operator/.local/bin/claude")
+        assert argv[0] == "git" and "--no-index" in argv, argv
+        place = f"{cwd}/{argv[-1]}"
+        self.greps.append(place)
+        if place not in self.found:
+            return ExecResult(exit_code=1, stdout="", stderr="", path="/usr/bin/git")
+        return ExecResult(exit_code=0, stdout=self.found[place], stderr="", path="/usr/bin/git")
+
+
+def test_claude_models_are_the_undated_versions_its_program_names_newest_first() -> None:
+    assert ClaudeTooling.model_ids(CLAUDE_PROGRAM_IDS) == (
+        "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-1",
+        "claude-fable-5-1", "claude-fable-5",
+        "claude-sonnet-5-5", "claude-sonnet-5",
+        "claude-haiku-4-5",
+    )
+    assert ClaudeTooling.model_ids("claude-opus-4-20250514 claude-sonnet-3-7 claude-haiku-3-5") == ()
+
+
+async def test_claude_models_are_read_through_the_link_and_fall_back_to_the_aliases() -> None:
+    ClaudeTooling._scanned.clear()
+    native = "/home/operator/.local/share/claude/versions/2.1.284"
+    port = ProgramPort({native: CLAUDE_PROGRAM_IDS})
+    models = await ClaudeTooling().models(port)  # type: ignore[arg-type]
+    assert models[:4] == ("fable", "opus", "sonnet", "haiku") and models[4:6] == ("claude-opus-5-5", "claude-opus-5")
+    # The link itself yields nothing (git does not follow it); the versions directory does.
+    assert port.greps == ["/home/operator/.local/bin/claude", native]
+    assert await ClaudeTooling().models(port) == models and len(port.greps) == 2, "one version is read once"  # type: ignore[arg-type]
+    assert tooling("claude").cheapest_model(models) == "haiku"
+
+    ClaudeTooling._scanned.clear()
+    npm = ProgramPort({"/home/operator/.local/lib/node_modules/@anthropic-ai/claude-code/.": "claude-sonnet-5-5\n"}, version="2.1.290 (Claude Code)")
+    assert await ClaudeTooling().models(npm) == ("fable", "opus", "sonnet", "haiku", "claude-sonnet-5-5")  # type: ignore[arg-type]
+
+    # A program that names no model, or no program at all: the aliases, which always work.
+    ClaudeTooling._scanned.clear()
+    assert await ClaudeTooling().models(ProgramPort({})) == ClaudeTooling.ALIASES  # type: ignore[arg-type]
+
+    class Missing(ProgramPort):
+        async def run(self, argv: list[str], **_: Any) -> ExecResult:
+            raise ProgramNotFound("claude is not an executable on PATH")
+
+    assert await ClaudeTooling().models(Missing({})) == ClaudeTooling.ALIASES  # type: ignore[arg-type]

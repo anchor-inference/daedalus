@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Community meetup — October programme</title><script src="/eval.js"></script>
+<style>body{font-family:sans-serif;max-width:760px;margin:2em auto}section{min-height:110vh;border-top:1px solid #ccc;padding-top:1em}</style></head>
+<body>
+<h1>October community meetup</h1>
+<p>Saturday 18 October, the old tram depot. Doors open at 10:00.</p>
+<section><h2>Morning talks</h2><p>Three short talks on neighbourhood energy co-operatives, a repair café report and the new library hours.</p></section>
+<section><h2>Lunch</h2><p>Soup and bread from the bakery on Kade Street. Vegan options are available.</p></section>
+<section><h2>Workshops</h2><p>Bike maintenance, seed swapping and an introduction to the tool library.</p></section>
+<section><h2>Afternoon</h2><p>A walk along the canal led by the historical society, followed by the open microphone.</p></section>
+<section><h2>Getting there</h2><p>Tram 4 to the depot stop; bicycle racks are at the north entrance.</p></section>
+<section><h2>Attend</h2><p>Let us know you are coming so we bake enough bread.</p>
+<p><label for="g">Guests</label> <select id="g"><option>1</option><option>2</option><option>3</option><option>4</option></select></p>
+<p><button id="rsvp">Confirm attendance</button></p><p id="ok"></p></section>
+<script>
+  document.getElementById('rsvp').onclick = () => { const g = document.getElementById('g').value; record('long-page', 'rsvp', { guests: g }); document.getElementById('ok').textContent = 'See you there — ' + g + ' guest(s).'; };
+</script>
+</body></html>

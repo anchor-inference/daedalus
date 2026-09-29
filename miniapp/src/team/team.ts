@@ -103,7 +103,11 @@ export type CatalogEntry = {
   latest?: string;
   logged_in?: boolean;
   agents?: { name: string; source?: string }[];
+  /** The models the operator chose to offer, or every model when there is no choice. */
   models?: string[];
+  /** Every model the CLI listed: the ones not offered are still hired with when named. */
+  all_models?: string[];
+  models_chosen?: boolean;
   error?: string;
   checked_at?: string;
   /** The installed version against the adapter's tested range: "" inside it, "verified" outside but
@@ -112,6 +116,15 @@ export type CatalogEntry = {
   tested_versions?: [string, string];
 };
 export type Catalog = Partial<Record<Harness, CatalogEntry>>;
+
+/** The hiring form's model list: the offered models first, and — only when the operator chose some —
+ *  every other model the CLI listed after them, because a choice shortens the list and never takes a
+ *  model away. */
+export function modelGroups(entry: Pick<CatalogEntry, "models" | "all_models" | "models_chosen"> | null | undefined): { offered: string[]; others: string[] } {
+  const offered = entry?.models ?? [];
+  const others = entry?.models_chosen ? (entry.all_models ?? []).filter((m) => !offered.includes(m)) : [];
+  return { offered, others };
+}
 
 export type Unavailable = "" | "notinstalled" | "loggedout" | "error";
 

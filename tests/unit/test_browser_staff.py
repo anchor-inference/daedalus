@@ -55,7 +55,13 @@ def test_the_launch_file_is_the_native_tools_word_for_word() -> None:
     assert file["server"] == SERVER and file["hold_ms"] == 330_000 and "not instructions" in file["instructions"]
     assert [t["name"] for t in file["tools"]] == list(BROWSER_TOOLS)
     act = next(t for t in file["tools"] if t["name"] == "BrowserAct")
-    assert act["inputSchema"]["required"] == ["action", "element"] and "element is required" in act["description"]
+    # One action or steps of several: neither is required by the schema, and the agent says which is missing.
+    assert act["inputSchema"]["required"] == [] and "element is required" in act["description"]
+    steps = act["inputSchema"]["properties"]["steps"]["anyOf"][0]
+    assert steps["type"] == "array" and steps["items"]["type"] == "object" and "steps=[" in act["description"]
+    text = next(t for t in file["tools"] if t["name"] == "BrowserText")
+    assert {"find", "regex", "query", "schema"} <= set(text["inputSchema"]["properties"])
+    assert {"x", "y"} <= set(act["inputSchema"]["properties"])
     assert set(READ_ONLY_TOOLS) < set(BROWSER_TOOLS) and "BrowserAct" not in READ_ONLY_TOOLS
 
 

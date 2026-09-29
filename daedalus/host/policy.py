@@ -774,7 +774,9 @@ class Policy:
         scheme = urlsplit(text).scheme.lower()
         if scheme not in BROWSER_SCHEMES:
             what = f"{scheme}: URLs" if scheme else "an address without http:// or https://"
-            return Decision(DENY, f"the browser opens http and https pages only, not {what}", "browser.scheme")
+            # The eval saw models reach for view-source: and javascript: when a page did not show what they
+            # wanted; the refusal names what reads a page instead.
+            return Decision(DENY, f"the browser opens http and https pages only, not {what}; BrowserText reads a page's text and BrowserText(find=…) searches it", "browser.scheme")
         return self._web(text)
 
     def _config_rules(self, tool: str, text: str, current: Decision) -> Decision:

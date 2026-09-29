@@ -361,7 +361,12 @@ export type BrowserSettings = {
   watch_domains: string[];
   injection_monitor: boolean;
   injection_monitor_preset: string;
+  extract_preset: string;
+  point_clicks: boolean;
 };
+
+/** A note an agent proposed about a site (`GET /api/browsers/notes`): shown to agents there only once approved. */
+export type BrowserSiteNote = { id: string; project_id: string; project: string; host: string; text: string; status: "proposed" | "active"; by: string; proposed_at: number; approved_at: number };
 
 export type TerminalView = {
   id: string;

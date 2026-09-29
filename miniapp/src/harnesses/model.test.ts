@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentSource, checkSummary, refusedStaff, rowState, signIn, updateCount, versionMark } from "./model";
+import { agentSource, checkSummary, offeredDraft, offeredToSend, refusedStaff, rowState, signIn, updateCount, versionMark } from "./model";
 
 const row = (over: Partial<Parameters<typeof rowState>[0]> = {}) => ({ operation: null, installed: true, installable: false, logged_in: "yes" as const, can_sign_in: true, update_available: false, ...over });
 
@@ -48,5 +48,18 @@ describe("what a row says", () => {
     expect(refusedStaff({ detail: "…", staff: [{ name: "Ira", project: "Bakery 2.0" }, { name: "Max" }, "junk", { project: "no name" }] })).toEqual(["Ira (Bakery 2.0)", "Max"]);
     expect(refusedStaff(undefined)).toEqual([]);
     expect([agentSource("project"), agentSource("builtin"), agentSource(undefined)]).toEqual(["harness.agent.project", "harness.agent.builtin", "harness.agent.user"]);
+  });
+});
+
+describe("the models a row offers", () => {
+  const all = ["opus", "claude-opus-5-5", "claude-opus-4-8", "claude-sonnet-5-5"];
+  it("starts from nothing ticked when there is no choice, from the choice otherwise", () => {
+    expect(offeredDraft({ models: all, all_models: all, models_chosen: false })).toEqual([]);
+    expect(offeredDraft({ models: ["claude-opus-5-5", "gone-model"], all_models: all, models_chosen: true })).toEqual(["claude-opus-5-5"]);
+  });
+  it("sends the ticked ones in the CLI's order, and no choice for all or none", () => {
+    expect(offeredToSend(["claude-sonnet-5-5", "claude-opus-5-5"], all)).toEqual(["claude-opus-5-5", "claude-sonnet-5-5"]);
+    expect(offeredToSend([...all], all)).toBeNull();
+    expect(offeredToSend([], all)).toBeNull();
   });
 });

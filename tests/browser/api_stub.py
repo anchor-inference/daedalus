@@ -215,6 +215,7 @@ GATES: dict[str, object] = {
     "/api/browsers/running": {"browsers": []},
     "/api/browsers/profiles": {"profiles": []},
     "/api/browsers/recordings": {"envs": []},
+    "/api/browsers/notes": {"notes": []},
     # Without a browser installed, the workloads are the terminals alone: their own bar.
     "/api/workloads/load": {"terminals": terminal_load(), "browsers": None, "together": None},
     # Terminal environments and the terminals in them: a container environment that works, a host
@@ -403,14 +404,14 @@ def expect_app(base: str) -> None:
 
 
 
-__all__ = ["VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "HarnessesStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tool_groups", "terminal_load"]
+__all__ = ["VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tool_groups", "terminal_load"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent
 # it can offer and one it cannot, with the reason.
 CATALOG: dict[str, object] = {
-    "claude": {"installed": True, "version": "2.1.40", "latest": "2.1.40", "logged_in": True, "agents": [{"name": "code-reviewer", "source": "project"}], "models": ["opus", "sonnet"], "error": "", "checked_at": "2026-09-24T09:00:00Z"},
-    "codex": {"installed": True, "version": "0.40.0", "latest": "0.41.0", "logged_in": False, "agents": [], "models": ["gpt-5.2-codex"], "error": "", "checked_at": "2026-09-24T09:00:00Z"},
+    "claude": {"installed": True, "version": "2.1.40", "latest": "2.1.40", "logged_in": True, "agents": [{"name": "code-reviewer", "source": "project"}], "models": ["opus", "sonnet"], "all_models": ["opus", "sonnet"], "models_chosen": False, "error": "", "checked_at": "2026-09-24T09:00:00Z"},
+    "codex": {"installed": True, "version": "0.40.0", "latest": "0.41.0", "logged_in": False, "agents": [], "models": ["gpt-5.2-codex"], "all_models": ["gpt-5.2-codex"], "models_chosen": False, "error": "", "checked_at": "2026-09-24T09:00:00Z"},
 }
 
 
@@ -1399,6 +1400,12 @@ CAPABILITIES: dict[str, dict] = {
 }
 
 
+# Claude Code's models as the host reads them from the installed program: the aliases, then each
+# version the /model picker offers, newest first within each family.
+CLAUDE_ALIASES = ["fable", "opus", "sonnet", "haiku"]
+CLAUDE_VERSIONS = ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-fable-5-1", "claude-sonnet-5-5", "claude-sonnet-5", "claude-haiku-4-5"]
+
+
 class HarnessesStub:
     """The harness manager's routes (``api_harnesses.py``) over the five CLIs of M7, kept between
     requests: a check moves ``checked_at``, an update or install leaves the row busy with its
@@ -1416,6 +1423,7 @@ class HarnessesStub:
         self.working = working if working is not None else {"codex": [{"harness": "codex", "staff_id": "st-max", "name": "Max", "project": "Bakery 2.0", "project_id": "b4k3ry20f0c5", "env": "container", "staff_session_id": "ss-max", "status": "turn_done_unseen"}]}
         self.host = host
         self.posted: list[tuple[str, dict]] = []
+        self.put: list[tuple[str, dict]] = []
         passed = {"ok": True, "version": "", "duration_ms": 8200, "at": self.checked, "steps": [{"name": n, "ok": True, "skipped": False, "detail": d, "duration_ms": 900} for n, d in (("version", ""), ("supported", "within the tested versions"), ("signin", "signed in"), ("launch", ""), ("ready", "SessionStart"), ("team", "team tools said hello"), ("deliver", "one line acknowledged"), ("reply", "Report came through the team channel"), ("exit", "exit code 0"))]}
         failed = {"ok": False, "version": "1.0.40", "duration_ms": 30100, "at": self.checked, "steps": [{"name": "version", "ok": True, "skipped": False, "detail": "1.0.40", "duration_ms": 300}, {"name": "launch", "ok": True, "skipped": False, "detail": "", "duration_ms": 600}, {"name": "ready", "ok": False, "skipped": False, "detail": "no SessionStart within 30 s", "duration_ms": 30000}]}
 
@@ -1424,7 +1432,7 @@ class HarnessesStub:
             installed = bool(version)
             row = {
                 "env": "container", "harness": harness, "label": caps["label"], "installed": installed, "installed_version": version, "latest_version": latest, "install_method": "npm" if harness in ("codex", "opencode", "pi") else "native",
-                "binary_path": "", "logged_in": login, "login_detail": detail, "agents": agents, "models": models, "modes": [], "efforts": [], "profiles": [],
+                "binary_path": "", "logged_in": login, "login_detail": detail, "agents": agents, "models": models, "all_models": models, "models_chosen": False, "modes": [], "efforts": [], "profiles": [],
                 "self_check": ({**check, "version": check.get("version") or version} if check else {}), "checked_at": self.checked, "latest_checked_at": self.checked, "error": "",
                 "status_channel": caps["status_channel"], "status_channel_label": caps["status_channel_label"], "steer": caps["steer"], "tested_versions": caps["tested_versions"],
                 "tested": installed, "supported": installed, "adapter": True, "version_guard": "", "update_available": installed and latest != version, "self_check_ok": check["ok"] if check else None,
@@ -1436,7 +1444,7 @@ class HarnessesStub:
         claude_agents = [{"name": "default", "source": "builtin"}, {"name": "frontend-developer", "source": "user"}, {"name": "code-reviewer", "source": "project"}, {"name": "copywriter", "source": "project"}]
         self.rows: dict[str, list[dict]] = {
             "container": [
-                entry("claude", "2.1.281", "2.1.281", "yes", "subscription · max", claude_agents, ["opus", "sonnet", "haiku", "fable"], passed),
+                entry("claude", "2.1.281", "2.1.281", "yes", "subscription · max", claude_agents, [*CLAUDE_ALIASES, *CLAUDE_VERSIONS], passed),
                 entry("codex", "0.155.1", "0.156.1", "yes", "ChatGPT", [{"name": "reviewer", "source": "user"}, {"name": "api", "source": "project"}, {"name": "tester", "source": "project"}], ["gpt-5.2-codex", "gpt-5.2-codex-mini", "o5"], passed),
                 entry("opencode", "1.18.23", "1.18.32", "yes", "keys: 2", [{"name": n, "source": "builtin"} for n in ("build", "plan", "general", "review", "docs")], [f"provider/model-{i}" for i in range(42)], passed),
                 entry("pi", "", "0.87.1", "unknown", "", [], [], None),
@@ -1457,6 +1465,29 @@ class HarnessesStub:
         rows = self.rows[env]
         return {"env": env, "environments": ["container", "host"] if self.host else ["container"], "rows": rows, "node": self.node[env], "checked_at": self.checked, "updates": sum(1 for r in rows if r["update_available"])}
 
+    def catalog_view(self, env: str) -> dict:
+        """``GET /api/harnesses/catalog`` from these rows, as the host's ``catalog_view`` builds it."""
+        return {
+            r["harness"]: {
+                "installed": r["installed"], "version": r["installed_version"], "latest": r["latest_version"], "logged_in": {"yes": True, "no": False}.get(r["logged_in"]),
+                "agents": r["agents"], "models": r["models"], "all_models": r["all_models"], "models_chosen": r["models_chosen"], "error": r["error"], "checked_at": r["checked_at"],
+                "version_guard": r["version_guard"], "tested_versions": r["tested_versions"], "unavailable": r["unavailable"],
+            }
+            for r in self.rows[env]
+        }
+
+    def offer(self, env: str, harness: str, models: list[str] | None) -> tuple[int, object]:
+        """``PUT /api/harnesses/{harness}/models``: only a listed model can be chosen; none offers all."""
+        row = next((r for r in self.rows[env] if r["harness"] == harness), None)
+        if row is None:
+            return 404, {"detail": "no such harness"}
+        unknown = [m for m in models or [] if m not in row["all_models"]]
+        if unknown:
+            return 400, {"detail": f"{row['label']} in the {env} environment lists no model {unknown[0]!r}"}
+        chosen = [m for m in row["all_models"] if m in (models or [])]
+        row.update(models=chosen or list(row["all_models"]), models_chosen=bool(chosen))
+        return 200, {"row": row}
+
     def answer(self, method: str, path: str, query: str, body: dict | None) -> tuple[int, object] | None:
         if not path.startswith("/api/harnesses") or path == "/api/harnesses/catalog" or path.endswith("/catalog"):
             return None
@@ -1466,6 +1497,9 @@ class HarnessesStub:
             return 422, {"detail": "env is container or host"}
         if method == "GET" and path == "/api/harnesses":
             return 200, self.screen(env)
+        if method == "PUT" and path.endswith("/models") and path.count("/") == 4:
+            self.put.append((path, dict(body or {})))
+            return self.offer(env, path.split("/")[3], (body or {}).get("models"))
         if method != "POST":
             return None
         self.posted.append((path, dict(body or {})))

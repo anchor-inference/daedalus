@@ -408,3 +408,22 @@ async def test_the_host_answers_in_the_shapes_the_app_reads(served: Served) -> N
     async with served.http() as http:
         listed = (await http.get("/api/browsers", params={"session": group.removeprefix("s-")}, headers=H)).json()
     assert listing_required <= set(listed)
+
+
+async def test_site_notes_are_reviewed_through_the_routes_in_the_apps_shape(served: Served) -> None:
+    notes = served.app.extensions["browser_notes"]
+    project = await served.app.manager.projects.create("Bakery", [])
+    waiting = await notes.propose(project_id=project.id, host="shop.test", text="Search answers only to Enter", by="agent:s1")
+    approved = await notes.propose(project_id="", host="docs.test", text="The API reference is under Guides", by="agent:s2")
+    await notes.approve(approved["id"])
+    required, optional = _ts_fields("BrowserSiteNote")
+    async with served.http() as http:
+        listed = (await http.get("/api/browsers/notes", headers=H)).json()["notes"]
+        # Waiting ones first: they are what the operator comes for.
+        assert [n["id"] for n in listed] == [waiting["id"], approved["id"]] and listed[0]["project"] == "Bakery" and listed[1]["project"] == ""
+        assert all(set(n) == required | optional for n in listed), [set(n) ^ required for n in listed]
+        assert (await http.post(f"/api/browsers/notes/{waiting['id']}/approve", headers=H)).json()["note"]["status"] == "active"
+        assert (await http.delete(f"/api/browsers/notes/{approved['id']}", headers=H)).status_code == 200
+        assert (await http.delete(f"/api/browsers/notes/{approved['id']}", headers=H)).status_code == 404
+        assert (await http.post("/api/browsers/notes/nope/approve", headers=H)).status_code == 404
+    assert [n.text for n in await notes.active_for(project.id, "shop.test")] == ["Search answers only to Enter"]

@@ -1,6 +1,8 @@
+- [viewport 1280x800, the page fits]
 - main
   - heading "Checkout" [level=1]
   - textbox "Full name" [ref=e1]
   - textbox "Card number" [ref=e2] [secret]
   - textbox "Security code" [ref=e3] [secret]
   - button "Place order" [ref=e4]
+- [end of page]

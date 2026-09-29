@@ -15,6 +15,7 @@ import (
 func (d *Daemon) registerPage(s *server.Server) {
 	for name, h := range map[string]server.Handler{
 		"page.snapshot":   d.snapshot,
+		"page.find":       d.find,
 		"page.text":       d.text,
 		"page.screenshot": d.screenshot,
 		"page.act":        d.act,
@@ -34,6 +35,7 @@ func (d *Daemon) snapshot(ctx context.Context, c *server.Conn, params json.RawMe
 		TabID    string          `json:"tab_id"`
 		ScopeRef string          `json:"scope_ref,omitempty"`
 		MaxChars int             `json:"max_chars,omitempty"`
+		View     string          `json:"view,omitempty"`
 		Origin   *browser.Origin `json:"origin,omitempty"`
 	}
 	if err := decode(params, &p); err != nil {
@@ -43,7 +45,26 @@ func (d *Daemon) snapshot(ctx context.Context, c *server.Conn, params json.RawMe
 	if err != nil {
 		return nil, err
 	}
-	return d.Page.Snapshot(ctx, t, p.ScopeRef, p.MaxChars)
+	return d.Page.Snapshot(ctx, t, p.ScopeRef, p.MaxChars, p.View)
+}
+
+func (d *Daemon) find(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		TabID         string          `json:"tab_id"`
+		Query         string          `json:"query"`
+		Regex         bool            `json:"regex,omitempty"`
+		CaseSensitive bool            `json:"case_sensitive,omitempty"`
+		Max           int             `json:"max,omitempty"`
+		Origin        *browser.Origin `json:"origin,omitempty"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	t, err := d.gatedTab(ctx, p.TabID, p.Origin)
+	if err != nil {
+		return nil, err
+	}
+	return d.Page.Find(ctx, t, p.Query, p.Regex, p.CaseSensitive, p.Max)
 }
 
 func (d *Daemon) text(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
@@ -122,10 +143,7 @@ func (d *Daemon) dialogAnswer(ctx context.Context, c *server.Conn, params json.R
 	if err != nil {
 		return nil, err
 	}
-	if err := d.Page.AnswerDialog(ctx, t, p.Accept, p.Text); err != nil {
-		return nil, err
-	}
-	return map[string]any{}, nil
+	return d.Page.AnswerDialog(ctx, t, p.Accept, p.Text)
 }
 
 func (d *Daemon) downloadList(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {

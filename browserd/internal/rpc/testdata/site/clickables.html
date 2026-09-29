@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Clickables</title>
+<style>
+.card{border:1px solid #999;margin:6px;padding:6px;width:300px}
+.heart,.chip{cursor:pointer}
+.chip{display:inline-block;padding:2px 6px;border:1px solid #666}
+.toggle input{opacity:0;position:absolute;width:1px;height:1px}
+.toggle span{display:inline-block;width:40px;height:20px;background:#ccc}
+#photo{display:none}
+#pane{height:100px;overflow:auto;border:1px solid #000;width:300px}
+#pane p{margin:0;height:25px}
+.menu{position:relative;display:inline-block;padding:4px}.menu .sub{display:none;position:absolute;top:100%;left:0;background:#fff}
+.menu:hover .sub{display:block}
+</style></head>
+<body>
+<nav aria-label="Top"><div class="menu">Account<div class="sub"><a href="/still?p=profile">Profile</a></div></div></nav>
+<main>
+  <h1>Clickables</h1>
+  <div class="card" id="plain">Open the plain card</div>
+  <div class="card" id="linked"><h3>Linked card</h3><a href="/still">Read more</a></div>
+  <p><span class="heart" id="heart">Save</span> for later</p>
+  <div class="chip" id="chip"><b>Filter:</b> <i>red</i></div>
+  <p>Posted by <span class="by"><a href="/still?u=1">someone</a></span> today.</p>
+  <label class="toggle"><input type="checkbox" id="dark"><span></span> Dark mode</label>
+  <label for="photo" class="chip">Upload a picture</label><input type="file" id="photo">
+  <label>Country <select id="country"><option>Austria</option><option>Belgium</option><option>Croatia</option>
+    <option>Denmark</option><option>Estonia</option><option>Finland</option><option>Germany</option>
+    <option>Hungary</option><option>Ireland</option><option>Japan</option><option>Kenya</option><option>Laos</option></select></label>
+  <div id="pane"><p>Row 1</p><p>Row 2</p><p>Row 3</p><p>Row 4</p><p>Row 5</p><p>Row 6</p><p>Row 7</p><p>Row 8</p>
+    <p>Row 9</p><p>Row 10</p><p>Row 11</p><p>Row 12</p></div>
+</main>
+<script>
+document.getElementById("plain").addEventListener("click", () => document.title = "plain clicked");
+document.getElementById("linked").addEventListener("click", () => {});
+document.getElementById("heart").addEventListener("click", () => document.title = "saved");
+document.getElementById("chip").addEventListener("pointerdown", () => {});
+document.getElementById("dark").addEventListener("change", (e) => document.title = "dark " + e.target.checked);
+document.getElementById("photo").addEventListener("change", (e) => document.title = "photo " + e.target.files[0].name);
+</script>
+</body></html>

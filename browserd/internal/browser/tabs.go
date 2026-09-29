@@ -125,6 +125,9 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 		// no bodies are kept.
 		{"Network.enable", map[string]any{"maxTotalBufferSize": 0, "maxResourceBufferSize": 0}},
 		{"Emulation.setUserAgentOverride", map[string]any{"userAgent": b.userAgent, "userAgentMetadata": b.uaMetadata}},
+		// The frames of other sites, each in a process of its own, are attached to as they come, so
+		// the page model can read them (Manager.attachFrame).
+		{"Target.setAutoAttach", map[string]any{"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true}},
 	} {
 		replies = append(replies, b.conn.Send(ctx, session, call.method, call.params))
 		methods = append(methods, call.method)

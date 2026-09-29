@@ -6,8 +6,11 @@
 // Every operation answers at once and finishes in the background; the rows follow the manager's
 // `harness.check` and `harness.updated` events. An update the host refuses because staff are working
 // on that CLI says who, on the row, so the operator knows whom to release.
+//
+// A row's details also hold which of its models are offered: the operator ticks the few the hiring
+// form and the orchestrator should present, by model and version, and every other one stays usable.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError } from "../api";
 import { useEvent } from "../events";
 import { relTime, relTimeLong } from "../format";
@@ -20,7 +23,7 @@ import { HarnessBadge } from "../team/parts";
 import type { Harness } from "../team/team";
 import { errorText } from "../ui";
 import { channelWords } from "../staff/model";
-import { agentSource, checkSummary, type HarnessRow, type HarnessScreen, refusedStaff, rowState, signIn, updateCount, versionMark } from "../harnesses/model";
+import { agentSource, checkSummary, type HarnessRow, type HarnessScreen, offeredDraft, offeredToSend, refusedStaff, rowState, signIn, updateCount, versionMark } from "../harnesses/model";
 
 type Env = "container" | "host";
 const key = (env: Env) => `/api/harnesses?env=${env}`;
@@ -65,6 +68,17 @@ export function HarnessesScreen({ toast }: { toast: (text: string) => void }) {
       toast(errorText(e));
     } finally {
       setChecking(false);
+      invalidate("/api/harnesses");
+    }
+  }
+  async function offer(row: HarnessRow, models: string[] | null) {
+    try {
+      const answer = await api.put<{ row: HarnessRow }>(`/api/harnesses/${row.harness}/models`, { env, models });
+      if (data && answer?.row) prime(key(env), { ...data, rows: data.rows.map((r) => (r.harness === row.harness ? answer.row : r)) });
+      toast(t(models ? "harness.models.saved" : "harness.models.reset", { name: row.label }));
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
       invalidate("/api/harnesses");
     }
   }
@@ -127,14 +141,14 @@ export function HarnessesScreen({ toast }: { toast: (text: string) => void }) {
             </thead>
             <tbody>
               {rows.map((row) => (
-                <TableRow key={row.harness} row={row} open={open === row.harness} onToggle={() => setOpen((o) => (o === row.harness ? null : row.harness))} onAct={() => act(row)} refused={refused[`${row.harness}:update`] ?? []} />
+                <TableRow key={row.harness} row={row} open={open === row.harness} onToggle={() => setOpen((o) => (o === row.harness ? null : row.harness))} onAct={() => act(row)} onOffer={(models) => offer(row, models)} refused={refused[`${row.harness}:update`] ?? []} />
               ))}
             </tbody>
           </table>
         )}
         {data && !wide && (
           <div className="harness-cards">
-            {rows.map((row) => <Card key={row.harness} row={row} open={open === row.harness} onToggle={() => setOpen((o) => (o === row.harness ? null : row.harness))} onAct={() => act(row)} refused={refused[`${row.harness}:update`] ?? []} />)}
+            {rows.map((row) => <Card key={row.harness} row={row} open={open === row.harness} onToggle={() => setOpen((o) => (o === row.harness ? null : row.harness))} onAct={() => act(row)} onOffer={(models) => offer(row, models)} refused={refused[`${row.harness}:update`] ?? []} />)}
           </div>
         )}
         {data && env === "container" && (
@@ -187,7 +201,12 @@ function SignIn({ row }: { row: HarnessRow }) {
 function Models({ row }: { row: HarnessRow }) {
   if (!row.models.length) return <span className="sub">—</span>;
   const shown = row.models.slice(0, 4).join(" · ");
-  return <span className="harness-models" title={row.models.join(", ")}>{shown}{row.models.length > 4 ? ` ${t("harness.more", { n: row.models.length - 4 })}` : ""}</span>;
+  return (
+    <span className="harness-models" title={row.models.join(", ")} data-chosen={row.models_chosen}>
+      {shown}{row.models.length > 4 ? ` ${t("harness.more", { n: row.models.length - 4 })}` : ""}
+      {row.models_chosen && <span className="sub harness-models-of"> · {t("harness.models.of", { n: row.models.length, total: row.all_models.length })}</span>}
+    </span>
+  );
 }
 
 function Action({ row, onAct }: { row: HarnessRow; onAct: () => void }) {
@@ -211,9 +230,57 @@ function Action({ row, onAct }: { row: HarnessRow; onAct: () => void }) {
   );
 }
 
-/** What unfolds under a row: the agents with where each is defined, the last self-check step by step,
- *  and why staff cannot run on it, when they cannot. */
-function Details({ row }: { row: HarnessRow }) {
+/** The row's "Models to offer": every model the CLI listed, the chosen ones ticked. Saving sends the
+ *  ticked ones; ticking none (or all) is no choice, and offers every model again. */
+function OfferedModels({ row, onOffer }: { row: HarnessRow; onOffer: (models: string[] | null) => Promise<void> }) {
+  const all = row.all_models ?? [];
+  const initial = offeredDraft(row);
+  const [draft, setDraft] = useState<string[]>(initial);
+  const [busy, setBusy] = useState(false);
+  // A save, an event or another window changes the row; the ticks follow it.
+  const current = initial.join("\n");
+  useEffect(() => setDraft(current ? current.split("\n") : []), [current]);
+  if (all.length === 0) return <div className="sub">{t("harness.models.offer.none")}</div>;
+  const sending = offeredToSend(draft, all);
+  const changed = JSON.stringify(sending) !== JSON.stringify(row.models_chosen ? offeredToSend(initial, all) : null);
+  const toggle = (model: string) => setDraft((d) => (d.includes(model) ? d.filter((m) => m !== model) : [...d, model]));
+  async function save(models: string[] | null) {
+    setBusy(true);
+    try {
+      await onOffer(models);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="harness-offer" data-harness={row.harness}>
+      <div className="sub">{t("harness.models.offer.hint")}</div>
+      <div className="harness-offer-list" role="group" aria-label={t("harness.models.offer")}>
+        {all.map((m) => (
+          <label key={m} className="harness-offer-model" data-model={m}>
+            <input type="checkbox" checked={draft.includes(m)} disabled={busy} onChange={() => toggle(m)} />
+            <span className="mono truncate">{m}</span>
+          </label>
+        ))}
+      </div>
+      <div className="harness-offer-actions">
+        <button
+          className="btn small"
+          data-offer="all"
+          disabled={busy || (!row.models_chosen && draft.length === 0)}
+          onClick={() => (row.models_chosen ? void save(null) : setDraft([]))}
+        >
+          {t("harness.models.all")}
+        </button>
+        <button className="btn small primary" data-offer="save" disabled={busy || !changed} onClick={() => void save(sending)}>{t("common.save")}</button>
+      </div>
+    </div>
+  );
+}
+
+/** What unfolds under a row: the agents with where each is defined, which models are offered, the
+ *  last self-check step by step, and why staff cannot run on it, when they cannot. */
+function Details({ row, onOffer }: { row: HarnessRow; onOffer: (models: string[] | null) => Promise<void> }) {
   const summary = checkSummary(row.self_check);
   const steps = "steps" in row.self_check && Array.isArray(row.self_check.steps) ? row.self_check.steps : [];
   return (
@@ -233,6 +300,8 @@ function Details({ row }: { row: HarnessRow }) {
           ))}
         </ul>
       )}
+      <div className="harness-details-label">{t("harness.models.offer")}</div>
+      <OfferedModels row={row} onOffer={onOffer} />
       <div className="harness-details-label">{t("harness.selfcheck")}</div>
       <div className={`harness-check-line ${summary.key === "harness.check.failed" ? "failed" : ""}`}>
         {t(summary.key, { step: summary.step, n: summary.skipped })}
@@ -253,9 +322,9 @@ function Details({ row }: { row: HarnessRow }) {
   );
 }
 
-type RowProps = { row: HarnessRow; open: boolean; onToggle: () => void; onAct: () => void; refused: string[] };
+type RowProps = { row: HarnessRow; open: boolean; onToggle: () => void; onAct: () => void; onOffer: (models: string[] | null) => Promise<void>; refused: string[] };
 
-function TableRow({ row, open, onToggle, onAct, refused }: RowProps) {
+function TableRow({ row, open, onToggle, onAct, onOffer, refused }: RowProps) {
   return (
     <>
       <tr className={`harness-row ${open ? "open" : ""}`} data-harness={row.harness} data-state={rowState(row)}>
@@ -278,13 +347,13 @@ function TableRow({ row, open, onToggle, onAct, refused }: RowProps) {
         <tr className="harness-row-refused"><td colSpan={8}><Refused names={refused} /></td></tr>
       )}
       {open && (
-        <tr className="harness-row-details"><td colSpan={8}><Details row={row} /></td></tr>
+        <tr className="harness-row-details"><td colSpan={8}><Details row={row} onOffer={onOffer} /></td></tr>
       )}
     </>
   );
 }
 
-function Card({ row, open, onToggle, onAct, refused }: RowProps) {
+function Card({ row, open, onToggle, onAct, onOffer, refused }: RowProps) {
   return (
     <article className="harness-card" data-harness={row.harness} data-state={rowState(row)}>
       <div className="harness-card-head">
@@ -303,7 +372,7 @@ function Card({ row, open, onToggle, onAct, refused }: RowProps) {
         {plural("harness.agents.count", row.agents.length)}
         <Icon name="chevron" size={14} />
       </button>
-      {open && <Details row={row} />}
+      {open && <Details row={row} onOffer={onOffer} />}
     </article>
   );
 }
