@@ -94,7 +94,7 @@ from daedalus.speech import service as speech_service
 from daedalus.speech import tts_catalog
 from daedalus.speech.engine import CACHE as ENGINE_CACHE
 from daedalus.speech.engine import SAMPLE_RATE, SpeechError, clamp_rate
-from daedalus.speech.service import recogniser_available, transcribe_recording
+from daedalus.speech.service import note_transcribers, recogniser_available, transcribe_recording
 from daedalus.speech.tts_engine import CACHE as VOICE_CACHE
 from daedalus.speech.tts_engine import MAX_SPEED, MIN_SPEED, TtsError
 from daedalus.speech.tts_service import MEDIA_TYPE_HEADER, SEQUENCE_TYPE
@@ -151,6 +151,27 @@ SESSION_COOKIE = "daedalus_session"
 SESSION_TTL = 30 * 24 * 3600
 VOICE_AUDIO_MAX = 25 << 20
 """One spoken utterance, not a recording session: anything larger is a mistake, not speech."""
+VOICE_NOTE_MAX = 50 << 20
+"""A composer voice note. The site sends 16 kHz WAV, so this is over twenty minutes of talking."""
+KEPT_RECORDINGS = ".voice-notes"
+"""Where, under a session's inbox, a voice note waits until its words are in the composer."""
+KEPT_NAME = re.compile(r"[0-9a-f]{12}\.[a-z0-9]{1,5}")
+"""What a kept recording is called; a name from the client that is not this is not looked up."""
+KEPT_RECORDING_DAYS = 7
+"""A kept recording nobody retried or discarded is let go after this long."""
+
+
+def forget_old_recordings(kept: Path) -> None:
+    """Delete kept voice notes older than :data:`KEPT_RECORDING_DAYS`, so the folder does not grow forever."""
+    if not kept.is_dir():
+        return
+    horizon = time.time() - KEPT_RECORDING_DAYS * 86400
+    for path in kept.iterdir():
+        with suppress(OSError):
+            if path.is_file() and path.stat().st_mtime < horizon:
+                path.unlink()
+
+
 VOICE_SAY_MAX_CHARS = 4000
 """One utterance in words. Dictation runs long, a pasted document is not speech: past this it is refused."""
 
@@ -2449,59 +2470,97 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.get("/api/asr")
     async def asr_status(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """Whether the site may offer a microphone: speech-to-text is configured and its endpoint resolves."""
+        """Whether the site may offer a microphone: something here can turn a recording into words."""
         asr = app.config.asr
-        ready = asr_configured(asr)
+        chain = note_transcribers(app.speech, app.config)
         reason = ""
-        if ready:
+        if asr_configured(asr):
             try:
                 effective_asr(asr, manager)
             except TranscriptionError as exc:
-                ready, reason = False, str(exc)
-        local = app.speech.state()
-        if local["active"]:
-            # A local model can still turn a recording into words when no endpoint is set, so the
-            # microphone stays on that installation. A configured Voice Notes endpoint is preferred
-            # for the file itself (see transcribe_recording).
-            ready, reason = True, ""
+                reason = str(exc)
+                chain = [who for who in chain if who.kind != "cloud"]
+        elif not chain:
+            reason = "no speech-to-text endpoint or local model is chosen"
         return {
-            "configured": ready,
-            "reason": reason,
+            "configured": bool(chain),
+            "reason": "" if chain else reason,
             "provider": asr.provider,
             "model": asr.model,
             "max_seconds": asr.max_seconds,
             "autosend": asr.autosend,
-            "local": local,
+            "transcriber": asr.transcriber,
+            "fallback": asr.fallback,
+            # What will actually be tried, in order, after the settings met what is installed.
+            "chain": [{"kind": who.kind, "model": who.model} for who in chain],
+            "local": app.speech.state(),
         }
 
     @api.post("/api/sessions/{session_id}/transcribe")
-    async def transcribe_audio(session_id: str, audio: UploadFile = File(...), _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """A recording from the site's microphone → its words, marked as a transcript, for the composer."""
+    async def transcribe_audio(
+        session_id: str,
+        audio: UploadFile | None = File(None),
+        recording: str = Form(""),
+        _: dict[str, Any] = Depends(auth),
+    ) -> dict[str, Any]:
+        """A recording from the site's microphone → its words, marked as a transcript, for the composer.
+
+        A recording that could not be transcribed is kept, not deleted: the error names it, and a retry
+        sends that name instead of the audio again. A long voice note used to be lost whole to one
+        refusal from the endpoint; now nothing the operator said leaves this host's disk until its
+        words have.
+        """
         state = await manager.get_state(session_id)
         if state is None:
             raise HTTPException(404, "no such session")
         if not recogniser_available(app.speech, app.config):
             raise HTTPException(409, "speech-to-text is not set up (Settings → Voice → Speech recognition)")
-        suffix = Path(audio.filename or "").suffix or mimetypes.guess_extension((audio.content_type or "").split(";")[0]) or ".webm"
-        inbox = state.workspace / "inbox"
-        inbox.mkdir(parents=True, exist_ok=True)
-        target = inbox / f".recording-{secrets.token_hex(4)}{suffix}"
-        size = 0
-        with target.open("wb") as fh:
-            while chunk := await audio.read(1 << 20):
-                size += len(chunk)
-                if size > 50 << 20:
-                    fh.close()
-                    target.unlink(missing_ok=True)
-                    raise HTTPException(413, "recording is over 50 MB")
-                fh.write(chunk)
+        kept = state.workspace / "inbox" / KEPT_RECORDINGS
+        forget_old_recordings(kept)
+        if recording:
+            if not KEPT_NAME.fullmatch(recording) or not (kept / recording).is_file():
+                raise HTTPException(404, "that recording is no longer kept; send the audio again")
+            target = kept / recording
+        elif audio is not None:
+            suffix = Path(audio.filename or "").suffix or mimetypes.guess_extension((audio.content_type or "").split(";")[0]) or ".webm"
+            if not re.fullmatch(r"\.[A-Za-z0-9]{1,5}", suffix):
+                suffix = ".webm"
+            kept.mkdir(parents=True, exist_ok=True)
+            target = kept / f"{secrets.token_hex(6)}{suffix.lower()}"
+            size = 0
+            try:
+                with target.open("wb") as fh:
+                    while chunk := await audio.read(1 << 20):
+                        size += len(chunk)
+                        if size > VOICE_NOTE_MAX:
+                            raise HTTPException(413, f"a recording may be up to {VOICE_NOTE_MAX >> 20} MB")
+                        fh.write(chunk)
+            except BaseException:
+                # A half-written upload is not a recording worth keeping: the browser still has it.
+                target.unlink(missing_ok=True)
+                raise
+        else:
+            raise HTTPException(422, "send the audio, or the name of a kept recording")
         try:
             transcript = await transcribe_recording(app.speech, app.config, manager, target)
         except TranscriptionError as exc:
-            raise HTTPException(502, str(exc)) from exc
-        finally:
-            target.unlink(missing_ok=True)
+            logger.warning("voice note %s kept after a failed transcription: %s", target.name, exc)
+            raise HTTPException(502, {"message": str(exc), "recording": target.name}) from exc
+        target.unlink(missing_ok=True)
         return {"transcript": transcript, "text": voice_note_text(transcript), "autosend": app.config.asr.autosend}
+
+    @api.delete("/api/sessions/{session_id}/transcribe/{recording}")
+    async def forget_recording(session_id: str, recording: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Let go of a kept recording: the operator attached it as a file, or discarded it."""
+        state = await manager.get_state(session_id)
+        if state is None:
+            raise HTTPException(404, "no such session")
+        if not KEPT_NAME.fullmatch(recording):
+            raise HTTPException(404, "no such recording")
+        path = state.workspace / "inbox" / KEPT_RECORDINGS / recording
+        existed = path.is_file()
+        path.unlink(missing_ok=True)
+        return {"deleted": existed}
 
     # -- voice: the concierge page ---------------------------------------------------
 
