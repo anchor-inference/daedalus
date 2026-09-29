@@ -170,7 +170,10 @@ function drawStatus(status) {
   el("telegram").textContent = status.telegram ? T("status.on") : T("status.off");
   el("appurl").textContent = status.app_url;
   el("appurl").href = status.app_url;
-  el("busy").textContent = status.busy ? status.busy + "…" : "";
+  // The operation in words — "Updating…" — beside a turning mark; the bare action name ("update…")
+  // read as a stray label. An action without a line of its own ("installing …") is already a phrase.
+  el("busy").textContent = status.busy ? table["busy." + status.busy] ?? status.busy + "…" : "";
+  el("busy").classList.toggle("on", Boolean(status.busy));
   for (const button of document.querySelectorAll("button[data-action]")) {
     button.disabled = Boolean(status.busy);
   }
