@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Trail Runner 3 — Fleetfoot</title><script src="/eval.js"></script>
+<style>body{font-family:sans-serif;max-width:900px;margin:2em auto}.cta{display:inline-block;background:#e4572e;color:#fff;padding:12px 28px;border-radius:6px;cursor:pointer;font-weight:bold}.sizes span{display:inline-block;border:1px solid #999;padding:6px 10px;margin:2px}.sizes span.on{background:#222;color:#fff}</style></head>
+<body>
+<h1>Trail Runner 3</h1>
+<p>€119.00 · Lightweight trail shoe with a rock plate.</p>
+<div class="sizes" id="sizes">Size: <span>41</span><span>42</span><span>43</span><span>44</span><span>45</span></div>
+<p id="picked">No size chosen.</p>
+<div class="cta" id="add">Add to bag</div>
+<p id="bag">Your bag is empty.</p>
+<script>
+  let size = null;
+  document.querySelectorAll('#sizes span').forEach(s => s.addEventListener('click', () => {
+    document.querySelectorAll('#sizes span').forEach(o => o.classList.remove('on'));
+    s.classList.add('on'); size = s.textContent; document.getElementById('picked').textContent = 'Size ' + size + ' chosen.';
+  }));
+  document.getElementById('add').addEventListener('click', () => {
+    if (!size) { document.getElementById('bag').textContent = 'Choose a size first.'; return; }
+    record('div-button', 'add', { size: size });
+    document.getElementById('bag').textContent = 'Added Trail Runner 3, size ' + size + ', to your bag.';
+  });
+</script>
+</body></html>

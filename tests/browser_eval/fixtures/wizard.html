@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Start your trial — Metricly</title>
+<style>body{font-family:sans-serif;max-width:640px;margin:2em auto}.step{display:none}.step.on{display:block}label{display:block;margin:.5em 0}</style></head>
+<body>
+<h1>Start your free trial</h1>
+<form method="post" action="/submit/wizard" id="f">
+<div class="step on" id="s1"><h2>1. Choose a plan</h2>
+  <label><input type="radio" name="plan" value="starter" checked> Starter — 3 dashboards</label>
+  <label><input type="radio" name="plan" value="team"> Team — 20 dashboards, 10 seats</label>
+  <label><input type="radio" name="plan" value="scale"> Scale — unlimited</label>
+  <button type="button" id="n1">Next</button></div>
+<div class="step" id="s2"><h2>2. Your workspace</h2>
+  <label>Workspace name <input name="workspace"></label>
+  <label>Team size <select name="size"><option>1–5</option><option>6–20</option><option>21–100</option><option>100+</option></select></label>
+  <button type="button" id="b2">Back</button> <button type="button" id="n2">Next</button></div>
+<div class="step" id="s3"><h2>3. Review</h2><p id="rev"></p>
+  <button type="button" id="b3">Back</button> <button type="submit">Start trial</button></div>
+</form>
+<script>
+  const go = n => { document.querySelectorAll('.step').forEach(s => s.classList.remove('on')); document.getElementById('s' + n).classList.add('on'); };
+  document.getElementById('n1').onclick = () => go(2);
+  document.getElementById('b2').onclick = () => go(1);
+  document.getElementById('n2').onclick = () => { const f = new FormData(document.getElementById('f')); document.getElementById('rev').textContent = 'Plan ' + f.get('plan') + ', workspace "' + f.get('workspace') + '", ' + f.get('size') + ' people.'; go(3); };
+  document.getElementById('b3').onclick = () => go(2);
+</script>
+</body></html>

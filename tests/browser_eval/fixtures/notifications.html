@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Notifications — Ledgerly</title>
+<style>body{font-family:sans-serif;max-width:640px;margin:2em auto}.sw{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #eee}</style></head>
+<body>
+<h1>Notification settings</h1>
+<form method="post" action="/submit/hover-menu">
+<div class="sw"><label for="a">Invoice paid</label><input type="checkbox" id="a" name="paid" value="on" checked></div>
+<div class="sw"><label for="b">Invoice overdue</label><input type="checkbox" id="b" name="overdue" value="on" checked></div>
+<div class="sw"><label for="c">Weekly digest</label><input type="checkbox" id="c" name="digest" value="on" checked></div>
+<div class="sw"><label for="d">Product news</label><input type="checkbox" id="d" name="news" value="on"></div>
+<input type="hidden" name="sent" value="1">
+<p><button type="submit">Save preferences</button></p>
+</form>
+</body></html>
