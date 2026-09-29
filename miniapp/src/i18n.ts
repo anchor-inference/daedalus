@@ -3777,7 +3777,7 @@ Object.assign(DICT, {
   "questions.asker.permission": { en: "{name} asks for permission", ru: "{name} просит разрешения" },
   "questions.asker.staff": { en: "{name} asks", ru: "Спрашивает {name}" },
   "questions.urgent": { en: "blocking", ru: "блокирует" },
-  "questions.host": { en: "host", ru: "хост" },
+  "questions.host": { en: "on your machine", ru: "на вашем компьютере" },
   "questions.more": { en: "Show more", ru: "Показать больше" },
   "questions.less": { en: "Show less", ru: "Свернуть" },
   "questions.options": { en: "Options", ru: "Варианты" },

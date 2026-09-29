@@ -1216,7 +1216,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 {busy && <LiveTurn base={tail} live={live} onTurnAction={turnAction} onRender={pinBottom} />}
               </SessionContext.Provider>
               {flow}
-              {questionScope && <QuestionsLine count={waiting} onOpen={() => panel.open("questions")} />}
+              {/* Not while the Questions tab is the one open: the cards are already beside the chat,
+                  and an "Open" that opens what is on screen had people clicking and waiting for
+                  something new to appear. */}
+              {questionScope && panel.state.tab !== "questions" && <QuestionsLine count={waiting} onOpen={() => panel.open("questions")} />}
             </div>
           </div>
           {!atBottom && (
