@@ -28,9 +28,11 @@ def test_the_public_audit_refuses_a_committed_binary_and_a_machine_path() -> Non
     """``scripts/audit_public.sh --self-check`` proves itself against a fixture, and passes this tree.
 
     The audit is what stands between this repository and a push, so what matters is not that it exits
-    0 but that it is able to exit anything else. Its own self-check builds a repository holding a
-    committed ELF binary and a file naming the account it is running as, requires the audit to refuse
-    both by name, and then requires it to pass the real tree.
+    0 but that it is able to exit anything else. Its own self-check plants one fault per rule family
+    and requires each to be refused by name, then proves the history arm: a credential that lives only
+    in an older commit, a shallow checkout, a commit list that repeats one id, and an enumeration that
+    fails must each be refused rather than reported clean. Each arm is asserted here by its line, so a
+    self-check that stopped running one of them fails this test instead of passing quietly.
     """
     import subprocess
     from pathlib import Path
@@ -38,5 +40,13 @@ def test_the_public_audit_refuses_a_committed_binary_and_a_machine_path() -> Non
     script = Path(__file__).resolve().parents[2] / "scripts" / "audit_public.sh"
     done = subprocess.run(["bash", str(script), "--self-check"], capture_output=True, text=True)
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "refuses a committed binary and a machine path" in done.stdout
-    assert "passes this tree" in done.stdout
+    for arm in (
+        "refuses a committed binary and a machine path, a provider token, an internal address and a tooling trailer",
+        "passes this tree",
+        "refuses a pattern that survives only in history",
+        "carries the commit once",
+        "refuses to certify a checkout whose history git records as short",
+        "counts distinct commits, not lines",
+        "refuses to call a section clean when its reader failed",
+    ):
+        assert arm in done.stdout, f"self-check arm missing: {arm}\n{done.stdout}"

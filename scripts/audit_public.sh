@@ -63,7 +63,7 @@ audit() {
   if git grep -InE "$PATTERNS" -- . 2>/dev/null | grep -EvI "$PATTERN_EXEMPT" | grep -vi "$OWN_TRAILER"; then failed=1; else echo "clean"; fi
 
   echo "== history (all blobs)"
-  local history_hits history_report walked unreadable commit_list enum_rc shallow
+  local history_hits history_report walked unreadable commit_list enum_rc shallow duplicate_ids
   # Captured, then tested -- never tested by the pipeline's status. Under pipefail the status of
   # `cmd | while ...; done | grep ...` is the status of the loop's LAST iteration, so a pattern
   # present in an older commit and absent from the newest one printed its line here and answered
@@ -378,9 +378,8 @@ Generated with a tool: see the session log at https://example.invalid/session_01
     return 1; }
   echo "self-check: with the branch cut out, the same shallow clone is passed -- the arm is the line"
 
-  # A list of the right length is not a list of the right commits. The control below was proposed
-  # on the public board: the enumeration is replaced by a loop that writes HEAD's id as many times
-  # as the repository has commits. The list has the expected number of lines, every line reads
+  # A list of the right length is not a list of the right commits. Here the enumeration is replaced
+  # by a loop that writes HEAD's id as many times as the repository has commits. The list has the expected number of lines, every line reads
   # without error, and the credential -- which lives only in an older commit -- is never visited.
   # A section that prints a count of lines as a count of commits certifies a history it scanned
   # once; the count must be a count of distinct commits, and the refusal must say what it saw.
