@@ -428,7 +428,8 @@ async def transcribe_in_pieces(path: Path, asr: object) -> str:
     after another, and one piece failing fails the recording — a transcript with a hole in the middle
     is worse than the fallback hearing all of it.
     """
-    from daedalus.transport.telegram import voice  # Lazy, and by module: the tests replace ``transcribe``
+    # By module, so a test that replaces ``transcribe`` is the one called here.
+    from daedalus.transport.telegram import voice  # Lazy: the transport imports this module
 
     seconds = int(getattr(asr, "chunk_seconds", 180))
     try:

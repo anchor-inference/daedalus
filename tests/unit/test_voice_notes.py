@@ -24,7 +24,14 @@ from daedalus.extensions.api import KEPT_RECORDINGS, build_app
 from daedalus.host.component_install import Installer
 from daedalus.speech import chunks
 from daedalus.speech.chunks import join_transcripts, split_pcm
-from daedalus.speech.service import CLOUD_PIECE_BYTES, LocalSpeech, Transcriber, note_transcribers, transcribe_in_pieces, transcribe_recording
+from daedalus.speech.service import (
+    CLOUD_PIECE_BYTES,
+    LocalSpeech,
+    Transcriber,
+    note_transcribers,
+    transcribe_in_pieces,
+    transcribe_recording,
+)
 from daedalus.speech.tts_service import LocalTts
 from daedalus.transport.telegram import voice as transport_voice
 from daedalus.transport.telegram.voice import TranscriptionError
