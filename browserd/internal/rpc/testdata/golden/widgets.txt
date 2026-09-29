@@ -1,18 +1,20 @@
+- [viewport 1280x800, the page fits]
 - main
   - heading "Widgets" [level=1]
-  - combobox "Size" [ref=e1] value="Small"
+  - combobox "Size" [ref=e1] value="Small" options=["Small","Medium","Large"]
   - checkbox "Keep me posted" [ref=e2]
   - group [collapsed]
     - button "More" [ref=e3]
   - region "Card"
     - button "Inside the shadow" [ref=e4]
-  - iframe "Inner frame" [ref=f1]
+  - iframe "Inner frame" [ref=f1] url="http://SITE/site/frame.html"
     - button "In the frame" [ref=f1e5]
   - text "Count 0"
   - button "Bump" [ref=e6]
   - button "Later" [ref=e7]
-  - button "Covered button" [ref=e8]
+  - button "Covered button" [ref=e8] [covered by div "overlay"]
   - text "overlay"
   - link "Get the report" [ref=e9] url="http://SITE/file.txt"
-  - button "Choose file" [ref=e10]
+  - button "Choose File" [ref=e10]
   - button "Ask" [ref=e11]
+- [end of page]

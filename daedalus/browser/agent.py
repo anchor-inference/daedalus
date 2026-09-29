@@ -330,12 +330,16 @@ class BrowserAgent:
             await self.service.grant(group["id"], host, port, by=caller.actor)
             return await go()
 
-    async def snapshot(self, caller: Caller, *, tab: str | None = None, scope: str | None = None) -> str:
+    async def snapshot(self, caller: Caller, *, tab: str | None = None, scope: str | None = None, view: str | None = None) -> str:
+        if view not in (None, "page", "viewport"):
+            raise InvalidRequest("view is 'page' (the whole page, the default) or 'viewport' (what is on screen)")
         group = await self._group(caller)
         current = await self._tab(group, tab)
         params: dict[str, Any] = {"tab_id": current["id"], "max_chars": max(2000, min(caller.budget, 200_000)), "origin": self._origin(caller)}
         if scope:
             params["scope_ref"] = scope
+        if view:
+            params["view"] = view
         result = await self.service.call(group["id"], "page.snapshot", params, what="reading the page", timeout=40.0)
         url = str(result.get("url") or current.get("url") or "")
         await self._screen(group, caller, url, str(result.get("text") or ""))
@@ -640,7 +644,7 @@ class BrowserAgent:
             if tool == "BrowserNavigate":
                 return await self.navigate(caller, url=_str(a, "url"), go=_str(a, "go"), tab=_str(a, "tab")), False
             if tool == "BrowserSnapshot":
-                return await self.snapshot(caller, tab=_str(a, "tab"), scope=_str(a, "scope")), False
+                return await self.snapshot(caller, tab=_str(a, "tab"), scope=_str(a, "scope"), view=_str(a, "view")), False
             if tool == "BrowserText":
                 return await self.text(caller, tab=_str(a, "tab"), ref=_str(a, "ref"), max_chars=_int(a, "max_chars")), False
             if tool == "BrowserLook":

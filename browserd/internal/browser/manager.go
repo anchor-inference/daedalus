@@ -82,6 +82,9 @@ type Manager struct {
 	bySession map[string]*Tab
 	settingUp map[string]*Tab // pages being set up, by session: their first navigation may pause already
 	byTarget  map[string]*Tab
+	// The sessions of the frames of other sites in a tab (each runs in a process of its own and is
+	// attached to on its own), to the tab they are in.
+	frameTabs map[string]*Tab
 	gone      map[string]goneGroup // groups whose browser went away, for an hour, to answer 1108
 	listeners []Listener
 	tabSeq    int
@@ -102,7 +105,7 @@ func New(deps Deps) *Manager {
 	m := &Manager{deps: deps, lim: deps.Config.Limits, log: deps.Log,
 		browsers: map[string]*Browser{}, byProfile: map[string]*Browser{}, starting: map[string]chan struct{}{},
 		groups: map[string]*Group{}, tabs: map[string]*Tab{}, bySession: map[string]*Tab{}, settingUp: map[string]*Tab{}, byTarget: map[string]*Tab{},
-		gone: map[string]goneGroup{}, sandbox: "unknown"}
+		frameTabs: map[string]*Tab{}, gone: map[string]goneGroup{}, sandbox: "unknown"}
 	if deps.Config.Chromium.NoSandbox {
 		m.sandbox = "off by configuration"
 	}
@@ -688,6 +691,9 @@ func (m *Manager) forgetTabLocked(t *Tab) {
 	delete(m.tabs, t.ID)
 	delete(m.bySession, t.Session)
 	delete(m.byTarget, t.TargetID)
+	for _, s := range t.frameSessions() {
+		delete(m.frameTabs, s)
+	}
 	if g := t.Group; g != nil {
 		for i, x := range g.tabs {
 			if x == t {
@@ -860,21 +866,99 @@ func (m *Manager) onEvent(b *Browser, e cdp.Event) {
 	}
 	m.mu.Lock()
 	t := m.bySession[e.Session]
-	if t == nil && e.Method == "Fetch.requestPaused" {
+	tab := t != nil
+	frame := false
+	if t == nil {
+		// A page still being set up: its first navigation may pause already, and its first frames
+		// attach, before it is a tab.
 		t = m.settingUp[e.Session]
 	}
-	m.mu.Unlock()
 	if t == nil {
+		if t = m.frameTabs[e.Session]; t != nil {
+			frame = true
+		}
+	}
+	m.mu.Unlock()
+	switch e.Method {
+	case "Fetch.requestPaused":
+		if t != nil && !frame {
+			go m.guardPaused(t, e.Params)
+		}
+		return
+	case "Target.attachedToTarget":
+		go m.attachFrame(b, t, e.Session, e.Params)
+		return
+	case "Target.detachedFromTarget":
+		if t != nil {
+			m.detachFrame(t, e.Params)
+		}
 		return
 	}
-	if e.Method == "Fetch.requestPaused" {
-		go m.guardPaused(t, e.Params)
+	// A frame's own events are not its tab's.
+	if !tab {
 		return
 	}
 	t.event(e)
 	for _, l := range m.listeners {
 		l.TabEvent(t, e)
 	}
+}
+
+// attachFrame takes a target a page (or a frame of it) attached to. A frame of another site, which
+// Chromium runs in a process of its own, is followed so the page model can read it: it gets the
+// page's user agent and follows its own frames the same way, then runs. Anything else (a worker)
+// runs as it is and is let go. Every one of them waits for the daemon (waitForDebuggerOnStart), so
+// every one is let run, the tab gone or not.
+func (m *Manager) attachFrame(b *Browser, t *Tab, parent string, raw json.RawMessage) {
+	var p struct {
+		SessionID  string     `json:"sessionId"`
+		TargetInfo targetInfo `json:"targetInfo"`
+	}
+	if json.Unmarshal(raw, &p) != nil || p.SessionID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if t == nil || t.Closed() || p.TargetInfo.Type != "iframe" {
+		_ = b.conn.Call(ctx, p.SessionID, "Runtime.runIfWaitingForDebugger", nil, nil)
+		_ = b.conn.Call(ctx, parent, "Target.detachFromTarget", map[string]any{"sessionId": p.SessionID}, nil)
+		return
+	}
+	m.mu.Lock()
+	m.frameTabs[p.SessionID] = t
+	m.mu.Unlock()
+	t.setFrame(p.TargetInfo.TargetID, p.SessionID)
+	var replies []<-chan error
+	for _, call := range []struct {
+		method string
+		params any
+	}{
+		{"Target.setAutoAttach", map[string]any{"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true}},
+		{"Emulation.setUserAgentOverride", map[string]any{"userAgent": b.userAgent, "userAgentMetadata": b.uaMetadata}},
+		{"Runtime.runIfWaitingForDebugger", nil},
+	} {
+		replies = append(replies, b.conn.Send(ctx, p.SessionID, call.method, call.params))
+	}
+	for _, r := range replies {
+		if err := <-r; err != nil {
+			m.log.Debug("frame setup", "tab", t.ID, "error", err.Error())
+		}
+	}
+}
+
+// detachFrame forgets a frame's session when Chromium lets it go (the frame navigated to another
+// process, or went).
+func (m *Manager) detachFrame(t *Tab, raw json.RawMessage) {
+	var p struct {
+		SessionID string `json:"sessionId"`
+	}
+	if json.Unmarshal(raw, &p) != nil || p.SessionID == "" {
+		return
+	}
+	m.mu.Lock()
+	delete(m.frameTabs, p.SessionID)
+	m.mu.Unlock()
+	t.dropFrame(p.SessionID)
 }
 
 type targetInfo struct {

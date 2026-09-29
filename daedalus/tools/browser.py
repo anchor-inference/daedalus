@@ -190,11 +190,12 @@ async def browser_navigate(context: ToolContext, url: str | None = None, go: str
     description=(
         "See the page: an outline of its landmarks, headings, links, fields and buttons, each actionable one with a "
         "ref (e14, f2e4 inside a frame). Password and payment fields show as [secret], never their value. scope=<ref> "
-        "reads only that part, whole. Next: BrowserAct with a ref from here."
+        "reads only that part, whole. view='viewport' reads only what is on screen and half a screen around it. Next: "
+        "BrowserAct with a ref from here."
     ),
 )
-async def browser_snapshot(context: ToolContext, tab: str | None = None, scope: str | None = None) -> ToolResult:
-    return await _run(context, "BrowserSnapshot", {"tab": tab, "scope": scope})
+async def browser_snapshot(context: ToolContext, tab: str | None = None, scope: str | None = None, view: str | None = None) -> ToolResult:
+    return await _run(context, "BrowserSnapshot", {"tab": tab, "scope": scope, "view": view})
 
 
 @tool_group("browser")
