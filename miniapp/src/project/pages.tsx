@@ -15,7 +15,7 @@ import { folderName, reachIsProblem, reachKey } from "../folders";
 import { navigate, pathFor, projectPagePath } from "../router";
 import { go, PageHeader } from "../shell";
 import { invalidate, useQuery } from "../store";
-import { EnvPill } from "../terminal/dock";
+import { EnvPill } from "../envpill";
 import { TerminalView } from "../terminal/view";
 import type { Team } from "../team/team";
 import { errorText } from "../ui";
@@ -219,8 +219,8 @@ export function FoldersPage({ projectId, back, compact, toast }: { projectId: st
               {i === 0 && <span className="chip tiny">{t("folder.primary")}</span>}
               {folder.readonly && <span className="chip tiny">{t("project.readonly.short")}</span>}
             </div>
-            <div className="focus-folder-path mono truncate" title={folder.path}>{folder.path}</div>
-            {reachIsProblem(reachKey(folder)) && <div className="focus-folder-warn">{t(reachKey(folder))}</div>}
+            <FolderPath path={folder.path} />
+            {reachIsProblem(reachKey(folder)) && <div className="focus-folder-warn"><Icon name="alert" size={12} /><span>{t(reachKey(folder))}</span></div>}
           </div>
           <EnvPill env={folder.env} />
         </div>
@@ -361,5 +361,22 @@ function EnableSheet({ project, onClose, toast }: { project: Project; onClose: (
         <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
       </div>
     </Sheet>
+  );
+}
+
+/**
+ * A folder's path that gives way in the middle: the start ellipsizes and the last segment always
+ * shows. A plain end ellipsis on a phone cut "/home/operator/documents/courier" to ".../cou…", losing
+ * the one part that says which folder it is.
+ */
+function FolderPath({ path }: { path: string }) {
+  const cut = path.replace(/\/+$/, "").lastIndexOf("/");
+  const head = cut > 0 ? path.slice(0, cut + 1) : "";
+  const tail = cut > 0 ? path.slice(cut + 1) : path;
+  return (
+    <div className="focus-folder-path mono" title={path}>
+      {head && <span className="focus-folder-path-head">{head}</span>}
+      <span className="focus-folder-path-tail">{tail}</span>
+    </div>
   );
 }

@@ -16,6 +16,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { api, type Ask, type HarnessCapabilities, type StaffChanges, type StaffEventRow, type StaffMessage, type StaffSessionView, type StaffTurn, type StandingRule, type TerminalView as TerminalRow } from "../api";
 import { Sheet } from "../dialogs";
+import { useMoreBelow } from "../edgefade";
 import { useEvent } from "../events";
 import { relTime, tokens, usd } from "../format";
 import { plural, t } from "../i18n";
@@ -416,6 +417,8 @@ type PanelProps = {
 /** The column beside the member (a sheet on a phone): its session and messages, the standing facts a
  *  session's Details has (what runs it, how long, what it cost), what it changed, its notes. */
 function StaffPanel({ projectId, staffId, member, turns, name, view, notes, instructions, taskId, tab, onTab: setTab, messages, reveal, toast, browser }: PanelProps) {
+  const body = useRef<HTMLDivElement>(null);
+  useMoreBelow(body, tab);
   const tabs: SideTab[] = browser ? ["session", "details", "changes", "notes", "browser"] : ["session", "details", "changes", "notes"];
   return (
     <div className={`staff-panel ${tab === "browser" ? "with-browser" : ""}`}>
@@ -426,7 +429,7 @@ function StaffPanel({ projectId, staffId, member, turns, name, view, notes, inst
           </button>
         ))}
       </div>
-      <div className={`panel-body staff-panel-body ${tab === "browser" ? "tab-browser" : ""}`}>
+      <div ref={body} className={`panel-body staff-panel-body ${tab === "browser" ? "tab-browser" : ""}`}>
         {tab === "browser" && browser}
         {tab === "session" && <SessionTab staffId={staffId} view={view} toast={toast} messages={<MessagesSection staffId={staffId} name={name} messages={messages} reveal={reveal} toast={toast} />} />}
         {tab === "details" && <StaffDetails member={member} view={view} turns={turns} />}

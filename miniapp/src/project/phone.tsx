@@ -13,6 +13,7 @@ import { MenuItem, OverflowMenu, toast } from "../dialogs";
 import { useEvent, useStreamUp } from "../events";
 import { relTime } from "../format";
 import { plural, t } from "../i18n";
+import { EnvPill } from "../envpill";
 import { Icon, type IconName } from "../icons";
 import { go, PageHeader } from "../shell";
 import { ORCHESTRATION_LIST, navigate, pathFor, projectHome, projectPagePath, projectSessionPath, projectStaffPath } from "../router";
@@ -111,7 +112,7 @@ export function ProjectPhoneHead({ projectId, title, subtitle, actions, extra }:
       actions={
         <>
           {actions}
-          {project && <span className={`chip tiny env-chip ${env}`} title={t(`team.env.${env}`)}>{t(`term.env.short.${env}`)}</span>}
+          {project && <EnvPill env={env} tiny />}
           <OverflowMenu items={pages} label={t("phone.pages")} />
         </>
       }
@@ -188,7 +189,9 @@ export function AskAnswers({ ask, projectId, toast, always = false, server = "" 
             ))
           )}
           {ask.kind !== "folder" && (
-            <button className="btn ghost" disabled={busy} onClick={() => setWriting(true)}>{t(ask.kind === "permission" ? "phone.ask.denyWhy" : "phone.ask.write")}</button>
+            // A pen and a dashed frame: as a bare grey word under two solid buttons it read as a
+            // caption, and nobody found the way to type an answer of their own.
+            <button className="btn ask-answers-write" disabled={busy} onClick={() => setWriting(true)}><Icon name="pen" size={14} />{t(ask.kind === "permission" ? "phone.ask.denyWhy" : "phone.ask.write")}</button>
           )}
         </div>
       )}
@@ -223,8 +226,10 @@ export function NeedsYouBanner({ projectId, toast }: { projectId: string; toast:
       <div className="needs-banner-head">
         <Icon name="alert" size={14} />
         <span className="grow">{t("phone.needs")}</span>
-        {waiting > 1 && <span className="needs-banner-more">{t("phone.needs.more", { n: waiting - 1 })}</span>}
+        {/* The age first, then the count behind a dot: "+1 more 4d" run together left it unclear whose
+            age that was. The age is the shown question's. */}
         <span className="needs-banner-when">{relTime(ask.created_at)}</span>
+        {waiting > 1 && <span className="needs-banner-more">· {t("phone.needs.more", { n: waiting - 1 })}</span>}
       </div>
       <div className="needs-banner-text"><b>{askerLine(ask, names)}</b> {askWords(ask)}</div>
       <AskAnswers key={ask.id} ask={ask} projectId={projectId} toast={toast} />
@@ -313,7 +318,7 @@ function PhoneStaffRow({ member, task, spend, onOpen, onEdit }: { member: Staff;
           <span className="truncate">{member.name}</span>
           {!member.one_off && member.role && <span className="phone-staff-role truncate">{member.role}</span>}
           <HarnessBadge harness={member.harness} />
-          {member.env === "host" && <span className="chip tiny env-chip host" title={t("team.env.host")}>{t("term.env.short.host")}</span>}
+          {member.env === "host" && <EnvPill env="host" tiny />}
         </span>
         {/* Two lines before it gives up: a wait's reason is the one thing that says why the member is
             stuck, and one line cut "the machine's terminal limit is reached" before its verb. */}
@@ -397,7 +402,7 @@ export function PhoneTerminals({ projectId, toast }: { projectId: string; toast:
                 <span className="phone-term-title truncate">{row.title || t("term.untitled")}</span>
                 <span className="phone-term-line truncate">{[row.owner.label, terminalLine(row)].filter(Boolean).join(" · ")}</span>
               </span>
-              <span className={`term-env ${row.env}`}>{t(`term.env.short.${row.env}`)}</span>
+              <EnvPill env={row.env} />
             </a>
           ))}
         </div>

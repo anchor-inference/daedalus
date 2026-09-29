@@ -7,6 +7,7 @@ import { copyText } from "./components";
 import { OverflowMenu } from "./dialogs";
 import { fileIcon } from "./artifact";
 import { folderBase, folderName } from "./folders";
+import { EnvPill } from "./envpill";
 import { Icon } from "./icons";
 import { PreviewSource, downloadHref } from "./preview";
 import { errorText, fmtBytes } from "./ui";
@@ -159,7 +160,7 @@ export function Explorer({ base: sessionBase, root, upload: canUpload = false, f
         <select className="field" aria-label={t("explorer.folder")} value={folder || home} onChange={(e) => { setFolder(e.target.value); setQuery(""); setSelected(""); }}>
           {folders.map((f) => <option key={f.id} value={f.id}>{folderName(f)}</option>)}
         </select>
-        {shown && <span className="chip" title={shown.path}>{t(shown.env === "host" ? "explorer.env.host" : "explorer.env.container")}</span>}
+        {shown && <EnvPill env={shown.env === "host" ? "host" : "container"} />}
         {shown && !shown.writable && <span className="chip" title={t("explorer.folder.readonly.title")}><Icon name="lock" size={14} />{t("project.readonly.short")}</span>}
       </div>}
       <div className="explorer-search">

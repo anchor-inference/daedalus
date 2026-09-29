@@ -74,6 +74,9 @@ export function ReviewPanel({ taskId, onMerged, onRejected, toast }: { taskId: s
   }
   if (!data) return null;
   const block = mergeBlock(data);
+  // The reason Merge waits is said once, under the button it disables; the list above keeps only the
+  // others. Both used to print it, word for word, two lines apart.
+  const others = data.blockers.filter((b) => b.code !== block?.code);
   const commits = showAll ? data.commits : data.commits.slice(0, COMMITS_SHOWN);
   const hidden = data.commits.length - commits.length;
   return (
@@ -118,9 +121,9 @@ export function ReviewPanel({ taskId, onMerged, onRejected, toast }: { taskId: s
           ))}
         </ul>
       )}
-      {data.blockers.length > 0 && (
+      {others.length > 0 && (
         <ul className="review-blockers">
-          {data.blockers.map((b) => <li key={b.code} className={b.code === "conflicts" ? "bad" : "attn"} title={b.text}>{blockerText(b, data)}</li>)}
+          {others.map((b) => <li key={b.code} className={b.code === "conflicts" ? "bad" : "attn"} title={b.text}>{blockerText(b, data)}</li>)}
         </ul>
       )}
       <div className="btnrow review-actions">
@@ -131,7 +134,7 @@ export function ReviewPanel({ taskId, onMerged, onRejected, toast }: { taskId: s
           <Icon name="check" size={14} /> {t("pboard.review.merge")}
         </button>
       </div>
-      {block && <div className="sub review-why">{t("pboard.review.why", { reason: blockerText(block, data) })}</div>}
+      {block && <div className={`sub review-why ${block.code === "conflicts" ? "bad" : "attn"}`}>{t("pboard.review.why", { reason: blockerText(block, data) })}</div>}
       {rejecting && (
         <div className="review-reject">
           <label className="field" htmlFor={`reject-${taskId}`}>{t("pboard.review.reject.note")}</label>

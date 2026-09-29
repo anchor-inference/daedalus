@@ -278,6 +278,9 @@ a { color: var(--accent); text-decoration: none; }
 .title-row .title { min-width: 0; flex: 0 1 auto; }
 .btnrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .empty { color: var(--fg-2); text-align: center; padding: 48px 16px; display: grid; gap: 6px; justify-items: center; }
+/* The line under an empty state's heading is a sentence, and often the server's own words, which
+   start in lower case ("the board did not answer") beside hand-written lines that do not. */
+.empty > div::first-letter { text-transform: uppercase; }
 .empty b { color: var(--fg); font-weight: 600; font-size: var(--fs-15); }
 .empty .btn { margin-top: 8px; }
 .section-title { color: var(--fg-2); font-size: var(--fs-12); text-transform: uppercase; letter-spacing: 0.06em; margin: 16px 2px 6px; display: flex; align-items: baseline; gap: 6px; }
@@ -835,6 +838,9 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .panel-body.tab-preview { padding: 0; display: flex; flex-direction: column; }
 .panel-viewer { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px 16px; }
 .panel-viewer .preview-body { flex: 1; }
+/* A side column with more below its fold fades its lower edge, as a sheet's body does: on a tablet
+   the last event sat on the screen's edge with nothing to say the list went on. */
+.panel-body[data-more="below"] { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
 .panel-viewer .preview-image { max-height: none; }
 .panel-viewer .preview-frame { min-height: 0; flex: 1; }
 .panel.phone-width .panel-viewer { width: 390px; max-width: 100%; margin: 0 auto; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
@@ -1456,6 +1462,10 @@ body.resizing iframe { pointer-events: none; }
 .mfield .field { margin: 0; width: 100%; }
 .segmented.inline { display: inline-flex; margin: 0; }
 .segmented.inline button { flex: none; padding: 4px 12px; font-size: var(--fs-13); }
+.priority-pick button.bad { color: var(--bad); }
+.priority-pick button.attn { color: var(--warn); }
+.priority-pick button.bad.on { background: color-mix(in srgb, var(--bad) 16%, transparent); }
+.priority-pick button.attn.on { background: color-mix(in srgb, var(--warn) 16%, transparent); }
 .btnrow .sub.mid { margin-left: auto; align-self: center; }
 @media (min-width: 720px) {
   .mline { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "radio main tags actions"; }
@@ -1607,6 +1617,7 @@ body.resizing iframe { pointer-events: none; }
 .needs-you .notice-body { font-family: var(--mono); font-size: var(--fs-mono); }
 .linkbtn.accent { color: var(--accent); font-size: var(--fs-12); }
 .linkbtn.accent:disabled { color: var(--fg-3); cursor: default; }
+.linkbtn.board-task-open { display: inline-flex; align-items: center; gap: 3px; font-size: inherit; }
 .bell { position: relative; }
 .bell-badge { position: absolute; top: 2px; right: 1px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--info); color: #fff; font-size: 10px; font-weight: 700; line-height: 15px; text-align: center; pointer-events: none; }
 .bell-badge.urgent { background: var(--bad); }
@@ -1663,8 +1674,9 @@ pre.diff .file { color: var(--fg); font-weight: 600; }
 .kanban-col.is-empty { display: none; }
 .kanban-empty { display: none; }
 @media (min-width: 1024px) {
-  .kanban { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 12px; align-items: start; }
-  .kanban.five { grid-template-columns: repeat(5, minmax(200px, 1fr)); }
+  /* The columns are set by kanbanColumns (Board.tsx): narrow when empty, and sideways scrolling when
+     the rest do not fit. */
+  .kanban { display: grid; gap: 12px; align-items: start; overflow-x: auto; }
   .kanban-col { min-height: 240px; padding: 4px 8px 8px; border-radius: var(--radius-md); border: 1px dashed transparent; }
   .kanban-col.is-empty { display: block; }
   .kanban-col.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
@@ -2243,7 +2255,6 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 .dir-path { font-size: var(--fs-12); word-break: break-all; }
 .dir-row .toggle-row { margin: 4px 0 0; }
 .dir-reach { font-size: var(--fs-12); }
-.badge.env-host { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); }
 .dir-form { margin-top: 8px; padding: 10px 12px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); }
 .dir-form-foot { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .dir-add-open { margin-top: 8px; }
@@ -2476,7 +2487,10 @@ input.field[type="range"] {
 .composer-box { gap:var(--space-2); padding:var(--space-2); border-radius:var(--radius-lg); transition:none; }
 .composer-box textarea { flex:none; display:block; width:100%; min-height:calc(var(--fs-prose) * 1.4 + var(--space-2) * 2); padding:var(--space-2); font-size:var(--fs-prose); }
 .composer-row { align-items:center; flex-wrap:nowrap; gap:var(--space-1); }
-.composer-row > .iconbtn.plus { margin:0; border-radius:50%; }
+/* The plus wears the same filled ground as the mode and model chips beside it: bare on the card, its
+   tap area was the one control in the row nothing marked. */
+.composer-row > .iconbtn.plus { margin:0; border-radius:50%; background:var(--surface-2); }
+.composer-row > .iconbtn.plus:hover, .composer-row > .iconbtn.plus.on { background:var(--surface-3); }
 .composer-row .model-select { max-width:none; padding-inline:var(--space-2); gap:var(--space-1); border-radius:var(--radius-lg); background:var(--surface-2); }
 /* The mode chip stays on every width, a running phone included: it is the one place that says the
    session plans, or holds to YAGNI, and the model chip is the one that gives way when the row is short. */
@@ -2736,6 +2750,8 @@ button.staff-row:hover { background: var(--surface-2); }
 .term-env { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; margin-right: 4px; border-radius: var(--radius-pill); border: 1px solid; font-size: var(--fs-11); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
 .term-env.container { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .term-env.host { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+/* The small one, for a row of a list and a header's corner: the same pill, one size down. */
+.term-env.tiny { height: 18px; padding: 0 6px; margin-right: 0; flex: none; letter-spacing: .04em; }
 .term-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .term-panes.split { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
 .term-slot { min-width: 0; min-height: 0; display: flex; }
@@ -2864,6 +2880,8 @@ button.staff-row:hover { background: var(--surface-2); }
 .review-reject { display: flex; flex-direction: column; gap: 4px; }
 .review-reject textarea.field { resize: vertical; font: inherit; }
 .review-diff .diff-view { font-size: var(--fs-mono); }
+.review-why.bad { color: var(--bad); }
+.review-why.attn { color: var(--warn); }
 @media (min-width: 1024px) {
   .pboard-cols { display: grid; grid-template-columns: repeat(4, minmax(200px, 1fr)) minmax(170px, 0.8fr); gap: 12px; align-items: start; }
   .pboard-col { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: 4px 6px 8px; border-radius: var(--radius-md); }
@@ -2958,9 +2976,6 @@ button.staff-row:hover { background: var(--surface-2); }
 .focus-project { display: grid; gap: 3px; padding: 6px 8px 10px; }
 .focus-project-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .focus-project-name { flex: 1; min-width: 0; font-weight: 650; font-size: var(--fs-14); }
-.env-chip { text-transform: uppercase; letter-spacing: 0.04em; }
-.env-chip.container { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-.env-chip.host { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
 .focus-project-meta { color: var(--fg-3); font-size: var(--fs-11); }
 .focus-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--row-h-dense); padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
 .focus-row:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
@@ -3091,8 +3106,13 @@ button.staff-row:hover { background: var(--surface-2); }
 .focus-folder > .ic { color: var(--fg-2); margin-top: 2px; flex: none; }
 .focus-folder-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .focus-folder-name { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: var(--fs-13); }
-.focus-folder-path { color: var(--fg-3); font-size: var(--fs-12); }
-.focus-folder-warn { color: var(--warn); font-size: var(--fs-12); }
+.focus-folder-path { display: flex; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
+.focus-folder-path-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.focus-folder-path-tail { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* Red with a mark, not amber: amber with a lock is how a host folder is drawn, a normal working state,
+   and a folder that is missing read as the same thing one row away. */
+.focus-folder-warn { display: flex; align-items: flex-start; gap: 5px; color: var(--bad); font-size: var(--fs-12); }
+.focus-folder-warn .ic { flex: none; margin-top: 2px; }
 .focus-folders > .btn { justify-self: start; }
 .focus-terminals { flex: 1; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; padding: 0 14px 14px; }
 .focus-terminal-list { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
@@ -3106,6 +3126,9 @@ button.staff-row:hover { background: var(--surface-2); }
 .focus-enable .empty { max-width: 560px; margin: 0 auto; }
 .focus-enable .empty .ic { color: var(--accent); }
 .autonomy-choice { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; min-width: 0; }
+/* The first thing a new project shows: centred in the free height, not pinned under the header with
+   the rest of a desktop screen left empty below it, which read as a page that had not finished. */
+.focus-enable { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; min-height: 0; padding-bottom: 8vh; }
 .autonomy-option { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; }
 .autonomy-option.on { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); background: color-mix(in srgb, var(--accent) 6%, transparent); }
 .autonomy-option input { margin-top: 3px; }
@@ -3175,6 +3198,9 @@ button.staff-row:hover { background: var(--surface-2); }
 .loadbar-browsers { background: var(--accent); }
 .loadbar-browsers-extra { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 55%, transparent) 0 4px, color-mix(in srgb, var(--accent) 28%, transparent) 4px 8px); }
 .loadbar-kind { display: flex; align-items: baseline; gap: 6px; }
+.loadbar-legend { display: flex; flex-wrap: wrap; gap: 2px 14px; color: var(--fg-2); font-size: var(--fs-12); }
+.loadbar-key { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.loadbar-key i { flex: none; width: 14px; height: 8px; border-radius: 2px; }
 .loadbar-kind i { flex: none; width: 8px; height: 8px; border-radius: 2px; transform: translateY(-1px); }
 .loadbar-kind.terminals i { background: var(--ok); }
 .loadbar[data-level="warn"] .loadbar-kind.terminals i { background: var(--warn); }
@@ -3230,7 +3256,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .app.project-phone .screen { padding-bottom: var(--space-4); }
 .app.project-phone .main.chat-open .composer { padding-bottom: 10px; }
 :root[data-keyboard="open"] .app.project-phone .composer { padding-bottom: 6px; }
-.pagehead .env-chip { margin-right: 2px; }
+.pagehead .term-env { margin-right: 2px; flex: none; }
 .needs-banner { display: grid; gap: var(--space-2); margin: var(--space-2) 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--warn) 7%, transparent); }
 .chat > .needs-banner { flex: none; margin: var(--space-2) 10px 0; }
 .phone-board > .needs-banner { margin: var(--space-2) 12px 0; }
@@ -3242,6 +3268,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .ask-answers-own { display: flex; align-items: center; gap: var(--space-2); }
 .ask-answers-own .field { flex: 1; min-width: 0; min-height: var(--row-h-touch); margin: 0; }
 .ask-answers-own .btn { min-height: var(--row-h-touch); }
+.ask-answers-write { background: transparent; border-style: dashed; border-color: var(--line-strong); color: var(--fg-2); }
 .phone-staff { display: grid; }
 .phone-staff-item { display: flex; align-items: center; gap: 2px; min-width: 0; border-bottom: 1px solid var(--line); }
 .phone-staff-row { flex: 1; display: flex; align-items: center; gap: var(--space-3); min-width: 0; min-height: calc(var(--row-h-touch) + var(--space-3)); padding: 6px 4px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
@@ -3254,7 +3281,7 @@ button.staff-row:hover { background: var(--surface-2); }
    "langpt" to "l." beside a long role; the cap keeps a very long name from taking the whole line. */
 .phone-staff-name > .truncate:first-child { flex: 0 0 auto; max-width: 60%; }
 .phone-staff-role { color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; }
-.phone-staff-name .harness-badge, .phone-staff-name .env-chip { flex: none; }
+.phone-staff-name .harness-badge, .phone-staff-name .term-env { flex: none; margin-right: 0; }
 .phone-staff-line { color: var(--fg-2); font-size: var(--fs-12); }
 .phone-staff-line.waits { color: var(--warn); }
 .phone-terms { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
@@ -3290,6 +3317,8 @@ button.staff-row:hover { background: var(--surface-2); }
 .feed-tools { font-size: var(--fs-13); color: var(--fg-2); }
 .feed-tools-head { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--row-h-dense); padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; cursor: pointer; }
 .feed-tools-failed { color: var(--bad); }
+.feed-tools-chevron { flex: none; display: inline-flex; color: var(--fg-3); transition: transform var(--t-fast); }
+.feed-tools.open .feed-tools-chevron { transform: rotate(90deg); }
 .feed-tool-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; }
 .feed-tool { display: flex; gap: var(--space-2); min-width: 0; min-height: var(--row-h-dense); align-items: center; }
 .feed-tool-name { flex: none; font-size: var(--fs-12); color: var(--fg); }
@@ -3320,8 +3349,9 @@ button.staff-row:hover { background: var(--surface-2); }
 .staff-compose-field { flex: 1; min-width: 0; min-height: var(--ctl-h); max-height: 30vh; padding: 6px 10px; resize: none; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); color: var(--fg); font: inherit; font-size: var(--fs-14); line-height: var(--lh-ui); field-sizing: content; }
 .staff-compose .staff-when { flex: none; }
 .staff-when button[disabled] { opacity: .45; cursor: not-allowed; }
-.staff-health { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 6px; color: var(--fg-2); font-size: var(--fs-12); }
-.staff-health .ic { flex: none; color: var(--ok); }
+.staff-health { display: flex; align-items: flex-start; gap: 10px; margin-top: 6px; color: var(--fg-2); font-size: var(--fs-12); }
+.staff-health-parts { display: flex; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.staff-health .ic { flex: none; margin-top: 1px; color: var(--ok); }
 .staff-health.warn .ic { color: var(--warn); }
 .staff-health-part.warn { color: var(--warn); }
 .staff-health.compact { margin-top: 2px; }
@@ -3339,7 +3369,10 @@ button.staff-row:hover { background: var(--surface-2); }
 .staff-details .dt-row > .grow { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .staff-panel-body { display: grid; align-content: start; gap: var(--space-3); font-size: var(--fs-13); }
 .staff-aside-section { display: grid; gap: 4px; }
-.staff-aside-label { color: var(--fg-3); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: .06em; }
+/* The Session tab's headings are the Details tab's (.dt-label): one heading style in one column. The
+   Session tab once had small capitals and the Details tab sentence case, side by side on one panel. */
+.staff-aside-label { color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; }
+.staff-session > .staff-aside-section + .staff-aside-section { padding-top: 10px; border-top: 1px solid var(--line); }
 .staff-aside-line { min-width: 0; overflow-wrap: anywhere; }
 .staff-aside-line.mono { font-size: var(--fs-12); }
 .staff-events { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
@@ -3448,9 +3481,9 @@ button.staff-row:hover { background: var(--surface-2); }
 .main-pill { flex: none; font-size: var(--fs-11); padding: 1px 8px; border-radius: var(--radius-pill); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); white-space: nowrap; }
 /* The main chat's open questions and the work under way, after the latest turn in the timeline. */
 .main-flow { display: grid; gap: 10px; margin: 8px 0 4px; min-width: 0; }
-.main-setup { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px dashed var(--line); border-radius: var(--radius-sm); font-size: var(--fs-13); }
+.main-setup { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); font-size: var(--fs-13); }
 .main-dispatches { display: grid; gap: 6px; }
-.dispatch-card { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--line); border-left-width: 3px; border-radius: var(--radius-sm); background: var(--surface-1); min-width: 0; }
+.dispatch-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 4px; padding: 8px 10px; border: 1px solid var(--line); border-left-width: 3px; border-radius: var(--radius-sm); background: var(--surface-1); min-width: 0; }
 .dispatch-card.tone-info { border-left-color: var(--info); }
 .dispatch-card.tone-ok { border-left-color: var(--ok); }
 .dispatch-card.tone-warn { border-left-color: var(--warn); }
@@ -3473,7 +3506,12 @@ button.staff-row:hover { background: var(--surface-2); }
 .dispatch-message { display: grid; gap: 1px; }
 .dispatch-message-head { color: var(--fg-2); }
 .dispatch-message-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.dispatch-actions { display: flex; justify-content: flex-end; }
+/* Cancel sits beside the description, not on a row of its own: on its own row it roughly doubled
+   every card's height with empty space, and on a phone pushed the questions line and the composer
+   down the screen. */
+.dispatch-head, .dispatch-detail { grid-column: 1 / -1; }
+.dispatch-body { grid-column: 1; }
+.dispatch-actions { grid-column: 2; grid-row: 2; align-self: end; display: flex; justify-content: flex-end; }
 /* ── the two modes (orchestration.tsx, mode.ts) ─────────────────────────────────────────────
    The rail's two mode items switch between them (the first two tabs on a phone). The count on
    Orchestration is the one trace of that mode in Agents, so it is drawn quietly — a neutral pill, not
@@ -3614,11 +3652,14 @@ button.staff-row:hover { background: var(--surface-2); }
 .panel-tablist.many .panel-tab .ic { display: none; }
 
 /* The chat's one line for the whole list: how many wait, and the way to them. */
-.questions-line { display: flex; align-items: center; gap: 10px; width: 100%; margin: 10px 0 4px; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line)); border-radius: var(--radius-md); background: color-mix(in srgb, var(--warn) 6%, transparent); color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
+/* The same notice as the main chat's setup line — solid frame, icon, sentence, a small button at the
+   end — told apart by its colour: the two stacked on a phone used to read as unrelated components,
+   one dashed with a button, the other solid with a bare link. */
+.questions-line { display: flex; align-items: center; gap: 10px; width: 100%; margin: 10px 0 4px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line)); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 6%, transparent); color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
 .questions-line:hover { background: color-mix(in srgb, var(--warn) 11%, transparent); border-color: color-mix(in srgb, var(--warn) 60%, var(--line)); }
 .questions-line-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--avatar); height: var(--avatar); border-radius: 50%; background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
 .questions-line-text { flex: 1; min-width: 0; font-weight: 500; }
-.questions-line-open { flex: none; display: inline-flex; align-items: center; gap: 4px; color: var(--accent); font-weight: 600; }
+.questions-line-open { flex: none; gap: 4px; }
 .questions-headbtn { position: relative; }
 .questions-headbtn .count { position: absolute; top: 2px; right: 2px; min-width: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--warn); color: var(--primary-ink); font-size: var(--fs-11); font-weight: 700; line-height: 16px; text-align: center; }
 @media (max-width: 1023px) {

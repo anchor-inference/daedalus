@@ -57,12 +57,30 @@ export function LoadBar({ load, cap, compact = false }: { load: TerminalLoad; ca
         <b>{plural("load.atcap", f.cap, { used: size(f.terminalsAtCap), total: size(f.total) })}</b>
         <span className="loadbar-percent">{t("load.percent", { percent: pct(f.memPercentAtCap) })}</span>
       </div>
-      <div className="sub">
-        {plural("load.now", f.running, { used: size(f.terminalsNow), free: size(Math.max(0, f.total - f.machineNow)) })}
-        {daemon > 0 && ` ${t("load.daemon", { used: size(daemon) })}`}
+      {/* What each fill of the track is, in its own colour and pattern: the solid and the striped
+          part had no key, and nobody could tell the terminals running now from the room the limit
+          keeps for them. */}
+      <div className="loadbar-legend">
+        <span className="loadbar-key"><i className="loadbar-other" />{t("load.legend.other", { used: size(other) })}</span>
+        <span className="loadbar-key" title={daemon > 0 ? t("load.daemon", { used: size(daemon) }) : undefined}><i className="loadbar-now" />{plural("load.legend.now", f.running, { used: size(f.terminalsNow) })}</span>
+        {f.extra > 0 && <span className="loadbar-key"><i className="loadbar-extra" />{t("load.legend.extra", { cap: f.cap, used: size(f.machineAtCap - f.machineNow) })}</span>}
       </div>
-      {!compact && <div className="sub">{t("load.machine", { now: pct(f.memPercentNow), atcap: pct(f.memPercentAtCap) })}</div>}
-      <div className="sub loadbar-cpu" data-level={f.cpuLevel}>{t("load.cpu", { now: pct(f.cpuNow), atcap: pct(f.cpuAtCap) })}</div>
+      {compact ? (
+        // The page's header keeps the facts short and named — free memory, the processors — where two
+        // sentences of figures used to make a newcomer parse prose for which number was now.
+        <div className="sub loadbar-cpu" data-level={f.cpuLevel}>
+          {t("load.stats.free", { free: size(Math.max(0, f.total - f.machineNow)) })} · {t("load.stats.cpu", { now: pct(f.cpuNow), atcap: pct(f.cpuAtCap), cap: f.cap })}
+        </div>
+      ) : (
+        <>
+          <div className="sub">
+            {plural("load.now", f.running, { used: size(f.terminalsNow), free: size(Math.max(0, f.total - f.machineNow)) })}
+            {daemon > 0 && ` ${t("load.daemon", { used: size(daemon) })}`}
+          </div>
+          <div className="sub">{t("load.machine", { now: pct(f.memPercentNow), atcap: pct(f.memPercentAtCap) })}</div>
+          <div className="sub loadbar-cpu" data-level={f.cpuLevel}>{t("load.cpu", { now: pct(f.cpuNow), atcap: pct(f.cpuAtCap) })}</div>
+        </>
+      )}
       {!compact && <div className="sub faint">{t(`load.basis.${load.likely.basis}`, { each: size(load.likely.rss_bytes) })}</div>}
       {overEstimate(f) && (
         <div className="loadbar-warning" role="status">

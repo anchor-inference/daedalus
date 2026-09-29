@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, Project, ProjectDir, ProjectEnvironments } from "./api";
 import { folderName, needsMount, pathProblem, projectPath, projectReachable, reachIsProblem, reachKey } from "./folders";
 import { Sheet } from "./dialogs";
+import { EnvPill } from "./envpill";
 import { Icon } from "./icons";
 import { navigate, projectPagePath } from "./router";
 import { invalidate, useQuery } from "./store";
@@ -255,7 +256,7 @@ function FolderRow({ project, folder, environments, toast }: { project: Project;
         <Icon name="folder" size={15} />
         <span className="dir-name truncate">{folderName(folder)}</span>
         {primary && <span className="badge" title={t("folder.primary.title")}>{t("folder.primary")}</span>}
-        <span className={`badge env-${folder.env}`}>{t(`folder.env.${folder.env}`)}</span>
+        <EnvPill env={folder.env} tiny />
         {folder.is_git && <span className="badge">{t("comp.name.git")}</span>}
         <button className="iconbtn small" onClick={remove} disabled={busy || only} title={only ? t("folder.remove.last") : t("folder.remove", { name: folderName(folder) })} aria-label={t("folder.remove", { name: folderName(folder) })}>
           <Icon name="trash" size={14} />

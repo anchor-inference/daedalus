@@ -134,8 +134,12 @@ function drawProgress(status) {
     // What the launcher can name, it names — in the language of the page. What it cannot stays as
     // the program said it, which is a visible gap rather than a silent one. Either way the original
     // text is under "What happened", above the log.
-    const said = status.docker_missing ? T("docker.missing") : status.failure_key ? T(status.failure_key) : status.failure;
-    el("what").textContent = said;
+    // A failure it cannot name gets a plain lead-in and the program's own words under it, set in
+    // the log's type: bare, "exit status 137: …" read like the launcher's sentence.
+    const known = status.docker_missing || status.failure_key;
+    el("what").textContent = status.docker_missing ? T("docker.missing") : status.failure_key ? T(status.failure_key) : T("progress.error.raw");
+    el("what-raw").hidden = Boolean(known);
+    el("what-raw").textContent = known ? "" : status.failure;
     el("trouble-log").textContent = [status.failure, ...(status.log || [])].filter(Boolean).join("\n");
     return;
   }
@@ -152,6 +156,7 @@ function drawProgress(status) {
         ? T("live." + status.stage)
         : T("progress.working");
   el("livelog").textContent = ready ? "" : (status.log || []).slice(-1)[0] || "";
+  el("livelog").title = el("livelog").textContent;
   if (ready) setTimeout(() => (location.href = "/status"), 900);
 }
 
@@ -165,7 +170,10 @@ function drawStatus(status) {
   el("telegram").textContent = status.telegram ? T("status.on") : T("status.off");
   el("appurl").textContent = status.app_url;
   el("appurl").href = status.app_url;
-  el("busy").textContent = status.busy ? status.busy + "…" : "";
+  // The operation in words — "Updating…" — beside a turning mark; the bare action name ("update…")
+  // read as a stray label. An action without a line of its own ("installing …") is already a phrase.
+  el("busy").textContent = status.busy ? table["busy." + status.busy] ?? status.busy + "…" : "";
+  el("busy").classList.toggle("on", Boolean(status.busy));
   for (const button of document.querySelectorAll("button[data-action]")) {
     button.disabled = Boolean(status.busy);
   }

@@ -8,6 +8,7 @@
 import { useState, type ReactNode, type RefObject } from "react";
 import { Bell } from "../bell";
 import { plural, t } from "../i18n";
+import { EnvPill } from "../envpill";
 import { Icon, type IconName } from "../icons";
 import { PaneHandle, type PaneDrag } from "../layout";
 import { FoldButton } from "../sidebar";
@@ -70,7 +71,7 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
         <div className="focus-project">
           <div className="focus-project-line">
             <span className="focus-project-name truncate">{project?.name ?? "…"}</span>
-            {project && <span className={`chip tiny env-chip ${project.settings.default_env ?? project.folders[0]?.env ?? "container"}`}>{t(`team.env.${project.settings.default_env ?? project.folders[0]?.env ?? "container"}`)}</span>}
+            {project && <EnvPill env={project.settings.default_env ?? project.folders[0]?.env ?? "container"} tiny />}
           </div>
           {project && (
             <div className="focus-project-meta truncate">
@@ -183,7 +184,7 @@ function StaffRow({ projectId, member, taskTitle, current, compact }: { projectI
       </span>
       {/* The same outlined chip that marks a host terminal: an amber word inside the name once read as
           part of the role, or as a warning that had leaked out of the status line. */}
-      {member.env === "host" && <span className="chip tiny env-chip host" title={t("team.env.host")}>{t("term.env.short.host")}</span>}
+      {member.env === "host" && <EnvPill env="host" tiny />}
       <HarnessBadge harness={member.harness} />
       <span className={`focus-dot tone-${tone}`} aria-label={t(`focus.tone.${tone}`)} role="img" />
     </button>

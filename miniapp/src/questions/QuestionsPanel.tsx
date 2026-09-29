@@ -494,7 +494,7 @@ export function QuestionsLine({ count, onOpen }: { count: number; onOpen: () => 
     <button type="button" className="questions-line" onClick={onOpen} data-count={count}>
       <span className="questions-line-mark"><Icon name="ask" size={14} /></span>
       <span className="questions-line-text">{plural("questions.line", count)}</span>
-      <span className="questions-line-open">{t("questions.open")}<Icon name="forward" size={12} /></span>
+      <span className="questions-line-open btn small">{t("questions.open")}<Icon name="forward" size={12} /></span>
     </button>
   );
 }

@@ -107,7 +107,7 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, modes,
             <span className="dt-sep">·</span>
             <span>{t(detail.context.estimated ? "session.context.estimated" : "session.context.measured")}</span>
           </div>
-          <p className="sub">{t("session.context.messages", { n: detail.context.messages, s: detail.context.summaries, o: detail.context.operator_turns })}</p>
+          <p className="sub">{t("session.context.messages", { n: plural("session.context.count.messages", detail.context.messages), s: plural("session.context.count.summaries", detail.context.summaries), o: plural("session.context.count.originals", detail.context.operator_turns) })}</p>
           {detail.context.last_compaction?.at && (
             <p className="sub" data-last-compaction>{t("session.context.lastcompaction", { when: relTimeLong(detail.context.last_compaction.at), reason: detail.context.last_compaction.reason || "—" })}</p>
           )}
@@ -435,7 +435,7 @@ function ScheduleRow({ sc, sessionId, onAction }: { sc: Schedule; sessionId: str
       <div className="grow" style={{ minWidth: 0 }}>
         <div className="sched-name">
           {!sc.enabled && <span title={t("session.sched.off")}>⏸ </span>}
-          {sc.name} <span className="badge">{where}</span>
+          {sc.name} <span className="badge" title={sc.kind === "lazy" ? t("session.sched.lazy.title") : undefined}>{where}</span>
           {sc.active_session_id === sessionId && <span className="live-dot" title={t("sched.running")} />}
         </div>
         <div className="sub sched-when">
