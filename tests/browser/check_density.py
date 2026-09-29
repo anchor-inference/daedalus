@@ -3,7 +3,8 @@
 The stylesheet's own test (miniapp/src/density.test.ts) reads the rules; this reads the rendered
 page, which is the only place a row's height or a column's width actually exists. Everything the
 app asks for is answered by the invented installation in screenshots.py, so the numbers describe
-the layout and nothing else. Three windows: a laptop, an ultrawide, a phone.
+the layout and nothing else. Three windows: a laptop, an ultrawide, a phone; and Settings' column
+and rows at the three sizes the owner uses.
 
     cd miniapp && npm run build
     mkdir -p /tmp/app-root/app && cp -r dist/* /tmp/app-root/app/
@@ -201,6 +202,47 @@ def check_browser_preview(browser) -> list[str]:  # type: ignore[no-untyped-def]
     return problems
 
 
+def check_settings(browser) -> list[str]:  # type: ignore[no-untyped-def]
+    """Settings' column and rows as drawn: the column is min(960, pane - 96) and centred, a row is at
+    least the touch height, its control ends at the column's right edge, and a phone does not scroll
+    sideways. Widened from 760 on the owner's word that the column was too narrow."""
+    problems: list[str] = []
+    for width, height, mobile in ((1920, 1080, False), (1180, 820, False), (390, 844, True)):
+        context = browser.new_context(viewport={"width": width, "height": height}, color_scheme="dark", is_mobile=mobile, has_touch=mobile)
+        page = open_page(context, "settings/chat", ".settings-row")
+        m = page.evaluate("""() => {
+          const col = document.querySelector('.settings-col').getBoundingClientRect();
+          const main = document.querySelector('.settings-main');
+          const pane = main ? main.getBoundingClientRect() : null;
+          const rows = [...document.querySelectorAll('.settings-row')].map((r) => {
+            const b = r.getBoundingClientRect();
+            const ctl = r.querySelector('.settings-row-ctl');
+            return { h: Math.round(b.height), right: Math.round(b.right), ctlRight: ctl ? Math.round(ctl.getBoundingClientRect().right) : null };
+          });
+          return { col: { x: Math.round(col.x), w: Math.round(col.width), r: Math.round(col.right) }, pane: pane ? { x: Math.round(pane.x), w: Math.round(pane.width) } : null, rows,
+                   scroll: [document.documentElement.scrollWidth, document.documentElement.clientWidth] };
+        }""")
+        print(f"settings-{width}", json.dumps({k: v for k, v in m.items() if k != "rows"}), f"{len(m['rows'])} rows")
+        if m["pane"]:
+            want = min(960, m["pane"]["w"] - 96)
+            if abs(m["col"]["w"] - want) > 1:
+                problems.append(f"settings {width}: the column is {m['col']['w']}px, not {want}")
+            if abs((m["col"]["x"] - m["pane"]["x"]) - (m["pane"]["x"] + m["pane"]["w"] - m["col"]["r"])) > 2:
+                problems.append(f"settings {width}: the column is off centre {m['col']} in {m['pane']}")
+        for row in m["rows"]:
+            if row["h"] < 44:
+                problems.append(f"settings {width}: a row is {row['h']}px, under the touch height")
+                break
+        # Every control ends in one lane: the row's right edge (the number fields keep a units' slot inside it).
+        lanes = {row["ctlRight"] for row in m["rows"] if row["ctlRight"] is not None}
+        if lanes and max(lanes) - min(lanes) > 1:
+            problems.append(f"settings {width}: the controls end at {sorted(lanes)}, not in one lane")
+        if m["scroll"][0] > m["scroll"][1]:
+            problems.append(f"settings {width}: the page scrolls sideways {m['scroll']}")
+        context.close()
+    return problems
+
+
 def judge(m: dict) -> list[str]:
     problems: list[str] = []
     phone = m["vw"] < 1024
@@ -307,6 +349,7 @@ def run() -> int:
         if ASSERT:
             measured["sidebar"] = check_sidebar(browser)
             problems += check_browser_preview(browser)
+            problems += check_settings(browser)
         browser.close()
     for name, m in measured.items():
         print(name, json.dumps(m))

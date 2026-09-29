@@ -57,9 +57,10 @@ const SAME_IN_BOTH = [
   "session.sched.cron",
   // Today's spend is a row made only of holes and arrows.
   "session.usage.today.line",
+  // The chat's own product name heads its card.
+  "settings.chat.telegram",
   "settings.exec.title",
   "settings.search.title",
-  "settings.vision.title",
   "settings.web.title",
   // Lines changed and the files they are in.
   "staff.changes.summary",
@@ -180,7 +181,7 @@ describe("the keys the code asks for", () => {
       ["svc.copied.", ["address", "link", "key"]],
       ["settings.chat.", ["private", "topics"]],
       ["settings.selfchange.", ["manual", "auto"]],
-      ["settings.sec.", ["appearance", "models", "rules", "limits", "terminals", "tools", "voice", "components", "chat", "notifications", "security", "heartbeat", "about"]],
+      ["settings.sec.", ["appearance", "models", "rules", "limits", "environments", "tools", "voice", "components", "chat", "notifications", "security", "heartbeat", "about"]],
       ["theme.", listed("./appearance.ts", "THEME_IDS")],
       ["tool.group.", ["Exec", "Read", "Write", "Edit", "search", "WebFetch", "SendFile", "other"]],
       ["tool.board.", ["get", "list"]],
@@ -260,7 +261,7 @@ describe("the keys the code asks for", () => {
     ];
     const missing = families.flatMap(([prefix, names]) => names.map((n) => prefix + n)).filter((key) => !(key in DICT));
     // The section hints sit beside the section names, and a hint nobody wrote is a blank line.
-    const hints = ["appearance", "models", "rules", "limits", "terminals", "tools", "voice", "components", "chat", "notifications", "security", "heartbeat", "about"].map((s) => `settings.sec.${s}.hint`).filter((k) => !(k in DICT));
+    const hints = ["appearance", "models", "rules", "limits", "environments", "tools", "voice", "components", "chat", "notifications", "security", "heartbeat", "about"].map((s) => `settings.sec.${s}.hint`).filter((k) => !(k in DICT));
     // Every tool the timeline names has a verb while it runs and one after it.
     const verbs = ["Exec", "Read", "Write", "Edit", "Find", "WebSearch", "WebFetch", "SendFile", "ImageView", "Skill", "Verify", "SubAgent", "SpawnAgent", "AskPeer", "HistorySearch", "ServiceStart", "ServiceStop"]
       .flatMap((name) => [`tool.${name}.on`, `tool.${name}.off`])

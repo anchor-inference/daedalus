@@ -7,8 +7,10 @@ import { useCallback, useEffect, useState } from "react";
 import { api, SessionToolGroup, Settings, ToolGroupCatalogue, ToolGroupLoad } from "./api";
 import { plural, t } from "./i18n";
 import { errorText, fmtTok } from "./ui";
+import { Dropdown } from "./components";
 import { LOADS, groupAbout, groupName, loadWord, stateChip, usageLine, usageShare } from "./toolgroups";
 
+/** The three modes side by side: a session's Details, where a group is opened one at a time. */
 function LoadPicker({ label, value, onPick, busy }: { label: string; value: ToolGroupLoad; onPick: (load: ToolGroupLoad) => void; busy?: boolean }) {
   return (
     <div className="segmented inline tgroup-load" role="radiogroup" aria-label={label}>
@@ -21,7 +23,8 @@ function LoadPicker({ label, value, onPick, busy }: { label: string; value: Tool
   );
 }
 
-/** Settings → Tools: every group with what it costs and how often it was needed, and its mode.
+/** Settings → Tools: one row a group — what it is, what it costs and how often it was needed, and its
+ *  mode in a compact picker; a group moved off its default says so with a Reset beside the picker.
  *  `revision` is the configuration the screen shows; a pick saves against it and hands the screen the
  *  settings it produced, whose new revision the screen's next save must carry. */
 export function ToolGroupsSettings({ toast, revision, onSettings }: { toast: (text: string) => void; revision?: string; onSettings?: (next: Settings) => void }) {
@@ -54,21 +57,40 @@ export function ToolGroupsSettings({ toast, revision, onSettings }: { toast: (te
       {data === null && <div className="sub">{t("common.loading")}</div>}
       {data?.groups.map((g) => {
         const share = usageShare(g.usage.sessions, data.sessions);
+        const changed = g.load !== g.default;
         return (
-          <div key={g.name} className="tgroup" data-group={g.name}>
-            <div className="tgroup-head">
-              <b className="tgroup-name">{groupName(g.name)}</b>
-              <span className="sub num">{plural("tgroup.tools", g.tools.length)} · ≈{fmtTok(g.tokens)} {t("tgroup.tokens")}</span>
+          // Not a plain settings row: the usage and the Reset have lanes of their own between the
+          // words and the picker, so a dozen groups line up as columns rather than each putting its
+          // usage wherever its description happened to end.
+          <div key={g.name} className="settings-row tgroup" data-group={g.name}>
+            <div className="settings-row-text">
+              <div className="settings-row-title">
+                <span className="tgroup-name">{groupName(g.name)}</span>
+                <span className="tgroup-cost">{plural("tgroup.tools", g.tools.length)} · ≈{fmtTok(g.tokens)} {t("tgroup.tokens")}</span>
+              </div>
+              <div className="settings-row-desc">{groupAbout(g.name, g.description)}</div>
             </div>
-            <div className="sub tgroup-about">{groupAbout(g.name, g.description)}</div>
-            <div className="tgroup-use" title={t("tgroup.usage.detail", { sessions: g.usage.sessions, total: data.sessions, runs: g.usage.runs, calls: g.usage.calls })}>
+            <span className="tgroup-use" title={t("tgroup.usage.detail", { sessions: g.usage.sessions, total: data.sessions, runs: g.usage.runs, calls: g.usage.calls })}>
               <span className="tgroup-bar" aria-hidden><span style={{ width: `${Math.min(100, Math.max(share.pct > 0 ? 2 : 0, share.pct))}%` }} /></span>
-              <span className="sub">{usageLine(g.usage.sessions, data.sessions, data.days)}</span>
-            </div>
-            <div className="tgroup-foot">
-              <LoadPicker label={groupName(g.name)} value={g.load} onPick={(load) => pick(g.name, load)} busy={busy === g.name} />
-              <span className={`sub tgroup-default ${g.load === g.default ? "" : "changed"}`}>{t(g.load === g.default ? "tgroup.default.is" : "tgroup.default.was", { load: loadWord(g.default) })}</span>
-            </div>
+              {usageLine(g.usage.sessions, data.sessions, data.days)}
+            </span>
+            {/* Said only where it is true: a caption on every row saying "(default)" was a line of
+                text on each of a dozen groups to tell the operator nothing had changed. */}
+            <span className="tgroup-reset-slot">
+              {changed && (
+                <button type="button" className="linkbtn tgroup-reset" disabled={busy === g.name} title={t("tgroup.reset.title", { load: loadWord(g.default) })} onClick={() => pick(g.name, g.default)}>
+                  {t("tgroup.reset")}
+                </button>
+              )}
+            </span>
+            <Dropdown
+              className="tgroup-pick"
+              label={groupName(g.name)}
+              value={g.load}
+              disabled={busy === g.name}
+              onChange={(load) => pick(g.name, load)}
+              options={LOADS.map((load) => ({ id: load, label: loadWord(load), hint: t(`tgroup.load.${load}.hint`) }))}
+            />
           </div>
         );
       })}

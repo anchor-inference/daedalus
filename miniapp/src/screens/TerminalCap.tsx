@@ -1,4 +1,5 @@
-// Settings → Terminals: the machine-wide cap on running terminals, with the load bar under it.
+// Settings → Environments → terminal sessions: the machine-wide cap on running terminals, with the
+// load bar under it.
 //
 // The cap has no upper bound on purpose. The bar follows the value as it is typed, and a value the
 // estimate says the machine cannot carry is saved with a warning rather than refused: the operator
@@ -9,6 +10,7 @@ import type { Settings, WorkloadsLoad } from "../api";
 import { plural, t } from "../i18n";
 import { WorkloadsBar } from "../loadbar";
 import { useQuery } from "../store";
+import { Row } from "../settingsrow";
 
 export const DEFAULT_CAP = 20;
 
@@ -40,25 +42,26 @@ export function TerminalCap({ s, save }: { s: Settings; save: (patch: Partial<Se
     <div className="card terminal-cap">
       <div className="section-title" style={{ marginTop: 0 }}>{t("settings.cap.title")}</div>
       <div className="sub">{t("settings.cap.sub")}</div>
-      <label className="field" htmlFor="terminal-cap">{t("settings.cap.label")}</label>
-      <div className="terminal-cap-row">
-        <input
-          id="terminal-cap"
-          className="field terminal-cap-input"
-          type="number"
-          inputMode="numeric"
-          min={1}
-          step={1}
-          value={draft}
-          aria-invalid={value === null}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-          }}
-        />
-        <span className="sub">{load.data?.terminals ? plural("settings.cap.running", load.data.terminals.running) : ""}</span>
-      </div>
+      <Row title={t("settings.cap.label")} htmlFor="terminal-cap" desc={load.data?.terminals ? plural("settings.cap.running", load.data.terminals.running) : undefined}>
+        <span className="settings-num">
+          <input
+            id="terminal-cap"
+            className="field"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            step={1}
+            value={draft}
+            aria-invalid={value === null}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
+          />
+          <span className="settings-unit" />
+        </span>
+      </Row>
       {value === null && <div className="sub push-error">{t("settings.cap.invalid")}</div>}
       {load.data?.terminals ? (
         <WorkloadsBar load={load.data} caps={{ terminals: value ?? configured }} />

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// The summary model select in Settings → Limits & budget: the session's own model first, every
+// The summary model picker in Settings → Limits & budget: the session's own model first, every
 // preset under the model picker's label, and a preset deleted since it was chosen shown as missing.
 
 import { act } from "react";
@@ -37,7 +37,7 @@ describe("the options", () => {
   });
 });
 
-describe("the select", () => {
+describe("the picker", () => {
   let host: HTMLDivElement;
   let root: Root;
   beforeEach(() => {
@@ -54,21 +54,21 @@ describe("the select", () => {
   it("shows the effective value, saves a new choice, and marks a missing one", () => {
     const onSave = vi.fn();
     act(() => root.render(<CompactionModelSelect presets={PRESETS} value="flash" onSave={onSave} />));
-    const select = host.querySelector<HTMLSelectElement>("#compaction-preset")!;
-    expect(select.value).toBe("flash");
-    expect(select.getAttribute("aria-invalid")).toBeNull();
+    const picker = host.querySelector<HTMLButtonElement>("#compaction-preset")!;
+    expect(picker.dataset.value).toBe("flash");
+    expect(picker.textContent).toBe("deepseek/deepseek-flash");
+    expect(picker.getAttribute("aria-invalid")).toBeNull();
     expect(host.textContent).toContain("seconds instead of minutes");
-    act(() => {
-      select.value = "";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    act(() => picker.click());
+    const own = [...host.querySelectorAll<HTMLElement>("[role=option]")].find((o) => o.dataset.value === "")!;
+    act(() => own.click());
     expect(onSave).toHaveBeenCalledWith("");
 
     act(() => root.render(<CompactionModelSelect presets={PRESETS} value="gone" onSave={onSave} />));
-    const again = host.querySelector<HTMLSelectElement>("#compaction-preset")!;
-    expect(again.value).toBe("gone");
+    const again = host.querySelector<HTMLButtonElement>("#compaction-preset")!;
+    expect(again.dataset.value).toBe("gone");
     expect(again.getAttribute("aria-invalid")).toBe("true");
-    expect(again.selectedOptions[0].textContent).toContain("missing");
+    expect(again.textContent).toContain("missing");
     expect(host.textContent).toContain("uses the session's own model");
   });
 });

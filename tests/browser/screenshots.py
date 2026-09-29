@@ -1818,7 +1818,8 @@ def run() -> int:
         shot(page, "settings", "settings", wait=".settings-stage")
         shot(page, "components", "settings/components", wait=".comp-grid .comp-card", settle=500)
         shot(page, "settings-notifications", "settings/notifications", wait=".nmatrix", settle=600)
-        shot(page, "settings-terminals", "settings/terminals", wait=".loadbar-track", settle=600)
+        # Terminals and the browser are one Environments page; the picture keeps its name for the docs.
+        shot(page, "settings-terminals", "settings/environments", wait=".loadbar-track", settle=600)
         shot(page, "settings-tools", "settings/tools", wait=".tgroups .tgroup", settle=500)
         shot(page, "session-tool-groups", f"agents/{S1}", wait=".chat-scroll .timeline", before=open_tool_groups, settle=300)
         # And the same install where the owner met its absence: under the two lines on the voice card
@@ -1938,7 +1939,7 @@ def run_browser() -> int:
         print("wrote session-browser-replay")
         page.locator(".panel .bp-replay-live").click()
 
-        # Settings → Browser: what runs, the profiles, the limits on the shared load bar.
+        # Settings → Environments, the browser half: what runs, the profiles, the limits on the shared load bar.
         bs.running = [{"env": "container", "id": "b1a2b3c4", "profile": f"project-{P1}", "started_at": ago(minutes=12), "rss_bytes": 318 << 20, "cpu_percent": 3.1, "tabs": 2,
                        "memory_basis": "cgroup", "groups": [{"id": "g1", "owner": {"kind": "session", "id": S1, "label": "Bakery site"}, "url": "https://shop.example.com/", "title": "Rye flour"}]}]
         bs.profiles = [
@@ -1946,9 +1947,10 @@ def run_browser() -> int:
             {"id": f"project-{P2}", "env": "container", "scope": "project", "project_id": P2, "session_id": None, "staff_id": None, "created_at": ago(days=4), "last_used_at": ago(days=1), "size_bytes": 9 << 20, "running": False},
         ]
         page.route("**/api/workloads/load", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"terminals": terminal_load(), "browsers": browser_load(running=1), "together": None})))
-        page.goto(f"{BASE}/settings/browser?token=t&scheme=dark&lang={LANG}")
+        page.goto(f"{BASE}/settings/environments?token=t&scheme=dark&lang={LANG}")
         page.wait_for_selector(".bs-running .bs-row", timeout=15000)
         page.wait_for_selector(".bs-limits .loadbar.workloads", timeout=15000)
+        page.locator("#browser-sessions").evaluate("el => el.scrollIntoView({block: 'start'})")
         page.wait_for_timeout(400)
         page.screenshot(path=str(OUT / "settings-browser.png"))
         print("wrote settings-browser")

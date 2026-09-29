@@ -268,17 +268,27 @@ def run(browser) -> list[str]:  # type: ignore[no-untyped-def]
     context = new_context(browser, viewport={"width": 1280, "height": 900})
     page = context.new_page()
     page.route("**/api/**", settings_stub)
-    page.goto(f"{BASE}/settings/tools?token=t&scheme=dark&lang=en")
+    # The card lives on Voice & speech now, its two choices compact pickers in their rows.
+    page.goto(f"{BASE}/settings/voice?token=t&scheme=dark&lang=en")
     page.wait_for_selector("#asr-transcriber", timeout=15000)
-    page.wait_for_function("() => document.querySelectorAll('#asr-transcriber option').length > 1", timeout=10000)
-    offered = page.eval_on_selector_all("#asr-transcriber option", "els => els.map(e => e.value)")
+
+    def offered_by(picker: str) -> list[str]:
+        page.locator(picker).click()
+        page.wait_for_selector(".dropdown-list [role=option]", timeout=5000)
+        values = page.eval_on_selector_all(".dropdown-list [role=option]", "els => els.map(e => e.dataset.value)")
+        return values
+
+    page.wait_for_function("() => document.querySelector('.asr-card') !== null", timeout=10000)
+    page.wait_for_timeout(600)
+    offered = offered_by("#asr-transcriber")
     check(offered[:1] == ["cloud"] and "gigaam-ru" in offered, f"the transcriber offers the endpoint and the installed model ({offered})")
-    page.select_option("#asr-transcriber", "gigaam-ru")
+    page.locator(".dropdown-list [role=option][data-value='gigaam-ru']").click()
     page.wait_for_timeout(400)
     check(bool(saved) and saved[-1].get("asr", {}).get("transcriber") == "gigaam-ru", f"choosing it saves [asr].transcriber ({saved[-1:] if saved else saved})")
     check(not saved or saved[-1]["asr"].get("api_key") == "", "and never sends the key back")
-    fallback = page.eval_on_selector_all("#asr-fallback option", "els => els.map(e => e.value)")
+    fallback = offered_by("#asr-fallback")
     check(fallback[:1] == [""] and "gigaam-ru" in fallback, f"the fallback offers nothing, and the installed model ({fallback})")
+    page.keyboard.press("Escape")
     context.close()
     return problems
 

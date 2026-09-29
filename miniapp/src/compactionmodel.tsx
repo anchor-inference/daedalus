@@ -2,11 +2,13 @@
 //
 // It sits apart from the settings screen so the one surprising rule can be tested on its own: a
 // preset that was chosen here and later deleted stays in the configuration (the runtime quietly
-// summarises with the session's own model instead), so the select must still show it — as missing —
+// summarises with the session's own model instead), so the picker must still show it — as missing —
 // rather than silently displaying the first option and leaving the operator to believe it is in use.
 
 import type { Preset } from "./api";
 import { t } from "./i18n";
+import { Dropdown } from "./components";
+import { Row } from "./settingsrow";
 
 export type CompactionOption = { value: string; label: string; missing?: boolean };
 
@@ -22,21 +24,12 @@ export function CompactionModelSelect({ presets, value, onSave }: { presets: Rec
   const options = compactionOptions(presets, value);
   const missing = options.some((o) => o.missing);
   return (
-    <div>
-      <label className="field" htmlFor="compaction-preset">{t("settings.compaction.model")}</label>
-      <select
-        id="compaction-preset"
-        className="field"
-        value={value}
-        aria-invalid={missing || undefined}
-        onChange={(e) => e.target.value !== value && onSave(e.target.value)}
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
-      {missing && <div className="sub">{t("settings.compaction.model.missing.hint")}</div>}
-      <div className="sub faint">{t("settings.compaction.model.hint")}</div>
-    </div>
+    <Row
+      title={t("settings.compaction.model")}
+      desc={<>{missing && <span className="attn">{t("settings.compaction.model.missing.hint")} </span>}{t("settings.compaction.model.hint")}</>}
+      stack
+    >
+      <Dropdown id="compaction-preset" label={t("settings.compaction.model")} value={value} invalid={missing} onChange={onSave} options={options.map((o) => ({ id: o.value, label: o.label }))} />
+    </Row>
   );
 }

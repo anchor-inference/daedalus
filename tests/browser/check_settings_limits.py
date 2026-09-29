@@ -2,13 +2,14 @@
 
 At 1440 × 900 and on a 390 px phone, in English and Russian:
 
-- the select offers the session's own model first, then every preset under the model picker's label;
-- a choice is saved through the settings save with its revision, and after a reload the select shows
+- the picker (a compact dropdown in the row's control lane) offers the session's own model first, then
+  every preset under the model picker's label;
+- a choice is saved through the settings save with its revision, and after a reload the picker shows
   the value the host holds;
 - a preset deleted after it was chosen is shown as missing, not as whichever option comes first, and
   saving another field of the section carries it along unchanged;
 - the summariser's call timeout sits beside it and is saved on blur;
-- nothing on the page scrolls sideways on a phone.
+- nothing on the page scrolls sideways on a phone, and the picker's list stays on its screen.
 
 Exit 0 when every step holds.
 """
@@ -85,18 +86,20 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     say = say_into(problems, lang)
     host = Host()
     page = opened(browser, host, lang, {"width": 1440, "height": 900})
-    select = page.locator("#compaction-preset")
-    labels = select.locator("option").all_inner_texts()
+    picker = page.locator("#compaction-preset")
+    picker.click()
+    labels = page.locator(".dropdown-list [role=option] .dropdown-item-text > span:first-child").all_inner_texts()
     print(f"[{lang}] options: {labels}")
     if labels[:1] != [OWN[lang]] or labels[1:] != [p["label"] for p in SETTINGS["presets"].values()]:
         say(f"the options read {labels}")
-    if select.input_value() != "":
-        say(f"with nothing chosen the select holds {select.input_value()!r}")
-    hint = select.locator("xpath=following-sibling::div[last()]").inner_text()
+    if picker.get_attribute("data-value") != "":
+        say(f"with nothing chosen the picker holds {picker.get_attribute('data-value')!r}")
+    # The hint is the row's description, beside the picker rather than under a full-width select.
+    hint = page.locator(".settings-row", has=picker).locator(".settings-row-desc").inner_text()
     if "flash" not in hint.lower():
         say(f"the hint reads {hint!r}")
 
-    select.select_option("deepseek-flash")
+    page.locator(".dropdown-list [role=option][data-value='deepseek-flash']").click()
     page.wait_for_timeout(800)
     last = host.puts[-1] if host.puts else {}
     print(f"[{lang}] saved: {last.get('compaction')} at {last.get('base_revision')}")
@@ -105,10 +108,10 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
 
     page.reload()
     page.wait_for_selector("#compaction-preset", timeout=15000)
-    if page.locator("#compaction-preset").input_value() != "deepseek-flash":
-        say(f"after a reload the select holds {page.locator('#compaction-preset').input_value()!r}")
+    if page.locator("#compaction-preset").get_attribute("data-value") != "deepseek-flash":
+        say(f"after a reload the picker holds {page.locator('#compaction-preset').get_attribute('data-value')!r}")
 
-    timeout = page.locator("label:text-is('%s') + input" % ("Summary call timeout (seconds)" if lang == "en" else "Таймаут вызова выжимки (секунды)"))
+    timeout = page.locator("#compaction-timeout")
     timeout.fill("120")
     timeout.blur()
     page.wait_for_timeout(800)
@@ -119,12 +122,12 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     # A preset deleted since it was chosen: shown as missing, carried along by another save.
     host = Host("retired-model")
     page = opened(browser, host, lang, {"width": 1440, "height": 900})
-    select = page.locator("#compaction-preset")
-    chosen = select.locator("option:checked").inner_text()
-    print(f"[{lang}] missing: {chosen!r}, invalid {select.get_attribute('aria-invalid')}")
-    if select.input_value() != "retired-model" or MISSING[lang] not in chosen or select.get_attribute("aria-invalid") != "true":
-        say(f"a deleted preset reads {chosen!r} ({select.input_value()!r})")
-    words = page.locator("label:text-is('%s') + input" % ("Summary budget (words)" if lang == "en" else "Объём выжимки (слов)"))
+    picker = page.locator("#compaction-preset")
+    chosen = picker.inner_text()
+    print(f"[{lang}] missing: {chosen!r}, invalid {picker.get_attribute('aria-invalid')}")
+    if picker.get_attribute("data-value") != "retired-model" or MISSING[lang] not in chosen or picker.get_attribute("aria-invalid") != "true":
+        say(f"a deleted preset reads {chosen!r} ({picker.get_attribute('data-value')!r})")
+    words = page.locator("#compaction-words")
     words.fill("1000")
     words.blur()
     page.wait_for_timeout(800)
@@ -140,6 +143,13 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
     print(f"[{lang}] phone widths: {width}")
     if width[0] > width[1] or width[2] > width[1] + 0.5:
         say(f"Settings → Limits scrolls sideways on a phone: {width}")
+    # The picker's list floats over the page; on a phone it must stay inside the screen.
+    page.locator("#compaction-preset").scroll_into_view_if_needed()
+    page.locator("#compaction-preset").tap()
+    box = page.locator(".dropdown-list").bounding_box() or {"x": -1, "width": 0}
+    print(f"[{lang}] phone list: {box}")
+    if box["x"] < 0 or box["x"] + box["width"] > 390.5:
+        say(f"the picker's list leaves the phone's screen: {box}")
     page.context.close()
 
 

@@ -8,7 +8,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, telegram } from "../api";
 import type { NotificationPreferences, NotificationPreferencesView, NotifyCell, NotifyChannel, Project } from "../api";
-import { timeAgo } from "../components";
+import { Switch, timeAgo } from "../components";
+import { NumInput, Row } from "../settingsrow";
 import { clock, shortDateTime } from "../format";
 import { plural, t } from "../i18n";
 import { categoryLabel } from "../notifications";
@@ -18,7 +19,7 @@ import { setPopupsShown, usePopupsShown } from "../popups";
 import { PushCard } from "../pushui";
 import { useMedia } from "../shell";
 import { invalidate, useQuery } from "../store";
-import { errorText, numInput } from "../ui";
+import { errorText } from "../ui";
 
 const QUIET_DEFAULT = { from: "23:00", to: "08:00" };
 
@@ -202,14 +203,12 @@ function QuietHours({ prefs, zone, change }: { prefs: NotificationPreferences; z
     <div className="card">
       <div className="section-title" style={{ marginTop: 0 }}>{t("nset.quiet.title")}</div>
       <div className="sub">{t("nset.quiet.sub")}</div>
-      <div className="btnrow">
-        <button className={`btn small ${ends ? "primary" : ""}`} aria-pressed={!!ends} onClick={() => change((p) => ({ ...p, quiet_hours: ends ? "" : joinQuietHours(draft.from, draft.to) || `${QUIET_DEFAULT.from}-${QUIET_DEFAULT.to}` }))}>
-          {t("nset.quiet.toggle", { state: t(ends ? "common.on" : "common.off") })}
-        </button>
-      </div>
+      <Row title={t("nset.quiet.toggle")} desc={<>{ends ? `${t("nset.quiet.urgent")} ` : ""}{zone ? t("nset.quiet.zone", { zone }) : t("nset.quiet.nozone")}</>}>
+        <Switch checked={!!ends} onChange={(on) => change((p) => ({ ...p, quiet_hours: on ? joinQuietHours(draft.from, draft.to) || `${QUIET_DEFAULT.from}-${QUIET_DEFAULT.to}` : "" }))} label={t("nset.quiet.toggle")} />
+      </Row>
       {ends && (
-        <>
-          <div className="quiet-hours">
+        <Row title={t("nset.quiet.when")} desc={same ? <span className="push-error">{t("nset.quiet.same")}</span> : undefined}>
+          <span className="quiet-hours">
             <label>
               <span className="sub">{t("nset.quiet.from")}</span>
               <input className="field" type="time" value={draft.from} onChange={(e) => set("from", e.target.value)} />
@@ -218,30 +217,12 @@ function QuietHours({ prefs, zone, change }: { prefs: NotificationPreferences; z
               <span className="sub">{t("nset.quiet.to")}</span>
               <input className="field" type="time" value={draft.to} onChange={(e) => set("to", e.target.value)} />
             </label>
-          </div>
-          {same && <div className="sub push-error">{t("nset.quiet.same")}</div>}
-          <div className="sub">{t("nset.quiet.urgent")}</div>
-        </>
+          </span>
+        </Row>
       )}
-      <div className="sub faint">{zone ? t("nset.quiet.zone", { zone }) : t("nset.quiet.nozone")}</div>
-      <label className="field" htmlFor="finished-after">{t("nset.finished.label")}</label>
-      <div className="terminal-cap-row">
-        <input
-          id="finished-after"
-          className="field terminal-cap-input"
-          type="number"
-          min={0}
-          step={5}
-          defaultValue={prefs.finished_min_seconds}
-          key={prefs.finished_min_seconds}
-          onBlur={(e) => {
-            const v = numInput(e.target.value, 0);
-            if (v !== null && Math.round(v) !== prefs.finished_min_seconds) change((p) => ({ ...p, finished_min_seconds: Math.round(v) }));
-          }}
-        />
-        <span className="sub">{t("nset.finished.unit")}</span>
-      </div>
-      <div className="sub">{t("nset.finished.sub")}</div>
+      <Row title={t("nset.finished.label")} htmlFor="finished-after" desc={t("nset.finished.sub")} stack>
+        <NumInput id="finished-after" label={t("nset.finished.label")} value={prefs.finished_min_seconds} min={0} step={5} unit={t("nset.finished.unit")} onSave={(v) => Math.round(v) !== prefs.finished_min_seconds && change((p) => ({ ...p, finished_min_seconds: Math.round(v) }))} />
+      </Row>
     </div>
   );
 }
@@ -250,18 +231,12 @@ function Answering({ prefs, change }: { prefs: NotificationPreferences; change: 
   return (
     <div className="card">
       <div className="section-title" style={{ marginTop: 0 }}>{t("nset.answer.title")}</div>
-      <div className="btnrow">
-        <button className={`btn small ${prefs.quick_actions ? "primary" : ""}`} aria-pressed={prefs.quick_actions} onClick={() => change((p) => ({ ...p, quick_actions: !p.quick_actions }))}>
-          {t("nset.quick", { state: t(prefs.quick_actions ? "common.on" : "common.off") })}
-        </button>
-      </div>
-      <div className="sub">{t("nset.quick.sub")}</div>
-      <div className="btnrow">
-        <button className={`btn small ${prefs.telegram_covers_push ? "primary" : ""}`} aria-pressed={prefs.telegram_covers_push} onClick={() => change((p) => ({ ...p, telegram_covers_push: !p.telegram_covers_push }))}>
-          {t("nset.cover", { state: t(prefs.telegram_covers_push ? "common.on" : "common.off") })}
-        </button>
-      </div>
-      <div className="sub">{t("nset.cover.sub")}</div>
+      <Row title={t("nset.quick")} desc={t("nset.quick.sub")}>
+        <Switch checked={prefs.quick_actions} onChange={(quick_actions) => change((p) => ({ ...p, quick_actions }))} label={t("nset.quick")} />
+      </Row>
+      <Row title={t("nset.cover")} desc={t("nset.cover.sub")}>
+        <Switch checked={prefs.telegram_covers_push} onChange={(telegram_covers_push) => change((p) => ({ ...p, telegram_covers_push }))} label={t("nset.cover")} />
+      </Row>
     </div>
   );
 }
@@ -273,12 +248,9 @@ function PopupsCard() {
   return (
     <div className="card" data-popups-card>
       <div className="section-title" style={{ marginTop: 0 }}>{t("nset.popups.title")}</div>
-      <div className="btnrow">
-        <button className={`btn small ${on ? "primary" : ""}`} aria-pressed={on} onClick={() => setPopupsShown(!on)}>
-          {t("nset.popups", { state: t(on ? "common.on" : "common.off") })}
-        </button>
-      </div>
-      <div className="sub">{t("nset.popups.sub")}</div>
+      <Row title={t("nset.popups")} desc={t("nset.popups.sub")}>
+        <Switch checked={on} onChange={setPopupsShown} label={t("nset.popups")} />
+      </Row>
     </div>
   );
 }

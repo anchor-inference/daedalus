@@ -1,4 +1,4 @@
-"""Settings → Browser, driven in a real browser.
+"""Settings → Environments, the browser half, driven in a real browser.
 
 At 1440 × 900 and on a 390 px phone, in English and Russian:
 
@@ -10,6 +10,7 @@ At 1440 × 900 and on a 390 px phone, in English and Russian:
 - a profile is cleared and deleted only after asking, and never while its browser runs;
 - the recording's default, watch mode and its sites, and the local network's addresses are saved as
   the host's `[browser]` section;
+- the old /settings/browser address lands on Environments;
 - nothing on the page scrolls sideways on a phone.
 
 Exit 0 when every step holds.
@@ -97,7 +98,7 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
     host = Host(bs)
     page = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark").new_page()
     page.route("**/api/**", host.route)
-    page.goto(f"{BASE}/settings/browser?token=t&lang={lang}")
+    page.goto(f"{BASE}/settings/environments?token=t&lang={lang}")
     page.wait_for_selector(".bs-envs .bs-env", timeout=15000)
 
     env = page.inner_text(".bs-envs")
@@ -167,8 +168,8 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
         say(f"the profile was not cleared and deleted: {calls}")
 
     # The rest of the section is the host's [browser].
-    page.locator(".bs-recording .btnrow button").first.click()
-    page.locator(".bs-watch .btnrow button").first.click()
+    page.locator(".bs-recording [role=switch]").first.click()
+    page.locator(".bs-watch [role=switch]").first.click()
     page.locator("#browser-watch").fill("mail.google.com\n*.bank.example\n\nmail.google.com")
     page.locator("#browser-lan").fill("10.0.5.20, 10.0.5.0/24")
     page.locator("#browser-cap").focus()
@@ -188,8 +189,11 @@ def phone(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     host = Host(bs)
     page = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme="dark").new_page()
     page.route("**/api/**", host.route)
+    # The address Browser had as a page of its own: kept working, it lands on the merged page.
     page.goto(f"{BASE}/settings/browser?token=t&lang={lang}")
     page.wait_for_selector(".bs-running .bs-row", timeout=15000)
+    if "/settings/environments" not in page.url:
+        say(f"the old address stayed at {page.url}")
     width = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth, Math.max(...[...document.querySelectorAll('.bs *')].map(e => e.getBoundingClientRect().right))]")
     print(f"[{lang}] phone widths: {width}")
     if width[0] > width[1] or width[2] > width[1] + 0.5:

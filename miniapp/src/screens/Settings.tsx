@@ -1,7 +1,7 @@
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, IconName } from "../icons";
-import { pathFor } from "../router";
+import { navigate, pathFor } from "../router";
 import { PageHeader, go, screenTitle, useMedia } from "../shell";
 import { api, telegram, HeartbeatStatus, Preset, ProviderConf, SearchBackendInfo, SearchCheck, Settings } from "../api";
 import { confirmAsync, errorText, numInput } from "../ui";
@@ -20,7 +20,8 @@ import { ON_DEMAND_CHOICES, REASONING_EFFORTS, onDemandGroups, orchestratorPrese
 import { mainPreset } from "../main/model";
 import { Sheet } from "../dialogs";
 import { plural, t } from "../i18n";
-import { LangPicker, Segmented, Switch } from "../components";
+import { Dropdown, LangPicker, Segmented, Switch } from "../components";
+import { NumInput, NumRow, Row, TextBlock } from "../settingsrow";
 import { AppearancePanel } from "./Appearance";
 import { modeHome, storedMode } from "../mode";
 import { useQuery } from "../store";
@@ -64,6 +65,12 @@ function RulesEditor({ rules, fallback, onSave }: { rules: string; fallback: str
       </div>
     </div>
   );
+}
+
+/** A preset as the model picker names it: its label, or provider/model when it has none. */
+function presetName(s: Settings, id: string): string {
+  const p = s.presets?.[id];
+  return p ? p.label || `${p.provider}/${p.model}` : id;
 }
 
 type Patch = (id: string, patch: Record<string, unknown>) => Promise<Settings | undefined>;
@@ -421,48 +428,35 @@ function TotalCaps({ s, save }: { s: Settings; save: (patch: any) => Promise<voi
   useEffect(load, [load, s.limits.total_since, s.limits.usd_total, s.limits.usd_total_per_provider]);
   const providers = Object.keys(s.providers ?? {});
   const caps = s.limits.usd_total_per_provider ?? {};
+  const since = s.limits.total_since ? shortDateTime(s.limits.total_since) : t("settings.limits.since.start");
+  const spent = spend?.total.spent_usd ?? 0;
+  const cap = s.limits.usd_total;
   return (
     <>
-      <label className="field">{t("settings.limits.total")}</label>
-      <div className="composer-row">
-        <input className="field" type="number" step="1" min={0} defaultValue={s.limits.usd_total} onBlur={(e) => { const v = numInput(e.target.value, 0); if (v !== null && v !== s.limits.usd_total) save({ limits: { usd_total: v } }); }} />
-        <span className="sub" style={{ whiteSpace: "nowrap" }}>{t("settings.limits.spent", { sum: spend ? `$${spend.total.spent_usd.toFixed(2)}` : "…" })}</span>
-      </div>
-      <label className="field">{t("settings.limits.perprovider")}</label>
-      {/* Said, not left blank: an empty space under the heading read as a list that failed to load. */}
-      {providers.length === 0 && <div className="sub">{t("settings.limits.noproviders")}</div>}
-      {providers.map((pid) => (
-        <div key={pid} className="composer-row" style={{ marginBottom: 6 }}>
-          <span style={{ minWidth: 90 }}>{pid}</span>
-          <input className="field" type="number" step="1" min={0} defaultValue={caps[pid] ?? 0} onBlur={(e) => { const v = numInput(e.target.value, 0); if (v !== null && v !== (caps[pid] ?? 0)) save({ limits: { usd_total_per_provider: { [pid]: v } } }); }} />
-          <span className="sub" style={{ whiteSpace: "nowrap" }}>{t("settings.limits.spent", { sum: spend?.per_provider[pid] ? `$${spend.per_provider[pid].spent_usd.toFixed(2)}` : "$0.00" })}</span>
+      {/* Only with a cap: "of $0, no cap" has no bar to draw and no share to read. */}
+      {cap > 0 && spend && (
+        <div className="spend-meter" data-level={spent >= cap ? "bad" : spent >= cap * 0.8 ? "warn" : "ok"}>
+          <div className="spend-meter-line">
+            <b>{t("settings.limits.meter", { spent: `$${spent.toFixed(2)}`, cap: `$${cap.toFixed(2)}` })}</b>
+            <span className="sub">{t("settings.limits.since", { when: since })}</span>
+          </div>
+          <span className="spend-meter-track" aria-hidden><span style={{ width: `${Math.min(100, (spent / cap) * 100)}%` }} /></span>
         </div>
+      )}
+      <Row title={t("settings.limits.total")} htmlFor="limits-total" desc={t("settings.limits.total.sub", { sum: spend ? `$${spent.toFixed(2)}` : "…" })} stack>
+        <NumInput id="limits-total" label={t("settings.limits.total")} value={cap} min={0} step={1} unit="USD" onSave={(v) => save({ limits: { usd_total: v } })} />
+      </Row>
+      {providers.map((pid) => (
+        <Row key={pid} title={t("settings.limits.provider", { id: pid })} desc={t("settings.limits.spent", { sum: spend?.per_provider[pid] ? `$${spend.per_provider[pid].spent_usd.toFixed(2)}` : "$0.00" })} stack data-provider={pid}>
+          <NumInput label={t("settings.limits.provider", { id: pid })} value={caps[pid] ?? 0} min={0} step={1} unit="USD" onSave={(v) => save({ limits: { usd_total_per_provider: { [pid]: v } } })} />
+        </Row>
       ))}
-      <div className="row" style={{ alignItems: "center", gap: 10 }}>
-        <span className="sub">{t("settings.limits.since", { when: s.limits.total_since ? shortDateTime(s.limits.total_since) : t("settings.limits.since.start") })}</span>
+      {/* Said, not left blank: an empty space where the providers go read as a list that failed to load. */}
+      {providers.length === 0 && <Row title={t("settings.limits.perprovider")} desc={t("settings.limits.noproviders")} />}
+      <Row title={t("settings.limits.counting")} desc={t("settings.limits.since", { when: since })}>
         <button className="btn small" onClick={async () => { await api.post("/api/limits/reset-total"); load(); }}>{t("settings.limits.reset")}</button>
-      </div>
+      </Row>
     </>
-  );
-}
-
-function NumField({ label, value, min, step, onSave, hint }: { label: string; value: number; min?: number; step?: number; onSave: (v: number) => void; hint?: string }) {
-  return (
-    <div>
-      <label className="field">{label}</label>
-      <input className="field" type="number" min={min} step={step} defaultValue={value} onBlur={(e) => { const v = numInput(e.target.value, min); if (v !== null && v !== value) onSave(v); }} />
-      {hint && <div className="sub">{hint}</div>}
-    </div>
-  );
-}
-
-function TextField({ label, value, placeholder, onSave, hint }: { label: string; value: string; placeholder?: string; onSave: (v: string) => void; hint?: string }) {
-  return (
-    <div>
-      <label className="field">{label}</label>
-      <input className="field" defaultValue={value} placeholder={placeholder} onBlur={(e) => e.target.value.trim() !== value && onSave(e.target.value.trim())} />
-      {hint && <div className="sub">{hint}</div>}
-    </div>
   );
 }
 
@@ -490,91 +484,92 @@ function SearchBlock({ s, save }: { s: Settings; save: (patch: any) => Promise<v
   };
   const fallbackIds = search.fallback ?? [];
   return (
-    <div className="card">
+    <div className="card search-card">
       <div className="section-title" style={{ marginTop: 0 }}>{t("settings.search.title")}</div>
       <div className="sub">{t("settings.search.sub")}</div>
-      <label className="field">{t("settings.search.backend")}</label>
-      <select className="field" value={search.backend} onChange={(e) => saveSearch({ backend: e.target.value })}>
-        {backends.map((b) => (
-          <option key={b.id} value={b.id} disabled={!usable(b)}>{optionLabel(b)}</option>
-        ))}
-        {!backends.some((b) => b.id === search.backend) && <option value={search.backend}>{search.backend}</option>}
-      </select>
-      <label className="field">{t("settings.search.fallbacks")}</label>
-      <div className="btnrow">
-        {backends.filter((b) => b.id !== search.backend).map((b) => {
-          const on = fallbackIds.includes(b.id);
-          return (
-            <button
-              key={b.id}
-              className={`btn small ${on ? "primary" : ""}`}
-              disabled={!on && !usable(b)}
-              title={optionLabel(b)}
-              onClick={() => saveSearch({ fallback: on ? fallbackIds.filter((x) => x !== b.id) : [...fallbackIds, b.id] })}
-            >
-              {on ? `${fallbackIds.indexOf(b.id) + 1}. ` : ""}{b.id}
-            </button>
-          );
-        })}
-      </div>
-      <div className="grid2">
-        <NumField label={t("settings.search.results")} value={search.results} min={1} onSave={(v) => saveSearch({ results: v })} />
-        <NumField label={t("settings.search.timeout")} value={search.timeout_seconds} min={1} onSave={(v) => saveSearch({ timeout_seconds: v })} />
-      </div>
+      <Row title={t("settings.search.backend")} stack>
+        <Dropdown
+          id="search-backend"
+          label={t("settings.search.backend")}
+          value={search.backend}
+          onChange={(backend) => saveSearch({ backend })}
+          options={[
+            ...backends.map((b) => ({ id: b.id, label: b.label, hint: optionLabel(b).slice(b.label.length).replace(/^ — /, "") || undefined, disabled: !usable(b) })),
+            ...(backends.some((b) => b.id === search.backend) ? [] : [{ id: search.backend, label: search.backend }]),
+          ]}
+        />
+      </Row>
+      <Row title={t("settings.search.fallbacks")} desc={t("settings.search.fallbacks.sub")} stack>
+        <span className="settings-chips">
+          {backends.filter((b) => b.id !== search.backend).map((b) => {
+            const on = fallbackIds.includes(b.id);
+            return (
+              <button
+                key={b.id}
+                className={`chip select ${on ? "on" : ""}`}
+                aria-pressed={on}
+                disabled={!on && !usable(b)}
+                title={optionLabel(b)}
+                onClick={() => saveSearch({ fallback: on ? fallbackIds.filter((x) => x !== b.id) : [...fallbackIds, b.id] })}
+              >
+                {on ? `${fallbackIds.indexOf(b.id) + 1}. ` : ""}{b.id}
+              </button>
+            );
+          })}
+        </span>
+      </Row>
+      <NumRow title={t("settings.search.results")} value={search.results} min={1} onSave={(v) => saveSearch({ results: v })} />
+      <NumRow title={t("settings.search.timeout")} unit={t("settings.unit.seconds")} value={search.timeout_seconds} min={1} onSave={(v) => saveSearch({ timeout_seconds: v })} />
       {search.backend === "searxng" || fallbackIds.includes("searxng") ? (
         <>
           <div className="section-title">SearXNG</div>
-          <TextField label={t("settings.search.url")} value={search.searxng.url} placeholder="http://127.0.0.1:8080" onSave={(v) => saveSearch({ searxng: { url: v } })} />
-          <TextField label={t("settings.search.engines")} value={search.searxng.engines} placeholder="google,duckduckgo,bing" onSave={(v) => saveSearch({ searxng: { engines: v } })} />
-          <div className="grid2">
-            <TextField label={t("settings.search.categories")} value={search.searxng.categories} placeholder="general" onSave={(v) => saveSearch({ searxng: { categories: v } })} />
-            <NumField label={t("settings.search.safe")} value={search.searxng.safesearch} min={0} onSave={(v) => saveSearch({ searxng: { safesearch: Math.min(2, v) } })} />
-          </div>
+          <TextBlock label={t("settings.search.url")} value={search.searxng.url} placeholder="http://127.0.0.1:8080" onSave={(v) => saveSearch({ searxng: { url: v } })} />
+          <TextBlock label={t("settings.search.engines")} value={search.searxng.engines} placeholder="google,duckduckgo,bing" onSave={(v) => saveSearch({ searxng: { engines: v } })} />
+          <TextBlock label={t("settings.search.categories")} value={search.searxng.categories} placeholder="general" onSave={(v) => saveSearch({ searxng: { categories: v } })} />
+          <Row title={t("settings.search.safe")}>
+            <Segmented label={t("settings.search.safe")} value={String(Math.min(2, Math.max(0, search.searxng.safesearch)))} onChange={(v) => saveSearch({ searxng: { safesearch: Number(v) } })} options={["0", "1", "2"].map((id) => ({ id, label: t(`settings.search.safe.${id}`) }))} />
+          </Row>
         </>
       ) : null}
       {search.backend === "duckduckgo" || fallbackIds.includes("duckduckgo") ? (
         <>
           <div className="section-title">DuckDuckGo</div>
-          <div className="grid2">
-            <TextField label={t("settings.search.html")} value={search.duckduckgo.url} onSave={(v) => saveSearch({ duckduckgo: { url: v } })} />
-            <TextField label={t("settings.search.region")} value={search.duckduckgo.region} placeholder="wt-wt, ru-ru, us-en" onSave={(v) => saveSearch({ duckduckgo: { region: v } })} />
-          </div>
+          <TextBlock label={t("settings.search.html")} value={search.duckduckgo.url} onSave={(v) => saveSearch({ duckduckgo: { url: v } })} />
+          <TextBlock label={t("settings.search.region")} value={search.duckduckgo.region} placeholder="wt-wt, ru-ru, us-en" onSave={(v) => saveSearch({ duckduckgo: { region: v } })} />
         </>
       ) : null}
       {search.backend === "serper" || fallbackIds.includes("serper") ? (
         <>
           <div className="section-title">Serper (Google)</div>
-          <div className="grid2">
-            <TextField label={t("settings.search.country")} value={search.serper.gl} placeholder="ru, us" onSave={(v) => saveSearch({ serper: { gl: v } })} />
-            <TextField label={t("settings.search.language")} value={search.serper.hl} placeholder="ru, en" onSave={(v) => saveSearch({ serper: { hl: v } })} />
+          <div className="grid2 settings-block">
+            <TextBlock label={t("settings.search.country")} value={search.serper.gl} placeholder="ru, us" onSave={(v) => saveSearch({ serper: { gl: v } })} />
+            <TextBlock label={t("settings.search.language")} value={search.serper.hl} placeholder="ru, en" onSave={(v) => saveSearch({ serper: { hl: v } })} />
           </div>
         </>
       ) : null}
       {search.backend === "keenable" || fallbackIds.includes("keenable") ? (
         <>
           <div className="section-title">Keenable</div>
-          <NumField label={t("settings.search.snippet")} value={search.keenable.snippet_max_length} min={180} step={60} onSave={(v) => saveSearch({ keenable: { snippet_max_length: v } })} />
+          <NumRow title={t("settings.search.snippet")} unit={t("settings.unit.chars")} value={search.keenable.snippet_max_length} min={180} step={60} onSave={(v) => saveSearch({ keenable: { snippet_max_length: v } })} />
         </>
       ) : null}
       {search.backend === "tavily" || fallbackIds.includes("tavily") ? (
         <>
           <div className="section-title">Tavily</div>
-          <label className="field">{t("settings.search.depth")}</label>
-          <select className="field" value={search.tavily.depth} onChange={(e) => saveSearch({ tavily: { depth: e.target.value } })}>
-            {["basic", "advanced", "fast", "ultra-fast"].map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
+          <Row title={t("settings.search.depth")}>
+            <Dropdown label={t("settings.search.depth")} value={search.tavily.depth} onChange={(depth) => saveSearch({ tavily: { depth } })} options={["basic", "advanced", "fast", "ultra-fast"].map((d) => ({ id: d, label: d }))} />
+          </Row>
         </>
       ) : null}
       {search.backend === "exa" || fallbackIds.includes("exa") ? (
         <>
           <div className="section-title">Exa</div>
-          <label className="field">{t("settings.search.type")}</label>
-          <select className="field" value={search.exa.type} onChange={(e) => saveSearch({ exa: { type: e.target.value } })}>
-            {["auto", "instant", "fast", "deep"].map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
+          <Row title={t("settings.search.type")}>
+            <Dropdown label={t("settings.search.type")} value={search.exa.type} onChange={(type) => saveSearch({ exa: { type } })} options={["auto", "instant", "fast", "deep"].map((d) => ({ id: d, label: d }))} />
+          </Row>
         </>
       ) : null}
-      <div className="btnrow" style={{ marginTop: 12 }}>
+      <div className="btnrow search-check">
         <button className="btn small primary" disabled={checking} onClick={() => runCheck("")}>{t(checking ? "settings.search.checking" : "settings.search.check")}</button>
         <button className="btn small" disabled={checking || !info(search.backend)} onClick={() => runCheck(search.backend)}>{t("settings.search.checkone", { name: info(search.backend)?.label ?? search.backend })}</button>
       </div>
@@ -598,50 +593,31 @@ function SearchBlock({ s, save }: { s: Settings; save: (patch: any) => Promise<v
   );
 }
 
+/** Tools & search: the tool groups first — the one card here that changes what every request costs —
+ *  then what each tool that reaches out may do. Speech-to-text moved to Voice & speech, and the
+ *  image model to Models & providers, where the operator goes looking for a model. */
 function ToolsTab({ s, save, toast, onSettings }: { s: Settings; save: (patch: any) => Promise<void>; toast: (t: string) => void; onSettings: (next: Settings) => void }) {
   const web = s.tools.web;
   return (
     <>
       <ToolGroupsSettings toast={toast} revision={s.revision} onSettings={onSettings} />
-      <AsrSettingsCard s={s} save={save} />
-      <div className="card">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("settings.vision.title")}</div>
-        <div className="sub">{t("settings.vision.sub")}</div>
-        <div className="grid2">
-          <div>
-            <label className="field">{t("settings.asr.model")}</label>
-            <select className="field" value={s.vision.preset} onChange={(e) => save({ vision: { preset: e.target.value } })}>
-              {Object.entries(s.presets ?? {}).filter(([, p]) => p.images).map(([id, p]) => (
-                <option key={id} value={id}>{p.label || `${p.provider}/${p.model}`}</option>
-              ))}
-              {!(s.presets ?? {})[s.vision.preset]?.images && <option value={s.vision.preset}>{s.vision.preset || t("settings.vision.none")}</option>}
-            </select>
-          </div>
-          <NumField label={t("settings.vision.output")} value={s.vision.max_output_tokens} min={100} step={100} onSave={(v) => save({ vision: { max_output_tokens: v } })} />
-        </div>
-      </div>
 
       <div className="card">
         <div className="section-title" style={{ marginTop: 0 }}>{t("settings.web.title")}</div>
-        <div className="grid2">
-          <NumField label={t("settings.web.timeout")} value={web.fetch_timeout_seconds} min={1} onSave={(v) => save({ tools: { web: { fetch_timeout_seconds: v } } })} />
-          <NumField label={t("settings.web.maxchars")} value={web.fetch_max_chars} min={1000} step={1000} onSave={(v) => save({ tools: { web: { fetch_max_chars: v } } })} />
-        </div>
-        <TextField label={t("settings.web.proxy")} value={web.proxy} placeholder="socks5://127.0.0.1:1080" hint={t("settings.web.proxy.hint")} onSave={(v) => save({ tools: { web: { proxy: v } } })} />
-        <TextField label={t("settings.web.ua")} value={web.user_agent} onSave={(v) => save({ tools: { web: { user_agent: v } } })} />
+        <NumRow title={t("settings.web.timeout")} unit={t("settings.unit.seconds")} value={web.fetch_timeout_seconds} min={1} onSave={(v) => save({ tools: { web: { fetch_timeout_seconds: v } } })} />
+        <NumRow title={t("settings.web.maxchars")} unit={t("settings.unit.chars")} value={web.fetch_max_chars} min={1000} step={1000} onSave={(v) => save({ tools: { web: { fetch_max_chars: v } } })} />
+        <TextBlock label={t("settings.web.proxy")} value={web.proxy} placeholder="socks5://127.0.0.1:1080" hint={t("settings.web.proxy.hint")} onSave={(v) => save({ tools: { web: { proxy: v } } })} />
+        <TextBlock label={t("settings.web.ua")} value={web.user_agent} onSave={(v) => save({ tools: { web: { user_agent: v } } })} />
       </div>
 
       <SearchBlock s={s} save={save} />
 
       <div className="card">
         <div className="section-title" style={{ marginTop: 0 }}>{t("settings.exec.title")}</div>
-        <div className="grid2">
-          <NumField label={t("settings.exec.timeout")} value={s.limits.tool_timeout_seconds} min={10} step={30} onSave={(v) => save({ limits: { tool_timeout_seconds: v } })} hint={t("settings.exec.timeout.hint")} />
-          <NumField label={t("settings.exec.maxchars")} value={s.tools.exec.max_output_chars} min={2000} step={5000} onSave={(v) => save({ tools: { exec: { max_output_chars: v } } })} hint={t("settings.exec.maxchars.hint")} />
-        </div>
+        <NumRow title={t("settings.exec.timeout")} desc={t("settings.exec.timeout.hint")} unit={t("settings.unit.seconds")} value={s.limits.tool_timeout_seconds} min={10} step={30} onSave={(v) => save({ limits: { tool_timeout_seconds: v } })} />
+        <NumRow title={t("settings.exec.maxchars")} desc={t("settings.exec.maxchars.hint")} unit={t("settings.unit.chars")} value={s.tools.exec.max_output_chars} min={2000} step={5000} onSave={(v) => save({ tools: { exec: { max_output_chars: v } } })} />
       </div>
 
-      
       <div className="card">
         <div className="section-title" style={{ marginTop: 0 }}>{t("settings.mcp.title")}</div>
         <div className="sub">{t("settings.mcp.sub")}</div>
@@ -766,35 +742,31 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
       <div className="card">
         <div className="section-title" style={{ marginTop: 0 }}>{t("settings.heartbeat.title")}</div>
         <div className="sub">{t("settings.heartbeat.sub")}</div>
-        <div className="settings-choice">
-          <b>{t("settings.heartbeat.enabled")}</b>
-          <Switch checked={hb.enabled} onChange={(enabled) => put({ enabled })} label={t("settings.heartbeat.enabled")} />
-        </div>
-        <div className="btnrow">
+        {/* The switch and Run now share the row, and the state is the row's description: apart,
+            an "on" chip, a Run now and a status line made three rows that read as three actions. */}
+        <Row
+          title={t("settings.heartbeat.enabled")}
+          desc={
+            <>
+              {hb.armed ? t("settings.heartbeat.armed") : hb.enabled ? t("settings.heartbeat.emptyfile") : t("common.off")} · {t("settings.heartbeat.today", { done: hb.runs_today, max: hb.max_runs_per_day })} ·{" "}
+              {t("settings.heartbeat.last", { t: hb.last_run ? timeAgo(hb.last_run) : t("common.never") })}
+              {hb.running ? t("settings.heartbeat.running") : ""}
+            </>
+          }
+        >
           <button className="btn small" onClick={runNow} disabled={!text.trim() || hb.running}>
             {t("common.runnow")}
           </button>
-          <span className="sub" style={{ alignSelf: "center" }}>
-            {hb.armed ? t("settings.heartbeat.armed") : hb.enabled ? t("settings.heartbeat.emptyfile") : t("common.off")} · {t("settings.heartbeat.today", { done: hb.runs_today, max: hb.max_runs_per_day })} ·{" "}
-            {t("settings.heartbeat.last", { t: hb.last_run ? timeAgo(hb.last_run) : t("common.never") })}
-            {hb.running ? t("settings.heartbeat.running") : ""}
-          </span>
-        </div>
-        <label className="field">{t("settings.heartbeat.interval")}</label>
-        <input className="field" type="number" defaultValue={hb.interval_minutes} onBlur={(e) => { const v = numInput(e.target.value, 1); if (v !== null) put({ interval_minutes: v }); }} />
-        <label className="field">{t("settings.heartbeat.hours")}</label>
-        <input className="field" defaultValue={hb.active_hours} onBlur={(e) => put({ active_hours: e.target.value })} />
-        <label className="field">{t("settings.heartbeat.max")}</label>
-        <input className="field" type="number" defaultValue={hb.max_runs_per_day} onBlur={(e) => { const v = numInput(e.target.value, 0); if (v !== null) put({ max_runs_per_day: v }); }} />
-        <label className="field">{t("settings.heartbeat.preset")}</label>
-        <select className="field" value={hb.preset} onChange={(e) => put({ preset: e.target.value })}>
-          <option value="">{t("settings.heartbeat.default")}</option>
-          {presets.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
+          <Switch checked={hb.enabled} onChange={(enabled) => put({ enabled })} label={t("settings.heartbeat.enabled")} />
+        </Row>
+        <NumRow id="heartbeat-interval" title={t("settings.heartbeat.interval")} unit={t("settings.unit.minutes")} value={hb.interval_minutes} min={1} onSave={(v) => put({ interval_minutes: v })} />
+        <Row title={t("settings.heartbeat.hours")} desc={t("settings.heartbeat.hours.sub")} htmlFor="heartbeat-hours" stack>
+          <input id="heartbeat-hours" className="field settings-inline-field" defaultValue={hb.active_hours} placeholder="09:00-21:00" onBlur={(e) => e.target.value !== hb.active_hours && put({ active_hours: e.target.value })} />
+        </Row>
+        <NumRow id="heartbeat-max" title={t("settings.heartbeat.max")} value={hb.max_runs_per_day} min={0} onSave={(v) => put({ max_runs_per_day: v })} />
+        <Row title={t("settings.heartbeat.preset")} stack>
+          <Dropdown id="heartbeat-preset" label={t("settings.heartbeat.preset")} value={hb.preset} onChange={(preset) => put({ preset })} options={[{ id: "", label: t("settings.heartbeat.default") }, ...presets.map((p) => ({ id: p, label: presetName(s, p) }))]} />
+        </Row>
       </div>
       <div className="card">
         <div className="section-title" style={{ marginTop: 0 }}>
@@ -891,62 +863,61 @@ function SecurityTab({ toast }: { toast: (t: string) => void }) {
     }
   }
 
+  const signOutEverywhere = async () => {
+    if (!(await confirmAsync(t("settings.security.signoutall.title"), { body: t("settings.security.signoutall.body"), action: t("settings.security.signoutall") }))) return;
+    try {
+      await passkeys.signOutEverywhere();
+      toast(t("settings.security.signedout"));
+    } catch (e) {
+      toast(errorText(e));
+    }
+  };
+
   return (
-    <div className="card">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("settings.security.title")}</div>
-      <div className="sub">{t("settings.security.sub")}</div>
-      <div className="btnrow" style={{ marginTop: 8 }}>
-        <button
-          className="btn small"
-          onClick={async () => {
-            if (!(await confirmAsync(t("settings.security.signoutall.title"), { body: t("settings.security.signoutall.body"), action: t("settings.security.signoutall") }))) return;
-            try {
-              await passkeys.signOutEverywhere();
-              toast(t("settings.security.signedout"));
-            } catch (e) {
-              toast(errorText(e));
-            }
-          }}
-        >
-          {t("settings.security.signoutall")}
-        </button>
-      </div>
-      {keys === null && <div className="empty">{t("common.loading")}</div>}
-      {keys !== null && keys.length === 0 && <div className="sub" style={{ marginTop: 8 }}>{t("settings.security.none")}</div>}
-      {keys !== null && keys.length > 0 && (
-        <div className="mlist">
-          {keys.map((k) => (
-            <div key={k.id} className="mrow">
-              <div className="mline noradio">
-                <div className="mmain">
-                  <span className="mtitle">{k.name}</span>
-                  <span className="mmeta">
-                    {t("settings.security.added", { t: timeAgo(k.created_at) })} · {k.last_used_at ? t("settings.security.lastused", { t: timeAgo(k.last_used_at) }) : t("settings.security.neverused")}
-                  </span>
-                </div>
-                <div className="mactions">
-                  <button className="btn small" onClick={() => void remove(k)}>{t("common.remove")}</button>
+    <>
+      <div className="card">
+        <div className="section-title" style={{ marginTop: 0 }}>{t("settings.security.title")}</div>
+        <div className="sub">{t("settings.security.sub")}</div>
+        {keys === null && <div className="empty">{t("common.loading")}</div>}
+        {keys !== null && keys.length === 0 && <div className="sub" style={{ marginTop: 8 }}>{t("settings.security.none")}</div>}
+        {keys !== null && keys.length > 0 && (
+          <div className="mlist">
+            {keys.map((k) => (
+              <div key={k.id} className="mrow">
+                <div className="mline noradio">
+                  <div className="mmain">
+                    <span className="mtitle">{k.name}</span>
+                    <span className="mmeta">
+                      {t("settings.security.added", { t: timeAgo(k.created_at) })} · {k.last_used_at ? t("settings.security.lastused", { t: timeAgo(k.last_used_at) }) : t("settings.security.neverused")}
+                    </span>
+                  </div>
+                  <div className="mactions">
+                    <button className="btn small" onClick={() => void remove(k)}>{t("common.remove")}</button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
-      <label className="field">{t("settings.security.name")}</label>
-      <input className="field" placeholder={t("settings.security.thisdevice")} value={name} onChange={(e) => setName(e.target.value)} />
-      <div className="btnrow">
-        <button className="btn primary small" disabled={busy || !can} onClick={() => void add()}>
-          {t(busy ? "settings.security.waiting" : "settings.security.add")}
-        </button>
+            ))}
+          </div>
+        )}
+        {/* The name and the button that uses it are one row: stacked, the button read as a separate
+            action under a field it had nothing to do with. */}
+        <Row title={t("settings.security.new")} desc={can ? t("settings.security.new.sub") : t("settings.security.cannot")} stack>
+          <input className="field settings-name-field" placeholder={t("settings.security.thisdevice")} aria-label={t("settings.security.name")} value={name} onChange={(e) => setName(e.target.value)} />
+          <button className="btn primary small" disabled={busy || !can} onClick={() => void add()}>
+            {t(busy ? "settings.security.waiting" : "settings.security.add")}
+          </button>
+        </Row>
       </div>
-      {!can && (
-        <div className="sub">{t("settings.security.cannot")}</div>
-      )}
-    </div>
+      <div className="card">
+        <Row title={t("settings.security.signoutall")} desc={t("settings.security.signoutall.sub")}>
+          <button className="btn small" onClick={() => void signOutEverywhere()}>{t("settings.security.signoutall.action")}</button>
+        </Row>
+      </div>
+    </>
   );
 }
 
-type Section = "appearance" | "models" | "rules" | "limits" | "terminals" | "browser" | "tools" | "voice" | "components" | "dependencies" | "chat" | "notifications" | "security" | "heartbeat" | "about";
+type Section = "appearance" | "models" | "rules" | "limits" | "environments" | "tools" | "voice" | "components" | "dependencies" | "chat" | "notifications" | "security" | "heartbeat" | "about";
 /** The sections, grouped the way the page lists them. The words come from the table, not from here. */
 const GROUPS: { id: "you" | "work" | "system"; sections: { id: Section; icon: IconName }[] }[] = [
   { id: "you", sections: [
@@ -960,8 +931,7 @@ const GROUPS: { id: "you" | "work" | "system"; sections: { id: Section; icon: Ic
     { id: "rules", icon: "pen" },
     { id: "limits", icon: "chart" },
     { id: "tools", icon: "wrench" },
-    { id: "terminals", icon: "terminal" },
-    { id: "browser", icon: "globe" },
+    { id: "environments", icon: "terminal" },
     { id: "chat", icon: "inbox" },
   ] },
   { id: "system", sections: [
@@ -975,6 +945,13 @@ const SECTIONS = GROUPS.flatMap((group) => group.sections);
 
 const sectionLabel = (id: Section) => t(`settings.sec.${id}`);
 
+/** Sections that were pages of their own and are now part of another: an address written down, sent
+ *  in a notification or bookmarked still lands on the setting, scrolled to the part it named. */
+const MOVED: Record<string, { to: Section; anchor?: string }> = {
+  terminals: { to: "environments", anchor: "terminal-sessions" },
+  browser: { to: "environments", anchor: "browser-sessions" },
+};
+
 export function SettingsScreen({ toast, section }: { toast: (t: string) => void; section?: string | null }) {
   const caps = useQuery<Capabilities>("/api/capabilities", { staleMs: 20000 });
   const [s, setS] = useState<Settings | null>(null);
@@ -982,7 +959,31 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
   const [status, setStatus] = useState<any>(null);
   const wide = useMedia("(min-width: 1024px)");
   const [query, setQuery] = useState("");
-  const current: Section | null = SECTIONS.some((x) => x.id === section) ? (section as Section) : null;
+  const moved = section ? MOVED[section] : undefined;
+  const current: Section | null = moved ? moved.to : SECTIONS.some((x) => x.id === section) ? (section as Section) : null;
+  useEffect(() => {
+    if (!moved) return;
+    navigate(pathFor("settings", moved.to) + window.location.search, { replace: true });
+  }, [moved]);
+  // The part an old address named is scrolled to once it has drawn, which for the browser half is
+  // after its own listing answers; a few tries rather than a guess at how long that takes.
+  const [anchor, setAnchor] = useState<string | null>(null);
+  useEffect(() => {
+    if (moved?.anchor) setAnchor(moved.anchor);
+  }, [moved]);
+  useEffect(() => {
+    if (!anchor) return;
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      const target = document.getElementById(anchor);
+      if (target || ++tries > 20) {
+        window.clearInterval(timer);
+        target?.scrollIntoView({ block: "start" });
+        setAnchor(null);
+      }
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [anchor]);
   const shown: Section | null = current ?? (wide ? "models" : null);
   useEffect(() => {
     api.get<Settings>("/api/settings").then(setS).catch((e) => toast((e as Error).message));
@@ -1153,42 +1154,51 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
               <div className="card">
                 <div className="section-title" style={{ marginTop: 0 }}>{t("settings.orchestrator.title")}</div>
                 <div className="sub">{t("settings.orchestrator.sub")}</div>
-                <label className="field" htmlFor="orchestrator-preset">{t("settings.orchestrator.model")}</label>
-                <select
-                  id="orchestrator-preset"
-                  className="field"
-                  value={orchestratorPreset(s.presets, s.orchestrator?.preset, s.orchestrator?.strongest)}
-                  onChange={(e) => save({ orchestrator: { preset: e.target.value } })}
-                >
-                  {Object.entries(s.presets).map(([id, p]) => (
-                    <option key={id} value={id}>
-                      {(p.label || `${p.provider}/${p.model}`) + (id === s.orchestrator?.strongest ? ` · ${t("settings.orchestrator.strongest")}` : "")}
-                    </option>
-                  ))}
-                </select>
-                <div className="sub faint">{t("settings.orchestrator.hint")}</div>
+                <Row title={t("settings.orchestrator.model")} desc={t("settings.orchestrator.hint")} stack>
+                  <Dropdown
+                    id="orchestrator-preset"
+                    label={t("settings.orchestrator.title")}
+                    value={orchestratorPreset(s.presets, s.orchestrator?.preset, s.orchestrator?.strongest)}
+                    onChange={(preset) => save({ orchestrator: { preset } })}
+                    options={Object.keys(s.presets).map((id) => ({ id, label: presetName(s, id) + (id === s.orchestrator?.strongest ? ` · ${t("settings.orchestrator.strongest")}` : "") }))}
+                  />
+                </Row>
               </div>
             )}
             {Object.keys(s.presets ?? {}).length > 0 && (
               <div className="card" data-card="main-orchestrator">
                 <div className="section-title" style={{ marginTop: 0 }}>{t("settings.main.title")}</div>
                 <div className="sub">{t("settings.main.sub")}</div>
-                <label className="field" htmlFor="main-preset">{t("settings.orchestrator.model")}</label>
-                <select
-                  id="main-preset"
-                  className="field"
-                  value={mainPreset(s.presets, s.dispatcher?.preset, s.dispatcher?.middle)}
-                  onChange={(e) => save({ dispatcher: { preset: e.target.value } })}
-                >
-                  {Object.entries(s.presets).map(([id, p]) => (
-                    <option key={id} value={id}>
-                      {(p.label || `${p.provider}/${p.model}`) + (id === s.dispatcher?.middle ? ` · ${t("settings.main.middle")}` : "")}
-                    </option>
-                  ))}
-                </select>
-                <div className="sub faint">{t("settings.main.hint")}</div>
+                <Row title={t("settings.orchestrator.model")} desc={t("settings.main.hint")} stack>
+                  <Dropdown
+                    id="main-preset"
+                    label={t("settings.main.title")}
+                    value={mainPreset(s.presets, s.dispatcher?.preset, s.dispatcher?.middle)}
+                    onChange={(preset) => save({ dispatcher: { preset } })}
+                    options={Object.keys(s.presets).map((id) => ({ id, label: presetName(s, id) + (id === s.dispatcher?.middle ? ` · ${t("settings.main.middle")}` : "") }))}
+                  />
+                </Row>
               </div>
             )}
+            {/* Here rather than under Tools: it is a choice of model, and this is where the operator
+                comes to choose one. */}
+            <div className="card vision-card">
+              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.vision.title")}</div>
+              <div className="sub">{t("settings.vision.sub")}</div>
+              <Row title={t("settings.vision.model")} stack>
+                <Dropdown
+                  id="vision-preset"
+                  label={t("settings.vision.title")}
+                  value={s.vision.preset}
+                  onChange={(preset) => save({ vision: { ...s.vision, preset } })}
+                  options={[
+                    ...Object.keys(s.presets ?? {}).filter((id) => s.presets[id].images).map((id) => ({ id, label: presetName(s, id) })),
+                    ...(s.presets?.[s.vision.preset]?.images ? [] : [{ id: s.vision.preset, label: s.vision.preset || t("settings.vision.none") }]),
+                  ]}
+                />
+              </Row>
+              <NumRow id="vision-output" title={t("settings.vision.output")} value={s.vision.max_output_tokens} min={100} step={100} onSave={(v) => save({ vision: { ...s.vision, max_output_tokens: v } })} />
+            </div>
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.providers.title")}</div>
               <div className="sub">{t("settings.providers.sub")}</div>
@@ -1211,14 +1221,12 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
               <div className="sub">{t("settings.selfchange.sub")}</div>
               {/* Two separate rules, each a segmented pick like every other choice in Settings. They
                   were three loose buttons once, the third a toggle that looked like a third mode. */}
-              <div className="settings-choice">
-                <span>{t("settings.selfchange.approval")}</span>
+              <Row title={t("settings.selfchange.approval")}>
                 <Segmented label={t("settings.selfchange.approval")} value={s.self_change.approval} onChange={(approval) => save({ self_change: { ...s.self_change, approval } })} options={["manual", "auto"].map((id) => ({ id, label: t(`settings.selfchange.${id}`) }))} />
-              </div>
-              <div className="settings-choice">
-                <span>{t("settings.selfchange.rebuild")}</span>
+              </Row>
+              <Row title={t("settings.selfchange.rebuild")}>
                 <Segmented label={t("settings.selfchange.rebuild")} value={s.self_change.auto_rebuild ? "on" : "off"} onChange={(state) => save({ self_change: { ...s.self_change, auto_rebuild: state === "on" } })} options={(["off", "on"] as const).map((id) => ({ id, label: t(`settings.selfchange.rebuild.${id}`) }))} />
-              </div>
+              </Row>
             </div>
           </>
         );
@@ -1226,38 +1234,44 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
         return (
           <div className="card">
             <div className="section-title" style={{ marginTop: 0 }}>{t("settings.limits.title")}</div>
-            <div className="sub">{t("settings.limits.daily", { n: (s as any).usd_per_day })}</div>
-            <label className="field">{t("settings.limits.iterations")}</label>
-            <input className="field" type="number" defaultValue={s.limits.max_iterations} onBlur={(e) => { const v = numInput(e.target.value); if (v !== null) save({ limits: { ...s.limits, max_iterations: v } }); }} />
-            <label className="field">{t("settings.limits.perrun")}</label>
-            <input className="field" type="number" step="0.5" defaultValue={s.limits.usd_per_run} onBlur={(e) => { const v = numInput(e.target.value); if (v !== null) save({ limits: { ...s.limits, usd_per_run: v } }); }} />
+            {/* Only where the environment sets one: without it the line read "daily cap: $undefined". */}
+            {typeof (s as any).usd_per_day === "number" && <div className="sub">{t("settings.limits.daily", { n: (s as any).usd_per_day })}</div>}
+            <NumRow id="limits-iterations" title={t("settings.limits.iterations")} value={s.limits.max_iterations} min={1} onSave={(v) => save({ limits: { ...s.limits, max_iterations: v } })} />
+            <NumRow id="limits-perrun" title={t("settings.limits.perrun")} desc={t("settings.limits.perrun.sub")} unit="USD" step="0.5" value={s.limits.usd_per_run} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_run: v } })} />
             <TotalCaps s={s} save={save} />
             <div className="section-title">{t("settings.compaction")}</div>
             <div className="sub">{t("settings.compaction.sub")}</div>
-            <div className="grid2">
-              <NumField label={t("settings.compaction.ratio")} value={s.compaction?.auto_ratio ?? 0.5} min={0} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, auto_ratio: v } })} />
-              <NumField label={t("settings.compaction.keep")} value={s.compaction?.keep_recent_messages ?? 6} min={0} onSave={(v) => save({ compaction: { ...s.compaction, keep_recent_messages: v } })} />
-              <NumField label={t("settings.compaction.words")} value={s.compaction?.max_words ?? 1200} min={200} step={100} onSave={(v) => save({ compaction: { ...s.compaction, max_words: v } })} />
-              <NumField label={t("settings.compaction.core")} value={s.compaction?.core_trigger_ratio ?? 0.85} min={0.1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, core_trigger_ratio: v } })} hint={t("settings.compaction.core.hint")} />
-              <CompactionModelSelect presets={s.presets} value={s.compaction?.preset ?? ""} onSave={(preset) => save({ compaction: { ...s.compaction, preset } })} />
-              <NumField label={t("settings.compaction.timeout")} value={s.compaction?.call_timeout_seconds ?? 90} min={10} step={10} onSave={(v) => save({ compaction: { ...s.compaction, call_timeout_seconds: v } })} hint={t("settings.compaction.timeout.hint")} />
-            </div>
-            <label className="field">{t("settings.balance.thresholds")}</label>
-            <input className="field" defaultValue={s.balance.thresholds_usd.join(", ")} onBlur={(e) => save({ balance: { ...s.balance, thresholds_usd: e.target.value.split(",").map(Number).filter((n) => !Number.isNaN(n)) } })} />
-            <label className="field">{t("settings.balance.poll")}</label>
-            <input className="field" type="number" defaultValue={s.balance.poll_seconds} onBlur={(e) => { const v = numInput(e.target.value); if (v !== null) save({ balance: { ...s.balance, poll_seconds: v } }); }} />
+            <NumRow id="compaction-ratio" title={t("settings.compaction.ratio")} desc={t("settings.compaction.ratio.sub")} value={s.compaction?.auto_ratio ?? 0.5} min={0} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, auto_ratio: v } })} />
+            <NumRow id="compaction-keep" title={t("settings.compaction.keep")} value={s.compaction?.keep_recent_messages ?? 6} min={0} onSave={(v) => save({ compaction: { ...s.compaction, keep_recent_messages: v } })} />
+            <NumRow id="compaction-words" title={t("settings.compaction.words")} unit={t("settings.unit.words")} value={s.compaction?.max_words ?? 1200} min={200} step={100} onSave={(v) => save({ compaction: { ...s.compaction, max_words: v } })} />
+            <NumRow id="compaction-core" title={t("settings.compaction.core")} desc={t("settings.compaction.core.hint")} value={s.compaction?.core_trigger_ratio ?? 0.85} min={0.1} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, core_trigger_ratio: v } })} />
+            <CompactionModelSelect presets={s.presets} value={s.compaction?.preset ?? ""} onSave={(preset) => save({ compaction: { ...s.compaction, preset } })} />
+            <NumRow id="compaction-timeout" title={t("settings.compaction.timeout")} desc={t("settings.compaction.timeout.hint")} unit={t("settings.unit.seconds")} value={s.compaction?.call_timeout_seconds ?? 90} min={10} step={10} onSave={(v) => save({ compaction: { ...s.compaction, call_timeout_seconds: v } })} />
+            {/* A heading of their own: they trailed the compaction fields with nothing to say they
+                were a different subject. */}
+            <div className="section-title">{t("settings.balance.title")}</div>
+            <Row title={t("settings.balance.thresholds")} desc={t("settings.balance.thresholds.sub")} htmlFor="balance-thresholds" stack>
+              <input id="balance-thresholds" className="field settings-inline-field" defaultValue={s.balance.thresholds_usd.join(", ")} onBlur={(e) => save({ balance: { ...s.balance, thresholds_usd: e.target.value.split(",").map(Number).filter((n) => !Number.isNaN(n)) } })} />
+            </Row>
+            <NumRow id="balance-poll" title={t("settings.balance.poll")} unit={t("settings.unit.seconds")} value={s.balance.poll_seconds} min={1} onSave={(v) => save({ balance: { ...s.balance, poll_seconds: v } })} />
           </div>
         );
-      case "terminals":
-        return <TerminalCap s={s} save={save} />;
-      case "browser":
-        return <BrowserSettingsTab s={s} save={save} toast={toast} />;
+      case "environments":
+        // Terminals and browsers are one decision — how many may run at once on this machine, and
+        // for how long — so they are one page, each half under its own heading.
+        return (
+          <>
+            <div id="terminal-sessions"><TerminalCap s={s} save={save} /></div>
+            <div id="browser-sessions"><BrowserSettingsTab s={s} save={save} toast={toast} /></div>
+          </>
+        );
       case "tools":
         return <ToolsTab s={s} save={save} toast={toast} onSettings={(next) => setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) })} />;
       case "voice":
         return (
           <>
             <VoiceSettings toast={toast} />
+            <AsrSettingsCard s={s} save={save} />
             <SpeechModels toast={toast} />
             <TtsVoices toast={toast} />
           </>
@@ -1266,63 +1280,44 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
         return <ComponentsTab toast={toast} />;
       case "dependencies":
         return <DependenciesTab />;
-      case "chat":
+      case "chat": {
+        const mode = s.telegram.mode ?? (s.telegram.forum_chat_id ? "topics" : "private");
+        const tg = (patch: Partial<Settings["telegram"]>) => save({ telegram: { ...s.telegram, ...patch } });
         return (
-          <div className="card">
-            <div className="section-title" style={{ marginTop: 0 }}>{t("settings.chat.title")}</div>
-            <label className="field">{t("settings.chat.where")}</label>
-            <div className="btnrow" style={{ marginTop: 0 }}>
-              {(["private", "topics"] as const).map((m) => (
-                <button key={m} className={`btn small ${(s.telegram.mode ?? (s.telegram.forum_chat_id ? "topics" : "private")) === m ? "primary" : ""}`} onClick={() => save({ telegram: { ...s.telegram, mode: m } })}>
-                  {t(`settings.chat.${m}`)}
-                </button>
-              ))}
+          <>
+            <div className="card">
+              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.chat.telegram")}</div>
+              <Row title={t("settings.chat.where")} desc={mode === "private" ? t("settings.chat.private.sub") : t(s.telegram.forum_chat_id ? "settings.chat.topics.sub" : "settings.chat.topics.bind")} stack>
+                <Segmented label={t("settings.chat.where")} value={mode} onChange={(m) => tg({ mode: m })} options={(["private", "topics"] as const).map((m) => ({ id: m, label: t(`settings.chat.${m}`) }))} />
+              </Row>
+              {/* The digits are the ones /verbosity takes in the chat, so they stay; the description is
+                  what they mean, which nothing on the page said. */}
+              <Row title={t("settings.chat.verbosity")} desc={t("settings.chat.verbosity.sub")}>
+                <Segmented label={t("settings.chat.verbosity")} value={String(s.telegram.verbosity)} onChange={(v) => tg({ verbosity: Number(v) })} options={["0", "1", "2"].map((v) => ({ id: v, label: v }))} />
+              </Row>
+              <Row title={t("settings.chat.reactions")} desc={t("settings.chat.reactions.sub")}>
+                <Switch checked={!!s.telegram.reactions} onChange={(reactions) => tg({ reactions })} label={t("settings.chat.reactions")} />
+              </Row>
+              <Row title={t("settings.chat.topicemoji")} desc={t("settings.chat.topicemoji.sub")}>
+                <Switch checked={!!s.telegram.topic_status_emoji} onChange={(topic_status_emoji) => tg({ topic_status_emoji })} label={t("settings.chat.topicemoji")} />
+              </Row>
+              <Row title={t("settings.chat.forward")} desc={t("settings.chat.forward.sub")}>
+                <Switch checked={!!s.telegram.forward_unknown_commands} onChange={(forward_unknown_commands) => tg({ forward_unknown_commands })} label={t("settings.chat.forward")} />
+              </Row>
+              <NumRow id="chat-stale" title={t("settings.chat.stale")} desc={t("settings.chat.stale.sub")} unit={t("settings.unit.seconds")} value={s.telegram.stale_after_seconds} min={0} onSave={(v) => tg({ stale_after_seconds: v })} />
+              <NumRow id="chat-maxfile" title={t("settings.chat.maxfile")} unit={t("settings.unit.mb")} value={s.telegram.max_inbound_file_mb} min={1} onSave={(v) => tg({ max_inbound_file_mb: v })} />
+              <NumRow id="chat-caption" title={t("settings.chat.caption")} unit={t("settings.unit.seconds")} value={s.telegram.photo_caption_wait_seconds} min={0} onSave={(v) => tg({ photo_caption_wait_seconds: v })} />
+              <NumRow id="chat-slowtool" title={t("settings.chat.slowtool")} unit={t("settings.unit.seconds")} value={s.telegram.slow_tool_seconds} min={1} onSave={(v) => tg({ slow_tool_seconds: v })} />
             </div>
-            <div className="sub">
-              {(s.telegram.mode ?? (s.telegram.forum_chat_id ? "topics" : "private")) === "private"
-                ? t("settings.chat.private.sub")
-                : t(s.telegram.forum_chat_id ? "settings.chat.topics.sub" : "settings.chat.topics.bind")}
+            <div className="card">
+              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.chat.scheduler")}</div>
+              <Row title={t("settings.chat.scheduled")} desc={t("settings.chat.scheduled.sub")} stack>
+                <Segmented label={t("settings.chat.scheduled")} value={s.scheduler.topic_mode} onChange={(topic_mode) => save({ scheduler: { ...s.scheduler, topic_mode } })} options={["per_task", "per_run"].map((m) => ({ id: m, label: t(m === "per_task" ? "settings.chat.pertask" : "settings.chat.perrun") }))} />
+              </Row>
             </div>
-            <label className="field">{t("settings.chat.verbosity")}</label>
-            <div className="btnrow" style={{ marginTop: 0 }}>
-              {[0, 1, 2].map((v) => (
-                <button key={v} className={`btn small ${s.telegram.verbosity === v ? "primary" : ""}`} onClick={() => save({ telegram: { ...s.telegram, verbosity: v } })}>
-                  {v}
-                </button>
-              ))}
-            </div>
-            {/* The digits are the ones /verbosity takes in the chat, so they stay; this line is what
-                they mean, which nothing on the page said. */}
-            <div className="sub">{t("settings.chat.verbosity.sub")}</div>
-            <div className="btnrow">
-              <button className={`btn small ${s.telegram.reactions ? "primary" : ""}`} onClick={() => save({ telegram: { ...s.telegram, reactions: !s.telegram.reactions } })}>
-                {t("settings.chat.reactions", { state: t(s.telegram.reactions ? "common.on" : "common.off") })}
-              </button>
-              <button className={`btn small ${s.telegram.topic_status_emoji ? "primary" : ""}`} onClick={() => save({ telegram: { ...s.telegram, topic_status_emoji: !s.telegram.topic_status_emoji } })}>
-                {t("settings.chat.topicemoji", { state: t(s.telegram.topic_status_emoji ? "common.on" : "common.off") })}
-              </button>
-              <button className={`btn small ${s.telegram.forward_unknown_commands ? "primary" : ""}`} onClick={() => save({ telegram: { ...s.telegram, forward_unknown_commands: !s.telegram.forward_unknown_commands } })}>
-                {t("settings.chat.forward", { state: t(s.telegram.forward_unknown_commands ? "common.on" : "common.off") })}
-              </button>
-            </div>
-            <label className="field">{t("settings.chat.stale")}</label>
-            <input className="field" type="number" defaultValue={s.telegram.stale_after_seconds} onBlur={(e) => { const v = numInput(e.target.value); if (v !== null) save({ telegram: { ...s.telegram, stale_after_seconds: v } }); }} />
-            <label className="field">{t("settings.chat.maxfile")}</label>
-            <input className="field" type="number" defaultValue={s.telegram.max_inbound_file_mb} onBlur={(e) => { const v = numInput(e.target.value); if (v !== null) save({ telegram: { ...s.telegram, max_inbound_file_mb: v } }); }} />
-            <label className="field">{t("settings.chat.caption")}</label>
-            <input className="field" type="number" defaultValue={s.telegram.photo_caption_wait_seconds} onBlur={(e) => { const v = numInput(e.target.value); if (v !== null) save({ telegram: { ...s.telegram, photo_caption_wait_seconds: v } }); }} />
-            <label className="field">{t("settings.chat.slowtool")}</label>
-            <input className="field" type="number" defaultValue={s.telegram.slow_tool_seconds} onBlur={(e) => { const v = numInput(e.target.value); if (v !== null) save({ telegram: { ...s.telegram, slow_tool_seconds: v } }); }} />
-            <label className="field">{t("settings.chat.scheduled")}</label>
-            <div className="btnrow" style={{ marginTop: 0 }}>
-              {["per_task", "per_run"].map((m) => (
-                <button key={m} className={`btn small ${s.scheduler.topic_mode === m ? "primary" : ""}`} onClick={() => save({ scheduler: { ...s.scheduler, topic_mode: m } })}>
-                  {t(m === "per_task" ? "settings.chat.pertask" : "settings.chat.perrun")}
-                </button>
-              ))}
-            </div>
-          </div>
+          </>
         );
+      }
       case "notifications":
         return <NotificationSettings toast={toast} />;
       case "security":

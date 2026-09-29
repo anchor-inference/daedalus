@@ -21,7 +21,8 @@
 
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api } from "../api";
-import { StatusLabel, timeAgo } from "../components";
+import { Dropdown, StatusLabel, timeAgo } from "../components";
+import { Row } from "../settingsrow";
 import { t, useLang } from "../i18n";
 import { Icon } from "../icons";
 import { pathFor, sessionPath } from "../router";
@@ -656,57 +657,56 @@ export function VoiceSettings({ toast }: { toast: (t: string) => void }) {
   if (!data) return <div className="sub">{t("common.loading")}</div>;
   const row = modelRow(data);
   const local = data.stt?.local;
+  const listens = local?.active
+    ? t(local.streaming ? "voice.card.in.local.streaming" : "voice.card.in.local", { label: local.label })
+    : recognitionSupported()
+      ? t("voice.card.in.browser")
+      : data.stt?.configured
+        ? t("voice.card.in.server")
+        : t("voice.card.in.none");
   return (
-    <div className="card">
+    <div className="card voice-card">
       <div className="section-title" style={{ marginTop: 0 }}>{t("voice.card.title")}</div>
       <div className="sub">{t("voice.card.intro")}</div>
-      <div className="kv">
-        <span>{t("voice.card.enabled")}</span>
-        <b>{t(data.enabled ? "voice.card.enabled.yes" : "voice.card.enabled.no")}</b>
-      </div>
-      <div className="kv">
-        <span>{t("voice.card.model")}</span>
-        <select className="field" style={{ margin: 0, maxWidth: "60%" }} value={row.value} disabled={saving} aria-label={t("voice.card.model")} onChange={(e) => void pick(e.target.value)}>
-          <option value="">{row.fallback ? t("voice.card.model.default.named", { model: row.fallback }) : t("voice.card.model.default")}</option>
-          {row.choices.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.slow ? t("voice.card.model.option.slow", { label: c.label, detail: c.detail }) : `${c.label} — ${c.detail}`}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="sub">
-        {t("voice.card.model.hint")} {row.warn && <span className="chip attn">{t(row.warn)}</span>}
-      </div>
-      {row.addFast && (
-        <div className="sub">
-          {t("voice.card.model.none")}{" "}
-          <a href={pathFor("settings", "models")} onClick={(e) => go(e, pathFor("settings", "models"))}>
-            {t("voice.card.model.add")}
-          </a>
-        </div>
-      )}
-      {problem && <div className="sub" style={{ color: "var(--bad)" }}>{problem}</div>}
-      <div className="kv">
-        <span>{t("voice.card.out")}</span>
-        <b>{spokenLine(data)}</b>
-      </div>
-      <div className="kv">
-        <span>{t("voice.card.in")}</span>
-        <b>
-          {local?.active
-            ? t(local.streaming ? "voice.card.in.local.streaming" : "voice.card.in.local", { label: local.label })
-            : recognitionSupported()
-              ? t("voice.card.in.browser")
-              : data.stt?.configured
-                ? t("voice.card.in.server")
-                : t("voice.card.in.none")}
-        </b>
-      </div>
+      <Row title={t("voice.card.enabled")}>
+        <span className="settings-value">{t(data.enabled ? "voice.card.enabled.yes" : "voice.card.enabled.no")}</span>
+      </Row>
+      <Row
+        title={t("voice.card.model")}
+        desc={
+          <>
+            {t("voice.card.model.hint")} {row.warn && <span className="chip attn">{t(row.warn)}</span>}
+            {row.addFast && (
+              <>
+                {" "}{t("voice.card.model.none")}{" "}
+                <a href={pathFor("settings", "models")} onClick={(e) => go(e, pathFor("settings", "models"))}>{t("voice.card.model.add")}</a>
+              </>
+            )}
+            {problem && <span className="push-error"> {problem}</span>}
+          </>
+        }
+        stack
+      >
+        <Dropdown
+          label={t("voice.card.model")}
+          value={row.value}
+          disabled={saving}
+          onChange={(preset) => void pick(preset)}
+          options={[
+            { id: "", label: row.fallback ? t("voice.card.model.default.named", { model: row.fallback }) : t("voice.card.model.default") },
+            ...row.choices.map((c) => ({ id: c.id, label: c.label, hint: c.slow ? t("voice.card.model.option.slow", { detail: c.detail }) : c.detail })),
+          ]}
+        />
+      </Row>
+      <Row title={t("voice.card.out")}>
+        <span className="settings-value">{spokenLine(data)}</span>
+      </Row>
+      <Row title={t("voice.card.in")}>
+        <span className="settings-value">{listens}</span>
+      </Row>
       {local?.active && (
-        <div className="kv">
-          <span>{t("voice.card.memory")}</span>
-          <b>
+        <Row title={t("voice.card.memory")}>
+          <span className="settings-value">
             {data.stt?.state === "loading"
               ? t("voice.card.memory.loading")
               : data.stt?.state === "error"
@@ -714,8 +714,8 @@ export function VoiceSettings({ toast }: { toast: (t: string) => void }) {
                 : data.stt?.loaded_in_ms
                   ? t("voice.card.memory.ready", { s: (data.stt.loaded_in_ms / 1000).toFixed(1) })
                   : t("voice.card.memory.later")}
-          </b>
-        </div>
+          </span>
+        </Row>
       )}
       {/* Where the two lines above say "the browser's own" because nothing else is installed, the
           offer to install it belongs directly under them rather than on another page. */}

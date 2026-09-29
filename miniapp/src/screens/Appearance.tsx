@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { FONT_CATALOG, FONT_ROLES, FontRole, THEMES, ThemeId, fontUrlAllowed, readPrefs, resolvedTheme, resetColors, updatePrefs, type ColorKey, type Column, type Leading, type Prefs, type ProseStep, type Radius, type Scale } from "../appearance";
 import { t } from "../i18n";
-import { Segmented, Switch } from "../components";
+import { Dropdown, Segmented, Switch } from "../components";
+import { Row } from "../settingsrow";
 
 function usePrefs(): [Prefs, (patch: Partial<Prefs>) => void, (next: Prefs) => void] {
   const [prefs, setPrefs] = useState(readPrefs);
@@ -57,27 +58,17 @@ export function AppearancePanel() {
         ))}
       </div>
       <div className="card">
-        <div className="settings-choice">
-          <div>
-            <b>{t("theme.follow")}</b>
-            <div className="sub">{t("theme.follow.sub", { dark: t(`theme.${prefs.dark}`), light: t(`theme.${prefs.light}`) })}</div>
-          </div>
+        <Row title={t("theme.follow")} desc={t("theme.follow.sub", { dark: t(`theme.${prefs.dark}`), light: t(`theme.${prefs.light}`) })}>
           <Switch checked={prefs.follow} onChange={(follow) => update({ follow })} label={t("theme.follow")} />
-        </div>
+        </Row>
         {prefs.follow && (
           <>
-            <label className="settings-choice">
-              <span>{t("theme.follow.dark")}</span>
-              <select className="field" value={prefs.dark} onChange={(e) => update({ dark: e.target.value as ThemeId })}>
-                {THEMES.filter((item) => !item.light).map((item) => <option key={item.id} value={item.id}>{t(`theme.${item.id}`)}</option>)}
-              </select>
-            </label>
-            <label className="settings-choice">
-              <span>{t("theme.follow.light")}</span>
-              <select className="field" value={prefs.light} onChange={(e) => update({ light: e.target.value as ThemeId })}>
-                {THEMES.filter((item) => item.light).map((item) => <option key={item.id} value={item.id}>{t(`theme.${item.id}`)}</option>)}
-              </select>
-            </label>
+            <Row title={t("theme.follow.dark")}>
+              <Dropdown label={t("theme.follow.dark")} value={prefs.dark} onChange={(dark: ThemeId) => update({ dark })} options={THEMES.filter((item) => !item.light).map((item) => ({ id: item.id, label: t(`theme.${item.id}`) }))} />
+            </Row>
+            <Row title={t("theme.follow.light")}>
+              <Dropdown label={t("theme.follow.light")} value={prefs.light} onChange={(light: ThemeId) => update({ light })} options={THEMES.filter((item) => item.light).map((item) => ({ id: item.id, label: t(`theme.${item.id}`) }))} />
+            </Row>
           </>
         )}
       </div>
@@ -89,22 +80,17 @@ export function AppearancePanel() {
           const fallback = key === "bg" ? resolved.side : key === "surface" ? resolved.surface : key === "fg" ? resolved.fg : key === "fg2" ? resolved.fg2 : key === "accent" ? resolved.accent : resolved.send.startsWith("#") ? resolved.send : resolved.accent;
           const value = color(key, fallback);
           return (
-            <label key={key} className="settings-choice">
-              <span>{t(`theme.color.${key}`)}</span>
+            <Row key={key} title={t(`theme.color.${key}`)} htmlFor={`theme-color-${key}`}>
               <span className="settings-color">
-                <input type="color" value={value} aria-label={t(`theme.color.${key}`)} onChange={(e) => update({ colors: { [key]: e.target.value } })} />
                 <span className="mono sub">{value}</span>
+                <input id={`theme-color-${key}`} type="color" value={value} aria-label={t(`theme.color.${key}`)} onChange={(e) => update({ colors: { [key]: e.target.value } })} />
               </span>
-            </label>
+            </Row>
           );
         })}
-        <div className="settings-choice">
-          <div>
-            <b>{t("theme.wash")}</b>
-            <div className="sub">{t("theme.wash.sub")}</div>
-          </div>
+        <Row title={t("theme.wash")} desc={t("theme.wash.sub")}>
           <Switch checked={prefs.wash} onChange={(wash) => update({ wash })} label={t("theme.wash")} />
-        </div>
+        </Row>
         <div className="btnrow">
           <button type="button" className="btn small" onClick={() => replace(resetColors())}>{t("theme.reset")}</button>
         </div>
@@ -151,19 +137,19 @@ export function AppearancePanel() {
       <div className="section-title">{t("theme.size")}</div>
       <p className="sub">{t("theme.size.lead")}</p>
       <div className="card">
-        <div className="settings-choice"><b>{t("theme.size.step")}</b><Segmented value={prefs.scale} onChange={(scale: Scale) => update({ scale })} options={(["sm", "md", "lg", "xl"] as const).map((id) => ({ id, label: t(`theme.scale.${id}`) }))} /></div>
-        <div className="settings-choice"><div><b>{t("theme.prose")}</b><div className="sub">{t("theme.prose.sub")}</div></div><Segmented value={prefs.prose} onChange={(prose: ProseStep) => update({ prose })} options={([{ id: "auto" as const, label: t("theme.prose.auto") }, { id: "17" as const, label: "17" }, { id: "19" as const, label: "19" }])} /></div>
-        <div className="settings-choice"><b>{t("theme.leading")}</b><Segmented value={prefs.leading} onChange={(leading: Leading) => update({ leading })} options={(["tight", "normal", "open"] as const).map((id) => ({ id, label: t(`theme.leading.${id}`) }))} /></div>
-        <div className="settings-choice"><div><b>{t("theme.column")}</b><div className="sub">{t("theme.column.sub")}</div></div><Segmented value={prefs.column} onChange={(column: Column) => update({ column })} options={(["narrow", "normal", "wide"] as const).map((id) => ({ id, label: t(`theme.column.${id}`) }))} /></div>
+        <Row title={t("theme.size.step")}><Segmented value={prefs.scale} onChange={(scale: Scale) => update({ scale })} options={(["sm", "md", "lg", "xl"] as const).map((id) => ({ id, label: t(`theme.scale.${id}`) }))} /></Row>
+        <Row title={t("theme.prose")} desc={t("theme.prose.sub")}><Segmented value={prefs.prose} onChange={(prose: ProseStep) => update({ prose })} options={([{ id: "auto" as const, label: t("theme.prose.auto") }, { id: "17" as const, label: "17" }, { id: "19" as const, label: "19" }])} /></Row>
+        <Row title={t("theme.leading")}><Segmented value={prefs.leading} onChange={(leading: Leading) => update({ leading })} options={(["tight", "normal", "open"] as const).map((id) => ({ id, label: t(`theme.leading.${id}`) }))} /></Row>
+        <Row title={t("theme.column")} desc={t("theme.column.sub")}><Segmented value={prefs.column} onChange={(column: Column) => update({ column })} options={(["narrow", "normal", "wide"] as const).map((id) => ({ id, label: t(`theme.column.${id}`) }))} /></Row>
       </div>
 
       <div className="section-title">{t("theme.more")}</div>
       <div className="card">
-        <div className="settings-choice"><b>{t("theme.radius")}</b><Segmented value={prefs.radius} onChange={(radius: Radius) => update({ radius })} options={(["sharp", "normal", "round"] as const).map((id) => ({ id, label: t(`theme.radius.${id}`) }))} /></div>
-        <div className="settings-choice"><b>{t("theme.motion")}</b><Segmented value={prefs.motion} onChange={(motion) => update({ motion })} options={([{ id: "full" as const, label: t("theme.motion.full") }, { id: "reduce" as const, label: t("theme.motion.reduce") }])} /></div>
-        <div className="settings-choice"><div><b>{t("theme.contrast")}</b><div className="sub">{t("theme.contrast.sub")}</div></div><Segmented value={prefs.contrast} onChange={(contrast) => update({ contrast })} options={([{ id: "normal" as const, label: t("theme.contrast.normal") }, { id: "high" as const, label: t("theme.contrast.high") }])} /></div>
-        <div className="settings-choice"><div><b>{t("theme.code")}</b><div className="sub">{t("theme.code.sub")}</div></div><Segmented value={prefs.code} onChange={(code) => update({ code })} options={([{ id: "theme" as const, label: t("theme.code.theme") }, { id: "dark" as const, label: t("theme.code.dark") }])} /></div>
-        <div className="settings-choice"><b>{t("theme.bubble")}</b><Segmented value={prefs.bubble} onChange={(bubble) => update({ bubble })} options={([{ id: "card" as const, label: t("theme.bubble.card") }, { id: "plain" as const, label: t("theme.bubble.plain") }])} /></div>
+        <Row title={t("theme.radius")}><Segmented value={prefs.radius} onChange={(radius: Radius) => update({ radius })} options={(["sharp", "normal", "round"] as const).map((id) => ({ id, label: t(`theme.radius.${id}`) }))} /></Row>
+        <Row title={t("theme.motion")}><Segmented value={prefs.motion} onChange={(motion) => update({ motion })} options={([{ id: "full" as const, label: t("theme.motion.full") }, { id: "reduce" as const, label: t("theme.motion.reduce") }])} /></Row>
+        <Row title={t("theme.contrast")} desc={t("theme.contrast.sub")}><Segmented value={prefs.contrast} onChange={(contrast) => update({ contrast })} options={([{ id: "normal" as const, label: t("theme.contrast.normal") }, { id: "high" as const, label: t("theme.contrast.high") }])} /></Row>
+        <Row title={t("theme.code")} desc={t("theme.code.sub")}><Segmented value={prefs.code} onChange={(code) => update({ code })} options={([{ id: "theme" as const, label: t("theme.code.theme") }, { id: "dark" as const, label: t("theme.code.dark") }])} /></Row>
+        <Row title={t("theme.bubble")}><Segmented value={prefs.bubble} onChange={(bubble) => update({ bubble })} options={([{ id: "card" as const, label: t("theme.bubble.card") }, { id: "plain" as const, label: t("theme.bubble.plain") }])} /></Row>
       </div>
     </>
   );

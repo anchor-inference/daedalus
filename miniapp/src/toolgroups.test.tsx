@@ -116,9 +116,12 @@ describe("the panels", () => {
     expect(browser.textContent).toContain("Browser");
     expect(browser.textContent).toContain("2 tools");
     expect(browser.textContent).toContain("used in 1% of sessions · 30 days");
-    expect(browser.querySelector('[aria-checked="true"]')!.textContent).toBe("On demand");
-    expect(host.querySelector('[data-group="board"] .tgroup-default.changed')!.textContent).toBe("(default: When it fits)");
-    const always = [...browser.querySelectorAll("button")].find((b) => b.textContent === "Always")!;
+    expect(browser.querySelector<HTMLElement>(".dropdown-btn")!.textContent).toBe("On demand");
+    // Only a group moved off its default carries a Reset, and it names the default it goes back to.
+    expect(browser.querySelector(".tgroup-reset")).toBeNull();
+    expect(host.querySelector('[data-group="board"] .tgroup-reset')!.getAttribute("title")).toContain("When it fits");
+    await act(async () => browser.querySelector<HTMLElement>(".dropdown-btn")!.click());
+    const always = [...browser.querySelectorAll<HTMLElement>("[role=option]")].find((o) => o.dataset.value === "eager")!;
     await act(async () => always.click());
     const put = fetcher.mock.calls.find(([, init]) => init?.method === "PUT")!;
     expect(String(put[0])).toContain("/api/tool-groups/browser");
@@ -126,7 +129,7 @@ describe("the panels", () => {
     // its next save of anything would be refused as changed in another window.
     expect(JSON.parse(String(put[1]!.body))).toEqual({ load: "eager", base_revision: "r1" });
     expect(onSettings).toHaveBeenCalledWith({ revision: "r2" });
-    expect(host.querySelector('[data-group="browser"] [aria-checked="true"]')!.textContent).toBe("Always");
+    expect(host.querySelector('[data-group="browser"] .dropdown-btn')!.textContent).toBe("Always");
   });
 
   it("offers Load now only for a group on demand, and shows the answer's state", async () => {

@@ -1,4 +1,4 @@
-// Settings → Browser: the agent's browser as the operator runs it — which Chromium, whether its
+// Settings → Environments → browser sessions: the agent's browser as the operator runs it — which Chromium, whether its
 // sandbox holds, what runs now and what it costs, the profiles that keep its logins, how many may run
 // at once, how long an idle one lives, what is recorded, where the agent may act only while watched,
 // which addresses on the local network it may be let into, and the injection monitor.
@@ -16,7 +16,8 @@ import { Icon } from "../icons";
 import { WorkloadsBar, size } from "../loadbar";
 import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
-import { timeAgo } from "../components";
+import { Dropdown, Switch, timeAgo } from "../components";
+import { Row } from "../settingsrow";
 
 export const DEFAULT_BROWSER: BrowserSettings = {
   env: "auto",
@@ -181,43 +182,44 @@ function Limits({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserSe
     <div className="card bs-limits">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.limits.title")}</div>
       <div className="sub">{t("bs.limits.sub")}</div>
-      <label className="field" htmlFor="browser-cap">{t("bs.limits.cap")}</label>
-      <div className="terminal-cap-row">
-        <input
-          id="browser-cap"
-          className="field terminal-cap-input"
-          type="number"
-          inputMode="numeric"
-          min={1}
-          max={32}
-          value={cap}
-          aria-invalid={capValue === null}
-          onChange={(e) => setCap(e.target.value)}
-          onBlur={() => (capValue === null ? setCap(String(b.running_cap)) : capValue !== b.running_cap && set({ running_cap: capValue }))}
-          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-        />
-        <span className="sub">{load.data?.browsers ? plural("bs.limits.running", load.data.browsers.running) : ""}</span>
-      </div>
+      <Row title={t("bs.limits.cap")} htmlFor="browser-cap" desc={load.data?.browsers ? plural("bs.limits.running", load.data.browsers.running) : undefined}>
+        <span className="settings-num">
+          <input
+            id="browser-cap"
+            className="field"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={32}
+            value={cap}
+            aria-invalid={capValue === null}
+            onChange={(e) => setCap(e.target.value)}
+            onBlur={() => (capValue === null ? setCap(String(b.running_cap)) : capValue !== b.running_cap && set({ running_cap: capValue }))}
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          />
+          <span className="settings-unit" />
+        </span>
+      </Row>
       {capValue === null && <div className="sub push-error">{t("bs.limits.cap.invalid")}</div>}
       {load.data && (load.data.browsers || load.data.terminals) && <WorkloadsBar load={load.data} caps={{ browsers: capValue ?? b.running_cap }} />}
-      <label className="field" htmlFor="browser-idle">{t("bs.limits.idle")}</label>
-      <div className="terminal-cap-row">
-        <input
-          id="browser-idle"
-          className="field terminal-cap-input"
-          type="number"
-          inputMode="numeric"
-          min={0}
-          max={1440}
-          value={idle}
-          aria-invalid={idleValue === null}
-          onChange={(e) => setIdle(e.target.value)}
-          onBlur={() => (idleValue === null ? setIdle(String(b.idle_close_minutes)) : idleValue !== b.idle_close_minutes && set({ idle_close_minutes: idleValue }))}
-          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-        />
-        <span className="sub">{idleValue === 0 ? t("bs.limits.idle.never") : t("bs.limits.idle.unit")}</span>
-      </div>
-      <div className="sub">{t("bs.limits.idle.sub")}</div>
+      <Row title={t("bs.limits.idle")} htmlFor="browser-idle" desc={t("bs.limits.idle.sub")} stack>
+        <span className="settings-num">
+          <input
+            id="browser-idle"
+            className="field"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={1440}
+            value={idle}
+            aria-invalid={idleValue === null}
+            onChange={(e) => setIdle(e.target.value)}
+            onBlur={() => (idleValue === null ? setIdle(String(b.idle_close_minutes)) : idleValue !== b.idle_close_minutes && set({ idle_close_minutes: idleValue }))}
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          />
+          <span className="settings-unit">{idleValue === 0 ? t("bs.limits.idle.never") : t("bs.limits.idle.unit")}</span>
+        </span>
+      </Row>
     </div>
   );
 }
@@ -291,28 +293,29 @@ function Recording({ b, set, toast }: { b: BrowserSettings; set: (patch: Partial
     <div className="card bs-recording">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.rec.title")}</div>
       <div className="sub">{t("bs.rec.sub")}</div>
-      <div className="btnrow">
-        <button type="button" className={`btn small ${b.record_frames ? "primary" : ""}`} aria-pressed={b.record_frames} onClick={() => set({ record_frames: !b.record_frames })}>
-          {t("bs.rec.default", { state: t(b.record_frames ? "common.on" : "common.off") })}
-        </button>
-        <button type="button" className={`btn small ${b.record_takeover ? "primary" : ""}`} aria-pressed={b.record_takeover} onClick={() => set({ record_takeover: !b.record_takeover })}>
-          {t("bs.rec.takeover", { state: t(b.record_takeover ? "common.on" : "common.off") })}
-        </button>
-      </div>
-      <div className="bs-pair">
-        <label className="field">
-          {t("bs.rec.days")}
-          <input className="field" type="number" min={1} max={365} value={days} aria-invalid={daysValue === null} onChange={(e) => setDays(e.target.value)} onBlur={() => (daysValue === null ? setDays(String(b.record_retention_days)) : daysValue !== b.record_retention_days && set({ record_retention_days: daysValue }))} />
-        </label>
-        <label className="field">
-          {t("bs.rec.mb")}
-          <input className="field" type="number" min={10} value={mb} aria-invalid={mbValue === null} onChange={(e) => setMb(e.target.value)} onBlur={() => (mbValue === null ? setMb(String(b.record_max_mb)) : mbValue !== b.record_max_mb && set({ record_max_mb: mbValue }))} />
-        </label>
-      </div>
-      <div className="sub bs-rec-used">
-        {plural("bs.rec.used", groups, { used: size(used), max: size(b.record_max_mb * 1024 * 1024) })}
-        {groups > 0 && <button type="button" className="btn small danger" onClick={() => void deleteAll()}>{t("bs.rec.delete")}</button>}
-      </div>
+      <Row title={t("bs.rec.default")} desc={t("bs.rec.default.sub")}>
+        <Switch checked={b.record_frames} onChange={(record_frames) => set({ record_frames })} label={t("bs.rec.default")} />
+      </Row>
+      <Row title={t("bs.rec.takeover")} desc={t("bs.rec.takeover.sub")}>
+        <Switch checked={b.record_takeover} onChange={(record_takeover) => set({ record_takeover })} label={t("bs.rec.takeover")} />
+      </Row>
+      <Row title={t("bs.rec.days")} htmlFor="browser-rec-days" stack>
+        <span className="settings-num">
+          <input id="browser-rec-days" className="field" type="number" min={1} max={365} value={days} aria-invalid={daysValue === null} onChange={(e) => setDays(e.target.value)} onBlur={() => (daysValue === null ? setDays(String(b.record_retention_days)) : daysValue !== b.record_retention_days && set({ record_retention_days: daysValue }))} />
+          <span className="settings-unit">{t("settings.unit.days")}</span>
+        </span>
+      </Row>
+      <Row title={t("bs.rec.mb")} htmlFor="browser-rec-mb" desc={plural("bs.rec.used", groups, { used: size(used), max: size(b.record_max_mb * 1024 * 1024) })} stack>
+        <span className="settings-num">
+          <input id="browser-rec-mb" className="field" type="number" min={10} value={mb} aria-invalid={mbValue === null} onChange={(e) => setMb(e.target.value)} onBlur={() => (mbValue === null ? setMb(String(b.record_max_mb)) : mbValue !== b.record_max_mb && set({ record_max_mb: mbValue }))} />
+          <span className="settings-unit">{t("settings.unit.mb")}</span>
+        </span>
+      </Row>
+      {groups > 0 && (
+        <div className="btnrow bs-rec-used">
+          <button type="button" className="btn small danger" onClick={() => void deleteAll()}>{t("bs.rec.delete")}</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -324,11 +327,9 @@ function Watch({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserSet
     <div className="card bs-watch">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.watch.title")}</div>
       <div className="sub">{t("bs.watch.sub")}</div>
-      <div className="btnrow">
-        <button type="button" className={`btn small ${b.watch_mode ? "primary" : ""}`} aria-pressed={b.watch_mode} onClick={() => set({ watch_mode: !b.watch_mode })}>
-          {t("bs.watch.mode", { state: t(b.watch_mode ? "common.on" : "common.off") })}
-        </button>
-      </div>
+      <Row title={t("bs.watch.mode")}>
+        <Switch checked={b.watch_mode} onChange={(watch_mode) => set({ watch_mode })} label={t("bs.watch.mode")} />
+      </Row>
       <label className="field" htmlFor="browser-watch">{t("bs.watch.domains")}</label>
       <textarea id="browser-watch" className="field bs-list" rows={6} value={text} spellCheck={false} onChange={(e) => setText(e.target.value)} onBlur={() => {
         const next = lines(text);
@@ -360,16 +361,12 @@ function Monitor({ b, set, presets }: { b: BrowserSettings; set: (patch: Partial
     <div className="card bs-monitor">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.monitor.title")}</div>
       <div className="sub">{t("bs.monitor.sub")}</div>
-      <div className="btnrow">
-        <button type="button" className={`btn small ${b.injection_monitor ? "primary" : ""}`} aria-pressed={b.injection_monitor} onClick={() => set({ injection_monitor: !b.injection_monitor })}>
-          {t("bs.monitor.mode", { state: t(b.injection_monitor ? "common.on" : "common.off") })}
-        </button>
-      </div>
-      <label className="field" htmlFor="browser-monitor-model">{t("bs.monitor.model")}</label>
-      <select id="browser-monitor-model" className="field" value={b.injection_monitor_preset} onChange={(e) => set({ injection_monitor_preset: e.target.value })}>
-        <option value="">{t("bs.monitor.model.auto")}</option>
-        {presets.map((p) => <option key={p} value={p}>{p}</option>)}
-      </select>
+      <Row title={t("bs.monitor.mode")}>
+        <Switch checked={b.injection_monitor} onChange={(injection_monitor) => set({ injection_monitor })} label={t("bs.monitor.mode")} />
+      </Row>
+      <Row title={t("bs.monitor.model")} stack>
+        <Dropdown id="browser-monitor-model" label={t("bs.monitor.model")} value={b.injection_monitor_preset} onChange={(injection_monitor_preset) => set({ injection_monitor_preset })} options={[{ id: "", label: t("bs.monitor.model.auto") }, ...presets.map((p) => ({ id: p, label: p }))]} />
+      </Row>
     </div>
   );
 }

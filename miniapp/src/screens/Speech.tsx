@@ -194,7 +194,7 @@ export function SpeechModels({ toast }: { toast: (t: string) => void }) {
   const autoDetects = view.models.find((m) => m.id === view.selected)?.detects_language ?? true;
 
   return (
-    <div className="card">
+    <div className="card" id="speech-models">
       <div className="section-title" style={{ marginTop: 0 }}>{t("stt.title")}</div>
       <div className="sub">{t("stt.intro")}</div>
 
