@@ -1438,6 +1438,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "memory.kind.preference": { en: "preference", ru: "предпочтение" },
   "memory.kind.reflection": { en: "reflection", ru: "вывод" },
   "memory.kind.skill": { en: "skill", ru: "навык" },
+  "memory.kind.howto": { en: "how-to", ru: "как делать" },
+  "memory.kind.identifier": { en: "identifier", ru: "идентификатор" },
   "memory.kind.note": { en: "note", ru: "заметка" },
 
   // ── usage ──────────────────────────────────────────────────────────────────────────────
