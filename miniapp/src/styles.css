@@ -189,6 +189,10 @@ a { color: var(--accent); text-decoration: none; }
 .pagehead .iconbtn { background: transparent; }
 .pagehead .iconbtn:hover { background: var(--surface-2); }
 .pagehead .iconbtn.primary { background: var(--primary); color: var(--primary-ink); }
+/* A finger gets no hover to find a target by, so the header's plain icons show the box they are
+   pressed in. Bare glyphs beside a filled "+" read as smaller, weaker targets than it, though all
+   three are the same size. */
+@media (pointer: coarse) { .pagehead .iconbtn:not(.primary) { background: var(--surface-1); } }
 .pagehead .filters { margin: 4px 0 2px; }
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
