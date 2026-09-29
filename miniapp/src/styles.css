@@ -726,10 +726,10 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .steer-x { background:transparent; }
 @media (max-width: 719px) { .steer-hint { display:none; } }
 /* A narrow pill — a phone, or a pane of the dual view — has room for the field, the model and the
-   circle: the ring lives in Details there, the voice page is a tab away, and the model name is cut short. */
+   circle: the ring lives in Details there, and the model name is cut short. */
 .composer-box { container-type: inline-size; }
 @container (max-width: 560px) {
-  .ctx-ring, .iconbtn.flat.voice { display:none; }
+  .ctx-ring { display:none; }
   .composer-box textarea { padding:9px 4px; }
   .composer-tools { gap:0; }
 }

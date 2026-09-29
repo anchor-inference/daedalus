@@ -74,7 +74,6 @@ export type ComposerProps = {
   onContext?: () => void;
   asr?: AsrStatus | null;
   /** The voice page, when the installation has one. */
-  onVoice?: () => void;
   steers: QueuedSteer[];
   onWithdraw?: (steer: QueuedSteer) => void;
   questions?: Question[] | null;
@@ -472,11 +471,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               </button>
             )}
             {props.asr?.configured && !draft.trim() && <MicButton sessionId={sessionId} asr={props.asr} onText={(text) => { setDraft(draft.trim() ? `${draft.trimEnd()}\n\n${text}` : text); textarea.current?.focus(); }} onAutosend={(text) => onSend(text, [])} toast={toast} />}
-            {props.onVoice && !draft.trim() && (
-              <button type="button" className="iconbtn flat voice" onClick={props.onVoice} aria-label={t("composer.voice")} title={t("composer.voice")}>
-                <Icon name="play" />
-              </button>
-            )}
             <button type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled} aria-label={primaryLabel} title={action === "queue" ? `${primaryLabel} — ${t("composer.queue.hint")}` : primaryLabel} data-action={action}>
               <Icon name={action === "stop" ? "stop" : action === "reply" ? "send" : "up"} />
             </button>

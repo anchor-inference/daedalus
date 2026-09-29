@@ -178,7 +178,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [asr, setAsr] = useState<AsrStatus | null>(null);
   const [snapshots, setSnapshots] = useState<SessionCheckpoints | null>(null);
-  const [voice, setVoice] = useState(false);
   // The steers the host is holding for the next model call. `none` is a host without the route:
   // the cards are simply not drawn, and the route is not asked again.
   const [steers, setSteers] = useState<QueuedSteer[]>([]);
@@ -408,7 +407,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     api.get<Record<string, { description?: string }>>("/api/modes").then((m) => setModes(Object.entries(m).map(([name, v]) => ({ name, description: v?.description ?? "" })))).catch(() => setModes([]));
     api.get<SlashCommand[]>("/api/commands").then(setCommands).catch(() => setCommands([]));
     api.get<AsrStatus>("/api/asr").then(setAsr).catch(() => setAsr(null));
-    api.get<{ enabled?: boolean }>("/api/voice").then((v) => setVoice(!!v?.enabled)).catch(() => setVoice(false));
     readSnapshots();
   }, [load, readSnapshots]);
 
@@ -1255,7 +1253,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             context={detail?.context ?? null}
             onContext={hasDetails ? () => { setDetailsFocus("context"); panel.open("details"); } : undefined}
             asr={asr}
-            onVoice={voice ? () => navigate(pathFor("voice", null, { session: id })) : undefined}
             steers={steers}
             onWithdraw={withdraw}
             questions={detail?.pending?.questions ?? null}

@@ -2718,7 +2718,6 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "composer.model.restore": { en: "Back to {model}", ru: "Вернуть {model}" },
   "composer.model.standing": { en: "{model} · standing in", ru: "{model} · замена" },
   "composer.model.configured": { en: "configured: {model}", ru: "выбрана: {model}" },
-  "composer.voice": { en: "Talk to the agent", ru: "Поговорить с агентом" },
   "composer.queue": { en: "Queue for the next step", ru: "В очередь на следующий шаг" },
   "composer.queue.hint": { en: "will be read on the next step", ru: "будет прочитано на следующем шаге" },
   "composer.reply": { en: "Reply", ru: "Ответить" },
