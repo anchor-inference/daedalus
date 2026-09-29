@@ -193,7 +193,7 @@ describe("a project on a phone", () => {
     expect(phoneTab(focusView("journal", null))).toEqual({ tab: null, bar: true });
     expect(phoneTab(focusView("brief", null))).toEqual({ tab: null, bar: true });
     expect(phoneTab(focusView("s", "sess-lev"))).toEqual({ tab: null, bar: false });
-    expect(PHONE_TABS).toEqual(["orchestrator", "team", "board", "terminals"]);
+    expect(PHONE_TABS).toEqual(["orchestrator", "team", "terminals", "board"]);
   });
 
   it("puts the operator's longest-waiting open request in the banner, and counts the rest", () => {
