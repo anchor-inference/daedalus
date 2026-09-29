@@ -23,6 +23,7 @@ import { actionWords, agentName, domainOf, driveState, mergeActions, needsOf, ne
 import type { ActionEvent } from "./protocol";
 import { BrowserViewer, focusViewer } from "./viewer";
 import { PhoneDrive } from "./phone";
+import { copyFromPage, pasteFromClipboard } from "./clipboard";
 import { Favicon } from "./favicon";
 import { attachBox } from "./geometry";
 import type { ViewerChord } from "./keys";
@@ -377,6 +378,12 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
   const nav = (action: "back" | "forward" | "reload") => live?.input({ t: "nav", action });
   const items: MenuItem[] = [
     ...(drive === "paused" ? [] : drive === "you" ? [] : [{ label: t("browser.pause"), icon: "pause" as IconName, onSelect: () => void control.pause() }]),
+    // The keyboard's Ctrl+V and Ctrl+C do the same; these are for a tablet or a mouse alone.
+    ...(driving ? [
+      { label: t("browser.paste"), icon: "paste" as IconName, onSelect: () => void pasteFromClipboard(live, false) },
+      { label: t("browser.copy"), icon: "copy" as IconName, onSelect: () => void copyFromPage(live) },
+      "-" as const,
+    ] : []),
     ...(full ? [] : [{ label: t("browser.window"), icon: "external" as IconName, onSelect: () => window.open(pathFor("browser", group.id), "_blank", "noopener") }]),
     // The recording is the operator's alone: the agent has no tool that switches it.
     { label: t(recording ? "browser.record.stop" : "browser.record.start"), icon: "dot" as IconName, checked: recording, onSelect: () => void record(!recording) },

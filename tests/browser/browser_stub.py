@@ -12,6 +12,8 @@ check's own Chromium once, before the app is opened, and keeps each as a JPEG wi
 named elements. An action replayed on "the Add to cart button" therefore lands on the button the
 picture shows, and a check can say where the app must have drawn the cursor.
 
+A copy is answered with the group's ``selection``, as the daemon answers it with the page's.
+
 Everything the page sends is recorded per connection (ATTACH, ACK, VIEW, INPUT), and every request
 to the REST routes, so a check can say which socket sent which input and what a give-back carried.
 """
@@ -133,6 +135,10 @@ class Group:
     frames: list[dict[str, Any]] = field(default_factory=list)
     """Keyframes while recording: one when it starts and one after every action, each the picture of
     the scene on screen then (``scene`` names it; the REST answer leaves it out)."""
+    selection: str = ""
+    """What the page has selected, which a copy (INPUT ``copy``) answers with."""
+    selection_withheld: bool = False
+    """The focus is on a password field: a copy answers ``withheld`` and no text, as the daemon does."""
 
 
 @dataclass
@@ -432,6 +438,9 @@ class BrowserStub:
                     self.send(client, enc_event({"type": "error", "code": "not_holder", "message": "this client does not hold control"}))
                     return
                 g.last_activity = time.time()
+                if body.get("t") == "copy":
+                    withheld = g.selection_withheld
+                    self.send(client, enc_event({"type": "copied", "id": body.get("id", ""), "text": "" if withheld else g.selection, "truncated": False, "withheld": withheld}))
                 if body.get("t") == "nav" and body.get("action") == "url":
                     target = next((n for n, s in self.scenes.items() if s.url == body.get("url")), None)
                     if target:

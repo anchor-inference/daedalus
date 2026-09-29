@@ -4022,6 +4022,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .bp-drive-keys { flex: none; display: flex; gap: 4px; padding: 6px 8px; overflow-x: auto; scrollbar-width: none; background: var(--surface-1); border-top: 1px solid var(--line); }
 .bp-drive-keys::-webkit-scrollbar { display: none; }
 .bp-drive-kbd { display: inline-flex; align-items: center; justify-content: center; color: var(--accent); }
+.bp-drive-clip { display: inline-flex; align-items: center; justify-content: center; }
 .bp-compose { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
 .browser-full .bp { border-top: 1px solid var(--line); }
 .staff-panel.with-browser { display: flex; flex-direction: column; height: 100%; }

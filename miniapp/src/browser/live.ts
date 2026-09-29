@@ -7,7 +7,7 @@
 // under the agent repaints one canvas, not the panel.
 
 import { BrowserConnection, type ViewDeps, type ViewState } from "./connection";
-import type { ActionEvent, FrameMeta, InputMessage, Tier, ViewChange, ViewControl, ViewEvent, ViewTab } from "./protocol";
+import type { ActionEvent, CopiedEvent, FrameMeta, InputMessage, Tier, ViewChange, ViewControl, ViewEvent, ViewTab } from "./protocol";
 
 export type LiveSnapshot = {
   state: ViewState;
@@ -36,6 +36,14 @@ type Listener = () => void;
 
 const RECENT_MAX = 50;
 
+/** How long a copy waits for the page's answer; a page busy that long is not one to wait on. */
+export const COPY_TIMEOUT_MS = 10_000;
+
+/** What a copy brought back: the selected text, or why there is none. */
+export type Copied = { text: string; truncated: boolean; withheld: boolean };
+
+export class CopyError extends Error {}
+
 /** Only what moves the cursor's placement: a new size or zoom, not a new scroll position. */
 function sameGeometry(a: FrameMeta | null, b: FrameMeta): boolean {
   return !!a && a.w === b.w && a.h === b.h && a.vw === b.vw && a.vh === b.vh && a.page_scale === b.page_scale && a.offset_top === b.offset_top && a.tab === b.tab;
@@ -60,6 +68,8 @@ export class LiveView {
   frames = 0;
   /** The newest frame's metadata, scroll included. */
   latest: FrameMeta | null = null;
+  private copies = new Map<string, { resolve: (c: Copied) => void; reject: (e: Error) => void; timer: number }>();
+  private copySeq = 0;
 
   constructor(readonly options: LiveOptions) {
     this.snap = {
@@ -103,6 +113,35 @@ export class LiveView {
     return this.connection.input(message);
   }
 
+  /**
+   * The page's selected text, read by the daemon in this view's input order: a key sent after the copy
+   * (the cut's) acts on the page only once the selection has been read.
+   */
+  copy(): Promise<Copied> {
+    const id = `k${++this.copySeq}`;
+    return new Promise<Copied>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        this.copies.delete(id);
+        reject(new CopyError("timeout"));
+      }, COPY_TIMEOUT_MS);
+      this.copies.set(id, { resolve, reject, timer });
+      if (!this.input({ t: "copy", id })) {
+        window.clearTimeout(timer);
+        this.copies.delete(id);
+        reject(new CopyError("offline"));
+      }
+    });
+  }
+
+  private copied(event: CopiedEvent): void {
+    const waiting = this.copies.get(event.id);
+    if (!waiting) return;
+    this.copies.delete(event.id);
+    window.clearTimeout(waiting.timer);
+    if (event.error) waiting.reject(new CopyError(event.error));
+    else waiting.resolve({ text: event.text ?? "", truncated: !!event.truncated, withheld: !!event.withheld });
+  }
+
   view(change: ViewChange): void {
     if (change.tab) this.set({ viewing: change.tab });
     this.connection.view(change);
@@ -116,6 +155,11 @@ export class LiveView {
   close(): void {
     this.connection.close();
     this.listeners.clear();
+    for (const [, waiting] of this.copies) {
+      window.clearTimeout(waiting.timer);
+      waiting.reject(new CopyError("closed"));
+    }
+    this.copies.clear();
     const b = this.lastBitmap;
     if (b && "close" in b) b.close();
     this.lastBitmap = null;
@@ -153,6 +197,8 @@ export class LiveView {
       }
       case "needs_you":
         return this.set({ needs: { reason: event.reason, what: event.what, url: event.url } });
+      case "copied":
+        return this.copied(event);
       default:
         return;
     }

@@ -7,6 +7,8 @@
 // read back through the frame's metadata; moves are coalesced to one per animation frame, so a fast
 // hand does not queue hundreds of events behind the page. Text arrives through a hidden field, because
 // that is where a browser hands over what an IME, a phone's keyboard or a paste composed (keys.ts).
+// The clipboard crosses here too: a paste is the operator's clipboard typed onto the page, a copy the
+// page's selection written to the operator's clipboard (clipboard.ts).
 //
 // On a phone a tap is a click, one finger dragged is a scroll, a long press is a right click, and two
 // fingers zoom this picture (never the page, whose layout the agent reads).
@@ -16,7 +18,8 @@ import { t } from "../i18n";
 import { Icon } from "../icons";
 import { InputDeduper } from "../terminal/dedupe";
 import { attachBox, clampZoom, dragToWheel, fit, NO_ZOOM, viewToPage, zoomed, type Rect, type Zoom } from "./geometry";
-import { ESCAPE_TWICE_MS, isKeyPress, keyInput, modsOf, mouseButton, viewerChord, type ViewerChord } from "./keys";
+import { copyFromPage, pasteText } from "./clipboard";
+import { clipboardChord, ESCAPE_TWICE_MS, isKeyPress, keyInput, modsOf, mouseButton, viewerChord, type ViewerChord } from "./keys";
 import type { LiveSnapshot, LiveView } from "./live";
 import { CursorOverlay } from "./overlay";
 
@@ -297,15 +300,25 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
       }
       lastEscape.current = now;
     }
+    const clip = clipboardChord(e, mac);
+    if (clip === "paste") {
+      // Not prevented, and not sent: the browser's own paste then fires on the hidden field with the
+      // operator's clipboard (onPaste). Sent as keys, the page's browser pasted its own clipboard,
+      // which is empty, and a password had to be typed by hand.
+      flushField();
+      return;
+    }
     if (!isKeyPress(e)) return;
     e.preventDefault();
     // A key must not overtake the text typed just before it.
     flushField();
+    // The copy is asked for before the key goes: a cut's key deletes the selection it reads.
+    if ((clip === "copy" || clip === "cut") && !e.repeat && interactive) void copyFromPage(live);
     send(keyInput(e, "down"));
   };
 
   const onKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!interactive || composing.current || !isKeyPress(e)) return;
+    if (!interactive || composing.current || !isKeyPress(e) || clipboardChord(e, mac) === "paste") return;
     e.preventDefault();
     send(keyInput(e, "up"));
   };
@@ -323,7 +336,7 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
     if (!interactive) return;
     const text = e.clipboardData.getData("text/plain");
     e.preventDefault();
-    if (text) send({ t: "text", text });
+    if (text) pasteText(live, text);
   };
 
   const state = snap.state.kind;

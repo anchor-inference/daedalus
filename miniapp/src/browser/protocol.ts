@@ -83,7 +83,15 @@ export type ViewEvent =
   | { type: "download"; download: { id: string; name: string; size: number; state: string } }
   | { type: "needs_you"; reason: string; what: string; url: string; tab_id?: string; by?: "daemon" | "agent" }
   | { type: "error"; code: string; message: string }
-  | { type: "ping"; at: number };
+  | { type: "ping"; at: number }
+  | CopiedEvent;
+
+/**
+ * The answer to a copy, to this client alone: the page's selected text, `truncated` when it was cut to
+ * what one frame carries, `withheld` when the focus is on a password field, whose value never leaves
+ * the page this way; `error` when the page could not be read (a dialog stops it).
+ */
+export type CopiedEvent = { type: "copied"; id: string; text: string; truncated?: boolean; withheld?: boolean; error?: string };
 
 export type ServerFrame = { kind: "frame"; frameNo: number; meta: FrameMeta; image: Uint8Array } | { kind: "event"; event: ViewEvent };
 
@@ -97,7 +105,8 @@ export type InputMessage =
   | { t: "key"; type: "down" | "up"; key: string; code: string; key_code: number; text?: string; mods: Mods }
   | { t: "text"; text: string }
   | { t: "touch"; type: "start" | "move" | "end" | "cancel"; points: { x: number; y: number; id: number }[] }
-  | { t: "nav"; action: "url" | "back" | "forward" | "reload"; url?: string };
+  | { t: "nav"; action: "url" | "back" | "forward" | "reload"; url?: string }
+  | { t: "copy"; id: string };
 
 export class ProtocolError extends Error {}
 
@@ -185,6 +194,7 @@ const INPUT_KEYS: Record<InputMessage["t"], readonly string[]> = {
   text: ["t", "text"],
   touch: ["t", "type", "points"],
   nav: ["t", "action", "url"],
+  copy: ["t", "id"],
 };
 
 /** One INPUT frame. A text too long for one is the caller's to split (`splitText`). */

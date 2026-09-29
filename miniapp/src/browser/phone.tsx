@@ -9,7 +9,8 @@
 // needs every pixel of it: a tap is a click, a drag scrolls, a long press is a right click, two
 // fingers zoom the picture. Typing goes two ways, as in the terminal: straight onto the page through
 // the phone's keyboard (filtered for Gboard's doubled words, terminal/dedupe.ts), or composed on a line
-// with autocorrect and dictation and sent whole.
+// with autocorrect and dictation and sent whole. A phone has no Ctrl+V or Ctrl+C, so the row of keys
+// carries Paste and Copy (clipboard.ts).
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { BrowserGroup } from "../api";
@@ -20,6 +21,7 @@ import { useLiveSnapshot, useLiveView } from "./data";
 import type { LiveSnapshot, LiveView } from "./live";
 import { domainOf, driveState, needsOf, needWords, pipGroup } from "./model";
 import { tapKey } from "./keys";
+import { copyFromPage, pasteFromClipboard } from "./clipboard";
 import { BrowserViewer, focusViewer } from "./viewer";
 import { Favicon } from "./favicon";
 
@@ -71,6 +73,29 @@ export function PhoneDrive({ group, live, snap, agent, url, saving, onGiveBack }
           onClick={() => focusViewer(root.current)}
         >
           <Icon name="pen" size={14} />
+        </button>
+        <button
+          type="button"
+          className="term-key bp-drive-clip"
+          data-clip="paste"
+          aria-label={t("browser.paste")}
+          title={t("browser.paste")}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => void pasteFromClipboard(live, true)}
+        >
+          <Icon name="paste" size={14} />
+        </button>
+        <button
+          type="button"
+          className="term-key bp-drive-clip"
+          data-clip="copy"
+          aria-label={t("browser.copy")}
+          title={t("browser.copy")}
+          onPointerDown={(e) => e.preventDefault()}
+          // Called in the tap itself, not after anything awaited: Safari writes the clipboard only then.
+          onClick={() => void copyFromPage(live)}
+        >
+          <Icon name="copy" size={14} />
         </button>
         {KEYS.map((k) => (
           <button
