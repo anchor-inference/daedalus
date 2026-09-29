@@ -921,7 +921,9 @@ class Orchestrators:
                 name = member.name if member else ""
                 ending = "ended a turn with a question and no report" if p.get("kind") == "needs_input" else "finished a turn without a report"
                 return f"{who(member)} {ending}{(' on ' + task) if task else ''}: \"{_one_line(str(p.get('text') or ''), 300)}\" — ReadStaff(\"{name}\") for the whole turn"
-            return f"{who(member)} reported {p.get('kind')}{(' on ' + task) if task else ''}: \"{_one_line(str(p.get('text') or ''), 300)}\"{refs_line(p.get('files'))}"
+            # A report is the member's answer to the orchestrator and arrives whole: cut at 300
+            # characters, a detailed reply reached it as a stub, and no tool could show the rest.
+            return f"{who(member)} reported {p.get('kind')}{(' on ' + task) if task else ''}: \"{_verbatim(str(p.get('text') or ''))}\"{refs_line(p.get('files'))}"
         if kind == "staff.channel":
             if p.get("team_tools") == "missing":
                 return f"{who(member)}'s team tools are not connected: {_one_line(str(p.get('detail') or ''), 200)}. They keep working, but will not Report or AskOrchestrator; Tell and ReadStaff still work"

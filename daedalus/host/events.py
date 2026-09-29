@@ -943,6 +943,15 @@ class EventBus:
         )
         return [_row_event(row) for row in rows]
 
+    async def latest(self, flt: EventFilter | None = None, *, limit: int = 10) -> list[AppEvent]:
+        """The newest stored events that match, at most ``limit``, oldest first among them."""
+        where, params = (flt or EventFilter()).sql()
+        rows = await self.db.fetchall(
+            f"SELECT * FROM (SELECT * FROM app_events WHERE {where} ORDER BY seq DESC LIMIT ?) ORDER BY seq",
+            (*params, max(1, limit)),
+        )
+        return [_row_event(row) for row in rows]
+
     async def count_after(self, after: int, flt: EventFilter | None = None, *, cap: int) -> int:
         """How many stored events match past ``after``, counting no further than ``cap``."""
         where, params = (flt or EventFilter()).sql()

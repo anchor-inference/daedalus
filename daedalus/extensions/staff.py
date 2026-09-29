@@ -79,7 +79,7 @@ TICK_SECONDS = 30.0
 FIRST_PUMP_SECONDS = 20.0
 """After a start, the queue waits this long before launching what was assigned before the restart:
 the host first continues the runs it left behind and refuses new ones meanwhile."""
-NOTE_MAX = 2000
+NOTE_MAX = 12000
 RESULT_MAX = 1500
 """How much of a done report is kept on its card: the summary, not the whole transcript of the work."""
 BASIS_MIN = 12
@@ -1678,7 +1678,13 @@ class Ingress:
         if remember and remember.strip():
             await self.manager.staff.append_notes(live.staff.id, remember.strip())
             told += "; noted for your next sessions"
-        payload: dict[str, Any] = {"kind": kind, "text": note[:NOTE_MAX], "actor": "staff"}
+        # A report is the member's answer, so it is kept whole up to a generous bound; past it the cut is
+        # said in the text, since a report sliced at 2000 characters once reached the orchestrator
+        # mid-sentence with nothing to show that more had been written.
+        if len(note) > NOTE_MAX:
+            note = note[:NOTE_MAX].rstrip() + f"\n[cut at {NOTE_MAX} characters; the rest is in the member's session]"
+            told += f"; your report was longer than {NOTE_MAX} characters and was cut there"
+        payload: dict[str, Any] = {"kind": kind, "text": note, "actor": "staff"}
         refs = [str(a)[:300] for a in (artifacts or []) if str(a).strip()][:20]
         if refs:
             payload["refs"] = refs
