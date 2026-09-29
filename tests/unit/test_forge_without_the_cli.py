@@ -12,7 +12,6 @@ answers is a sentence about what existed when it was written, and the diff was m
 from __future__ import annotations
 
 import ast
-import asyncio
 import json
 from pathlib import Path
 
