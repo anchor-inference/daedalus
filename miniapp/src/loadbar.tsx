@@ -25,6 +25,20 @@ function share(part: number, total: number, used: number): number {
   return Math.max(0, Math.min(100 - used, (100 * part) / total));
 }
 
+/**
+ * What the grey and the striped parts of the track are. The sentences name the coloured parts, but
+ * nothing named these two, so a reader had to infer from the warning that the stripes are only a
+ * projection — "what the limit would add" — and not memory in use now.
+ */
+function Legend({ both = false }: { both?: boolean }) {
+  return (
+    <div className="sub faint loadbar-legend">
+      <span><i className="loadbar-other" aria-hidden="true" />{t("load.legend.other")}</span>
+      <span><i className="loadbar-legend-extra" aria-hidden="true" />{t(both ? "load.legend.extra.both" : "load.legend.extra")}</span>
+    </div>
+  );
+}
+
 export function LoadBar({ load, cap, compact = false }: { load: TerminalLoad; cap?: number; compact?: boolean }) {
   const f = loadFigures(load, cap ?? load.cap);
   if (!f.known) {
@@ -57,6 +71,7 @@ export function LoadBar({ load, cap, compact = false }: { load: TerminalLoad; ca
         <b>{plural("load.atcap", f.cap, { used: size(f.terminalsAtCap), total: size(f.total) })}</b>
         <span className="loadbar-percent">{t("load.percent", { percent: pct(f.memPercentAtCap) })}</span>
       </div>
+      {!compact && <Legend />}
       <div className="sub">
         {plural("load.now", f.running, { used: size(f.terminalsNow), free: size(Math.max(0, f.total - f.machineNow)) })}
         {daemon > 0 && ` ${t("load.daemon", { used: size(daemon) })}`}
@@ -136,6 +151,7 @@ export function WorkloadsBar({ load, caps = {} }: { load: WorkloadsLoad; caps?: 
           {plural("load.kind.browsers", f.browsers.running, { used: size(f.browsers.now), cap: f.browsers.cap, atcap: size(f.browsers.atCap) })}
         </div>
       )}
+      <Legend both />
       <div className="sub">{t("load.machine", { now: pct(f.memPercentNow), atcap: pct(f.memPercentAtCap) })}</div>
       <div className="sub loadbar-cpu" data-level={f.cpuLevel}>{t("load.cpu", { now: pct(f.cpuNow), atcap: pct(f.cpuAtCap) })}</div>
       {over && (

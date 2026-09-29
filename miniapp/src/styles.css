@@ -580,6 +580,12 @@ input.field, select.field, textarea.field {
 /* A field that cannot be changed says so before it is tried: a disabled select drew exactly like the
    live one beside it, and a memory's fixed scope read as editable. */
 input.field:disabled, select.field:disabled, textarea.field:disabled { opacity: .55; cursor: not-allowed; }
+.rules-editor { position: relative; margin-top: 8px; }
+.rules-editor-field { display: block; }
+.rules-editor:has(> [data-more="below"])::after {
+  content: ""; position: absolute; left: 1px; right: 16px; bottom: 1px; height: 32px; pointer-events: none;
+  border-radius: 0 0 0 var(--radius-sm); background: linear-gradient(to bottom, transparent, var(--card-2));
+}
 /* A choice longer than its box ends in an ellipsis. Clipped mid-letter, the voice model's
    "… vllm" read as "vllr", a different word rather than a shortened one. */
 select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
@@ -1432,7 +1438,9 @@ body.resizing iframe { pointer-events: none; }
 /* ── settings: models and clients as rows that expand ─────────────────────────────────── */
 .mlist { margin-top: 8px; border-top: 1px solid var(--line); }
 .mrow { border-bottom: 1px solid var(--line); padding: 4px 0; }
-.mrow.default { box-shadow: inset 3px 0 0 var(--ok); padding-left: 10px; }
+/* The stripe is the accent of the "default" chip beside the name: green, it was a second signal in a
+   colour nothing else on the page used, and read as a status the chip did not explain. */
+.mrow.default { box-shadow: inset 3px 0 0 var(--accent); padding-left: 10px; }
 .mrow.open { background: color-mix(in srgb, var(--card-2) 55%, transparent); border-radius: var(--radius-md); margin: 4px -8px; padding-left: 8px; padding-right: 8px; }
 .mrow.open.default { padding-left: 10px; }
 .mline { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "radio main actions" "tags tags tags"; align-items: center; gap: 4px 10px; min-height: var(--row-h-touch); }
@@ -1457,6 +1465,7 @@ body.resizing iframe { pointer-events: none; }
 .segmented.inline { display: inline-flex; margin: 0; }
 .segmented.inline button { flex: none; padding: 4px 12px; font-size: var(--fs-13); }
 .btnrow .sub.mid { margin-left: auto; align-self: center; }
+.btnrow-labelled { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 @media (min-width: 720px) {
   .mline { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "radio main tags actions"; }
   .mline.noradio { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "main tags actions"; }
@@ -1563,6 +1572,7 @@ body.resizing iframe { pointer-events: none; }
 .kv { display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding:4px 0; font-size:var(--fs-13); }
 .kv > span:first-child { color:var(--fg-2); flex:none; }
 .kv b { font-weight:500; text-align:right; min-width:0; overflow-wrap:anywhere; }
+.kv-part { display: inline-block; }
 .kv .linkbtn { text-align:right; min-width:0; max-width:60%; font-size:var(--fs-13); }
 
 /* ── inbox, changes, board rows ─────────────────────────────────────────────────────────── */
@@ -1749,7 +1759,9 @@ pre.diff .file { color: var(--fg); font-weight: 600; }
 .settings-link .ic { color: var(--fg-2); }
 .settings-link-text { display: flex; flex-direction: column; min-width: 0; }
 .settings-link-text b { font-weight: 600; }
-.settings-link-text .sub { font-size: var(--fs-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Two lines before the ellipsis: held to one, most hints on a phone ended mid-word ("that run h…",
+   "fetc…") and read as broken text rather than as a summary. */
+.settings-link-text .sub { font-size: var(--fs-12); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .settings-link .chev { color: var(--fg-3); font-size: var(--fs-18); line-height: 1; }
 .settings-link:hover { background: var(--surface-2); }
 .settings-link.active { background: var(--surface-2); border-color: var(--line-strong); }
@@ -1955,7 +1967,9 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 /* The diagnostic line: a measurement of the last answer, deliberately the quietest thing on the page.
    It is read when something feels slow and ignored the rest of the time, so it sits below the words
    at the smallest size the page uses and takes no colour of its own. */
-.voice-timing { text-align: center; font-size: 12px; color: var(--fg-3); font-variant-numeric: tabular-nums; }
+/* The hint's grey, not the fainter one: at 12px on the stage's dark gradient the faint grey was the
+   one line on the page that could hardly be read. It stays secondary by its size. */
+.voice-timing { text-align: center; font-size: 12px; color: var(--fg-2); font-variant-numeric: tabular-nums; }
 /* Three voices, three treatments: what the operator asked (settled, quiet), what is being heard right
    now (light and italic, because it is still provisional), and the answer (large, and arriving). */
 .voice-asked { margin: 0; color: var(--fg-2); font-size: 14px; }
@@ -2261,7 +2275,9 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 .stt-filters .field { flex: 1 1 180px; min-width: 140px; }
 .stt-filters .chip.select.on { background: var(--fg); color: var(--bg); border-color: transparent; }
 
-.stt-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 10px; margin-top: 10px; }
+/* Each card keeps its own height: stretched to the row, a one-button voice beside a long model card
+   ended in a block of empty panel that read as a missing part. */
+.stt-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); align-items: start; gap: 10px; margin-top: 10px; }
 .stt-card { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); }
 .stt-card.using { background: var(--surface-3); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .stt-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -2311,7 +2327,9 @@ input.field[type="range"] {
 /* The minimum is capped at the column's width and a card may shrink below its content: a card's fix
    command is `white-space: pre`, and with the default `auto` minimum it widened the one phone column
    past the screen, cutting every card's text at the right edge. */
-.comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 10px; margin-top: 12px; }
+/* Sized to content for the same reason as the voice cards: a short card stretched to its neighbour
+   was a third empty. */
+.comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); align-items: start; gap: 10px; margin-top: 12px; }
 .comp-card { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); }
 .comp-card-on { background: var(--surface-3); }
 .comp-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -3142,6 +3160,9 @@ button.staff-row:hover { background: var(--surface-2); }
 .quiet-hours label { display: flex; flex-direction: column; gap: 4px; }
 .quiet-hours .field { width: 140px; margin: 0; }
 .ndevice .mtitle .chip { margin-left: 8px; vertical-align: middle; }
+/* The browser's own description is what tells two Chrome-on-Android devices apart, and its model and
+   version sit at the end: clipped to one line on a phone, exactly that part was lost. */
+.ndevice .mmeta { white-space: normal; overflow-wrap: anywhere; }
 @media (max-width: 1023px) {
   .nmute .mline.noradio, .ndevice .mline.noradio { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main" "actions"; }
   .nmute .mactions, .ndevice .mactions { padding-bottom: 6px; flex-wrap: wrap; }
@@ -3178,6 +3199,10 @@ button.staff-row:hover { background: var(--surface-2); }
 .loadbar[data-level="warn"] .loadbar-kind.terminals i { background: var(--warn); }
 .loadbar[data-level="bad"] .loadbar-kind.terminals i { background: var(--bad); }
 .loadbar-kind.browsers i { background: var(--accent); }
+.loadbar-legend { display: flex; flex-wrap: wrap; gap: 2px 14px; }
+.loadbar-legend span { display: inline-flex; align-items: baseline; gap: 6px; }
+.loadbar-legend i { flex: none; width: 12px; height: 8px; border-radius: 2px; transform: translateY(-1px); }
+.loadbar-legend-extra { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--fg-2) 55%, transparent) 0 3px, color-mix(in srgb, var(--fg-2) 20%, transparent) 3px 6px); }
 .loadbar-warning { margin-top: 4px; padding: 8px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--bad) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bad) 35%, transparent); color: var(--fg); font-size: var(--fs-13); line-height: var(--lh-ui); }
 
 /* ── a terminal on a phone (terminal/mobile.tsx) ─────────────────────────────────────────────

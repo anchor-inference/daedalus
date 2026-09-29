@@ -47,6 +47,15 @@ export function numInput(raw: string, min?: number): number | null {
   return v;
 }
 
+/**
+ * A message from the host shown as a sentence of its own. The host writes its reasons in lower case
+ * so they read inside a longer line ("could not start: the model refused: …"); standing alone under
+ * a form, the same lower-case text read as a fragment next to the page's own capitalised copy.
+ */
+export function sentence(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /** A readable message for a failed request. */
 export function errorText(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
