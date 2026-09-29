@@ -1176,11 +1176,17 @@ class BrowserAgent:
         if text is not None:
             params["text"] = text[:TEXT_MAX]
         try:
-            await self.service.call(group["id"], "dialog.answer", params, what="answering the dialog")
+            result = await self.service.call(group["id"], "dialog.answer", params, what="answering the dialog")
         except NotFound:
             return "No dialog is open on that tab."
         await self._audit(group, caller, "dialog", {"tab": current["id"], "accept": bool(accept), "text_len": len(text or "")})
-        return f"The dialog was {'accepted' if accept else 'dismissed'}."
+        said = f"The dialog was {'accepted' if accept else 'dismissed'}."
+        # What the answer did to the page, as an action reports it: "accepted" alone left the agent to
+        # take a whole snapshot to learn whether the delete it confirmed had happened.
+        changes = str((result or {}).get("diff") or "").strip()
+        if changes:
+            said += "\nWhat changed on the page (+ appeared, - went):\n" + fenced(origin_of(str(current.get("url") or "")), changes[:2000])
+        return said
 
     async def handoff(self, caller: Caller, *, reason: str, what: str) -> str:
         if reason not in HANDOFF_REASONS:

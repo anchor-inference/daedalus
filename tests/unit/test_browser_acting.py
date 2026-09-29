@@ -261,3 +261,33 @@ def test_the_prompt_lets_the_gate_ask_and_the_scheme_refusal_names_what_reads_a_
     assert "say plainly what is missing" in prompts.BROWSER
     decision = Policy().evaluate("BrowserNavigate", {"url": "view-source:https://shop.test/"})
     assert decision.rule == "browser.scheme" and "BrowserText(find=" in decision.reason
+
+
+async def test_answering_a_dialog_says_what_the_answer_changed_on_the_page() -> None:
+    """"Accepted" alone left the agent to take a whole snapshot to learn whether the delete it confirmed
+    had happened; the daemon returns the change and the reply carries it, fenced as page content."""
+    from daedalus.browser.agent import BrowserAgent
+
+    class Service:
+        async def call(self, group: str, method: str, params: dict, **_: object) -> dict:
+            assert method == "dialog.answer" and params["accept"] is True
+            return {"diff": '- row "Invoice 42"'}
+
+    agent = object.__new__(BrowserAgent)
+    agent.service = Service()  # type: ignore[attr-defined]
+
+    async def group(caller: object) -> dict:
+        return {"id": "g1"}
+
+    async def tab(group: dict, tab: object) -> dict:
+        return {"id": "t1", "url": "https://shop.example/orders"}
+
+    async def audit(*_: object) -> None:
+        return None
+
+    agent._group = group  # type: ignore[method-assign]
+    agent._tab = tab  # type: ignore[method-assign]
+    agent._audit = audit  # type: ignore[method-assign]
+    agent._origin = lambda caller: {"actor": "agent"}  # type: ignore[method-assign]
+    said = await agent.dialog(object(), accept=True)  # type: ignore[arg-type]
+    assert said.startswith("The dialog was accepted.") and '- row "Invoice 42"' in said and "shop.example" in said
