@@ -1168,17 +1168,31 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .toolrow .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* tool groups: the installation's modes in Settings → Tools, and one session's in its Details */
-.tgroup { padding: 10px 0; border-top: 1px solid var(--line); display: grid; gap: 4px; min-width: 0; }
-.tgroups .section-title + .sub { margin-bottom: 4px; }
-.tgroup-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; min-width: 0; }
-.tgroup-name { font-size: var(--fs-14); }
-.tgroup-use { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.tgroup-bar { flex: 0 0 96px; height: 4px; border-radius: var(--radius-pill); background: var(--surface-2); overflow: hidden; }
+/* Tool groups in Settings: a settings row with two lanes between the words and the picker — the
+   usage, and a Reset that only a changed group fills — so the groups read down as columns. */
+.settings-row.tgroup { grid-template-columns: minmax(0, 1fr) 236px 56px auto; column-gap: 16px; }
+.tgroup .settings-row-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; }
+.tgroup-name { font-weight: 600; }
+.tgroup-cost { color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; font-variant-numeric: tabular-nums; }
+.tgroup-use { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
+.tgroup-bar { flex: 0 0 56px; height: 4px; border-radius: var(--radius-pill); background: var(--surface-3); overflow: hidden; }
 .tgroup-bar > span { display: block; height: 100%; background: var(--accent); }
-.tgroup-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
-.tgroup-load button { min-height: var(--ctl-h-sm); }
-.tgroup-default.changed { color: var(--warn); }
-.tgroup-note { margin-top: 8px; }
+.tgroup-reset-slot { justify-self: end; }
+.tgroup-reset { color: var(--fg-2); font-size: var(--fs-13); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong); }
+.tgroup-reset:hover { color: var(--fg); }
+.tgroup .dropdown { justify-self: end; }
+.tgroup .dropdown-btn { min-width: 136px; justify-content: space-between; }
+/* Narrower, the usage and the picker share the line under the words. */
+@media (max-width: 899px) {
+  .settings-row.tgroup { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "text text text" "use reset pick"; row-gap: 8px; }
+  .tgroup .settings-row-text { grid-area: text; }
+  /* Wraps rather than running under the picker: on a phone "· 30 days" was cut off mid-word. */
+  .tgroup-use { grid-area: use; white-space: normal; line-height: 1.3; }
+  .tgroup-reset-slot { grid-area: reset; }
+  .tgroup .dropdown { grid-area: pick; }
+}
+.tgroup-note { margin-top: 10px; }
+.segmented.tgroup-load button { min-height: var(--ctl-h-sm); }
 .stgroups { display: grid; gap: 2px; }
 .stgroups > .sub { margin-bottom: 4px; }
 .stgroup .chip { flex: none; }
@@ -1900,9 +1914,73 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 .settings-themes button { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-height: var(--row-h); padding: 8px; border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; color: var(--fg); text-align: left; cursor: pointer; }
 .settings-themes button.on { border-color: var(--fg); }
 .settings-swatch { display: block; width: 100%; height: 22px; border-radius: var(--radius-sm); border: 1px solid var(--line); }
-.settings-choice { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--row-h); padding: 6px 0; }
-.settings-choice .segmented { margin: 0; }
-.settings-choice select.field { width: auto; max-width: 46%; margin: 0; }
+/* One setting, one row (settingsrow.tsx): the words left, one control in a right-hand lane that lines
+   up down the page, a hairline to the next. The description is held to a reading measure: the column
+   is 960 px now and a grey line that ran the whole width was harder to read than the one it replaced. */
+.settings-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 24px; min-height: var(--row-h-touch); padding: 10px 0; }
+.settings-row + .settings-row { border-top: 1px solid var(--line); }
+.settings-row-text { min-width: 0; }
+.settings-row-title { display: block; font-size: var(--fs-14); font-weight: 500; color: var(--fg); line-height: 1.35; }
+.settings-row-desc { margin-top: 2px; max-width: 60ch; color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; }
+.settings-row-ctl { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; justify-self: end; }
+.settings-row-ctl .segmented { margin: 0; }
+.settings-row-ctl .btn { flex: none; }
+/* The intro under a card's heading keeps the same measure as a row's description. */
+.settings-col .card > .sub { max-width: 75ch; }
+.settings-col .card > .section-title + .sub { margin-bottom: 4px; }
+/* A heading inside a card below the first starts a new group of rows. */
+.settings-col .card > .section-title:not(:first-child) { margin-top: 18px; }
+.settings-num { display: inline-flex; align-items: center; gap: 8px; }
+.settings-num input.field { width: 104px; margin: 0; padding: 6px 10px; text-align: right; font-variant-numeric: tabular-nums; }
+.settings-num input.field[aria-invalid="true"] { border-color: var(--bad); }
+.settings-unit { min-width: 64px; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; }
+.settings-row-ctl input.field:not([type="number"]) { margin: 0; }
+/* A short text value in the lane numbers use, ending where their fields end (before the units' slot). */
+.settings-inline-field { width: 180px; padding: 6px 10px; margin-right: 72px !important; }
+.settings-name-field { width: 220px; padding: 6px 10px; }
+.settings-value { color: var(--fg-2); font-size: var(--fs-13); text-align: right; overflow-wrap: anywhere; }
+.settings-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+/* Total spend against its cap, as a thin bar over the rows that set it. */
+.spend-meter { display: grid; gap: 6px; margin: 10px 0 4px; }
+.spend-meter-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.spend-meter-line b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.spend-meter-track { display: block; height: 6px; border-radius: var(--radius-pill); background: var(--surface-3); overflow: hidden; }
+.spend-meter-track > span { display: block; height: 100%; background: var(--accent); }
+.spend-meter[data-level="warn"] .spend-meter-track > span { background: var(--warn); }
+.spend-meter[data-level="bad"] .spend-meter-track > span { background: var(--bad); }
+.settings-row + .btnrow { margin-top: 0; padding-top: 10px; border-top: 1px solid var(--line); }
+.settings-block { padding: 6px 0 10px; }
+.settings-row + .settings-block, .settings-block + .settings-row { border-top: 1px solid var(--line); }
+/* What opens beneath a row that needs more than one control (the cloud endpoint under a transcriber
+   set to it): indented and fenced by the same hairline, so it reads as that row's own. */
+.settings-disclosure { margin: 0 0 8px; padding: 4px 0 10px 14px; border-left: 2px solid var(--line-strong); }
+.settings-disclosure label.field:first-child { margin-top: 4px; }
+.settings-subhead { margin: 18px 0 2px; color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+/* The compact dropdown (components.tsx): the value and a caret, the list floating over the page. */
+.dropdown { position: relative; display: inline-flex; min-width: 0; max-width: 100%; }
+.dropdown-btn { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: min(340px, 100%); min-height: var(--ctl-h-sm); padding: 4px 8px 4px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card-2); color: var(--fg); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+.dropdown-btn:hover:not(:disabled) { border-color: var(--line-strong); }
+.dropdown-btn:disabled { opacity: .55; cursor: not-allowed; }
+.dropdown-btn[aria-invalid="true"] { border-color: var(--warn); }
+.dropdown-btn .ic { flex: none; color: var(--fg-3); }
+.dropdown-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dropdown-list { position: absolute; top: calc(100% + 4px); right: 0; z-index: 25; display: flex; flex-direction: column; width: max-content; min-width: max(100%, 200px); max-width: min(360px, calc(100vw - 32px)); max-height: 320px; overflow-y: auto; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-3); box-shadow: var(--shadow-pop); }
+.dropdown-list.up { top: auto; bottom: calc(100% + 4px); }
+.dropdown-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: var(--row-h); padding: 6px 10px; border-radius: var(--radius-sm); color: var(--fg); font-size: var(--fs-13); text-align: left; cursor: pointer; }
+.dropdown-item.active { background: var(--surface-2); }
+.dropdown-item[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.dropdown-item .ic { flex: none; color: var(--fg-2); }
+.dropdown-item-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.dropdown-item-text .sub { font-size: var(--fs-12); }
+/* A phone keeps a compact control beside its words; a control that cannot be compact takes its own
+   right-aligned line under them (Row's `stack`), rather than squeezing the title to a word a line. */
+@media (max-width: 599px) {
+  .settings-row.stack { grid-template-columns: minmax(0, 1fr); }
+  .settings-row { gap: 8px 16px; }
+  .settings-row-ctl { flex-wrap: wrap; }
+  .settings-inline-field { width: min(100%, 260px); margin-right: 0 !important; }
+  .settings-name-field { flex: 1 1 160px; width: auto; }
+}
 .health-mark { flex: none; width: 22px; padding-top: 2px; }
 .health-mark.ok { color: var(--ok); }
 .health-mark.warn { color: var(--warn); }
@@ -1924,7 +2002,10 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
   .settings-stage { display: grid; grid-template-columns: 280px minmax(0, 1fr); height: 100%; }
   .settings-nav { overflow: auto; border-right: 1px solid var(--line); padding: 12px 12px 24px; }
   .settings-main { overflow: auto; min-width: 0; }
-  .settings-col { width: min(760px, calc(100% - 64px)); margin: 36px auto 72px; }
+  /* Wide enough that a row's words and its control sit on one line with a lane to spare; the rail
+     keeps its 280 px and the whole gain goes to the content. The column grows with the window until
+     the cap binds, then the gutters take the rest, so prose never runs edge to edge. */
+  .settings-col { width: min(960px, calc(100% - 96px)); margin: 36px auto 72px; }
   .settings-back { display: flex; align-items: center; gap: 8px; min-height: var(--row-h); padding: 0 10px; color: var(--fg-2); }
   .settings-link { padding: 6px 12px; min-height: var(--row-h); background: transparent; border-color: transparent; }
   .settings-link .chev { display: none; }
@@ -3322,9 +3403,9 @@ button.staff-row:hover { background: var(--surface-2); }
 .nrow-line { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; min-height: var(--row-h); padding: 2px 0 2px 12px; font-size: var(--fs-13); color: var(--fg-2); }
 .nrow-line .segmented.inline button { min-height: var(--ctl-h-sm); padding: 0 10px; }
 .nrow:last-child .nrow-line:last-child { padding-bottom: 8px; }
-.quiet-hours { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
-.quiet-hours label { display: flex; flex-direction: column; gap: 4px; }
-.quiet-hours .field { width: 140px; margin: 0; }
+.quiet-hours { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 14px; }
+.quiet-hours label { display: inline-flex; align-items: center; gap: 6px; }
+.quiet-hours .field { width: 116px; margin: 0; padding: 6px 8px; }
 .ndevice .mtitle .chip { margin-left: 8px; vertical-align: middle; }
 /* The browser's own description is what tells two Chrome-on-Android devices apart, and its model and
    version sit at the end: clipped to one line on a phone, exactly that part was lost. */
@@ -3337,9 +3418,6 @@ button.staff-row:hover { background: var(--surface-2); }
 
 /* The cap on running terminals and the load bar under it. The track is the machine's memory: what
    everything else holds, what the terminals hold now, and — lighter — what the cap would add. */
-.terminal-cap-row { display: flex; align-items: center; gap: 10px; }
-.terminal-cap-row .terminal-cap-input { flex: none; width: 120px; margin: 0; }
-.terminal-cap-row .sub { white-space: nowrap; }
 .loadbar { margin-top: 14px; display: grid; gap: 4px; }
 .loadbar-track { display: flex; height: 10px; border-radius: var(--radius-pill); background: var(--surface-3); overflow: hidden; }
 .loadbar-track i { display: block; height: 100%; transition: width .3s; }
@@ -4062,18 +4140,16 @@ button.staff-row:hover { background: var(--surface-2); }
 .bs-env-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; min-width: 0; }
 .bs-env-head .sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bs-warn { color: var(--warn); }
-.bs-rows { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; }
-.bs-row { display: flex; align-items: center; gap: 10px; min-height: var(--row-h); padding: 4px 0; min-width: 0; }
+.bs-rows { list-style: none; margin: 6px 0 0; padding: 0; display: grid; }
+/* The same hairline-separated rows as every other list in Settings. */
+.bs-row { display: flex; align-items: center; gap: 10px; min-height: var(--row-h-touch); padding: 8px 0; min-width: 0; }
+.bs-row + .bs-row { border-top: 1px solid var(--line); }
 .bs-row > svg { flex: none; color: var(--fg-2); }
 .bs-row-main { display: grid; flex: 1; min-width: 0; }
 .bs-row-main b { font-weight: 600; font-size: var(--fs-14); }
 .bs-row-figure { flex: none; color: var(--fg-2); font-size: var(--fs-13); font-variant-numeric: tabular-nums; }
 .bs-row .btn { flex: none; }
-.bs-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.bs-pair label.field { display: grid; gap: 4px; }
-.bs-pair input.field { margin: 0; }
 .bs-list { width: 100%; font-family: var(--mono); font-size: var(--fs-13); resize: vertical; }
-.bs-rec-used { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 @media (max-width: 600px) {
   .bs-row { flex-wrap: wrap; }
   .bs-row-main { flex-basis: calc(100% - 30px); }

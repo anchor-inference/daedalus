@@ -2,7 +2,7 @@
 // of words. The app once grew to 15 px body text, 44 px round buttons and 64 px session rows one
 // rule at a time, each of them reasonable on its own; this is what stops the next one.
 //
-// Four claims. Every size comes from the scale in :root. Nothing outside the answer, the headings
+// Four claims, and Settings' own column and row. Every size comes from the scale in :root. Nothing outside the answer, the headings
 // and the prose is drawn above 14 px, in whatever unit it is written. No box that is not a surface
 // of its own is given a height a row or a control would not have. Rows and controls take their
 // height from the row and control tokens, so a phone gets its 44 px from one media rule and not
@@ -326,6 +326,27 @@ describe("rows and controls", () => {
     const widths = stripes.map((r) => Number(/--chat-w:\s*(\d+)px/.exec(r.body)?.[1] ?? 0));
     expect(widths.length).toBeGreaterThan(1);
     expect(Math.max(...widths)).toBeGreaterThan(Math.min(...widths));
+  });
+});
+
+describe("settings", () => {
+  const decl = (selector: string) => all.filter((r) => r.selector === selector && !r.media).map((r) => r.body).join(" ");
+  const wide = (selector: string) => all.filter((r) => r.media.includes("min-width: 1024px") && selectors(r).includes(selector)).map((r) => r.body).join(";");
+
+  it("gives the section a 960 px column that grows with the window until then", () => {
+    // Widened from 760 px on the owner's word that the column was too narrow: at 960 a row's words
+    // and its control share one line with a lane to spare. The rail stays 280 px; the gain is content.
+    expect(wide(".settings-col")).toContain("width: min(960px, calc(100% - 96px))");
+    expect(wide(".settings-stage")).toContain("grid-template-columns: 280px minmax(0, 1fr)");
+  });
+
+  it("draws every setting as a touch-height row with its control in one lane", () => {
+    // One row shape for every scalar setting (settingsrow.tsx), its height the touch token and not a
+    // number of its own, and the compact picker a small control rather than a full-width field.
+    expect(decl(".settings-row")).toContain("min-height: var(--row-h-touch)");
+    expect(decl(".settings-row")).toContain("grid-template-columns: minmax(0, 1fr) auto");
+    expect(decl(".dropdown-btn")).toContain("min-height: var(--ctl-h-sm)");
+    expect(decl(".dropdown-item")).toContain("min-height: var(--row-h)");
   });
 });
 

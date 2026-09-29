@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useEdgeFade } from "./edgefade";
 import { int, relTime, usd } from "./format";
 import { api, LoopView, ServiceView, ShareMode, ToolInfo } from "./api";
@@ -58,6 +58,140 @@ export function Switch({ checked, onChange, label, disabled }: { checked: boolea
     <button type="button" role="switch" aria-checked={checked} aria-label={label} className={`switch ${checked ? "on" : ""}`} disabled={disabled} onClick={() => onChange(!checked)}>
       <span className="switch-track" aria-hidden><span className="switch-knob" /></span>
     </button>
+  );
+}
+
+export type DropdownOption<T extends string> = { id: T; label: string; hint?: string; disabled?: boolean };
+
+/** One of many, or of a few with long names, picked from a list that opens over the page: a compact
+ *  button that shows the value and a caret, so a settings row keeps its control in the right-hand
+ *  lane. A full-width native select there pushed the value under its label and made every such row
+ *  two lines tall, and a native list could not carry a line saying what each choice means.
+ *
+ *  The list opens upward when the window has no room below the button, and closes on a pick, on
+ *  Escape, on Tab and on a press anywhere else. Focus stays on the button; the arrow keys move the
+ *  highlighted choice, as they do in a native select. */
+export function Dropdown<T extends string>({ value, options, onChange, label, id, invalid, disabled, className = "" }: {
+  value: T;
+  options: DropdownOption<T>[];
+  onChange: (id: T) => void;
+  label: string;
+  id?: string;
+  invalid?: boolean;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const [up, setUp] = useState(false);
+  const wrap = useRef<HTMLSpanElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const listId = useId();
+  const current = options.find((o) => o.id === value);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    // Optional call: a document without layout (the unit tests' jsdom) has no scrollIntoView.
+    wrap.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView?.({ block: "nearest" });
+  }, [open, active]);
+
+  function show() {
+    const box = button.current?.getBoundingClientRect();
+    const below = box ? window.innerHeight - box.bottom : Infinity;
+    const wanted = Math.min(320, options.length * 40 + 12);
+    setUp(below < wanted && (box?.top ?? 0) > below);
+    setActive(Math.max(0, options.findIndex((o) => o.id === value)));
+    setOpen(true);
+  }
+  function pick(option: DropdownOption<T>) {
+    if (option.disabled) return;
+    setOpen(false);
+    button.current?.focus();
+    if (option.id !== value) onChange(option.id);
+  }
+  function step(from: number, by: number): number {
+    for (let i = 1; i <= options.length; i++) {
+      const next = (from + by * i + options.length * i) % options.length;
+      if (!options[next]?.disabled) return next;
+    }
+    return from;
+  }
+  function onKey(e: React.KeyboardEvent) {
+    if (!open) {
+      if (["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) {
+        e.preventDefault();
+        show();
+      }
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((i) => step(i, e.key === "ArrowDown" ? 1 : -1));
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      if (options[active]) pick(options[active]);
+    } else if (e.key === "Tab") {
+      setOpen(false);
+    }
+  }
+  return (
+    <span ref={wrap} className={`dropdown ${className}`.trim()}>
+      <button
+        ref={button}
+        id={id}
+        type="button"
+        className="dropdown-btn"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
+        aria-label={`${label}: ${current?.label ?? ""}`}
+        aria-invalid={invalid || undefined}
+        data-value={value}
+        disabled={disabled}
+        title={current?.label}
+        onClick={() => (open ? setOpen(false) : show())}
+        onKeyDown={onKey}
+      >
+        <span className="dropdown-value">{current?.label ?? ""}</span>
+        <Icon name="chevron" size={14} />
+      </button>
+      {open && (
+        <span id={listId} role="listbox" aria-label={label} className={`dropdown-list ${up ? "up" : ""}`}>
+          {options.map((option, i) => (
+            <span
+              key={option.id}
+              id={`${listId}-${i}`}
+              data-index={i}
+              data-value={option.id}
+              role="option"
+              aria-selected={option.id === value}
+              aria-disabled={option.disabled || undefined}
+              className={`dropdown-item ${i === active ? "active" : ""} ${option.id === value ? "on" : ""}`}
+              onPointerEnter={() => !option.disabled && setActive(i)}
+              onClick={() => pick(option)}
+            >
+              <span className="dropdown-item-text">
+                <span>{option.label}</span>
+                {option.hint && <span className="sub">{option.hint}</span>}
+              </span>
+              {option.id === value && <Icon name="check" size={14} />}
+            </span>
+          ))}
+        </span>
+      )}
+    </span>
   );
 }
 
