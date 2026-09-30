@@ -2496,26 +2496,16 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "local": app.speech.state(),
         }
 
-    @api.post("/api/sessions/{session_id}/transcribe")
-    async def transcribe_audio(
-        session_id: str,
-        audio: UploadFile | None = File(None),
-        recording: str = Form(""),
-        _: dict[str, Any] = Depends(auth),
-    ) -> dict[str, Any]:
-        """A recording from the site's microphone → its words, marked as a transcript, for the composer.
+    async def transcribe_into(kept: Path, audio: UploadFile | None, recording: str) -> dict[str, Any]:
+        """A recording from the site's microphone → its words, marked as a transcript, for a composer.
 
-        A recording that could not be transcribed is kept, not deleted: the error names it, and a retry
-        sends that name instead of the audio again. A long voice note used to be lost whole to one
-        refusal from the endpoint; now nothing the operator said leaves this host's disk until its
-        words have.
+        A recording that could not be transcribed is kept in ``kept``, not deleted: the error names
+        it, and a retry sends that name instead of the audio again. A long voice note used to be lost
+        whole to one refusal from the endpoint; now nothing the operator said leaves this host's disk
+        until its words have.
         """
-        state = await manager.get_state(session_id)
-        if state is None:
-            raise HTTPException(404, "no such session")
         if not recogniser_available(app.speech, app.config):
             raise HTTPException(409, "speech-to-text is not set up (Settings → Voice → Speech recognition)")
-        kept = state.workspace / "inbox" / KEPT_RECORDINGS
         forget_old_recordings(kept)
         if recording:
             if not KEPT_NAME.fullmatch(recording) or not (kept / recording).is_file():
@@ -2549,18 +2539,53 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         target.unlink(missing_ok=True)
         return {"transcript": transcript, "text": voice_note_text(transcript), "autosend": app.config.asr.autosend}
 
-    @api.delete("/api/sessions/{session_id}/transcribe/{recording}")
-    async def forget_recording(session_id: str, recording: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """Let go of a kept recording: the operator attached it as a file, or discarded it."""
-        state = await manager.get_state(session_id)
-        if state is None:
-            raise HTTPException(404, "no such session")
+    def forget_kept(kept: Path, recording: str) -> dict[str, Any]:
         if not KEPT_NAME.fullmatch(recording):
             raise HTTPException(404, "no such recording")
-        path = state.workspace / "inbox" / KEPT_RECORDINGS / recording
+        path = kept / recording
         existed = path.is_file()
         path.unlink(missing_ok=True)
         return {"deleted": existed}
+
+    async def session_recordings(session_id: str) -> Path:
+        state = await manager.get_state(session_id)
+        if state is None:
+            raise HTTPException(404, "no such session")
+        return state.workspace / "inbox" / KEPT_RECORDINGS
+
+    def new_chat_recordings() -> Path:
+        # A note spoken on the start page belongs to no session yet: it waits in the host's state,
+        # not in a workspace that does not exist until the message is sent.
+        return settings.state_dir / KEPT_RECORDINGS
+
+    @api.post("/api/sessions/{session_id}/transcribe")
+    async def transcribe_audio(
+        session_id: str,
+        audio: UploadFile | None = File(None),
+        recording: str = Form(""),
+        _: dict[str, Any] = Depends(auth),
+    ) -> dict[str, Any]:
+        """A voice note in a session's composer; see ``transcribe_into``."""
+        return await transcribe_into(await session_recordings(session_id), audio, recording)
+
+    @api.delete("/api/sessions/{session_id}/transcribe/{recording}")
+    async def forget_recording(session_id: str, recording: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Let go of a kept recording: the operator attached it as a file, or discarded it."""
+        return forget_kept(await session_recordings(session_id), recording)
+
+    @api.post("/api/transcribe")
+    async def transcribe_new_chat(
+        audio: UploadFile | None = File(None),
+        recording: str = Form(""),
+        _: dict[str, Any] = Depends(auth),
+    ) -> dict[str, Any]:
+        """A voice note in the start page's composer, before there is a session to keep it in."""
+        return await transcribe_into(new_chat_recordings(), audio, recording)
+
+    @api.delete("/api/transcribe/{recording}")
+    async def forget_new_chat_recording(recording: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Let go of a recording kept for the start page's composer."""
+        return forget_kept(new_chat_recordings(), recording)
 
     # -- voice: the concierge page ---------------------------------------------------
 

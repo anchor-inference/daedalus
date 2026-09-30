@@ -120,7 +120,7 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     check.that(tabs[:2] == ["session", "details"], f"{lang}: the member's tabs are {tabs}")
     staff(page, lang, check, ".staff-aside", "desktop member")
     # Every tab of the narrow column is reachable: the row scrolls rather than clipping the last one.
-    reach = page.evaluate("(() => { const row = document.querySelector('.staff-aside .panel-tabs'); const last = row.lastElementChild; row.scrollLeft = row.scrollWidth; const a = last.getBoundingClientRect(), b = row.getBoundingClientRect(); return a.right <= b.right + 1; })()")
+    reach = page.evaluate("(() => { const row = document.querySelector('.staff-aside .panel-tablist'); const last = row.lastElementChild; row.scrollLeft = row.scrollWidth; const a = last.getBoundingClientRect(), b = row.getBoundingClientRect(); return a.right <= b.right + 1; })()")
     check.that(bool(reach), f"{lang}: the last tab of the member's column cannot be reached")
     page.close()
 

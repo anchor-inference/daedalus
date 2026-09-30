@@ -25,19 +25,27 @@ export type PanelContext = "session" | "orchestrator" | "member" | "main";
  *
  * The Browser tab is there only for a session that has had a browser (`browser`): most never do,
  * and the member panel already has eight tabs. It follows the agent's own tabs, before the project's.
+ *
+ * The orchestrator has no Preview tab of its own, yet its chat carries file cards — a member's
+ * patch, the operator's attachment — that open in Preview. With `preview` (a file has been opened)
+ * the tab joins its strip after Details, so the file on screen has a tab to be on.
  */
-export function tabsFor(context: PanelContext, opts: { browser?: boolean } = {}): PanelTab[] {
+export function tabsFor(context: PanelContext, opts: { browser?: boolean; preview?: boolean } = {}): PanelTab[] {
   const browser: PanelTab[] = opts.browser ? ["browser"] : [];
-  if (context === "orchestrator") return ["questions", "details", ...browser, ...PROJECT_TABS];
+  if (context === "orchestrator") return ["questions", "details", ...(opts.preview ? (["preview"] as PanelTab[]) : []), ...browser, ...PROJECT_TABS];
   if (context === "member") return [...PANEL_TABS, ...browser, ...PROJECT_TABS];
   if (context === "main") return ["questions", ...PANEL_TABS, ...browser];
   return [...PANEL_TABS, ...browser];
 }
 
 /** Every tab a route may name in this context. A link to `?panel=browser` must open the tab even
- *  before the listing that says the session has a browser has arrived. */
+ *  before the listing that says the session has a browser has arrived. Preview is always among
+ *  them: a file card in the orchestrator's chat opened Preview, wrote `?panel=preview` into the
+ *  address, and the route, reading a tab it did not know, closed the panel again in the same
+ *  moment — the first click fetched the file and showed nothing, and only a second click, landing
+ *  on an address that no longer changed, kept it open. */
 export function routeTabsFor(context: PanelContext): PanelTab[] {
-  return tabsFor(context, { browser: true });
+  return tabsFor(context, { browser: true, preview: true });
 }
 
 /** One file the Preview tab showed: where the bytes come from, and the lines an answer cited, if any. */

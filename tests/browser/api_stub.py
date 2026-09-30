@@ -303,12 +303,13 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
         return 200, "application/json", json.dumps(session_tool_groups())
     if method.upper() == "PUT" and len(parts) == 4 and parts[2] == "tool-groups":
         return 200, "application/json", json.dumps(TOOL_GROUP_CATALOGUE)
-    if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "transcribe":
-        # A composer voice note: the words the stub heard, marked as the host marks a transcript.
-        # check_voice_note.py answers this itself to fail it, keep it and retry it.
+    if method.upper() == "POST" and ((len(parts) == 5 and parts[2] == "sessions" and parts[4] == "transcribe") or path == "/api/transcribe"):
+        # A composer voice note, a session's or the start page's before it has one: the words the
+        # stub heard, marked as the host marks a transcript. check_voice_note.py answers the
+        # session's itself to fail it, keep it and retry it.
         heard = "hello from the stub"
         return 200, "application/json", json.dumps({"transcript": heard, "text": f"{VOICE_NOTE_PREFIX}\n{heard}", "autosend": False})
-    if method.upper() == "DELETE" and len(parts) == 6 and parts[2] == "sessions" and parts[4] == "transcribe":
+    if method.upper() == "DELETE" and ((len(parts) == 6 and parts[2] == "sessions" and parts[4] == "transcribe") or (len(parts) == 4 and parts[2] == "transcribe")):
         return 200, "application/json", json.dumps({"deleted": True})
     if method.upper() == "GET" and len(parts) == 6 and parts[2] == "sessions" and parts[4:] == ["tools", "timing"]:
         # A session's Details reads the time its tools took; nobody here timed any.

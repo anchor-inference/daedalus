@@ -416,8 +416,9 @@ class TerminalStub:
     def listing(self, query: dict[str, list[str]]) -> dict[str, Any]:
         owner = query.get("owner_id", [None])[0]
         kind = query.get("owner_kind", [None])[0]
+        project = query.get("project_id", [None])[0]
         preview = int(query.get("preview", ["0"])[0] or 0) > 0
-        rows = [t.view(preview) for t in self.terms.values() if (owner is None or t.owner_id == owner) and (kind is None or t.owner_kind == kind)]
+        rows = [t.view(preview) for t in self.terms.values() if (owner is None or t.owner_id == owner) and (kind is None or t.owner_kind == kind) and (project is None or t.project_id == project)]
         return {"envs": self.envs, "terminals": rows, "capacity": {"running": self.running(), "cap": self.cap, "queued": 0}}
 
     def route(self, route: Any) -> None:
@@ -462,6 +463,11 @@ class TerminalStub:
             return 404, {"detail": "no such terminal"}
         action = segments[3] if len(segments) > 3 else ""
         if action == "" and method == "GET":
+            return 200, term.view()
+        if action == "" and method == "PATCH":
+            # A rename: the operator's title, or back to the program's with an empty one.
+            if "title" in (body or {}):
+                term.title = str(body["title"]).strip()[:200] or "bash"
             return 200, term.view()
         if action == "" and method == "DELETE":
             if term.status == "running":

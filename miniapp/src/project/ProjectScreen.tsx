@@ -69,7 +69,7 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
   } else if (view.page === "folders") {
     body = <FoldersPage projectId={projectId} back={back} toast={toast} />;
   } else {
-    body = <TerminalsPage projectId={projectId} selected={route.query.get("t")} back={back} />;
+    body = <TerminalsPage projectId={projectId} selected={route.query.get("t")} back={back} toast={toast} />;
   }
   return <Suspense fallback={<div className="empty">{t("common.loading")}</div>}>{body}</Suspense>;
 }

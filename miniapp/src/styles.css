@@ -2902,6 +2902,15 @@ h1.start-greeting { margin:0; max-width:18em; font-size:var(--fs-18); font-weigh
 .start-list-head .section-title { flex:1; margin-bottom:0; }
 /* The list below keeps its 14 px gutter; the search field ran from one edge of the glass to the other. */
 .start-list > .field.search { display:block; width:calc(100% - 28px); margin:2px 14px 6px; }
+/* A phone's hero is the upper half of the space above the tab bar (50 px of tab, 12 of padding and
+   a hairline, then the home indicator), with the composer at its foot: the field sits in the middle
+   of the screen where a thumb reaches it, and the chats begin under it at the middle line. At the
+   top of the screen, as tall as its content, the field was the hardest thing on the page to reach.
+   The question stands in the room above, centred in it. */
+@media (max-width: 1023px) {
+  .start-hero { justify-content:flex-end; min-height:calc((100svh - 63px - env(safe-area-inset-bottom)) / 2); padding-bottom:var(--space-4); }
+  .start-hero > .start-greeting { margin-block:auto; }
+}
 @media (min-width: 1024px) {
   .start { flex:1; min-height:0; }
   .start-hero { flex:1; min-height:0; padding:var(--space-4) var(--space-4) 0; }
@@ -3367,6 +3376,13 @@ button.staff-row:hover { background: var(--surface-2); }
 .focus-folders > .btn { justify-self: start; }
 .focus-terminals { flex: 1; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; padding: 0 14px 14px; }
 .focus-terminal-list { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+/* A row and its menu: the menu shows on the row under the pointer, the current one, or with focus in
+   it, as the session rows' do; a finger has no hover, so on a touch screen it is always there. */
+.focus-term-row { display: flex; align-items: center; min-width: 0; border-radius: var(--radius-sm); }
+.focus-term-row > .focus-row { flex: 1; min-width: 0; }
+.focus-term-row > .term-row-menu { flex: none; opacity: 0; }
+.focus-term-row:hover > .term-row-menu, .focus-term-row.current > .term-row-menu, .focus-term-row > .term-row-menu:focus-within, .focus-term-row > .term-row-menu:has([aria-expanded="true"]) { opacity: 1; }
+@media (pointer: coarse) { .focus-term-row > .term-row-menu { opacity: 1; } }
 .focus-terminal-view { position: relative; min-height: 50vh; display: flex; border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; background: var(--term-bg); }
 @media (min-width: 1024px) {
   .focus-terminals { grid-template-rows: none; grid-template-columns: 240px minmax(0, 1fr); }
@@ -3540,6 +3556,9 @@ button.staff-row:hover { background: var(--surface-2); }
 .phone-staff-line { color: var(--fg-2); font-size: var(--fs-12); }
 .phone-staff-line.waits { color: var(--warn); }
 .phone-terms { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
+.phone-term-row { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
+.phone-term-row > .phone-term { flex: 1; }
+.term-rename { display: grid; gap: var(--space-2); }
 .phone-term { display: flex; align-items: center; gap: var(--space-3); min-width: 0; min-height: calc(var(--row-h-touch) + var(--space-2)); padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); color: var(--fg); }
 .phone-term > .ic { flex: none; color: var(--accent); }
 .phone-term.host { box-shadow: inset 3px 0 0 var(--warn); }
@@ -3614,8 +3633,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .staff-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
 /* Five tabs in Russian are wider than the narrowest column (280 px): the row scrolls sideways, as
    the session panel's tab list does, rather than wrapping under itself or clipping the last tab. */
-.staff-panel > .panel-tabs { overflow-x: auto; scrollbar-width: none; }
-.staff-panel > .panel-tabs::-webkit-scrollbar { display: none; }
+.staff-panel > .panel-tabs { padding-right: 4px; }
 /* The panel body is a grid, whose items grow to their longest unbroken line: a Details row would
    push the whole column past the aside. The rows wrap instead, the key taking a fixed share. */
 .staff-panel-body > .details { min-width: 0; }
@@ -3655,6 +3673,9 @@ button.staff-row:hover { background: var(--surface-2); }
   .staff-aside > .pane-handle { position: absolute; top: 0; bottom: 0; left: -4px; margin: 0; }
   .staff-aside > .pane-handle:focus-visible { outline: none; }
   .staff-aside > .pane-handle:focus-visible::after { background: var(--accent); width: 2px; }
+  /* Laid over the whole body rather than widened: out of the grid's flow, the column it leaves
+     keeps its width, so the terminal underneath keeps its size and its PTY hears no resize. */
+  .chat-body.with-staff-aside > .staff-aside.expanded { position: absolute; inset: 0; z-index: 6; border-left: 0; }
   .staff-request .ask-answers-row .btn { flex: none; min-height: var(--ctl-h); }
   .staff-request .ask-answers-own .field, .staff-request .ask-answers-own .btn { min-height: var(--ctl-h); }
 }

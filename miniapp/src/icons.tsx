@@ -4,7 +4,7 @@ export type IconName =
   | "back" | "more" | "plus" | "up" | "stop" | "model" | "terminal" | "file" | "pen" | "search" | "globe" | "attach" | "image"
   | "question" | "skill" | "spawn" | "bulb" | "wrench" | "clock" | "plug" | "dot" | "compact"
   | "folder" | "settings" | "bots" | "inbox" | "board" | "changes" | "chart" | "loop" | "pause" | "play" | "trash" | "check" | "close" | "send"
-  | "download" | "share" | "split" | "key" | "link" | "unlink" | "down" | "copy" | "paste" | "columns" | "eye" | "mic" | "fork" | "undo" | "phone" | "expand" | "external" | "reload" | "forward" | "panel" | "chevron" | "bolt" | "volume" | "mute" | "lock" | "bell" | "shield" | "conductor" | "journal" | "alert" | "compass" | "user" | "ask" | "archive" | "braces";
+  | "download" | "share" | "split" | "key" | "link" | "unlink" | "down" | "copy" | "paste" | "columns" | "eye" | "mic" | "fork" | "undo" | "phone" | "expand" | "external" | "reload" | "forward" | "panel" | "chevron" | "bolt" | "volume" | "mute" | "lock" | "bell" | "shield" | "conductor" | "journal" | "alert" | "compass" | "user" | "ask" | "archive" | "braces" | "sidebar";
 
 const PATHS: Record<IconName, string> = {
   back: "M15 18l-6-6 6-6",
@@ -73,6 +73,8 @@ const PATHS: Record<IconName, string> = {
   reload: "M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5",
   forward: "M9 18l6-6-6-6",
   panel: "M3 5h18v14H3zM15 5v14",
+  // The panel's mirror, a column on the left: the file tree beside a previewed file.
+  sidebar: "M3 5h18v14H3zM9 5v14",
   chevron: "M6 9l6 6 6-6",
   bolt: "M13 3L6 13h6l-2 8 8-11h-6l1-7z",
   volume: "M4 10v4h3l5 4V6L7 10H4zM16 9.5a3.5 3.5 0 0 1 0 5",

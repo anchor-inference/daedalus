@@ -94,6 +94,11 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
   const [side, setSide] = useState(() => saved(SIDE_KEY) !== "closed");
   const [sheet, setSheet] = useState(false);
   const [tab, setTab] = useState<SideTab>("session");
+  // The column laid over the whole body, the terminal left where it was underneath. Widening the
+  // column instead would narrow the terminal, and a narrower terminal is a resize the member's PTY
+  // hears: the TUI reflows, and reflows back when the column returns. Over the terminal, the
+  // browser is read full width while the program keeps the columns it had.
+  const [expanded, setExpanded] = useState(false);
   const [reveal, setReveal] = useState(0);
   const [terminalState, setTerminalState] = useState<TerminalState | null>(null);
   // The column's width, dragged at its edge: null is the stylesheet's own until the operator drags.
@@ -160,6 +165,7 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
   }
   function toggleSide() {
     if (!wide) return setSheet(true);
+    setExpanded(false);
     setSide((open) => {
       save(SIDE_KEY, open ? "closed" : "open");
       return !open;
@@ -189,8 +195,10 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
   const panel = (
     <StaffPanel projectId={projectId} staffId={staffId} member={member} turns={turns} name={member.name} view={view ?? null} notes={member.notes} instructions={member.instructions} taskId={session?.task_id ?? null}
       tab={tab === "browser" && !hasBrowser ? "session" : tab} onTab={setTab} messages={messages} reveal={reveal} toast={toast}
-      browser={hasBrowser ? <BrowserTab groups={browsers.groups} toast={toast} phone={!wide} /> : null} />
+      browser={hasBrowser ? <BrowserTab groups={browsers.groups} toast={toast} phone={!wide} /> : null}
+      expanded={expanded} onExpand={wide ? () => setExpanded((on) => !on) : undefined} />
   );
+  const covering = wide && side && expanded;
   const browserInView = (wide ? side : sheet) && tab === "browser";
   const outbox = outboxRows(messages);
 
@@ -247,7 +255,7 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
       </StaffHeader>
       <div ref={bodyRef} className={`chat-body ${wide && side ? "with-staff-aside" : ""}`} data-aside-width={asideWidth ?? "auto"} style={asideWidth != null ? ({ "--staff-aside-w": `${asideWidth}px` } as CSSProperties) : undefined}>
         <div className="chat-main">
-          {wide && !browserInView && <BrowserPip groups={browsers.groups} onOpen={showBrowser} />}
+          {wide && !browserInView && !covering && <BrowserPip groups={browsers.groups} onOpen={showBrowser} />}
           {shown === "terminal" && terminalId ? (
             <div className="staff-term">
               <TerminalView id={terminalId} visible env={launch?.env ?? undefined} onState={(_, state) => setTerminalState(state)} />
@@ -268,8 +276,20 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
           </div>
         </div>
         {wide && side && (
-          <aside ref={asideRef} className="staff-aside" aria-label={t("staff.side")}>
-            <PaneHandle side="left" drag={asideDrag} />
+          <aside
+            ref={asideRef}
+            className={`staff-aside ${covering ? "expanded" : ""}`}
+            aria-label={t("staff.side")}
+            onKeyDown={(e) => {
+              // Escape inside the laid-over column brings the terminal back; a key the browser
+              // tab passed on to the page it shows is that page's, and is already handled.
+              if (e.key === "Escape" && covering && !e.defaultPrevented) {
+                e.preventDefault();
+                setExpanded(false);
+              }
+            }}
+          >
+            {!covering && <PaneHandle side="left" drag={asideDrag} />}
             {panel}
           </aside>
         )}
@@ -412,22 +432,34 @@ type PanelProps = {
   toast: (text: string) => void;
   /** The member's browser, when it has had one: a fourth tab. */
   browser: ReactNode;
+  /** Whether the column lies over the terminal, full width; `onExpand` toggles it (wide screens only). */
+  expanded?: boolean;
+  onExpand?: () => void;
 };
 
 /** The column beside the member (a sheet on a phone): its session and messages, the standing facts a
  *  session's Details has (what runs it, how long, what it cost), what it changed, its notes. */
-function StaffPanel({ projectId, staffId, member, turns, name, view, notes, instructions, taskId, tab, onTab: setTab, messages, reveal, toast, browser }: PanelProps) {
+function StaffPanel({ projectId, staffId, member, turns, name, view, notes, instructions, taskId, tab, onTab: setTab, messages, reveal, toast, browser, expanded = false, onExpand }: PanelProps) {
   const body = useRef<HTMLDivElement>(null);
   useMoreBelow(body, tab);
   const tabs: SideTab[] = browser ? ["session", "details", "changes", "notes", "browser"] : ["session", "details", "changes", "notes"];
   return (
     <div className={`staff-panel ${tab === "browser" ? "with-browser" : ""}`}>
-      <div className="panel-tabs" role="tablist">
-        {tabs.map((name) => (
-          <button key={name} role="tab" className={`panel-tab ${tab === name ? "on" : ""}`} aria-selected={tab === name} data-tab={name} onClick={() => setTab(name)}>
-            <span>{t(`staff.tab.${name}`)}</span>
-          </button>
-        ))}
+      <div className="panel-tabs">
+        <div className="panel-tablist" role="tablist">
+          {tabs.map((name) => (
+            <button key={name} role="tab" className={`panel-tab ${tab === name ? "on" : ""}`} aria-selected={tab === name} data-tab={name} onClick={() => setTab(name)}>
+              <span>{t(`staff.tab.${name}`)}</span>
+            </button>
+          ))}
+        </div>
+        {onExpand && (
+          <div className="panel-actions">
+            <button className={`iconbtn small staff-expand ${expanded ? "on" : ""}`} onClick={onExpand} aria-pressed={expanded} aria-label={t(expanded ? "staff.side.restore" : "staff.side.expand")} title={t(expanded ? "staff.side.restore" : "staff.side.expand")}>
+              <Icon name={expanded ? "panel" : "expand"} size={16} />
+            </button>
+          </div>
+        )}
       </div>
       <div ref={body} className={`panel-body staff-panel-body ${tab === "browser" ? "tab-browser" : ""}`}>
         {tab === "browser" && browser}

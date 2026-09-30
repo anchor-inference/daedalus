@@ -2,10 +2,14 @@
 // Naming it, choosing a folder and a loop stay in the new-agent sheet for when they matter.
 
 import { type FocusEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api, Preset, Project, Settings } from "../api";
+import { api, AsrStatus, Preset, Project, Settings } from "../api";
 import { fieldHeight } from "../composer";
 import { AttachmentCard } from "../composerbox";
+import { EffortSelect } from "../effortselect";
+import { effortBody, effortOf, presetEffort, type Effort } from "../starteffort";
 import { ModelChoice, ModelSelect } from "../modelselect";
+import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "../voicebar";
+import { landWords } from "../voicenote";
 import { NewAgentSheet, SessionsScreen } from "./Sessions";
 import { Icon } from "../icons";
 import { navigate, pathFor, sessionPath, useRoute } from "../router";
@@ -90,6 +94,9 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
+  // Picked here and carried into the session it makes; null leaves the model's own.
+  const [effort, setEffort] = useState<Effort | null>(null);
+  const { data: asr } = useQuery<AsrStatus>("/api/asr", { staleMs: 60000 });
   const field = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const labelOf = (id: string) => {
@@ -99,6 +106,9 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
   const modelLabel = chosen
     ? "preset" in chosen ? labelOf(chosen.preset) : "provider" in chosen ? `${chosen.provider}/${chosen.model}` : chosen.model
     : defaultId ? labelOf(defaultId) : t("newagent.model.default");
+  // A model picked outside the presets keeps the thinking the session starts with, the default's.
+  const presetId = chosen && "preset" in chosen ? chosen.preset : defaultId;
+  const shownEffort = effort ?? presetEffort(presets[presetId] as Preset | undefined);
 
   function choose(choice: ModelChoice) {
     if ("clear" in choice) setChosen(null);
@@ -123,8 +133,8 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
   };
   useLayoutEffect(fit, [draft, phone]);
 
-  async function send() {
-    const text = draft.trim();
+  async function send(words?: string) {
+    const text = (words ?? draft).trim();
     if (busy || (!text && files.length === 0)) return;
     setBusy(true);
     let created: { id: string } | null = null;
@@ -138,8 +148,11 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
         preset: chosen && "preset" in chosen ? chosen.preset : undefined,
         project_id: project || undefined,
       });
-      if (chosen && !("preset" in chosen)) {
-        await api.post(`/api/sessions/${created.id}/model`, "provider" in chosen ? { provider: chosen.provider, model: chosen.model } : { model: chosen.model });
+      // The model and the effort in one change, before the message: the first turn is the one
+      // that has to think the way the operator asked.
+      const model = chosen && !("preset" in chosen) ? ("provider" in chosen ? { provider: chosen.provider, model: chosen.model } : { model: chosen.model }) : null;
+      if (model || effort) {
+        await api.post(`/api/sessions/${created.id}/model`, { ...model, ...(effort ? effortBody(effort) : {}) });
       }
       if (files.length) {
         const form = new FormData();
@@ -153,6 +166,7 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
       sent = true;
       setDraft("");
       setFiles([]);
+      setEffort(null);
     } catch (e) {
       toast(errorText(e));
     } finally {
@@ -182,11 +196,34 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
 
+  // The voice note, as the chat's composer has it: the words land after what is typed, or go at
+  // once with ↑. Read at the moment they arrive, not when the recording began.
+  const draftNow = useRef(draft);
+  draftNow.current = draft;
+  const note = useVoiceNote({
+    sessionId: "",
+    asr,
+    onWords: (words, go) => {
+      const landed = landWords(draftNow.current, words, go);
+      if (landed.send) void send(landed.text);
+      else {
+        setDraft(landed.text);
+        window.setTimeout(() => field.current?.focus(), 0);
+      }
+    },
+    onAttach: (file) => addFiles([file]),
+    toast,
+  });
+  const voiceBar = note.state.phase === "recording" || note.state.phase === "transcribing";
+  const chooseEffort = (value: string) => setEffort(effortOf(value));
+
   return (
     <div className="start-composer composer" onDragOver={(event) => { if (event.dataTransfer?.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (!event.dataTransfer?.files.length) return; event.preventDefault(); addFiles(event.dataTransfer.files); }}>
-      <div className="composer-box">
+      <VoiceNoteFailed note={note} />
+      <div className={`composer-box ${voiceBar ? "voicing" : ""}`}>
+        {voiceBar && <VoiceBar note={note} />}
         {progress !== null && <div className="sub upload-progress" role="status">{t("upload.progress", { percent: Math.floor(progress * 100) })}</div>}
-        {files.length > 0 && (
+        {files.length > 0 && !voiceBar && (
           <div className="attachments" aria-label={t("session.attachments")}>
             {files.map((file, i) => (
               <AttachmentCard key={`${file.name}-${file.size}-${file.lastModified}-${i}`} file={file} onOpen={() => openFile(file)} onRemove={() => setFiles((held) => held.filter((_, j) => j !== i))} />
@@ -194,6 +231,7 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
           </div>
         )}
         <textarea
+          hidden={voiceBar}
           ref={field}
           value={draft}
           rows={1}
@@ -213,11 +251,14 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
             }
           }}
         />
-        <div className="composer-row">
+        <div className="composer-row" hidden={voiceBar}>
           <input ref={fileInput} type="file" multiple hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
           <button type="button" className="iconbtn flat plus" onClick={() => fileInput.current?.click()} aria-label={t("composer.plus")} title={t("composer.plus")}><Icon name="plus" /></button>
-          <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone} />
+          <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone}
+            effort={phone && shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={phone ? chooseEffort : undefined} />
           <div className="composer-tools">
+            {!phone && <EffortSelect effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChoose={chooseEffort} />}
+            {asr?.configured && <MicButton note={note} />}
             <button type="button" className="roundbtn primary" onClick={() => void send()} disabled={busy || (!draft.trim() && files.length === 0)} aria-label={t("session.send")}><Icon name="up" /></button>
           </div>
         </div>

@@ -78,7 +78,7 @@ export type PanelHostProps = {
  *  viewer info, HTML navigation, the closing state, and its id. The tab and body prefix uses that
  *  same id — two panels are open at once on a wide screen, and an id that is not this panel's own
  *  would point a reader's screen reader at the other one. */
-type Local = { gen: number; reload: () => void; narrow: boolean; toggleNarrow: () => void; info: ViewerInfo | null; setInfo: (info: ViewerInfo) => void; nav: HtmlNavigation | null; setNav: (nav: HtmlNavigation | null) => void; id: string; ids: string; closing: boolean };
+type Local = { gen: number; reload: () => void; narrow: boolean; toggleNarrow: () => void; info: ViewerInfo | null; setInfo: (info: ViewerInfo) => void; nav: HtmlNavigation | null; setNav: (nav: HtmlNavigation | null) => void; id: string; ids: string; closing: boolean; wide: boolean; setWide: (wide: boolean) => void; tree: boolean; toggleTree: () => void };
 type HostProps = PanelHostProps & { local: Local };
 
 export function Panel(props: PanelHostProps) {
@@ -96,8 +96,11 @@ export function Panel(props: PanelHostProps) {
   const [narrow, setNarrow] = useState(false);
   const [info, setInfo] = useState<ViewerInfo | null>(null);
   const [nav, setNav] = useState<HtmlNavigation | null>(null);
+  const [wide, setWide] = useState(false);
+  const [tree, setTree] = useState(readTreeShown);
   const id = useId();
-  const local: Local = { closing: state.tab === null, info, setInfo, nav, setNav, id, ids: id, gen, reload: () => setGen((g) => g + 1), narrow, toggleNarrow: () => setNarrow((n) => !n) };
+  const toggleTree = () => setTree((shown) => { rememberTreeShown(!shown); return !shown; });
+  const local: Local = { closing: state.tab === null, info, setInfo, nav, setNav, id, ids: id, gen, reload: () => setGen((g) => g + 1), narrow, toggleNarrow: () => setNarrow((n) => !n), wide, setWide, tree, toggleTree };
   if (shown.tab === null) return null;
   if (sheet) {
     return (
@@ -188,18 +191,25 @@ function Tabs({ state, onTab, onClose, onExpand, badges, marks, inSheet, local, 
 
 /** The Preview tab's toolbar: history, the breadcrumb, open-in-new, phone width, download. The
  *  other tabs carry their own controls in their bodies and draw no toolbar. */
-function Toolbar({ state, onBack, onForward, onTab, root, downloadUrl, sheet, local }: HostProps) {
+function Toolbar({ state, onBack, onForward, onTab, root, downloadUrl, sheet, local, files }: HostProps) {
   const entry = currentEntry(state);
   if (state.tab !== "preview") return null;
   const html = local.info?.kind === "html" ? local.nav : null;
   const crumbs = entry ? crumbsOf(html?.path ?? entry.path) : [];
+  // The tree beside the file is offered only where it could be drawn: a panel wide enough for both.
+  const treeable = files !== undefined && local.wide && !sheet;
   return (
     <div className="panel-toolbar">
+      {treeable && (
+        <button className={`iconbtn small panel-tree-toggle ${local.tree ? "on" : ""}`} aria-pressed={local.tree} onClick={local.toggleTree} aria-label={t(local.tree ? "panel.tree.hide" : "panel.tree.show")} title={t(local.tree ? "panel.tree.hide" : "panel.tree.show")}><Icon name="sidebar" size={16} /></button>
+      )}
       <button className="iconbtn small" onClick={html ? html.back ?? undefined : onBack} disabled={html ? !html.back : !canGoBack(state)} aria-label={t("panel.back")} title={t("panel.back")}><Icon name="back" size={16} /></button>
       <button className="iconbtn small" onClick={html ? html.forward ?? undefined : onForward} disabled={html ? !html.forward : !canGoForward(state)} aria-label={t("panel.forward")} title={t("panel.forward")}><Icon name="forward" size={16} /></button>
       <button className="iconbtn small" onClick={html ? html.reload : local.reload} aria-label={t("panel.reload")} title={t("panel.reload")}><Icon name="reload" size={16} /></button>
       <div className="panel-crumbs" aria-label={t("panel.crumbs")}>
-        <button className="crumb" onClick={() => onTab("files")} title={t("panel.tab.files")}>{root}</button>
+        {/* The orchestrator previews a file without having a Files tab: its root is a name there,
+            not a way to a tab the panel does not offer. */}
+        {files !== undefined ? <button className="crumb" onClick={() => onTab("files")} title={t("panel.tab.files")}>{root}</button> : <span className="crumb">{root}</span>}
         {crumbs.map((c, i) => (
           <span key={i} className={i === crumbs.length - 1 ? "crumb last" : "crumb"}>
             <span className="sep">›</span>
@@ -223,7 +233,7 @@ function Body(props: HostProps) {
   const { state, local } = props;
   const entry = currentEntry(state);
   const box = useRef<HTMLDivElement>(null);
-  const [wide, setWide] = useState(false);
+  const { wide, setWide } = local;
   const [width, setWidth] = usePaneWidth("tree", TREE_W, TREE_W_MIN, TREE_W_MAX);
   const files = useRef<HTMLDivElement>(null);
   const treeDrag = pixelDrag(() => files.current, "width", () => files.current?.getBoundingClientRect().width ?? width, (w) => clampWidth(w, TREE_W_MIN, TREE_W_MAX), setWidth);
@@ -232,9 +242,9 @@ function Body(props: HostProps) {
     const observer = new ResizeObserver(([e]) => setWide(e.contentRect.width >= SPLIT_MIN));
     observer.observe(box.current);
     return () => observer.disconnect();
-  }, []);
+  }, [setWide]);
   const [visited, setVisited] = useState(state.tab === "files");
-  const split = wide && state.tab === "preview";
+  const split = wide && state.tab === "preview" && local.tree;
   useEffect(() => { if (state.tab === "files" || split) setVisited(true); }, [state.tab, split]);
   useMoreBelow(box, state.tab);
   const progress = local.nav?.busy ? null : local.info?.progress;
@@ -366,6 +376,26 @@ export function usePanel(sessionId: string, base: string, opts: { route: URLSear
       [commit, announce],
     ),
   };
+}
+
+// Whether the file tree stands beside a previewed file. A convenience of this browser: the reader
+// who hid it to read a wide diff does not want it back on the next file.
+const TREE_KEY = "daedalus.panel.tree";
+
+function readTreeShown(): boolean {
+  try {
+    return localStorage.getItem(TREE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function rememberTreeShown(shown: boolean): void {
+  try {
+    localStorage.setItem(TREE_KEY, shown ? "1" : "0");
+  } catch {
+    /* private mode: it lasts for the visit */
+  }
 }
 
 const PANEL_EVENT = "daedalus:panel-open";

@@ -212,6 +212,26 @@ describe("the breadcrumb", () => {
   });
 });
 
+describe("a file opened beside the orchestrator", () => {
+  it("keeps the panel open through the address it writes", () => {
+    // The orchestrator has no Preview tab until a file is opened; the route must still know it,
+    // or the address the panel writes reads back as "closed" and the first click is undone.
+    const opened = openFile(PANEL_CLOSED, { base: "/api/files/0123456789ab", path: "fix.patch" });
+    const written = new URLSearchParams(Object.entries(panelQuery(opened)).filter(([, v]) => v) as [string, string][]);
+    const q = readPanelQuery(written, routeTabsFor("orchestrator"));
+    expect(q).toEqual({ tab: "preview", path: "fix.patch" });
+    const after = applyPanelQuery(opened, q, base);
+    expect(after.tab).toBe("preview");
+    expect(currentEntry(after)).toEqual({ base: "/api/files/0123456789ab", path: "fix.patch" });
+  });
+
+  it("offers Preview in the strip only once something was opened", () => {
+    expect(tabsFor("orchestrator")).not.toContain("preview");
+    expect(tabsFor("orchestrator", { preview: true })).toEqual(["questions", "details", "preview", "board", "brief", "wakeups", "folders"]);
+    expect(routeTabsFor("orchestrator")).toContain("preview");
+  });
+});
+
 describe("the Browser tab", () => {
   it("is offered only to a session that has had a browser, after the agent's own tabs", () => {
     expect(tabsFor("session")).not.toContain("browser");
