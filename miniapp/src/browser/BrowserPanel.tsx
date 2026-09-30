@@ -9,14 +9,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { BrowserActionRow, BrowserFrame, BrowserGroup } from "../api";
+import type { BrowserActionRow, BrowserDraft, BrowserFrame, BrowserGroup } from "../api";
 import { OverflowMenu, Popover, type MenuItem } from "../dialogs";
 import { clock } from "../format";
 import { plural, t } from "../i18n";
 import { Icon, type IconName } from "../icons";
 import { navigate, pathFor } from "../router";
 import { confirmAsync, errorText, haptic } from "../ui";
-import { answerDialog, closeBrowser, consumeTake, deleteRecording, deviceSaving, recordingMoved, resizeViewport, setControl, setRecording, takeHandoff, useActions, useLiveSnapshot, useLiveView, useRecording } from "./data";
+import { answerDialog, closeBrowser, consumeTake, deleteRecording, deviceSaving, recordingMoved, resizeViewport, setControl, setRecording, takeHandoff, useActions, useLiveSnapshot, useLiveView, useRecording, useWorkflows, workflowsMoved } from "./data";
+import { currentRecording, ProcedureEditor, RecordBar, RecordButton, RecordedCard, waitingRecording } from "./steps";
 import { frameOfRow, ReplayStage } from "./replay";
 import type { LiveSnapshot, LiveView } from "./live";
 import { actionWords, agentName, domainOf, driveState, mergeActions, needsOf, needWords, rowOfEvent, secure, type DriveState } from "./model";
@@ -132,6 +133,31 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
   useEffect(() => {
     if (latestAction && recordingOn) recordingMoved(group.id);
   }, [latestAction, recordingOn, group.id]);
+  // The operator's recording of their own steps: on now (the bar over the picture), or finished and
+  // waiting for them to draft it (the card under it), or drafted and being read (the editor).
+  const flows = useWorkflows(group.id);
+  const steps = currentRecording(snap.workflow, flows.workflow);
+  const [draft, setDraft] = useState<BrowserDraft | null>(null);
+  const waiting = steps ? null : waitingRecording(flows.recent);
+  const liveState = snap.workflow ? `${snap.workflow.id}:${snap.workflow.recording}` : "";
+  useEffect(() => {
+    if (liveState) workflowsMoved(group.id);
+  }, [liveState, group.id]);
+  // The socket says a recording stopped before the host has kept it (the host hears of it from the
+  // daemon on its own connection), and a reading already on its way answers from before the stop.
+  // So the listing is read again each second until it has the recording, once per recording.
+  const listedIds = useRef(new Set<string>());
+  for (const w of flows.recent) listedIds.current.add(w.id);
+  const unlisted = snap.workflow && !snap.workflow.recording && !listedIds.current.has(snap.workflow.id) ? snap.workflow.id : "";
+  useEffect(() => {
+    if (!unlisted) return;
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      workflowsMoved(group.id);
+      if (++tries >= 10) window.clearInterval(timer);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [unlisted, group.id]);
 
   // The corner preview grows into this picture: the stage starts where the card was and settles here.
   useEffect(() => {
@@ -175,6 +201,7 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
   const viewer = (
     <div className="bp-stage-wrap">
       <Banner drive={drive} agent={agent} needs={needs} state={snap.state.kind} control={control} viewers={snap.viewers} bare={phone} />
+      {steps && <RecordBar group={group.id} recording={steps} tab={viewing?.id ?? null} toast={toast} />}
       <BrowserViewer
         live={live}
         snap={snap}
@@ -199,6 +226,11 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
       {replaying && (
         <ReplayStage group={group.id} viewportW={group.viewport.w} frames={frames} index={replay} rows={rows} agent={agent} onIndex={setReplay} onLive={() => setReplay(null)} />
       )}
+      {draft ? (
+        <section className="bp-rec" data-state="draft"><ProcedureEditor draft={draft} toast={toast} onDone={() => setDraft(null)} /></section>
+      ) : waiting ? (
+        <RecordedCard key={waiting.id} group={group.id} recording={waiting} toast={toast} onDraft={setDraft} />
+      ) : null}
     </div>
   );
 
@@ -208,7 +240,7 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
         <PhoneBar group={group} url={url} tabs={tabs.length} control={control} />
       ) : (
         <Toolbar group={group} groups={groups} onGroup={onGroup} live={live} snap={snap} url={url} tabs={tabs} viewing={viewing?.id ?? null} drive={drive} control={control} toast={toast} full={full}
-          recording={recording.recording.frames} frames={frames} onReplay={() => setReplay(frames.length - 1)} />
+          recording={recording.recording.frames} frames={frames} onReplay={() => setReplay(frames.length - 1)} recordable={drive === "you" && !steps} />
       )}
       <div className="bp-main">
         {viewer}
@@ -349,7 +381,7 @@ function GiveBack({ anchor, onClose, onGive }: { anchor: HTMLElement; onClose: (
 
 // ── the toolbar ──────────────────────────────────────────────────────────────────────────────
 
-function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive, control, toast, full, recording, frames, onReplay }: {
+function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive, control, toast, full, recording, frames, onReplay, recordable }: {
   group: BrowserGroup;
   groups: BrowserGroup[];
   onGroup?: (id: string) => void;
@@ -365,6 +397,8 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
   recording: boolean;
   frames: BrowserFrame[];
   onReplay: () => void;
+  /** The operator drives and records nothing yet: their steps can be recorded. */
+  recordable: boolean;
 }) {
   const driving = drive === "you";
   const record = async (on: boolean) => {
@@ -423,6 +457,7 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
       <button className="iconbtn small" disabled={!driving} onClick={() => nav("reload")} aria-label={t("panel.reload")} title={driving ? t("panel.reload") : t("browser.nav.locked")}><Icon name="reload" size={16} /></button>
       <Address url={url} editable={driving} loading={tabs.find((x) => x.id === viewing)?.loading ?? false} onGo={(next) => live?.input({ t: "nav", action: "url", url: next })} />
       {tabs.length > 1 && <TabStrip tabs={tabs} viewing={viewing} active={snap.active} onPick={(id) => live?.view({ tab: id })} />}
+      {recordable && <RecordButton group={group.id} toast={toast} />}
       <ControlButton control={control} />
       <OverflowMenu label={t("browser.menu")} small items={items} />
     </div>
