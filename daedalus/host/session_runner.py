@@ -2642,7 +2642,10 @@ class SessionManager:
                             placed = await steer_hook(session_id, placed)
                         except Exception:  # noqa: BLE001 — the message goes as it was written
                             logger.exception("steer hook failed for session %s", session_id)
-                queued = {**new_queued_prompt(kind, placed).to_dict(), "origin": origin, "operator_words": None if operator_words is None else list(operator_words), "queued_at": datetime.now(UTC).isoformat()}
+                # The operator's words are the message as written, never the host's note placed before it:
+                # compaction quotes them verbatim, and the note would have been quoted as the operator's.
+                said = list(operator_words) if operator_words is not None else ([body] if placed != body else None)
+                queued = {**new_queued_prompt(kind, placed).to_dict(), "origin": origin, "operator_words": said, "queued_at": datetime.now(UTC).isoformat()}
                 if client_message_id:
                     queued["id"] = client_message_id
                     receipt, created = await self.live.accept(
