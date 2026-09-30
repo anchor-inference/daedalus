@@ -233,7 +233,11 @@ async def test_listing_the_models_of_an_unkeyed_endpoint_says_what_is_missing(cl
     detail = response.json()["detail"]
     assert "key" in detail and "deepseek" in detail
     assert "404" not in detail and "http://" not in detail
-    assert [r for r in seen if r.url.path != "/keys"] == [], "the endpoint was probed anyway"
+    # The app refreshes its model prices from models.dev in the background from its start, through
+    # the same patched transport; on a loaded machine that request landed in this window and failed
+    # the test. What must not happen is a probe of the endpoint that has no key.
+    probes = [r for r in seen if r.url.path != "/keys" and r.url.host != "models.dev"]
+    assert probes == [], "the endpoint was probed anyway"
 
     claude = await client.post("/api/providers/lookup-models", json={"provider": "claude"}, headers=H)
     assert claude.status_code == 400 and "signed in" in claude.json()["detail"]
