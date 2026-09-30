@@ -20,6 +20,7 @@
 // four, and the global rule in styles.css takes the animation away.
 
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { retried } from "../chunks";
 import { api } from "../api";
 import { Dropdown, StatusLabel, timeAgo } from "../components";
 import { Row } from "../settingsrow";
@@ -40,7 +41,7 @@ import { usePresenceScope } from "../presence";
 // composer — and the voice page is a page that has to be on the screen before the first sentence of
 // an answer arrives. Loaded when a transcript is first opened, which is the first moment it is worth
 // anything, and never on the way to the orb.
-const SessionScreen = lazy(() => import("./Session").then((m) => ({ default: m.SessionScreen })));
+const SessionScreen = lazy(retried(() => import("./Session"), (m) => ({ default: m.SessionScreen })));
 
 type Agent = AgentNews;
 type VoiceState = {

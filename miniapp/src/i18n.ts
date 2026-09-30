@@ -706,6 +706,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "app.stale.title": { en: "This screen belongs to an older version of the app", ru: "Этот экран — из старой версии приложения" },
   "app.stale.body": { en: "The app was updated while this page was open.", ru: "Приложение обновилось, пока страница была открыта." },
   "app.stale.action": { en: "Reload the app", ru: "Обновить приложение" },
+  "app.dropped.title": { en: "Part of the app did not download", ru: "Часть приложения не загрузилась" },
+  "app.dropped.body": { en: "The connection dropped while this screen was loading.", ru: "Связь прервалась, пока экран загружался." },
   "app.broken.title": { en: "Something broke in this screen", ru: "На этом экране что-то сломалось" },
   "app.offline": { en: "No connection to the bot · retrying…", ru: "Нет связи с ботом · пробуем снова…" },
   "app.selfdev.off.title": { en: "This installation does not change its own code", ru: "Эта установка не меняет свой код" },
