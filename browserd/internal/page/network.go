@@ -251,6 +251,58 @@ func (p *Model) networkEvent(t *browser.Tab, e cdp.Event) {
 			}
 			l.mu.Unlock()
 		}
+	case "Network.webSocketCreated":
+		// A socket is not a request Chromium reports as one: its opening is its own event, and its
+		// answer (101, or a refusal) the handshake's. Its messages are not kept.
+		var r struct {
+			RequestID string `json:"requestId"`
+			URL       string `json:"url"`
+			Initiator struct {
+				Type  string      `json:"type"`
+				Stack *stackTrace `json:"stack"`
+			} `json:"initiator"`
+		}
+		if json.Unmarshal(e.Params, &r) != nil {
+			return
+		}
+		l := p.requestsOf(t, true)
+		l.mu.Lock()
+		q := &Request{requestID: r.RequestID, Method: "GET", URL: RedactURL(r.URL), Type: "websocket", At: time.Now().UnixMilli(), Pending: true}
+		if f := r.Initiator.Stack.first(); f != nil {
+			q.Initiator = "script " + f.URL + ":" + strconv.Itoa(f.LineNumber+1)
+		}
+		l.addLocked(q)
+		l.byID[r.RequestID] = q
+		l.mu.Unlock()
+	case "Network.webSocketHandshakeResponseReceived", "Network.webSocketClosed", "Network.webSocketFrameError":
+		var r struct {
+			RequestID    string `json:"requestId"`
+			ErrorMessage string `json:"errorMessage"`
+			Response     struct {
+				Status     int               `json:"status"`
+				StatusText string            `json:"statusText"`
+				Headers    map[string]string `json:"headers"`
+			} `json:"response"`
+		}
+		if json.Unmarshal(e.Params, &r) != nil {
+			return
+		}
+		if l := p.requestsOf(t, false); l != nil {
+			l.mu.Lock()
+			if q := l.byID[r.RequestID]; q != nil && q.Type == "websocket" {
+				switch e.Method {
+				case "Network.webSocketHandshakeResponseReceived":
+					q.Status, q.StatusText = r.Response.Status, r.Response.StatusText
+					q.ResponseHeaders = keepHeaders(headers(r.Response.Headers), q.ResponseHeaders)
+				case "Network.webSocketClosed":
+					q.Pending = false
+					q.MS = time.Now().UnixMilli() - q.At
+				default:
+					q.Failed = orDefault(r.ErrorMessage, "the socket failed")
+				}
+			}
+			l.mu.Unlock()
+		}
 	case "Network.requestWillBeSentExtraInfo", "Network.responseReceivedExtraInfo":
 		// The headers as they went over the wire, which the events above leave out: the cookies a
 		// request carried and the ones its answer set. Only that they were there is kept.

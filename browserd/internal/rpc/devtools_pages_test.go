@@ -43,13 +43,15 @@ func devtoolsPages(mux *http.ServeMux) {
 	// Requests: an API behind the page, answering with credentials in every place a site puts them.
 	doc("/devtools/app", `<title>App</title>`+
 		`<button id="load" style="width:200px;height:40px" onclick="load()">Load</button>`+
-		`<button id="login" style="width:200px;height:40px" onclick="login()">Sign in</button><ul id="list"></ul>`+
+		`<button id="login" style="width:200px;height:40px" onclick="login()">Sign in</button>`+
+		`<button id="sock" style="width:200px;height:40px" onclick="socket()">Live</button><ul id="list"></ul>`+
 		`<script>
 		async function load() {
 			const r = await fetch("/devtools/items?page=2&access_token=SECRET-query", {headers: {"Authorization": "Bearer SECRET-auth", "X-Api-Key": "SECRET-apikey", "X-Trace": "t-1"}});
 			const data = await r.json();
 			for (const it of data.items) { const li = document.createElement("li"); li.textContent = it.name; document.getElementById("list").append(li); }
 		}
+		function socket() { new WebSocket(location.origin.replace("http", "ws") + "/devtools/socket?token=SECRET-ws"); }
 		async function login() {
 			await fetch("/devtools/login", {method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: "user=someone&password=SECRET-typed"});
 		}
@@ -59,6 +61,11 @@ func devtoolsPages(mux *http.ServeMux) {
 		http.SetCookie(w, &http.Cookie{Name: "sid", Value: "SECRET-cookie"})
 		w.Header().Set("X-Request-Id", "req-7")
 		fmt.Fprint(w, `{"items":[{"name":"Blue mug","sku":"BM-1","code":"MUG"}],"session_token":"SECRET-json","auth":{"refresh_token":"SECRET-nested"},"next":"/devtools/items?page=3"}`)
+	})
+	// A socket the page opens: the fixture answers its handshake with a refusal, which is all the
+	// log keeps of a socket anyway (its opening and its answer).
+	mux.HandleFunc("/devtools/socket", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "no sockets here", http.StatusForbidden)
 	})
 	mux.HandleFunc("/devtools/login", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

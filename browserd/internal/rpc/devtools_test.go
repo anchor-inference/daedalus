@@ -296,8 +296,26 @@ func TestNetworkLogWithoutSecrets(t *testing.T) {
 	if err := h.call("page.request", map[string]any{"tab_id": tab, "id": "r999"}, nil); code(err) != 1001 {
 		t.Fatalf("an unknown request: %v", err)
 	}
+	// A socket is listed with its handshake's answer, its token cut like any address's.
+	h.mustAct(tab, map[string]any{"action": "click", "ref": refOf(t, s, "button", "Live"), "element": "live"})
+	var sockets netReply
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		h.must("page.network", map[string]any{"tab_id": tab, "types": []string{"websocket"}}, &sockets)
+		if len(sockets.Requests) == 1 && (sockets.Requests[0].Status != 0 || sockets.Requests[0].Failed != "") {
+			break
+		}
+		if time.Now().After(deadline) {
+			raw, _ := json.Marshal(sockets.Requests)
+			t.Fatalf("the socket: %s", raw)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if ws := sockets.Requests[0]; !strings.HasSuffix(ws.URL, "/devtools/socket?token=[withheld]") || !strings.HasPrefix(ws.URL, "ws://") {
+		t.Fatalf("the socket's address: %s", ws.URL)
+	}
 	var failed netReply
-	h.must("page.network", map[string]any{"tab_id": tab, "failed": true}, &failed)
+	h.must("page.network", map[string]any{"tab_id": tab, "failed": true, "types": []string{"document", "fetch"}}, &failed)
 	if len(failed.Requests) != 0 {
 		raw, _ := json.Marshal(failed.Requests)
 		t.Fatalf("failures where there were none: %s", raw)

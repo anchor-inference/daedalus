@@ -421,7 +421,9 @@ them), so the page cannot tell it is on the way it could with older builds; a te
   (`api` is `xhr`, `fetch`, `websocket` and `eventsource`), `host` takes the host or a domain above
   it, `failed` keeps what failed or answered 400 or more. Past `limit` the newest are kept and
   `skipped` counts the rest: after a page loads, its API calls come last. Each tab keeps its last 300
-  requests. A `data:` address is not a request and is not kept.
+  requests. A `data:` address is not a request and is not kept. A WebSocket is listed from its
+  opening to its handshake's answer (`101`, or the refusal) and its closing; its messages are not
+  kept.
 - **`page.request`** is one request with `request_headers`, `response_headers` (the cookies it
   carried and set included, from the wire's own headers), `status_text`, `protocol` and `post_data`
   (whether it sent a body — the body itself is never kept or returned: a sign-in sends its password
@@ -440,7 +442,9 @@ them), so the page cannot tell it is on the way it could with older builds; a te
   `api_key` and their kind, but not `code`, `key` or `hash`, which are an API's ordinary fields) cut
   at any depth with the members kept in their order; in a form, its secret pairs; in HTML, the value
   of hidden and password inputs and of a request token's meta tag; in any text, `name: "value"` and
-  `name=value` pairs with such a name, and JSON web tokens. What the agent learns is that a request
+  `name=value` pairs with such a name, and JSON web tokens. A console entry is cut the same way, the
+  addresses it quotes included: the browser's own message names a failed address token and all, and
+  a page may log its own session. What the agent learns is that a request
   carried an `Authorization` header or a token parameter, which finding an API needs — never its
   value.
 - **`page.inspect`** describes one element as a developer's tools do, from the daemon's world:

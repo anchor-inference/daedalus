@@ -71,10 +71,11 @@ func (p *Model) consoleOf(t *browser.Tab, create bool) *consoleLog {
 	return c
 }
 
-// add keeps an entry. The same entry again in a row is folded into the last, which takes the new
+// add keeps an entry, its credentials cut (RedactText). The same entry again in a row is folded into the last, which takes the new
 // sequence number: a page logging in a loop fills one line, not the ring, and a reader who has seen
 // the line before is still told it came again.
 func (c *consoleLog) add(e LogEntry) {
+	e.Text = RedactText(e.Text)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.seq++

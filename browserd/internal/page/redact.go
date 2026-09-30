@@ -169,6 +169,18 @@ func RedactBody(body, mime string) string {
 	return jwtShape.ReplaceAllString(textPairs(body), Withheld)
 }
 
+// urlsInText are the addresses a line of text quotes: the browser's own messages name the address
+// that failed, token and all, and a page logs the ones it calls.
+var urlsInText = regexp.MustCompile(`\b(?:https?|wss?)://[^\s'"<>()\[\]{}]+`)
+
+// RedactText is a line of the console as the agent may read it: the addresses in it cut as
+// RedactURL cuts them, and its secret pairs and tokens as a body's text. A page that logs its own
+// session token is not a reason to hand it to the agent.
+func RedactText(s string) string {
+	s = urlsInText.ReplaceAllStringFunc(s, RedactURL)
+	return jwtShape.ReplaceAllString(textPairs(s), Withheld)
+}
+
 // barePairs are name=value and name: value with a value in no quotes (a form's pairs, inside a
 // string or not); quotedPairs are "name": "value" and name = 'value', the value taken whole, spaces
 // and all ("Bearer …"). The bare ones go first: a quoted value can hold pairs of its own

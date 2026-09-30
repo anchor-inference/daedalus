@@ -60,6 +60,19 @@ func TestRedactHeaders(t *testing.T) {
 	}
 }
 
+func TestRedactText(t *testing.T) {
+	for in, want := range map[string]string{
+		"WebSocket connection to 'wss://live.example/s?token=abc' failed":    "WebSocket connection to 'wss://live.example/s?token=[withheld]' failed",
+		`session_token = "abcdef" loaded from https://x.example/a?page=1`:    `session_token = "[withheld]" loaded from https://x.example/a?page=1`,
+		"got eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcd for someone":          "got [withheld] for someone",
+		"Failed to load resource: the server responded with a status of 404": "Failed to load resource: the server responded with a status of 404",
+	} {
+		if got := RedactText(in); got != want {
+			t.Errorf("RedactText(%q)\n = %q\nwant %q", in, got, want)
+		}
+	}
+}
+
 func TestRedactBody(t *testing.T) {
 	for _, c := range []struct{ mime, in, want string }{
 		{"application/json",
