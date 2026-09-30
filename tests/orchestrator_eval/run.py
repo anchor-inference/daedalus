@@ -46,6 +46,7 @@ import shutil
 import sys
 import tempfile
 import time
+import uuid
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -69,6 +70,7 @@ PRICES = {
     # ($ per million input tokens missed by the cache, cached, output), for providers that report tokens only.
     "deepseek:deepseek-flash": (0.30, 0.006, 1.20),
     "deepseek:deepseek-v4-pro": (0.60, 0.012, 2.40),
+    "opencode:deepseek-v4.1-flash": (0.30, 0.006, 1.20),
 }
 
 MODEL_TIMEOUT_S = 240.0
@@ -113,6 +115,7 @@ class Model:
     name: str
     cap: float
     spent: float = 0.0
+    session: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     @property
     def label(self) -> str:
@@ -130,6 +133,13 @@ class Model:
         if self.upstream == "openrouter":
             body["usage"] = {"include": True}
         return body
+
+    def headers(self) -> dict[str, str]:
+        headers = {"x-daedalus-metered": "1"}
+        if self.upstream == "opencode":
+            # The OpenCode gateway routes by a session of the caller's; one per model run is enough.
+            headers["x-opencode-session"] = self.session
+        return headers
 
     def cost(self, usage: dict[str, Any]) -> float:
         if self.upstream in SUBSCRIPTIONS:
@@ -163,7 +173,7 @@ async def complete(http: httpx.AsyncClient, model: Model, messages: list[dict[st
         try:
             # The key proxy reports a call it forwards to the running bot's ledger unless it is told the
             # caller meters it itself; an evaluation must not show up in the operator's usage.
-            response = await http.post(model.url, json=model.body(messages, tools), headers={"x-daedalus-metered": "1"}, timeout=MODEL_TIMEOUT_S)
+            response = await http.post(model.url, json=model.body(messages, tools), headers=model.headers(), timeout=MODEL_TIMEOUT_S)
         except httpx.HTTPError as exc:
             last = f"{type(exc).__name__}: {exc}"
         else:
