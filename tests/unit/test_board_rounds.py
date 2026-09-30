@@ -53,7 +53,8 @@ async def test_work_the_orchestrator_handed_out_is_done_when_reported_and_keeps_
         told = await hand_in(r, ada)
         row = await task_row(r.manager, task_id)
         assert row["status"] == "done", "no branch and no operator request: nothing for the operator to review"
-        assert "is done" in told and "in review" not in told
+        # Handed in, not accepted: the orchestrator checks it against the report.
+        assert "is handed in" in told and "in review" not in told
         assert "result from Ada: plan.md written: four limits, two open questions" in row["notes"]
         assert (await task_row(r.manager, waiting["id"]))["status"] == "todo", "what waited on it is ready"
     finally:

@@ -14,13 +14,24 @@ dispatcher in :mod:`daedalus.extensions.orchestrator_ops` checked that first.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from daedalus.extensions.likeness import same_card
+from daedalus.extensions.orchestrator_contract import narrowed, narrowing_refusal, source_of
 from daedalus.extensions.orchestrator_ops import Refused, _folder
+from daedalus.extensions.task_contract import (
+    CHECK_MAX_CHARS,
+    CHECKS_MAX,
+    REQUIREMENT_KINDS,
+    REQUIREMENTS_MAX,
+    split_checks,
+)
+from daedalus.harness.capabilities import MODE_MEANINGS, RESTRICTIVE_MODES
 from daedalus.host.events import EventFilter
 from daedalus.staff_runtime import LiveSession, ReadRequest
 from daedalus.stores.files import FileRefused, StoredFile
@@ -188,9 +199,43 @@ async def hire(
     details = [_label(member.harness), member.isolation]
     details += [x for x in (member.agent, member.model, member.effort, member.permission_mode) if x]
     told = f"hired {member.name} [{member.id}] ({', '.join(details)}{', one-off' if member.one_off else ''}); Assign gives them a task"
+    if member.one_off:
+        told += await _who_made_it(orch, project, member, target)
+    if member.permission_mode and member.permission_mode in MODE_MEANINGS.get(member.harness, {}):
+        told += f". Its mode {member.permission_mode}: {MODE_MEANINGS[member.harness][member.permission_mode]}"
+        if member.permission_mode in RESTRICTIVE_MODES.get(member.harness, frozenset()):
+            told += " — work the operator allowed to change or fix things needs another mode (StaffEdit)"
     warn_of = getattr(orch.app.extensions.get("harness"), "hire_warning", None)
     warning = str(await warn_of(where, harness) or "") if harness != "daedalus" and warn_of is not None else ""
     return f"{told}. Warning: {warning}" if warning else told
+
+
+async def _who_made_it(orch: Orchestrators, project: Project, hired: Staff, folder: ProjectFolder | None) -> str:
+    """A hint when a one-off helper is hired while a member of the team who worked recently in the same
+    folder is free: rework of a thing is best done by who made it. Never a refusal — the helper may be
+    for something else entirely."""
+    where = folder or project.primary
+    since = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+    rows = await orch.manager.db.fetchall(
+        "SELECT m.id, m.name, t.id AS task_id, t.title FROM staff_sessions s JOIN staff m ON m.id = s.staff_id JOIN board_tasks t ON t.id = s.task_id"
+        " WHERE m.project_id = ? AND m.archived_at IS NULL AND m.one_off = 0 AND m.id != ? AND s.started_at >= ? AND (t.folder_id = ? OR t.folder_id IS NULL)"
+        " ORDER BY s.started_at DESC",
+        (project.id, hired.id, since, where.id if where is not None else ""),
+    )
+    live = await orch.manager.staff.live_sessions(project.id)
+    seen: set[str] = set()
+    hints: list[str] = []
+    for row in rows:
+        session = live.get(row["id"])
+        if row["id"] in seen or (session is not None and session.status not in ("idle", "turn_done_unseen")):
+            continue
+        seen.add(row["id"])
+        hints.append(f"{row['name']} is free and worked on \"{row['title']}\" ({row['task_id']})")
+        if len(hints) == 2:
+            break
+    if not hints:
+        return ""
+    return f". Before you give {hired.name} rework of something already made: {'; '.join(hints)} — Assign(task_id=…) without staff gives a card back to who made it"
 
 
 async def staff_edit(
@@ -288,12 +333,70 @@ async def dismiss(orch: Orchestrators, project: Project, session_id: str, *, sta
 # -- handing out work ----------------------------------------------------------------------------------------
 
 
+MODEL_NAME_MIN = 5
+"""The least a model id may be to be looked for in a brief: shorter ones ("o3") match ordinary words."""
+
+
+async def known_models(orch: Orchestrators, project: Project) -> dict[str, set[str]]:
+    """Every model something here can run, by id (lower case), with the executors that run it: the
+    Daedalus presets' models and each installed command-line agent's listed models, in the project's
+    environments."""
+    known: dict[str, set[str]] = {}
+    for preset in orch.manager.config.presets.values():
+        if preset.model:
+            known.setdefault(preset.model.lower(), set()).add("daedalus")
+    manager: Any = orch.app.extensions.get("harness")
+    if manager is None:
+        return known
+    for env in sorted({f.env for f in project.folders} or {orch.manager.projects.local_env}):
+        try:
+            entries = await manager.harnesses(env)
+        except Exception:  # noqa: BLE001 — a catalog that cannot be read names no models
+            logger.warning("could not read the harness catalog of the %s", env, exc_info=True)
+            continue
+        for entry in entries:
+            if entry.get("installed"):
+                for model in entry.get("all_models") or entry.get("models") or []:
+                    known.setdefault(str(model).lower(), set()).add(str(entry.get("harness")))
+    return known
+
+
+def runs_model(orch: Orchestrators, member: Staff) -> str:
+    """The model a member runs, as far as the host knows: a Daedalus member's preset's model, a
+    command-line member's chosen model, or "" for a CLI left on its own default."""
+    if member.harness == "daedalus":
+        config = orch.manager.config
+        preset = config.presets.get(member.model or config.model.preset) or next(iter(config.presets.values()), None)
+        return preset.model.lower() if preset is not None and preset.model else ""
+    return (member.model or "").lower()
+
+
+async def other_models(orch: Orchestrators, project: Project, member: Staff, text: str) -> list[str]:
+    """The models a text names that ``member`` does not run. A command-line member left on its CLI's
+    default may run any model that CLI lists, so only a model outside that list counts against it."""
+    lowered = (text or "").lower()
+    if not lowered.strip():
+        return []
+    known = await known_models(orch, project)
+    named = [m for m in known if len(m) >= MODEL_NAME_MIN and re.search(rf"(?<![\w.-]){re.escape(m)}(?![\w.-])", lowered)]
+    if not named:
+        return []
+    own = runs_model(orch, member)
+    if own:
+        return [] if own in named else named
+    return [m for m in named if member.harness not in known.get(m, set())]
+
+
+def _executors(known: dict[str, set[str]], model: str) -> str:
+    return ", ".join(sorted(_label(h) for h in known.get(model, set()))) or "nothing here"
+
+
 async def assign(
     orch: Orchestrators,
     project: Project,
     session_id: str,
     *,
-    staff: str,
+    staff: str | None = None,
     task_id: str | None = None,
     title: str | None = None,
     objective: str | None = None,
@@ -305,18 +408,25 @@ async def assign(
     depends_on: list[str] | None = None,
     files: list[str] | None = None,
     new: bool = False,
+    requirements: list[Any] | None = None,
+    inputs: list[Any] | None = None,
+    checks: list[str] | None = None,
+    reason: str = "",
 ) -> str:
     team = _team(orch)
     board = orch.board
     if board is None:
         raise Refused("the board is not available on this installation")
-    member = await _member(orch, project, staff)
     handed = await _files(orch, project, session_id, files)
+    wanted_inputs = await _inputs(orch, project, session_id, inputs)
+    wanted_requirements = await _requirements(orch, project, requirements)
+    wanted_checks = _checks(checks)
     given = {k: v.strip() for k, v in (("objective", objective), ("deliverable", deliverable), ("boundaries", boundaries), ("done_when", done_when)) if v is not None and v.strip()}
     target = _folder(project, folder) if folder else None
     wanted = " ".join((title or "").split())
     existing: dict[str, Any] | None = None
     previous: dict[str, Any] | None = None
+    owner: Staff | None = None
     if task_id:
         if task_id in (depends_on or []):
             # The board's own refusal, "a task cannot depend on itself, even through another task",
@@ -335,9 +445,52 @@ async def assign(
                 f"task {task_id} has work on branch {existing['branch']}, which the operator reviews and merges; "
                 "for more work on it, create a new task"
             )
+        owner = await previous_owner(orch, existing["id"])
     elif not wanted:
         raise Refused("Assign needs a task_id, or a title and the four parts of a brief for a new task")
+    queued = await orch.manager.staff.get(existing["assignee_staff_id"]) if existing is not None and existing.get("assignee_staff_id") else None
+    if staff:
+        member = await _member(orch, project, staff)
+    elif owner is not None and owner.active:
+        member = owner
+    elif owner is None and queued is not None and queued.active:
+        member = queued  # assigned and waiting to start: it is still theirs
+    elif existing is not None:
+        gone = f"{owner.name}, who worked it, has left the team" if owner is not None else "nobody has worked it yet"
+        raise Refused(f"task {existing['id']}: {gone}; name who takes it (staff=…)")
     else:
+        raise Refused("Assign needs staff: who takes the new task")
+    handover = ""
+    at_work = existing is not None and existing["status"] == "doing"
+    if owner is not None and owner.active and not owner.one_off and owner.id != member.id and not at_work:
+        # A one-off helper was hired for an errand, not for the thing it made: its work may go to anyone.
+        # A card in doing is its worker's until it is released, which the team says below.
+        why = " ".join((reason or "").split())
+        if len(why) < 8:
+            # A helper was hired for two small fixes to a video while the member who had made it sat
+            # free; it died at its start, and it took nine failed calls to give the work back to her.
+            raise Refused(
+                f"task {existing['id']} is {owner.name}'s work, and rework goes to whoever made it: Assign(task_id='{existing['id']}') "  # type: ignore[index]
+                f"without staff gives it to {owner.name}. To hand it to {member.name} instead, say why in reason (a sentence; the card and the journal keep it)"
+            )
+        handover = why
+    brief_text = " ".join([*given.values(), wanted, *(text for text, _, _, _ in wanted_requirements)])
+    await _grants_kept(orch, existing, wanted_requirements)
+    await _able(orch, member, existing, wanted_requirements, reason)
+    mismatch = await other_models(orch, project, member, brief_text)
+    if mismatch and len(" ".join((reason or "").split())) < 8:
+        # Asked for a named model at a named effort to check a mail service, the orchestrator told a
+        # member on another CLI to "raise a one-off reviewer on that model if available": a member
+        # cannot hire, and the work went to the model nobody had asked for.
+        known = await known_models(orch, project)
+        model = mismatch[0]
+        runs = runs_model(orch, member) or f"{_label(member.harness)}'s default model"
+        raise Refused(
+            f"the brief names {model}, and {member.name} runs {runs}: work the operator wants done by {model} goes to a member that runs it "
+            f"({_executors(known, model)} can) — Hire(harness=…, model='{model}', effort=…, one_off=true), or StaffEdit a member to it; a member "
+            f"cannot hire one. If {member.name} should do it anyway, say why in reason"
+        )
+    if existing is None:
         previous = await _last_handed_in(orch, project, member, session_id)
         if previous is not None and not new and _same_work(wanted, previous["title"]):
             raise Refused(
@@ -347,6 +500,8 @@ async def assign(
     # Checked before anything is written, so a refused hand-over leaves no half-briefed task behind.
     merged = {k: str((existing or {}).get("brief", {}).get(k) or "").strip() for k in CONTRACT_FIELDS}
     merged.update(given)
+    if existing is None:
+        await refuse_twin(orch, project, wanted, merged["objective"], new=new, reason=reason)
     short = [k.replace("_", "-") for k in CONTRACT_FIELDS if len(merged[k]) < CONTRACT_MIN]
     if short:
         raise Refused(
@@ -354,10 +509,21 @@ async def assign(
             "a task is handed over with its objective, deliverable, boundaries and done_when"
         )
     renamed = wanted if existing is not None and wanted and wanted != existing["title"] else None
+    reopened = existing is not None and existing["status"] in HANDED_IN
+    if existing is not None and renamed is not None and not reopened and not _same_work(renamed, existing["title"]) and len(" ".join((reason or "").split())) < 8:
+        # A card a member was at work on was renamed into an unrelated check of a mail service by an
+        # Assign that named it: the work it held left the board half done, under another title, and
+        # the member was switched to the new work in the same session.
+        holder = await orch.manager.staff.get(existing["assignee_staff_id"]) if existing.get("assignee_staff_id") else None
+        at = f", and {holder.name} is at work on it" if holder is not None and existing["status"] == "doing" else ", and it is not handed in"
+        raise Refused(
+            f"task {existing['id']} is \"{existing['title']}\"{at}: \"{renamed}\" is other work, which is a card of its own — Assign without "
+            "task_id. If it is the same work under a better title, say so in reason"
+        )
     try:
         if existing is None:
             task = await board.add(title=wanted, session_id=session_id, brief=merged, depends_on=depends_on, priority=int(priority or 3))
-        elif existing["status"] in HANDED_IN:
+        elif reopened:
             # The next round of work already on the board: the same card is reopened with the new brief,
             # and the round it replaces is kept in its notes, rather than a new card per round.
             task = await board.update(
@@ -376,16 +542,24 @@ async def assign(
             raise Refused(f"task {task['id']} is being worked on in its folder; release its worker before moving it")
         # The board has no folder of its own to set; the team reads the task's folder at the start.
         await orch.manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (target.id, task["id"]))
+    added = await _contract(orch, project, task, reopened=reopened, done_when_changed="done_when" in given, checks=wanted_checks, requirements=wanted_requirements, inputs=wanted_inputs)
+    handed = handed + [stored for stored, _ in wanted_inputs if stored.id not in {f.id for f in handed}]
     if handed:
         # On the task, not on this call: a task that waits in the queue, or is started again after a
         # crash, is handed its files at every start.
         await orch.manager.files.attach_to_task(task["id"], handed, actor="orchestrator")
+    if handover:
+        await team.note_on_card(task["id"], f"the work passed from {owner.name} to {member.name}: {handover}")  # type: ignore[union-attr]
+        await _journal(orch, project, "reassignment", f"Task {task['id']} \"{task['title']}\" passed from {owner.name} to {member.name}: {handover}", {"task_id": task["id"], "from": owner.id, "to": member.id})  # type: ignore[union-attr]
     try:
         launched = await team.assign(member, task["id"], by="orchestrator")
     except KeyError as exc:
         raise Refused(f"no task {task['id']} on {project.name}'s board") from exc
     except StaffError as exc:
         raise Refused(f"task {task['id']} stays on the board, unstarted: {exc}") from exc
+    await orch.loops.close(project.id, task_id=task["id"], by="orchestrator", decision=f"assigned to {member.name}" + (" for another round" if reopened else ""))
+    for waited in depends_on or []:
+        await orch.loops.close(project.id, task_id=waited, by="orchestrator", decision=f"task {task['id']} follows it")
     notes: list[str] = []
     if renamed is not None and existing is not None:
         # Said out loud: a card renamed in passing is a card whose earlier work leaves the board
@@ -396,11 +570,186 @@ async def assign(
             f"This is a card of its own. {member.name}'s previous card {previous['id']} \"{previous['title']}\" was handed in {_minutes_ago(previous)}; "
             f"if this work is its next round, drop {task['id']} and Assign(task_id='{previous['id']}') instead."
         )
+    if added:
+        notes.append(added)
     tail = "".join(" " + note for note in notes)
     if launched.get("state") == "started":
         return f"{member.name} started on {task['id']} \"{task['title']}\"" + await _delivered_note(orch, task["id"], handed) + tail
     waits = " The files are copied to them when they start." if handed else ""
     return f"{member.name} will start {task['id']} \"{task['title']}\" when it is their turn: queue position {launched.get('position')} — {launched.get('detail')}{waits}" + tail
+
+
+TWIN_WINDOW = timedelta(hours=6)
+"""How long a finished card still counts as the place for its work: a new card for it within this
+window is the same work opened twice."""
+
+
+async def refuse_twin(orch: Orchestrators, project: Project, title: str, objective: str, *, new: bool, reason: str) -> None:
+    """Refuse a new card for work already on the board: open, or finished within ``TWIN_WINDOW``.
+
+    A read-only audit of a mail service was opened a second time, under a new title, when the
+    orchestrator gave the work to a newly hired member instead of handing the card over; a
+    translation of the skills had two cards, one of them dropped later. ``new=true`` with a reason
+    says it is separate work after all; a card the member just handed in needs no reason (a round of
+    it is refused on its own, see ``_same_work``)."""
+    since = (datetime.now(UTC) - TWIN_WINDOW).isoformat()
+    rows = await orch.manager.db.fetchall(
+        "SELECT t.id, t.title, t.status, t.brief_json, m.name FROM board_tasks t LEFT JOIN staff m ON m.id = t.assignee_staff_id"
+        " WHERE t.project_id = ? AND (t.status IN ('todo', 'doing', 'blocked', 'review') OR (t.status IN ('done', 'dropped') AND t.updated_at >= ?))"
+        " ORDER BY t.updated_at DESC",
+        (project.id, since),
+    )
+    for row in rows:
+        try:
+            other = str(json.loads(row["brief_json"] or "{}").get("objective") or "")
+        except ValueError:
+            other = ""
+        if not same_card(title, row["title"], objective, other):
+            continue
+        if new and (len(" ".join((reason or "").split())) >= 8 or row["status"] in HANDED_IN):
+            continue
+        holder = f", {row['name']}" if row["name"] else ""
+        raise Refused(
+            f"\"{title}\" is work already on the board: {row['id']} \"{row['title']}\" ({row['status']}{holder}). For the same work, "
+            f"Assign(task_id='{row['id']}', …) hands that card on — to someone other than who worked it, with a reason; for separate work, "
+            "repeat this with new=true and a reason saying how it differs"
+        )
+
+
+async def previous_owner(orch: Orchestrators, task_id: str) -> Staff | None:
+    """Who last worked a card: the member of its latest session. An assignee that never started on it
+    is not; the work is the previous owner's only once they did some."""
+    row = await orch.manager.db.fetchone("SELECT staff_id FROM staff_sessions WHERE task_id = ? ORDER BY started_at DESC LIMIT 1", (task_id,))
+    return await orch.manager.staff.get(row["staff_id"]) if row is not None else None
+
+
+async def _inputs(orch: Orchestrators, project: Project, session_id: str, raw: list[Any] | None) -> list[tuple[StoredFile, str]]:
+    """The files a hand-over names as what the work starts from, with what each is for."""
+    wanted: list[tuple[str, str]] = []
+    for entry in raw or []:
+        if isinstance(entry, dict):
+            ref, why = str(entry.get("file") or entry.get("handle") or "").strip(), str(entry.get("text") or entry.get("why") or "").strip()
+        else:
+            ref, why = str(entry or "").strip(), ""
+        if ref:
+            wanted.append((ref, why))
+    if not wanted:
+        return []
+    found = await _files(orch, project, session_id, [ref for ref, _ in wanted])
+    return [(stored, why) for stored, (_, why) in zip(found, wanted, strict=True)]
+
+
+async def _requirements(orch: Orchestrators, project: Project, raw: list[Any] | None) -> list[tuple[str, str, str, str]]:
+    """``(text, kind, source, why)`` of each requirement a hand-over carries, checked before anything
+    is written. A bare string is the operator's condition, which is what a requirement usually is."""
+    out: list[tuple[str, str, str, str]] = []
+    for entry in raw or []:
+        if isinstance(entry, dict):
+            text, kind, source = str(entry.get("text") or "").strip(), str(entry.get("kind") or "quality").strip().lower(), entry.get("source")
+            why = str(entry.get("why") or "").strip()
+        else:
+            text, kind, source, why = str(entry or "").strip(), "quality", "operator", ""
+        if not text:
+            continue
+        if kind == "input":
+            raise Refused("an input requirement names its file: put it in inputs=[…], not requirements")
+        if kind not in REQUIREMENT_KINDS:
+            raise Refused(f"a requirement's kind is one of {', '.join(k for k in REQUIREMENT_KINDS if k != 'input')}")
+        out.append((text, kind, await source_of(orch, project, str(source) if source else "operator"), why))
+    if len(out) > REQUIREMENTS_MAX:
+        raise Refused(f"at most {REQUIREMENTS_MAX} requirements on a card; merge some")
+    return out
+
+
+async def _grants_kept(orch: Orchestrators, existing: dict[str, Any] | None, wanted: list[tuple[str, str, str, str]]) -> None:
+    """Refuse, before anything is written, a condition of the orchestrator's that narrows what the
+    operator allowed for the work without saying why (see ``orchestrator_contract.narrowed``)."""
+    grants = [r.text for r in await _team(orch).contracts.requirements(existing["id"]) if r.kind == "scope" and r.from_operator] if existing is not None else []
+    grants += [text for text, kind, source, _ in wanted if kind == "scope" and source != "orchestrator"]
+    for _, kind, source, why in wanted:
+        if grants and kind == "constraint" and source == "orchestrator" and len(" ".join(why.split())) < 8:
+            raise Refused(narrowing_refusal(grants[0]))
+
+
+def restricted(member: Staff) -> str:
+    """What a member's permission mode keeps it from doing, when it keeps it from changing anything."""
+    if member.permission_mode in RESTRICTIVE_MODES.get(member.harness, frozenset()):
+        return f"{member.permission_mode}: {MODE_MEANINGS.get(member.harness, {}).get(member.permission_mode, 'it changes nothing')}"
+    return ""
+
+
+async def _able(orch: Orchestrators, member: Staff, existing: dict[str, Any] | None, wanted: list[tuple[str, str, str, str]], reason: str) -> None:
+    """Refuse work the operator allowed to change things to a member whose mode changes nothing.
+
+    A reviewer was hired read-only for a check the operator had said to fix as well; when the operator
+    then allowed a test message, the reviewer could not send it — its sandbox had neither writes nor a
+    network — and the orchestrator asked the operator to lift a restriction it had set itself."""
+    limit = restricted(member)
+    if not limit or len(" ".join((reason or "").split())) >= 8:
+        return
+    grants = [r.text for r in await _team(orch).contracts.requirements(existing["id"]) if r.kind == "scope" and r.from_operator] if existing is not None else []
+    grants += [text for text, kind, source, _ in wanted if kind == "scope" and source != "orchestrator"]
+    if grants:
+        raise Refused(
+            f"the operator allowed this work \"{grants[0][:120]}\", and {member.name} runs {limit}. StaffEdit(staff='{member.name}', "
+            "permission_mode=…) to a mode that can do it — or say why in reason; never ask the operator to allow it again"
+        )
+
+
+def _checks(raw: list[str] | None) -> list[str]:
+    items = [" ".join(str(c or "").split()) for c in raw or []]
+    items = [c for c in items if c]
+    if len(items) > CHECKS_MAX:
+        raise Refused(f"at most {CHECKS_MAX} checks on a card; each is something anyone can see pass")
+    if any(len(c) > CHECK_MAX_CHARS for c in items):
+        raise Refused(f"a check is at most {CHECK_MAX_CHARS} characters")
+    return items
+
+
+async def _contract(
+    orch: Orchestrators,
+    project: Project,
+    task: dict[str, Any],
+    *,
+    reopened: bool,
+    done_when_changed: bool,
+    checks: list[str],
+    requirements: list[tuple[str, str, str, str]],
+    inputs: list[tuple[StoredFile, str]],
+) -> str:
+    """Put a hand-over's checks and requirements on the card; a sentence for the answer when there are any.
+
+    A round that reopens the card starts unmarked: the evidence and the marks were about the work it
+    replaces. The checks follow the done-when unless they are given; a round that keeps the done-when
+    keeps them."""
+    contracts = _team(orch).contracts
+    if reopened:
+        await contracts.clear_marks(task["id"])
+        if await contracts.acceptance(task["id"]) != "returned":
+            await contracts.set_acceptance(task["id"], "")
+    items = await contracts.checks(task["id"])
+    if checks or done_when_changed or not items or reopened:
+        texts = checks or ([str(i.get("text")) for i in items] if items and not done_when_changed else split_checks(str(task["brief"].get("done_when") or "")))
+        await contracts.set_checks(task["id"], [{"text": text, "done": False} for text in texts])
+    made: list[str] = []
+    added: list[tuple[Any, str]] = []
+    for text, kind, source, why in requirements:
+        try:
+            requirement = await contracts.add(task["id"], project.id, text, kind, source)
+        except ValueError as exc:
+            raise Refused(str(exc)) from exc
+        made.append(requirement.label)
+        added.append((requirement, why))
+    grants = [r for r in await contracts.requirements(task["id"]) if r.kind == "scope" and r.from_operator]
+    for requirement, why in added:
+        if grants and requirement.kind == "constraint" and requirement.source == "orchestrator":
+            await narrowed(orch, project, task, requirement, grants[0], why)
+    for stored, why in inputs:
+        body = why or f"{stored.name}: the work starts from it"
+        made.append((await contracts.add(task["id"], project.id, body, "input", "operator" if stored.origin == "operator" else "orchestrator", file_id=stored.id)).label)
+    if not made:
+        return ""
+    return f"Requirements {', '.join(made)} are on the card; they go in the brief, and an input must be opened before the work is handed in."
 
 
 async def _last_handed_in(orch: Orchestrators, project: Project, member: Staff, session_id: str) -> dict[str, Any] | None:
@@ -503,7 +852,19 @@ async def tell(orch: Orchestrators, project: Project, session_id: str, *, staff:
         receipt = await _team(orch).tell(member, body, when=when, by="orchestrator", files=handed)
     except StaffError as exc:
         raise Refused(str(exc)) from exc
+    live = await _team(orch).live_of(member)
+    about = live.session.task_id if live is not None else None
+    await orch.loops.close(
+        project.id, task_id=about, staff_id=None if about else member.id, by="orchestrator", decision=f"told {member.name}: {' '.join(body.split())[:200]}",
+        causes={"report_stuck", "report_needs_input"},
+    )
     line = f"message {receipt['message_id']} to {member.name} ({when}): {receipt['state']}"
+    named = await other_models(orch, project, member, body)
+    if named:
+        line += (
+            f" — note: the message names {', '.join(named)}, which {member.name} does not run and cannot hire; if the operator wants "
+            f"{named[0]} to do this, Hire it yourself (one_off=true) and Assign it the work"
+        )
     if receipt.get("files"):
         line += f", with {len(receipt['files'])} file{'s' if len(receipt['files']) > 1 else ''} copied where they can open {'it' if len(receipt['files']) == 1 else 'them'}"
     degraded = receipt.get("degraded_to")
@@ -634,6 +995,8 @@ async def answer(
         if not moved:
             current = await orch.manager.asks.get(ask.id)
             raise Refused(f"request {ask.short_id} could not be escalated: it is " + ("answered" if current is not None and not current.open else "already the operator's"))
+        if ask.staff_id:
+            await orch.loops.close(project.id, task_id=ask.task_id, staff_id=None if ask.task_id else ask.staff_id, by="orchestrator", decision=f"request {ask.short_id} went to the operator")
         return f"request {ask.short_id} went to the operator (urgent); their answer reaches the requester directly"
     if ask.kind == "permission" and allow is None:
         raise Refused("a permission is answered with allow=true or allow=false, or escalate=true")
@@ -646,6 +1009,11 @@ async def answer(
     if outcome["state"] == "suggested":
         return f"in {project.name} the operator answers questions: your answer went to them as a suggestion on {ask.short_id}"
     what = ("granted" if allow else "denied") if ask.kind == "permission" else "answered"
+    if ask.staff_id:
+        await orch.loops.close(
+            project.id, task_id=ask.task_id, staff_id=None if ask.task_id else ask.staff_id, by="orchestrator", decision=f"{what} request {ask.short_id}",
+            causes={"report_stuck", "report_needs_input"},
+        )
     line = f"request {ask.short_id} {what}"
     if not outcome.get("delivered"):
         line += f", but it could not be delivered: {outcome.get('error') or 'unknown reason'}"

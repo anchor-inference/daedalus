@@ -180,8 +180,9 @@ class Review:
         except WorktreeRefused as exc:
             await self._failed(task, project, str(exc), [])
             raise ReviewRefused(str(exc)) from exc
-        await self.app.db.execute("UPDATE board_tasks SET merge_state = 'merged' WHERE id = ?", (task["id"],))
-        done = await self.board.update(task["id"], status="done", note=f"merged by the operator as {sha[:10]} into {comparison.current}")
+        await self.app.db.execute("UPDATE board_tasks SET merge_state = 'merged', acceptance_state = 'operator_approved' WHERE id = ?", (task["id"],))
+        # The merge is the operator's acceptance of every check of the card (see ``Board.accept``).
+        done = await self.board.update(task["id"], status="done", note=f"merged by the operator as {sha[:10]} into {comparison.current}", check=list(range(len(task.get("checklist") or []))))
         await self.board._publish("task.accepted", done, OPERATOR, merge=sha, branch=str(task["branch"]))
         await self.app.manager.projects.record(  # type: ignore[union-attr]
             project.id, "operator", "merge", f"Merged {task['branch']} into {comparison.current} ({len(comparison.commits)} commits, +{comparison.added} −{comparison.removed}): {task['title']}", {"task_id": task["id"], "commit": sha}
@@ -255,7 +256,7 @@ class Review:
         member = await self.team.manager.staff.get(task["assignee_staff_id"]) if task.get("assignee_staff_id") else None
         live = await self.team.live_of(member) if member is not None else None
         told = False
-        await self.app.db.execute("UPDATE board_tasks SET merge_state = 'rejected' WHERE id = ?", (task["id"],))
+        await self.app.db.execute("UPDATE board_tasks SET merge_state = 'rejected', acceptance_state = 'returned' WHERE id = ?", (task["id"],))
         if live is not None and live.session.task_id == task["id"]:
             updated = await self.board.update(task["id"], status="doing", note=f"{SENT_BACK}{by}: {line}")
             try:

@@ -260,9 +260,12 @@ export default function (pi: ExtensionAPI) {
       "Tell your team how your task stands. kind: 'checkpoint' (progress worth knowing), 'needs_input' (you cannot go " +
       "on without a decision), 'stuck' (something outside your task blocks you) or 'done' (the deliverable meets the " +
       "task's done-when; it hands the task in: work on your own branch goes to review for the operator to merge, and a " +
-      "worktree with uncommitted changes is refused — commit first; any other task is closed as done, and your note is " +
-      "the result the orchestrator reads). note: a short factual summary. artifacts: paths or links of what you " +
-      "produced. remember: one line to keep in your notes for every later session.",
+      "worktree with uncommitted changes is refused — commit first; any other task goes to done, handed in for the " +
+      "orchestrator to check against your note). note: a short factual summary. evidence (with done): [{item, how, " +
+      "result}] for each check (C1 …) and requirement (R1 …) of the task — what you ran or looked at and what it " +
+      "showed. acknowledged: the requirements (R…) sent to you that you have taken into your plan, or the input files " +
+      "(R…) you have read. artifacts: paths or links of what you produced. remember: one line to keep in your notes for " +
+      "every later session.",
     promptSnippet: "Report progress, a needed decision, a blocker or the finished task to your team",
     promptGuidelines: ["End every turn with a Report call: the orchestrator hears from you only through Report and AskOrchestrator."],
     parameters: Type.Object({
@@ -270,10 +273,22 @@ export default function (pi: ExtensionAPI) {
       note: Type.String({ description: "A short factual summary." }),
       artifacts: Type.Optional(Type.Array(Type.String())),
       remember: Type.Optional(Type.String({ description: "One line for your notes." })),
+      evidence: Type.Optional(
+        Type.Array(
+          Type.Object({
+            item: Type.String({ description: "The check or requirement: C1, R2, or its words." }),
+            how: Type.String({ description: "What you ran, opened or looked at to check it." }),
+            result: Type.String({ description: "What that showed." }),
+          }),
+        ),
+      ),
+      acknowledged: Type.Optional(Type.Array(Type.String(), { description: "Requirements (R…) you have taken into your plan." })),
     }),
     async execute(_id, params, signal) {
       const fields: Json = { kind: params.kind, note: params.note, artifacts: params.artifacts ?? [] };
       if (params.remember?.trim()) fields.remember = params.remember;
+      if (params.evidence?.length) fields.evidence = params.evidence;
+      if (params.acknowledged?.length) fields.acknowledged = params.acknowledged;
       return text(await teamCall("report", fields, RECORDED, REPORT_HOLD_MS, signal));
     },
   });

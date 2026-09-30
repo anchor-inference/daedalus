@@ -30,10 +30,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from protocore.contracts.types import OPERATOR_WORDS_METADATA_KEY, Message, MessageRole, TextBlock
 
 from daedalus.config import NoModelConfigured
-from daedalus.extensions import orchestrator_ops, orchestrator_team, wakeups
+from daedalus.extensions import orchestrator_contract, orchestrator_ops, orchestrator_team, wakeups
+from daedalus.extensions.likeness import same_question
 from daedalus.extensions.notifications import Draft, ProjectNotifyPolicy
+from daedalus.extensions.orchestrator_loops import OpenResults
 from daedalus.extensions.project_usage import ProjectUsage
 from daedalus.extensions.watches import describe as describe_watch
+from daedalus.harness.capabilities import MODE_MEANINGS
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.peek import BridgedFolderAccess, FolderAccess, LocalFolderAccess, UnreachableFolder
 from daedalus.host.session_runner import HOME_KEY, WorkspaceUnreachable, home_of
@@ -82,6 +85,7 @@ WAKE_TYPES = (
     "dispatch.created",
     "dispatch.message",
     "ask.batch",
+    "orchestrator.open_results",
 )
 """What an orchestrator's queue subscribes to; :meth:`Orchestrators.classify` decides which of them wake it.
 The two ``dispatch`` types are the main orchestrator's hand-overs to a project; they wake at once."""
@@ -110,6 +114,9 @@ TEAM_LINES = 12
 OPEN_TASK_LINES = 12
 ASK_LINES = 8
 JOURNAL_LINES = 5
+DECISION_LINES = 10
+HIREABLE_LINES = 8
+HIREABLE_MODELS = 8
 QUEUE_LINES = 6
 READ_TIMEOUT_SECONDS = 5.0
 SECTION_LABELS = {
@@ -133,6 +140,11 @@ def _now() -> str:
 def _one_line(text: str, limit: int) -> str:
     flat = " / ".join(line.strip() for line in (text or "").strip().splitlines() if line.strip())
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+def _listed(items: list[str], cap: int) -> str:
+    shown = ", ".join(items[:cap])
+    return shown + (f" (+{len(items) - cap} more)" if len(items) > cap else "")
 
 
 def _verbatim(text: str) -> str:
@@ -183,7 +195,7 @@ def who(member: Staff | None) -> str:
 Section = tuple[list[str], str]
 """Lines of the state block, and where the orchestrator finds what a cut left out."""
 
-OPERATIONS = {**orchestrator_ops.OPS, **orchestrator_team.OPS}
+OPERATIONS = {**orchestrator_ops.OPS, **orchestrator_team.OPS, **orchestrator_contract.OPS}
 """Everything the orchestrator's tools can ask of this extension: the project tools and the team tools."""
 
 CUT_NOTE = "\n[… the state is cut here; the tools show the rest]"
@@ -253,6 +265,8 @@ class Orchestrators:
         """A fake monotonic clock for the wake queues, in tests."""
         self._replacing: set[str] = set()
         self._background: set[asyncio.Task[None]] = set()
+        self.loops = OpenResults(self)
+        """The results of the team no decision has followed yet (``orchestrator_loops``)."""
 
     # -- lookups ---------------------------------------------------------------------------------
 
@@ -588,7 +602,7 @@ class Orchestrators:
 
         asks = await self.manager.asks.open_for(project.id)
         for_me = [self._ask_line(a, by_id, now) for a in asks if a.routed_to == "orchestrator"]
-        for_operator = [self._ask_line(a, by_id, now) for a in asks if a.routed_to == "operator"]
+        for_operator = [self._ask_line(a, by_id, now) + self._twin(a, asks) for a in asks if a.routed_to == "operator"]
 
         queue_lines: list[str] = []
         if self.team is not None:
@@ -599,10 +613,19 @@ class Orchestrators:
         counts: dict[str, int] = {}
         for task in tasks.values():
             counts[task["status"]] = counts.get(task["status"], 0) + 1
+        still_open = [t for t in tasks.values() if t["status"] not in ("done", "dropped")]
+        before = await self._previous_owners([t["id"] for t in still_open if t["assignee_staff_id"] not in by_id])
         open_tasks = [
             f"{t['id']} {_one_line(t['title'], 80)} ({by_id[t['assignee_staff_id']].name if t['assignee_staff_id'] in by_id else 'unassigned'}, {t['status']})"
-            for t in tasks.values() if t["status"] not in ("done", "dropped")
+            + (f" — was {before[t['id']]}'s" if t["assignee_staff_id"] not in by_id and t["id"] in before else "")
+            for t in still_open
         ]
+        decisions = await self.loops.section(project.id)
+        hireable = await self._hireable(project)
+        unconfirmed = [
+            f"R{r['number']} of {r['task_id']} sent to {r['staff_name'] or 'a member'} {_age(r['delivered_at'], now)} ago, not confirmed: {_one_line(r['text'], 100)}"
+            for r in await self.team.contracts.unconfirmed(project.id)
+        ] if self.team is not None else []
         board_head = "Board: " + " · ".join(f"{name} {counts.get(name, 0)}" for name in ("doing", "review", "todo", "blocked", "done"))
 
         alarms = []
@@ -626,10 +649,13 @@ class Orchestrators:
             (["Folders: " + " · ".join(folders)] if folders else [], ""),
             (["Brief — " + " · ".join(brief_parts)], ""),
             (rules, ""),
+            _section("Waiting for your decision (a result, or a card nobody took; the host reminds you once)", decisions, cap=DECISION_LINES, more="they stay here until decided"),
+            _section("Requirements sent to a member at work and not yet confirmed", unconfirmed, cap=ASK_LINES, more="Tasks(op='get', task_id=…) shows a card's requirements"),
             team_section if team_section[0] else (["Team: nobody yet"], ""),
             _section("One-off", one_offs, cap=TEAM_LINES, more="Team"),
+            _section("Can be hired here (Hire; the operator's choice of models first)", hireable, cap=HIREABLE_LINES, more="Harnesses"),
             _section("Waiting for your answer", for_me, cap=ASK_LINES, more="the requests list"),
-            _section("Needs the operator", for_operator, cap=ASK_LINES, more="the requests list"),
+            _section("Needs the operator (a question of yours is changed in place with AskOperator(op='update', id=…), never asked again)", for_operator, cap=ASK_LINES, more="the requests list"),
             _section("Launch queue", queue_lines, cap=QUEUE_LINES, more="Team"),
             (board_lines, "Tasks"),
             (["Wake-ups: " + (" · ".join(alarms) or "none") + " · Watches: " + (" · ".join(watches) or "none")], ""),
@@ -642,6 +668,63 @@ class Orchestrators:
             except Exception:  # noqa: BLE001 — one section that fails must not take the state away
                 logger.exception("an orchestrator state section failed for %s", project.id)
         return fit(sections, config.orchestrator.state_max_chars)
+
+    async def _hireable(self, project: Project) -> list[str]:
+        """What can be hired for the project now, by executor and environment: the models each offers —
+        the operator's choice when they made one — and its efforts.
+
+        Asked for a named model at a named effort, an orchestrator whose view held no word of what
+        could be hired told another member to arrange one "if available"; a member cannot hire, and
+        the work went to a model the operator had not asked for."""
+        team = self.team
+        runtimes = set(team.runtimes) if team is not None else set()
+        lines: list[str] = []
+        if "daedalus" in runtimes and self.manager.config.presets:
+            lines.append("Daedalus (presets): " + _listed(sorted(self.manager.config.presets), HIREABLE_MODELS))
+        manager: Any = self.app.extensions.get("harness")
+        if manager is None:
+            return lines
+        for env in sorted({f.env for f in project.folders} or {self.manager.projects.local_env}):
+            try:
+                entries = await manager.harnesses(env)
+            except Exception:  # noqa: BLE001 — the block goes on without the catalog
+                logger.warning("could not read the harness catalog of the %s for the state block", env, exc_info=True)
+                continue
+            for entry in entries:
+                name = str(entry.get("harness") or "")
+                label = str(entry.get("label") or HARNESS_NAMES.get(name, name))
+                if not entry.get("installed"):
+                    continue
+                if entry.get("unavailable") or name not in runtimes:
+                    lines.append(f"{label} ({env}): cannot run staff now — {_one_line(str(entry.get('unavailable') or 'no staff runtime'), 100)}")
+                    continue
+                models = [str(m) for m in entry.get("models") or []]
+                rest = len([m for m in entry.get("all_models") or [] if m not in models]) if entry.get("models_chosen") else 0
+                try:
+                    catalog = await manager.catalog(env, name)
+                    efforts, modes = list(catalog.efforts), list(catalog.modes)
+                except Exception:  # noqa: BLE001 — the models are worth showing without the efforts
+                    efforts, modes = [], []
+                said = f"{label} ({env}): models " + (_listed(models, HIREABLE_MODELS) if models else "its default")
+                if rest:
+                    said += f" (+{rest} more the operator did not pick; any works when named)"
+                if efforts:
+                    said += " · efforts " + ", ".join(efforts)
+                meanings = MODE_MEANINGS.get(name, {})
+                if modes:
+                    said += " · modes " + ", ".join(f"{mode} ({meanings[mode]})" if mode in meanings else mode for mode in modes)
+                lines.append(said)
+        return lines
+
+    async def _previous_owners(self, task_ids: list[str]) -> dict[str, str]:
+        """Who worked each card last, for the cards nobody holds now: rework goes back to them."""
+        if not task_ids:
+            return {}
+        rows = await self.manager.db.fetchall(
+            f"SELECT s.task_id, m.name FROM staff_sessions s JOIN staff m ON m.id = s.staff_id WHERE s.task_id IN ({','.join('?' for _ in task_ids)}) ORDER BY s.started_at",  # noqa: S608
+            tuple(task_ids),
+        )
+        return {row["task_id"]: row["name"] for row in rows}
 
     def _brief_part(self, section: BriefSection) -> str:
         """A section of the brief as the state block shows it: the start of it, and when that is not
@@ -691,6 +774,20 @@ class Orchestrators:
         on = f" on \"{_one_line(task['title'], 60)}\" ({task['id']})" if task else ""
         waiting = f" — {session.waiting_for}" if session.waiting_for else ""
         return f"{member.name}{role}, {kind}, {where}: {status}{on}{waiting}, last signal {_age(session.last_signal_at or session.status_at, now)}"
+
+    @staticmethod
+    def _twin(ask: Ask, asks: list[Ask]) -> str:
+        """A question of the orchestrator's that asks what an older open one of its asks: said beside
+        it, so the copy is withdrawn rather than answered twice."""
+        if ask.origin != "orchestrator" or ask.kind != "question":
+            return ""
+        body = " ".join([ask.title, ask.text.split("\n\nContext:")[0], *(str(o) for o in ask.detail.get("options") or [])])
+        for other in asks:
+            if other.id == ask.id or other.origin != "orchestrator" or other.kind != "question" or other.created_at >= ask.created_at:
+                continue
+            if same_question(body, " ".join([other.title, other.text.split("\n\nContext:")[0], *(str(o) for o in other.detail.get("options") or [])])):
+                return f" — asks again what [{other.short_id}] asks: withdraw one"
+        return ""
 
     def _ask_line(self, ask: Ask, members: dict[str, Staff], now: datetime) -> str:
         asker = "you" if ask.origin == "orchestrator" else who(members.get(ask.staff_id or ""))
@@ -867,6 +964,8 @@ class Orchestrators:
         if kind == "watch.fired":
             action = (p.get("action") or "wake") if isinstance(p.get("action"), str) else "wake"
             return Wake(f"watch:{event.seq}", urgent=True) if action == "wake" else None
+        if kind == "orchestrator.open_results":
+            return Wake(f"open_results:{event.seq}")
         if kind == "dispatch.created":
             return Wake(f"dispatch:{event.seq}", urgent=True)
         if kind == "dispatch.message":
@@ -974,7 +1073,7 @@ class Orchestrators:
                 return f"{who(member)} {ending}{(' on ' + task) if task else ''}: \"{_one_line(str(p.get('text') or ''), IMPLICIT_REPORT_CHARS)}\" — ReadStaff(\"{name}\") for the whole turn"
             # A report is the member's answer to the orchestrator and arrives whole: cut at 300
             # characters, a detailed reply reached it as a stub, and no tool could show the rest.
-            return f"{who(member)} reported {p.get('kind')}{(' on ' + task) if task else ''}: \"{_verbatim(str(p.get('text') or ''))}\"{refs_line(p.get('files'))}"
+            return f"{who(member)} reported {p.get('kind')}{(' on ' + task) if task else ''}: \"{_verbatim(str(p.get('text') or ''))}\"{refs_line(p.get('files'))}{self._report_tail(p)}"
         if kind == "staff.channel":
             if p.get("team_tools") == "missing":
                 return f"{who(member)}'s team tools are not connected: {_one_line(str(p.get('detail') or ''), 200)}. They keep working, but will not Report or AskOrchestrator; Tell and ReadStaff still work"
@@ -1020,6 +1119,9 @@ class Orchestrators:
         if kind == "watch.fired":
             said = " — ".join(_one_line(str(p[key]), 240) for key in ("detail", "note") if p.get(key))
             return f"watch [{p.get('watch_id')}] fired{': ' + said if said else ''}"
+        if kind == "orchestrator.open_results":
+            lines = [str(line) for line in p.get("lines") or []]
+            return "your last turn ended with no decision on these (said once; they stay in the state block until one is made):\n  " + "\n  ".join(lines)
         if kind in ("dispatch.created", "dispatch.message"):
             title = str(p.get("title") or "")
             # Whole, as the operator's answers are: a dispatch is the operator's request relayed, and
@@ -1031,6 +1133,19 @@ class Orchestrators:
             number = f" #{p.get('seq')}" if kind == "dispatch.created" and p.get("seq") else ""
             return f"[from the main orchestrator] {what} {p.get('dispatch_id') or ''}{number}{': ' + title if title else ''}: {text}{refs_line(p.get('files'))}"
         return kind
+
+    @staticmethod
+    def _report_tail(p: Any) -> str:
+        """What a report says of the card's contract: the requirements the member confirmed, and for a
+        hand-in, which checks it gave evidence for and which not — and that it is not accepted yet."""
+        parts = []
+        if p.get("acknowledged"):
+            parts.append(f"confirmed {', '.join(str(a) for a in p['acknowledged'])}")
+        if p.get("kind") == "done" and p.get("task_id"):
+            shown = [str(e.get("item")) for e in p.get("evidence") or [] if isinstance(e, dict)]
+            said = (f"evidence for {', '.join(shown)}" if shown else "") + ("; " if shown and p.get("unproven") else "") + (f"none for {', '.join(p['unproven'])}" if p.get("unproven") else "")
+            parts.append(f"handed in, not accepted{': ' + said if said else ''} — Accept(task_id='{p['task_id']}', …) records your check")
+        return (" — " + "; ".join(parts)) if parts else ""
 
     @staticmethod
     def _actor(actor: str, member: Staff | None) -> str:
@@ -1248,9 +1363,25 @@ class Orchestrators:
     async def on_run_finished(self, session_id: str, run_id: str, status: str) -> None:
         state = self.manager.live_state(session_id)
         project_id = str(state.metadata.get("orchestrator_of") or "") if state is not None else ""
+        if project_id and status == "completed":
+            row = await self.manager.db.fetchone("SELECT created_at FROM runs WHERE id = ?", (run_id,))
+            try:
+                await self.turn_ended(project_id, str(row["created_at"]) if row is not None else _now())
+            except Exception:  # noqa: BLE001 — the queue below must still be poked
+                logger.exception("the end of the orchestrator's turn in %s could not be followed up", project_id)
         queue = self.queues.get(project_id) if project_id else None
         if queue is not None:
             queue.poke()
+
+    async def turn_ended(self, project_id: str, started_at: str) -> list[int]:
+        """What follows a turn of the orchestrator: the results it left without a decision are said
+        once (:meth:`OpenResults.turn_ended`). Only what its queue had delivered counts: a report still
+        on its way is not one it passed over."""
+        delivered: int | None = None
+        if project_id in self.queues:
+            cursor = await self.manager.db.kv_get(CURSOR_KEY.format(project_id=project_id))
+            delivered = int(cursor) if isinstance(cursor, int) else None
+        return await self.loops.turn_ended(project_id, started_at, delivered=delivered)
 
     async def on_session_deleted(self, session_id: str) -> None:
         """The operator deleted the orchestrator's chat: the orchestrator is off, and the journal says so."""
@@ -1418,6 +1549,14 @@ class Orchestrators:
                 notifications.register_resolver("orchestrator", self.team.resolve_action)
         if self.team is not None:
             self.team.own_requests = self
+            self.team.report_hooks.append(self.loops.reported)
+        try:
+            follower = self.manager.bus.on(EventFilter(types=("task.assigned", "task.moved", "task.accepted")), self.loops.on_task, name="orchestrator-open-results")
+        except RuntimeError:  # attached outside a running loop: nothing is published there either
+            follower = None
+        if follower is not None:
+            self._background.add(follower)
+            follower.add_done_callback(self._background.discard)
 
     async def resume(self) -> None:
         """Start the wake queues of every project that has an orchestrator, each from its cursor."""

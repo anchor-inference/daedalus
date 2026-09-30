@@ -284,8 +284,14 @@ async def test_a_message_for_now_goes_into_the_running_turn_by_turn_steer_and_on
         await message(s, queued["message_id"], "acknowledged")
         assert (await HarnessStore(db).delivery(queued["message_id"])).via == "turn/start"  # type: ignore[union-attr]
         live = await s.team.live((await s.session_row(ada)).id)
-        texts = [t.text for t in await s.runtime.turns(live) if t.role == "orchestrator"]  # type: ignore[arg-type]
-        assert texts.count("[orchestrator] echo:steered in") == 1 and texts.count("[orchestrator] echo:after the turn") == 1
+
+        async def both_in_the_thread() -> bool:
+            texts = [t.text for t in await s.runtime.turns(live) if t.role == "orchestrator"]  # type: ignore[arg-type]
+            return texts.count("[orchestrator] echo:steered in") == 1 and texts.count("[orchestrator] echo:after the turn") == 1
+
+        # Acknowledged is Codex taking the turn/start; the thread records the new turn's message a moment
+        # later. Read at once on a loaded machine, the thread still ended with the steered message.
+        await eventually(both_in_the_thread, "both messages are in the thread, once each")
 
 
 async def test_after_a_host_restart_the_thread_is_taken_up_again(settings: Settings, db: Database) -> None:

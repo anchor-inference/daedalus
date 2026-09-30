@@ -392,6 +392,8 @@ class TeamReportBody(BaseModel):
     note: str
     artifacts: list[str] | None = None
     remember: str | None = None
+    evidence: list[dict[str, str]] | None = None
+    acknowledged: list[str] | None = None
 
 
 class TeamAskBody(BaseModel):
@@ -1752,7 +1754,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     async def team_report(staff_session_id: str, body: TeamReportBody, request: Request) -> dict[str, Any]:
         team, live = await team_live(staff_session_id, request)
         try:
-            told = await team.ingress.report(live, body.kind, body.note, body.artifacts, body.remember)
+            told = await team.ingress.report(live, body.kind, body.note, body.artifacts, body.remember, evidence=body.evidence, acknowledged=body.acknowledged)
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"ok": True, "text": told}

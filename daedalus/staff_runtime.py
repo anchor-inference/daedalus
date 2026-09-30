@@ -56,6 +56,8 @@ class BoardTask:
     depends_on: tuple[str, ...] = ()
     sent_back: str = ""
     """The operator's note when the work was sent back from review; the next session starts from it."""
+    returned: str = ""
+    """The orchestrator's note when it checked the work and returned it; the next session starts from it."""
 
     def missing(self) -> list[str]:
         """The brief's fields still empty; a task is not handed to anyone until all four are written."""
@@ -278,9 +280,14 @@ class TeamIngress(Protocol):
     async def message_state(self, message_id: str, state: str, error: str = "") -> None:
         """A later receipt for a message: a terminal write is ``written``, never ``acknowledged``."""
 
-    async def report(self, live: LiveSession, kind: str, note: str, artifacts: list[str] | None = None, remember: str | None = None, *, call_id: str | None = None) -> str:
+    async def report(
+        self, live: LiveSession, kind: str, note: str, artifacts: list[str] | None = None, remember: str | None = None, *,
+        call_id: str | None = None, evidence: list[dict[str, str]] | None = None, acknowledged: list[str] | None = None,
+    ) -> str:
         """``checkpoint · needs_input · stuck · done``; returns what the reporter is told. A report
-        with a ``call_id`` already recorded is not made again: it was a replay of the same call."""
+        with a ``call_id`` already recorded is not made again: it was a replay of the same call.
+        ``evidence`` is a done report's word on each check and requirement; ``acknowledged`` the
+        requirements the member confirmed."""
 
     async def ask(self, live: LiveSession, question: str, options: list[str] | None = None, context: str = "") -> str:
         """A question for the orchestrator from the team server; returns the request's id at once."""

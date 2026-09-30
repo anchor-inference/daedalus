@@ -16,7 +16,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions import wakeups
+from daedalus.extensions.likeness import same_question
 from daedalus.extensions.notifications import Draft
+from daedalus.extensions.task_contract import split_checks
 from daedalus.extensions.watches import WatchRefused
 from daedalus.host import prompts
 from daedalus.host.peek import LocalFolderAccess, PeekRefused
@@ -97,6 +99,11 @@ def _folder(project: Project, ref: str | None) -> ProjectFolder:
     for folder in project.folders:
         if ref in (folder.id, folder.label, folder.path) or (folder.label and folder.label.lower() == ref.lower()):
             return folder
+    # The name a folder is listed by when it has no label is its directory's: Hire(folder="tern")
+    # was refused for a folder the list showed as "tern".
+    named = [f for f in project.folders if not f.label and Path(f.path).name == ref]
+    if len(named) == 1:
+        return named[0]
     raise Refused(f"{project.name} has no folder {ref!r}; Folders() lists them")
 
 
@@ -318,6 +325,9 @@ async def tasks(
     depends_on: list[str] | None = None,
     assignee: str | None = None,
     note: str = "",
+    waiting_on: str = "",
+    new: bool = False,
+    reason: str = "",
 ) -> str:
     board = orch.board
     if board is None:
@@ -339,13 +349,19 @@ async def tasks(
         if op == "create":
             if not title:
                 raise Refused("a task needs a title")
-            task = await board.add(title=title, session_id=session_id, brief=brief or None, depends_on=depends_on, priority=priority or 3, notes=note, assignee_staff_id=member_id)
+            from daedalus.extensions.orchestrator_team import refuse_twin  # Lazy: the team's module imports this one
+
+            await refuse_twin(orch, project, " ".join(title.split()), objective or "", new=new, reason=reason)
+            # Its done-when becomes its checks, as a card made by Assign gets them.
+            checklist = split_checks(done_when or "")
+            task = await board.add(title=title, session_id=session_id, brief=brief or None, depends_on=depends_on, priority=priority or 3, notes=note, assignee_staff_id=member_id, checklist=checklist)
         elif not task_id:
             raise Refused(f"{op} needs a task_id")
         elif op == "get":
             task = await board.get(task_id, actor=session_id)
             parts = [_task_line(task, names)]
             parts += [f"{k.replace('_', ' ')}: {v}" for k, v in task["brief"].items() if v]
+            parts += await _contract_lines(orch, task)
             if task.get("branch"):
                 parts.append(f"branch {task['branch']} ({task.get('merge_state') or 'unmerged'})")
             if task.get("notes"):
@@ -354,6 +370,16 @@ async def tasks(
         else:
             if op == "move" and not status:
                 raise Refused("move needs a status")
+            if op == "move" and status == "done":
+                current = await board.get(task_id, actor=session_id)
+                open_checks = [f"C{i}" for i, c in enumerate(current["checklist"], start=1) if not c.get("done")]
+                if open_checks and current["status"] != "done":
+                    raise Refused(f"task {task_id} has checks not marked ({', '.join(open_checks)}): Accept(task_id='{task_id}', checks=[…]) records them once the work is handed in")
+            waits = " ".join((waiting_on or "").split())
+            if waits:
+                if status != "blocked":
+                    raise Refused("waiting_on goes with status='blocked': what the card waits for")
+                note = (note + " " if note else "") + f"waits on: {waits}"
             task = await board.update(task_id, status=status, note=note, title=title if op == "update" else None, priority=priority, actor=session_id, brief=brief or None, depends_on=depends_on, assignee_staff_id=(member_id if member_id else ("" if assignee == "" else None)))
     except KeyError as exc:
         raise Refused(f"no task {exc.args[0] if exc.args else task_id} on {project.name}'s board") from exc
@@ -362,6 +388,13 @@ async def tasks(
             raise
         raise Refused(str(exc)) from exc
     line = _task_line(task, names)
+    if op == "move" and status == "blocked":
+        if waits:
+            await orch.loops.close(project.id, task_id=task["id"], by="orchestrator", decision=f"set aside, waiting on {waits}")
+        elif await orch.manager.db.fetchone("SELECT 1 FROM open_loops WHERE task_id = ? AND closed_at IS NULL", (task["id"],)):
+            line += "\nIts result still waits for your decision: say what the card waits on (waiting_on=…), give the next step, or Decide"
+    elif op == "move" and status == "dropped":
+        await orch.loops.close(project.id, task_id=task["id"], by="orchestrator", decision=f"dropped{': ' + note if note else ''}")
     if member_id and orch.team is not None:
         member = await orch.manager.staff.get(member_id)
         try:
@@ -372,6 +405,34 @@ async def tasks(
         where = f" (queue position {launched.get('position')}: {launched.get('detail')})" if state == "queued" else ""
         return f"{line}\n{member.name if member else 'the assignee'}: {state}{where}"
     return line
+
+
+async def _contract_lines(orch: Orchestrators, task: dict[str, Any]) -> list[str]:
+    """A card's acceptance, checks and requirements as Tasks(op='get') shows them."""
+    team = orch.team
+    if team is None:
+        return []
+    lines: list[str] = []
+    state = str(task.get("acceptance_state") or "")
+    if state:
+        lines.append("acceptance: " + {"handed_in": "handed in, not checked", "accepted": "checked and accepted by you", "operator_approved": "approved by the operator", "returned": "returned for another round"}.get(state, state))
+    for index, item in enumerate(task.get("checklist") or [], start=1):
+        evidence = item.get("evidence") or {}
+        mark = item.get("mark") or {}
+        said = f" — evidence: {evidence.get('how')}: {evidence.get('result')}" if evidence else ""
+        judged = f" — {'met' if mark.get('ok') else 'NOT met'}{': ' + mark['note'] if mark.get('note') else ''}" if mark else ""
+        lines.append(f"C{index} {item.get('text')}{said}{judged}")
+    deliveries = await team.contracts.deliveries(task["id"])
+    for requirement in await team.contracts.requirements(task["id"]):
+        given = deliveries.get(requirement.id) or []
+        heard = ", ".join(
+            f"{d['staff_name']}: " + ("confirmed" if d["acknowledged_at"] else "opened" if d["opened_at"] else f"sent ({d['via']})")
+            for d in given
+        )
+        mark = requirement.mark
+        judged = f" — {'met' if mark.get('ok') else 'NOT met'}" if mark else ""
+        lines.append(f"{requirement.label} [{requirement.kind}, from {requirement.origin()}] {requirement.text}" + (f" ({heard})" if heard else "") + judged)
+    return lines
 
 
 # -- looking into the files ------------------------------------------------------------------------
@@ -541,6 +602,10 @@ async def ask_operator(
     project: Project,
     session_id: str,
     *,
+    op: str = "ask",
+    id: str | None = None,
+    ids: list[str] | None = None,
+    reason: str = "",
     questions: list[Any] | None = None,
     title: str = "",
     text: str = "",
@@ -553,7 +618,16 @@ async def ask_operator(
 ) -> str:
     """One question, or several at once. Every question is checked before any is asked, and all of
     them are asked before the call returns, so the ids come back at once and the operator's list
-    fills in one go. The answers come later, together if the operator answers them together."""
+    fills in one go. The answers come later, together if the operator answers them together.
+
+    ``op='update'`` rewords an open question in place and ``op='withdraw'`` takes questions back; a
+    new question on the subject of one still open is refused with that question's id."""
+    if op == "update":
+        return await update_question(orch, project, session_id, ref=id or "", title=title, text=text, options=options, multi=multi, context=context, urgent=urgent)
+    if op == "withdraw":
+        return await withdraw_questions(orch, project, session_id, ids=ids or ([id] if id else []), reason=reason)
+    if op != "ask":
+        raise Refused("op is ask (the default), update or withdraw")
     if questions:
         if not isinstance(questions, list):
             raise Refused("questions is a list of {title, text, options?, multi?, urgent?, dispatch_id?, context?}")
@@ -566,6 +640,7 @@ async def ask_operator(
         raws = [{"title": title, "text": text, "options": options, "multi": multi, "context": context, "task_id": task_id, "urgent": urgent, "dispatch_id": dispatch_id}]
     single = len(raws) == 1
     checked = [await _question(orch, project, raw, "the question" if single else f"question {i + 1}") for i, raw in enumerate(raws)]
+    await _not_asked_already(orch, project, checked)
     asked: list[Ask] = []
     for q in checked:
         # No "only the options" switch: the operator may always answer in their own words, or add a
@@ -573,12 +648,90 @@ async def ask_operator(
         # fit, and the operator had no way to say so.
         detail: dict[str, Any] = {"urgent": q.urgent, "multi": q.multi}
         asked.append(await orch.open_request(project, session_id, kind="question", title=q.title, text=q.text, options=q.options, detail=detail, task_id=q.task_id, dispatch_id=q.dispatch_id))
+    for ask in asked:
+        if ask.task_id:
+            await orch.loops.close(project.id, task_id=ask.task_id, by="orchestrator", decision=f"asked the operator [{ask.short_id}] {ask.title}")
     shown = " Those with a dispatch_id are shown in the main orchestrator's chat too." if any(a.dispatch_id for a in asked) else ""
     if single:
         shown = " It is shown in the main orchestrator's chat too." if asked[0].dispatch_id else ""
         return f"asked the operator as [{asked[0].short_id}]; do not wait — the answer arrives as an event in a later wake-up.{shown}"
     listed = "; ".join(f"[{a.short_id}] {a.title}" for a in asked)
     return f"asked the operator {len(asked)} questions: {listed}. Do not wait — the answers arrive as events, together when the operator answers them together.{shown}"
+
+
+def _question_body(title: str, text: str, options: list[str]) -> str:
+    return " ".join([title, text.split("\n\nContext:")[0], *options])
+
+
+async def _not_asked_already(orch: Orchestrators, project: Project, checked: list[_Question]) -> None:
+    """Refuse a question that asks again what an open question of the orchestrator's already asks.
+
+    The operator found six questions in their list, three of them the first three reworded: a turn
+    that meant to remind them asked afresh, while the first ones had been waiting for eight minutes
+    and the state block said so. The refusal names the open question and how to change it in place."""
+    open_ones = [a for a in await orch.manager.asks.open_for(project.id) if a.origin == "orchestrator" and a.kind == "question"]
+    clashes: list[str] = []
+    for q in checked:
+        mine = _question_body(q.title, q.text, q.options)
+        for ask in open_ones:
+            if same_question(mine, _question_body(ask.title, ask.text, [str(o) for o in ask.detail.get("options") or []])):
+                clashes.append(f"\"{q.title}\" asks what [{ask.short_id}] \"{ask.heading}\" already asks")
+                break
+    if clashes:
+        raise Refused(
+            "nothing was asked: " + "; ".join(clashes) + ". The operator still has it in their list: change it in place with "
+            "AskOperator(op='update', id=…, …) — an answer they began to write stays with it — or take it back with op='withdraw'. "
+            "Ask the other questions of this call again without it"
+        )
+
+
+async def update_question(
+    orch: Orchestrators,
+    project: Project,
+    session_id: str,
+    *,
+    ref: str,
+    title: str = "",
+    text: str = "",
+    options: list[str] | None = None,
+    multi: bool = False,
+    context: str = "",
+    urgent: bool = False,
+) -> str:
+    """Reword an open question of the orchestrator's in place: the operator's card changes, it keeps
+    its place and its id, and what they already typed as an answer stays."""
+    ask = await _own_open_question(orch, project, ref)
+    before, _, said_context = ask.text.partition("\n\nContext:")
+    raw = {
+        "title": title or ask.title, "text": text or before, "context": context or said_context.strip(),
+        "options": options if options is not None else list(ask.detail.get("options") or []), "multi": multi or bool(ask.detail.get("multi")),
+        "urgent": urgent or bool(ask.detail.get("urgent")), "task_id": ask.task_id, "dispatch_id": None,
+    }
+    q = await _question(orch, project, raw, "the question")
+    revision = int(ask.detail.get("revision") or 0) + 1
+    detail = {**ask.detail, "options": q.options, "multi": q.multi, "urgent": q.urgent, "revision": revision, "updated_at": datetime.now(UTC).isoformat()}
+    try:
+        changed = await orch.manager.asks.revise(ask.id, title=q.title, text=q.text, detail=detail)
+    except StaffError as exc:
+        raise Refused(str(exc)) from exc
+    if not changed:
+        raise Refused(f"[{ask.short_id}] was answered or withdrawn a moment ago; its answer arrives as an event")
+    await orch.manager.bus.publish("ask.updated", {"request_id": ask.id, "short_id": ask.short_id, "routed_to": ask.routed_to}, project_id=project.id, session_id=session_id)
+    return f"[{ask.short_id}] is updated in place (revision {revision}); the operator sees it changed, and an answer they began to write stays"
+
+
+async def _own_open_question(orch: Orchestrators, project: Project, ref: str) -> Ask:
+    text = (ref or "").strip().strip("[]")
+    if not text:
+        raise Refused("give the id of the question to update; the state block lists yours still waiting")
+    ask = await orch.manager.asks.get(text)
+    if ask is None or ask.project_id != project.id:
+        raise Refused(f"{project.name} has no open question {ref!r}; the state block lists yours still waiting")
+    if ask.origin != "orchestrator":
+        raise Refused(f"[{ask.short_id}] is a staff member's request, not your question")
+    if not ask.open:
+        raise Refused(f"[{ask.short_id}] was already answered by the {ask.resolved_by}: {orch._answer_text(ask)}")
+    return ask
 
 
 async def withdraw_questions(orch: Orchestrators, project: Project, session_id: str, *, ids: list[str] | None = None, reason: str = "") -> str:
@@ -634,6 +787,13 @@ async def project_report(orch: Orchestrators, project: Project, session_id: str,
     if len(body) > REPORT_TEXT_MAX:
         raise Refused(f"a report is at most {REPORT_TEXT_MAX} characters; the journal holds the detail")
     headline = " ".join((title or "").split())[:120] or f"{project.name}: {kind}"
+    unchecked = ""
+    if kind == "done" and task_id:
+        row = await orch.manager.db.fetchone("SELECT acceptance_state FROM board_tasks WHERE id = ? AND project_id = ?", (task_id, project.id))
+        if row is not None and row["acceptance_state"] == "handed_in":
+            # "Ready" once went out for work nobody had looked at; the operator learns which it is.
+            body = f"(Handed in by the member, not checked yet.)\n{body}"
+            unchecked = f"; task {task_id} is handed in and not checked, and the operator was told so — Accept records your check"
     attached = []
     for ref in [str(f) for f in files or [] if str(f or "").strip()][:HANDOVER_MAX_FILES]:
         try:
@@ -678,7 +838,7 @@ async def project_report(orch: Orchestrators, project: Project, session_id: str,
             source="project_report",
         ))
     await orch._changed(project.id, "journal", "orchestrator")
-    return f"reported (journal #{entry.id}){closed}"
+    return f"reported (journal #{entry.id}){closed}{unchecked}"
 
 
 # -- its own alarms -------------------------------------------------------------------------------

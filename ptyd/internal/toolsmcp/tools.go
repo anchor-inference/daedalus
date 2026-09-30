@@ -51,9 +51,11 @@ func toolList(askHold time.Duration) []tool {
 				"(you cannot go on without a decision), 'stuck' (something outside your task blocks you) or 'done' (the " +
 				"deliverable meets the task's done-when; it hands the task in: work on your own branch goes to review for " +
 				"the operator to merge, and a worktree with uncommitted changes is refused — commit first; any other task " +
-				"is closed as done, and your note is the result the orchestrator reads). note: a short factual summary. " +
-				"artifacts: paths or links of what you produced. remember: one line to keep in your notes for every later " +
-				"session.",
+				"goes to done, handed in for the orchestrator to check against your note). note: a short factual summary. " +
+				"evidence (with done): [{item, how, result}] for each check (C1 …) and requirement (R1 …) of the task — " +
+				"what you ran or looked at and what it showed. acknowledged: the requirements (R…) sent to you that you " +
+				"have taken into your plan, or the input files (R…) you have read. artifacts: paths or links of what you " +
+				"produced. remember: one line to keep in your notes for every later session.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -61,6 +63,19 @@ func toolList(askHold time.Duration) []tool {
 					"note":      map[string]any{"type": "string", "description": "A short factual summary."},
 					"artifacts": stringList(),
 					"remember":  map[string]any{"type": "string", "description": "One line for your notes."},
+					"evidence": map[string]any{
+						"type": "array",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"item":   map[string]any{"type": "string", "description": "The check or requirement: C1, R2, or its words."},
+								"how":    map[string]any{"type": "string", "description": "What you ran, opened or looked at to check it."},
+								"result": map[string]any{"type": "string", "description": "What that showed."},
+							},
+							"required": []string{"item", "how", "result"},
+						},
+					},
+					"acknowledged": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Requirements (R…) you have taken into your plan."},
 				},
 				"required": []string{"kind", "note"},
 			},
@@ -164,10 +179,12 @@ func decode(name string, raw json.RawMessage) (request, error) {
 	switch name {
 	case reportTool:
 		var a struct {
-			Kind      string   `json:"kind"`
-			Note      string   `json:"note"`
-			Artifacts []string `json:"artifacts"`
-			Remember  string   `json:"remember"`
+			Kind         string     `json:"kind"`
+			Note         string     `json:"note"`
+			Artifacts    []string   `json:"artifacts"`
+			Remember     string     `json:"remember"`
+			Evidence     []evidence `json:"evidence"`
+			Acknowledged []string   `json:"acknowledged"`
 		}
 		if err := strict(raw, &a); err != nil {
 			return request{}, err
@@ -181,6 +198,12 @@ func decode(name string, raw json.RawMessage) (request, error) {
 		fields := map[string]any{"kind": a.Kind, "note": a.Note, "artifacts": nonNil(a.Artifacts)}
 		if strings.TrimSpace(a.Remember) != "" {
 			fields["remember"] = a.Remember
+		}
+		if len(a.Evidence) > 0 {
+			fields["evidence"] = a.Evidence
+		}
+		if len(a.Acknowledged) > 0 {
+			fields["acknowledged"] = a.Acknowledged
 		}
 		return request{op: "report", fields: fields, fallback: reportRecorded}, nil
 	case askTool:
@@ -206,6 +229,14 @@ func decode(name string, raw json.RawMessage) (request, error) {
 
 var errUnknownTool = errors.New("unknown tool")
 
+// evidence is a done report's word on one check or requirement of the task; the host keeps it on the
+// item it names and does not judge it.
+type evidence struct {
+	Item   string `json:"item"`
+	How    string `json:"how"`
+	Result string `json:"result"`
+}
+
 // strict decodes the arguments, refusing a field of the wrong type with a message naming it.
 // Unknown fields are ignored: a newer model may add one, and the host would not read it anyway.
 func strict(raw json.RawMessage, into any) error {
@@ -227,8 +258,11 @@ func strict(raw json.RawMessage, into any) error {
 // shapeOf names what an argument must be; the decoder's own type names the element of a list, not
 // the list.
 func shapeOf(field string) string {
-	if field == "artifacts" || field == "options" {
+	if field == "artifacts" || field == "options" || field == "acknowledged" {
 		return "a list of strings"
+	}
+	if field == "evidence" {
+		return "a list of objects with item, how and result"
 	}
 	return "a string"
 }
