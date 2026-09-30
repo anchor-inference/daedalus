@@ -277,6 +277,34 @@ def test_the_sealed_paths_are_the_installation_and_the_runtime_folder(tmp_path: 
         assert policy.evaluate("Exec", {"command": f"cat {tmp_path}/{path}"}).action == DENY, path
 
 
+def test_the_copies_an_update_keeps_are_sealed_like_the_live_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An update keeps whole copies of the data folder: the kept trees of the fenced switch beside the
+    data folder, the verified backups and the upgrade's folder inside it. Each holds the provider
+    keys, the state directory and launcher.json, so a sealed live folder next to a readable copy
+    would seal nothing."""
+    monkeypatch.setenv("DAEDALUS_NATIVE", "1")
+    install = tmp_path / "Daedalus"
+    data = install / "data"
+    slot = install / ".data-slot-0123abcd"  # a copy a switch cut off left beside the data folder
+    (slot / "daedalus-secrets").mkdir(parents=True)
+    monkeypatch.setenv("DAEDALUS_SECRETS", str(install / "daedalus-secrets"))
+    settings = Settings(_env_file=None, state_dir=data / "state", owner_user_id=1)  # type: ignore[call-arg]
+    sealed = set(settings.sealed_paths)
+    assert {data / "backups", data / "upgrade", install / ".daedalus-update", data / "launcher.json", slot} <= sealed
+    policy = native_policy(sealed_paths=list(sealed), home_dir=str(tmp_path))
+    for path in (
+        ".daedalus-update/retained/pre-1/daedalus-secrets/keyproxy.env",
+        ".daedalus-update/retained/failed-2/launcher.json",
+        "data/backups/20260930T120000Z/data.tar.gz",
+        "data/upgrade/journal.json",
+        ".data-slot-0123abcd/daedalus-secrets/keyproxy.env",
+    ):
+        assert policy.evaluate("Exec", {"command": f"cat {install}/{path}"}).action == DENY, path
+        assert policy.evaluate("Read", {"path": str(install / path)}).action == DENY, path
+    # The work next to them is not the installation's and stays the agent's.
+    assert policy.evaluate("Read", {"path": str(data / "workspaces" / "notes.md")}).action != DENY
+
+
 def test_without_a_launcher_the_paths_are_the_containers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("DAEDALUS_RUNTIME", "DAEDALUS_LOCAL", "DAEDALUS_SECRETS", "DAEDALUS_LAUNCHER"):
         monkeypatch.delenv(name, raising=False)

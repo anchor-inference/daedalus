@@ -1246,8 +1246,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_BYTES)
 
     # The desktop launcher gives each start of the supervisor an id, and the bot inherits it. Echoing
-    # it on every answer is how the launcher tells this process's answer from one by a stack a
-    # crashed launcher left running on the same port. It is a random value per start, not a secret.
+    # it on the answers to /app and /app/ — what the launcher's health check asks for — is how the
+    # launcher tells this process's answer from one by a stack a crashed launcher left running on the
+    # same port. It is a random value per start, not a secret.
     boot_id = app.settings.boot_id
 
     @api.middleware("http")

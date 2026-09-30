@@ -75,7 +75,7 @@ async def test_a_newer_launcher_is_announced_once_with_the_command(launcher: Any
     [draft] = app.notifications.drafts
     assert draft.category == "system" and draft.kind == "launcher_upgrade"
     assert draft.title == "Daedalus 0.13.0 is available"
-    assert command in draft.body and "0.12.0" in draft.body and "backs up" in draft.body
+    assert command in draft.body and "0.12.0" in draft.body and "verified backup" in draft.body and "ext4" in draft.body
     # Once per release, across restarts too: the record is in the state directory.
     assert await launcher_updates.check_once(_app(launcher.state)) is None
     assert await launcher_updates.check_once(app) is None
@@ -83,6 +83,16 @@ async def test_a_newer_launcher_is_announced_once_with_the_command(launcher: Any
     launcher.fake.status["upgrade"] = {**launcher.fake.status["upgrade"], "to": "desktop-v0.14.0"}
     assert await launcher_updates.check_once(app) is not None
     assert app.notifications.drafts[-1].title == "Daedalus 0.14.0 is available"
+
+
+async def test_the_announcement_is_in_the_operators_language(launcher: Any) -> None:
+    app = _app(launcher.state)
+    app.notifications.locale = "ru-RU"
+    launcher.fake.status = {"busy": "", "upgrade": {"from": "desktop-v0.12.0", "to": "desktop-v0.13.0", "command": "daedalus-desktop upgrade"}}
+    assert await launcher_updates.check_once(app) is not None
+    [draft] = app.notifications.drafts
+    assert draft.title == "Вышел Daedalus 0.13.0"
+    assert "daedalus-desktop upgrade" in draft.body and "проверенной резервной копией" in draft.body
 
 
 async def test_nothing_is_announced_without_an_offer_or_a_launcher(launcher: Any, tmp_path: Path) -> None:
@@ -130,6 +140,14 @@ async def test_without_a_launcher_there_is_no_boot_header(api_app: Any) -> None:
     api = build_app(api_app, "tok")  # type: ignore[arg-type]
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:  # type: ignore[arg-type]
         assert "X-Daedalus-Boot" not in (await client.get("/api/status")).headers
+
+
+def test_the_boot_id_is_read_from_its_own_name_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A bare BOOT_ID some other program exported is not the launcher's: without its own name the
+    settings would echo it, and the launcher would take a stranger's answer for its stack's."""
+    monkeypatch.delenv("DAEDALUS_BOOT_ID", raising=False)
+    monkeypatch.setenv("BOOT_ID", "not-ours")
+    assert Settings(_env_file=None, state_dir=tmp_path, owner_user_id=1).boot_id == ""  # type: ignore[call-arg]
 
 
 def test_the_boot_id_comes_from_the_launchers_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

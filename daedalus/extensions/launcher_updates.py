@@ -5,11 +5,13 @@ found in its own status, which this process can already read through the launche
 also raises a desktop notification, but that is easy to miss and does nothing on a machine without a
 notification daemon; the app is where the operator actually looks. So this reads the launcher's
 status now and then and, for a release it has not announced before, posts one entry to the app's own
-notification centre: what is out, and the exact command that installs it on this machine.
+notification centre, in the operator's language: what is out, and the exact command that installs it
+on this machine.
 
-Nothing is installed from here. The upgrade asks for a yes, stops the stack, backs up and checks the
-data and the launcher, and rolls back on failure — it runs in a terminal, with the launcher closed,
-because it replaces the launcher's own files and restarts this very process.
+Nothing is installed from here. The upgrade asks for a yes, stops the stack, keeps the data from
+before it (a whole copy of the data folder on Linux with ext4, a verified backup elsewhere), and puts
+the data and the launcher back on failure — it runs in a terminal, with the launcher closed, because
+it replaces the launcher's own files and restarts this very process.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.notifications import Draft
 from daedalus.host import launcher_bridge
+from daedalus.host.notify_text import render
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -68,15 +71,16 @@ async def check_once(app: Application | Any) -> dict[str, Any] | None:
     to, current, command = str(offer.get("to") or ""), str(offer.get("from") or ""), str(offer.get("command") or "")
     if not to.startswith("desktop-v") or _noted(state_dir) == to:
         return None
-    lines = [f"This installation's launcher is {_version(current)}. Nothing is installed by itself."]
+    language = app.notifications.language()
+    lines = [render("launcher.upgrade.current", language, version=_version(current))]
     if command:
-        lines.append(f"Close the launcher and run in a terminal:\n{command}")
-    lines.append("It asks first, backs up your data and the launcher and checks the backup, and puts everything back if the new version does not come up.")
+        lines.append(render("launcher.upgrade.command", language, command=command))
+    lines.append(render("launcher.upgrade.promise", language))
     if url := str(offer.get("url") or ""):
-        lines.append(f"Release notes: {url}")
+        lines.append(render("launcher.upgrade.notes", language, url=url))
     await app.notifications.post(Draft(
         "system",
-        f"Daedalus {_version(to)} is available",
+        render("launcher.upgrade", language, version=_version(to)),
         "\n\n".join(lines),
         kind="launcher_upgrade",
         dedupe_key=f"launcher-upgrade:{to}",

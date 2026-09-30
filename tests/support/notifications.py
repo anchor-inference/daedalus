@@ -23,6 +23,10 @@ class RecordingNotifications:
     def __init__(self) -> None:
         self.drafts: list[Draft] = []
         self.seen: set[int] = set()
+        self.locale = ""
+
+    def language(self) -> str:
+        return self.locale
 
     async def post(self, draft: Draft) -> NotificationView:
         self.drafts.append(draft)
