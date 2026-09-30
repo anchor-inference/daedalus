@@ -406,6 +406,30 @@ func TestReportRoundTrip(t *testing.T) {
 	}
 }
 
+func TestReportCarriesEvidenceAndAcknowledgements(t *testing.T) {
+	f := listener(t)
+	c := serve(t, f.env("DAEDALUS_REPORT_HOLD_MS", "10000"))
+	c.call(1, "Report", map[string]any{
+		"kind": "done", "note": "script.md written",
+		"evidence":     []map[string]any{{"item": "C1", "how": "read aloud with a timer", "result": "52 s"}},
+		"acknowledged": []string{"R2"},
+	})
+	ev := f.rec.hookN(t, 1)
+	want := `{"acknowledged":["R2"],"artifacts":[],"evidence":[{"how":"read aloud with a timer","item":"C1","result":"52 s"}],"kind":"done","note":"script.md written","tool":"report"}`
+	if got := withoutCallID(t, ev["body"]); got != want {
+		t.Fatalf("body %s", got)
+	}
+	f.reply(t, ev, `{"text":"reported done"}`)
+	if text, isErr := c.result(1); isErr || text != "reported done" {
+		t.Fatalf("%q %v", text, isErr)
+	}
+	// Evidence of the wrong shape is refused with what it must be, before anything reaches the host.
+	c.call(2, "Report", map[string]any{"kind": "done", "note": "x", "evidence": "C1 passed"})
+	if text, isErr := c.result(2); !isErr || !strings.Contains(text, "evidence must be a list of objects with item, how and result") {
+		t.Fatalf("%q %v", text, isErr)
+	}
+}
+
 func TestReportWithASilentHostIsRecorded(t *testing.T) {
 	f := listener(t)
 	c := serve(t, f.env("DAEDALUS_REPORT_HOLD_MS", "150"))

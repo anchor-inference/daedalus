@@ -301,6 +301,12 @@ class StaffReport(TypedDict):
     when that message ends by asking something."""
     files: NotRequired[list[FileRef]]
     """The artifacts the host took in from the member's folder, kept as the project's files."""
+    acknowledged: NotRequired[list[str]]
+    """The task's requirements (``R2`` …) the member confirmed it took into its plan."""
+    evidence: NotRequired[list[dict[str, str]]]
+    """A done report's word on each check it names: ``{item, how, result}``, ``item`` a check or a requirement."""
+    unproven: NotRequired[list[str]]
+    """The checks and requirements a done report gave no evidence for."""
 
 
 class StaffChannel(TypedDict):
@@ -332,6 +338,22 @@ TaskChange = TypedDict(
         "error": NotRequired[str],
     },
 )
+
+class AskUpdated(TypedDict):
+    """An open question of the orchestrator's reworded in place: the app redraws the same card."""
+
+    request_id: str
+    short_id: str
+    routed_to: NotRequired[str]
+
+
+class OpenResults(TypedDict):
+    """The team's results no decision of the orchestrator has followed: said to it once, when a turn
+    of its ended with them still open (see :mod:`daedalus.extensions.orchestrator_loops`)."""
+
+    loops: list[int]
+    lines: list[str]
+
 
 BusGap = TypedDict("BusGap", {"from": int, "to": int})
 
@@ -505,6 +527,7 @@ REGISTRY: dict[str, EventSpec] = {
     "ask.answered": EventSpec(AskAnswered),
     "ask.routed": EventSpec(AskRouted),
     "ask.batch": EventSpec(AskBatch),
+    "ask.updated": EventSpec(AskUpdated),
     "permission.pending": EventSpec(PermissionPending),
     "permission.resolved": EventSpec(PermissionResolved),
     "terminal.created": EventSpec(TerminalCreated),
@@ -533,6 +556,7 @@ REGISTRY: dict[str, EventSpec] = {
     "task.assigned": EventSpec(TaskChange),
     "task.accepted": EventSpec(TaskChange),
     "task.merge_failed": EventSpec(TaskChange),
+    "orchestrator.open_results": EventSpec(OpenResults),
     "schedule.fired": EventSpec(ScheduleFired),
     "watch.fired": EventSpec(WatchFired),
     "webhook.received": EventSpec(WebhookReceived),

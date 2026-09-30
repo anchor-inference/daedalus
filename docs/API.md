@@ -99,6 +99,24 @@ and orchestrator see its whole board, move only their own tasks and never to don
 keeps its own board, without the team's tasks. Each change is a `task.created`, `task.moved`,
 `task.assigned` or `task.accepted` event naming its `actor`.
 
+**A card's contract and its acceptance.** A project task also carries `requirements`: the conditions
+all of its work must meet, each numbered (`R1` …) with its `text`, `kind` (`quality`, `scope`,
+`input` — a file the work starts from, `file_id` and `file_name` — or `constraint`), `source`
+(`operator`, `orchestrator`, `answer:<request>`, `rule:<id>`), `state` (`active`, `superseded`,
+`withdrawn`) and `deliveries`: which member was given it, in the brief or as a message, and when it
+confirmed it (`acknowledged_at`) or opened the input (`opened_at`; a command-line member confirms in
+words). Its `checklist` is its checks (`C1` …), one per line of the done-when, each with the member's
+`evidence` (`how`, `result`) when it handed the work in and the orchestrator's `mark` (`ok`, `note`).
+`acceptance_state` is how far the result is accepted, beside the column it is in: `handed_in` (its
+member reported it done), `accepted` (the orchestrator marked every check and requirement),
+`operator_approved` (you accepted or merged it) or `returned` (sent back for another round). The
+orchestrator adds requirements with `Require`, and a member at work on the card is sent each one at
+once; it accepts, returns or hands a result to you with `Accept` — a result it gives to you comes to
+the review column with its marks — and says that nothing further follows one with `Decide`. A member's
+done, stuck or needs-input, and a card left in todo with nobody on it, stay in the orchestrator's state
+block until one of its decisions follows; a turn that ends with one still open is followed by one
+`orchestrator.open_results` event, and never a second.
+
 **Reviewing and merging a staff branch.** The orchestrator proposes, you merge. `GET
 /api/board/{id}/review` reads, without changing anything, what merging the task's branch into its
 folder's current branch would bring: `commits` (at most 50), `files` with their added and removed
@@ -163,7 +181,10 @@ every task a member is handed, and the members at work on a task are told when a
 lifted. `GET …/journal` carries the rules in force as `rules` beside every page, and the entry of a
 lifted rule has `lifted: true`.
 It asks in batches — `AskOperator(questions=[{title, text, options, multi, …}])` — and takes back what
-no longer matters with `WithdrawQuestions(ids, reason)`. What waits for you is a list in the Questions
+no longer matters with `WithdrawQuestions(ids, reason)`. A question still waiting is never asked again:
+`AskOperator(op="update", id)` rewords it in place — the same id, so an answer you began to write stays;
+its `detail` carries `revision` and `updated_at`, and an `ask.updated` event redraws it — and a new
+question on the subject of an open one is refused with that one's id. What waits for you is a list in the Questions
 tab of the panel beside its chat (a sheet behind the header's button on a phone), staff waiting on a
 permission or an escalated question above its own questions; the chat itself shows one line, "N
 questions waiting". Answer some, leave others — half-answered cards are drafts kept on the device — and

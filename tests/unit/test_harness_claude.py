@@ -656,6 +656,24 @@ async def test_a_team_call_seen_twice_is_acted_on_once(settings: Settings, db: D
         assert answers[-1] == (200, {"text": "the left one"})
 
 
+async def test_a_team_report_carries_the_members_confirmations_and_evidence_to_the_host(settings: Settings, db: Database) -> None:
+    """A command-line member confirms a requirement and gives evidence through its team tool; both
+    reach the report as a Daedalus member's do, rather than being dropped on the way."""
+    async with stand(settings, db, **claude()) as s:
+        trust(s)
+        ada = await started(s, "echo:ready")
+        await s.status_event(ada, "turn_done_unseen")
+        row = await s.session_row(ada)
+        launch = await HarnessStore(db).open_launch_for(row.id)
+        assert launch is not None and row.task_id
+        await s.team.contracts.add(row.task_id, s.project.id, "English only for now", "scope", "operator")
+        body = {"tool": "report", "kind": "checkpoint", "note": "noted", "artifacts": [], "acknowledged": ["R1", "R7"], "call_id": f"{launch.launch_id}:cafe:1"}
+        status, said = await asyncio.to_thread(post, s, launch.launch_id, "team", body, wait_ms=5000)
+        assert status == 200 and said is not None and "confirmed R1" in said["text"] and "no requirement R7 in force" in said["text"]
+        [report] = [e for e in await s.events("staff.report", staff_id=ada.id) if not e.payload.get("implicit")]
+        assert report.payload["acknowledged"] == ["R1"]
+
+
 async def test_a_cli_whose_team_tools_never_load_is_shown_so(settings: Settings, db: Database) -> None:
     async with stand(settings, db, extra_env={"FAKE_TEAM_MCP_SILENT": "1"}, team_hello_s=0.5, **claude()) as s:
         trust(s)

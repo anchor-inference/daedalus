@@ -35,7 +35,7 @@ export type ProjectTask = {
   status: TaskStatus;
   priority: number;
   acceptance: string;
-  checklist: { text: string; done: boolean }[];
+  checklist: CheckItem[];
   depends_on: string[];
   session_id: string | null;
   notes: string;
@@ -47,6 +47,54 @@ export type ProjectTask = {
   branch: string | null;
   merge_state: "" | "proposed" | "merged" | "conflict" | "rejected";
   assignee: Assignee | null;
+  /** How far the work was accepted; absent from a host older than the task contract. */
+  acceptance_state?: AcceptanceState;
+  /** What the card must satisfy, each with who was given it; absent from an older host. */
+  requirements?: Requirement[];
+};
+
+/** "handed_in": the member said it is done and nobody checked yet; "accepted": the orchestrator checked
+ *  every item; "operator_approved": the operator accepted or merged it; "returned": checked and sent
+ *  back for another round. Empty for a card nobody handed in. */
+export type AcceptanceState = "" | "handed_in" | "accepted" | "operator_approved" | "returned";
+
+/** The member's word for one item when it handed the work in: what it did and what came of it. */
+export type Evidence = { how?: string; result?: string; by?: string; at?: string };
+/** The orchestrator's verdict on one item. */
+export type Mark = { ok: boolean; note?: string; by?: string };
+
+/** One of the card's checks, named C1, C2 … by its place in the list. */
+export type CheckItem = { text: string; done: boolean; evidence?: Evidence | null; mark?: Mark | null };
+
+/** A requirement given to one member, and how far it got. `opened_at` is the host seeing a tool touch
+ *  an input's file; a command-line member's tools are out of its sight, so there only its word counts. */
+export type Delivery = {
+  staff_id: string;
+  staff_name: string;
+  via: "brief" | "message";
+  message_id?: string | null;
+  delivered_at: string;
+  acknowledged_at: string | null;
+  opened_at: string | null;
+  cli: boolean;
+};
+
+export type Requirement = {
+  id: string;
+  label: string;
+  number: number;
+  text: string;
+  kind: "quality" | "scope" | "input" | "constraint";
+  source: string;
+  from_operator: boolean;
+  state: "active" | "superseded" | "withdrawn";
+  replaces: string | null;
+  file_id: string | null;
+  file_name: string;
+  evidence: Evidence | null;
+  mark: Mark | null;
+  created_at: string;
+  deliveries: Delivery[];
 };
 
 export type NeedsYou = {
@@ -205,4 +253,46 @@ export function mergeBlock(review: Pick<Review, "can_merge" | "blockers">): Revi
 /** A task whose Accept is really Merge: its work is on a staff branch not merged yet. */
 export function mergesOnAccept(task: Pick<ProjectTask, "branch" | "merge_state">): boolean {
   return Boolean(task.branch) && task.merge_state !== "merged";
+}
+
+/** The acceptance levels a card's chip names, and the tone each is drawn in. Only a card in review or
+ *  done carries one: a card sent back is in progress again, and its own column already says so. */
+export function acceptanceChip(task: Pick<ProjectTask, "status" | "acceptance_state">): { state: Exclude<AcceptanceState, "">; tone: "" | "ok" | "attn" } | null {
+  const state = task.acceptance_state;
+  if (!state || (task.status !== "done" && task.status !== "review")) return null;
+  return { state, tone: acceptanceTone(state) };
+}
+
+/** Checked and approved are good news, returned wants attention, and handed in is only the member's
+ *  word so far, which is drawn as neither. */
+export function acceptanceTone(state: AcceptanceState): "" | "ok" | "attn" {
+  if (state === "accepted" || state === "operator_approved") return "ok";
+  if (state === "returned") return "attn";
+  return "";
+}
+
+/** Whether the sheet has an acceptance section to draw: a level, or a check with a word or a mark on it. */
+export function hasAcceptance(task: Pick<ProjectTask, "acceptance_state" | "checklist">): boolean {
+  return Boolean(task.acceptance_state) || task.checklist.some((item) => item.evidence || item.mark);
+}
+
+/** Where a requirement came from, as a dictionary key and what fills it. A source of a kind this app
+ *  does not know is the orchestrator's unless the host says it is the operator's. */
+export function requirementSource(r: Pick<Requirement, "source" | "from_operator">): { key: "operator" | "answer" | "rule" | "orchestrator"; ref: string } {
+  const [head, ...rest] = r.source.split(":");
+  const ref = rest.join(":");
+  if (head === "answer" && ref) return { key: "answer", ref };
+  if (head === "rule" && ref) return { key: "rule", ref };
+  return { key: r.from_operator || head === "operator" ? "operator" : "orchestrator", ref: "" };
+}
+
+export type DeliveryState = "opened" | "words" | "confirmed" | "sent";
+
+/** How far a requirement got with one member. For an input, opening its file is the proof; a
+ *  command-line member's confirmation of an input is only its word, since the host cannot see the file
+ *  opened, and the sheet says so rather than pass it off as the same thing. */
+export function deliveryState(d: Pick<Delivery, "opened_at" | "acknowledged_at" | "cli">, kind: Requirement["kind"]): DeliveryState {
+  if (d.opened_at) return "opened";
+  if (!d.acknowledged_at) return "sent";
+  return kind === "input" && d.cli ? "words" : "confirmed";
 }

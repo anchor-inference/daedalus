@@ -123,6 +123,38 @@ export function projectGroups(questions: WaitingQuestion[]): { key: string; proj
   return [...groups.values()];
 }
 
+/** When the orchestrator last reworded a question, and how many times: null for one never changed. A
+ *  reworded question keeps its id, so the card, its place and the operator's draft all stay; this is
+ *  what tells the operator the words under that draft are not the ones it was begun against. */
+export function revisionOf(q: Pick<WaitingQuestion, "detail">): { revision: number; at: string } | null {
+  const revision = Number(q.detail?.revision ?? 0);
+  if (!Number.isFinite(revision) || revision < 1) return null;
+  const at = typeof q.detail.updated_at === "string" ? q.detail.updated_at : "";
+  return { revision, at };
+}
+
+/** A draft held against the question as it now stands. A rewording may drop an option the operator
+ *  had chosen; sending that choice would answer with something the question no longer offers, so the
+ *  choice goes and the words written beside it stay. The draft is returned unchanged when nothing
+ *  it chose is gone, so a list that did not change re-renders nothing. */
+export function fitDraft(q: Pick<WaitingQuestion, "kind" | "options">, d: Draft): Draft {
+  if (isPermission(q) || d.selected.length === 0) return d;
+  const selected = d.selected.filter((o) => q.options.includes(o));
+  return selected.length === d.selected.length ? d : { ...d, selected };
+}
+
+/** Every draft of the listed questions fitted to them, the same object back when none changed. */
+export function fitDrafts(drafts: Drafts, questions: WaitingQuestion[]): Drafts {
+  let out: Drafts | null = null;
+  for (const q of questions) {
+    const d = drafts[q.id];
+    if (!d) continue;
+    const fitted = fitDraft(q, d);
+    if (fitted !== d) (out ??= { ...drafts })[q.id] = fitted;
+  }
+  return out ?? drafts;
+}
+
 // ── the host's answer ────────────────────────────────────────────────────────────────────────
 
 /** What a card shows after a send, or after the list lost it: gone with a word, or held with a reason. */

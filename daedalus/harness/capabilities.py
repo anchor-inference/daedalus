@@ -187,6 +187,32 @@ CAPABILITIES: dict[str, Capabilities] = {
 """One entry per command-line harness. Daedalus staff are not here: they run in this process and have
 none of these channels."""
 
+MODE_MEANINGS: dict[str, dict[str, str]] = {
+    "codex": {
+        "read-only": "reads only: no file writes and no network, whatever the task allows",
+        "workspace-write": "writes in its own folder; the network stays off",
+        "danger-full-access": "writes anywhere and uses the network, and never asks",
+    },
+    "claude": {
+        "default": "asks before each edit and command",
+        "manual": "asks before each edit and command",
+        "acceptEdits": "edits files without asking; asks before commands",
+        "auto": "decides by itself what to ask about",
+        "plan": "plans only: no edits and no commands",
+        "dontAsk": "never asks: anything not allowed beforehand is refused",
+        "bypassPermissions": "does anything without asking",
+    },
+}
+"""What each permission mode of a command-line agent lets a member do, in the words the orchestrator
+chooses by. An orchestrator hired a reviewer "read-only" for a check the operator had said to fix as
+well, and a test message the operator then allowed could not be sent: a Codex read-only sandbox has
+neither writes nor a network, which no mode's name says."""
+MODE_MEANINGS["grok"] = {k: v for k, v in MODE_MEANINGS["claude"].items() if k != "manual"}
+RESTRICTIVE_MODES = {"codex": frozenset({"read-only"}), "claude": frozenset({"plan"}), "grok": frozenset({"plan"})}
+"""The modes in which a member cannot change anything: work that the operator allowed to fix things
+cannot be done in them."""
+
+
 _VERSION = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
 
 
@@ -218,6 +244,8 @@ def version_supported(caps: Capabilities, version: str) -> bool:
 
 __all__ = [
     "CAPABILITIES",
+    "MODE_MEANINGS",
+    "RESTRICTIVE_MODES",
     "Capabilities",
     "FirstPrompt",
     "Interrupt",

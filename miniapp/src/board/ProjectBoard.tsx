@@ -27,14 +27,20 @@ import {
   NeedsYou,
   ProjectBoardData,
   ProjectTask,
+  Requirement,
   TaskStatus,
+  acceptanceChip,
+  acceptanceTone,
   arrange,
   briefChanges,
   chips,
   columnCount,
+  deliveryState,
   emptyBrief,
+  hasAcceptance,
   mergesOnAccept,
   missingBrief,
+  requirementSource,
   sections,
   statusLine,
   toggleFilter,
@@ -309,6 +315,7 @@ function TaskCard({ task, titles, onOpen, onAccept }: { task: ProjectTask; title
         {task.assignee && <Who name={task.assignee.name} color={task.assignee.color} harness={task.assignee.harness} />}
         <StatusText task={task} titles={titles} />
         <span className="grow" />
+        <AcceptanceChip task={task} />
         {task.status === "done" || task.status === "dropped" ? (
           <span className="faint" title={absTime(task.updated_at)}>{task.status === "dropped" ? t("board.col.dropped") : relTime(task.updated_at)}</span>
         ) : null}
@@ -317,6 +324,117 @@ function TaskCard({ task, titles, onOpen, onAccept }: { task: ProjectTask; title
         )}
       </div>
     </div>
+  );
+}
+
+/** How far a handed-in card was accepted, in a word. It sits in the card's last row rather than a row
+ *  of its own, so a finished card is no taller for it. */
+function AcceptanceChip({ task }: { task: ProjectTask }) {
+  const chip = acceptanceChip(task);
+  if (!chip) return null;
+  return (
+    <span className={`chip tiny pcard-accept ${chip.tone}`} data-acceptance={chip.state} title={t(`pboard.acceptance.${chip.state}.title`)}>
+      {chip.state === "operator_approved" && <Icon name="check" size={11} />}
+      {t(`pboard.acceptance.${chip.state}`)}
+    </span>
+  );
+}
+
+/** The checks of a handed-in card: the member's word on each (how it was checked, what came of it) and
+ *  the orchestrator's mark, so the operator reads the evidence rather than a count of ticks. */
+function AcceptanceSection({ task }: { task: ProjectTask }) {
+  const state = task.acceptance_state;
+  return (
+    <section className="pboard-contract pboard-acceptance" aria-label={t("pboard.acceptance")}>
+      <div className="pboard-contract-head">
+        <span className="pboard-contract-title">{t("pboard.acceptance")}</span>
+        {state && (
+          <span className={`chip tiny ${acceptanceTone(state)}`} data-acceptance={state}>
+            {state === "operator_approved" && <Icon name="check" size={11} />}
+            {t(`pboard.acceptance.${state}.title`)}
+          </span>
+        )}
+      </div>
+      {task.checklist.length > 0 && (
+        <ol className="pboard-items">
+          {task.checklist.map((item, i) => (
+            <li key={i} className={`pboard-item ${item.mark ? (item.mark.ok ? "ok" : "bad") : ""}`} data-check={`C${i + 1}`}>
+              <code className="pboard-label">C{i + 1}</code>
+              <div className="pboard-item-line">
+                <span className="pboard-item-text">{item.text}</span>
+                {item.mark && <MarkChip ok={item.mark.ok} />}
+              </div>
+              {item.evidence && (item.evidence.how || item.evidence.result) && (
+                <div className="sub pboard-evidence">{[item.evidence.how, item.evidence.result].filter(Boolean).join(" → ")}</div>
+              )}
+              {!item.evidence && state === "handed_in" && <div className="sub faint">{t("pboard.check.noword")}</div>}
+              {item.mark?.note && <div className="sub pboard-mark-note">{item.mark.note}</div>}
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+function MarkChip({ ok }: { ok: boolean }) {
+  return (
+    <span className={`chip tiny ${ok ? "ok" : "bad"} pboard-mark`} data-mark={ok ? "met" : "unmet"}>
+      <Icon name={ok ? "check" : "close"} size={11} />
+      {t(ok ? "pboard.check.met" : "pboard.check.unmet")}
+    </span>
+  );
+}
+
+/** The card's requirements: what each asks, of what kind, whose it is, and for each member it was
+ *  given to whether it got there. One replaced or withdrawn stays in the list, struck through, so the
+ *  operator can see what changed rather than wonder where a requirement went. */
+function RequirementsSection({ requirements }: { requirements: Requirement[] }) {
+  return (
+    <section className="pboard-contract pboard-requirements" aria-label={t("pboard.requirements")}>
+      <div className="pboard-contract-head">
+        <span className="pboard-contract-title">{t("pboard.requirements")}</span>
+      </div>
+      <ol className="pboard-items">
+        {requirements.map((r) => {
+          const source = requirementSource(r);
+          return (
+            <li key={r.id} className={`pboard-item req ${r.state}`} data-requirement={r.label}>
+              <code className="pboard-label">{r.label}</code>
+              <div className="pboard-item-line">
+                <span className="pboard-item-text">{r.text}</span>
+                {r.mark && r.state === "active" && <MarkChip ok={r.mark.ok} />}
+              </div>
+              <div className="sub pboard-req-meta">
+                {t(`pboard.req.kind.${r.kind}`)} · {t(`pboard.req.from.${source.key}`, { ref: source.ref })}
+                {r.state !== "active" && <> · <span className="pboard-req-state">{t(`pboard.req.state.${r.state}`)}</span></>}
+              </div>
+              {r.kind === "input" && r.file_name && (
+                <div className="sub pboard-req-file"><Icon name="file" size={12} /> <span className="truncate" title={r.file_name}>{r.file_name}</span></div>
+              )}
+              {r.mark?.note && r.state === "active" && <div className="sub pboard-mark-note">{r.mark.note}</div>}
+              {r.state === "active" && r.deliveries.length > 0 && (
+                <div className="pboard-deliveries">
+                  {r.deliveries.map((d) => {
+                    const state = deliveryState(d, r.kind);
+                    return (
+                      <span
+                        key={`${d.staff_id}-${d.delivered_at}`}
+                        className={`chip tiny pboard-delivery ${state === "sent" ? "attn" : state === "words" ? "" : "ok"}`}
+                        data-delivery={state}
+                        title={t(`pboard.req.via.${d.via}`, { t: absTime(d.delivered_at) })}
+                      >
+                        {t(`pboard.req.delivery.${state}`, { name: d.staff_name })}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
 
@@ -437,6 +555,8 @@ function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: 
         </div>
       )}
 
+      {task && hasAcceptance(task) && <AcceptanceSection task={task} />}
+
       <label className="field" htmlFor="ptask-title">{t("board.title")}</label>
       <input id="ptask-title" className="field" autoFocus={!task} value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} />
 
@@ -449,6 +569,8 @@ function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: 
           </div>
         ))}
       </fieldset>
+
+      {task && (task.requirements?.length ?? 0) > 0 && <RequirementsSection requirements={task.requirements!} />}
 
       <label className="field" htmlFor="ptask-assignee">{t("pboard.assignee")}</label>
       {team.length === 0 && !gone ? (

@@ -32,6 +32,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.notifications import Draft
+from daedalus.extensions.task_contract import Contracts
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -336,8 +337,12 @@ class Board:
         # A task may not be left finished with an item still open, whichever way this call moved:
         # closing it, or editing the checklist of a task that is already done. The gate judges the
         # checklist this call produces, and it runs before anything is written, so a refusal stores
-        # nothing — the message has to say so, or the caller retries with the wrong indexes.
-        if (status or task["status"]) == "done":
+        # nothing — the message has to say so, or the caller retries with the wrong indexes. A call
+        # that does neither is let through: a card a member handed in sits in done with its checks
+        # still to be marked, and a note added to it is not a claim that they are.
+        closing = moving and status == "done"
+        editing = not moving and task["status"] == "done" and bool(check or uncheck)
+        if closing or editing:
             still_open = [i for i, c in enumerate(checklist) if not c["done"]]
             if still_open:
                 named = ", ".join(f"{i} ({str(checklist[i].get('text', '')).strip()[:40]})" for i in still_open[:5])
@@ -373,6 +378,9 @@ class Board:
                 assignee, json.dumps(new_brief) if new_brief is not None else None, json.dumps(deps), task_id,
             ),
         )
+        if moving and who.kind == "operator" and task["status"] in ("review", "done") and new_status in ("todo", "doing") and task.get("project_id"):
+            # The operator taking a card back out of review is their verdict on the result.
+            await self.app.db.execute("UPDATE board_tasks SET acceptance_state = 'returned' WHERE id = ?", (task_id,))
         updated = await self.get(task_id)
         # The move is announced before what it causes, so a reader sees "done" and then the dependents
         # it made ready, in that order.
@@ -420,9 +428,17 @@ class Board:
             if review is None:
                 raise ValueError(f"task {task_id} has unmerged work on branch {task['branch']}; it is merged before it is accepted")
             return await review.merge(task_id, by=by)  # type: ignore[no-any-return]
-        done = await self.update(task_id, status="done", note=f"accepted by the {by}")
+        # Accepting is the verdict on every check of the card: its items are ticked with it, or a card
+        # whose checks the orchestrator left to the operator could never be accepted at all.
+        done = await self.update(task_id, status="done", note=f"accepted by the {by}", check=list(range(len(task["checklist"]))))
+        await self.set_acceptance(task_id, "operator_approved" if by == "operator" else "accepted")
+        done = await self.get(task_id)
         await self._publish("task.accepted", done, OPERATOR if by == "operator" else Actor(by))
         return done
+
+    async def set_acceptance(self, task_id: str, state: str) -> None:
+        """How far a card's result is accepted (see :mod:`daedalus.extensions.task_contract`)."""
+        await self.app.db.execute("UPDATE board_tasks SET acceptance_state = ? WHERE id = ? AND project_id IS NOT NULL", (state, task_id))
 
     async def needs_you(self, project_id: str) -> list[dict[str, Any]]:
         """What in this project waits on the operator: the open requests routed to them, oldest first.
@@ -480,12 +496,30 @@ class Board:
                 "status_at": session["status_at"] if on_it and session is not None else None,
                 "session_id": session["session_id"] if session is not None else None,
             }
+        await self._contracts(tasks)
         needs = await self.needs_you(project_id)
         counts_rows = await self.app.db.fetchall("SELECT status, count(*) AS n FROM board_tasks WHERE project_id = ? GROUP BY status", (project_id,))
         counts = {status: 0 for status in STATUSES}
         counts.update({r["status"]: int(r["n"]) for r in counts_rows if r["status"] in counts})
         team = [{"id": m["id"], "name": m["name"], "color": m["color"], "harness": m["harness"]} for m in members.values() if m["archived_at"] is None]
         return {"tasks": tasks, "needs_you": needs, "counts": {**counts, "needs_you": len(needs)}, "staff": team}
+
+    async def _contracts(self, tasks: list[dict[str, Any]]) -> None:
+        """Each card's requirements, with who was given each and whether they confirmed or opened it."""
+        contracts = Contracts(self.app.db)
+        found = await contracts.of_tasks([t["id"] for t in tasks])
+        for task in tasks:
+            requirements = found.get(task["id"]) or []
+            deliveries = await contracts.deliveries(task["id"]) if requirements else {}
+            names = {f.id: f.name for f in await self._files(task["id"])} if any(r.file_id for r in requirements) else {}
+            task["requirements"] = [
+                {**r.view(), "file_name": names.get(r.file_id or "", ""), "deliveries": deliveries.get(r.id) or []} for r in requirements
+            ]
+
+    async def _files(self, task_id: str) -> list[Any]:
+        manager = self.app.manager
+        store = getattr(manager, "files", None) if manager is not None else None
+        return list(await store.of_task(task_id)) if store is not None else []
 
     async def delete(self, task_id: str) -> bool:
         row = await self.app.db.fetchone("SELECT id FROM board_tasks WHERE id = ?", (task_id,))

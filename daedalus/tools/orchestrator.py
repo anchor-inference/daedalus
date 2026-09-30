@@ -132,8 +132,11 @@ async def team(context: ToolContext, staff: str | None = None, concurrency: int 
         "The project's board. op='list' (open tasks; status narrows it), 'get' (task_id: brief, branch, notes), "
         "'create' (title and the four brief parts: objective, deliverable, boundaries, done_when; priority 1-5, "
         "depends_on, assignee to hand it over at once), 'update' (task_id and what changes, assignee='' unassigns), "
-        "'move' (task_id, status: todo|doing|review|done|blocked|dropped). A task with an unmerged branch reaches done "
-        "only through the operator's review; review is for what the operator has to look at."
+        "'move' (task_id, status: todo|doing|review|done|blocked|dropped; with blocked, waiting_on says who or what it "
+        "waits for — the operator, someone outside, a date, another task). A task with an unmerged branch reaches done "
+        "only through the operator's review; review is for what the operator has to look at. 'get' shows the card's "
+        "checks (C…), requirements (R…) and acceptance. A new card for work already on the board is refused with "
+        "that card's id — hand the card on instead, or new=true with a reason saying how the work differs."
     ),
 )
 async def tasks(
@@ -150,10 +153,14 @@ async def tasks(
     depends_on: list[str] | None = None,
     assignee: str | None = None,
     note: str = "",
+    waiting_on: str = "",
+    new: bool = False,
+    reason: str = "",
 ) -> ToolResult:
     return await _call(
         context, "tasks", op=op, task_id=task_id, title=title, objective=objective, deliverable=deliverable, boundaries=boundaries,
-        done_when=done_when, status=status, priority=priority, depends_on=depends_on, assignee=assignee, note=note,
+        done_when=done_when, status=status, priority=priority, depends_on=depends_on, assignee=assignee, note=note, waiting_on=waiting_on,
+        new=new, reason=reason,
     )
 
 
@@ -211,10 +218,17 @@ class AskOperator(Tool):
                 "text, options?, multi?, urgent?, dispatch_id?, context?}, …] (up to 12), or one question with title and "
                 "text. The operator sees them as a list, answers any of them and sends the answers together. It returns "
                 "at once with each question's short id; do not wait — the answers arrive as events in a later wake-up, "
-                "in one wake-up when they were sent together. WithdrawQuestions takes back those that no longer matter."
+                "in one wake-up when they were sent together. A question still waiting is never asked again: "
+                "op='update' with its id and the new title, text, options or context changes it in place (an answer the "
+                "operator began to write stays), op='withdraw' with ids and reason takes questions back; a new question on "
+                "the subject of one still open is refused with that one's id."
             ),
             parameters=ToolParameterSchema(
                 properties={
+                    "op": {"type": "string", "enum": ["ask", "update", "withdraw"], "description": "ask (the default), update one open question in place, or withdraw some."},
+                    "id": {"type": "string", "description": "With op='update': the short id of your open question."},
+                    "ids": {"type": "array", "items": {"type": "string"}, "description": "With op='withdraw': the short ids to take back."},
+                    "reason": {"type": "string", "description": "With op='withdraw': a few words the operator sees where each question was."},
                     "questions": {
                         "type": "array",
                         "description": "Several questions at once, each with its own title and text.",
@@ -233,13 +247,19 @@ class AskOperator(Tool):
         options = arguments.get("options") or []
         if not isinstance(options, list):
             return error(context, "options is a list of strings")
+        ids = arguments.get("ids") or []
         return await _call(
             context,
             "ask_operator",
+            op=str(arguments.get("op") or "ask"),
+            id=str(arguments["id"]) if arguments.get("id") else None,
+            ids=[str(i) for i in ids] if isinstance(ids, list) else None,
+            reason=str(arguments.get("reason") or ""),
             questions=questions or None,
             title=str(arguments.get("title") or ""),
             text=str(arguments.get("text") or ""),
-            options=[str(o) for o in options],
+            # None when not given, so an update that changes only the words keeps the options.
+            options=[str(o) for o in options] if arguments.get("options") is not None else None,
             multi=bool(arguments.get("multi")),
             context=str(arguments.get("context") or ""),
             task_id=str(arguments["task_id"]) if arguments.get("task_id") else None,
@@ -378,19 +398,24 @@ async def dismiss(context: ToolContext, staff: str, release: bool = False, keep_
     description=(
         "Hand a member a task: task_id of a task on the board, or title plus the brief for a new one. A revision or "
         "the next step of work a member handed in is the same task: pass its task_id (it is reopened, its history "
-        "kept). Without a task_id the work gets a card of its own; a title that repeats the one the member just "
-        "handed in is refused as a round that forgot its task_id — new=true when it is separate work after all. "
+        "kept) — without staff it goes back to whoever worked it last, and to anyone else only with reason. Without "
+        "a task_id the work gets a card of its own; work already on the board (a card open, or finished in the last "
+        "hours) is refused with that card's id — hand it on with task_id, or new=true with a reason when it is "
+        "separate work after all. A task_id never takes a card someone is still working on to other work. "
         "The brief has four parts, each a real sentence, on the task or given here: objective (what and why), deliverable (what "
-        "exists when done), boundaries (where to work, what not to touch), done_when (a check anyone can run). "
-        "folder, priority (1 first … 5) and depends_on are optional. files: handles (att:…) or paths in the project's "
-        "folders; the host copies each where the member can open it before the brief is sent, and the brief names "
-        "that copy — never put a path of your own into a brief. It starts now or waits in the project's queue; the "
-        "answer says which and why."
+        "exists when done), boundaries (where to work, what not to touch), done_when (a check anyone can run; each "
+        "line of it becomes a check C1 … the result is accepted against, or give checks=[…]). requirements: the "
+        "operator's concrete conditions for this work, in their words (a string each, or {text, kind: quality|scope|"
+        "constraint, source}). inputs: files the work starts from (handles), which the member must open before it can "
+        "hand the work in. folder, priority (1 first … 5) and depends_on are optional. files: handles (att:…) or "
+        "paths in the project's folders; the host copies each where the member can open it before the brief is sent, "
+        "and the brief names that copy — never put a path of your own into a brief. It starts now or waits in the "
+        "project's queue; the answer says which and why."
     ),
 )
 async def assign(
     context: ToolContext,
-    staff: str,
+    staff: str | None = None,
     task_id: str | None = None,
     title: str | None = None,
     objective: str | None = None,
@@ -402,11 +427,134 @@ async def assign(
     depends_on: list[str] | None = None,
     files: list[str] | None = None,
     new: bool = False,
+    requirements: list[Any] | None = None,
+    inputs: list[str] | None = None,
+    checks: list[str] | None = None,
+    reason: str = "",
 ) -> ToolResult:
     return await _call(
         context, "assign", staff=staff, task_id=task_id, title=title, objective=objective, deliverable=deliverable, boundaries=boundaries,
         done_when=done_when, folder=folder, priority=priority, depends_on=depends_on, files=files, new=new,
+        requirements=requirements, inputs=inputs, checks=checks, reason=reason,
     )
+
+
+REQUIREMENT_ITEM: dict[str, Any] = {
+    "anyOf": [
+        {"type": "string"},
+        {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "kind": {"type": "string", "enum": ["quality", "scope", "constraint"]},
+                "source": {"type": "string", "description": "operator (their words in this chat, the default), orchestrator, answer:<request id> or rule:<id>."},
+                "why": {"type": "string", "description": "Why, for a constraint of yours that narrows what the operator allowed."},
+            },
+            "required": ["text"],
+        },
+    ]
+}
+assign().definition.parameters.properties["requirements"] = {
+    "type": "array",
+    "description": "The operator's conditions for this work, one each: quality bars, formats, what not to do.",
+    "items": REQUIREMENT_ITEM,
+}
+
+
+@search_hint(
+    "requirement condition quality bar operator demand add requirement to task input file reference must read "
+    "требование условие к задаче планка качества добавить требование референс обязательный файл поправка к задаче"
+)
+@tool(
+    name="Require",
+    description=(
+        "Put a requirement on a card: a condition all of its work must meet — usually the operator's, stated in the "
+        "chat (source='operator'), sometimes yours (source='orchestrator'), or from an answer of theirs "
+        "(source='answer:<request id>'). kind: quality, scope, constraint, or input with file=<att:…>: a file the work "
+        "starts from, which the member must open before handing in. It is numbered (R1 …) and goes to whoever works "
+        "the card: into the turn they are in now, with a receipt, or with the next brief. replaces=R2 puts it in "
+        "place of an older one; withdraw=R2 takes one out. The operator's own requirement is replaced or withdrawn "
+        "only with their answer as source — ask them first. What the operator allows for the work ('if something "
+        "needs fixing, fix it') is kind='scope' in their words; a constraint of yours that narrows it takes why, "
+        "and the operator is told."
+    ),
+)
+async def require(
+    context: ToolContext,
+    task_id: str,
+    text: str = "",
+    kind: str = "quality",
+    source: str = "orchestrator",
+    replaces: str | None = None,
+    withdraw: str | None = None,
+    file: str | None = None,
+    why: str = "",
+) -> ToolResult:
+    return await _call(context, "require", task_id=task_id, text=text, kind=kind, source=source, replaces=replaces, withdraw=withdraw, file=file, why=why)
+
+
+require().definition.parameters.properties["kind"]["enum"] = ["quality", "scope", "constraint", "input"]
+
+
+@search_hint(
+    "accept result check handed in done review verify evidence return rework approve mark checks "
+    "принять результат проверить сданное приемка вернуть на доработку отметить пункты одобрить"
+)
+@tool(
+    name="Accept",
+    description=(
+        "Record your check of work a member handed in. verdict='accepted' takes a mark for every check (C…) and "
+        "requirement (R…) of the card: checks=[{item, ok, note}] — an input the member opened is marked by the host; "
+        "a check you did not see pass is ok=false. verdict='returned' reopens the card for its member with what "
+        "failed (staff and reason to give it to someone else). ask_operator=true, with your marks, puts it in the "
+        "operator's review column for them to accept: for what they will use themselves or judge by taste. A card "
+        "with no checks and no requirements is accepted with note alone."
+    ),
+)
+async def accept(
+    context: ToolContext,
+    task_id: str,
+    verdict: str = "accepted",
+    checks: list[dict[str, Any]] | None = None,
+    note: str = "",
+    ask_operator: bool = False,
+    staff: str | None = None,
+    reason: str = "",
+) -> ToolResult:
+    return await _call(context, "accept", task_id=task_id, verdict=verdict, checks=checks, note=note, ask_operator=ask_operator, staff=staff, reason=reason)
+
+
+accept().definition.parameters.properties["verdict"]["enum"] = ["accepted", "returned"]
+accept().definition.parameters.properties["checks"] = {
+    "type": "array",
+    "description": "One mark per check (C1 …) and requirement (R1 …).",
+    "items": {
+        "type": "object",
+        "properties": {
+            "item": {"type": "string", "description": "C1, R2, or its words."},
+            "ok": {"type": "boolean", "description": "Whether you saw it met."},
+            "note": {"type": "string", "description": "What you looked at, or what is wrong."},
+        },
+        "required": ["item", "ok"],
+    },
+}
+
+
+@search_hint(
+    "decide nothing further close result no next step waiting reason decision "
+    "решить закрыть результат ничего дальше без следующего шага причина решение"
+)
+@tool(
+    name="Decide",
+    description=(
+        "Say that nothing further follows a result or a card, and why: it leaves the state block's list of results "
+        "waiting for your decision, and the journal keeps the reason. task_id, or loop (the L… the state block "
+        "gives). For a card that waits on the operator, someone outside or a date, Tasks(op='move', "
+        "status='blocked', waiting_on=…) says so on the board instead."
+    ),
+)
+async def decide(context: ToolContext, why: str, task_id: str | None = None, loop: str | None = None) -> ToolResult:
+    return await _call(context, "decide", why=why, task_id=task_id, loop=loop)
 
 
 @search_hint(
@@ -639,7 +787,7 @@ async def unwatch(context: ToolContext, id: str) -> ToolResult:
 
 TOOLS = [
     brief, folders, journal, team, tasks, peek, AskOperator, withdraw_questions, project_report,
-    hire, staff_edit, dismiss, assign, tell, read_staff, answer, interrupt, pause, release, harnesses,
+    hire, staff_edit, dismiss, assign, require, accept, decide, tell, read_staff, answer, interrupt, pause, release, harnesses,
     wake_me, Watch, unwatch,
 ]
 

@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { api, type QuestionOutcome, type WaitingQuestion } from "../api";
 import { useEvent } from "../events";
-import { relTime } from "../format";
+import { absTime, relTime } from "../format";
 import { plural, t } from "../i18n";
 import { Icon, type IconName } from "../icons";
 import { renderMarkdown } from "../md";
@@ -24,6 +24,7 @@ import {
   batchOf,
   choosePermission,
   fateOf,
+  fitDrafts,
   folds,
   isBlank,
   isPermission,
@@ -34,6 +35,7 @@ import {
   loadDrafts,
   projectGroups,
   pruneDrafts,
+  revisionOf,
   saveDrafts,
   sections,
   setText,
@@ -102,7 +104,7 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
     seen.current = now;
     // A draft of a question this list no longer holds is dropped — but only a draft of this list's
     // own questions: the main chat's list must not lose a project's drafts, nor the reverse.
-    setDrafts((d) => pruneDrafts(d, now.keys(), (draft) => scope === "all" || draft.project === scope.projectId));
+    setDrafts((d) => fitDrafts(pruneDrafts(d, now.keys(), (draft) => scope === "all" || draft.project === scope.projectId), questions));
   }, [questions, depart, scope]);
 
   // Taken back by the orchestrator: the event carries its reason, which the card then shows.
@@ -323,6 +325,7 @@ function QuestionCard({ q, draft, fate, fresh, onChange, onClear, onDismiss }: C
   const permission = isPermission(q);
   const role = textRole(q, d);
   const state = fate ? fate.kind : ready ? "ready" : blank ? "idle" : "draft";
+  const revised = revisionOf(q);
 
   // The field grows with what is written, up to a few lines, and then scrolls.
   useEffect(() => {
@@ -374,6 +377,11 @@ function QuestionCard({ q, draft, fate, fresh, onChange, onClear, onDismiss }: C
             <span className="truncate">{askerWords(q)}</span>
             <span aria-hidden>·</span>
             <span className="num">{relTime(q.created_at)}</span>
+            {revised && (
+              <span className="q-flag updated" data-revision={revised.revision} title={t("questions.updated.title", { n: revised.revision, t: revised.at ? absTime(revised.at) : "" })}>
+                {revised.at ? t("questions.updated", { t: relTime(revised.at) }) : t("questions.updated.bare")}
+              </span>
+            )}
             {q.urgent && <span className="q-flag urgent">{t("questions.urgent")}</span>}
             {q.host && <span className="q-flag host" title={t("main.ask.host")}><Icon name="lock" size={11} />{t("questions.host")}</span>}
           </div>

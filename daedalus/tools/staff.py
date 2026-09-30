@@ -37,9 +37,11 @@ def _hook(context: ToolContext):  # type: ignore[no-untyped-def]
         "cannot go on without a decision), 'stuck' (something outside your task blocks you) or 'done' (the "
         "deliverable meets the task's done-when; it hands the task in: work on your own branch goes to review for "
         "the operator to merge, and a worktree with uncommitted changes is refused — commit first; any other task "
-        "is closed as done, and your note is the result the orchestrator reads). note: a short factual summary. "
-        "artifacts: paths or links of what you produced. remember: one line to keep in your notes for every later "
-        "session."
+        "goes to done, handed in for the orchestrator to check against your note). note: a short factual summary. "
+        "evidence (with done): [{item, how, result}] for each check (C1 …) and requirement (R1 …) of the task — "
+        "what you ran or looked at and what it showed. acknowledged: the requirements (R…) sent to you that you "
+        "have taken into your plan. artifacts: paths or links of what you produced. remember: one line to keep in "
+        "your notes for every later session."
     ),
 )
 async def report(
@@ -48,15 +50,36 @@ async def report(
     note: str,
     artifacts: list[str] | None = None,
     remember: str | None = None,
+    evidence: list[dict[str, str]] | None = None,
+    acknowledged: list[str] | None = None,
 ) -> ToolResult:
     hook = _hook(context)
     if hook is None:
         return error(context, "the team is not available in this installation")
     try:
-        text = await hook("report", session_id=context.session_id, kind=kind, note=note, artifacts=artifacts, remember=remember)
+        text = await hook(
+            "report", session_id=context.session_id, kind=kind, note=note, artifacts=artifacts, remember=remember, evidence=evidence, acknowledged=acknowledged,
+        )
     except (KeyError, ValueError, RuntimeError) as exc:
         return error(context, str(exc))
     return ok(context, text)
+
+
+# The decorator describes a list of dicts as a list of anything; the member is shown the three fields
+# a piece of evidence has, so it does not invent its own and have them matched to nothing.
+report().definition.parameters.properties["evidence"] = {
+    "type": "array",
+    "description": "With kind='done': one entry per check (C1 …) and requirement (R1 …).",
+    "items": {
+        "type": "object",
+        "properties": {
+            "item": {"type": "string", "description": "The check or requirement: C1, R2, or its words."},
+            "how": {"type": "string", "description": "What you ran, opened or looked at to check it."},
+            "result": {"type": "string", "description": "What that showed."},
+        },
+        "required": ["item", "how", "result"],
+    },
+}
 
 
 class AskOrchestrator(Tool):

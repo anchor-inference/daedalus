@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Assignee, NeedsYou, ProjectTask, arrange, briefChanges, chips, columnCount, columnOf, emptyBrief, mergeBlock, mergesOnAccept, missingBrief, sections, statusLine, toggleFilter } from "./board";
+import { Assignee, NeedsYou, ProjectTask, acceptanceChip, acceptanceTone, arrange, briefChanges, chips, columnCount, columnOf, deliveryState, emptyBrief, hasAcceptance, mergeBlock, mergesOnAccept, missingBrief, requirementSource, sections, statusLine, toggleFilter } from "./board";
 
 let seq = 0;
 function task(fields: Partial<ProjectTask> = {}): ProjectTask {
@@ -128,5 +128,43 @@ describe("review and merge", () => {
     expect(mergesOnAccept({ branch: "agent/ada/t1-menu", merge_state: "conflict" })).toBe(true);
     expect(mergesOnAccept({ branch: "agent/ada/t1-menu", merge_state: "merged" })).toBe(false);
     expect(mergesOnAccept({ branch: null, merge_state: "" })).toBe(false);
+  });
+});
+
+describe("the task contract", () => {
+  it("chips the acceptance level only on a card in review or done", () => {
+    expect(acceptanceChip(task({ status: "done", acceptance_state: "handed_in" }))).toEqual({ state: "handed_in", tone: "" });
+    expect(acceptanceChip(task({ status: "review", acceptance_state: "accepted" }))).toEqual({ state: "accepted", tone: "ok" });
+    expect(acceptanceChip(task({ status: "done", acceptance_state: "operator_approved" }))?.tone).toBe("ok");
+    expect(acceptanceChip(task({ status: "review", acceptance_state: "returned" }))?.tone).toBe("attn");
+    expect(acceptanceChip(task({ status: "doing", acceptance_state: "returned" }))).toBeNull();
+    expect(acceptanceChip(task({ status: "done", acceptance_state: "" }))).toBeNull();
+    // An older host sends no acceptance at all.
+    expect(acceptanceChip(task({ status: "done" }))).toBeNull();
+    expect(acceptanceTone("handed_in")).toBe("");
+  });
+
+  it("has an acceptance section for a level or a check with a word or a mark on it", () => {
+    expect(hasAcceptance(task({ checklist: [{ text: "tests pass", done: false }] }))).toBe(false);
+    expect(hasAcceptance(task({ checklist: [{ text: "tests pass", done: true, evidence: { how: "pytest", result: "12 passed" } }] }))).toBe(true);
+    expect(hasAcceptance(task({ acceptance_state: "returned" }))).toBe(true);
+  });
+
+  it("names where a requirement came from", () => {
+    expect(requirementSource({ source: "operator", from_operator: true })).toEqual({ key: "operator", ref: "" });
+    expect(requirementSource({ source: "answer:q4r8tz", from_operator: true })).toEqual({ key: "answer", ref: "q4r8tz" });
+    expect(requirementSource({ source: "rule:120", from_operator: true })).toEqual({ key: "rule", ref: "120" });
+    expect(requirementSource({ source: "orchestrator", from_operator: false })).toEqual({ key: "orchestrator", ref: "" });
+    expect(requirementSource({ source: "operator:telegram", from_operator: true }).key).toBe("operator");
+  });
+
+  it("says how far a requirement got with a member, and a command-line member's input only in words", () => {
+    const sent = { opened_at: null, acknowledged_at: null, cli: false };
+    expect(deliveryState(sent, "quality")).toBe("sent");
+    expect(deliveryState({ ...sent, acknowledged_at: "2026-09-24T10:00:00Z" }, "quality")).toBe("confirmed");
+    expect(deliveryState({ ...sent, acknowledged_at: "2026-09-24T10:00:00Z", opened_at: "2026-09-24T10:01:00Z" }, "input")).toBe("opened");
+    expect(deliveryState({ ...sent, acknowledged_at: "2026-09-24T10:00:00Z", cli: true }, "input")).toBe("words");
+    expect(deliveryState({ ...sent, acknowledged_at: "2026-09-24T10:00:00Z", cli: true }, "scope")).toBe("confirmed");
+    expect(deliveryState({ ...sent, cli: true }, "input")).toBe("sent");
   });
 });

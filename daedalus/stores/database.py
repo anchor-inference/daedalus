@@ -1574,6 +1574,81 @@ CREATE INDEX browser_workflows_by_group ON browser_workflows(group_id, started_a
 CREATE INDEX browser_workflows_by_stopped ON browser_workflows(stopped_at);
 """)
 
+# The contract of a task, its acceptance and the results nobody has decided on.
+#
+# A requirement is a row of its own, with where it came from and what became of it: the operator's
+# words said once in the orchestrator's chat were lost to the card and to the member who worked it
+# (the list of quality demands for a video lived only in a conversation; two reference videos were
+# promised to a scriptwriter and never sent). Its deliveries say which member was given it, how, and
+# whether they confirmed it or opened the file it names.
+#
+# Acceptance is a second dimension of a card beside its column: "done" on the board is where the
+# work is, and a member's report used to be all it took to get there. ``handed_in`` is the member's
+# word, ``accepted`` the orchestrator's check of each item, ``operator_approved`` the operator's own
+# acceptance, ``returned`` a check that sent it back. Cards already finished are given what they
+# were: a merge the operator made is theirs, a card an orchestrator closed on a report in the last
+# week is only handed in, anything older counts as accepted rather than raising old work again.
+#
+# An open result is a report of done, stuck or needs-input, or a card nobody owns, that no decision
+# of the orchestrator has followed yet: it stays in the state block until one does.
+MIGRATIONS.append("""
+CREATE TABLE task_requirements (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES board_tasks(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL,
+    number INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('quality', 'scope', 'input', 'constraint')),
+    source TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'superseded', 'withdrawn')),
+    replaces TEXT,
+    file_id TEXT,
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    mark_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (task_id, number)
+);
+CREATE INDEX task_requirements_by_project ON task_requirements(project_id, state);
+CREATE TABLE requirement_deliveries (
+    requirement_id TEXT NOT NULL REFERENCES task_requirements(id) ON DELETE CASCADE,
+    staff_session_id TEXT NOT NULL,
+    staff_id TEXT NOT NULL,
+    via TEXT NOT NULL CHECK (via IN ('brief', 'message')),
+    message_id TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
+    delivered_at TEXT NOT NULL,
+    acknowledged_at TEXT,
+    opened_at TEXT,
+    PRIMARY KEY (requirement_id, staff_session_id)
+);
+CREATE INDEX requirement_deliveries_by_session ON requirement_deliveries(staff_session_id);
+ALTER TABLE board_tasks ADD COLUMN acceptance_state TEXT NOT NULL DEFAULT ''
+    CHECK (acceptance_state IN ('', 'handed_in', 'accepted', 'operator_approved', 'returned'));
+UPDATE board_tasks SET acceptance_state = CASE
+        WHEN status = 'review' THEN 'handed_in'
+        WHEN COALESCE(branch, '') != '' AND merge_state = 'merged' THEN 'operator_approved'
+        WHEN origin_session_id IS NOT NULL AND updated_at >= strftime('%Y-%m-%dT%H:%M:%f', 'now', '-7 days') THEN 'handed_in'
+        ELSE 'accepted'
+    END
+WHERE project_id IS NOT NULL AND status IN ('review', 'done');
+CREATE TABLE open_loops (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    task_id TEXT,
+    staff_id TEXT,
+    cause TEXT NOT NULL CHECK (cause IN ('report_done', 'report_stuck', 'report_needs_input', 'task_unowned')),
+    event_seq INTEGER NOT NULL DEFAULT 0,
+    summary TEXT NOT NULL DEFAULT '',
+    opened_at TEXT NOT NULL,
+    reminded_at TEXT,
+    closed_at TEXT,
+    closed_by TEXT NOT NULL DEFAULT '',
+    decision TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX open_loops_open ON open_loops(project_id, closed_at);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

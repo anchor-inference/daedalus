@@ -7,6 +7,8 @@ import {
   batchOf,
   choosePermission,
   fateOf,
+  fitDraft,
+  fitDrafts,
   folds,
   isBlank,
   isReady,
@@ -16,6 +18,7 @@ import {
   permissionChoices,
   projectGroups,
   pruneDrafts,
+  revisionOf,
   saveDrafts,
   sections,
   setText,
@@ -195,5 +198,32 @@ describe("the answers a permission card offers", () => {
     expect(permissionChoices({ always: true, always_server: "" })).toEqual(["allow", "always", "deny", "because"]);
     expect(permissionChoices({ always: true })).toEqual(["allow", "always", "deny", "because"]);
     expect(permissionChoices({ always: false, always_server: "daedalus_browser" })).toEqual(["allow", "deny", "because"]);
+  });
+});
+
+describe("a question reworded in place", () => {
+  it("is marked with its revision and time, and a question never changed is not", () => {
+    expect(revisionOf(question())).toBeNull();
+    expect(revisionOf(question({ detail: { revision: 0 } }))).toBeNull();
+    expect(revisionOf(question({ detail: { revision: 2, updated_at: "2026-09-25T10:05:00Z" } }))).toEqual({ revision: 2, at: "2026-09-25T10:05:00Z" });
+    expect(revisionOf(question({ detail: { revision: 1 } }))).toEqual({ revision: 1, at: "" });
+  });
+
+  it("keeps the draft under the same id, dropping only a chosen option the new words no longer offer", () => {
+    const before = { selected: ["SQLite"], text: "small is fine", at: 1, project: "p1" };
+    const reworded = question({ options: ["Postgres", "DuckDB"], detail: { revision: 1 } });
+    expect(fitDraft(reworded, before)).toEqual({ ...before, selected: [] });
+    const kept = question({ options: ["Postgres", "SQLite", "DuckDB"] });
+    expect(fitDraft(kept, before)).toBe(before);
+    const drafts: Drafts = { [reworded.id]: before, other: { selected: ["x"], text: "", at: 1 } };
+    const fitted = fitDrafts(drafts, [reworded]);
+    expect(fitted[reworded.id].text).toBe("small is fine");
+    expect(fitted.other).toBe(drafts.other);
+    expect(fitDrafts(drafts, [kept])).toBe(drafts);
+  });
+
+  it("leaves a permission's choice alone, since it has no options to lose", () => {
+    const d = { selected: [], text: "", at: 1, choice: "allow" as const };
+    expect(fitDraft(perm, d)).toBe(d);
   });
 });

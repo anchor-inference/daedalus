@@ -1097,7 +1097,12 @@ class CliStaffRuntime:
                     await session.term.reply(post.reply_id, seen[1])
                 return
             try:
-                told = await self.ingress.report(live, str(body.get("kind") or ""), str(body.get("note") or ""), [str(a) for a in body.get("artifacts") or []], str(body.get("remember") or "") or None, call_id=call_id or None)
+                evidence = [e for e in body.get("evidence") or [] if isinstance(e, dict)]
+                acknowledged = [str(a) for a in body.get("acknowledged") or []]
+                told = await self.ingress.report(
+                    live, str(body.get("kind") or ""), str(body.get("note") or ""), [str(a) for a in body.get("artifacts") or []], str(body.get("remember") or "") or None,
+                    call_id=call_id or None, evidence=evidence or None, acknowledged=acknowledged or None,
+                )
                 reply: dict[str, Any] = {"text": told}
             except (ValueError, RuntimeError) as exc:
                 reply = {"text": str(exc), "error": True}

@@ -24,6 +24,7 @@ import posixpath
 import re
 import secrets
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -34,6 +35,7 @@ from protocore.runtime.events.types import EventType
 
 from daedalus.extensions.board import NOTES_MAX_CHARS
 from daedalus.extensions.notifications import ActionConflict, ActionOutcome, ActionRefused, Draft
+from daedalus.extensions.task_contract import RETURNED, Contracts, Requirement
 from daedalus.harness.capabilities import CAPABILITIES
 from daedalus.harness.contract import mcp_server, standing_rule
 from daedalus.harness.health import ChannelHealth, channel_health
@@ -150,6 +152,7 @@ def _task(row: Any) -> BoardTask:
         branch=row["branch"],
         depends_on=depends,
         sent_back=_sent_back(row),
+        returned=_returned(row),
     )
 
 
@@ -160,6 +163,16 @@ def _sent_back(row: Any) -> str:
     for line in reversed(str(row["notes"] or "").splitlines()):
         if SENT_BACK in line:
             return line.split(SENT_BACK, 1)[1].partition(": ")[2].strip()
+    return ""
+
+
+def _returned(row: Any) -> str:
+    """The orchestrator's latest note when it checked the work and returned it, else nothing."""
+    if row["acceptance_state"] != "returned":
+        return ""
+    for line in reversed(str(row["notes"] or "").splitlines()):
+        if RETURNED in line:
+            return line.split(RETURNED, 1)[1].strip()
     return ""
 
 
@@ -212,6 +225,12 @@ class Team:
         self.dispatcher_requests: Any = None
         """The main orchestrator, once installed: its confirmation before a project is created is a
         request of no project, which it settles itself."""
+        self.contracts = Contracts(self.manager.db)
+        """The cards' requirements, their deliveries to members, the checks and the acceptance."""
+        self.report_hooks: list[Callable[[AppEvent], Awaitable[None]]] = []
+        """Called with every member's report once it is published, before the call that made it
+        returns: the orchestrators open the result as one to decide on, so a wake-up the report causes
+        never finds it missing."""
 
     # -- lookups -----------------------------------------------------------------------------------
 
@@ -357,10 +376,10 @@ class Team:
 
     # -- publishing ----------------------------------------------------------------------------------
 
-    async def publish(self, event_type: str, payload: dict[str, Any], *, member: Staff | None = None, project_id: str | None = None, session_id: str | None = None) -> None:
+    async def publish(self, event_type: str, payload: dict[str, Any], *, member: Staff | None = None, project_id: str | None = None, session_id: str | None = None) -> AppEvent | None:
         """A bus event about the team; a bus that cannot write is logged, never the caller's failure."""
         try:
-            await self.manager.bus.publish(
+            return await self.manager.bus.publish(
                 event_type,
                 payload,
                 project_id=project_id or (member.project_id if member else None),
@@ -369,6 +388,7 @@ class Team:
             )
         except Exception:  # noqa: BLE001 — the change is written; the event is a courtesy to its subscribers
             logger.warning("could not publish %s", event_type, exc_info=True)
+            return None
 
     async def _move_task(self, task: BoardTask, to: str, *, actor: str, assignee: str | None = "", branch: str | None = None, folder_id: str | None = None, merge_state: str | None = None) -> BoardTask:
         """Move a task on the board and say so. ``assignee=""`` keeps the assignee; ``None`` clears it."""
@@ -705,7 +725,8 @@ class Team:
         )
         await self.publish("staff.status", {"status": "starting", "previous": None, "actor": by}, member=member)
         fresh, earlier = await self.brief_files(delivered)
-        first = self.first_message(member, task, folder, worktree, predecessor, by, fresh, earlier, rules=await self.rules_block(project.id))
+        contract = await self.contract_block(member, task, session.id, delivered)
+        first = self.first_message(member, task, folder, worktree, predecessor, by, fresh, earlier, rules=await self.rules_block(project.id), contract=contract)
         try:
             recorded = await self.manager.staff.add_message(member.id, first, origin=by, mode="after_turn", staff_session_id=session.id)
             first_id = recorded.id
@@ -771,7 +792,8 @@ class Team:
             await self.manager.staff.request_pause(session.id, False)  # a new assignment resumes a paused member
         live = LiveSession(member, session)
         fresh, earlier = await self.brief_files(delivered)
-        text = prompts.STAFF_NEXT_TASK + self.first_message(member, task, folder, None, predecessor, by, fresh, earlier, rules=await self.rules_block(member.project_id))
+        contract = await self.contract_block(member, task, session.id, delivered)
+        text = prompts.STAFF_NEXT_TASK + self.first_message(member, task, folder, None, predecessor, by, fresh, earlier, rules=await self.rules_block(member.project_id), contract=contract)
         try:
             message_id = (await self.manager.staff.add_message(member.id, text, origin=by, mode="after_turn", staff_session_id=session.id)).id
         except StaffError:
@@ -858,7 +880,28 @@ class Team:
             told.append(member.name)
         return told
 
-    def first_message(self, member: Staff, task: BoardTask, folder: ProjectFolder, worktree: Worktree | None, predecessor: StaffSession | None, by: str, delivered: list[Delivered] | None = None, earlier: list[Delivered] | None = None, *, rules: str = "") -> str:
+    async def contract_block(self, member: Staff, task: BoardTask, staff_session_id: str, delivered: list[Delivered]) -> str:
+        """The card's requirements and checks for a member's brief, each requirement recorded as given to
+        this session. An input names the copy the member can open, which is what the host watches for."""
+        requirements = await self.contracts.requirements(task.id)
+        checks = await self.contracts.checks(task.id)
+        paths = {d.file.id: d.path for d in delivered}
+        cli = member.harness != "daedalus"
+        lines: list[str] = []
+        for requirement in requirements:
+            path = paths.get(requirement.file_id or "", "")
+            await self.contracts.delivered(requirement, staff_session_id=staff_session_id, staff_id=member.id, via="brief", path=path)
+            text = requirement.text
+            if requirement.kind == "input":
+                confirm = prompts.STAFF_INPUT_CONFIRM.format(label=requirement.label) if cli else ""
+                text += " — " + prompts.STAFF_INPUT_LINE.format(path=path or "the file of that name among those handed to you", confirm=confirm)
+            lines.append(f"- {requirement.label} ({requirement.kind}, from {requirement.origin()}): {text}")
+        block = prompts.STAFF_CONTRACT.format(lines="\n".join(lines)) if lines else ""
+        if checks:
+            block += prompts.STAFF_CHECKS.format(lines="\n".join(f"- C{i} {item['text']}" for i, item in enumerate(checks, start=1)))
+        return block
+
+    def first_message(self, member: Staff, task: BoardTask, folder: ProjectFolder, worktree: Worktree | None, predecessor: StaffSession | None, by: str, delivered: list[Delivered] | None = None, earlier: list[Delivered] | None = None, *, rules: str = "", contract: str = "") -> str:
         before = ""
         if predecessor is not None:
             why = predecessor.end_reason or predecessor.status
@@ -868,6 +911,8 @@ class Team:
             )
         if task.sent_back:
             before += f"\n\nThe operator sent this work back from review: {task.sent_back}\nChange it on the same branch, commit, and report done again."
+        if task.returned:
+            before += prompts.STAFF_RETURNED.format(text=task.returned)
         return prompts.STAFF_TASK.format(
             task_id=task.id,
             by="orchestrator" if by == "orchestrator" else "operator",
@@ -877,6 +922,7 @@ class Team:
             boundaries=task.boundaries,
             done_when=task.done_when,
             rules=rules,
+            contract=contract,
             folder=worktree.cwd if worktree is not None else folder.path,
             branch=f"\nBranch: {worktree.branch} (from {worktree.base_ref})" if worktree is not None else "",
             predecessor=before,
@@ -1353,6 +1399,10 @@ class Team:
             options = [str(o.get("label") or "") for o in first.get("options") or [] if isinstance(o, dict)]
             call_id = str(event.payload.get("tool_call_id") or "")
             await self.ingress.question(live, call_id, str(first.get("question") or ""), options, event_ref=f"ask:{session_id}:{call_id}")
+        elif event.type is EventType.TOOL_USE_STOP and isinstance(event.payload.get("final_input"), dict):
+            # An input the member was given counts as opened once a tool of its is pointed at it: the
+            # host cannot know it was understood, only that it was not skipped.
+            await self.contracts.opened(live.id, json.dumps(event.payload["final_input"], ensure_ascii=False))
         elif event.type is EventType.QUEUE_UPDATE and event.payload.get("placed"):
             # A queued message the model has now received: that is the acknowledgement.
             for message_id in event.payload["placed"]:
@@ -1663,7 +1713,10 @@ class Team:
         if op == "can_ask":
             return True
         if op == "report":
-            return await self.ingress.report(live, str(kwargs.get("kind") or ""), str(kwargs.get("note") or ""), kwargs.get("artifacts"), kwargs.get("remember"))
+            return await self.ingress.report(
+                live, str(kwargs.get("kind") or ""), str(kwargs.get("note") or ""), kwargs.get("artifacts"), kwargs.get("remember"),
+                evidence=kwargs.get("evidence"), acknowledged=kwargs.get("acknowledged"),
+            )
         raise ValueError(op)
 
 
@@ -1779,7 +1832,10 @@ class Ingress:
             payload["error"] = after.error[:500]
         await self.team.publish("staff.message", payload, member=member)
 
-    async def report(self, live: LiveSession, kind: str, note: str, artifacts: list[str] | None = None, remember: str | None = None, *, call_id: str | None = None) -> str:
+    async def report(
+        self, live: LiveSession, kind: str, note: str, artifacts: list[str] | None = None, remember: str | None = None, *,
+        call_id: str | None = None, evidence: list[dict[str, str]] | None = None, acknowledged: list[str] | None = None,
+    ) -> str:
         if call_id and await self._reported(live, call_id):
             return f"reported {kind}"
         if kind not in ("checkpoint", "needs_input", "stuck", "done"):
@@ -1788,7 +1844,17 @@ class Ingress:
         if not note:
             raise ValueError("a report needs a note")
         task = await self.team.task(live.session.task_id) if live.session.task_id else None
+        contracts = self.team.contracts
         told = f"reported {kind}"
+        confirmed: list[str] = []
+        if task is not None and acknowledged:
+            confirmed, unknown = await contracts.acknowledge(task.id, live.id, [str(a) for a in acknowledged if isinstance(a, str | int)][:40])
+            if confirmed:
+                told += f"; confirmed {', '.join(confirmed)}"
+            if unknown:
+                told += f"; task {task.id} has no requirement {', '.join(unknown)} in force"
+        proven: list[dict[str, str]] = []
+        unproven: list[str] = []
         if kind == "done":
             worktree = await self.team.worktree_of(live.session)
             if worktree is not None:
@@ -1799,16 +1865,31 @@ class Ingress:
                 if status.dirty:
                     raise ValueError(f"{worktree.path} has uncommitted changes; commit them on {worktree.branch} and report again")
             if task is not None:
+                cli = live.staff.harness != "daedalus"
+                missing = await contracts.unmet_inputs(task.id, live.staff.id, cli=cli)
+                if missing:
+                    # A scriptwriter reported a script "at the level of the references" and said in the
+                    # same report that no reference had reached it: the files were the start of the
+                    # work, and a hand-in that skipped them is not one.
+                    named = "; ".join(f"{r.label} ({path or r.text})" for r, path in missing)
+                    how = f"confirm each with acknowledged=[{', '.join(repr(r.label) for r, _ in missing)}] once you have read it" if cli else "open each one"
+                    raise ValueError(f"task {task.id} starts from inputs you have not {'confirmed' if cli else 'opened'}: {named}. {how.capitalize()} and report done again, or Report(kind='needs_input') saying why you cannot")
+                proven, unproven, stray = await self._evidence(task, live.staff, evidence)
+                if stray:
+                    told += f"; evidence for {', '.join(stray)} matched no check or requirement of the task"
                 await self.team.record_result(task, live.staff, note)
             if task is not None and task.status in ("doing", "todo", "blocked"):
                 to = await self.team.hand_in_to(task, worktree)
                 await self.team._move_task(task, to, actor="staff", merge_state="proposed" if worktree is not None else "")
+                await contracts.set_acceptance(task.id, "handed_in")
                 board = self.team.app.extensions.get("board")
                 if to == "done" and board is not None:
                     # The board's own moves promote what waited on a finished task; this move is the
                     # team's, and without this the tasks after it would wait for a move nobody makes.
                     await board._promote_dependents(task.id)
-                told += f"; task {task.id} is in review" if to == "review" else f"; task {task.id} is done, and the orchestrator reads your report"
+                told += f"; task {task.id} is in review" if to == "review" else f"; task {task.id} is handed in, and the orchestrator checks it against your report"
+                if unproven:
+                    told += f"; you gave no evidence for {', '.join(unproven)}"
         if remember and remember.strip():
             await self.manager.staff.append_notes(live.staff.id, remember.strip())
             told += "; noted for your next sessions"
@@ -1830,10 +1911,59 @@ class Ingress:
                 told += "; not kept: " + "; ".join(notes)
         if task is not None:
             payload["task_id"] = task.id
+        if confirmed:
+            payload["acknowledged"] = confirmed
+        if proven:
+            payload["evidence"] = proven
+        if unproven:
+            payload["unproven"] = unproven
         if call_id:
             payload["call_id"] = call_id
-        await self.team.publish("staff.report", payload, member=live.staff, session_id=live.session_id)
+        await self._published(await self.team.publish("staff.report", payload, member=live.staff, session_id=live.session_id))
         return told
+
+    async def _published(self, event: AppEvent | None) -> None:
+        if event is None:
+            return
+        for hook in self.team.report_hooks:
+            try:
+                await hook(event)
+            except Exception:  # noqa: BLE001 — the report stands; a follower that fails is logged
+                logger.exception("a report hook failed on %s", event.seq)
+
+    async def _evidence(self, task: BoardTask, member: Staff, evidence: list[dict[str, str]] | None) -> tuple[list[dict[str, str]], list[str], list[str]]:
+        """A done report's evidence, kept on the checks and requirements it names: ``(what it proved,
+        the items with none, what matched nothing)``. The host does not judge the evidence; it keeps
+        it where the orchestrator marks the item, and says which items have none."""
+        contracts = self.team.contracts
+        checks = await contracts.checks(task.id)
+        requirements = await contracts.requirements(task.id)
+        proven: list[dict[str, str]] = []
+        stray: list[str] = []
+        now = _now()
+        for entry in [e for e in evidence or [] if isinstance(e, dict)][:40]:
+            item = str(entry.get("item") or entry.get("check") or "").strip()
+            how, result = str(entry.get("how") or "").strip()[:500], str(entry.get("result") or "").strip()[:500]
+            target = contracts.match(item, checks, requirements)
+            if target is None:
+                stray.append(item[:60] or "(unnamed)")
+                continue
+            kept = {"how": how, "result": result, "by": member.name, "at": now}
+            if target[0] == "C":
+                index = int(target[1])  # type: ignore[arg-type]
+                checks[index]["evidence"] = kept
+                label = f"C{index + 1}"
+            else:
+                requirement = cast(Requirement, target[1])
+                await contracts.set_evidence(requirement, kept)
+                label = requirement.label
+            proven.append({"item": label, "how": how, "result": result})
+        if checks:
+            await contracts.set_checks(task.id, checks)
+        shown = {p["item"] for p in proven}
+        unproven = [f"C{i}" for i in range(1, len(checks) + 1) if f"C{i}" not in shown]
+        unproven += [r.label for r in requirements if r.kind != "input" and r.label not in shown]
+        return proven, unproven, stray
 
     async def _take_in(self, live: LiveSession, refs: list[str]) -> tuple[list[StoredFile], list[str]]:
         """A member's artifacts that are files in the project's folders, taken into the project's store
@@ -1871,7 +2001,7 @@ class Ingress:
         payload: dict[str, Any] = {"kind": kind, "text": text[:NOTE_MAX], "actor": "system", "implicit": True}
         if task is not None:
             payload["task_id"] = task.id
-        await self.team.publish("staff.report", payload, member=live.staff, session_id=live.session_id)
+        await self._published(await self.team.publish("staff.report", payload, member=live.staff, session_id=live.session_id))
 
     async def channel(self, live: LiveSession, team_tools: str, detail: str = "") -> None:
         payload: dict[str, Any] = {"team_tools": team_tools}
