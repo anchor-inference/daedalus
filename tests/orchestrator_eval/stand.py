@@ -76,6 +76,41 @@ def ago(minutes: float) -> str:
     return (datetime.now(UTC) - timedelta(minutes=minutes)).isoformat()
 
 
+class Harnesses:
+    """The harness manager as far as hiring and the orchestrator's view ask it: two command-line agents
+    installed in the container, Codex with the operator's pick of two of its models."""
+
+    offered = {"codex": ["gpt-6-luna", "gpt-6-sol"], "claude": ["claude-sonnet-5"]}
+    listed = {"codex": ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra"], "claude": ["claude-sonnet-5", "claude-opus-5"]}
+    labels = {"codex": "Codex", "claude": "Claude Code"}
+
+    async def harnesses(self, env: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "harness": h, "label": self.labels[h], "installed": True, "installed_version": "1.0.0", "logged_in": True, "tested": True, "unavailable": "",
+                "models": self.offered[h], "all_models": self.listed[h], "models_chosen": self.offered[h] != self.listed[h], "agents": [],
+            }
+            for h in self.offered
+        ]
+
+    async def catalog(self, env: str, harness: str, folder_id: str | None = None) -> Any:
+        from daedalus.harness.contract import Catalog
+
+        modes = ("read-only", "workspace-write", "danger-full-access") if harness == "codex" else ("default", "acceptEdits", "auto", "plan", "dontAsk", "bypassPermissions")
+        return Catalog(agents=(), models=tuple(self.listed.get(harness, [])), modes=modes, efforts=("low", "medium", "high"))
+
+    async def hire_problem(self, env: str, harness: str) -> str:
+        return "" if harness in self.offered else f"{harness} is not installed in the {env} environment"
+
+    async def hire_warning(self, env: str, harness: str) -> str:
+        return ""
+
+    def capabilities(self, harness: str) -> Any:
+        from daedalus.harness.capabilities import capabilities
+
+        return capabilities(harness)
+
+
 class Notes:
     """The notifications service as far as the stand needs it: what the orchestrator posted."""
 
@@ -150,14 +185,24 @@ class Stand:
         await self.manager.close()
         await self.db.close()
 
+    def clis(self) -> None:
+        """Command-line agents to hire: Codex and Claude Code, run by the same fake runtime, with a
+        terminal to start them in."""
+        from tests.unit.test_staff_runtime import Capacity
+
+        self.team.runtimes["codex"] = self.runtime
+        self.team.runtimes["claude"] = self.runtime
+        self.team._capacity = Capacity()
+        self.team.app.extensions["harness"] = Harnesses()
+
     async def brief(self, section: str, text: str) -> None:
         await self.manager.projects.set_brief(self.project.id, section, text, "operator")
 
     async def journal(self, kind: str, text: str, *, author: str = "orchestrator") -> None:
         await self.manager.projects.record(self.project.id, author, kind, text)
 
-    async def hire(self, name: str, role: str, *, one_off: bool = False, harness: str = "daedalus") -> Staff:
-        member = await self.manager.staff.hire(self.project.id, name=name, role=role, harness=harness, isolation="shared", one_off=one_off, created_by="orchestrator")
+    async def hire(self, name: str, role: str, *, one_off: bool = False, harness: str = "daedalus", model: str = "") -> Staff:
+        member = await self.manager.staff.hire(self.project.id, name=name, role=role, harness=harness, model=model, isolation="shared", one_off=one_off, created_by="orchestrator")
         self.members[name] = member
         return member
 
@@ -231,9 +276,15 @@ class Stand:
 
     # -- what the model reads --------------------------------------------------------------------
 
-    def mark(self) -> None:
-        """From here on, what the project publishes is news for the next wake-up."""
+    async def mark(self) -> None:
+        """From here on, what the project publishes is news for the next wake-up. What the setup did
+        before it is the past the recent turns already dealt with: a result it opened is closed as
+        decided then, where this build keeps such results."""
         self.mark_seq = self.manager.bus.head
+        try:
+            await self.db.execute("UPDATE open_loops SET closed_at = ?, closed_by = 'system', decision = 'before the episode' WHERE closed_at IS NULL", (ago(0),))
+        except Exception:  # noqa: BLE001 — a build without the register has nothing to close
+            pass
 
     async def news(self) -> str:
         """The wake-up the events since the mark make, rendered by the product: "" when none of them wakes it."""

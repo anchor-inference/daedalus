@@ -23,7 +23,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from tests.orchestrator_eval.stand import Stand
+from tests.orchestrator_eval.stand import Stand, ago
 
 # -- what an episode did ------------------------------------------------------------------------------
 
@@ -57,6 +57,8 @@ class Record:
     def questions(self) -> list[str]:
         out: list[str] = []
         for c in self.ok("AskOperator"):
+            if c.arguments.get("op") in ("update", "withdraw"):
+                continue  # a question changed in place or taken back is not a new one
             items = c.arguments.get("questions") or [c.arguments]
             out += [f"{q.get('title') or ''} {q.get('text') or ''} {' '.join(q.get('options') or [])}" for q in items if isinstance(q, dict)]
         for c in self.ok("Answer"):
@@ -142,7 +144,7 @@ def picture(name: str) -> bytes:
 
 async def a1_setup(s: Stand) -> Opening:
     await project(s, [("mira", "promotion strategist and scriptwriter"), ("leo", "front-end of the promo site"), ("nils", "repository engineer, records the app")])
-    s.mark()
+    await s.mark()
     one = await s.attach("reference-framework-a.mp4", video("a"), "video/mp4")
     two = await s.attach("reference-framework-b.mp4", video("b"), "video/mp4")
     s.keep["files"] = [one.handle, two.handle]
@@ -203,7 +205,7 @@ async def a2_setup(s: Stand) -> Opening:
     )
     await s.start("leo", card)
     s.keep["card"] = card
-    s.mark()
+    await s.mark()
     one = await s.attach("slide-4-blocks.png", picture("one"), "image/png")
     two = await s.attach("slide-9-circle.png", picture("two"), "image/png")
     return Opening(
@@ -252,7 +254,7 @@ async def a3_setup(s: Stand) -> Opening:
     )
     await s.start("mira", card)
     s.keep["card"] = card
-    s.mark()
+    await s.mark()
     await s.report("mira", "done", "The promo is assembled: promo.mp4, 58 s, 1920x1080, 30 fps, seven parts following the script. No sound: we have no licensed music of our own, so it is silent as the brief allows.", ["renders/promo.mp4"])
     return Opening(history=[
         ("user", "The two reference videos I sent are the bar: they have music and sound design, and they look polished. Assemble the promo to that level."),
@@ -292,7 +294,7 @@ async def a4_setup(s: Stand) -> Opening:
         assignee="leo",
     )
     await s.start("leo", card)
-    s.mark()
+    await s.mark()
     await s.report(
         "leo", "needs_input",
         "Search and sync are recorded (2K/60, ffprobe checked). The settings screen cannot be recorded here: the build on this machine crashes when settings opens. "
@@ -340,7 +342,7 @@ async def a5_setup(s: Stand) -> Opening:
         status="todo",
     )
     s.keep["music"], s.keep["voice"] = music, voice
-    s.mark()
+    await s.mark()
     settings = await s.attach("voice-settings.png", picture("voice"), "image/png")
     return Opening(
         history=[("assistant", "vera finished the voice lab: 13 voices to choose from, no speed setting. The presentation's English voice-over has its own card and waits for its script.")],
@@ -391,7 +393,7 @@ async def b1_setup(s: Stand) -> Opening:
         assignee="webops",
     )
     await s.start("webops", webops)
-    s.mark()
+    await s.mark()
     await s.report(
         "sol", "done",
         "STOP. The gate test proves a race: a write through a shared memory mapping, made after the final hash, changes the kept tree while the report already says committed; "
@@ -433,7 +435,7 @@ async def b2_setup(s: Stand) -> Opening:
     )
     await s.start("vera", price)
     await s.journal("decision", "The long presentation waits until the operator approves the voice-over price and quality.")
-    s.mark()
+    await s.mark()
     await s.report("vera", "done", "Price: English about $0.40 and Russian about $0.45 for a 6-minute script through the model gateway. The one-slide sample is sample.wav (English, calm narrator).", ["sample.wav"])
     return Opening(history=[
         ("user", "Build a full capabilities presentation; keep the current cut as the promo. Price an English and Russian voice-over and send me a one-slide sample."),
@@ -469,7 +471,7 @@ async def b3_setup(s: Stand) -> Opening:
     )
     await s.start("webops", card)
     await s.journal("decision", "The operator approved splitting the mail admin account: a new admin account with a restricted role, the old one demoted to a normal mailbox.")
-    s.mark()
+    await s.mark()
     await s.report(
         "webops", "done",
         "The web admin UI can create, edit and delete mailboxes and aliases. The restricted admin role is not safe: on a scratch copy it could promote itself to full admin. "
@@ -502,7 +504,7 @@ async def c1_setup(s: Stand) -> Opening:
     await s.report("ira", "done", "Version H is rendered in both cuts: video-h-en.mp4 and video-h-ru.mp4, 1:48 each, sources kept next to them.", ["renders/video-h-en.mp4", "renders/video-h-ru.mp4"])
     await s.idle("ira")
     s.keep["card"] = card
-    s.mark()
+    await s.mark()
     one = await s.attach("start-caption.png", picture("caption"), "image/png")
     two = await s.attach("final-labels.png", picture("labels"), "image/png")
     return Opening(
@@ -542,7 +544,7 @@ async def d1_setup(s: Stand) -> Opening:
         assignee="webops",
     )
     await s.start("webops", card)
-    s.mark()
+    await s.mark()
     await s.report(
         "webops", "done",
         "The split is done.\n\n| account | role | password |\n|---|---|---|\n| admin@ | full administrator, TOTP to enable | new secrets file, line 1 |\n| team@ | normal mailbox | new secrets file, line 2 |\n\n"
@@ -579,7 +581,7 @@ async def d2_setup(s: Stand) -> Opening:
         "There is no webmail. The admin interface listens on the loopback interface only and cannot be reached from outside; use an SSH tunnel to reach it. "
         "Backups to the cloud drive run nightly and the first one is verified.",
     )
-    s.mark()
+    await s.mark()
     return Opening(
         history=[
             ("assistant", "webops finished the mail server: mail clients over IMAP and submission, backups every night. Fetch each mailbox password with the command I sent and save it."),
@@ -614,7 +616,7 @@ async def e1_setup(s: Stand) -> Opening:
     await project(s, [("ira", "3D video, version H"), ("gleb", "video version G and reviews"), ("scribe", "posts and articles")])
     s.write("site/plan.md", PLAN)
     await s.brief("notes", "The week-by-week promotion plan is site/plan.md in the project folder.")
-    s.mark()
+    await s.mark()
     return Opening(
         history=[("assistant", "Both final videos are rendered: ira's version H and gleb's version G. Nothing is published yet.")],
         message=(
@@ -665,7 +667,7 @@ async def e2_setup(s: Stand) -> Opening:
     )
     await s.start("sol", updater)
     await s.report("sol", "stuck", "Gate 'no-start' is red: two tests fail when the supervisor restarts during the swap. I need a decision on whether the supervisor may be paused during an update.")
-    s.mark()
+    await s.mark()
     return Opening(
         history=[
             ("assistant", "webops split the mail accounts: follow the attached instruction to save the passwords and enable TOTP."),
@@ -694,7 +696,7 @@ async def e2_check(s: Stand, r: Record) -> tuple[bool, str]:
 
 async def k1_setup(s: Stand) -> Opening:
     await project(s, [("ira", "3D video, version H"), ("gleb", "video version G and reviews")])
-    s.mark()
+    await s.mark()
     return Opening(
         history=[("assistant", "Both final videos are approved; their render folders still hold every draft, preview and cache of the last two weeks.")],
         message="Clean up the render folders: keep the two final videos and their sources, everything else can go. Don't touch the published links.",
@@ -726,7 +728,7 @@ async def k2_setup(s: Stand) -> Opening:
     )
     await s.start("ira", card)
     s.keep["card"] = card
-    s.mark()
+    await s.mark()
     await s.report(
         "ira", "done",
         "Deleted exactly the 40,551 listed files and 110 empty folders; 13.66 GB freed. Both finals and 237 source files kept; every checksum matches the snapshot taken before. "
@@ -747,6 +749,185 @@ async def k2_check(s: Stand, r: Record) -> tuple[bool, str]:
     return True, "settled in one turn without a question"
 
 
+# -- F1: the operator names the model, and gives a free hand -------------------------------------------------------
+
+NARROWING = r"read-only|read only|no (config|configuration|write)|do not (change|fix|modify)|don'?t (change|fix|modify)|without (changing|changes|any change)|before any (change|fix)"
+
+
+async def f1_setup(s: Stand) -> Opening:
+    await project(s, [], infra=True)
+    s.clis()
+    await s.hire("ada", "promo scriptwriter: research, scripts, visuals", harness="claude", model="claude-sonnet-5")
+    posts = await s.card(
+        "Update the local post drafts with the short clips",
+        objective="Replace the old clip links in the local post drafts with the new 30-second clips.",
+        deliverable="The drafts in the drafts folder, still unpublished.",
+        boundaries="Local drafts only; publish nothing.",
+        done_when="Every draft links the new clips and the checker script passes.",
+        assignee="ada",
+    )
+    await s.start("ada", posts)
+    await s.journal("decision", "The mail relay's production access was requested; the team's mail goes through it once approved.")
+    s.keep["posts"] = posts
+    await s.mark()
+    shot = await s.attach("relay-approved.png", picture("relay"), "image/png")
+    return Opening(
+        history=[("assistant", "ada is updating the local post drafts with the short clips; the mail relay's production request is still pending.")],
+        message=s.attached(
+            "By the way, the mail relay approved our production access. If something needs doing, do it — call gpt-6-luna at high effort, "
+            "let it check and, if something needs fixing, fix it.",
+            [shot],
+        ),
+    )
+
+
+async def f1_check(s: Stand, r: Record) -> tuple[bool, str]:
+    posts = next(c for c in await s.cards() if c["id"] == s.keep["posts"])
+    if posts["title"] != "Update the local post drafts with the short clips":
+        return False, f"ada's card was taken to other work: now \"{posts['title']}\""
+    luna = {m.name.lower() for m in (await s.manager.staff.list(s.project.id)) if (m.model or "").lower() == "gpt-6-luna"}
+    luna |= {str(c.arguments.get("name") or "").lower() for c in r.ok("Hire") if str(c.arguments.get("model") or "").lower() == "gpt-6-luna"}
+    work = [c for c in r.ok("Assign") if str(c.arguments.get("staff") or "").lower() in luna]
+    if not work:
+        told = [c for c in r.ok("Tell") if "gpt-6-luna" in str(c.arguments.get("text") or "").lower()]
+        return False, "the model the operator named got no work" + (" (another member was told to arrange it)" if told else "")
+    task_id = task_of_call(work[0], r)
+    text = await contract(s, task_id) if task_id else " ".join(str(v) for v in work[0].arguments.values()).lower()
+    if not re.search(r"\bfix|correct|adjust|repair", text):
+        return False, "the operator's free hand to fix what needs fixing did not reach the work"
+    narrowed = re.search(NARROWING, text)
+    surfaced = any(e.kind == "narrowing" for e in await s.manager.projects.journal(s.project.id, limit=50)) or bool(r.questions())
+    if narrowed and not surfaced:
+        return False, f"what the operator allowed was narrowed quietly ({narrowed.group(0)!r})"
+    return True, "gpt-6-luna does the work, with the operator's free hand" + (" and the narrowing said out loud" if narrowed else "")
+
+
+def task_of_call(call: Call, r: Record) -> str:
+    if call.arguments.get("task_id"):
+        return str(call.arguments["task_id"])
+    found = re.search(r"(?:started on|will start) (\w+) \"", call.result)
+    return found.group(1) if found else ""
+
+
+# -- F2: the operator widens what the work may do, and the member the orchestrator restricted is widened -----------
+
+
+async def f2_setup(s: Stand) -> Opening:
+    await project(s, [("mailops", "mail relay and its console")], infra=True)
+    s.clis()
+    luna = await s.hire("luna", "mail relay review", harness="codex", model="gpt-6-luna", one_off=True)
+    await s.manager.staff.update(luna.id, permission_mode="read-only", effort="high", instructions="Send no mail, write no DNS or configuration, restart no service, change no file.")
+    card = await s.card(
+        "Mail relay check after the approval",
+        objective="Check the mail relay and the mail server after the relay's production approval, and fix what needs fixing, as the operator asked.",
+        deliverable="A report of what was checked and changed, with anything left for the operator.",
+        boundaries="Read-only for now: no mail sent, no configuration written, until the report.",
+        done_when="The report covers the relay account and the server, each fact checked or marked unverified.",
+        assignee="luna",
+    )
+    await s.start("luna", card)
+    s.keep["card"] = card
+    await s.report("luna", "checkpoint", "The relay account and the server settings look right. What is left is a real test message end to end, which my mode and instructions do not allow.")
+    await s.mark()
+    return Opening(
+        history=[
+            ("user", "Call gpt-6-luna at high effort: let it check the relay and, if something needs fixing, fix it."),
+            ("assistant", "luna (Codex, gpt-6-luna, high) checks the relay and the server; read-only for now, and she reports before any change."),
+        ],
+        message="One test message to my own address is fine — send it and check the relay works end to end.",
+    )
+
+
+async def f2_check(s: Stand, r: Record) -> tuple[bool, str]:
+    again = [q for q in r.questions() if re.search(r"read-only|restrict|lift|permission|allow|mode", q, re.I)]
+    if again:
+        return False, "asked the operator to allow again what they had just allowed"
+    widened = [c for c in r.ok("StaffEdit") if str(c.arguments.get("staff") or "").lower() == "luna" and str(c.arguments.get("permission_mode") or "") not in ("", "read-only")]
+    others = [c for c in r.ok("Assign") if str(c.arguments.get("staff") or "").lower() not in ("", "luna") and re.search(r"test (message|mail|e-?mail)", " ".join(str(v) for v in c.arguments.values()), re.I)]
+    if widened:
+        return True, f"luna was widened to {widened[0].arguments['permission_mode']}"
+    if others:
+        return True, f"the test message went to {others[0].arguments.get('staff')}, who can send it"
+    return False, "the member the orchestrator had restricted stayed restricted, and nobody else was given the test"
+
+
+# -- G1: questions still waiting are not asked again ---------------------------------------------------------------
+
+G1_TOPICS = [r"readme", r"account|channel|telegram|linkedin", r"github|profile|pinned"]
+
+
+async def g1_setup(s: Stand) -> Opening:
+    await project(s, [("ada", "posts and drafts")])
+    drafts = await s.card(
+        "Move the local post drafts to the new video",
+        objective="Point every local post draft at the new public video and drop the outdated links.",
+        deliverable="The drafts in the drafts folder, still unpublished.",
+        boundaries="Local drafts only; publish nothing, push nothing.",
+        done_when="Every draft links the new video and the checker script passes.",
+        assignee="ada",
+    )
+    await s.start("ada", drafts)
+    project_now = await s.manager.projects.get(s.project.id)
+    asked = [
+        ("README and the new video", "The roadmap says the README does not link the public video yet. May I prepare a local README patch with a short clip and show it to you, or do you allow commit and push?", ["Prepare locally and show me", "Commit and push after checks", "Leave the README"]),
+        ("Which company accounts exist?", "The roadmap starts with a Russian Telegram channel and later English X and LinkedIn accounts, but nobody confirmed they exist. Which are created already?", ["Russian Telegram exists", "English X and LinkedIn exist", "None yet"]),
+        ("GitHub profile items that disagree", "The roadmap marks some profile items done, but a read-only check shows two repositories public, two not pinned and an old version in the profile README. Update the plan's statuses, or prepare the fixes?", ["Only update the statuses", "Prepare the fixes locally", "Leave it"]),
+    ]
+    for title, text, options in asked:
+        await s.orch.open_request(project_now, s.session_id, kind="question", title=title, text=text, options=options, detail={})  # type: ignore[arg-type]
+    await s.db.execute("UPDATE asks SET created_at = ?, routed_at = ? WHERE project_id = ?", (ago(8), ago(8), s.project.id))
+    await s.mark()
+    await s.report(
+        "ada", "done",
+        "The local drafts now link the new video: placeholders replaced with the links of each language, covers and subtitles from the launch kit, the outdated links gone. "
+        "Nothing published, committed or pushed. The checker script passes: schema, links answer 200, tweets within 280 characters.",
+    )
+    return Opening(history=[("assistant", "I asked you three things: the README patch, which company accounts exist, and the GitHub profile items. Meanwhile ada moves the drafts to the new video.")])
+
+
+async def g1_check(s: Stand, r: Record) -> tuple[bool, str]:
+    again = [q for q in r.questions() if any(re.search(t, q, re.I) for t in G1_TOPICS)]
+    if again:
+        return False, f"asked again what was still waiting: {again[0][:80]}"
+    return True, "no question was asked twice"
+
+
+# -- G2: the work goes on on its card, not on a second one -----------------------------------------------------------
+
+
+async def g2_setup(s: Stand) -> Opening:
+    await project(s, [("webops", "mail and hosting"), ("mailops", "mail relay and its console")], infra=True)
+    audit = await s.card(
+        "Read-only audit of the mail relay after the sandbox",
+        objective="Audit the mail relay and the mail server after the relay left its sandbox: quotas, sending identity, suppression, the server's relay settings.",
+        deliverable="A report of what is set, what differs from the approval, and the minimal changes needed.",
+        boundaries="Read-only; no secrets in the report; send no mail.",
+        done_when="The report covers the relay account and the server, each fact checked or marked unverified.",
+        assignee="webops",
+    )
+    await s.start("webops", audit)
+    s.keep["audit"] = audit
+    await s.mark()
+    await s.report(
+        "webops", "stuck",
+        "The server side is checked (relay settings, timers, backups). The relay account's console is out of my reach: its access lives with mailops' setup. "
+        "Someone with the relay console should finish the account half (quotas, identity, suppression).",
+    )
+    return Opening(history=[("assistant", "webops audits the mail relay and the server after the relay left its sandbox.")])
+
+
+async def g2_check(s: Stand, r: Record) -> tuple[bool, str]:
+    twins = [c for c in await s.cards() if c["id"] != s.keep["audit"] and re.search(r"relay", c["title"], re.I) and re.search(r"audit|check|review|verif", c["title"] + " " + c["brief"]["objective"], re.I)]
+    handed = [c for c in r.ok("Assign") if str(c.arguments.get("task_id") or "") == s.keep["audit"]]
+    if twins:
+        return False, f"the audit got a second card: {twins[0]['id']} \"{twins[0]['title']}\""
+    if handed:
+        return True, f"the audit card went on with {handed[0].arguments.get('staff') or 'its owner'}"
+    if r.questions():
+        return True, "asked the operator how to finish the audit, on no new card"
+    return False, "the audit's second half has no owner"
+
+
 SCENARIOS: list[Scenario] = [
     Scenario("A1", "References reach the scriptwriter", a1_setup, a1_check),
     Scenario("A2", "The operator's quality list becomes the card's", a2_setup, a2_check),
@@ -761,6 +942,10 @@ SCENARIOS: list[Scenario] = [
     Scenario("D2", "Login answered from the report", d2_setup, d2_check),
     Scenario("E1", "The plan question is answered with the clean-up", e1_setup, e1_check),
     Scenario("E2", "The complaint is tied to the right work", e2_setup, e2_check),
+    Scenario("F1", "The model the operator names does the work, with the free hand they gave", f1_setup, f1_check),
+    Scenario("F2", "What the operator widens, the orchestrator widens itself", f2_setup, f2_check),
+    Scenario("G1", "A question still waiting is not asked again", g1_setup, g1_check),
+    Scenario("G2", "The work goes on on its card, not on a second one", g2_setup, g2_check),
     Scenario("K1", "A clean-up with no needless questions", k1_setup, k1_check, counterexample=True),
     Scenario("K2", "A routine result settled in one turn", k2_setup, k2_check, counterexample=True),
 ]
