@@ -381,7 +381,7 @@ class Board:
         if assignee != task.get("assignee_staff_id"):
             await self._publish("task.assigned", updated, who)
         if status in ("done", "dropped"):
-            await self._promote_dependents()
+            await self._promote_dependents(task_id)
         elif status and task["status"] in ("done", "dropped"):
             await self._demote_dependents()
         await self.export_plan(task.get("origin_session_id") or session_id or task.get("session_id"))
@@ -494,16 +494,31 @@ class Board:
         owner = await self.app.db.fetchone("SELECT origin_session_id FROM board_tasks WHERE id = ?", (task_id,))
         await self.app.db.execute("DELETE FROM board_tasks WHERE id = ?", (task_id,))
         await self.export_plan(owner["origin_session_id"] if owner else None)
+        waited: list[str] = []
         for row in await self.app.db.fetchall("SELECT id, depends_on FROM board_tasks WHERE depends_on LIKE ?", (f"%{task_id}%",)):
             deps = [d for d in json.loads(row["depends_on"] or "[]") if d != task_id]
             await self.app.db.execute("UPDATE board_tasks SET depends_on = ? WHERE id = ?", (json.dumps(deps), row["id"]))
-        await self._promote_dependents()
+            waited.append(row["id"])
+        await self._promote(waited)
         return True
 
-    async def _promote_dependents(self) -> list[str]:
-        """A blocked task whose dependencies are all finished becomes ready."""
+    async def _promote_dependents(self, finished: str) -> list[str]:
+        """The tasks that waited on ``finished`` and wait on nothing else now become ready.
+
+        Only the tasks that named it: this once went through every blocked task of the installation
+        whenever anything finished, and a card the orchestrator had set aside as blocked by hand —
+        for a reason no dependency expresses — was put back to todo by the board four times in an
+        hour, each time a task somewhere else was done.
+        """
+        rows = await self.app.db.fetchall("SELECT id FROM board_tasks WHERE status = 'blocked' AND depends_on LIKE ?", (f'%"{finished}"%',))
+        return await self._promote([r["id"] for r in rows])
+
+    async def _promote(self, candidates: list[str]) -> list[str]:
         promoted: list[str] = []
-        for row in await self.app.db.fetchall("SELECT id, depends_on FROM board_tasks WHERE status = 'blocked'"):
+        for task_id in candidates:
+            row = await self.app.db.fetchone("SELECT id, depends_on FROM board_tasks WHERE id = ? AND status = 'blocked'", (task_id,))
+            if row is None:
+                continue
             deps = json.loads(row["depends_on"] or "[]")
             if not await self._has_open_deps(deps):
                 await self.app.db.execute("UPDATE board_tasks SET status = 'todo', updated_at = ? WHERE id = ?", (_now(), row["id"]))

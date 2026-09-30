@@ -61,7 +61,7 @@ def _team(orch: Orchestrators) -> Any:
 
 
 async def _member(orch: Orchestrators, project: Project, ref: str, *, active: bool = True) -> Staff:
-    member = await orch.manager.staff.find(project.id, (ref or "").strip())
+    member = await orch.manager.staff.find(project.id, (ref or "").strip(), dismissed=not active)
     if member is None:
         raise Refused(f"{project.name} has nobody called {ref!r}; Team() lists the team")
     if active and not member.active:
@@ -237,8 +237,34 @@ async def staff_edit(
     return f"{updated.name}: {', '.join(names)} changed, in effect {when}"
 
 
+async def _free_cards(orch: Orchestrators, member: Staff, why: str) -> list[str]:
+    """Put back to todo the cards a member without a live session still holds in doing; their ids.
+
+    Such a card is nobody's work, and it cannot be released the usual way, which ends a session."""
+    team = _team(orch)
+    if await orch.manager.staff.live(member.id) is not None:
+        return []
+    rows = await orch.manager.db.fetchall("SELECT id FROM board_tasks WHERE assignee_staff_id = ? AND status = 'doing' ORDER BY updated_at", (member.id,))
+    freed = []
+    for row in rows:
+        if await team.free_card(member, row["id"], why, by="orchestrator") is not None:
+            freed.append(row["id"])
+    return freed
+
+
+def _cards(ids: list[str]) -> str:
+    return f"card{'s' if len(ids) > 1 else ''} {', '.join(ids)}"
+
+
 async def dismiss(orch: Orchestrators, project: Project, session_id: str, *, staff: str, release: bool = False, keep_worktree: bool = True) -> str:
-    member = await _member(orch, project, staff)
+    member = await _member(orch, project, staff, active=False)
+    if not member.active:
+        # A one-off helper leaves the team with its task, and the operator may dismiss anyone from
+        # the app: the orchestrator is told so, and what the member left in doing is freed.
+        freed = await _free_cards(orch, member, f"{member.name} was dismissed")
+        if freed:
+            await _journal(orch, project, "control", f"The orchestrator freed {_cards(freed)} left in doing by {member.name}, who had been dismissed.", {"staff_id": member.id})
+        return f"{member.name} was already dismissed" + (f"; the {_cards(freed)} they left in doing went back to todo, unassigned" if freed else "")
     live = await orch.manager.staff.live(member.id)
     released = ""
     if live is not None:
@@ -286,6 +312,14 @@ async def assign(
     existing: dict[str, Any] | None = None
     continued = False
     if task_id:
+        if task_id in (depends_on or []):
+            # The board's own refusal, "a task cannot depend on itself, even through another task",
+            # left the orchestrator guessing which task it meant: it had given the card it was
+            # assigning as the one the reviewer should wait for.
+            raise Refused(
+                f"task {task_id} cannot wait for itself: depends_on names the task being assigned. For work that follows it, "
+                f"create a task of its own (a title and a brief, no task_id) with depends_on=['{task_id}']"
+            )
         try:
             existing = await board.get(task_id, actor=session_id)
         except KeyError as exc:
@@ -504,6 +538,8 @@ async def read_staff(
         if not latest:
             raise Refused(f"{member.name} has not worked yet")
         session = latest[0]
+    if what == "screen" and not session.live:
+        return f"{member.name}, session {session.id} (ended: {session.end_reason or session.status}): there is no screen of an ended session; what=\"last\" or \"reports\" shows what it left"
     inner: str | None = None
     if cursor:
         owner, _, inner = cursor.partition(CURSOR_SEPARATOR)
@@ -608,10 +644,16 @@ async def pause(orch: Orchestrators, project: Project, session_id: str, *, staff
 
 
 async def release(orch: Orchestrators, project: Project, session_id: str, *, staff: str, keep_worktree: bool = True) -> str:
-    member = await _member(orch, project, staff)
-    ended = await _team(orch).release(member, keep_worktree=keep_worktree, reason="released by the orchestrator", by="orchestrator")
+    member = await _member(orch, project, staff, active=False)
+    ended = member.active and await _team(orch).release(member, keep_worktree=keep_worktree, reason="released by the orchestrator", by="orchestrator")
     if not ended:
-        raise Refused(f"{member.name} has no live session")
+        # Releasing is how a card is freed, so a member whose session is already over still frees
+        # its cards: "no live session" once left a card in doing that nothing else could move.
+        freed = await _free_cards(orch, member, "released by the orchestrator after the session had ended")
+        if not freed:
+            raise Refused(f"{member.name} has no live session and holds no card in doing")
+        await _journal(orch, project, "control", f"The orchestrator freed {_cards(freed)} left in doing by {member.name}, whose session had ended.", {"staff_id": member.id})
+        return f"{member.name} had no live session; the {_cards(freed)} they held in doing went back to todo, unassigned"
     await _journal(orch, project, "control", f"The orchestrator released {member.name}" + ("" if keep_worktree else " and asked for the worktree to go") + ".", {"staff_id": member.id})
     return f"{member.name}'s session ended; an unfinished task went back to todo, and the branch stays"
 

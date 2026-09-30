@@ -4,6 +4,8 @@ their requests within the project's autonomy, and stopping them."""
 from __future__ import annotations
 
 import itertools
+import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -15,7 +17,9 @@ from daedalus.config import ORCHESTRATOR_ONLY_TOOLS, Settings
 from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.harness.catalog import HarnessCatalog
 from daedalus.harness.contract import AgentEntry, Catalog, InstallInfo, LoginState
+from daedalus.host.events import AppEvent
 from daedalus.host.services import SessionServices, locator
+from daedalus.host.wake_queue import Batch, Pending, Wake
 from daedalus.staff_runtime import Availability, FakeStaffRuntime, LiveSession, ReadPage, Receipt
 from daedalus.stores.database import Database
 from daedalus.stores.harness import HarnessStore
@@ -24,7 +28,7 @@ from daedalus.tools.orchestrator import tell
 from tests.support.models import DEFAULT_PRESET
 from tests.support.waiting import until_await
 from tests.unit.test_orchestrator import Rig, _idle, events, rig
-from tests.unit.test_staff_runtime import BRIEF, board_task
+from tests.unit.test_staff_runtime import BRIEF, board_task, task_row
 
 ALLOWANCES = "Install npm packages listed in package.json\nRun the test suite as often as needed"
 
@@ -604,5 +608,151 @@ async def test_a_scripted_orchestrator_hires_assigns_answers_from_the_brief_and_
         assert {e.type for e in task_events} == {"task.created", "task.assigned"} and all(e.payload["actor"] == "orchestrator" for e in task_events)
         [answered_event] = [e for e in await events(r.manager, "ask.answered") if e.staff_id == rex.id]
         assert answered_event.payload["via"] == "orchestrator"
+    finally:
+        await r.manager.close()
+
+
+# -- a card nobody works any more ------------------------------------------------------------------------------
+
+
+def _task_in(said: str) -> str:
+    found = re.search(r"(?:started on|will start) (\w+) \"", said)
+    assert found is not None, said
+    return found.group(1)
+
+
+async def test_a_card_left_by_a_helper_that_died_goes_to_the_next_member_in_one_call(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """A one-off helper exited a third of a second after its start. Its card stayed in doing under its
+    name, and every way to hand the work to the member who had done it before was refused: Assign as
+    "being worked on by someone else", Release as "no live session", Dismiss as "nobody called" once
+    the operator had dismissed the helper. The orchestrator hired a second helper to free the card."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r)
+        sid = await office(r)
+        await r.manager.staff.hire(r.project.id, name="Ira", role="Video", isolation="shared")
+        helper = await r.manager.staff.hire(r.project.id, name="mediafix", role="Video", isolation="shared", one_off=True)
+        task_id = _task_in(await r.call(sid, "assign", staff="mediafix", title="Fix the two captions", **BRIEF))
+        live = await r.team.live_of(helper)
+        assert live is not None
+
+        # The process went on its own: the card is nobody's, and says why.
+        await r.team.ingress.ended(live, "Claude Code exited with code 1; its screen last showed: Error: unknown model")
+        row = await task_row(r.manager, task_id)
+        assert (row["status"], row["assignee_staff_id"]) == ("todo", None)
+        assert "mediafix no longer works this card: the session ended (Claude Code exited with code 1; its screen last showed: Error: unknown model)" in row["notes"]
+
+        said = await r.call(sid, "assign", staff="Ira", task_id=task_id)
+        assert said.startswith(f"Ira started on {task_id}")
+    finally:
+        await r.manager.close()
+
+
+async def test_a_card_held_by_a_member_who_is_gone_is_passed_on_released_or_freed_by_dismiss(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """Cards an earlier host left in doing under a member whose session had ended, and who the operator
+    had dismissed since: each tool that frees a card frees this one too, and a live member keeps theirs."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r)
+        sid = await office(r)
+        await r.manager.staff.hire(r.project.id, name="Ira", role="Video", isolation="shared")
+        helper = await r.manager.staff.hire(r.project.id, name="mediafix", role="Video", isolation="shared", one_off=True)
+        first = _task_in(await r.call(sid, "assign", staff="mediafix", title="Fix the two captions", **BRIEF))
+        live = await r.team.live_of(helper)
+        assert live is not None
+        await r.manager.staff.end_session(live.id, "Claude Code exited with code 1")
+        await r.manager.staff.archive(helper.id, by="operator")
+        assert (await task_row(r.manager, first))["status"] == "doing"
+
+        said = await r.call(sid, "assign", staff="Ira", task_id=first)
+        assert said.startswith(f"Ira started on {first}")
+        assert "the card passed from mediafix to Ira: mediafix was dismissed" in (await task_row(r.manager, first))["notes"]
+
+        second = await board_task(r.manager, r.project, "Second cut")
+        third = await board_task(r.manager, r.project, "Third cut")
+        await r.manager.db.execute("UPDATE board_tasks SET status = 'doing', assignee_staff_id = ? WHERE id IN (?, ?)", (helper.id, second, third))
+        said = await r.call(sid, "release", staff="mediafix")
+        assert said == f"mediafix had no live session; the cards {second}, {third} they held in doing went back to todo, unassigned"
+        assert [(await task_row(r.manager, t))["status"] for t in (second, third)] == ["todo", "todo"]
+        with pytest.raises(Refused, match="has no live session and holds no card in doing"):
+            await r.call(sid, "release", staff="mediafix")
+
+        await r.manager.db.execute("UPDATE board_tasks SET status = 'doing', assignee_staff_id = ? WHERE id = ?", (helper.id, second))
+        said = await r.call(sid, "dismiss", staff="mediafix")
+        assert said == f"mediafix was already dismissed; the card {second} they left in doing went back to todo, unassigned"
+        assert await r.call(sid, "dismiss", staff="mediafix") == "mediafix was already dismissed"
+
+        # Silence is not gone: a member whose live session is on the card keeps it.
+        ada, ada_live = await working(r, "Ada", "Menu page")
+        await r.team.ingress.status(ada_live, "no_signal")
+        with pytest.raises(Refused, match=f"task {ada_live.session.task_id} is being worked on by Ada; release them first"):
+            await r.call(sid, "assign", staff="Ira", task_id=ada_live.session.task_id)
+    finally:
+        await r.manager.close()
+
+
+async def test_reading_a_member_whose_session_ended_says_what_there_is(settings: Settings, db: Database, tmp_path: Path) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r)
+        sid = await office(r)
+        member, live = await working(r)
+        await r.manager.staff.end_session(live.id, "Claude Code exited with code 1")
+        said = await r.call(sid, "read_staff", staff="Ada", what="screen")
+        assert said.endswith("(ended: Claude Code exited with code 1): there is no screen of an ended session; what=\"last\" or \"reports\" shows what it left")
+    finally:
+        await r.manager.close()
+
+
+async def test_a_card_set_aside_by_hand_stays_so_and_starts_when_it_is_assigned(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """The orchestrator set a card aside as blocked; its one dependency had been done for hours. The
+    board put it back to todo each time any other task finished, and an Assign of it queued it as
+    "waits for <the done dependency> to finish" until the orchestrator edited the dependency away."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r)
+        sid = await office(r)
+        mail = await r.board.add(title="Mail migration", session_id=sid, brief=BRIEF)
+        updates = await r.board.add(title="Safe updates", session_id=sid, brief=BRIEF, depends_on=[mail["id"]])
+        assert updates["status"] == "blocked"
+        await r.board.update(mail["id"], actor=sid, status="done")
+        assert (await task_row(r.manager, updates["id"]))["status"] == "todo", "what waited on the finished task is ready"
+        await r.board.update(updates["id"], actor=sid, status="blocked", note="the prototype stopped; an architecture has to be chosen")
+        unrelated = await r.board.add(title="Unrelated", session_id=sid, brief=BRIEF)
+        await r.board.update(unrelated["id"], actor=sid, status="done")
+        assert (await task_row(r.manager, updates["id"]))["status"] == "blocked", "another task finishing is no reason to unblock it"
+
+        await r.manager.staff.hire(r.project.id, name="release", role="Updates", isolation="shared")
+        said = await r.call(sid, "assign", staff="release", task_id=updates["id"])
+        assert said.startswith(f"release started on {updates['id']}") and "waits for" not in said
+
+        with pytest.raises(Refused, match=rf"task {updates['id']} cannot wait for itself.*depends_on=\['{updates['id']}'\]"):
+            await r.call(sid, "assign", staff="release", task_id=updates["id"], depends_on=[updates["id"]])
+    finally:
+        await r.manager.close()
+
+
+async def test_a_report_is_never_folded_into_the_more_line(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """A wake-up of forty events showed thirty and counted the rest: a member's report among the rest
+    reached the orchestrator as a number."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r)
+        await office(r)
+        _, live = await working(r)
+        answer = "\n".join(f"{n}. " + "The frames are drawn in Chrome on the GPU. " * 4 for n in range(1, 6))
+        await r.team.ingress.report(live, "checkpoint", answer)
+        reported = (await r.manager.bus.latest(events_filter("staff.report"), limit=1))[0]
+        news = [AppEvent(i + 1, "2026-01-01T10:00:00+00:00", "run.started", {}, project_id=r.project.id) for i in range(39)]
+        batch = [*news[:34], reported, *news[34:]]
+        assert r.manager.config.orchestrator.batch_max_lines == 30 and len(batch) == 40
+        text = await r.orch.render(r.project.id, Batch(tuple(Pending(e, Wake(str(e.seq)), time.monotonic()) for e in batch), urgent=True))
+        assert "Ada reported checkpoint" in text and "5. The frames are drawn" in text
+        assert "- … and 9 more" in text
+
+        await r.team.ingress.implicit_report(live, "turn_done", "word " * 400)
+        implicit = (await r.manager.bus.latest(events_filter("staff.report"), limit=1))[0]
+        line = await r.orch.line(await r.refreshed(), implicit)
+        assert "word " * 190 in line and "ReadStaff(\"Ada\")" in line
     finally:
         await r.manager.close()

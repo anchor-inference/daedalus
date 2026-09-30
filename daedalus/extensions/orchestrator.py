@@ -84,7 +84,14 @@ SELF_EVENTS_ALLOWED = frozenset({"ask.answered", "permission.resolved"})
 """Events that carry the orchestrator's own session id but are someone else's news: the operator
 answering what it asked."""
 ANSWER_EVENTS = frozenset({"ask.answered", "permission.resolved", "ask.batch"})
-"""The events that bring the operator's answers; a wake-up never folds them into "… N more"."""
+"""The events that bring the operator's answers."""
+NEVER_FOLDED = ANSWER_EVENTS | {"staff.report"}
+"""What a wake-up never folds into "… N more": the operator's answers and the members' reports. The cap
+is for news the tools list again; a report folded away reached the orchestrator as a count, and in
+the one place it looks it saw nothing of what the member had answered."""
+IMPLICIT_REPORT_CHARS = 1000
+"""How much of a turn's last message stands in for a report the member did not make: 300 characters
+cut a member's answer mid-sentence, the whole turn is one ReadStaff away."""
 
 QUESTION_MAX = 2000
 OPTION_MAX = 200
@@ -860,9 +867,9 @@ class Orchestrators:
         name = project.name if project is not None else project_id
         limit = self.manager.config.orchestrator.batch_max_lines
         events = batch.events
-        # An answer of the operator's is never one of the "… N more": the cap is for news the tools
-        # can list again, and the operator's words are nowhere else the orchestrator looks.
-        shown = [event for index, event in enumerate(events) if index < limit or event.type in ANSWER_EVENTS]
+        # An answer of the operator's or a member's report is never one of the "… N more" (see
+        # ``NEVER_FOLDED``); the rest of the batch is capped.
+        shown = [event for index, event in enumerate(events) if index < limit or event.type in NEVER_FOLDED]
         lines: list[str] = []
         words: list[str] = []
         for event in shown:
@@ -920,7 +927,7 @@ class Orchestrators:
             if p.get("implicit"):
                 name = member.name if member else ""
                 ending = "ended a turn with a question and no report" if p.get("kind") == "needs_input" else "finished a turn without a report"
-                return f"{who(member)} {ending}{(' on ' + task) if task else ''}: \"{_one_line(str(p.get('text') or ''), 300)}\" — ReadStaff(\"{name}\") for the whole turn"
+                return f"{who(member)} {ending}{(' on ' + task) if task else ''}: \"{_one_line(str(p.get('text') or ''), IMPLICIT_REPORT_CHARS)}\" — ReadStaff(\"{name}\") for the whole turn"
             # A report is the member's answer to the orchestrator and arrives whole: cut at 300
             # characters, a detailed reply reached it as a stub, and no tool could show the rest.
             return f"{who(member)} reported {p.get('kind')}{(' on ' + task) if task else ''}: \"{_verbatim(str(p.get('text') or ''))}\"{refs_line(p.get('files'))}"

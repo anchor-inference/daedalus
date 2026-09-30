@@ -58,7 +58,7 @@ from daedalus.harness.manager import HarnessManager, Operation
 from daedalus.harness.runtime import CliStaffRuntime, install_runtimes
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.session_runner import SessionManager
-from daedalus.staff_runtime import ReadRequest
+from daedalus.staff_runtime import LiveSession, ReadRequest
 from daedalus.stores.database import Database
 from daedalus.stores.harness import HarnessStore
 from daedalus.stores.projects import FolderSpec, Project
@@ -566,11 +566,38 @@ async def test_a_cli_that_exits_by_itself_ends_its_session(settings: Settings, d
         ada = await s.hire()
         await s.team.assign(ada, await s.task())
         ended = await s.status_event(ada, "exited")
-        assert ended.payload["detail"] == "Claude Code exited with code 3"
+        assert ended.payload["detail"].startswith("Claude Code exited with code 3; its screen last showed: ")
         assert await s.manager.staff.live(ada.id) is None
         [session] = await s.manager.staff.sessions(ada.id)
-        assert session.end_reason == "Claude Code exited with code 3"
+        assert session.end_reason == ended.payload["detail"]
         assert await HarnessStore(db).open_launches() == []
+
+
+async def test_a_cli_that_fails_at_its_start_says_why_and_leaves_its_card_free(settings: Settings, db: Database) -> None:
+    """A helper's CLI exited with code 1 a third of a second after its start. The event said only
+    that; ReadStaff failed twice with "the path must be absolute", because the session id stood in for
+    the turn record the CLI never wrote; and the card stayed in doing under the dead helper."""
+    async with stand(settings, db, extra_env={"FAKE_CLI_FAULTS": "fail_at_start"}) as s:
+        trust(s)
+        ada = await s.hire()
+        task_id = await s.task()
+        await s.team.assign(ada, task_id, by="orchestrator")
+        ended = await s.status_event(ada, "exited")
+        assert ended.payload["detail"].startswith("Claude Code exited with code 1; its screen last showed: ")
+        assert "Error: the model given with --model is not available to this account" in ended.payload["detail"]
+        [session] = await s.manager.staff.sessions(ada.id)
+        assert session.end_reason == ended.payload["detail"] and not session.transcript_ref and session.cli_session_id
+
+        live = LiveSession(ada, session)
+        for what in ("last", "turns"):
+            page = await s.runtime.read(live, ReadRequest(what))  # type: ignore[arg-type]
+            assert page.text == f"no turn record: the session ended before its first turn ({session.end_reason})"
+
+        async def freed() -> bool:
+            row = await s.manager.db.fetchone("SELECT status, assignee_staff_id, notes FROM board_tasks WHERE id = ?", (task_id,))
+            return row is not None and row["status"] == "todo" and row["assignee_staff_id"] is None
+
+        await eventually(freed, "the card went back to todo, unassigned")
 
 
 async def test_a_companion_that_dies_takes_the_side_channel_with_it(settings: Settings, db: Database) -> None:

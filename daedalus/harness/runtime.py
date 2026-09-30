@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import posixpath
 import secrets
 import time
 import uuid
@@ -105,6 +106,11 @@ READ_TRANSCRIPT_TURNS = 400
 DIFF_TIMEOUT = 30.0
 SCREEN_TAIL_CHARS = 1200
 """How much of a stuck screen the failure keeps: enough to see the dialog, not a page of scrollback."""
+EXIT_SCREEN_LINES = 8
+EXIT_SCREEN_CHARS = 400
+"""How much of the screen a CLI that failed leaves in its session's end: the error it printed, not
+the frame around it."""
+EXIT_SCREEN_TIMEOUT = 3.0
 CALLS_REMEMBERED = 256
 """Team call ids a session keeps for spotting a repeat; a replay is of the latest posts."""
 PORT_ATTEMPTS = 3
@@ -781,7 +787,7 @@ class CliStaffRuntime:
                 # The question is recorded, but the permission still holds the process.
                 await self.ingress.status(live, StaffState.PERMISSION.value, step.waiting_for)
         elif step.state is StaffState.EXITED:
-            await self._finish(session, self._ending(event), end=True, live=live)
+            await self._finish(session, await self._exit_reason(session, event), end=True, live=live)
             return
         elif step.changed:
             detail = "read from the screen" if step.inferred else ""
@@ -814,6 +820,33 @@ class CliStaffRuntime:
             return f"{label} ended its session"
         code = event.payload.get("exit_code")
         return f"{label} exited" + (f" with code {code}" if isinstance(code, int) and code != 0 else "")
+
+    async def _exit_reason(self, session: CliSession, event: StaffEvent) -> str:
+        """Why the CLI went, with what its screen last said when it failed.
+
+        "exited with code 1" was all a member that died a third of a second after its start left
+        behind: it wrote no turn record, its terminal was gone by the time anyone looked, and the
+        orchestrator hired a second helper to find out what had happened. What the CLI printed as it
+        failed — a refused model, a missing login — is read here, while the terminal still holds it,
+        and kept as the session's end reason, which the event and ``ReadStaff`` both show.
+        """
+        reason = self._ending(event)
+        code = event.payload.get("exit_code")
+        if event.kind is EventKind.SESSION_ENDED or not isinstance(code, int) or code == 0:
+            return reason
+        try:
+            async with asyncio.timeout(EXIT_SCREEN_TIMEOUT):
+                screen = await session.term.screen(scrollback=EXIT_SCREEN_LINES)
+        except Exception:  # noqa: BLE001 — the reason stands without the screen
+            logger.info("the screen of %s could not be read after it exited", session.staff_session_id, exc_info=True)
+            return reason
+        # Printable characters only: the reason is stored as one line of text, and a store that
+        # refused it would leave the session unended. A line with no word on it is a frame.
+        lines = ["".join(c for c in line if c.isprintable()).strip() for line in screen.splitlines()]
+        said = " / ".join([line for line in lines if any(c.isalnum() for c in line)][-EXIT_SCREEN_LINES:])
+        if len(said) > EXIT_SCREEN_CHARS:
+            said = "…" + said[-EXIT_SCREEN_CHARS:]
+        return f"{reason}; its screen last showed: {said}" if said else reason
 
     async def _located(self, session: CliSession, live: LiveSession, event: StaffEvent) -> None:
         ref = str(event.payload.get("ref") or "")
@@ -1267,7 +1300,20 @@ class CliStaffRuntime:
             return _clip(await session.term.screen(scrollback=200), req.max_chars, None)
         if req.what == "diff":
             return await self._diff(live, req)
-        turns = await self._turns(live)
+        ref = self._transcript_ref(live)
+        if not ref:
+            # Said, not raised: the session id once stood in for the missing path, the adapter
+            # refused it as not absolute, and ReadStaff failed twice on a member that had died before
+            # its first turn, when that was the very thing the orchestrator needed to learn.
+            label = self.adapter.capabilities.label
+            if live.session.live:
+                return ReadPage(f"no turn record yet: {label} has not begun its first turn", req.cursor, False)
+            return ReadPage(f"no turn record: the session ended before its first turn ({live.session.end_reason or live.session.status})", req.cursor, False)
+        try:
+            turns = await self._turns(live)
+        except Exception as exc:  # noqa: BLE001 — a record that cannot be read is an answer, not a failure of the tool
+            logger.info("the turn record of %s could not be read", live.id, exc_info=True)
+            return ReadPage(f"the turn record at {ref} could not be read: {getattr(exc, 'message', None) or exc}", req.cursor, False)
         after = int(req.cursor) if req.cursor and req.cursor.isdigit() else -1
         fresh = [t for t in turns if t.index > after]
         cursor = str(max(t.index for t in fresh)) if fresh else req.cursor
@@ -1282,9 +1328,16 @@ class CliStaffRuntime:
         """The session's turns from its CLI's own transcript, for the staff view."""
         return await self._turns(live)
 
+    def _transcript_ref(self, live: LiveSession) -> str:
+        """Where the CLI keeps the session's turns, once its first hook said so; empty before that.
+        Every adapter reads a file there, so a ref that is not an absolute path is none."""
+        session = self.sessions.get(live.id)
+        ref = (session.transcript_ref if session is not None else "") or live.session.transcript_ref or ""
+        return ref if posixpath.isabs(ref) else ""
+
     async def _turns(self, live: LiveSession) -> list[Turn]:
         session = self.sessions.get(live.id)
-        ref = (session.transcript_ref if session is not None else "") or live.session.transcript_ref or live.cli_session_id or ""
+        ref = self._transcript_ref(live)
         if not ref:
             return []
         port = session.env_port if session is not None else RuntimeEnvironment(self.terminals, await self._env_of(live), actor=f"agent:{self._actor(live.id)}")

@@ -355,7 +355,8 @@ async def staff_edit(
     description=(
         "Take a member off the team. Refused while they have a live session unless release=true, which ends it first "
         "(their unfinished task goes back to todo). keep_worktree=false removes a clean worktree; an unmerged branch "
-        "is always kept."
+        "is always kept. A member already gone — a one-off helper leaves with its task — is said to be, and a card "
+        "they left in doing is freed."
     ),
 )
 async def dismiss(context: ToolContext, staff: str, release: bool = False, keep_worktree: bool = True) -> ToolResult:
@@ -499,7 +500,9 @@ async def pause(context: ToolContext, staff: str) -> ToolResult:
     name="Release",
     description=(
         "End a member's live session. Their unfinished task goes back to todo, unassigned; their branch stays. "
-        "keep_worktree=false also removes a clean worktree. Look (ReadStaff) before releasing someone who went silent."
+        "A member whose session already ended, or who was dismissed, has the cards they still hold in doing freed "
+        "the same way. keep_worktree=false also removes a clean worktree. Look (ReadStaff) before releasing someone "
+        "who went silent."
     ),
 )
 async def release(context: ToolContext, staff: str, keep_worktree: bool = True) -> ToolResult:

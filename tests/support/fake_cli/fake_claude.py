@@ -76,6 +76,7 @@ from tests.support.fake_cli.agent import FakeAgent  # noqa: E402
 from tests.support.fake_cli.tui import (  # noqa: E402
     Args,
     Dialog,
+    Faults,
     Look,
     McpClient,
     exit_with,
@@ -623,6 +624,9 @@ def main() -> None:
     args = Args("claude", argv, flags=FLAGS, aliases=ALIASES)
     if args.has("--version"):
         raise SystemExit(command(["--version"]))
+    if Faults.from_env().fail_at_start:
+        print("Error: the model given with --model is not available to this account", flush=True)
+        raise SystemExit(1)
     agent = FakeClaude(args)
     exit_with(agent.main)
 

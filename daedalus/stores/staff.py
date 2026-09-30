@@ -496,12 +496,24 @@ class StaffStore:
         row = await self._db.fetchone("SELECT * FROM staff WHERE project_id = ? AND name = ? COLLATE NOCASE AND archived_at IS NULL", (project_id, (name or "").strip()))
         return _staff(row) if row is not None else None
 
-    async def find(self, project_id: str, ref: str) -> Staff | None:
-        """A member of this project named by id or by name — the two ways a person or a model refers to one."""
+    async def find(self, project_id: str, ref: str, *, dismissed: bool = False) -> Staff | None:
+        """A member of this project named by id or by name — the two ways a person or a model refers to one.
+
+        With ``dismissed``, a name no active member has is the latest dismissed member of that name: a
+        one-off helper goes from the team on its own, and "nobody called mediafix" was the answer to
+        an orchestrator that still had to free the card the helper had left behind.
+        """
         found = await self.get(ref)
         if found is not None and found.project_id == project_id:
             return found
-        return await self.by_name(project_id, ref)
+        active = await self.by_name(project_id, ref)
+        if active is not None or not dismissed:
+            return active
+        row = await self._db.fetchone(
+            "SELECT * FROM staff WHERE project_id = ? AND name = ? COLLATE NOCASE AND archived_at IS NOT NULL ORDER BY archived_at DESC LIMIT 1",
+            (project_id, (ref or "").strip()),
+        )
+        return _staff(row) if row is not None else None
 
     async def list(self, project_id: str, archived: bool = False) -> list[Staff]:
         """The project's team in the order it was hired; with ``archived``, the dismissed as well."""

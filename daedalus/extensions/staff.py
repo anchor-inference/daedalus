@@ -411,11 +411,7 @@ class Team:
     async def record_result(self, task: BoardTask, member: Staff, note: str) -> None:
         """Keep what a member reported on its card, so the card says what came of the work and not only
         what was asked. The latest result is enough to read; the event log keeps every one."""
-        line = f"[{_now()[:16].replace('T', ' ')}] result from {member.name}: " + " ".join(note.split())[:RESULT_MAX]
-        await self.manager.db.execute(
-            "UPDATE board_tasks SET notes = substr(CASE WHEN notes = '' THEN ? ELSE notes || char(10) || ? END, ?), updated_at = ? WHERE id = ?",
-            (line, line, -NOTES_MAX_CHARS, _now(), task.id),
-        )
+        await self.note_on_card(task.id, f"result from {member.name}: " + " ".join(note.split())[:RESULT_MAX])
 
     async def _set_assignee(self, task: BoardTask, staff_id: str | None, *, actor: str, error: str = "") -> None:
         await self.manager.db.execute("UPDATE board_tasks SET assignee_staff_id = ?, updated_at = ? WHERE id = ?", (staff_id, _now(), task.id))
@@ -438,8 +434,23 @@ class Team:
         if task is None:
             return "the task is gone"
         if task.status == "blocked":
-            return f"waits for {', '.join(task.depends_on) or 'its dependencies'} to finish"
+            waiting = await self.open_dependencies(task)
+            if waiting:
+                return f"waits for {', '.join(waiting)} to finish"
+            # Named for what it is: "waits for ec2179 to finish" was said of a card whose one
+            # dependency had been done for six hours, and the orchestrator went to edit the
+            # dependency away instead of moving the card it had set aside itself.
+            return "is set aside as blocked, not waiting for any task; moving it to todo lets it start"
         return None
+
+    async def open_dependencies(self, task: BoardTask) -> list[str]:
+        """The tasks ``task`` waits on that are not finished yet."""
+        waiting = []
+        for dep in task.depends_on:
+            row = await self.manager.db.fetchone("SELECT status FROM board_tasks WHERE id = ?", (dep,))
+            if row is not None and row["status"] not in FINISHED_TASK:
+                waiting.append(dep)
+        return waiting
 
     async def _free(self, entry: Entry) -> str | None:
         """Why the member cannot take the entry now, or ``None``.
@@ -567,7 +578,21 @@ class Team:
         if missing:
             raise StaffError(f"task {task.id} has no {', '.join(m.replace('_', '-') for m in missing)} yet; a task is handed over with all four parts of its brief")
         if task.status == "doing" and task.assignee_staff_id and task.assignee_staff_id != member.id:
-            raise StaffBusy(f"task {task.id} is being worked on by someone else; release them first")
+            holder, gone = await self._holder(task)
+            if not gone:
+                raise StaffBusy(f"task {task.id} is being worked on by {holder}; release them first")
+            # Nobody works it: the card was left in doing by a member whose session is over. A
+            # one-off helper died a third of a second after its start, the card stayed in doing under
+            # its name, and every Assign to the member who had done the work before was refused as
+            # "being worked on by someone else"; Release and Dismiss found no session and no member,
+            # and the orchestrator hired a second helper only to free the card. It passes on here,
+            # and the card says so.
+            await self.note_on_card(task.id, f"the card passed from {holder} to {member.name}: {gone}")
+            task = await self._move_task(task, "todo", actor=by)
+        if task.status == "blocked" and not await self.open_dependencies(task):
+            # An assignment is the decision that the card goes now. Left blocked, the queue held it
+            # as waiting for a dependency that had long been done.
+            task = await self._move_task(task, "todo", actor=by)
         runtime = self.runtime(member)
         project = await self.project(member.project_id)
         folder = self.folder_for(project, member, task)
@@ -594,6 +619,45 @@ class Team:
         entry = Entry(project.id, member.id, member.name, task.id, task.priority, terminal, by, env=folder.env)
         admission = await self.queue.request(entry)
         return Assigned(admission, (await self.task(task.id)) or task)
+
+    async def _holder(self, task: BoardTask) -> tuple[str, str]:
+        """Who holds a card in doing, and, when nobody works it any more, why not (else ``""``).
+
+        A card is held only by a member still on the team whose live session is on it. Silence is
+        not gone: a command-line member that says nothing may be thinking, and its card stays its
+        own until its session ends or it is released.
+        """
+        member = await self.manager.staff.get(task.assignee_staff_id or "")
+        if member is None:
+            return "someone no longer on the team", "they are no longer on the team"
+        if not member.active:
+            return member.name, f"{member.name} was dismissed"
+        live = await self.manager.staff.live(member.id)
+        if live is not None and live.task_id == task.id:
+            return member.name, ""
+        if live is not None:
+            return member.name, f"{member.name}'s session moved on to task {live.task_id or 'none'}"
+        last = next((s for s in await self.manager.staff.sessions(member.id, limit=20) if s.task_id == task.id), None)
+        if last is None:
+            return member.name, f"{member.name} never started on it"
+        return member.name, f"{member.name}'s session ended ({last.end_reason or last.status}) before the work was handed in"
+
+    async def note_on_card(self, task_id: str, text: str) -> None:
+        """A line of the host's in a card's notes, dated as the board dates its own."""
+        line = f"[{_now()[:16].replace('T', ' ')}] {' '.join(text.split())}"
+        await self.manager.db.execute(
+            "UPDATE board_tasks SET notes = substr(CASE WHEN notes = '' THEN ? ELSE notes || char(10) || ? END, ?), updated_at = ? WHERE id = ?",
+            (line, line, -NOTES_MAX_CHARS, _now(), task_id),
+        )
+
+    async def free_card(self, member: Staff, task_id: str | None, why: str, *, by: str = "system") -> BoardTask | None:
+        """Put a card its member no longer works back to todo, unassigned, saying why on it; ``None``
+        when there was no such card. What a release does for a live session, for one already over."""
+        task = await self.task(task_id) if task_id else None
+        if task is None or task.status != "doing" or task.assignee_staff_id != member.id:
+            return None
+        await self.note_on_card(task.id, f"{member.name} no longer works this card: {why}; it is back in todo, unassigned")
+        return await self._move_task(task, "todo", actor=by, assignee=None)
 
     async def start(self, member: Staff, task: BoardTask, *, by: str = "operator") -> LiveSession:
         """Start a session of ``member`` for ``task`` now; the launch queue calls this once it admits it."""
@@ -1705,7 +1769,7 @@ class Ingress:
                 if to == "done" and board is not None:
                     # The board's own moves promote what waited on a finished task; this move is the
                     # team's, and without this the tasks after it would wait for a move nobody makes.
-                    await board._promote_dependents()
+                    await board._promote_dependents(task.id)
                 told += f"; task {task.id} is in review" if to == "review" else f"; task {task.id} is done, and the orchestrator reads your report"
         if remember and remember.strip():
             await self.manager.staff.append_notes(live.staff.id, remember.strip())
@@ -1809,6 +1873,9 @@ class Ingress:
 
     async def ended(self, live: LiveSession, reason: str) -> None:
         await self.team._end(live, reason, stop=False)
+        # The process is gone, so nobody works the card: left in doing, it read as taken on the
+        # board and refused every other member (see ``Team._holder``).
+        await self.team.free_card(live.staff, live.session.task_id, f"the session ended ({reason})")
         # A place under the project's concurrency came free.
         self.team.queue.pump_soon(live.staff.project_id)
 

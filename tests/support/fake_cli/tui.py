@@ -57,6 +57,9 @@ Faults, a comma list in ``FAKE_CLI_FAULTS``:
     (a timed close would make "an Enter landed in it" depend on how loaded the machine is).
 ``exit_after:<turns>``
     the process dies with exit code 3 after that many turns, without saying goodbye — a crash.
+``fail_at_start``
+    the process prints an error and exits with code 1 before it draws anything or posts a hook, as a
+    CLI refusing its model or its flags does: no transcript is ever written.
 ``no_2004``
     bracketed paste is never turned on.
 ``slow_ready:<ms>``
@@ -116,6 +119,7 @@ class Faults:
     late_permission_notification: bool = False
     dialog_during_paste: bool = False
     exit_after: int = 0
+    fail_at_start: bool = False
     no_2004: bool = False
     slow_ready_ms: int = 0
 

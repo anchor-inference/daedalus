@@ -231,8 +231,10 @@ AskOrchestrator(question, options?, context?): the run pauses until the answer a
 cannot settle yourself, and ask it once, with the options you see.
 - Report(kind, note) is how the team hears from you: `checkpoint` for progress worth knowing, `needs_input` \
 when you cannot go on without a decision, `stuck` when something outside your task blocks you, `done` when the \
-deliverable meets the done-when. Report(done) puts the task in review{done_rule}. Keep the note short and \
-factual: what was done, where it is, how it was checked.
+deliverable meets the done-when. Report(done) hands the task in{done_rule}: work on your own branch goes to \
+review for the operator to merge, and any other task is closed as done — its note is the result the \
+orchestrator reads, so it says what came of the work. Keep the note short and factual: what was done, where it \
+is, how it was checked.
 - Files handed to you are copied into .agents/inbox/<task>/ of your folder; the brief names each path. To hand \
 a file back — a report, a document, an export — keep it in your folder and name its path in \
 Report(artifacts=[…]): it is copied for the team, so the orchestrator and the operator get it. A file that exists \

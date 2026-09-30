@@ -259,9 +259,10 @@ export default function (pi: ExtensionAPI) {
     description:
       "Tell your team how your task stands. kind: 'checkpoint' (progress worth knowing), 'needs_input' (you cannot go " +
       "on without a decision), 'stuck' (something outside your task blocks you) or 'done' (the deliverable meets the " +
-      "task's done-when; the task goes to review, and a worktree with uncommitted changes is refused — commit first). " +
-      "note: a short factual summary. artifacts: paths or links of what you produced. remember: one line to keep in " +
-      "your notes for every later session.",
+      "task's done-when; it hands the task in: work on your own branch goes to review for the operator to merge, and a " +
+      "worktree with uncommitted changes is refused — commit first; any other task is closed as done, and your note is " +
+      "the result the orchestrator reads). note: a short factual summary. artifacts: paths or links of what you " +
+      "produced. remember: one line to keep in your notes for every later session.",
     promptSnippet: "Report progress, a needed decision, a blocker or the finished task to your team",
     promptGuidelines: ["End every turn with a Report call: the orchestrator hears from you only through Report and AskOrchestrator."],
     parameters: Type.Object({
