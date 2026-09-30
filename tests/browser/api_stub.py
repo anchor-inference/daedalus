@@ -553,6 +553,7 @@ class BoardStub:
             "id": id_, "title": title, "status": status, "priority": priority, "acceptance": "", "checklist": [], "depends_on": [], "session_id": None, "notes": "",
             "created_at": "2026-09-24T09:00:00Z", "updated_at": "2026-09-24T09:30:00Z", "project_id": "", "assignee_staff_id": assignee["id"] if assignee else None,
             "brief": {"objective": "", "deliverable": "", "boundaries": "", "done_when": ""}, "branch": None, "merge_state": "", "assignee": assignee,
+            "acceptance_state": "", "requirements": [],
         }
         row.update(fields)
         return row
@@ -1290,8 +1291,9 @@ class FocusStub:
             BoardStub.task("t-checkout", words["task.checkout"], status="doing", priority=1, assignee=ira, checklist=[{"text": "cart", "done": True}, {"text": "promo", "done": True}, {"text": "payment", "done": False}]),
             BoardStub.task("t-bot", words["task.bot"], status="doing", assignee=BoardStub.assignee("st-naya", "Naya", harness="opencode", color="green", status="permission", on_task=True)),
             BoardStub.task("t-endpoint", words["task.endpoint"], status="review", assignee=BoardStub.assignee("st-max", "Max", harness="codex"), branch="agent/max/endpoint"),
-            BoardStub.task("t-photos", words["task.photos"], status="doing", assignee=BoardStub.assignee("st-lev", "Lev", color="teal", status="working", on_task=True, session_id="sess-lev")),
+            BoardStub.task("t-photos", words["task.photos"], status="doing", assignee=BoardStub.assignee("st-lev", "Lev", color="teal", status="working", on_task=True, session_id="sess-lev"), requirements=photo_requirements(lang)),
             BoardStub.task("t-hours", words["task.hours"], status="todo", priority=2, assignee=BoardStub.assignee("st-olga", "Olga", harness="claude", color="violet")),
+            *finished_contracts(lang),
         ]
         needs = [{
             "id": "ask-spring", "short_id": "q4r8tz", "origin": "orchestrator", "kind": "question", "text": words["ask.spring"], "suggestion": "",
@@ -1300,7 +1302,8 @@ class FocusStub:
         board = BoardStub({**bakery}, staff=[{k: m[k] for k in ("id", "name", "color", "harness")} for m in staff], tasks=tasks, needs_you=needs)
 
         asks = [
-            {"id": "ask-spring", "short_id": "q4r8tz", "project_id": pid, "origin": "orchestrator", "kind": "question", "staff_id": None, "staff_session_id": None, "task_id": "t-checkout", "request_ref": "", "title": words["title.spring"], "text": words["ask.spring"], "detail": {"options": [words["ask.before"], words["ask.after"]]}, "routed_to": "operator", "suggestion": "", "created_at": "2026-09-24T09:55:00Z", "routed_at": "2026-09-24T09:55:00Z", "resolved_at": None, "resolved_by": None, "resolution": {}},
+            # Reworded once by the orchestrator in place: the same id, and the card says it changed.
+            {"id": "ask-spring", "short_id": "q4r8tz", "project_id": pid, "origin": "orchestrator", "kind": "question", "staff_id": None, "staff_session_id": None, "task_id": "t-checkout", "request_ref": "", "title": words["title.spring"], "text": words["ask.spring"], "detail": {"options": [words["ask.before"], words["ask.after"]], "revision": 1, "updated_at": "2026-09-24T09:58:00Z"}, "routed_to": "operator", "suggestion": "", "created_at": "2026-09-24T09:55:00Z", "routed_at": "2026-09-24T09:55:00Z", "resolved_at": None, "resolved_by": None, "resolution": {}},
             {"id": "ask-grammy", "short_id": "qk7m2x", "project_id": pid, "origin": "staff", "kind": "permission", "staff_id": "st-naya", "staff_session_id": "ss-naya", "task_id": "t-bot", "request_ref": "", "text": "Exec: npm install grammy", "detail": {}, "routed_to": "orchestrator", "suggestion": "", "created_at": "2026-09-24T09:53:00Z", "routed_at": "2026-09-24T09:53:00Z", "resolved_at": "2026-09-24T09:54:00Z", "resolved_by": "orchestrator", "resolution": {"allow": True, "text": "", "selected": [], "via": "orchestrator"}},
         ]
 
@@ -1568,6 +1571,7 @@ FOCUS_WORDS: dict[str, dict[str, str]] = {
         "ask.font": "Which typeface for the menu headings?",
         "watch.note": "Max's turn finished → wake me",
         "task.checkout": "Checkout", "task.bot": "Notify: bot", "task.endpoint": "Notify: endpoint", "task.photos": "Menu photo captions", "task.hours": "Opening hours",
+        "task.menu": "Seasonal menu page", "task.prices": "Price sheet check", "task.hero": "Hero image",
         "ira.role": "front end", "naya.role": "the baker's bot", "lev.role": "review", "olga.role": "copy", "link.name": "Menu link check",
         "lev.task": "Task: captions for the menu photos. Done when every photo in the gallery has a caption from the sheet.",
         "lev.reply": "Twelve of eighteen captions are written from the sheet; the rest have no row yet, so I am asking the orchestrator.",
@@ -1598,6 +1602,7 @@ FOCUS_WORDS: dict[str, dict[str, str]] = {
         "ask.font": "Какой шрифт для заголовков меню?",
         "watch.note": "ход Макса завершён → разбудить меня",
         "task.checkout": "Оформление заказа", "task.bot": "Уведомление: бот", "task.endpoint": "Уведомление: эндпоинт", "task.photos": "Подписи к фото в меню", "task.hours": "Часы работы",
+        "task.menu": "Страница сезонного меню", "task.prices": "Сверка прайса", "task.hero": "Главное изображение",
         "ira.role": "фронтенд", "naya.role": "бот пекаря", "lev.role": "ревью", "olga.role": "тексты", "link.name": "Проверка ссылок меню",
         "lev.task": "Задача: подписи к фото в меню. Готово, когда у каждого фото в галерее есть подпись из таблицы.",
         "lev.reply": "Двенадцать из восемнадцати подписей взяты из таблицы; для остальных строк нет, спрашиваю оркестратора.",
@@ -1615,6 +1620,90 @@ FOCUS_WORDS: dict[str, dict[str, str]] = {
         "ira.queued": "После Stripe проверь страницу на телефоне",
     },
 }
+
+
+# What the demo board's cards were asked and what their members said about it, in both languages:
+# the English texts are what `check_task_contract.py` asserts against, the Russian ones are for the pictures.
+CONTRACT_WORDS: dict[str, dict[str, str]] = {
+    "en": {
+        "r.short": "Captions under 80 characters, no emoji", "r.shots": "Start from the photographer's shot list", "r.all": "Caption every photo on the site",
+        "r.menu": "Caption the menu photos only", "r.checkout": "Do not touch the checkout pages", "r.sheet": "Take the items from the spring menu sheet",
+        "c.items": "The page lists every seasonal item", "c.phone": "It reads well on a 390 px phone",
+        "e.items.how": "compared the page with spring-menu.csv", "e.items.result": "27 of 27 items shown",
+        "e.phone.how": "screenshot at 390 px", "e.phone.result": "no sideways scroll", "m.phone": "checked the screenshot myself",
+        "c.prices": "Every price matches the shop sheet", "c.vat": "VAT is shown on every line",
+        "e.prices.how": "diffed the page against prices.xlsx", "e.prices.result": "no mismatches",
+        "c.hero": "The image is under 100 KB", "e.hero.how": "ls -l hero.webp", "e.hero.result": "46 KB",
+    },
+    "ru": {
+        "r.short": "Подписи короче 80 символов, без эмодзи", "r.shots": "Начать со списка снимков фотографа", "r.all": "Подписать все фото на сайте",
+        "r.menu": "Подписать только фото в меню", "r.checkout": "Не трогать страницы оформления заказа", "r.sheet": "Позиции брать из таблицы весеннего меню",
+        "c.items": "На странице есть все сезонные позиции", "c.phone": "Страница читается на телефоне шириной 390 px",
+        "e.items.how": "сверил страницу с spring-menu.csv", "e.items.result": "показаны 27 из 27",
+        "e.phone.how": "снимок экрана на 390 px", "e.phone.result": "без горизонтальной прокрутки", "m.phone": "снимок проверил сам",
+        "c.prices": "Все цены совпадают с таблицей магазина", "c.vat": "НДС указан в каждой строке",
+        "e.prices.how": "сравнил страницу с prices.xlsx", "e.prices.result": "расхождений нет",
+        "c.hero": "Изображение меньше 100 КБ", "e.hero.how": "ls -l hero.webp", "e.hero.result": "46 КБ",
+    },
+}
+
+
+def requirement(label: int, text: str, kind: str, source: str, *, state: str = "active", replaces: str | None = None, file_name: str = "", deliveries: list[dict] | None = None, mark: dict | None = None) -> dict:
+    """One requirement of a card as ``daedalus/extensions/board.py`` draws it."""
+    return {
+        "id": f"rq-{label}-{kind}", "label": f"R{label}", "number": label, "text": text, "kind": kind, "source": source,
+        "from_operator": source == "operator" or source.startswith(("operator:", "answer:", "rule:")), "state": state, "replaces": replaces,
+        "file_id": f"file-{label}" if file_name else None, "file_name": file_name, "evidence": None, "mark": mark, "created_at": "2026-09-24T09:10:00Z",
+        "deliveries": deliveries or [],
+    }
+
+
+def delivery(staff_id: str, name: str, *, via: str = "brief", acknowledged: bool = False, opened: bool = False, cli: bool = False) -> dict:
+    """One member given one requirement: when, how, and whether it confirmed it or opened its file."""
+    return {
+        "staff_id": staff_id, "staff_name": name, "via": via, "message_id": "m-req" if via == "message" else None, "delivered_at": "2026-09-24T09:31:00Z",
+        "acknowledged_at": "2026-09-24T09:32:00Z" if acknowledged else None, "opened_at": "2026-09-24T09:33:00Z" if opened else None, "cli": cli,
+    }
+
+
+def photo_requirements(lang: str) -> list[dict]:
+    """Lev's captions: a requirement of the operator's he confirmed, an input he opened, a scope the
+    orchestrator narrowed (the old one kept, struck through) and sent him by a message he has not
+    confirmed yet, and one of the operator's standing rules."""
+    w = CONTRACT_WORDS[lang]
+    return [
+        requirement(1, w["r.short"], "quality", "operator", deliveries=[delivery("st-lev", "Lev", acknowledged=True)]),
+        requirement(2, w["r.shots"], "input", "answer:q4r8tz", file_name="shot-list.csv", deliveries=[delivery("st-lev", "Lev", acknowledged=True, opened=True)]),
+        requirement(3, w["r.all"], "scope", "orchestrator", state="superseded", deliveries=[delivery("st-lev", "Lev", acknowledged=True)]),
+        requirement(4, w["r.menu"], "scope", "orchestrator", replaces="rq-3-scope", deliveries=[delivery("st-lev", "Lev", via="message")]),
+        requirement(5, w["r.checkout"], "constraint", "rule:120", deliveries=[delivery("st-lev", "Lev", acknowledged=True)]),
+    ]
+
+
+def finished_contracts(lang: str) -> list[dict]:
+    """Finished cards at each level of acceptance: Ira's menu checked item by item, with an input her
+    command-line agent could only confirm in words; Max's price check handed in with one item left
+    without a word; Olga's image approved by the operator."""
+    words, w = FOCUS_WORDS[lang], CONTRACT_WORDS[lang]
+    ira = BoardStub.assignee("st-ira", "Ira", harness="claude", color="orange")
+    max_ = BoardStub.assignee("st-max", "Max", harness="codex")
+    olga = BoardStub.assignee("st-olga", "Olga", harness="claude", color="violet")
+    ok = {"ok": True, "note": "", "by": "orchestrator"}
+    menu = [
+        {"text": w["c.items"], "done": True, "evidence": {"how": w["e.items.how"], "result": w["e.items.result"], "by": "Ira", "at": "2026-09-24T08:40:00Z"}, "mark": ok},
+        {"text": w["c.phone"], "done": True, "evidence": {"how": w["e.phone.how"], "result": w["e.phone.result"], "by": "Ira", "at": "2026-09-24T08:40:00Z"}, "mark": {**ok, "note": w["m.phone"]}},
+    ]
+    sheet = requirement(1, w["r.sheet"], "input", "operator", file_name="spring-menu.csv", deliveries=[delivery("st-ira", "Ira", acknowledged=True, cli=True)], mark=ok)
+    prices = [
+        {"text": w["c.prices"], "done": True, "evidence": {"how": w["e.prices.how"], "result": w["e.prices.result"], "by": "Max", "at": "2026-09-24T09:10:00Z"}},
+        {"text": w["c.vat"], "done": False},
+    ]
+    hero = [{"text": w["c.hero"], "done": True, "evidence": {"how": w["e.hero.how"], "result": w["e.hero.result"], "by": "Olga", "at": "2026-09-23T17:00:00Z"}, "mark": ok}]
+    return [
+        BoardStub.task("t-menu", words["task.menu"], status="done", assignee=ira, checklist=menu, acceptance_state="accepted", requirements=[sheet], updated_at="2026-09-24T08:50:00Z"),
+        BoardStub.task("t-prices", words["task.prices"], status="done", assignee=max_, checklist=prices, acceptance_state="handed_in", updated_at="2026-09-24T09:12:00Z"),
+        BoardStub.task("t-hero", words["task.hero"], status="done", assignee=olga, checklist=hero, acceptance_state="operator_approved", updated_at="2026-09-23T18:00:00Z"),
+    ]
 
 
 MAIN_SID = "main0sess001"

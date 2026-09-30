@@ -3098,7 +3098,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .pboard-sheet-status { margin-bottom: 8px; flex-wrap: wrap; }
 .pboard-moves { margin: 0 0 6px; flex-wrap: wrap; }
 .pboard-brief { border: 0; padding: 0; margin: 0; min-width: 0; }
-.pboard-brief legend { padding: 0; margin: 14px 0 0; color: var(--fg-2); font-size: var(--fs-12); text-transform: uppercase; letter-spacing: 0.06em; }
+.pboard-brief legend, .pboard-contract-title { padding: 0; margin: 14px 0 0; color: var(--fg-2); font-size: var(--fs-12); text-transform: uppercase; letter-spacing: 0.06em; }
 .pboard-moves .sub { align-self: center; }
 .pboard-sheet textarea.field { resize: vertical; font: inherit; }
 .pboard-deps { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
@@ -3106,9 +3106,30 @@ button.staff-row:hover { background: var(--surface-2); }
 .pboard-notes { max-height: 180px; overflow: auto; }
 .pcard-review { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .pcard-review .chip { flex: none; }
+.pcard-accept .ic { width: 11px; height: 11px; }
+/* The acceptance and the requirements of a card in its sheet: read-only blocks drawn like the review's.
+   Each item is its label in a narrow column and everything about it beside, so the text of a check
+   lines up under itself on a phone instead of wrapping back under "C1". */
+.pboard-contract { margin-top: 12px; }
+.pboard-contract-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.pboard-contract-head .pboard-contract-title { margin: 0; }
+.pboard-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: var(--fs-13); }
+.pboard-item { display: grid; grid-template-columns: 2.2em minmax(0, 1fr); column-gap: 6px; row-gap: 2px; align-items: baseline; min-width: 0; }
+.pboard-item > * { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
+.pboard-item > .pboard-label { grid-column: 1; grid-row: 1; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
+.pboard-item-line { display: flex; align-items: baseline; gap: 6px; }
+.pboard-item-text { flex: 1; min-width: 0; }
+.pboard-item-line .chip { flex: none; }
+.pboard-item .sub { font-size: var(--fs-12); }
+.pboard-item.superseded .pboard-item-text, .pboard-item.withdrawn .pboard-item-text { text-decoration: line-through; color: var(--fg-3); }
+.pboard-item.superseded, .pboard-item.withdrawn { opacity: 0.75; }
+.pboard-req-file { display: flex; align-items: center; gap: 4px; }
+.pboard-req-file .ic { flex: none; }
+.pboard-deliveries { display: flex; flex-wrap: wrap; gap: 4px; }
+.pboard-deliveries .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 /* The review of a staff branch in the task sheet: a bordered block over the move buttons, every row
    free to shrink so a long branch name or path never widens the sheet on a phone. */
-.review-panel { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px 12px; margin: 0 0 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.review-panel, .pboard-contract { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px 12px; margin: 0 0 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .review-head { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--fg-2); }
 .review-head .pcard-branch { flex: 0 1 auto; }
 .review-stat { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: var(--fs-13); }
@@ -3849,6 +3870,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .q-short { flex: none; margin-top: 2px; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
 .q-flag { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: var(--radius-pill); font-size: var(--fs-11); font-weight: 600; line-height: 16px; }
 .q-flag.urgent { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.q-flag.updated { background: color-mix(in srgb, var(--info) 14%, transparent); color: var(--info); font-weight: 500; }
 .q-flag.host { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
 
 .q-text { min-width: 0; font-size: var(--fs-13); line-height: 1.5; color: var(--fg); overflow-wrap: anywhere; }
