@@ -139,6 +139,10 @@ class Group:
     """What the page has selected, which a copy (INPUT ``copy``) answers with."""
     selection_withheld: bool = False
     """The focus is on a password field: a copy answers ``withheld`` and no text, as the daemon does."""
+    workflow: dict[str, Any] | None = None
+    """The recording of the operator's steps on now (``/api/browsers/{group}/workflow``)."""
+    workflows: list[dict[str, Any]] = field(default_factory=list)
+    """The finished ones the host keeps, newest first."""
 
 
 @dataclass
@@ -350,6 +354,54 @@ class BrowserStub:
                 g.needs = None
             g.last_activity = time.time()
             self.broadcast(group_id, per_client=lambda c: {"type": "control", "group": g.id, **self.control_for(c)})
+            if owner != "human" and g.workflow:
+                # The daemon ends a recording when the browser is no longer the person's.
+                self.stop_workflow(group_id, "control")
+
+    # -- the operator's recorded steps ---------------------------------------------------------
+
+    def workflow_view(self, g: Group, w: dict[str, Any]) -> dict[str, Any]:
+        return {"id": w["id"], "group_id": g.id, "env": "container", "project_id": g.project_id, "session_id": g.owner_id if g.owner_kind == "session" else None,
+                "staff_id": g.owner_id if g.owner_kind == "staff" else None, "state": w["state"], "values": w["values"], "reason": w.get("reason", ""),
+                "start_url": w["start_url"], "start_title": w["start_title"], "started_at": iso(w["started"]), "stopped_at": iso(w["stopped"]) if w.get("stopped") else None,
+                "steps": list(w["steps"]), "note_id": w.get("note_id", "")}
+
+    def record_step(self, group_id: str, **step: Any) -> dict[str, Any]:
+        """The operator took a step: the daemon records it and tells the live views, as it does."""
+        with self.lock:
+            g = self.groups[group_id]
+            w = g.workflow
+            assert w is not None, "no recording is on"
+            tab = self.active(g)
+            full = {"n": len(w["steps"]) + 1, "at": int(time.time() * 1000), "tab": tab.id, "url": self.scenes[tab.scene].url, **step}
+            w["steps"].append(full)
+            self.broadcast(group_id, {"type": "workflow", "state": "step", "id": w["id"], "step": full, "steps": len(w["steps"]), "recording": True})
+            return full
+
+    def stop_workflow(self, group_id: str, reason: str) -> dict[str, Any]:
+        with self.lock:
+            g = self.groups[group_id]
+            w = g.workflow
+            assert w is not None
+            w.update(state="stopped", reason=reason, stopped=time.time())
+            g.workflow = None
+            g.workflows.insert(0, w)
+            self.broadcast(group_id, {"type": "workflow", "state": "stopped", "id": w["id"], "recording": False, "steps": len(w["steps"]), "reason": reason, "values": w["values"]})
+            return self.workflow_view(g, w)
+
+    def draft(self, workflow_id: str, goal: str) -> tuple[int, Any]:
+        """A procedure from the steps, as the host writes one without a model."""
+        g, w = next(((g, w) for g in self.groups.values() for w in g.workflows if w["id"] == workflow_id), (None, None))
+        if g is None or w is None:
+            return 404, {"detail": "no such recording"}
+        lines = [f"{n}. {s['action']} {json.dumps((s.get('element') or {}).get('name', ''))}" for n, s in enumerate(w["steps"], start=1) if s["action"] not in ("arrive", "scroll")]
+        now = time.time()
+        note = {"id": f"n{len(self.notes) + 1}", "project_id": g.project_id or "", "project": "", "host": "shop.example", "status": "proposed", "by": "operator",
+                "proposed_at": now, "approved_at": 0, "kind": "procedure", "title": goal or "Recorded steps on shop.example", "source": workflow_id,
+                "text": "Recorded by the operator in the agent's browser on shop.example.\n\n" + "\n".join(lines)}
+        self.notes.append(note)
+        w["note_id"] = note["id"]
+        return 200, {"note": note, "drafted_by": "steps", "why": ""}
 
     def needs_you(self, group_id: str, reason: str, what: str, by: str = "agent") -> None:
         """A request for the operator: the agent's handoff, or (``by="daemon"``) one the daemon raised
@@ -455,7 +507,7 @@ class BrowserStub:
 
     def answer(self, method: str, path: str, query: dict[str, list[str]], body: Any) -> tuple[int, Any]:
         segments = path.strip("/").split("/")  # api, browsers, [group], [action]
-        if len(segments) >= 3 and segments[2] in ("running", "profiles", "recordings", "load", "notes"):
+        if len(segments) >= 3 and segments[2] in ("running", "profiles", "recordings", "load", "notes", "workflows"):
             return self.answer_settings(method, segments[2:], body)
         if len(segments) == 2 and method == "GET":
             session = query.get("session", [None])[0]
@@ -514,6 +566,28 @@ class BrowserStub:
         if action == "recording" and method == "DELETE":
             g.frames = []
             return 200, {"ok": True}
+        if action == "workflow" and method == "GET" and len(segments) == 4:
+            live = self.workflow_view(g, g.workflow) if g.workflow else None
+            return 200, {"workflow": live, "recent": [self.workflow_view(g, w) for w in g.workflows]}
+        if action == "workflow" and method == "POST" and len(segments) == 4:
+            if g.owner != "human":
+                return 409, {"detail": "take the browser first: a recording is of a person's own steps", "code": "forbidden"}
+            if not g.workflow:
+                self.counter += 1
+                tab = self.active(g)
+                g.workflow = {"id": f"w{self.counter}", "state": "recording", "values": body.get("values", "slots"), "started": time.time(), "steps": [],
+                              "start_url": self.scenes[tab.scene].url, "start_title": self.scenes[tab.scene].title}
+                self.broadcast(g.id, {"type": "workflow", "state": "started", "id": g.workflow["id"], "recording": True, "steps": 0, "values": g.workflow["values"]})
+            return 200, {"workflow": self.workflow_view(g, g.workflow)}
+        if action == "workflow" and method == "POST" and segments[-1] == "stop":
+            if not g.workflow:
+                return 404, {"detail": "not recording", "code": "not_found"}
+            return 200, {"workflow": self.stop_workflow(g.id, "operator")}
+        if action == "workflow" and method == "POST" and segments[-1] == "mark":
+            if not g.workflow:
+                return 404, {"detail": "not recording", "code": "not_found"}
+            text = g.selection or self.scenes[self.active(g).scene].title
+            return 200, {"step": self.record_step(g.id, action="expect", text=text)}
         if action == "close" and method == "POST":
             g.status = "closed"
             self.drop(g.id, 4404)
@@ -544,6 +618,18 @@ class BrowserStub:
             return 200, {"envs": [{"env": "container", "groups": groups, "bytes": sum(x["bytes"] for x in groups), "max_bytes": 500 << 20, "retention_ms": 7 * 86_400_000}]}
         if what == "load" and method == "GET":
             return 200, browser_load(running=len(self.running))
+        if what == "workflows" and len(parts) >= 2:
+            found = next(((g, w) for g in self.groups.values() for w in g.workflows if w["id"] == parts[1]), None)
+            if found is None:
+                return 404, {"detail": "no such recording"}
+            g, w = found
+            if method == "GET" and len(parts) == 2:
+                return 200, {"workflow": self.workflow_view(g, w)}
+            if method == "POST" and parts[-1] == "draft":
+                return self.draft(w["id"], str((body or {}).get("goal") or ""))
+            if method == "DELETE":
+                g.workflows = [x for x in g.workflows if x is not w]
+                return 200, {"ok": True}
         if what == "notes" and method == "GET" and len(parts) == 1:
             return 200, {"notes": sorted(self.notes, key=lambda n: n["status"] != "proposed")}
         if what == "notes" and len(parts) >= 2:
@@ -552,6 +638,13 @@ class BrowserStub:
                 return 404, {"detail": "no such note"}
             if method == "POST" and parts[-1] == "approve":
                 note.update(status="active", approved_at=note["proposed_at"] + 60)
+                return 200, {"note": note}
+            if method == "PATCH":
+                if not str((body or {}).get("text") or "").strip():
+                    return 400, {"detail": "a procedure needs its steps"}
+                note["text"] = body["text"]
+                if note.get("kind") == "procedure" and body.get("title") is not None:
+                    note["title"] = body["title"]
                 return 200, {"note": note}
             if method == "DELETE":
                 self.notes = [n for n in self.notes if n["id"] != parts[1]]

@@ -327,7 +327,8 @@ than guess: refs come only from BrowserSnapshot, and the browser opens http and 
 - A cookie or consent banner in the way: refuse it ("Reject all", "Only necessary", "Отклонить все", "Только \
 необходимые") rather than accept. A refusal is never asked about; accepting is.
 - Notes on a site the operator approved come with the page; use them. After a hard-won success on a site, \
-BrowserNote proposes one for the next agent.
+BrowserNote proposes one for the next agent. A procedure the operator recorded there is listed by its title: when \
+your task is what it does, read it with BrowserNote(read=…) and follow it with your own tools.
 - The browser keeps the project's logins between sessions. Close it (BrowserClose) when the task is done.
 """
 

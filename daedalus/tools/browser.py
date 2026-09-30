@@ -386,19 +386,20 @@ async def browser_download(context: ToolContext, name: str, to: str | None = Non
 
 @tool_group("browser")
 @search_hint(
-    "remember site note what worked on this website tip next time propose note learned "
-    "заметка о сайте запомнить что сработало на сайте совет на будущее предложить заметку"
+    "remember site note what worked on this website tip next time propose note learned recorded procedure read steps "
+    "заметка о сайте запомнить что сработало на сайте совет на будущее предложить заметку записанная процедура шаги"
 )
 @tool(
     name="BrowserNote",
     description=(
         "After a hard-won success on a site, propose a short note for the next agent there: what worked that was not "
         "obvious ('search answers only to Enter, not the button'). host defaults to the current tab's. The operator "
-        "reads it first; only an approved note is shown, on that site. Never put secrets or personal data in it."
+        "reads it first; only an approved note is shown, on that site. Never put secrets or personal data in it. "
+        "read=<id> instead reads a procedure the operator recorded on a site, whole; its id comes with the site's notes."
     ),
 )
-async def browser_note(context: ToolContext, note: str, host: str | None = None) -> ToolResult:
-    return await _run(context, "BrowserNote", {"note": note, "host": host})
+async def browser_note(context: ToolContext, note: str | None = None, host: str | None = None, read: str | None = None) -> ToolResult:
+    return await _run(context, "BrowserNote", {"note": note, "host": host, "read": read})
 
 
 @tool_group("browser")

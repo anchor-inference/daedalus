@@ -1791,7 +1791,142 @@
     };
   }
 
+  // The recording of a person's steps asks what a field is by its nature, never by the mark a
+  // person's typing leaves on it (humanTyped): that mark keeps the agent from reading back what the
+  // operator typed, and would make every field of a recording secret the moment it is typed into.
+  // Beyond the autocomplete tokens the agent's refusal knows, a field whose own words name a
+  // password, a code or a card counts too: a page that forgets its autocomplete is common, and a
+  // false alarm here costs a step the operator does themselves, where a miss would keep a secret.
+  const SECRET_WORDS = [
+    ["password", /pass(word|wd|code)|парол/i],
+    ["one_time_code", /(^|[^a-z])(otp|totp|2fa|mfa)([^a-z]|$)|one.?time|verification.?code|security.?code|sms.?code|код.{0,12}(подтвержд|из смс|sms)/i],
+    ["payment", /card.?(number|no)|cardnumber|ccnum|(^|[^a-z])(cvc|cvv|csc|cvn)([^a-z]|$)|номер карты/i],
+  ];
+  // What a person types into these is who they are, not what the task is: never kept as a value
+  // even when the operator lets ordinary values be kept, only as a blank to fill.
+  const PERSONAL_AUTOCOMPLETE = /(^|\s)(username|email|tel(-[a-z-]+)?|bday(-[a-z]+)?|name|given-name|family-name|additional-name|nickname|honorific-[a-z]+|street-address|address-line[123]|address-level[1-4]|postal-code|country|country-name|sex|impp|organization-title)(\s|$)/i;
+
+  // The most fields a sign-in box holds: a name, a password, a code, "remember me".
+  const SIGN_IN_FIELDS = 4;
+
+  function natureSecret(el) {
+    const t = tag(el);
+    if (t !== "input" && t !== "textarea" && t !== "select" && !el.isContentEditable) return "";
+    if (t === "input" && inputType(el) === "password") return "password";
+    const ac = (el.getAttribute("autocomplete") || "").toLowerCase();
+    if (/password/.test(ac)) return "password";
+    if (/one-time-code/.test(ac)) return "one_time_code";
+    if (/(^|\s)cc-/.test(ac)) return "payment";
+    const words = [el.getAttribute("name"), el.id, el.getAttribute("aria-label"), el.getAttribute("placeholder"), labelFor(el)]
+      .filter(Boolean).join(" ");
+    for (const [kind, re] of SECRET_WORDS) {
+      if (re.test(words)) return kind;
+    }
+    return "";
+  }
+
+  // secretNear is the kind of secret field in the form of el, or, for a page without a <form> (a
+  // sign-in drawn by a script), in the small box around it: the user name typed beside a password is
+  // part of a sign-in, which is the operator's. A box that holds more fields than a sign-in does is
+  // the page, not the sign-in: a comment on the same page as a password field is not part of it.
+  function secretNear(el) {
+    let scope = el.form || (el.closest && el.closest("form"));
+    if (!scope) {
+      let n = el.parentElement;
+      for (let i = 0; n && i < 4; i++, n = n.parentElement) {
+        if (n.querySelectorAll("input:not([type=hidden]), textarea, select").length > SIGN_IN_FIELDS) break;
+        if (n.querySelector("input[type=password]")) {
+          scope = n;
+          break;
+        }
+      }
+    }
+    if (!scope) return "";
+    let found = "";
+    for (const f of scope.querySelectorAll("input, textarea, select")) {
+      if (f === el || (tag(f) === "input" && inputType(f) === "hidden")) continue;
+      const k = natureSecret(f);
+      if (k === "password" || k === "one_time_code") return k;
+      if (k) found = k;
+    }
+    return found;
+  }
+
+  // placeOf names where an element is, in a person's words: the dialog it is in, else its form's
+  // name, else the heading above it.
+  function placeOf(el) {
+    const dialog = el.closest && el.closest("dialog, [role=dialog], [role=alertdialog]");
+    if (dialog) {
+      const n = accessibleName(dialog, "dialog", true) || (dialog.querySelector("h1, h2, h3, h4") ? textOf(dialog.querySelector("h1, h2, h3, h4"), 0) : "");
+      if (collapse(n)) return clip(n, 80);
+    }
+    const form = el.form || (el.closest && el.closest("form"));
+    if (form) {
+      const n = accessibleName(form, "form", true);
+      if (collapse(n)) return clip(n, 80);
+    }
+    return clip(nearestHeading(el), 80);
+  }
+
+  // recordInfo is what the recording of a person's steps says about an element: who it is, where it
+  // is, what kind of field it is, and whether its value is one that must never be kept.
+  function recordInfo(r) {
+    const found = lookup(r);
+    if (!found) return { error: "stale", ref: r };
+    const el = who(found);
+    const rl = role(el);
+    const t = tag(el);
+    const type = t === "input" ? inputType(el) : "";
+    const ac = (el.getAttribute("autocomplete") || "").toLowerCase();
+    const textField = (t === "input" && !["button", "submit", "reset", "image", "checkbox", "radio", "file", "range", "color", "hidden"].includes(type)) ||
+      t === "textarea" || (el.isContentEditable && el.getAttribute("contenteditable") !== null);
+    const out = {
+      role: rl || (t === "a" ? "link" : "generic"),
+      name: accessibleName(el, rl),
+      tag: t,
+      type,
+      place: placeOf(el),
+      secret_kind: natureSecret(el),
+      near_secret: secretNear(el),
+      personal: PERSONAL_AUTOCOMPLETE.test(ac) || type === "email" || type === "tel",
+      text_field: textField,
+      multiline: t === "textarea" || (textField && t !== "input"),
+      checkable: t === "input" && (type === "checkbox" || type === "radio") || ["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"].includes(rl),
+      checked: el.checked === true || el.getAttribute("aria-checked") === "true",
+      select: t === "select",
+    };
+    if (!out.name && !textField) out.name = clip(textOf(el, 0), 100);
+    if (el.href && t === "a") out.href = el.href;
+    return out;
+  }
+
+  // recordValue is a field's value now, for the recording to tell whether the person changed it and,
+  // where the operator lets it, to keep it. A secret field's value never leaves the page.
+  function recordValue(r) {
+    const found = lookup(r);
+    if (!found) return { error: "stale", ref: r };
+    const el = who(found);
+    if (natureSecret(el)) return { withheld: true };
+    const t = tag(el);
+    if (t === "select") {
+      const o = el.selectedOptions && el.selectedOptions[0];
+      return { option: o ? collapse(o.label || o.text).slice(0, 200) : "" };
+    }
+    if (t === "input" && (inputType(el) === "checkbox" || inputType(el) === "radio")) return { checked: !!el.checked };
+    if (t === "input" || t === "textarea") return { value: String(el.value || "").slice(0, 10000) };
+    if (el.isContentEditable) return { value: String(el.innerText || "").slice(0, 10000) };
+    return { value: "" };
+  }
+
+  // headline is what a page says it is about, for a person's "this is what done looks like" with
+  // nothing selected: its first heading, else its title.
+  function headline() {
+    const h = document.querySelector("main h1, h1, [role=main] h2, h2");
+    return clip(h ? textOf(h, 0) : document.title, 160);
+  }
+
   globalThis.__browserd = {
+    recordInfo, recordValue, headline,
     snapshot, readable, prepare, measure, hit, hovered, focus, selectAll, selectOption, element, evidence, mask, markHumanTyped, selection,
     hasText, exists, captchas, ref, describe, focusedRef, region, find, elementAt, scrollInfo, scrollBy, scrollToText,
     route, frameElement, frameOrigin, prepareFrame, hitFrame, crossFrames, setPrefix, markListened, listenerRoot, inspect,

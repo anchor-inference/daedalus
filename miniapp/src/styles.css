@@ -4074,6 +4074,53 @@ button.staff-row:hover { background: var(--surface-2); }
 .bp-give-foot { display: flex; align-items: flex-end; gap: 10px; margin-top: 8px; }
 .bp-give-foot .sub { flex: 1; font-size: var(--fs-11); line-height: 1.35; }
 .bp-give-foot .btn { flex: none; }
+
+/* Recording the operator's own steps. The red dot is the one sign a recording is on, on the button
+   that starts it and on the bar over the picture while it runs: never silent. */
+.bp-rec-dot { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
+.bp-rec-dot.live { animation: pulse 1.6s ease-in-out infinite; }
+.bp-rec-btn { flex: none; gap: 6px; white-space: nowrap; }
+.bp-rec-start { width: 320px; padding: 12px; font-size: var(--fs-13); }
+.menu.bp-rec-start { z-index: 42; }
+.bp-rec-start-head { margin-bottom: 6px; color: var(--fg); font-weight: 600; }
+.bp-rec-start p { margin: 0 0 8px; color: var(--fg-2); line-height: 1.4; }
+.bp-rec-start-secret { display: flex; gap: 6px; align-items: flex-start; }
+.bp-rec-start-secret .ic { flex: none; margin-top: 2px; color: var(--ok); }
+.bp-rec-start-keep { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0 10px; cursor: pointer; }
+.bp-rec-start-keep input { flex: none; margin-top: 3px; }
+.bp-rec-start-keep > span { display: flex; flex-direction: column; gap: 2px; }
+.bp-rec-start-keep b { color: var(--fg); font-weight: 500; }
+.bp-rec-start-keep .sub { font-size: var(--fs-12); line-height: 1.35; }
+.bp-rec-start-foot { display: flex; justify-content: flex-end; }
+.bp-rec-start-foot .btn { gap: 6px; }
+.bp-recbar { flex: none; display: flex; align-items: center; gap: 8px; height: var(--row-h-dense); padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bad) 9%, var(--surface-1)); color: var(--fg); font-size: var(--fs-12); }
+.bp-recbar-title { flex: none; font-weight: 600; }
+.bp-recbar-count { flex: none; color: var(--fg-2); }
+.bp-recbar-latest { flex: 1; min-width: 0; color: var(--fg-2); }
+.bp-recbar .btn { flex: none; gap: 5px; white-space: nowrap; }
+.bp-recbar-stop .ic { color: var(--bad); }
+.bp-rec { flex: none; display: flex; flex-direction: column; gap: 8px; max-height: 55%; padding: 10px 12px; border-top: 1px solid var(--line); background: var(--surface-1); overflow-y: auto; overscroll-behavior: contain; font-size: var(--fs-13); }
+.bp-rec-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bp-rec-head > .ic { flex: none; color: var(--fg-2); }
+.bp-rec-head b { flex: none; color: var(--fg); }
+.bp-rec-toggle { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; border: 0; background: none; padding: 0; color: var(--accent); font: inherit; font-size: var(--fs-12); cursor: pointer; }
+.bp-rec-toggle .chev.open { transform: rotate(180deg); }
+.bp-rec-steps { margin: 0; padding: 0 0 0 22px; font-size: var(--fs-12); color: var(--fg); }
+.bp-rec-steps li { padding: 1px 0; }
+.bp-rec-steps li > span { display: inline-block; max-width: 100%; vertical-align: bottom; }
+.bp-rec-steps li.quiet { color: var(--fg-3); }
+.bp-rec-steps li.yours { color: var(--ok); }
+.bp-rec-steps li.yours .ic { margin-right: 4px; vertical-align: -1px; }
+.bp-rec-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.bp-rec-goal { flex: 1 1 100%; min-width: 0; height: var(--ctl-h-sm); padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); font: inherit; font-size: var(--fs-13); }
+.bp-rec-goal:focus, .bp-proc-title:focus, .bp-proc-text:focus { outline: none; border-color: var(--accent); }
+.bp-proc { display: flex; flex-direction: column; gap: 6px; }
+.bp-proc-host { margin-left: auto; color: var(--fg-3); font-size: var(--fs-12); }
+.bp-proc-by { font-size: var(--fs-12); line-height: 1.4; }
+.bp-proc-label { color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; }
+.bp-proc-title { height: var(--ctl-h-sm); padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); font: inherit; font-size: var(--fs-13); }
+.bp-proc-text { padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); font-family: var(--mono); font-size: var(--fs-12); line-height: 1.5; resize: vertical; }
+.bp-proc-foot { display: flex; flex-wrap: wrap; gap: 6px; }
 .panel-tab .tab-mark { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .panel-tab .tab-mark.busy { animation: dotpulse 1.4s ease-in-out infinite; }
 .panel-tab .tab-mark.attn { background: var(--warn); }
@@ -4166,6 +4213,12 @@ button.staff-row:hover { background: var(--surface-2); }
 .bs-note { align-items: flex-start; }
 .bs-note > svg { margin-top: 3px; }
 .bs-note-text { font-size: var(--fs-14); overflow-wrap: anywhere; }
+.bs-proc-title { color: var(--fg); font-size: var(--fs-14); }
+/* A procedure is a page of steps: a few lines of it in the list, the whole on request. */
+.bs-proc-text { margin: 2px 0 0; max-height: 7.5em; overflow: hidden; color: var(--fg-2); font-family: var(--mono); font-size: var(--fs-12); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bs-proc-text.whole { max-height: none; }
+.bs-proc-more { align-self: flex-start; border: 0; background: none; padding: 0; color: var(--accent); font: inherit; font-size: var(--fs-12); cursor: pointer; }
+.bs-proc .bp-proc { flex: 1; min-width: 0; }
 @media (max-width: 600px) {
   .bs-row { flex-wrap: wrap; }
   .bs-row-main { flex-basis: calc(100% - 30px); }

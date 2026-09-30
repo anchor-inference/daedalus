@@ -25,6 +25,7 @@ import (
 	"github.com/ascorblack/daedalus/browserd/internal/rpc"
 	"github.com/ascorblack/daedalus/browserd/internal/version"
 	"github.com/ascorblack/daedalus/browserd/internal/view"
+	"github.com/ascorblack/daedalus/browserd/internal/workflow"
 	"github.com/ascorblack/daedalus/ptyd/proto/events"
 	"github.com/ascorblack/daedalus/ptyd/proto/server"
 )
@@ -151,8 +152,10 @@ func serve(args []string) error {
 			return l.RecordMaxBytes, time.Duration(l.RecordRetentionMs) * time.Millisecond
 		}}
 	model.AfterAction = recorder.AfterAction
+	steps := &workflow.Recorder{Pages: model, Groups: manager.Group, Publish: manager.Publish, Events: evlog, Log: log}
+	hub.Observe = steps.Before
 	daemon := &rpc.Daemon{Config: cfg, Instance: hex.EncodeToString(instance), StartedAt: time.Now().UTC(),
-		Manager: manager, Hub: hub, Page: model, Events: evlog, Log: log, Net: wall, Record: recorder}
+		Manager: manager, Hub: hub, Page: model, Events: evlog, Log: log, Net: wall, Record: recorder, Workflow: steps}
 	srv := server.New(ep.Token, log, daemon.Hello)
 	daemon.Register(srv)
 
@@ -162,6 +165,7 @@ func serve(args []string) error {
 	go manager.RunTitles(stop)
 	go hub.Run(stop)
 	go recorder.Run(stop)
+	go steps.Run(stop)
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)

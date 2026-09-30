@@ -2,7 +2,7 @@
 // in words, when the corner preview shows and where it sits. Nothing here touches the page or the
 // network, so each rule is a test rather than a screenshot.
 
-import type { BrowserActionRow, BrowserGroup } from "../api";
+import type { BrowserActionRow, BrowserGroup, BrowserStep } from "../api";
 import { t } from "../i18n";
 import type { ActionEvent, ViewControl } from "./protocol";
 
@@ -123,6 +123,51 @@ export function actionWords(row: Pick<BrowserActionRow, "kind" | "element" | "na
 }
 
 /** A live `action` event as a row of the log, so the drawer moves before the listing is read again. */
+/**
+ * One step of the operator's recording as the panel says it: the i18n key and its words. The element is
+ * named as the page names it, and a secret step says only whose it is — nothing was kept of it.
+ */
+export function stepWords(step: BrowserStep): { key: string; vars: Record<string, string | number> } {
+  const what = step.element?.name || step.element?.role || "";
+  switch (step.action) {
+    case "navigate":
+      return step.go ? { key: `browser.step.go.${step.go}`, vars: {} } : { key: "browser.step.navigate", vars: { where: domainOf(step.to ?? "") || step.to || "" } };
+    case "arrive":
+      return { key: "browser.step.arrive", vars: { where: step.title || domainOf(step.to ?? "") || step.to || "" } };
+    case "click":
+    case "double_click":
+    case "right_click":
+    case "check":
+    case "uncheck":
+      return step.element ? { key: `browser.step.${step.action}`, vars: { what } } : { key: "browser.step.point", vars: {} };
+    case "type":
+      if (step.value !== undefined) return { key: step.submit ? "browser.step.typed.submit" : "browser.step.typed", vars: { what, text: step.value } };
+      return { key: step.submit ? "browser.step.blank.submit" : "browser.step.blank", vars: { what, slot: step.slot ?? "" } };
+    case "select":
+      return step.option ? { key: "browser.step.select", vars: { what, option: step.option } } : { key: "browser.step.select.blank", vars: { what, slot: step.slot ?? "" } };
+    case "press":
+      return { key: (step.count ?? 1) > 1 ? "browser.step.press.n" : "browser.step.press", vars: { keys: step.keys ?? "", n: step.count ?? 1 } };
+    case "scroll":
+      return { key: `browser.step.scroll.${step.direction === "up" || step.direction === "left" || step.direction === "right" ? step.direction : "down"}`, vars: {} };
+    case "handoff":
+      return { key: `browser.step.handoff.${step.reason === "two_factor" || step.reason === "payment" ? step.reason : "login"}`, vars: {} };
+    case "expect":
+      return { key: "browser.step.expect", vars: { text: step.text || step.title || "" } };
+    case "dialog":
+      return { key: step.accept ? "browser.step.dialog.accept" : "browser.step.dialog.dismiss", vars: { text: step.text ?? "" } };
+    case "download":
+      return { key: "browser.step.download", vars: { name: step.text ?? "" } };
+    case "tab":
+      return { key: "browser.step.tab", vars: { where: step.title || domainOf(step.to ?? "") } };
+  }
+  return { key: "browser.step.other", vars: { what: String(step.action) } };
+}
+
+/** The steps a procedure is made of: the ones that do something, not where the page went or scrolled. */
+export function doingSteps(steps: BrowserStep[]): number {
+  return steps.filter((s) => s.action !== "arrive" && s.action !== "scroll" && s.action !== "expect").length;
+}
+
 export function rowOfEvent(e: ActionEvent): BrowserActionRow {
   return {
     id: e.id,

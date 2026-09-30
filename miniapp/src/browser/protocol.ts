@@ -23,6 +23,8 @@ export const MAX_INPUT_BYTES = 4096;
 /** The daemon's own ceiling on one `text` input, in characters. */
 export const MAX_TEXT_CHARS = 1000;
 
+import type { BrowserStep } from "../api";
+
 export type Tier = "live" | "thumb";
 
 /** What a frame shows: its pixels, the viewport's size in CSS pixels, and where the page was. */
@@ -84,7 +86,15 @@ export type ViewEvent =
   | { type: "needs_you"; reason: string; what: string; url: string; tab_id?: string; by?: "daemon" | "agent" }
   | { type: "error"; code: string; message: string }
   | { type: "ping"; at: number }
+  | WorkflowEvent
   | CopiedEvent;
+
+/**
+ * The group's recording of the operator's own steps (docs/architecture/browser.md, Recording a
+ * person's steps): started, each step as it is taken (`replaces` names a step it takes the place of),
+ * and stopped — without its steps, which the host keeps.
+ */
+export type WorkflowEvent = { type: "workflow"; state: "started" | "step" | "stopped"; id: string; recording?: boolean; steps?: number; step?: BrowserStep; replaces?: number; values?: string; reason?: string };
 
 /**
  * The answer to a copy, to this client alone: the page's selected text, `truncated` when it was cut to

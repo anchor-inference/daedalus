@@ -19,6 +19,7 @@ import (
 	"github.com/ascorblack/daedalus/browserd/internal/record"
 	"github.com/ascorblack/daedalus/browserd/internal/version"
 	"github.com/ascorblack/daedalus/browserd/internal/view"
+	"github.com/ascorblack/daedalus/browserd/internal/workflow"
 	"github.com/ascorblack/daedalus/ptyd/proto/events"
 	"github.com/ascorblack/daedalus/ptyd/proto/procstat"
 	"github.com/ascorblack/daedalus/ptyd/proto/server"
@@ -39,6 +40,8 @@ type Daemon struct {
 	Net *netwall.Browsers
 	// Record keeps keyframes; nil serves no record.* methods.
 	Record *record.Recorder
+	// Workflow records a person's steps; nil serves no workflow.* methods.
+	Workflow *workflow.Recorder
 
 	sampler *procstat.Sampler
 }
@@ -82,6 +85,7 @@ func (d *Daemon) Register(s *server.Server) {
 	d.registerPage(s)
 	d.registerNet(s)
 	d.registerRecord(s)
+	d.registerWorkflow(s)
 }
 
 // decode reads params strictly: an unknown field is an error, so a misspelt parameter is never
@@ -215,6 +219,9 @@ func (d *Daemon) groupClose(ctx context.Context, c *server.Conn, params json.Raw
 	d.Page.GroupClosed(p.GroupID)
 	if d.Record != nil {
 		d.Record.Forget(p.GroupID)
+	}
+	if d.Workflow != nil {
+		d.Workflow.Forget(p.GroupID)
 	}
 	return map[string]any{"tabs": n}, nil
 }

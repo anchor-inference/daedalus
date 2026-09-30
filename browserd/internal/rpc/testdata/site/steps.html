@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Reports</title>
+<style>
+  body { margin: 0; font: 16px sans-serif; }
+  .at { position: absolute; }
+  input, select, textarea, button { font: inherit; box-sizing: border-box; }
+</style></head>
+<body>
+<main>
+  <h1 class="at" style="left:20px;top:0">Reports</h1>
+  <form aria-label="Filters" onsubmit="event.preventDefault(); document.getElementById('out').textContent = 'found ' + document.getElementById('q').value">
+    <label class="at" style="left:20px;top:80px">Search <input id="q" style="width:240px;height:32px"></label>
+    <label class="at" style="left:360px;top:80px">Period
+      <select id="period" style="width:180px;height:32px"><option>This month</option><option>Last month</option><option>This year</option></select>
+    </label>
+    <label class="at" style="left:620px;top:80px"><input type="checkbox" id="arch" style="width:20px;height:20px"> Include archived</label>
+    <button type="submit" class="at" style="left:900px;top:80px;width:120px;height:32px">Show</button>
+  </form>
+  <p id="out" class="at" style="left:20px;top:130px">nothing yet</p>
+  <label class="at" style="left:20px;top:180px">Comment <textarea id="comment" style="width:300px;height:60px"></textarea></label>
+  <form aria-label="Sign in" onsubmit="event.preventDefault(); document.getElementById('out').textContent = 'signed in'">
+    <label class="at" style="left:20px;top:280px">Email <input id="email" autocomplete="username" style="width:240px;height:32px"></label>
+    <label class="at" style="left:360px;top:280px">Password <input id="pw" type="password" style="width:200px;height:32px"></label>
+    <button type="submit" class="at" style="left:640px;top:280px;width:120px;height:32px">Sign in</button>
+  </form>
+  <label class="at" style="left:20px;top:360px">Card number <input id="card" autocomplete="cc-number" style="width:240px;height:32px"></label>
+  <label class="at" style="left:360px;top:360px">Code <input id="code" name="otp" style="width:120px;height:32px"></label>
+  <a id="export" class="at" style="left:20px;top:440px;display:block;width:160px;height:32px" href="/site/steps.html?token=SECRETTOKEN1234567890abcdef&amp;period=last&amp;keyword=shoes#done">Export CSV</a>
+  <button class="at" style="left:360px;top:440px;width:160px;height:32px" onclick="document.getElementById('out').textContent = 'ordered'">Place order</button>
+  <label class="at" style="left:620px;top:520px">Birth year
+    <select autocomplete="bday-year" style="width:120px;height:32px"><option>1980</option><option>1981</option><option>1982</option></select>
+  </label>
+  <a class="at" style="left:20px;top:520px;display:block;width:200px;height:32px" href="/file.txt">Download report</a>
+  <button class="at" style="left:360px;top:520px;width:160px;height:32px" onclick="document.getElementById('out').textContent = confirm('Reset the filters?') ? 'reset' : 'kept'">Reset</button>
+</main>
+</body></html>

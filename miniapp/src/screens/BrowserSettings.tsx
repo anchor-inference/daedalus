@@ -19,6 +19,7 @@ import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { Dropdown, Switch, timeAgo } from "../components";
 import { Row } from "../settingsrow";
+import { ProcedureEditor } from "../browser/steps";
 
 export const DEFAULT_BROWSER: BrowserSettings = {
   env: "auto",
@@ -407,6 +408,8 @@ function Reading({ b, set, presets }: { b: BrowserSettings; set: (patch: Partial
 function SiteNotes({ toast }: { toast: (text: string) => void }) {
   const notes = useQuery<{ notes: BrowserSiteNote[] }>(NOTES, { pollMs: 30000 });
   const list = notes.data?.notes ?? [];
+  const [editing, setEditing] = useState<string | null>(null);
+  const [whole, setWhole] = useState<Set<string>>(() => new Set());
   async function approve(n: BrowserSiteNote) {
     try {
       await api.post(`${NOTES}/${encodeURIComponent(n.id)}/approve`, {});
@@ -434,14 +437,29 @@ function SiteNotes({ toast }: { toast: (text: string) => void }) {
         <div className="sub">{t("bs.notes.none")}</div>
       ) : (
         <ul className="bs-rows">
-          {list.map((n) => (
-            <li key={n.id} className="bs-row bs-note" data-note={n.id} data-status={n.status}>
-              <Icon name="globe" size={16} />
+          {list.map((n) => n.kind === "procedure" && editing === n.id ? (
+            <li key={n.id} className="bs-row bs-note bs-proc" data-note={n.id} data-status={n.status} data-kind={n.kind}>
+              <ProcedureEditor draft={{ note: n }} toast={toast} onDone={() => { setEditing(null); invalidate(NOTES); }} />
+            </li>
+          ) : (
+            <li key={n.id} className={`bs-row bs-note ${n.kind === "procedure" ? "bs-proc" : ""}`} data-note={n.id} data-status={n.status} data-kind={n.kind}>
+              <Icon name={n.kind === "procedure" ? "skill" : "globe"} size={16} />
               <span className="bs-row-main">
                 <b className="truncate mono">{n.host}</b>
-                <span className="bs-note-text">{n.text}</span>
-                <span className="sub truncate">{[t(n.status === "proposed" ? "bs.notes.waiting" : "bs.notes.active"), n.project || t("bs.notes.everyone"), timeAgo(new Date((n.approved_at || n.proposed_at) * 1000).toISOString())].join(" · ")}</span>
+                {n.kind === "procedure" && <b className="bs-proc-title">{n.title}</b>}
+                {n.kind === "procedure" ? (
+                  <>
+                    <pre className={`bs-proc-text ${whole.has(n.id) ? "whole" : ""}`}>{n.text}</pre>
+                    <button type="button" className="bs-proc-more" onClick={() => setWhole((w) => { const next = new Set(w); if (next.has(n.id)) next.delete(n.id); else next.add(n.id); return next; })}>
+                      {t(whole.has(n.id) ? "bs.notes.less" : "bs.notes.more")}
+                    </button>
+                  </>
+                ) : (
+                  <span className="bs-note-text">{n.text}</span>
+                )}
+                <span className="sub truncate">{[...(n.kind === "procedure" ? [t("bs.notes.procedure")] : []), t(n.status === "proposed" ? "bs.notes.waiting" : "bs.notes.active"), n.project || t("bs.notes.everyone"), timeAgo(new Date((n.approved_at || n.proposed_at) * 1000).toISOString())].join(" · ")}</span>
               </span>
+              {n.kind === "procedure" && <button type="button" className="btn small" onClick={() => setEditing(n.id)}>{t("bs.notes.edit")}</button>}
               {n.status === "proposed" && <button type="button" className="btn small primary" onClick={() => void approve(n)}>{t("bs.notes.approve")}</button>}
               <button type="button" className="btn small danger" onClick={() => void remove(n)}>{t(n.status === "proposed" ? "bs.notes.discard" : "bs.notes.remove")}</button>
             </li>

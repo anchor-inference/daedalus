@@ -255,6 +255,15 @@ class BrowserActivity(TypedDict):
     at: str
 
 
+class BrowserWorkflow(TypedDict):
+    """A recording of the operator's steps started, stopped, was drafted or discarded: the app reads
+    the group's recordings again. Ephemeral."""
+
+    group_id: str
+    id: str
+    state: str
+
+
 class BrowserClosed(TypedDict):
     group_id: str
     reason: str
@@ -514,6 +523,7 @@ REGISTRY: dict[str, EventSpec] = {
     # Many a minute while an agent works, and worth nothing once read: delivered live, never stored.
     "browser.control": EventSpec(BrowserControl, persist=False),
     "browser.activity": EventSpec(BrowserActivity, persist=False),
+    "browser.workflow": EventSpec(BrowserWorkflow, persist=False),
     "staff.status": EventSpec(StaffStatus),
     "staff.report": EventSpec(StaffReport),
     "staff.message": EventSpec(StaffMessage),

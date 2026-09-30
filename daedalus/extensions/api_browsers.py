@@ -19,6 +19,7 @@ from daedalus import load as load_math
 from daedalus.browser.gateway import BrowserGateway
 from daedalus.browser.model import BrowserError, EnvUnavailable, InvalidRequest, NotFound
 from daedalus.browser.notes import SiteNotes
+from daedalus.browser.workflows import GOAL_MAX, Workflows
 from daedalus.gateway import SocketGone, ticket_who
 from daedalus.stores.files import FileRefused, safe_name
 
@@ -69,6 +70,30 @@ class RecordingBody(BaseModel):
     frames: bool
     human: bool | None = None
     """Whether the recording goes on while the operator drives; omitted = the Settings default."""
+
+
+class WorkflowBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    values: Literal["slots", "literal"] = "slots"
+    """``literal`` keeps what the operator types into ordinary fields where it looks like nothing
+    personal; ``slots`` keeps only a named blank for it."""
+
+
+class MarkBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tab_id: str = Field(default="", max_length=64)
+
+
+class DraftBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    goal: str = Field(default="", max_length=GOAL_MAX)
+    """What the recorded steps do, in the operator's words: the procedure's title."""
+
+
+class NoteEditBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(max_length=8000)
+    title: str | None = Field(default=None, max_length=300)
 
 
 class UpdateBody(BaseModel):
@@ -217,6 +242,11 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(404, "this installation has no browser")
         return cast("SiteNotes", found)
 
+    async def named(note: dict[str, Any]) -> dict[str, Any]:
+        """A note in the app's shape: with the name of the project it is for."""
+        project = await manager.projects.get(note["project_id"]) if note.get("project_id") else None
+        return {**note, "project": project.name if project is not None else ""}
+
     @api.get("/api/browsers/notes")
     async def browsers_notes(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """The site notes agents proposed, waiting ones first, each with the project it is for."""
@@ -227,10 +257,36 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         notes.sort(key=lambda n: (n["status"] != "proposed", -(n["approved_at"] or n["proposed_at"])))
         return {"notes": notes}
 
+    @api.patch("/api/browsers/notes/{note_id}")
+    async def browsers_note_edit(note_id: str, body: NoteEditBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The operator's own words for a note or a procedure, before or after approving it."""
+        return {"note": await named(await site_notes().edit(note_id, text=body.text, title=body.title))}
+
+    def workflows() -> Workflows:
+        found = app.extensions.get("browser_workflows")
+        if found is None:
+            raise HTTPException(404, "this installation has no browser")
+        return cast("Workflows", found)
+
+    @api.get("/api/browsers/workflows/{workflow_id}")
+    async def browsers_workflow_get(workflow_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return {"workflow": await workflows().get(workflow_id)}
+
+    @api.post("/api/browsers/workflows/{workflow_id}/draft")
+    async def browsers_workflow_draft(workflow_id: str, body: DraftBody | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Draft a procedure from a finished recording; it waits in the site notes for approval."""
+        drafted = await workflows().draft(workflow_id, goal=(body.goal if body else ""))
+        return {**drafted, "note": await named(drafted["note"])}
+
+    @api.delete("/api/browsers/workflows/{workflow_id}")
+    async def browsers_workflow_delete(workflow_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        await workflows().delete(workflow_id)
+        return {"ok": True}
+
     @api.post("/api/browsers/notes/{note_id}/approve")
     async def browsers_note_approve(note_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """From now on agents on the note's site (in its project) are shown it."""
-        return {"note": await site_notes().approve(note_id)}
+        return {"note": await named(await site_notes().approve(note_id))}
 
     @api.delete("/api/browsers/notes/{note_id}")
     async def browsers_note_delete(note_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -367,6 +423,26 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def browsers_recording_delete(group_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         await service().delete_recording(group_id)
         return {"ok": True}
+
+    @api.get("/api/browsers/{group_id}/workflow")
+    async def browsers_workflow(group_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The recording of the operator's steps on now, if any, and the group's finished ones."""
+        found = workflows()
+        return {"workflow": await found.current(group_id), "recent": await found.recent(group_id)}
+
+    @api.post("/api/browsers/{group_id}/workflow")
+    async def browsers_workflow_start(group_id: str, body: WorkflowBody | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Start recording the operator's steps: theirs alone, only while they hold the browser."""
+        return {"workflow": await workflows().start(group_id, values=(body.values if body else "slots"))}
+
+    @api.post("/api/browsers/{group_id}/workflow/stop")
+    async def browsers_workflow_stop(group_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return {"workflow": await workflows().stop(group_id)}
+
+    @api.post("/api/browsers/{group_id}/workflow/mark")
+    async def browsers_workflow_mark(group_id: str, body: MarkBody | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """What the page shows when the task is done: the words the operator selected, else its heading."""
+        return {"step": await workflows().mark(group_id, tab_id=(body.tab_id if body else ""))}
 
     @api.get("/api/browsers/{group_id}/frames/{no}")
     async def browsers_frame(group_id: str, no: int, _: dict[str, Any] = Depends(auth)) -> Response:

@@ -5,7 +5,7 @@
 // is down, as for every other list.
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { api, telegram, type BrowserActionRow, type BrowserControl, type BrowserGroup, type BrowserList, type BrowserRecording } from "../api";
+import { api, telegram, type BrowserActionRow, type BrowserControl, type BrowserDraft, type BrowserGroup, type BrowserList, type BrowserRecording, type BrowserSiteNote, type BrowserStep, type BrowserWorkflow, type BrowserWorkflows } from "../api";
 import { useEvent, useStreamUp } from "../events";
 import { invalidate, useQuery } from "../store";
 import { LiveView, type LiveSnapshot } from "./live";
@@ -86,6 +86,73 @@ export async function deleteRecording(group: string): Promise<void> {
   invalidate(`${BROWSERS_KEY}/${enc(group)}/recording`);
 }
 
+/** The group's recording of the operator's steps: the one on now, and its finished ones. */
+export function useWorkflows(group: string | null): BrowserWorkflows & { loaded: boolean } {
+  const key = group ? `${BROWSERS_KEY}/${enc(group)}/workflow` : null;
+  const query = useQuery<BrowserWorkflows>(key, { pollMs: 30000, staleMs: 1500 });
+  useEvent(["browser."], (event) => {
+    if (group && event.payload?.group_id === group) invalidate(key!);
+  }, [key]);
+  const data = query.data;
+  return { workflow: data?.workflow ?? null, recent: data && Array.isArray(data.recent) ? data.recent : [], loaded: data !== undefined };
+}
+
+/** Read the group's recordings again: one just started or stopped, as the live view said. */
+export function workflowsMoved(group: string): void {
+  invalidate(`${BROWSERS_KEY}/${enc(group)}/workflow`);
+}
+
+/** Start recording the operator's own steps; the browser must be theirs. */
+export async function startWorkflow(group: string, values: BrowserWorkflow["values"]): Promise<BrowserWorkflow> {
+  const out = await api.post<{ workflow: BrowserWorkflow }>(`${BROWSERS_KEY}/${enc(group)}/workflow`, { values });
+  workflowsMoved(group);
+  return out.workflow;
+}
+
+export async function stopWorkflow(group: string): Promise<BrowserWorkflow> {
+  const out = await api.post<{ workflow: BrowserWorkflow }>(`${BROWSERS_KEY}/${enc(group)}/workflow/stop`, {});
+  workflowsMoved(group);
+  return out.workflow;
+}
+
+/** "This is what done looks like": the words selected on the page, else its heading. */
+export async function markWorkflow(group: string, tab: string | null): Promise<BrowserStep> {
+  const out = await api.post<{ step: BrowserStep }>(`${BROWSERS_KEY}/${enc(group)}/workflow/mark`, tab ? { tab_id: tab } : {});
+  return out.step;
+}
+
+export async function draftWorkflow(group: string, id: string, goal: string): Promise<BrowserDraft> {
+  const out = await api.post<BrowserDraft>(`${BROWSERS_KEY}/workflows/${enc(id)}/draft`, { goal });
+  workflowsMoved(group);
+  invalidate(NOTES_KEY);
+  return out;
+}
+
+export async function discardWorkflow(group: string, id: string): Promise<void> {
+  await api.delete(`${BROWSERS_KEY}/workflows/${enc(id)}`);
+  workflowsMoved(group);
+}
+
+export const NOTES_KEY = "/api/browsers/notes";
+
+/** The operator's own words for a note or a procedure. */
+export async function editNote(id: string, text: string, title?: string): Promise<BrowserSiteNote> {
+  const out = await api.patch<{ note: BrowserSiteNote }>(`${NOTES_KEY}/${enc(id)}`, title === undefined ? { text } : { text, title });
+  invalidate(NOTES_KEY);
+  return out.note;
+}
+
+export async function approveNote(id: string): Promise<BrowserSiteNote> {
+  const out = await api.post<{ note: BrowserSiteNote }>(`${NOTES_KEY}/${enc(id)}/approve`, {});
+  invalidate(NOTES_KEY);
+  return out.note;
+}
+
+export async function deleteNote(id: string): Promise<void> {
+  await api.delete(`${NOTES_KEY}/${enc(id)}`);
+  invalidate(NOTES_KEY);
+}
+
 function refreshLists(): void {
   invalidate(BROWSERS_KEY);
 }
@@ -143,7 +210,7 @@ export function useLiveView(group: string | null, tier: Tier, opts: { readOnly?:
 
 const EMPTY: LiveSnapshot = {
   state: { kind: "connecting" }, clientId: null, readOnly: true, control: null, tabs: [], active: null, viewing: null,
-  viewers: { count: 0, others: [] }, action: null, recent: [], dialog: null, needs: null, meta: null, painted: false,
+  viewers: { count: 0, others: [] }, action: null, recent: [], dialog: null, needs: null, meta: null, painted: false, workflow: null,
 };
 const none = () => () => undefined;
 

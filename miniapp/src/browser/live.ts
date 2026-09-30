@@ -7,7 +7,8 @@
 // under the agent repaints one canvas, not the panel.
 
 import { BrowserConnection, type ViewDeps, type ViewState } from "./connection";
-import type { ActionEvent, CopiedEvent, FrameMeta, InputMessage, Tier, ViewChange, ViewControl, ViewEvent, ViewTab } from "./protocol";
+import type { BrowserStep } from "../api";
+import type { ActionEvent, CopiedEvent, FrameMeta, InputMessage, Tier, ViewChange, ViewControl, ViewEvent, ViewTab, WorkflowEvent } from "./protocol";
 
 export type LiveSnapshot = {
   state: ViewState;
@@ -30,7 +31,11 @@ export type LiveSnapshot = {
   meta: FrameMeta | null;
   /** Whether a frame has been drawn at all (for the placeholder). */
   painted: boolean;
+  /** The operator's recording of their own steps, as the socket told it; null before it says anything. */
+  workflow: LiveWorkflow | null;
 };
+
+export type LiveWorkflow = { id: string; recording: boolean; steps: BrowserStep[]; count: number; reason: string };
 
 type Listener = () => void;
 
@@ -74,7 +79,7 @@ export class LiveView {
   constructor(readonly options: LiveOptions) {
     this.snap = {
       state: { kind: "connecting" }, clientId: null, readOnly: !!options.readOnly, control: null, tabs: [], active: null, viewing: options.tab ?? null,
-      viewers: { count: 0, others: [] }, action: null, recent: [], dialog: null, needs: null, meta: null, painted: false,
+      viewers: { count: 0, others: [] }, action: null, recent: [], dialog: null, needs: null, meta: null, painted: false, workflow: null,
     };
     this.connection = new BrowserConnection(
       {
@@ -199,6 +204,8 @@ export class LiveView {
         return this.set({ needs: { reason: event.reason, what: event.what, url: event.url } });
       case "copied":
         return this.copied(event);
+      case "workflow":
+        return this.set({ workflow: nextWorkflow(this.snap.workflow, event) });
       default:
         return;
     }
@@ -249,4 +256,18 @@ async function decode(image: Uint8Array): Promise<ImageBitmap | HTMLImageElement
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+/** The recording as a step, a start or a stop changes it. A step of a recording this view has not
+ *  heard start (it attached midway) begins its own list; the host's listing has the earlier ones. */
+export function nextWorkflow(current: LiveWorkflow | null, event: WorkflowEvent): LiveWorkflow {
+  const same = current && current.id === event.id ? current : null;
+  if (event.state === "started") return { id: event.id, recording: true, steps: [], count: 0, reason: "" };
+  if (event.state === "stopped") return { id: event.id, recording: false, steps: same?.steps ?? [], count: event.steps ?? same?.count ?? 0, reason: event.reason ?? "" };
+  const steps = same?.steps ?? [];
+  const step = event.step;
+  if (!step) return same ?? { id: event.id, recording: true, steps: [], count: event.steps ?? 0, reason: "" };
+  const replaced = event.replaces ? steps.some((s) => s.n === event.replaces) : false;
+  const next = replaced ? steps.map((s) => (s.n === event.replaces ? step : s)) : [...steps.filter((s) => s.n !== step.n), step];
+  return { id: event.id, recording: true, steps: next, count: Math.max(event.steps ?? 0, next.length), reason: "" };
 }
