@@ -216,7 +216,14 @@ function Install-Daedalus {
         $line = Get-Content $sums | Where-Object { $_ -match "^([0-9a-fA-F]{64})\s+\*?$([regex]::Escape($asset))$" } | Select-Object -First 1
         if (-not $line) { Fail "SHA256SUMS does not mention $asset." }
         $expected = ($line -split '\s+')[0].ToLowerInvariant()
-        $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
+        # .NET rather than Get-FileHash: Windows PowerShell started from a pwsh 7 inherits a module path
+        # its own Utility module does not load from, and there Get-FileHash did not exist at all.
+        $stream = [IO.File]::OpenRead($zip)
+        try {
+            $actual = -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') })
+        } finally {
+            $stream.Dispose()
+        }
         if ($actual -ne $expected) { Fail 'The download does not match its checksum; not installing it.' }
         Write-Host 'Checksum matches.'
 
@@ -235,7 +242,9 @@ function Install-Daedalus {
             $archive.Dispose()
         }
         $staged = Join-Path $work 'new'
-        Expand-Archive -Path $zip -DestinationPath $staged
+        # The same reason as the hash above: Expand-Archive lives in a script module that the same
+        # module path can hide, and every entry was already checked against climbing out.
+        [IO.Compression.ZipFile]::ExtractToDirectory($zip, $staged)
         if (-not (Test-Path (Join-Path $staged 'daedalus-desktop.exe'))) { Fail 'The archive has no daedalus-desktop.exe.' }
 
         if ($bridgeNeeded) {
