@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from daedalus.browser.model import InvalidRequest
-from daedalus.browser.notes import PROCEDURE, PROPOSED
+from daedalus.browser.notes import PROCEDURE, PROPOSED, SiteNotes
 from daedalus.browser.workflows import STEPS_CLOSE, STEPS_OPEN, check_draft, draft_prompt, write_procedure
 from tests.unit.test_browser_service import wait_until
 from tests.unit.test_browser_tools import Rig, base, daemon, rig  # noqa: F401
@@ -204,3 +204,12 @@ async def test_a_recording_without_steps_is_not_drafted_and_old_ones_go(rig: Rig
     await rig.app.db.execute("UPDATE browser_workflows SET stopped_at = '2000-01-01T00:00:00.000Z' WHERE id = ?", (stopped["id"],))
     assert await found.prune() == 1
     assert await found.recent(group) == []
+
+
+async def test_a_note_kept_before_procedures_existed_reads_as_a_note(rig: Rig) -> None:
+    db = rig.app.db
+    await db.kv_set("browser.site_notes", [{"id": "old1", "project_id": "", "host": "shop.test", "text": "Search answers only to Enter", "status": "active", "by": "agent:s1", "proposed_at": 1.0, "approved_at": 2.0}])
+    notes = SiteNotes(db)
+    (kept,) = await notes.list()
+    assert kept["kind"] == "note" and kept["title"] == "" and kept["source"] == ""
+    assert [n.text for n in await notes.active_for(None, "shop.test")] == ["Search answers only to Enter"]
