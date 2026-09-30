@@ -30,6 +30,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -99,8 +100,44 @@ def open_page(context, focus: FocusStub, term: TerminalStub, feed: EventFeed, ur
     page.route("**/api/**", handle)
     term.install(page)
     page.route("**/api/events**", feed.route)
+    # The page asks telegram.org for the Mini App script. A check has no business on the internet, and
+    # a slow answer from it held the page's load event, which the navigation waits for.
+    page.route("https://telegram.org/**", lambda route: route.fulfill(status=200, content_type="text/javascript", body=""))
+    # What went wrong on the way, said when a later wait gives up: a member page that stayed on
+    # "Loading" once did so for fifteen seconds with nothing in the log to say which read failed.
+    page.on("requestfailed", lambda r: print(f"request failed: {r.method} {urlsplit(r.url).path} {r.failure}", flush=True))
+    page.on("response", lambda r: r.status >= 500 and print(f"answered {r.status}: {urlsplit(r.url).path}", flush=True))
     page.goto(url)
     return page
+
+
+def dropped_first_read(browser, check: Check) -> None:  # type: ignore[no-untyped-def]
+    """The member's page after its first read of the member failed on the way: it tries again at
+    once, rather than at the member's 15-second poll. It waited for the poll, and one dropped request
+    kept the page on "Loading" for 15.8 seconds — just past this check's patience, which is how the
+    check came to fail now and then on a loaded machine and pass when run again."""
+    focus, term, pid = stand("en")
+    context = browser.new_context(viewport=DESK, color_scheme="dark")
+    page = open_page(context, focus, term, EventFeed(), "about:blank")
+    dropped: list[str] = []
+
+    def once(route) -> None:  # type: ignore[no-untyped-def]
+        if urlsplit(route.request.url).path == "/api/staff/st-ira" and not dropped:
+            dropped.append(route.request.url)
+            return route.abort()
+        return route.fallback()
+
+    page.route("**/api/staff/**", once)
+    started = time.monotonic()
+    page.goto(f"{BASE}/project/{pid}/staff/st-ira?token=t&lang=en")
+    try:
+        page.wait_for_selector(".staff-cli .staff-head", timeout=6000)
+    except Exception:  # noqa: BLE001 - reported below
+        pass
+    took = time.monotonic() - started
+    check.that(bool(dropped), "the first read of the member was never made")
+    check.that(page.locator(".staff-cli .staff-head").count() == 1 and took < 6, f"after a dropped first read the member's page took {took:.1f} s to show its header")
+    context.close()
 
 
 def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-def]
@@ -214,7 +251,10 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     feed.send("permission.pending", {"request_id": "p3v8nd"}, project=pid, staff="st-ira")
     late_bar = page.locator(".staff-request[data-ask='p3v8nd']")
     expect(late_bar).to_be_visible(timeout=5000)
-    late.update(resolved_at="2026-09-25T10:00:00Z", resolved_by="orchestrator")
+    # Answered by the orchestrator as the operator's answer arrives. Resolved here before the press,
+    # it was gone from the page's next read of its requests, and on a loaded machine that read came
+    # before the press, which then waited thirty seconds for a button no longer drawn.
+    focus.answered_first[late["id"]] = "orchestrator"
     late_bar.locator(".ask-answers-row .btn").first.click()
     expect(page.locator(".toast")).to_contain_text(words["by"], timeout=4000)
 
@@ -312,6 +352,7 @@ def run() -> int:
     check = Check()
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM)
+        dropped_first_read(browser, check)
         for lang in ("en", "ru"):
             desktop(browser, lang, check)
             phone(browser, lang, check)

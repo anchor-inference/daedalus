@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
@@ -65,6 +66,8 @@ class Host:
         self.n = 0
         self.mode = ""
         self.yagni = False
+        # How many times the app has read the session: a re-read is what once wiped a picked answer.
+        self.reads = 0
 
     def detail(self) -> dict:
         return {
@@ -147,6 +150,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             return route.fulfill(status=404, content_type="application/json", body=json.dumps({"detail": "Not Found"}))
         body = HOST.queue
     elif rel == f"/api/sessions/{SESSION}":
+        HOST.reads += 1
         body = HOST.detail()
     elif rel.startswith(f"/api/sessions/{SESSION}/"):
         body = []
@@ -181,8 +185,27 @@ def field(page: Page):  # type: ignore[no-untyped-def]
     return page.locator(".composer textarea")
 
 
-def posts(kind: str) -> list[tuple[str, str, dict | None]]:
-    return [p for p in HOST.posted if p[1].endswith(kind)]
+def posts(kind: str, method: str | None = None) -> list[tuple[str, str, dict | None]]:
+    return [p for p in HOST.posted if p[1].endswith(kind) and (method is None or p[0] == method)]
+
+
+def reached(page: Page, kind: str, before: int, what: str, problems: list[str], method: str | None = None) -> bool:
+    """Wait until the request a press makes has reached the host, rather than for a fixed time.
+
+    The host here is shared state the check changes between steps (the session's status, its
+    question). A request the app sent after a fixed wait ran out — a loaded machine is enough — was
+    answered in the next step instead, and flipped that step's state under it: a stop that arrived
+    after the check had set the session running again made it idle, and the reloaded page waited
+    fifteen seconds for a Stop that could not come. Every press whose request changes that state is
+    followed by this, so the next step starts from the state it set. Ten seconds is a missing
+    request, and says so, instead of a stall somewhere later."""
+    deadline = time.monotonic() + 10
+    while len(posts(kind, method)) <= before:
+        if time.monotonic() > deadline:
+            problems.append(f"{what}: the request never reached the host")
+            return False
+        page.wait_for_timeout(50)
+    return True
 
 
 def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
@@ -246,7 +269,11 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     two = page.locator(".composer-box").bounding_box()
     if not two or two["height"] <= box["height"]:
         problems.append("the pill did not grow with a second line")
-    page.wait_for_timeout(500)
+    # The draft is stored after a pause in typing; wait for it rather than for a guess at the pause.
+    try:
+        page.wait_for_function("() => localStorage.getItem('daedalus.draft.sess-1') === 'first line\\nsecond line'", timeout=10000)
+    except Exception:  # noqa: BLE001 - read back and reported below
+        pass
     stored = page.evaluate("() => localStorage.getItem('daedalus.draft.sess-1')")
     if stored != "first line\nsecond line":
         problems.append(f"the draft was not remembered ({stored!r})")
@@ -257,7 +284,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append(f"the draft did not come back after a reload ({field(page).input_value()!r})")
     field(page).click()
     page.keyboard.press("Enter")
-    page.wait_for_timeout(500)
+    reached(page, "/messages", 0, "Enter", problems)
     sent = posts("/messages")
     print("sent:", sent)
     first_id = sent[0][2].get("client_message_id") if len(sent) == 1 else None
@@ -300,7 +327,8 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if primary(page) != "stop":
         problems.append(f"after queuing, the circle is {primary(page)!r}, not stop")
     card.locator(".steer-x").click()
-    page.wait_for_timeout(500)
+    reached(page, "/steer/q_0001", 0, "the steer's ×", problems, method="DELETE")
+    page.wait_for_timeout(100)
     if page.locator(".composer .steer").count():
         problems.append("the card stayed after its × was pressed")
     deleted = [p for p in HOST.posted if p[0] == "DELETE"]
@@ -313,9 +341,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.keyboard.press("Control+Shift+S")
     page.wait_for_selector(".dialog", timeout=5000)
     page.locator(".dialog .btn.danger").click()
-    page.wait_for_timeout(400)
-    if not posts("/stop"):
-        problems.append("the stop shortcut did not reach the host")
+    reached(page, "/stop", 0, "the stop shortcut", problems)
     HOST.status = "idle"
 
     # A host without the route: no cards, no complaints.
@@ -337,8 +363,10 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     print("approval dock:", dock.inner_text().replace("\n", " | "))
     if "Exec" not in dock.inner_text() or "rm -rf build" not in dock.inner_text():
         problems.append("the dock does not name the refused call")
+    before = len(posts("/policy/grant"))
     page.keyboard.press("y")
-    page.wait_for_timeout(500)
+    reached(page, "/policy/grant", before, "Allow once", problems)
+    page.wait_for_timeout(100)
     granted = posts("/policy/grant")
     print("granted:", granted)
     if not granted or granted[-1][2] != {"key": "0123456789ab"}:
@@ -351,8 +379,10 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     HOST.refuse("abcdef012345")
     page.reload()
     page.wait_for_selector(".composer .dock.approval", timeout=15000)
+    before = len(posts("/policy/refuse"))
     page.keyboard.press("n")
-    page.wait_for_timeout(500)
+    reached(page, "/policy/refuse", before, "refusing", problems)
+    page.wait_for_timeout(100)
     refused = posts("/policy/refuse")
     print("refused:", refused)
     if not refused or refused[-1][2] != {"key": "abcdef012345"}:
@@ -372,8 +402,21 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if page.locator(".composer .dock.question .btn.option").count() != 2:
         problems.append("the question's options are not buttons in the dock")
     page.locator(".composer .dock.question .btn.option", has_text="Top 8").click()
+    # The session is read again while the operator is still answering — its stream ends and is
+    # re-opened, the safety-net poll runs — and each read brings the same question as a new object.
+    # The pick must survive that read; it once did not, and Reply then sent nothing. Wait for one.
+    reads = HOST.reads
+    deadline = time.monotonic() + 30
+    while HOST.reads == reads and time.monotonic() < deadline:
+        page.wait_for_timeout(100)
+    if HOST.reads == reads:
+        problems.append("the session was not read again while the question was open")
+    page.wait_for_timeout(300)
+    if page.locator(".composer .dock.question .btn.option.selected", has_text="Top 8").count() != 1:
+        problems.append("reading the session again dropped the answer the operator had picked")
+    before = len(posts("/answer"))
     page.locator(".composer .roundbtn.primary").click()
-    page.wait_for_timeout(500)
+    reached(page, "/answer", before, "Reply", problems)
     answered = posts("/answer")
     print("answered:", answered)
     if not answered or answered[-1][2] != {"answers": [{"question": "Keep it to the usual 8?", "selected": ["Top 8"], "custom": None}]}:
@@ -397,14 +440,17 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     local = page.locator(".model-list .model-row", has_text="Local model")
     if not local.locator('[title="128,000 token context"]').count() or "128k" not in local.inner_text():
         problems.append("the local preset lost its discovered context window")
+    before = len(posts("/model"))
     local.click()
-    page.wait_for_timeout(200)
+    reached(page, "/model", before, "the local preset", problems)
     if posts("/model")[-1][2] != {"preset": "local.model"}:
         problems.append("the local model was not chosen as a preset")
     page.locator(".composer .model-select").click()
     page.wait_for_selector(".model-list")
+    before = len(posts("/model"))
     page.locator(".model-list .model-row", has_text="DeepSeek Flash").click()
-    page.wait_for_timeout(400)
+    reached(page, "/model", before, "the model pick", problems)
+    page.wait_for_timeout(100)
     picked = posts("/model")
     print("picked:", picked)
     if not picked or picked[-1][2] != {"preset": "flash"}:
@@ -425,8 +471,9 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     chip = page.locator(".composer .effort-select").bounding_box()
     if effort_menu and chip and effort_menu["y"] + effort_menu["height"] > chip["y"] + 4:
         problems.append("the effort menu did not open upward")
+    before = len(posts("/model"))
     page.locator('.effort-option').filter(has=page.locator('input[value="xhigh"]')).click()
-    page.wait_for_timeout(300)
+    reached(page, "/model", before, "the effort pick", problems)
     efforted = [p for p in posts("/model") if isinstance(p[2], dict) and p[2].get("reasoning_effort")]
     print("effort:", efforted[-1] if efforted else None)
     if not efforted or efforted[-1][2] != {"thinking": True, "reasoning_effort": "xhigh"}:
@@ -444,8 +491,9 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append(f"the selector does not say which model stands in for which ({label!r})")
     page.locator(".composer .model-select").click()
     page.wait_for_selector(".model-list .model-row.restore", timeout=5000)
+    before = len(posts("/model"))
     page.locator(".model-list .model-row.restore").click()
-    page.wait_for_timeout(400)
+    reached(page, "/model", before, "the way back", problems)
     restored = posts("/model")[-1]
     print("restored:", restored)
     if restored[2] != {"preset": "opus"}:
@@ -474,8 +522,9 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.wait_for_selector(".sheet .model-list", timeout=5000)
     if pill and pill["height"] > 130:
         problems.append(f"phone: the empty composer is too tall ({pill})")
+    before = len(posts("/model"))
     page.locator('.sheet .effort-options input[value="low"]').click()
-    page.wait_for_timeout(300)
+    reached(page, "/model", before, "phone: the effort choice", problems)
     if HOST.effort != "low":
         problems.append("phone: the named effort choice did not reach the host")
     page.keyboard.press("Escape")
@@ -644,8 +693,10 @@ def modes(browser) -> list[str]:  # type: ignore[no-untyped-def]
     names = page.locator(".mode-menu [role='menuitemradio'] .truncate").all_inner_texts()
     if names != ["Agent", "Plan", "Quick", "Deep", "Careful"]:
         problems.append(f"the mode menu lists {names}")
+    before = len(posts("/mode"))
     page.locator(".mode-menu [role='menuitemradio']", has_text="Plan").click()
     page.wait_for_selector(".mode-menu", state="detached")
+    reached(page, "/mode", before, "picking Plan", problems)
     if not posts("/mode") or posts("/mode")[-1][2] != {"mode": "plan"}:
         problems.append(f"picking Plan posted {posts('/mode')[-1:]}")
     page.wait_for_function("document.querySelector('.composer .composer-mode')?.textContent.startsWith('Plan')")
@@ -657,8 +708,9 @@ def modes(browser) -> list[str]:  # type: ignore[no-untyped-def]
     focused = page.evaluate("document.activeElement?.className || ''")
     if "yagni-row" not in focused:
         problems.append(f"ArrowUp from the first row lands on {focused!r}, not the switch")
+    before = len(posts("/yagni"))
     page.keyboard.press("Enter")
-    page.wait_for_timeout(200)
+    reached(page, "/yagni", before, "the YAGNI switch", problems)
     if not posts("/yagni") or posts("/yagni")[-1][2] != {"on": True}:
         problems.append(f"the switch posted {posts('/yagni')[-1:]}")
     if page.locator(".mode-menu").count() != 1:

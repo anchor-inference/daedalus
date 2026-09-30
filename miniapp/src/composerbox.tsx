@@ -18,6 +18,7 @@ import {
   DRAFT_DEBOUNCE_MS,
   QueuedSteer,
   answersComplete,
+  questionsKey,
   clearDraft,
   composerKey,
   dockKey,
@@ -193,9 +194,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const questions = props.questions ?? null;
   const asking = !!questions && questions.length > 0;
   const [answers, setAnswers] = useState<{ selected: string[]; custom: string }[]>([]);
+  // A fresh set of blanks for new questions only; the same questions read again keep what was picked.
+  const asked = questionsKey(questions);
   useEffect(() => {
     setAnswers((questions ?? []).map(() => ({ selected: [], custom: "" })));
-  }, [questions]);
+    // `asked` stands for `questions`: the array is new on every read of the session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asked]);
   const complete = asking && answersComplete(questions!, answers);
   async function reply() {
     if (!questions || !props.onAnswer) return;
