@@ -173,7 +173,7 @@ async def test_a_click_that_changes_nothing_again_and_again_gets_a_note_never_a_
     for n in range(3):
         text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e44", element=f"the button, try {n}")
         assert not failed
-    assert "Note: that was click on e44 3 times on this page, and the page did not change once." in text
+    assert "Note: that was click on e44 3 times in a row on this page, and the page did not change after any of them." in text
     assert text.index("Done: click") < text.index("Note:")
     text, failed = await rig.call(sid, "BrowserSnapshot")
     assert "Note:" not in text
@@ -188,14 +188,31 @@ def test_the_hints_keep_to_what_the_call_did() -> None:
     hints = LoopHints()
     assert not hints.acted("a", "click", "e1", "u", True)
     assert not hints.acted("a", "click", "e1", "u", True)
-    assert not hints.acted("a", "click", "e1", "u", False)  # it changed things before
-    assert hints.acted("a", "click", "e1", "u", True).startswith("Note: you have done click on e1 4 times")
+    assert not hints.acted("a", "click", "e1", "u", False)  # one that changed nothing is not a loop yet
     assert not hints.acted("b", "click", "e1", "u", False)  # another owner's own count
     assert not hints.read("a", "snapshot", "u", "one") and hints.read("a", "snapshot", "u", "one")
     assert not hints.read("a", "snapshot", "u", "two")
     for n in range(LoopHints.OWNERS + 5):
         hints.went(f"o{n}", "u")
     assert len(hints._seen) == LoopHints.OWNERS
+
+
+def test_a_repeat_that_changes_the_page_every_time_is_no_loop() -> None:
+    """Pressing "Load more" ten times, each press bringing more of the list, is the task being done:
+    no note. The note that once came at the fourth press whatever it did ("try another way") sent a
+    model away from a list it was reading correctly."""
+    hints = LoopHints()
+    for _ in range(10):
+        assert hints.acted("a", "click", "e7", "https://shop.test/list", True) == ""
+    # The list is at its end: the button stays and brings nothing. Three presses that change nothing
+    # in a row are a loop, whatever the presses before them did.
+    assert not hints.acted("a", "click", "e7", "https://shop.test/list", False)
+    assert not hints.acted("a", "click", "e7", "https://shop.test/list", False)
+    note = hints.acted("a", "click", "e7", "https://shop.test/list", False)
+    assert note.startswith("Note: that was click on e7 3 times in a row on this page, and the page did not change after any of them.")
+    # A press that works again ends the run.
+    assert hints.acted("a", "click", "e7", "https://shop.test/list", True) == ""
+    assert not hints.acted("a", "click", "e7", "https://shop.test/list", False)
 
 
 def test_diffs_of_several_steps_net_out() -> None:

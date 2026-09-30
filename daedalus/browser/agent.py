@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+import itertools
 import json
 import logging
 import re
@@ -367,19 +368,27 @@ class LoopHints:
         return self._still(self._trail(owner), False)
 
     def acted(self, owner: str, action: str, target: str, url: str, changed: bool) -> str:
+        """A note once the same action on the same target has changed nothing three times running.
+
+        Only a repeat that changed nothing is a loop. A fourth repeat used to be noted whatever it did,
+        and pressing "Load more" was told to "try another way" at every press although each one had
+        brought more of the list: the model believed it and wandered off a task it was doing right.
+        The run counted is the one that ends with this call, so a button that worked and then stopped
+        working (the list is at its end) is noted once it has stopped three times."""
         trail = self._trail(owner)
         key = f"act\x00{action}\x00{target}\x00{url}"
         before = [c for k, _, c in trail.log if k == key]
         trail.log.append((key, url, changed))
         still = self._still(trail, changed)
-        if len(before) >= 2 and not changed and not any(before):
+        if changed:
+            return still
+        run = 1 + sum(1 for _ in itertools.takewhile(lambda c: not c, reversed(before)))
+        if run >= 3:
             return (
-                f"Note: that was {action} on {target or 'the page'} {len(before) + 1} times on this page, and the page did not change "
-                "once. Something else is needed: a new BrowserSnapshot (it may be covered, disabled, or elsewhere now), "
+                f"Note: that was {action} on {target or 'the page'} {run} times in a row on this page, and the page did not change "
+                "after any of them. Something else is needed: a new BrowserSnapshot (it may be covered, disabled, or elsewhere now), "
                 "BrowserLook to see the page, a scroll, or another element."
             ) + (f"\n{still}" if still else "")
-        if len(before) >= 3:
-            return f"Note: you have done {action} on {target or 'the page'} {len(before) + 1} times on this page. If it is not getting you closer, try another way."
         return still
 
     def read(self, owner: str, what: str, url: str, text: str) -> str:
