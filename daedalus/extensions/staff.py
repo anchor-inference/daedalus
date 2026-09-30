@@ -44,7 +44,7 @@ from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.handoff import Delivered, Handoff, box_name
 from daedalus.host.launch_queue import Admission, Entry, LaunchQueue, MachineCapacity, TerminalsCapacity
 from daedalus.host.staff_daedalus import DaedalusStaffRuntime
-from daedalus.host.worktrees import StaffWorktrees, Worktree, WorktreeError
+from daedalus.host.worktrees import StaffWorktrees, Worktree, WorktreeError, WorktreeRefused
 from daedalus.staff_runtime import (
     AskRef,
     BoardTask,
@@ -102,6 +102,15 @@ INBOX_PATH_RE = re.compile(r"(/[^\s\"'`<>]*?/inbox/[^\s\"'`<>]+)")
 """A path to a file in an inbox, as a brief written before handles existed names it."""
 SENT_BACK = "sent back by the "
 """How a rejection from review is written into a task's notes (see ``review.py``)."""
+
+
+def no_worktree(member: Staff, task: BoardTask, why: Exception) -> str:
+    """Why a member who works in a worktree of their own cannot take a task, and the two ways out."""
+    return (
+        f"{member.name} works in a git worktree of their own, and task {task.id} cannot have one: {why}. "
+        f"Give the task a folder of the project that is a git repository, or set {member.name}'s isolation "
+        f"to shared (they work in the folder itself) or read-only"
+    )
 
 
 class AlreadyAnswered(StaffError):
@@ -539,7 +548,7 @@ class Team:
         continuity = getattr(runtime, "continuity", None)
         if continuity is None or session.kind != "cli" or session.status == "error":
             return False
-        if session.folder_id != folder.id or session.worktree_path or (member.isolation == "worktree" and folder.is_git):
+        if session.folder_id != folder.id or session.worktree_path or member.isolation == "worktree":
             return False
         return bool(continuity(live) == "live")
 
@@ -577,6 +586,9 @@ class Team:
         # stays on the board, unassigned, and the event says why.
         task = await self.task(entry.task_id)
         if task is not None and task.assignee_staff_id == entry.staff_id:
+            # On the card as well as in the event: the event wakes the orchestrator, the card is where
+            # the operator looks when a task they saw assigned is unassigned again.
+            await self.note_on_card(task.id, f"{entry.staff_name} could not start: {exc}")
             await self._set_assignee(task, None, actor="system", error=f"{entry.staff_name} could not start: {exc}")
 
     # -- assigning and starting ---------------------------------------------------------------------
@@ -630,6 +642,15 @@ class Team:
             available = await runtime.available(folder.env)
             if not available.ok and not terminal:
                 raise StaffError(f"{member.name} cannot start: {available.reason}")
+        if member.isolation == "worktree":
+            # Said now, not when the queue reaches it, for the same reason. A folder git cannot be
+            # asked about yet (a host folder while the bridge is away) is left to the start.
+            try:
+                await self.worktrees.check(folder)
+            except WorktreeRefused as exc:
+                raise StaffError(no_worktree(member, task, exc)) from exc
+            except WorktreeError:
+                pass
         if await self.manager.files.of_task(task.id):
             # Said now, not when the queue reaches it: a folder nobody can put the task's files in is a
             # refusal the assigner can act on.
@@ -703,7 +724,20 @@ class Team:
             await self._end(previous, "next task", stop=True)
         predecessor = next((s for s in await self.manager.staff.sessions(member.id, limit=20) if s.task_id == task.id), None)
         worktree: Worktree | None = None
-        if member.isolation == "worktree" and folder.is_git:
+        if member.isolation == "worktree":
+            # Never the folder itself instead. The start used to ask the stored `is_git`, which is
+            # false for every host folder and for a subfolder of a repository, and went on without a
+            # worktree when it was: a command-line member hired to work in a worktree of its own ran
+            # in the operator's whole home directory, the live checkout included, as its sandbox's
+            # writable root. Git is asked instead, and a folder with no worktree to give is refused.
+            try:
+                await self.worktrees.check(folder)
+            except WorktreeRefused as exc:
+                raise StaffError(no_worktree(member, task, exc)) from exc
+            except WorktreeError as exc:
+                raise StaffError(f"no worktree for {member.name} in {folder.path}: {exc}") from exc
+            # What prepare refuses past that point (a worktree left with uncommitted changes) is the
+            # worktree's state, not the folder's, and is said as such.
             try:
                 worktree = await self.worktrees.prepare(folder, member.name, task.id, task.title)
             except WorktreeError as exc:
