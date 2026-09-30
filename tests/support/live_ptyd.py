@@ -121,6 +121,18 @@ def paste_bytes(text: str, bracketed: bool) -> bytes:
     return text.replace("\r\n", "\r").replace("\n", "\r").encode()
 
 
+def _default_signals() -> None:
+    """In the child, before exec: the hang-up and the interrupt back to their default action.
+
+    What the real daemon does with `DefaultSignalsForChildren`, and the double did not: a signal
+    ignored in the process that starts a program stays ignored across exec. A test run started under
+    `nohup` (or from a script's background) handed an ignored SIGHUP to every terminal it opened, so
+    the hang-up that ends a terminal ended nothing, the grace ran out, and the kill reported SIGKILL.
+    It looked like a flake under load because such runs were the long, backgrounded ones."""
+    for number in (signals.SIGHUP, signals.SIGINT):
+        signals.signal(number, signals.SIG_DFL)
+
+
 @dataclass
 class LiveTerminal(FakeTerminal):
     master: int = -1
@@ -408,6 +420,7 @@ class LivePtyd(FakePtyd):
         try:
             process = await asyncio.create_subprocess_exec(
                 program, *argv[1:], stdin=slave, stdout=slave, stderr=slave, cwd=cwd, env=env, start_new_session=True, close_fds=True,
+                preexec_fn=_default_signals,
             )
         except OSError as exc:
             os.close(master)
@@ -701,7 +714,7 @@ class LivePtyd(FakePtyd):
         cwd = str(params.get("cwd") or self.home)
         started = time.monotonic()
         process = await asyncio.create_subprocess_exec(
-            program, *argv[1:], cwd=cwd, env=env, start_new_session=True,
+            program, *argv[1:], cwd=cwd, env=env, start_new_session=True, preexec_fn=_default_signals,
             stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )

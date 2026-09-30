@@ -31,9 +31,9 @@ import { Mode, modeHome, modeOf, rememberMode, storedMode } from "./mode";
 import { applyAppearance } from "./appearance";
 import { OrchestrationList, OrchestrationSidebar, useOrchestrationWaiting } from "./orchestration";
 import { Rail } from "./rail";
-import { SessionScreen, chunk, retried, whenIdle } from "./chunks";
+import { SessionScreen, chunk, chunkVerdict, mayReload, retried, whenIdle } from "./chunks";
 
-/** A chunk that is not where the page thinks it is: the build moved under an open page. */
+/** A chunk that would not load: the build moved under an open page, or its download dropped. */
 function isChunkError(message: string): boolean {
   return /dynamically imported|Importing a module script failed|error loading dynamically imported/i.test(message);
 }
@@ -42,28 +42,28 @@ function isChunkError(message: string): boolean {
 // settings, the usage charts and the conversation view as well. The service worker keeps each
 // chunk once it has been used, so a screen visited before opens offline too. Every loader is
 // retried (see chunks.ts), because a failed chunk on a flaky link is a normal event.
-const StartScreen = lazy(retried(() => import("./screens/Start").then((m) => ({ default: m.StartScreen }))));
-const InboxScreen = lazy(retried(() => import("./screens/Inbox").then((m) => ({ default: m.InboxScreen }))));
-const BoardScreen = lazy(retried(() => import("./screens/Board").then((m) => ({ default: m.BoardScreen }))));
-const VoiceScreen = lazy(retried(() => import("./screens/Voice").then((m) => ({ default: m.VoiceScreen }))));
-const ProposalsScreen = lazy(retried(() => import("./screens/Proposals").then((m) => ({ default: m.ProposalsScreen }))));
-const SchedulesScreen = lazy(retried(() => import("./screens/Schedules").then((m) => ({ default: m.SchedulesScreen }))));
-const UsageScreen = lazy(retried(() => import("./screens/Usage").then((m) => ({ default: m.UsageScreen }))));
-const SettingsScreen = lazy(retried(() => import("./screens/Settings").then((m) => ({ default: m.SettingsScreen }))));
-const HealthScreen = lazy(retried(() => import("./screens/Settings").then((m) => ({ default: m.HealthScreen }))));
-const MemoryScreen = lazy(retried(() => import("./screens/Memory").then((m) => ({ default: m.MemoryScreen }))));
-const TerminalsScreen = lazy(retried(() => import("./screens/Terminals").then((m) => ({ default: m.TerminalsScreen }))));
-const BrowserFullScreen = lazy(retried(() => import("./screens/BrowserFull").then((m) => ({ default: m.BrowserFullScreen }))));
-const TerminalFullScreen = lazy(retried(() => import("./screens/TerminalFull").then((m) => ({ default: m.TerminalFullScreen }))));
-const HarnessesScreen = lazy(retried(() => import("./screens/Harnesses").then((m) => ({ default: m.HarnessesScreen }))));
-const ServicesScreen = lazy(retried(() => import("./screens/Services").then((m) => ({ default: m.ServicesScreen }))));
-const LoginScreen = lazy(retried(() => import("./screens/Login").then((m) => ({ default: m.LoginScreen }))));
-const ProjectScreen = chunk(retried(() => import("./project/ProjectScreen").then((m) => ({ default: m.ProjectScreen }))));
-const ProjectSidebar = chunk(retried(() => import("./project/ProjectSidebar").then((m) => ({ default: m.ProjectSidebar }))));
-const ProjectTabs = lazy(retried(() => import("./project/phone").then((m) => ({ default: m.ProjectTabs }))));
-const MainScreen = chunk(retried(() => import("./main/MainScreen").then((m) => ({ default: m.MainScreen }))));
-const OnboardingScreen = lazy(retried(() => import("./screens/AddModel").then((m) => ({ default: m.OnboardingScreen }))));
-const SharedDialog = lazy(retried(() => import("./screens/Shared").then((m) => ({ default: m.SharedDialog }))));
+const StartScreen = lazy(retried(() => import("./screens/Start"), (m) => ({ default: m.StartScreen })));
+const InboxScreen = lazy(retried(() => import("./screens/Inbox"), (m) => ({ default: m.InboxScreen })));
+const BoardScreen = lazy(retried(() => import("./screens/Board"), (m) => ({ default: m.BoardScreen })));
+const VoiceScreen = lazy(retried(() => import("./screens/Voice"), (m) => ({ default: m.VoiceScreen })));
+const ProposalsScreen = lazy(retried(() => import("./screens/Proposals"), (m) => ({ default: m.ProposalsScreen })));
+const SchedulesScreen = lazy(retried(() => import("./screens/Schedules"), (m) => ({ default: m.SchedulesScreen })));
+const UsageScreen = lazy(retried(() => import("./screens/Usage"), (m) => ({ default: m.UsageScreen })));
+const SettingsScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ default: m.SettingsScreen })));
+const HealthScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ default: m.HealthScreen })));
+const MemoryScreen = lazy(retried(() => import("./screens/Memory"), (m) => ({ default: m.MemoryScreen })));
+const TerminalsScreen = lazy(retried(() => import("./screens/Terminals"), (m) => ({ default: m.TerminalsScreen })));
+const BrowserFullScreen = lazy(retried(() => import("./screens/BrowserFull"), (m) => ({ default: m.BrowserFullScreen })));
+const TerminalFullScreen = lazy(retried(() => import("./screens/TerminalFull"), (m) => ({ default: m.TerminalFullScreen })));
+const HarnessesScreen = lazy(retried(() => import("./screens/Harnesses"), (m) => ({ default: m.HarnessesScreen })));
+const ServicesScreen = lazy(retried(() => import("./screens/Services"), (m) => ({ default: m.ServicesScreen })));
+const LoginScreen = lazy(retried(() => import("./screens/Login"), (m) => ({ default: m.LoginScreen })));
+const ProjectScreen = chunk(retried(() => import("./project/ProjectScreen"), (m) => ({ default: m.ProjectScreen })));
+const ProjectSidebar = chunk(retried(() => import("./project/ProjectSidebar"), (m) => ({ default: m.ProjectSidebar })));
+const ProjectTabs = lazy(retried(() => import("./project/phone"), (m) => ({ default: m.ProjectTabs })));
+const MainScreen = chunk(retried(() => import("./main/MainScreen"), (m) => ({ default: m.MainScreen })));
+const OnboardingScreen = lazy(retried(() => import("./screens/AddModel"), (m) => ({ default: m.OnboardingScreen })));
+const SharedDialog = lazy(retried(() => import("./screens/Shared"), (m) => ({ default: m.SharedDialog })));
 
 /** A shared dialog lives at /app/c/<slug>. It is a page of its own, not a screen of the signed-in shell. */
 function sharedSlug(): string | null {
@@ -76,28 +76,49 @@ function prefetchSession(): void {
   whenIdle(SessionScreen.prefetch);
 }
 
-class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
-  state = { error: null as Error | null };
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null; verdict: "asking" | "dropped" | "stale" | "offline" | null }> {
+  state = { error: null as Error | null, verdict: null as "asking" | "dropped" | "stale" | "offline" | null };
   static getDerivedStateFromError(error: Error) {
-    return { error };
+    return { error, verdict: isChunkError(error.message) ? "asking" : null };
+  }
+  componentDidCatch(error: Error) {
+    if (!isChunkError(error.message)) return;
+    // A chunk that will not load after three tries: either the build moved under the page, or a
+    // download dropped and left a file the page shares between screens failed for the page's life
+    // (see chunks.ts). The first is what the notice says; the second a reload recovers, and the
+    // screen is gone either way, so a dropped download reloads by itself, once a minute at most.
+    void chunkVerdict(error).then((verdict) => {
+      if (verdict === "dropped" && mayReload(sessionStore())) location.reload();
+      else this.setState({ verdict });
+    });
   }
   render() {
-    if (this.state.error) {
-      // A chunk that will not load after three tries is not a transient link: the page is running a
-      // build whose files are no longer on the server. Clearing the error would replay the same
-      // failure — what recovers it is fetching the page again.
-      const stale = isChunkError(this.state.error.message);
+    const { error, verdict } = this.state;
+    if (error) {
+      if (verdict === "asking") return <div className="empty">{t("common.loading")}</div>;
+      // Clearing the error of a chunk would replay the same failure — what recovers it is fetching the
+      // page again.
+      const chunkFailed = verdict !== null;
+      const stale = verdict === "stale";
       return (
         <div className="empty">
-          <b>{t(stale ? "app.stale.title" : "app.broken.title")}</b>
-          <div>{stale ? t("app.stale.body") : this.state.error.message}</div>
-          <button className="btn" onClick={() => (stale ? location.reload() : this.setState({ error: null }))}>
-            {t(stale ? "app.stale.action" : "common.retry")}
+          <b>{t(stale ? "app.stale.title" : chunkFailed ? "app.dropped.title" : "app.broken.title")}</b>
+          <div>{stale ? t("app.stale.body") : chunkFailed ? t("app.dropped.body") : error.message}</div>
+          <button className="btn" onClick={() => (chunkFailed ? location.reload() : this.setState({ error: null, verdict: null }))}>
+            {t(chunkFailed ? "app.stale.action" : "common.retry")}
           </button>
         </div>
       );
     }
     return this.props.children;
+  }
+}
+
+function sessionStore(): Storage | null {
+  try {
+    return sessionStorage;
+  } catch {
+    return null;
   }
 }
 

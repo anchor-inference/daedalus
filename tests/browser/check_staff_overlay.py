@@ -94,6 +94,10 @@ def run(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ignor
     page.locator(".staff-aside .panel-tab[data-tab='details']").focus()
     page.keyboard.press("Escape")
     page.wait_for_selector(".staff-aside:not(.expanded)", timeout=3000)
+    page.wait_for_timeout(300)
+    if len(term.resizes("tm-ira")) != resizes:
+        say(f"the PTY was resized while a tab was expanded: {term.resizes('tm-ira')[resizes:]}")
+    before_close = len(term.resizes("tm-ira"))
     # Closing the column while it covers the body drops the expansion with it.
     page.get_by_role("button", name=words["expand"]).click()
     page.wait_for_selector(".staff-aside.expanded", timeout=3000)
@@ -104,8 +108,14 @@ def run(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ignor
     page.wait_for_timeout(600)
     if page.evaluate(BOX, ".staff-term") != terminal:
         say(f"after all that the terminal is {page.evaluate(BOX, '.staff-term')}, not {terminal}")
-    if len(term.resizes("tm-ira")) != resizes:
-        say(f"the PTY was resized: {term.resizes('tm-ira')[resizes:]}")
+    # A closed column is a wider terminal, and the PTY may be told so: whether the width in between
+    # goes out depends on whether the column is opened again within the terminal's 100 ms resize
+    # debounce, which a loaded machine does not keep ("156 then 114 columns"). What must hold is that
+    # the PTY ends at the size it had.
+    after = term.resizes("tm-ira")[before_close:]
+    had = term.resizes("tm-ira")[:resizes]
+    if after and (not had or after[-1][2:] != had[-1][2:]):
+        say(f"the PTY was left at another size: {after}, not {had[-1] if had else 'its first size'}")
     context.close()
 
     context = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme="dark")

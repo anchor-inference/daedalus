@@ -3,7 +3,7 @@
 // file only mounts what that names, with the project's way back instead of the agents list's.
 
 import { lazy, Suspense } from "react";
-import { SessionScreen } from "../chunks";
+import { SessionScreen, retried } from "../chunks";
 import { Skeleton } from "../components";
 import { t } from "../i18n";
 import { ORCHESTRATION, ORCHESTRATION_LIST, back as goBack, navigate, projectHome, projectPagePath, useRoute } from "../router";
@@ -13,9 +13,9 @@ import { BriefPage, EnableOrchestrator, FoldersPage, JournalPage, TerminalsPage,
 import { SetupLine } from "../main/cards";
 import { PhoneBoard, PhoneTeam, PhoneTerminals } from "./phone";
 
-const TeamPage = lazy(() => import("../team/TeamPage").then((m) => ({ default: m.TeamPage })));
-const ProjectBoard = lazy(() => import("../board/ProjectBoard").then((m) => ({ default: m.ProjectBoard })));
-const StaffView = lazy(() => import("../staff/StaffView").then((m) => ({ default: m.StaffView })));
+const TeamPage = lazy(retried(() => import("../team/TeamPage"), (m) => ({ default: m.TeamPage })));
+const ProjectBoard = lazy(retried(() => import("../board/ProjectBoard"), (m) => ({ default: m.ProjectBoard })));
+const StaffView = lazy(retried(() => import("../staff/StaffView"), (m) => ({ default: m.StaffView })));
 
 export function ProjectScreen({ projectId, page, inner, toast, wide }: { projectId: string; page: string | null; inner: string | null; toast: (text: string) => void; wide: boolean }) {
   const route = useRoute();

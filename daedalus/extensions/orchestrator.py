@@ -1107,7 +1107,9 @@ class Orchestrators:
                 return f"{actor} moved {title} {p.get('from')} → {p.get('to')}"
             if kind == "task.assigned":
                 assignee = await self.manager.staff.get(str(p.get("assignee_staff_id") or "")) if p.get("assignee_staff_id") else None
-                error = f" ({_one_line(str(p.get('error')), 200)})" if p.get("error") else ""
+                # Whole: the error says why the start was refused and what to do about it, and cut at
+                # 200 characters it lost the second half, the part the orchestrator acts on.
+                error = f" ({_one_line(str(p.get('error')), 500)})" if p.get("error") else ""
                 return f"{title} assigned to {assignee.name}{error}" if assignee else f"{title} is unassigned{error}"
             if kind == "task.accepted":
                 return f"{actor} accepted {title}"

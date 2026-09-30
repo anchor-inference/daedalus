@@ -767,3 +767,32 @@ async def test_a_report_is_never_folded_into_the_more_line(settings: Settings, d
         assert "word " * 190 in line and "ReadStaff(\"Ada\")" in line
     finally:
         await r.manager.close()
+
+
+async def test_assign_to_a_worktree_member_in_a_plain_folder_is_refused_with_the_way_out(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """The orchestrator assigns a task in a folder that is no git repository to a member hired for a
+    worktree of their own. The start used to go ahead in the folder itself; Assign now refuses, says
+    the card stays unstarted, and names both ways out. A refusal that comes later, from the queue,
+    wakes the orchestrator with the reason whole: cut at 200 characters it lost the ways out."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        runtime = fake(r)
+        sid = await office(r)
+        notes = tmp_path / "notes"
+        notes.mkdir()
+        await r.manager.projects.add_folder(r.project.id, str(notes))
+        await r.manager.staff.hire(r.project.id, name="Ada", role="Menu", isolation="worktree")
+        with pytest.raises(Refused) as refused:
+            await r.call(sid, "assign", staff="Ada", title="Tidy the notes", folder=str(notes), **BRIEF)
+        said = str(refused.value)
+        assert re.search(r"task \w+ stays on the board, unstarted: Ada works in a git worktree of their own", said), said
+        assert "is not a git repository" in said and "a folder of the project that is a git repository" in said and "isolation to shared" in said
+        assert runtime.started == []
+
+        reason = "Ada could not start: " + said.split("unstarted: ", 1)[1]
+        assert len(reason) > 200
+        refusal = AppEvent(1, "2026-01-01T10:00:00+00:00", "task.assigned", {"task_id": "t1", "title": "Tidy the notes", "assignee_staff_id": "", "actor": "system", "error": reason}, project_id=r.project.id)
+        line = await r.orch.line(await r.refreshed(), refusal)
+        assert line.endswith("or read-only)"), line
+    finally:
+        await r.manager.close()

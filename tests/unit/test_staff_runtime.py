@@ -773,3 +773,96 @@ async def test_a_daedalus_member_is_steered_for_now_and_followed_up_after_the_tu
     assert [(s["client_message_id"], s["steer"], s["follow_up"]) for s in submitted] == [("m-now", True, False), ("m-later", False, True), ("m-stop", False, False)]
     assert (now.state, later.state) == ("acknowledged", "submitted")
     assert stopped == ["s-ada"], "only the interrupt stopped the run"
+
+
+# -- a worktree of one's own, or no start --------------------------------------------------------------
+
+
+async def plain_folder(manager: SessionManager, project: Project, tmp_path: Path) -> str:
+    """A folder of the project that is not a git repository: notes, a download, a home directory."""
+    notes = tmp_path / "notes"
+    notes.mkdir()
+    (notes / "todo.txt").write_text("bread\n")
+    return (await manager.projects.add_folder(project.id, str(notes))).id
+
+
+async def test_a_worktree_member_is_refused_a_task_whose_folder_has_no_worktree_to_give(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """The member is hired for a worktree of their own and the task names a folder git knows nothing
+    of. The start once went ahead in the folder itself, with nothing said: a command-line member ran
+    with the operator's home directory as its sandbox's writable root. It is refused when assigned,
+    with what to do about it, and nothing starts."""
+    manager, team, runtime, project = await fake_team(settings, db, tmp_path)
+    try:
+        folder_id = await plain_folder(manager, project, tmp_path)
+        ada = await manager.staff.hire(project.id, name="Ada", isolation="worktree")
+        task_id = await board_task(manager, project, "Tidy the notes")
+        await manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (folder_id, task_id))
+        with pytest.raises(StaffError) as refused:
+            await team.assign(ada, task_id)
+        said = str(refused.value)
+        assert "notes is not a git repository" in said and "Ada works in a git worktree of their own" in said
+        assert "a folder of the project that is a git repository" in said and "isolation to shared" in said and "read-only" in said
+        assert runtime.started == [] and await status_of(manager, ada) == "off"
+        row = await task_row(manager, task_id)
+        assert (row["status"], row["assignee_staff_id"]) == ("todo", None)
+        assert team.queue.queue(project.id) == []
+
+        # A member who works in the folder itself takes it, in the folder.
+        bo = await manager.staff.hire(project.id, name="Bo", isolation="shared")
+        assert (await team.assign(bo, task_id))["state"] == "started"
+        [req] = runtime.started
+        assert req.worktree is None and req.cwd == tmp_path / "notes"
+    finally:
+        await manager.close()
+
+
+async def test_a_queued_start_whose_folder_has_no_worktree_to_give_is_taken_back_and_says_why(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """The folder can change while the task waits in the queue (the orchestrator moves it to another
+    folder of the project). The start refuses as the assignment would have: the task is unassigned,
+    the event that wakes the orchestrator carries the whole reason, and the card says it too."""
+    manager, team, runtime, project = await fake_team(settings, db, tmp_path, concurrency=1)
+    try:
+        folder_id = await plain_folder(manager, project, tmp_path)
+        bo = await manager.staff.hire(project.id, name="Bo", isolation="shared")
+        ada = await manager.staff.hire(project.id, name="Ada", isolation="worktree")
+        first = await board_task(manager, project, "Bake")
+        assert (await team.assign(bo, first))["state"] == "started"
+        busy = await team.live_of(bo)
+        assert busy is not None
+        await team.ingress.status(busy, "working")
+        waiting = await board_task(manager, project, "Tidy the notes")
+        assert (await team.assign(ada, waiting))["state"] == "queued"
+        await manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (folder_id, waiting))
+
+        await team.ingress.status(busy, "turn_done_unseen")
+        await team.queue.pump(project.id)
+
+        async def taken_back() -> bool:
+            return (await task_row(manager, waiting))["assignee_staff_id"] is None
+
+        await until_await(taken_back)
+        assert [r.task.id for r in runtime.started] == [first], "nothing started in the plain folder"
+        assert await status_of(manager, ada) == "off"
+        row = await task_row(manager, waiting)
+        assert row["status"] == "todo" and "Ada could not start: Ada works in a git worktree of their own" in row["notes"]
+        [event] = [e for e in await events(manager, "task.assigned") if e.payload.get("task_id") == waiting and e.payload.get("error")]
+        assert "not a git repository" in event.payload["error"] and "isolation to shared" in event.payload["error"]
+    finally:
+        await manager.close()
+
+
+async def test_git_is_asked_whether_a_worktree_can_be_made_not_the_stored_flag(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """The stored `is_git` is known only for folders of this process's environment, and is false for
+    every host folder: the start that trusted it gave host members no worktree at all. A folder the
+    flag calls plain but git calls a repository gets its worktree."""
+    manager, team, runtime, project = await fake_team(settings, db, tmp_path)
+    try:
+        ada = await manager.staff.hire(project.id, name="Ada", isolation="worktree")
+        await manager.db.execute("UPDATE project_folders SET is_git = 0 WHERE project_id = ?", (project.id,))
+        refreshed = await manager.projects.get(project.id)
+        assert refreshed is not None and refreshed.primary is not None and not refreshed.primary.is_git
+        assert (await team.assign(ada, await board_task(manager, project, "Menu")))["state"] == "started"
+        [req] = runtime.started
+        assert req.worktree is not None and req.cwd == req.worktree.cwd != refreshed.primary.path
+    finally:
+        await manager.close()

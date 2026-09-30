@@ -97,7 +97,9 @@ def _folder(project: Project, ref: str | None) -> ProjectFolder:
     if not ref:
         return project.primary
     for folder in project.folders:
-        if ref in (folder.id, folder.label, folder.path) or (folder.label and folder.label.lower() == ref.lower()):
+        # The path as text: a folder's path is a Path, which never equals the string the orchestrator
+        # gives, so a folder named by its path, the way Folders() lists it, was "no folder".
+        if ref in (folder.id, folder.label, str(folder.path)) or (folder.label and folder.label.lower() == ref.lower()):
             return folder
     # The name a folder is listed by when it has no label is its directory's: Hire(folder="tern")
     # was refused for a folder the list showed as "tern".

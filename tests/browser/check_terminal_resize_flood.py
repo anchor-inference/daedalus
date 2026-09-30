@@ -37,6 +37,8 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 FLOOD = "rsflood00000"
 TOTAL = 16 * 1024 * 1024
 SIZES = [(1440, 900), (1180, 760), (1320, 840), (1100, 700)]
+STALL_S = 60
+"""Seconds without a new acknowledgement after which the flood is taken as stuck."""
 
 
 def main() -> int:
@@ -64,23 +66,30 @@ def main() -> int:
         started = time.monotonic()
         flood.go.set()
         turn = 0
-        while flood.acked < len(data) and time.monotonic() - started < 300:
+        # Given up on only when nothing is acknowledged for a whole minute. A fixed 300 s once ran out
+        # at load 47 with 99.6 % acknowledged, and the unparsed tail was then reported as output
+        # "parsed twice or lost": a slow machine that is still reading is not a lost stream.
+        progress, progressed = flood.acked, time.monotonic()
+        while flood.acked < len(data) and time.monotonic() - progressed < STALL_S:
             width, height = SIZES[turn % len(SIZES)]
             page.set_viewport_size({"width": width, "height": height})
             turn += 1
             page.wait_for_timeout(150)
+            if flood.acked != progress:
+                progress, progressed = flood.acked, time.monotonic()
         took = time.monotonic() - started
         page.set_viewport_size({"width": 1440, "height": 900})
         page.wait_for_timeout(600)
         cdp.send("Emulation.setCPUThrottlingRate", {"rate": 1})
         feeds = page.evaluate("(id) => window.__terminals.lineFeeds(id)", FLOOD)
         print(f"line feeds parsed: {feeds} for {count} lines sent")
-        if feeds != count:
+        finished = flood.acked >= len(data)
+        if finished and feeds != count:
             problems.append(f"xterm.js parsed {feeds} line feeds for {count} lines: {feeds - count:+d} (output parsed twice or lost)")
         print(f"flood: {len(data)} bytes in {took:.1f} s, {turn} window sizes, {len(flood.resizes)} RESIZE frames, "
               f"{flood.acks} ACKs, most unacknowledged {flood.max_unacked}")
-        if flood.acked < len(data):
-            problems.append(f"the flood did not finish: {flood.acked} of {len(data)} acknowledged")
+        if not finished:
+            problems.append(f"the flood stalled: {flood.acked} of {len(data)} acknowledged, nothing more for {STALL_S} s")
         if len(flood.resizes) < 4:
             problems.append(f"only {len(flood.resizes)} RESIZE frames reached the daemon: the check did not resize under the flood")
         if flood.ack_past_sent:
@@ -94,7 +103,7 @@ def main() -> int:
         print(f"scrollback: {numbered} numbered lines, {breaks} breaks in the numbering, last {tail:08d}")
         if breaks:
             problems.append(f"the scrollback's numbering breaks {breaks} times: output was parsed twice or lost")
-        if tail != count - 1:
+        if finished and tail != count - 1:
             problems.append(f"the last line shown is {tail:08d}, not the last line sent ({last})")
         context.close()
         browser.close()

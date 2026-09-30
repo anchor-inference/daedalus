@@ -15,6 +15,13 @@ For each action, on both pages at 1440 px, the elements are marked beforehand an
   the rail and the centre's frame survive, and the new column and conversation arrive without a
   loading fallback drawn first;
 - all of them: no layout shift above 0.01 and no task longer than 50 ms.
+
+Both measures are the action's own. Each action starts once the page has stopped changing by itself,
+so a page still arriving (a project's team coming into its column) is not reported as the first
+click's layout shift; and a task's length is the main thread's CPU time on a processor calibrated in
+the same page (see main_thread.py), so a machine busy with other work, or a browser slowed four times
+with `CPU_THROTTLE=4`, does not turn a 14 ms task into a failure while a synchronous 150 ms one in the
+app still is.
 """
 
 from __future__ import annotations
@@ -30,21 +37,27 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeout
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from check_orchestration_mode import PID, go, serve, stubs  # noqa: E402
+from main_thread import Watch, prepare, quiet  # noqa: E402
 from screenshots import UNHANDLED  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 
 MAX_SHIFT = 0.01
-MAX_TASK_MS = 50
-
-# Installed before the app: layout shifts and long tasks from the start, and every address the app
-# writes, so a detour through another page is seen even when it is undone within the same click.
+# Installed before the app: layout shifts from the start, with what moved and where, and every address
+# the app writes, so a detour through another page is seen even when it is undone within the same click.
 WATCH = """
 (() => {
-  window.__shifts = []; window.__long = []; window.__paths = [];
-  new PerformanceObserver((list) => { for (const e of list.getEntries()) if (!e.hadRecentInput) window.__shifts.push(e.value); }).observe({ type: "layout-shift", buffered: true });
-  new PerformanceObserver((list) => { for (const e of list.getEntries()) window.__long.push(Math.round(e.duration)); }).observe({ type: "longtask", buffered: true });
+  window.__shifts = []; window.__moved = []; window.__paths = [];
+  const named = (node) => !node ? "?" : node.nodeType === 1 ? node.tagName.toLowerCase() + [...node.classList].map((c) => "." + c).join("") : "#text";
+  const box = (r) => [r.x, r.y, r.width, r.height].map(Math.round).join(",");
+  new PerformanceObserver((list) => {
+    for (const e of list.getEntries()) {
+      if (e.hadRecentInput) continue;
+      window.__shifts.push(e.value);
+      for (const s of e.sources || []) window.__moved.push(`${named(s.node)} ${box(s.previousRect)} → ${box(s.currentRect)}`);
+    }
+  }).observe({ type: "layout-shift", buffered: true });
   for (const name of ["pushState", "replaceState"]) {
     const original = history[name].bind(history);
     history[name] = (state, title, url) => { if (url !== undefined && url !== null) window.__paths.push(new URL(String(url), location.href).pathname); return original(state, title, url); };
@@ -56,7 +69,7 @@ WATCH = """
 PARTS = {"rail": "nav.rail", "sidebar": "nav.sidebar", "centre": ".app > .main", "chat": ".chat"}
 BEGIN = """
 (parts) => {
-  window.__shifts = []; window.__long = []; window.__paths = []; window.__fallbacks = [];
+  window.__shifts = []; window.__moved = []; window.__paths = []; window.__fallbacks = [];
   if (window.__watch) window.__watch.disconnect();
   window.__watch = new MutationObserver((records) => {
     for (const r of records) for (const n of r.addedNodes) {
@@ -74,7 +87,7 @@ END = """
 (parts) => {
   const same = {};
   for (const [name, selector] of Object.entries(parts)) { const el = document.querySelector(selector); same[name] = !!el && el.dataset.stability === name; }
-  return { same, shift: window.__shifts.reduce((a, v) => a + v, 0), long: window.__long, paths: window.__paths, fallbacks: window.__fallbacks };
+  return { same, shift: window.__shifts.reduce((a, v) => a + v, 0), moved: window.__moved.slice(0, 8), paths: window.__paths, fallbacks: window.__fallbacks };
 }
 """
 
@@ -86,14 +99,19 @@ def settle(page: Page) -> None:
 
 
 def measured(page: Page, what: str, action, *, keep: tuple[str, ...], stay: re.Pattern[str] | None) -> dict:
+    # Whatever the page is still doing by itself belongs to what came before, not to this action.
+    quiet(page)
     page.evaluate(BEGIN, PARTS)
+    watch = Watch(page.context.browser, page)
+    watch.begin()
     action()
     settle(page)
+    work = watch.end()
     result = page.evaluate(END, PARTS)
     for part in keep:
         assert result["same"][part], f"{what}: the {part} was replaced ({result})"
     assert result["shift"] <= MAX_SHIFT, f"{what}: layout shift {result['shift']:.4f} ({result})"
-    assert all(ms <= MAX_TASK_MS for ms in result["long"]), f"{what}: long task {max(result['long'])} ms ({result})"
+    assert not work.over, f"{what}: a task over the budget: {work.describe()}"
     assert not result["fallbacks"], f"{what}: a loading fallback was drawn first ({result['fallbacks']})"
     if stay is not None:
         strays = [p for p in result["paths"] if not stay.search(p)]
@@ -119,10 +137,14 @@ def chunks_ready(page: Page, *names: str) -> None:
 def panel_actions(page: Page, where: str, stay: re.Pattern[str]) -> None:
     everything = ("rail", "sidebar", "centre", "chat")
     toggle = page.locator(".chat .head-actions button[aria-label='Panel']")
-    if page.locator(".panel").count() == 0:
+    # Whether the panel is open is read from the toggle, which says what the page decided, not from the
+    # panel itself: on a loaded machine the panel is drawn a moment after the conversation, and a click
+    # made because it was not there yet closed it, so "closed" then opened it and the check failed.
+    quiet(page)
+    if toggle.get_attribute("aria-pressed") != "true":
         toggle.click()
-        expect(page.locator(".panel")).to_have_count(1)
-        settle(page)
+    expect(toggle).to_have_attribute("aria-pressed", "true")
+    expect(page.locator(".panel")).to_have_count(1)
     measured(page, f"{where}: panel closed", toggle.click, keep=everything, stay=stay)
     expect(page.locator(".panel")).to_have_count(0)
     measured(page, f"{where}: panel opened", toggle.click, keep=everything, stay=stay)
@@ -178,6 +200,7 @@ def main() -> int:
         for name, run in (("main chat", main_chat), ("project focus", project_focus)):
             context = browser.new_context(viewport={"width": 1440, "height": 900})
             page = context.new_page()
+            prepare(page)
             page.add_init_script(WATCH)
             run(page)
             context.close()

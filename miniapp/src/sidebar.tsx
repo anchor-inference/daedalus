@@ -5,6 +5,7 @@
 // rail is the folded form, so there is no strip of its own to keep in step with it.
 
 import { Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { retried } from "./chunks";
 import type { Project } from "./api";
 import { Icon } from "./icons";
 import { PaneHandle, type PaneDrag } from "./layout";
@@ -13,7 +14,7 @@ import { go } from "./shell";
 import { t } from "./i18n";
 import { Bell } from "./bell";
 
-const SessionsScreen = lazy(() => import("./screens/Sessions").then((m) => ({ default: m.SessionsScreen })));
+const SessionsScreen = lazy(retried(() => import("./screens/Sessions"), (m) => ({ default: m.SessionsScreen })));
 
 export type SidebarProps = {
   session: string | null;

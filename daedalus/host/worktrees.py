@@ -398,6 +398,33 @@ class StaffWorktrees:
 
     # -- the operations ------------------------------------------------------------------------
 
+    async def check(self, folder: ProjectFolder) -> None:
+        """Raise :class:`WorktreeRefused` when no worktree can be made in ``folder``, as `prepare` would.
+
+        Asked of git itself, in the folder's own environment: the stored ``is_git`` is known only for
+        folders of this process's environment and only for a repository's top, and a host folder or a
+        subfolder of a repository reads as "not git" there although a worktree is made in it fine.
+        ``WorktreeUnavailable`` when the folder cannot be asked at all."""
+        await self._branchable(self._git(folder.env), folder)
+
+    async def _branchable(self, git: _Git, folder: ProjectFolder) -> str:
+        """The folder's path inside its repository, once it is known that a branch can be cut there."""
+        where = folder.path
+        if folder.readonly:
+            raise WorktreeRefused(f"{where} is read-only, so no worktree can be made in it")
+        try:
+            top = (await git.run(["rev-parse", "--show-toplevel"], cwd=where)).strip()
+            prefix = (await git.run(["rev-parse", "--show-prefix"], cwd=where)).strip()
+        except GitError:
+            raise WorktreeRefused(f"{where} is not a git repository, so no worktree can be made in it") from None
+        if not top:
+            raise WorktreeRefused(f"{where} is not a git working tree, so no worktree can be made in it")
+        try:
+            await git.run(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], cwd=where)
+        except GitError:
+            raise WorktreeRefused(f"{where} has no commit yet, so there is nothing to branch a worktree from") from None
+        return prefix
+
     async def prepare(self, folder: ProjectFolder, staff: str, task_id: str, task_title: str) -> Worktree:
         """The staff member's worktree in ``folder``, on the task's branch, ready to work in.
 
@@ -406,21 +433,9 @@ class StaffWorktrees:
         otherwise. A failed creation is retried once after ``git worktree prune``, which clears a worktree
         whose directory was deleted behind git's back. ``staff`` is the member's name or slug.
         """
-        if folder.readonly:
-            raise WorktreeRefused(f"{folder.path} is read-only; a staff member cannot get a worktree there")
         git = self._git(folder.env)
         where = folder.path
-        try:
-            top = (await git.run(["rev-parse", "--show-toplevel"], cwd=where)).strip()
-            prefix = (await git.run(["rev-parse", "--show-prefix"], cwd=where)).strip()
-        except GitError:
-            raise WorktreeRefused(f"{where} is not a git repository; use shared isolation there") from None
-        if not top:
-            raise WorktreeRefused(f"{where} is not a git working tree; use shared isolation there")
-        try:
-            await git.run(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], cwd=where)
-        except GitError:
-            raise WorktreeRefused(f"{where} has no commit yet, so there is nothing to branch from") from None
+        prefix = await self._branchable(git, folder)
         slug_ = staff_slug(staff)
         branch = branch_name(slug_, task_id, task_title)
         path = where / WORKTREES_DIR / slug_
