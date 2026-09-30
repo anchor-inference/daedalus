@@ -366,8 +366,32 @@ export type BrowserSettings = {
   point_clicks: boolean;
 };
 
-/** A note an agent proposed about a site (`GET /api/browsers/notes`): shown to agents there only once approved. */
-export type BrowserSiteNote = { id: string; project_id: string; project: string; host: string; text: string; status: "proposed" | "active"; by: string; proposed_at: number; approved_at: number };
+/** A note an agent proposed about a site, or a procedure drafted from the operator's recorded steps
+ *  (`GET /api/browsers/notes`): shown to agents there only once approved. A procedure has a title and
+ *  the recording it came from (`source`). */
+export type BrowserSiteNote = { id: string; project_id: string; project: string; host: string; text: string; status: "proposed" | "active"; by: string; proposed_at: number; approved_at: number; kind: "note" | "procedure"; title: string; source: string };
+
+/** What one recorded step did, in the words of the agent's tools. */
+export type BrowserStepAction = "navigate" | "arrive" | "click" | "double_click" | "right_click" | "check" | "uncheck" | "type" | "select" | "press" | "scroll" | "handoff" | "expect" | "dialog" | "download" | "tab";
+
+/** One step of the operator's recording (docs/architecture/browser.md, Recording a person's steps). A
+ *  typed value is a named blank (`slot`); `value` is there only when the operator let values be kept
+ *  and it looked like nothing personal. A secret field is a `handoff`, with nothing of what was typed. */
+export type BrowserStep = {
+  n: number; at: number; tab: string; url: string; action: BrowserStepAction;
+  element?: { role: string; name: string; place?: string };
+  slot?: string; value?: string; submit?: boolean; option?: string; keys?: string; count?: number; direction?: string;
+  reason?: string; to?: string; go?: string; title?: string; text?: string; kind?: string; accept?: boolean; asks?: string[]; point?: number[];
+};
+
+/** A recording of the operator's steps: the one on now, or a finished one the host keeps. */
+export type BrowserWorkflow = { id: string; group_id: string; env: string; project_id: string | null; session_id: string | null; staff_id: string | null; state: "recording" | "stopped"; values: "slots" | "literal"; reason: string; start_url: string; start_title: string; started_at: string | null; stopped_at: string | null; steps: BrowserStep[]; note_id: string };
+
+/** `GET /api/browsers/{group}/workflow`: the recording on now, and the group's finished ones, newest first. */
+export type BrowserWorkflows = { workflow: BrowserWorkflow | null; recent: BrowserWorkflow[] };
+
+/** `POST /api/browsers/workflows/{id}/draft`: the procedure put before the operator, and how it was written. */
+export type BrowserDraft = { note: BrowserSiteNote; drafted_by: "model" | "steps"; why: string };
 
 export type TerminalView = {
   id: string;

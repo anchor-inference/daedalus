@@ -28,6 +28,7 @@ from daedalus.browser.monitor import TIMEOUT_SECONDS, InjectionMonitor
 from daedalus.browser.notes import SiteNotes
 from daedalus.browser.owners import DatabaseOwners
 from daedalus.browser.service import Browsers
+from daedalus.browser.workflows import DRAFT_TIMEOUT_SECONDS, Workflows
 from daedalus.config import keyproxy_base
 from daedalus.extensions.notifications import Draft
 from daedalus.host.engine_factory import TENANT
@@ -155,9 +156,20 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
             kind="browser_note", project_id=note.get("project_id") or None, dedupe_key=f"browser_note:{note['id']}", source="browser",
         ))
 
+    async def draft(text: str) -> str:
+        """The operator's recorded steps drafted into a procedure: the model pages are read with."""
+        return await small_model(text, preset=app.config.browser.extract_preset, purpose="browser_procedure", max_tokens=2500, timeout=DRAFT_TIMEOUT_SECONDS)
+
     notes = SiteNotes(app.db)
     agent = BrowserAgent(service, InjectionMonitor(classify), extract=extract, notes=notes, on_note=noted)
     app.extensions["browser_notes"] = notes
+    async def lasting(project_id: str | None) -> str:
+        """A procedure recorded in a chat's own throwaway project is kept for every agent, as an
+        agent's site note from there is (``daedalus.tools.browser``)."""
+        project = await manager.projects.get(project_id) if project_id else None
+        return project.id if project is not None and not project.settings.ephemeral else ""
+
+    app.extensions["browser_workflows"] = Workflows(service, notes, draft=draft, scope=lasting)
     app.extensions["browser"] = service
     app.extensions["browser_agent"] = agent
     manager.service_hooks["browser"] = agent

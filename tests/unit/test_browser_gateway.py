@@ -427,3 +427,40 @@ async def test_site_notes_are_reviewed_through_the_routes_in_the_apps_shape(serv
         assert (await http.delete(f"/api/browsers/notes/{approved['id']}", headers=H)).status_code == 404
         assert (await http.post("/api/browsers/notes/nope/approve", headers=H)).status_code == 404
     assert [n.text for n in await notes.active_for(project.id, "shop.test")] == ["Search answers only to Enter"]
+
+
+async def test_recorded_steps_go_through_the_routes_in_the_apps_shape(served: Served) -> None:
+    group = await served.group()
+    served.daemon.set_control(group, "human", "c1")
+    required, optional = _ts_fields("BrowserWorkflow")
+    note_fields = set.union(*_ts_fields("BrowserSiteNote"))
+    async with served.http() as http:
+        for _ in range(200):
+            if (await http.get(f"/api/browsers/{group}", headers=H)).json()["control"]["owner"] == "human":
+                break
+            await asyncio.sleep(0.02)
+        started = await http.post(f"/api/browsers/{group}/workflow", json={"values": "literal"}, headers=H)
+        assert started.status_code == 200, started.text
+        assert set(started.json()["workflow"]) == required | optional
+        assert (await http.post(f"/api/browsers/{group}/workflow", json={"values": "everything"}, headers=H)).status_code == 422
+        served.daemon.record_step(group, action="click", element={"role": "button", "name": "Export"})
+        marked = (await http.post(f"/api/browsers/{group}/workflow/mark", json={}, headers=H)).json()["step"]
+        assert marked["action"] == "expect"
+        listed = (await http.get(f"/api/browsers/{group}/workflow", headers=H)).json()
+        assert set(listed) == {"workflow", "recent"} and set(listed["workflow"]) == required | optional and len(listed["workflow"]["steps"]) == 2
+        stopped = (await http.post(f"/api/browsers/{group}/workflow/stop", headers=H)).json()["workflow"]
+        assert stopped["state"] == "stopped" and set(stopped) == required | optional
+        assert (await http.post(f"/api/browsers/{group}/workflow/stop", headers=H)).status_code == 404
+        listed = (await http.get(f"/api/browsers/{group}/workflow", headers=H)).json()
+        assert listed["workflow"] is None and [w["id"] for w in listed["recent"]] == [stopped["id"]]
+        assert (await http.get(f"/api/browsers/workflows/{stopped['id']}", headers=H)).json()["workflow"]["steps"][0]["element"]["name"] == "Export"
+        drafted = (await http.post(f"/api/browsers/workflows/{stopped['id']}/draft", json={"goal": "Export the report"}, headers=H)).json()
+        assert set(drafted) == set.union(*_ts_fields("BrowserDraft")) and set(drafted["note"]) == note_fields
+        note = drafted["note"]
+        assert note["kind"] == "procedure" and note["title"] == "Export the report" and note["status"] == "proposed"
+        edited = await http.patch(f"/api/browsers/notes/{note['id']}", json={"text": "1. Click Export.", "title": "Export"}, headers=H)
+        assert edited.status_code == 200 and edited.json()["note"]["text"] == "1. Click Export." and edited.json()["note"]["title"] == "Export"
+        assert (await http.patch(f"/api/browsers/notes/{note['id']}", json={"text": "  "}, headers=H)).status_code == 400
+        assert (await http.patch("/api/browsers/notes/nope", json={"text": "x"}, headers=H)).status_code == 404
+        assert (await http.delete(f"/api/browsers/workflows/{stopped['id']}", headers=H)).status_code == 200
+        assert (await http.get(f"/api/browsers/workflows/{stopped['id']}", headers=H)).status_code == 404

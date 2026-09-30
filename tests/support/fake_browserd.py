@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import copy
 import hashlib
 import json
 import re
@@ -208,6 +209,8 @@ class FakeBrowserd:
         """Group → its recording switch."""
         self.frames: dict[str, list[dict[str, Any]]] = {}
         """Group → its keyframes, each with its ``data``: one after every action while recording."""
+        self.workflows: dict[str, dict[str, Any]] = {}
+        """Group → its recording of a person's steps: the one on, or the last it made."""
         self.legacy = False
         """A daemon older than the host: no ``page.find``, no point, no scroll to a text or sideways, and
         unknown parameters refused as the real daemon's strict decoding refuses them."""
@@ -313,8 +316,24 @@ class FakeBrowserd:
         group = self.groups[group_id]
         group.control = {"owner": owner, "holder": holder, "until": int(time.time() * 1000) + 1_800_000 if owner == "human" else None, "reason": reason}
         self.emit("control", {"group_id": group_id, **group.control})
+        if owner != "human" and self.workflows.get(group_id, {}).get("state") == "recording":
+            self.stop_workflow(group_id, "control")
         self._control_changed.set()
         self._control_changed = asyncio.Event()
+
+    def record_step(self, group_id: str, **step: Any) -> dict[str, Any]:
+        """A person's step, as the daemon records it while they drive and publishes it."""
+        workflow = self.workflows[group_id]
+        full = {"n": len(workflow["steps"]) + 1, "at": int(time.time() * 1000), "tab": self.groups[group_id].active, "url": self.tab_of(group_id).page.url, **step}
+        workflow["steps"].append(full)
+        self.emit("workflow.step", {"group_id": group_id, "id": workflow["id"], "step": full, "steps": len(workflow["steps"])})
+        return full
+
+    def stop_workflow(self, group_id: str, reason: str) -> dict[str, Any]:
+        workflow = self.workflows[group_id]
+        workflow.update(state="stopped", reason=reason, stopped_at=int(time.time() * 1000))
+        self.emit("workflow.stopped", {"group_id": group_id, "workflow": copy.deepcopy(workflow)})
+        return copy.deepcopy(workflow)
 
     # -- the protocol -----------------------------------------------------------------------
 
@@ -697,6 +716,33 @@ class FakeBrowserd:
             else:
                 self.grants.discard(key)
             return {}
+        if method == "workflow.start":
+            group = self._group(str(params.get("group_id")))
+            if group.control["owner"] != "human":
+                raise _Fail(1004, "take the browser first: a recording is of a person's own steps")
+            if params.get("values", "slots") not in ("slots", "literal"):
+                raise _Fail(-32602, "values must be slots or literal")
+            current = self.workflows.get(group.id)
+            if current and current["state"] == "recording":
+                return copy.deepcopy(current)
+            tab = self.tab_of(group.id)
+            self.workflows[group.id] = workflow = {"id": f"w{secrets.token_hex(4)}", "group_id": group.id, "values": params.get("values") or "slots", "state": "recording",
+                                                   "started_at": int(time.time() * 1000), "start_url": tab.page.url, "start_title": tab.page.title, "steps": []}
+            self.emit("workflow.started", {"group_id": group.id, "workflow": {**copy.deepcopy(workflow), "steps": None}})
+            return copy.deepcopy(workflow)
+        if method == "workflow.stop":
+            gid = str(params.get("group_id"))
+            if self.workflows.get(gid, {}).get("state") != "recording":
+                raise _Fail(1001, f"group {gid!r} is not recording")
+            return self.stop_workflow(gid, "operator")
+        if method == "workflow.get":
+            found = self.workflows.get(str(params.get("group_id")))
+            return {"workflow": copy.deepcopy(found) if found else None}
+        if method == "workflow.mark":
+            gid = str(params.get("group_id"))
+            if self.workflows.get(gid, {}).get("state") != "recording":
+                raise _Fail(1001, f"group {gid!r} is not recording")
+            return {"step": self.record_step(gid, action="expect", title=self.tab_of(gid).page.heading or self.tab_of(gid).page.title)}
         if method == "control.set":
             group = self._group(str(params.get("group_id")))
             owner = str(params.get("owner"))

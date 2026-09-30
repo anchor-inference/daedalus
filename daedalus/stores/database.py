@@ -1547,6 +1547,33 @@ WHERE status = 'review'
 """)
 
 
+# The operator's recorded steps in the agent's browser (docs/architecture/browser.md, Recording a
+# person's steps): one row per recording, its steps as the daemon kept them. The daemon forgets a
+# recording once it has published it; this is where it lives until the retention of recordings
+# removes it, or the operator drafts a procedure from it (note_id, the site note it became) or
+# discards it. A step holds no secret by construction, so nothing here is emptied with a session.
+MIGRATIONS.append("""
+CREATE TABLE browser_workflows (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL,
+    env TEXT NOT NULL CHECK (env IN ('container', 'host')),
+    project_id TEXT,
+    session_id TEXT,
+    staff_id TEXT,
+    status TEXT NOT NULL DEFAULT 'recording' CHECK (status IN ('recording', 'stopped')),
+    values_mode TEXT NOT NULL DEFAULT 'slots' CHECK (values_mode IN ('slots', 'literal')),
+    stop_reason TEXT NOT NULL DEFAULT '',
+    start_url TEXT NOT NULL DEFAULT '',
+    start_title TEXT NOT NULL DEFAULT '',
+    steps_json TEXT NOT NULL DEFAULT '[]',
+    note_id TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL,
+    stopped_at TEXT
+);
+CREATE INDEX browser_workflows_by_group ON browser_workflows(group_id, started_at);
+CREATE INDEX browser_workflows_by_stopped ON browser_workflows(stopped_at);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

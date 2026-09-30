@@ -150,6 +150,10 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 | `record.read` | `{group_id, no}` → `{frame: Frame, data_b64}`; `1001` for a frame not kept |
 | `record.delete` | `{group_id}` → `{}` |
 | `record.groups` | → `{groups: [{group_id, frames, bytes, first_at, last_at}], bytes, max_bytes, retention_ms}` |
+| `workflow.start` | `{group_id, values?: "slots" \| "literal" = "slots"}` → `Workflow`: record the steps of the person who drives (Recording a person's steps, below); `1004` unless a person holds control; one already on is returned as it is |
+| `workflow.stop` | `{group_id}` → `Workflow`, whole; `1001` when none is on |
+| `workflow.get` | `{group_id}` → `{workflow: Workflow \| null}`: the one on, else the last the group made |
+| `workflow.mark` | `{group_id, tab_id?}` → `{step}`: an `expect` step from the text the person selected, else the page's heading |
 
 ### `browser.open`
 
@@ -436,9 +440,14 @@ are in `data`. The daemon keeps the last 20 000, no more than 64 MiB. `events.su
 | `egress` | `{browser_id, group_id?, host, port, decision, reason?, at}`, at most one per browser, host, port and decision a minute |
 | `browser.stats` | a `browser.stats` result, every 10 s while a browser runs |
 | `navigation.blocked` | `{group_id, tab_id, url, from, by: "page", host, port, decision, reason}` — a page's own navigation the allowlist stopped (The network wall) |
+| `workflow.started` | `{group_id, workflow: Workflow}` without its steps |
+| `workflow.step` | `{group_id, id, step: Step, steps, replaces?}` — `replaces` is the number of a step it takes the place of (a click folded into the typing after it, a press counted again) |
+| `workflow.stopped` | `{group_id, workflow: Workflow}`, whole: what the host keeps |
 
 `action.text_len` is the length of the typed text; the text itself is never in an event, a log or the
-daemon's memory past the call.
+daemon's memory past the call. The one exception is a recording of a person's steps whose operator
+let values be kept, and then only an ordinary field's short value that looks like nothing personal
+(Recording a person's steps).
 
 ## Live views
 
@@ -487,6 +496,9 @@ the tab has painted before, since the daemon keeps each watched tab's newest fra
 - `viewers {count, others[{id, kind, label}]}` whenever someone attaches or leaves.
 - `action`, `action_done`, `control`, `dialog`, `download`, `needs_you`: as the daemon's events of the
   same names, for this group.
+- `workflow {state: "started" | "step" | "stopped", id, recording, steps, step?, replaces?, values?,
+  reason?, started_at?}`: the group's recording of a person's steps, each step as it is taken; a
+  stopped one without its steps.
 - `error {code, message}`: `bad_frame`, `not_holder` (INPUT from a client that does not hold
   control), `tab_closed`, `input`.
 - `copied {id, text, truncated, withheld, error?}`: the answer to this client's `copy`, to it alone.
@@ -548,7 +560,9 @@ text reaches that one client and nothing else: no event, log or audit holds it.
 
 A human's keystrokes are counted, never recorded: `view.detach`'s audit counterpart on the host gets
 the count of inputs by kind, and nothing reaches the daemon's log. Every field a human typed into is
-remembered as secret for the life of its document, so the agent can never read it back.
+remembered as secret for the life of its document, so the agent can never read it back. While the
+operator records their steps, each input is also read for what it lands on before it is dispatched
+(Recording a person's steps); the keys themselves are still never kept.
 
 ### The host's relay
 
@@ -687,7 +701,7 @@ element?, ref?, text?, keys?, option?, submit?, to_ref?, direction?: up|down|lef
 y?, steps?, tab?)`, `BrowserTabs(action: list|new|select|close, tab?, url?)`, `BrowserWait(until:
 load|idle|text|gone|url, value?, timeout_s ≤ 60, tab?)`, `BrowserDialog(accept, text?, tab?)`,
 `BrowserHandoff(reason: login|captcha|two_factor|payment|confirm|other, what)`, `BrowserClose(tab? |
-all)`, `BrowserDownload(name, to?)`, `BrowserNote(note, host?)`.
+all)`, `BrowserDownload(name, to?)`, `BrowserNote(note, host?)` or `BrowserNote(read)`.
 
 - **Reading.** `view` is passed to `page.snapshot`. `BrowserText(find=…, regex?)` is `page.find`
   (30 matches), fenced as the page's words. `BrowserText(query=…, schema?)` reads the page (`page.text`,
@@ -712,6 +726,12 @@ all)`, `BrowserDownload(name, to?)`, `BrowserNote(note, host?)`.
   outside the fence and labelled as the operator's approval, not the page's words. Notes are kept in
   the host's `kv` table (`browser.site_notes`) per project (or for every agent, from a chat of its
   own), at most five approved per site and twenty waiting per scope; the audit row is `note`.
+- **Procedures.** A procedure is a site note of the kind `procedure`: the operator's recorded steps
+  drafted into a text (Recording a person's steps), with a title, at most 4 000 characters, ten
+  approved per site. On the first read of its site an agent is shown only its title and id, beside
+  the notes and labelled the same way; `BrowserNote(read=<id>)` returns it whole, and only an approved
+  one of the caller's scope (its project's, or one made outside a project). The audit row is `note`
+  with `read: true`.
 - **Loop notes.** The host notes, after a result and never blocking, the same action on the same
   target with no change three times, the same read twice, the same address three times, and every
   five calls that changed nothing, with a plain word to stop guessing and say what is missing.
@@ -813,7 +833,10 @@ The shapes are the app's own types in `miniapp/src/api.ts`; a host test holds th
 | `GET /api/browsers/load?cap` | the browsers' cost now and at `cap` per environment, in the terminals' load shape, with `memory_basis` |
 | `GET /api/workloads/load?terminal_cap&browser_cap` | `{terminals, browsers, together}`: both loads, `null` where there is none, and `together` — both filled to their own caps and judged as one machine (`daedalus/load.py`, `project_workloads`), which the app's load bar repeats |
 | `GET /api/browsers/running` · `POST …/running/<env>/<browser>/close` | the browsers each daemon runs, with their memory and whose groups they hold; closing one ends its groups, the profile stays |
-| `GET /api/browsers/notes` · `POST …/notes/<id>/approve` · `DELETE …/notes/<id>` | the site notes agents proposed, waiting ones first, each with its project; approving one shows it to agents on that site; deleting discards a waiting one or removes an approved one |
+| `GET /api/browsers/notes` · `POST …/notes/<id>/approve` · `DELETE …/notes/<id>` | the site notes agents proposed and the procedures drafted from recordings, waiting ones first, each with its project; approving one shows it to agents on that site; deleting discards a waiting one or removes an approved one |
+| `PATCH /api/browsers/notes/<id> {text, title?}` | the operator's own words for a note or a procedure, waiting or approved; `{note}` |
+| `GET /api/browsers/<group>/workflow` · `POST … {values?}` · `POST …/workflow/stop` · `POST …/workflow/mark {tab_id?}` | `{workflow: BrowserWorkflow \| null, recent: [BrowserWorkflow]}`: the recording of the operator's steps on now and the group's finished ones; start (a person must hold the browser), stop, and mark what done looks like (`{step}`) |
+| `GET /api/browsers/workflows/<id>` · `POST …/<id>/draft {goal?}` · `DELETE …/<id>` | one recording; draft a procedure from it (`{note, drafted_by: "model" \| "steps", why}`), which waits in the site notes; discard it |
 | `GET /api/browsers/<group>/recording?after&limit` · `POST … {frames, human?}` · `DELETE …` | the group's recording switch and keyframes; the operator's switch; delete its keyframes |
 | `GET /api/browsers/<group>/frames/<no>` | one keyframe's JPEG |
 | `GET /api/browsers/recordings` | the recordings on disk per environment, against their size and age |
@@ -1004,6 +1027,82 @@ the picture was taken, so a later `group.resize` still places an action's box on
 taken before it was recorded omit them. Numbers never repeat within a group, across restarts
 too. A group's keyframes outlive it; they go when older than `record_retention_ms`, oldest first
 when the daemon's recordings pass `record_max_bytes`, or with `record.delete`.
+
+## Recording a person's steps
+
+The operator may record how they do a task while they drive (`workflow.start`), so that an agent can
+do it again with its own tools. It is not the keyframes: it keeps no picture, only steps in the
+agent's vocabulary. It records only while a person holds control and only what their live view
+sends; the agent's calls and the app's toolbar (`page.act` with an operator's origin) are not steps.
+It stops with `workflow.stop`, when control leaves the person (`reason: "control"`: the give-back
+ends it), when the group closes (`closed`) and at 200 steps (`full`). The daemon keeps only the one
+on and the last one per group, in memory; the host keeps the finished ones.
+
+`Workflow {id, group_id, values, state: "recording" | "stopped", reason?, started_at, stopped_at?,
+start_url, start_title, steps: [Step]}`, times in milliseconds since the epoch. `Step {n, at, tab,
+url, action, …}`, `url` being the page it was taken on; by `action`:
+
+| `action` | Fields | What the person did |
+|---|---|---|
+| `navigate` | `to` or `go: back \| forward \| reload` | the address bar, the toolbar |
+| `arrive` | `to`, `title` | a tab came to a new address (a click, a redirect, the address bar); its title follows when the page sets it |
+| `click`, `double_click`, `right_click` | `element`, `asks?`, `to?` (a link's address), or `point` when nothing could be named there | a press |
+| `check`, `uncheck` | `element` | a press on a box, from its state before |
+| `type` | `element`, `slot`, `value?`, `submit?` | text in a field, once they were done with it (a press elsewhere, Tab, Enter, another key, the recording's end); a click into the field is folded into it |
+| `select` | `element`, `option` | a list's choice changed (the arrows, typing, Enter) |
+| `press` | `keys`, `count?` | a key that is not typing: Enter where nothing was typed, Escape, arrows outside a field, a chord; repeats counted |
+| `scroll` | `direction`, `count?` | the wheel or a swipe; turns one way counted as one step |
+| `handoff` | `reason: login \| two_factor \| payment`, `element` | a secret field or a sign-in (below): the operator's to do |
+| `dialog` | `kind`, `text`, `accept` | their answer to a page's dialog (`dialog.answer` with an operator's origin) |
+| `download` | `text` (the file's name) | a download started |
+| `tab` | `to`, `title` | their input moved to another tab |
+| `expect` | `text` or `title` | `workflow.mark`: what done looks like |
+
+`element` is `{role, name, place?}` as the snapshot names it, `place` being the dialog, the named form
+or the heading it is under. Each input is read **before** it is dispatched, while the page is as the
+person saw it: the element at the point (as an action at a point finds it, through frames of other
+sites), or the focused one, described and classified in the daemon's world (`recordInfo`). A press
+the classifier would ask the agent about keeps its kinds in `asks`. Reading costs the input at most
+1.5 s.
+
+**What is never recorded.** A field that is secret by its nature — a password, an `autocomplete` of
+`current-password`, `new-password`, `one-time-code` or `cc-*`, or a field whose own name, label or
+placeholder names a password, a one-time code or a card (`otp`, `cvc`, "card number", "пароль") — is
+never read: pressing or typing into it is one `handoff` step, with nothing of what was typed, not its
+length. So is every field of a sign-in (a form, or a box of at most four fields, holding a password or
+a code field) and a press that submits one. Consecutive handoffs for the same reason on the same page
+are one step. The mark a person's typing leaves on a field for the agent (Live views, Input) is not
+what decides this: it would make every typed field secret.
+
+**Typed values.** With `values: "slots"` (the default) a typed value is only `slot`, a blank named
+from the field (`search`, `report_period`, the same for the same field). With `values: "literal"` the
+value is kept as well where it is at most 200 characters and holds no e-mail address, no run of nine
+digits or more (a telephone, a card, an account), no word that looks like a key, and the field is not
+a personal one (`autocomplete` of a name, an address, `email`, `tel`, `username`, a birthday, or
+`type="email"`/`"tel"`). A `select`'s option is the page's own word and is always kept.
+
+**Addresses and page words.** Every address in a step loses its user name, password and fragment; a
+query value becomes the blank `{name}` when its name is a credential's or a person's (`token`, `code`,
+`state`, `sig`, `key`, `session`, `email`, `phone`, …) or it is long or looks like a key; a path segment
+that looks like a key becomes `{token}`. A page's words in a step (names, places, titles, the marked
+text, a dialog's message) are scrubbed the same way — an address, an e-mail address (`{email}`), a key
+(`{token}`), nine digits or more (`{number}`) — because Chromium titles a loading page with its whole
+address, and a mail site's title names its account. They are cut to 100–200 characters, and they
+stay the page's words: the host fences them wherever a model reads them.
+
+**On the host.** `workflow.started` and `workflow.stopped` are kept in `browser_workflows` (the steps
+once stopped), for `[browser] record_retention_days` after they stop; the audit has `workflow_start`,
+`workflow_stop`, `workflow_draft` and `workflow_delete`, and the bus `browser.workflow {group_id, id,
+state}` (live only) tells the app to read the recordings again. On the operator's word a stopped
+recording is drafted into a procedure: the `extract_preset` model (else a middle preset) reads the
+steps fenced as page data with the operator's goal and answers `{title, procedure}`; the answer is
+set aside for the steps written out as they are (`drafted_by: "steps"`, with `why`) when there is no
+model, it fails, it is not that JSON, it names an address on a site the recording never visited, a
+blank the recording does not have, or leaves out the operator's handoff. The draft is a site note of
+the kind `procedure`, filed under the recording's project (or for every agent, from a chat's own
+project), waiting for the operator (Procedures, above). A procedure grants nothing: an agent follows
+it through the same tools, wall, watch mode, classifier and questions; where watch mode covers its
+site, the draft says so.
 
 ## Measured
 

@@ -13,6 +13,7 @@ agent is told, in the result itself, that the page cannot speak for the operator
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
 import logging
@@ -45,7 +46,7 @@ from daedalus.browser.model import (
     group_id,
 )
 from daedalus.browser.monitor import InjectionMonitor
-from daedalus.browser.notes import SiteNotes
+from daedalus.browser.notes import ACTIVE, NOTE, PROCEDURE, SiteNotes
 from daedalus.host.policy import ALLOW, ASK, Decision, approval_key, browser_sensitive, host_allowed
 
 if TYPE_CHECKING:
@@ -632,9 +633,15 @@ class BrowserAgent:
         except Exception:  # noqa: BLE001 — a note that cannot be read is not the page's failure
             logger.exception("could not read the site notes of %s", host)
             return
-        if found:
-            lines = "\n".join(f"- {n.text}" for n in found)
-            caller.notes.append(f"Notes on {found[0].host} from earlier work, approved by the operator (not the page's words):\n{lines}")
+        notes = [n for n in found if n.kind == NOTE]
+        if notes:
+            lines = "\n".join(f"- {n.text}" for n in notes)
+            caller.notes.append(f"Notes on {notes[0].host} from earlier work, approved by the operator (not the page's words):\n{lines}")
+        # A procedure is told by its title: it is read whole only when the task is the one it does.
+        procedures = [n for n in found if n.kind == PROCEDURE]
+        if procedures:
+            lines = "\n".join(f'- "{n.title}": BrowserNote(read="{n.id}")' for n in procedures)
+            caller.notes.append(f"Procedures the operator recorded on {procedures[0].host} and approved (not the page's words); read one when your task is what it does:\n{lines}")
 
     # -- the tools --------------------------------------------------------------------------------
 
@@ -1222,6 +1229,29 @@ class BrowserAgent:
         await self._audit(group, caller, "download_saved", {"id": download.get("id"), "name": download.get("name"), "size": len(data), "sha256": hashlib.sha256(data).hexdigest(), "to": told[:500]})
         return told
 
+    async def read_procedure(self, caller: Caller, procedure_id: str) -> str:
+        """A procedure the operator recorded and approved, whole: only one this caller is shown on its
+        sites (its project's, or one made outside a project), never one still waiting."""
+        if self.notes is None:
+            raise EnvUnavailable("site notes are not kept on this installation")
+        try:
+            found = await self.notes.get(procedure_id.strip())
+        except NotFound:
+            found = None
+        if found is None or found.status != ACTIVE or found.project_id not in ("", caller.scope):
+            raise NotFound(f"no approved procedure {procedure_id!r} for you; the ids are in the notes shown on a site")
+        group: dict[str, Any] | None = None
+        with contextlib.suppress(BrowserError):
+            group = await self._group(caller)
+        if group is not None:
+            await self._audit(group, caller, "note", {"host": found.host, "note_id": found.id, "read": True})
+        what = found.title if found.kind == PROCEDURE else "a note"
+        return (
+            f'Procedure "{what}" for {found.host}, recorded by the operator and approved by them (not the page\'s words). '
+            "Follow it with your own tools, taking a BrowserSnapshot for the refs; blanks in {braces} come from your task; "
+            "where it says the operator does something, call BrowserHandoff and end your turn.\n\n" + found.text
+        )
+
     async def note(self, caller: Caller, *, note: str, host: str | None = None) -> str:
         """Propose a site note. It is the operator's to approve; until then no agent reads it."""
         if self.notes is None:
@@ -1315,6 +1345,8 @@ class BrowserAgent:
             if tool == "BrowserDownload":
                 return await self.download(caller, name=_str(a, "name") or "", to=_str(a, "to")), False
             if tool == "BrowserNote":
+                if _str(a, "read"):
+                    return await self.read_procedure(caller, _str(a, "read") or ""), False
                 return await self.note(caller, note=_str(a, "note") or "", host=_str(a, "host")), False
         except OverCap as exc:
             return exc.message, True
