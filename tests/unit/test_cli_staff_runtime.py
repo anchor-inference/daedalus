@@ -70,6 +70,7 @@ from tests.support import fake_cli
 from tests.support.fake_cli.tui import read_log
 from tests.support.harness_ports import Rig
 from tests.support.live_ptyd import LivePtyd
+from tests.support.waiting import until_await
 from tests.unit.test_session_runner import ScriptedProvider, _manager
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="pseudo-terminals and process groups as on Linux")
@@ -570,7 +571,14 @@ async def test_a_cli_that_exits_by_itself_ends_its_session(settings: Settings, d
         assert await s.manager.staff.live(ada.id) is None
         [session] = await s.manager.staff.sessions(ada.id)
         assert session.end_reason == "Claude Code exited with code 3"
-        assert await HarnessStore(db).open_launches() == []
+
+        # The team hears of the exit first and the launch is ended after it, in a second step that
+        # waits for the terminal to go: reading the launches right after the event raced that step
+        # on a loaded machine.
+        async def launch_ended() -> bool:
+            return await HarnessStore(db).open_launches() == []
+
+        await until_await(launch_ended, "the launch was ended")
 
 
 async def test_a_companion_that_dies_takes_the_side_channel_with_it(settings: Settings, db: Database) -> None:
