@@ -6,7 +6,7 @@
 <p>Everything for the kitchen, shipped from our own warehouse.</p>
 <ul id="list"><li>Loading…</li></ul>
 <script>
-  fetch("/api/products?category=kitchen", { headers: { "Accept": "application/json" } })
+  fetch("/svc/catalogue/v3/listing-7f3a?cat=kitchen", { headers: { "Accept": "application/json" } })
     .then((r) => r.json())
     .then((data) => {
       const list = document.getElementById("list");

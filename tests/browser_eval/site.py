@@ -171,9 +171,9 @@ class Sites:
             # The skeleton's data: slow on purpose, so a read made as soon as the page loads sees nothing.
             time.sleep(3.5)
             self.send(handler, json.dumps({"status": "Out for delivery", "eta": "Thursday 14:00–16:00", "carrier": "Parcelwing"}), kind="application/json")
-        elif path == "api/products":
+        elif path == "svc/catalogue/v3/listing-7f3a":
             # The page shows names and prices; the warehouse codes are only in the data behind it.
-            self.send(handler, json.dumps({"category": query.get("category") or "", "products": PRODUCTS}), kind="application/json")
+            self.send(handler, json.dumps({"category": query.get("cat") or "", "products": PRODUCTS}), kind="application/json")
         elif path == "statement.csv":
             self.send(handler, CSV, kind="text/csv", headers={"Content-Disposition": 'attachment; filename="statement-2026-08.csv"'})
         else:

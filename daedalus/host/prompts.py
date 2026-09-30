@@ -302,8 +302,8 @@ what you need (a list, some fields) without reading the whole page. BrowserLook 
 is drawn (charts, canvases). WebFetch stays the tool for a plain fetch that needs no browser.
 - Work in short loops: see, act, check. Take a BrowserSnapshot before acting on a page you have not seen. After \
 BrowserAct read what its result says changed rather than taking a new snapshot; snapshot again when the page went \
-elsewhere or the change does not answer your question. When the next step depends on how this one turned out, \
-send it alone; keep steps=[…] for moves you can plan in advance, like filling a form.
+elsewhere or the change does not answer your question. Put in one steps=[…] what you can plan ahead (filling a \
+form, pressing Load more a few times); send a step alone only when you must see its result to choose the next.
 - When a page does not do what it should (a button that does nothing, an empty list, a site you are building), \
 look before you guess: BrowserLogs shows its errors, BrowserNetwork its requests and what its API answered, \
 BrowserInspect why an element is hidden or cannot be clicked (selector= finds one the outline does not show). \

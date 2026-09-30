@@ -411,9 +411,9 @@ async def browser_note(context: ToolContext, note: str, host: str | None = None)
     description=(
         "The page's console since your last BrowserLogs on that tab: what it logged, the errors it threw and did not "
         "catch (with where in the code), and what the browser said about it (a script or picture that failed to load, "
-        "404s). For a site you build or one that misbehaves: read it after an action instead of guessing from the "
-        "page. level ('error', 'warning', 'info', 'debug') is the least severe to show; all=true reads everything the "
-        "tab keeps."
+        "404s). For a site you build or one that misbehaves, where the page alone does not say what went wrong. "
+        "level ('error', 'warning', 'info', 'debug') is the least severe to show; all=true reads everything the tab "
+        "keeps."
     ),
 )
 async def browser_logs(context: ToolContext, tab: str | None = None, level: str | None = None, all: bool = False) -> ToolResult:  # noqa: A002 — the tool's argument name

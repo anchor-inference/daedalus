@@ -98,6 +98,15 @@ NETWORK_SHOWN = 50
 BODY_CHARS = 20_000
 """Characters of a response body one BrowserNetwork(body=true) shows unless the call asks for fewer."""
 INSPECT_HTML = 4_000
+PLAIN_HEADERS = frozenset((
+    "accept", "accept-encoding", "accept-language", "accept-ranges", "cache-control", "connection", "content-length", "date", "dnt",
+    "host", "keep-alive", "pragma", "priority", "proxy-connection", "referer", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+    "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user", "server", "upgrade-insecure-requests", "user-agent", "vary",
+    "last-modified", "etag", "expires", "age", "transfer-encoding",
+))
+"""Headers every browser sends and every server answers with: counted, not listed, in a request's
+detail. They were most of its words, and what finding an API needs is the rest — the content type,
+the credentials a call carries, a site's own headers."""
 CURSORS = 512
 """The owners and tabs whose place in the console and the request log is remembered."""
 EXTRACT_MAX_CHARS = 120_000
@@ -1292,8 +1301,10 @@ class BrowserAgent:
             said.append(f"started by: {request['initiator']}")
         for title, key in (("Request headers", "request_headers"), ("Response headers", "response_headers")):
             heads = [h for h in request.get(key) or [] if isinstance(h, dict)]
+            shown = [h for h in heads if str(h.get("name") or "").lower() not in PLAIN_HEADERS]
+            plain = len(heads) - len(shown)
             if heads:
-                said.append(f"{title}:\n" + "\n".join(f"  {h.get('name')}: {h.get('value')}" for h in heads))
+                said.append(f"{title}" + (f" ({_count(plain, 'standard one')} not shown)" if plain else "") + ":" + "".join(f"\n  {h.get('name')}: {h.get('value')}" for h in shown))
         if request.get("post_data"):
             said.append("It sent a body, which is never shown: a form's body can hold a password.")
         text = result.get("body")
@@ -1305,11 +1316,11 @@ class BrowserAgent:
         elif body:
             refused = str(result.get("body_error") or "no body was read")
         page = str(current.get("url") or "")
-        shown = "\n".join(said)
-        await self._screen(group, caller, target or page, shown)
+        told = "\n".join(said)
+        await self._screen(group, caller, target or page, told)
         if body and not refused:
             await self._audit(group, caller, "network", {"tab": current["id"], "id": rid, "url": target[:2000], "chars": len(text) if isinstance(text, str) else 0})
-        out = [f"Tab {current['id']} — request {rid}", fenced(origin_of(target or page), shown)]
+        out = [f"Tab {current['id']} — request {rid}", fenced(origin_of(target or page), told)]
         if refused:
             out.append(f"No body: {refused}.")
         return "\n".join(out)

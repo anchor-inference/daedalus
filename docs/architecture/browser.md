@@ -821,7 +821,9 @@ all)`, `BrowserDownload(name, to?)`, `BrowserNote(note, host?)`, `BrowserLogs(ta
   tab to, 60 entries at a time, one line each (`- error · exception: … (/app.js:40) ×3`), fenced as
   the page's words; `all=true` reads from the start. `BrowserNetwork` lists `page.network` the same
   way, 50 at a time (`r7 POST 201 fetch application/json 312 B 45 ms <url>`); with `id` it is
-  `page.request`, and `body=true` its response's body, at most 20 000 characters unless asked for
+  `page.request` — the headers every browser sends and every server answers with (`accept`,
+  `sec-fetch-*`, `user-agent`, `date` …) counted rather than listed, since they were most of its
+  words — and `body=true` its response's body, at most 20 000 characters unless asked for
   fewer, and never from a host outside the operator's `egress_allow` (a page may load from one; what
   it said is not read). On a site the operator watches, both wait for the live view as acting does
   (watch mode, below). A body read is a line of the audit (`network`, with the request's address and
