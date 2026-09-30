@@ -241,6 +241,10 @@ They come in the brief, or as a message while you work; confirm one sent while y
 Report(acknowledged=["R4"], …) once it is in your plan. A requirement you cannot meet is reported at once as \
 needs_input naming it — never worked around. A file given as an input is what the task starts from: open it \
 before you start; the task cannot be handed in until you have.
+- When the operator has to do something themselves — sign in, press, set up, check — the steps go in \
+Report(operator_steps={{goal, steps, roles, expected, check, verified, verified_how}}): the host hands them to the \
+operator word for word. Walk them on the version that runs (BrowserOpen) before you report them; a step you could \
+not walk is verified="unverified" with which one and why. Never put a password in them: name where it is kept.
 - Files handed to you are copied into .agents/inbox/<task>/ of your folder; the brief names each path. To hand \
 a file back — a report, a document, an export — keep it in your folder and name its path in \
 Report(artifacts=[…]): it is copied for the team, so the orchestrator and the operator get it. A file that exists \
@@ -454,7 +458,10 @@ blocker — which also reach their phone; not a running commentary. AskOperator 
 with options. Notify only for what cannot wait for a report and is no decision of theirs — a service the \
 project relies on is down, all work is blocked by something outside the project; pass a key to update it rather \
 than send another, and "urgent" (it breaks through quiet hours) only for what cannot wait until morning. When \
-events need nothing from you, StaySilent with a one-line note.
+events need nothing from you, StaySilent with a one-line note. How to reach or use something the operator will \
+operate themselves comes from a member's steps for the operator or from what you checked yourself; if neither \
+says it, say you do not know and ask the member — never an address or a path from memory. Steps a member wrote for \
+the operator reach them from the host word for word; do not retell them, add only what they lack.
 14. Work may reach you from the main orchestrator, the operator's front desk: an event "[from the main \
 orchestrator] dispatch <id>" is a request from the operator, relayed. The state block lists the open dispatches. \
 Treat one like the operator's own request. Every dispatch ends with exactly one closing ProjectReport with its \
@@ -499,6 +506,12 @@ it cannot be hired here, tell the operator at once, with what is offered. Hire w
 state block says what each permission mode lets a member do, and a mode or a standing instruction narrower than \
 the work needs takes a reason. When the operator widens what a piece of work may do, widen the member you \
 restricted (StaffEdit, then Release and Assign(task_id) to start it anew) — never ask them to allow it again.
+20. A message of the operator's that asks several things gets one commitment per ask — Journal(kind="commitment", \
+text, task_id when a card carries it) — which the operator sees until you keep it; a clean-up done does not answer \
+the question asked beside it. A question about the plan or the goals you answer yourself, from the brief, the plan \
+and the journal (Peek reads the plan's files); you do not hand it to a member with a narrower scope. When a message \
+could be about two pieces of work, name both and ask which, in one line. A message the host marks as written \
+during your turn may be about other work than that turn's; one that says what it replies to is about that.
 """
 """The whole standing brief of a project orchestrator. It names no project and no number, so it is the
 same bytes for every orchestrator on every turn and stays in the provider's cache; everything that
@@ -863,6 +876,19 @@ def yagni_note(on: bool) -> str:
     if on:
         return f"{YAGNI_ON}. {YAGNI_RULES}"
     return f"{YAGNI_OFF}; the earlier YAGNI rules no longer apply."
+
+
+MID_TURN_NOTE = (
+    "(The operator wrote this while you were in the middle of a turn{began}. It may be about that or about other work: "
+    "read it on its own, and if it could be about two pieces of work, name both and ask which.)\n\n"
+)
+"""Put before an operator's message that reaches an orchestrator in the middle of its turn."""
+MID_TURN_NOTE_RE = re.compile(r"\(The operator wrote this while you were in the middle of a turn.*?\)\n\n", re.S)
+
+
+def without_host_notes(text: str) -> str:
+    """A message as its writer wrote it: the turn context and a mid-turn note are the host's, for the model."""
+    return MID_TURN_NOTE_RE.sub("", without_turn_context(text))
 
 
 def turn_context(*, now: datetime | None = None, notes: str = "") -> str:

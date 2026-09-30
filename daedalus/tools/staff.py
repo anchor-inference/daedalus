@@ -40,8 +40,8 @@ def _hook(context: ToolContext):  # type: ignore[no-untyped-def]
         "goes to done, handed in for the orchestrator to check against your note). note: a short factual summary. "
         "evidence (with done): [{item, how, result}] for each check (C1 …) and requirement (R1 …) of the task — "
         "what you ran or looked at and what it showed. acknowledged: the requirements (R…) sent to you that you "
-        "have taken into your plan. artifacts: paths or links of what you produced. remember: one line to keep in "
-        "your notes for every later session."
+        "have taken into your plan. operator_steps: when the operator has to do something themselves — sign in, press, check — the steps for them, which reach them word for word: {goal, steps: […], roles?: [{account, purpose}], expected?, check?, limits?, verified: 'on-running-version' when you walked every step on the version that runs, else 'unverified', verified_how?}. Never a password in them: name where it is kept. artifacts: paths or links of what you produced. remember: one "
+        "line to keep in your notes for every later session."
     ),
 )
 async def report(
@@ -52,6 +52,7 @@ async def report(
     remember: str | None = None,
     evidence: list[dict[str, str]] | None = None,
     acknowledged: list[str] | None = None,
+    operator_steps: dict[str, Any] | None = None,
 ) -> ToolResult:
     hook = _hook(context)
     if hook is None:
@@ -59,6 +60,7 @@ async def report(
     try:
         text = await hook(
             "report", session_id=context.session_id, kind=kind, note=note, artifacts=artifacts, remember=remember, evidence=evidence, acknowledged=acknowledged,
+            operator_steps=operator_steps,
         )
     except (KeyError, ValueError, RuntimeError) as exc:
         return error(context, str(exc))
@@ -79,6 +81,25 @@ report().definition.parameters.properties["evidence"] = {
         },
         "required": ["item", "how", "result"],
     },
+}
+report().definition.parameters.properties["operator_steps"] = {
+    "type": "object",
+    "description": "Steps the operator follows themselves, delivered to them word for word.",
+    "properties": {
+        "goal": {"type": "string", "description": "What the operator achieves by following them."},
+        "steps": {"type": "array", "items": {"type": "string"}, "description": "One step each, in order, naming what to open and press."},
+        "roles": {
+            "type": "array",
+            "items": {"type": "object", "properties": {"account": {"type": "string"}, "purpose": {"type": "string"}}, "required": ["account", "purpose"]},
+            "description": "Which account is which, when there are several.",
+        },
+        "expected": {"type": "string", "description": "What the operator sees when it worked."},
+        "check": {"type": "string", "description": "A safe way to check it."},
+        "limits": {"type": "string", "description": "What it does not cover."},
+        "verified": {"type": "string", "enum": ["on-running-version", "unverified"]},
+        "verified_how": {"type": "string", "description": "How you walked them, or which step you could not and why."},
+    },
+    "required": ["goal", "steps", "verified"],
 }
 
 

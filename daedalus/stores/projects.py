@@ -37,6 +37,12 @@ RULE_KIND = "rule"
 ``RULE_LIFTED_KIND`` names it, shown whole to the orchestrator every turn and to every member with
 each task."""
 RULE_LIFTED_KIND = "rule_lifted"
+COMMITMENT_KIND = "commitment"
+"""A journal entry that is something the orchestrator took on for the operator — one per ask of a
+message that asked several things — open until an entry of ``COMMITMENT_KEPT_KIND`` names it."""
+COMMITMENT_KEPT_KIND = "commitment_kept"
+COMMITMENT_TEXT_MAX = 400
+COMMITMENTS_MAX = 30
 RULE_TEXT_MAX = 600
 """A rule is an instruction, not a document: what it needs is in the brief or the journal."""
 RULES_MAX = 10
@@ -1098,6 +1104,42 @@ class ProjectStore:
         said = " ".join(rule.text.split())
         text = f"Lifted rule #{rule.id}: {said[:200]}{'…' if len(said) > 200 else ''}" + (f"\nWhy: {why.strip()}" if why.strip() else "")
         return rule, await self.record(project_id, author, RULE_LIFTED_KIND, text, {"rule_id": rule.id})
+
+    async def commitments(self, project_id: str) -> list[JournalEntry]:
+        """What the orchestrator took on for the operator and has not kept yet, oldest first."""
+        rows = await self._db.fetchall(
+            "SELECT * FROM project_journal WHERE project_id = ? AND kind = ? AND id NOT IN ("
+            "SELECT CAST(json_extract(refs_json, '$.commitment_id') AS INTEGER) FROM project_journal WHERE project_id = ? AND kind = ?"
+            ") ORDER BY id",
+            (project_id, COMMITMENT_KIND, project_id, COMMITMENT_KEPT_KIND),
+        )
+        return [_entry(r) for r in rows]
+
+    async def add_commitment(self, project_id: str, author: str, text: str, *, task_id: str = "", message_seq: int | None = None) -> JournalEntry:
+        body = " ".join((text or "").split())
+        if not body:
+            raise ProjectError("a commitment needs its text: what you took on, in a sentence")
+        if len(body) > COMMITMENT_TEXT_MAX:
+            raise ProjectError(f"a commitment is at most {COMMITMENT_TEXT_MAX} characters: say what you took on, and put the plan on a card")
+        if len(await self.commitments(project_id)) >= COMMITMENTS_MAX:
+            raise ProjectError(f"{COMMITMENTS_MAX} commitments are open already: keep or drop some first (Journal(op='keep', commitment=<id>))")
+        refs: dict[str, Any] = {}
+        if task_id:
+            refs["task_id"] = task_id
+        if message_seq:
+            refs["message_seq"] = int(message_seq)
+        return await self.record(project_id, author, COMMITMENT_KIND, body, refs)
+
+    async def keep_commitment(self, project_id: str, commitment_id: int, author: str, why: str = "") -> tuple[JournalEntry, JournalEntry]:
+        """Close a commitment: kept, or let go with the reason; the commitment and the entry that closes it."""
+        row = await self._db.fetchone("SELECT * FROM project_journal WHERE id = ? AND project_id = ?", (int(commitment_id), project_id))
+        if row is None or row["kind"] != COMMITMENT_KIND:
+            raise ProjectError(f"entry #{commitment_id} is not a commitment of this project")
+        commitment = _entry(row)
+        if commitment.id not in {c.id for c in await self.commitments(project_id)}:
+            raise ProjectError(f"commitment #{commitment.id} is closed already")
+        text = f"Kept #{commitment.id}: {commitment.text[:200]}" + (f"\nHow: {why.strip()}" if why.strip() else "")
+        return commitment, await self.record(project_id, author, COMMITMENT_KEPT_KIND, text, {"commitment_id": commitment.id})
 
     # -- the link to sessions ------------------------------------------------------
 

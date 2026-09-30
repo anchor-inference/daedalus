@@ -90,7 +90,16 @@ async def source_of(orch: Orchestrators, project: Project, source: str | None) -
 
 
 def _operator_backed(source: str) -> bool:
-    return source == "operator" or source.startswith(("answer:", "rule:"))
+    return source == "operator" or source.startswith(("operator:", "answer:", "rule:"))
+
+
+async def bound(orch: Orchestrators, session_id: str, source: str) -> str:
+    """``operator`` bound to the message of theirs it came from, when there is one: the operator's chat
+    shows each message's fate — the requirement it became, who got it, whether they confirmed it."""
+    if source != "operator":
+        return source
+    seq = await orch.operator_message_seq(session_id)
+    return f"operator:{seq}" if seq else source
 
 
 async def deliver(orch: Orchestrators, project: Project, task: dict[str, Any], requirement: Requirement, text: str, *, files: list[StoredFile] | None = None) -> str:
@@ -129,7 +138,7 @@ async def require(
     if task["status"] == "dropped":
         raise Refused(f"task {task['id']} is dropped")
     contracts = _contracts(orch)
-    origin = await source_of(orch, project, source)
+    origin = await bound(orch, session_id, await source_of(orch, project, source))
     if withdraw:
         gone = await contracts.find(task["id"], withdraw)
         if gone is None or gone.state != "active":
@@ -334,6 +343,7 @@ async def accept(
         await _ask_operator_to_accept(orch, project, task, summary, note)
         return f"{task['id']} is in the operator's review column with your marks ({summary or 'no checks'}); their acceptance arrives as an event"
     await contracts.set_acceptance(task["id"], "accepted")
+    await orch.keep_commitments_of(project.id, task["id"], "its task was accepted")
     await _team(orch).note_on_card(task["id"], f"accepted by the orchestrator: {summary or note.strip() or 'no checks to mark'}")
     await loops.close(project.id, task_id=task["id"], by="orchestrator", decision="accepted")
     await orch._changed(project.id, "board", "orchestrator")

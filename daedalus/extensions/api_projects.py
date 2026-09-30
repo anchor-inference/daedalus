@@ -509,6 +509,12 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         text = await orchestrators().project_state(project, session_id=session_id or None)
         return {"project_id": project_id, "session_id": session_id or None, "text": text, "chars": len(text), "max_chars": manager.config.orchestrator.state_max_chars}
 
+    @api.get("/api/projects/{project_id}/focus-state")
+    async def focus_state(project_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The project as the orchestrator's chat shows it in one line: work in hand, results waiting for
+        a decision, questions for the operator, and what became of the operator's messages."""
+        return await orchestrators().focus_state(await existing(project_id))
+
     @api.get("/api/projects/{project_id}/usage")
     async def project_usage(project_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """What the project spends: per staff member, its orchestrator and its other sessions, today, over

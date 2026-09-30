@@ -1102,6 +1102,7 @@ class CliStaffRuntime:
                 told = await self.ingress.report(
                     live, str(body.get("kind") or ""), str(body.get("note") or ""), [str(a) for a in body.get("artifacts") or []], str(body.get("remember") or "") or None,
                     call_id=call_id or None, evidence=evidence or None, acknowledged=acknowledged or None,
+                    operator_steps=body.get("operator_steps") if isinstance(body.get("operator_steps"), dict) else None,
                 )
                 reply: dict[str, Any] = {"text": told}
             except (ValueError, RuntimeError) as exc:

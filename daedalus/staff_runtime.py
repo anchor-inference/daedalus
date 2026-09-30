@@ -283,6 +283,7 @@ class TeamIngress(Protocol):
     async def report(
         self, live: LiveSession, kind: str, note: str, artifacts: list[str] | None = None, remember: str | None = None, *,
         call_id: str | None = None, evidence: list[dict[str, str]] | None = None, acknowledged: list[str] | None = None,
+        operator_steps: dict[str, Any] | None = None,
     ) -> str:
         """``checkpoint · needs_input · stuck · done``; returns what the reporter is told. A report
         with a ``call_id`` already recorded is not made again: it was a replay of the same call.

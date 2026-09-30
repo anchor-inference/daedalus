@@ -35,6 +35,7 @@ from protocore.runtime.events.types import EventType
 
 from daedalus.extensions.board import NOTES_MAX_CHARS
 from daedalus.extensions.notifications import ActionConflict, ActionOutcome, ActionRefused, Draft
+from daedalus.extensions.operator_steps import normalise as normalise_steps
 from daedalus.extensions.task_contract import RETURNED, Contracts, Requirement
 from daedalus.harness.capabilities import CAPABILITIES
 from daedalus.harness.contract import mcp_server, standing_rule
@@ -1715,7 +1716,7 @@ class Team:
         if op == "report":
             return await self.ingress.report(
                 live, str(kwargs.get("kind") or ""), str(kwargs.get("note") or ""), kwargs.get("artifacts"), kwargs.get("remember"),
-                evidence=kwargs.get("evidence"), acknowledged=kwargs.get("acknowledged"),
+                evidence=kwargs.get("evidence"), acknowledged=kwargs.get("acknowledged"), operator_steps=kwargs.get("operator_steps"),
             )
         raise ValueError(op)
 
@@ -1835,6 +1836,7 @@ class Ingress:
     async def report(
         self, live: LiveSession, kind: str, note: str, artifacts: list[str] | None = None, remember: str | None = None, *,
         call_id: str | None = None, evidence: list[dict[str, str]] | None = None, acknowledged: list[str] | None = None,
+        operator_steps: dict[str, Any] | None = None,
     ) -> str:
         if call_id and await self._reported(live, call_id):
             return f"reported {kind}"
@@ -1843,6 +1845,8 @@ class Ingress:
         note = (note or "").strip()
         if not note:
             raise ValueError("a report needs a note")
+        # Checked before anything moves, so steps that cannot be carried refuse the whole report.
+        steps = normalise_steps(operator_steps) if operator_steps else None
         task = await self.team.task(live.session.task_id) if live.session.task_id else None
         contracts = self.team.contracts
         told = f"reported {kind}"
@@ -1919,8 +1923,24 @@ class Ingress:
             payload["unproven"] = unproven
         if call_id:
             payload["call_id"] = call_id
+        if steps is not None:
+            kept_steps = await self._keep_steps(live, task, steps)
+            payload["operator_steps"] = {**steps.view(), "file": file_ref(kept_steps)}
+            told += f"; your steps for the operator go to them word for word ({kept_steps.short()})" + ("" if steps.walked else ", marked as not checked on the running version")
         await self._published(await self.team.publish("staff.report", payload, member=live.staff, session_id=live.session_id))
         return told
+
+    async def _keep_steps(self, live: LiveSession, task: BoardTask | None, steps: Any) -> StoredFile:
+        """The steps as a file of the project, so they stay where the operator can open them again."""
+        number = 1 + int((await self.manager.db.fetchone(
+            "SELECT count(*) AS n FROM files f JOIN file_access a ON a.file_id = f.id WHERE a.scope = ? AND f.name LIKE 'operator-steps-%'", (live.staff.project_id,),
+        ) or {"n": 0})["n"])
+        name = f"operator-steps-{task.id if task is not None else live.staff.name}-{number}.md"
+        text = steps.markdown(member=live.staff.name, task=task.id if task is not None else "")
+        return await self.manager.files.add(
+            text.encode("utf-8"), name=name, mime="text/markdown", origin="staff", origin_ref=f"{live.staff.name}:{task.id if task else ''}",
+            scope=live.staff.project_id, actor=f"staff:{live.staff.name}",
+        )
 
     async def _published(self, event: AppEvent | None) -> None:
         if event is None:

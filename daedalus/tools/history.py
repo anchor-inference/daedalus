@@ -44,7 +44,7 @@ async def history_search(context: ToolContext, query: str, limit: int = 10, all_
     store = _store(context)
     if store is None:
         return error(context, "history is not available in this session")
-    hits = await store.search_transcript(query, session_id=None if all_sessions else context.session_id, limit=max(1, min(int(limit), 50)))
+    hits = [h for h in await store.search_transcript(query, session_id=None if all_sessions else context.session_id, limit=max(1, min(int(limit), 50))) if not h.get("queued")]
     if not hits:
         rebuilding = getattr(services_for(context).extra.get("manager"), "index_rebuild", None)
         if rebuilding:
@@ -89,6 +89,11 @@ async def history_expand(
         return error(context, f"no transcript turns in seq {start}–{end}")
     parts = []
     for seq, message in rows:
+        if message.metadata.get("daedalus.queued"):
+            # A message as it was queued while a turn ran; the copy where the model read it follows
+            # (placed in that turn, or opening the next). Shown both, the operator's words read as
+            # sent twice, the first time out of order.
+            continue
         text = message_text(message)
         if text:
             parts.append(f"— seq {seq} · {message.role.value} · {message.created_at.strftime('%Y-%m-%d %H:%M')} —\n{text}")

@@ -33,10 +33,12 @@ from daedalus.config import NoModelConfigured
 from daedalus.extensions import orchestrator_contract, orchestrator_ops, orchestrator_team, wakeups
 from daedalus.extensions.likeness import same_question
 from daedalus.extensions.notifications import Draft, ProjectNotifyPolicy
+from daedalus.extensions.operator_steps import OperatorSteps
 from daedalus.extensions.orchestrator_loops import OpenResults
 from daedalus.extensions.project_usage import ProjectUsage
 from daedalus.extensions.watches import describe as describe_watch
 from daedalus.harness.capabilities import MODE_MEANINGS
+from daedalus.host import prompts
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.peek import BridgedFolderAccess, FolderAccess, LocalFolderAccess, UnreachableFolder
 from daedalus.host.session_runner import HOME_KEY, WorkspaceUnreachable, home_of
@@ -621,6 +623,10 @@ class Orchestrators:
             for t in still_open
         ]
         decisions = await self.loops.section(project.id)
+        promised = [
+            f"#{c.id} ({self._moment(c.at)}) {_one_line(c.text, 160)}" + (f" — card {c.refs['task_id']}" if c.refs.get("task_id") else "")
+            for c in await self.manager.projects.commitments(project.id)
+        ]
         hireable = await self._hireable(project)
         unconfirmed = [
             f"R{r['number']} of {r['task_id']} sent to {r['staff_name'] or 'a member'} {_age(r['delivered_at'], now)} ago, not confirmed: {_one_line(r['text'], 100)}"
@@ -650,6 +656,7 @@ class Orchestrators:
             (["Brief — " + " · ".join(brief_parts)], ""),
             (rules, ""),
             _section("Waiting for your decision (a result, or a card nobody took; the host reminds you once)", decisions, cap=DECISION_LINES, more="they stay here until decided"),
+            _section("What you took on for the operator and have not kept (Journal(op='keep', commitment=<id>) when done)", promised, cap=DECISION_LINES, more="Journal(op='read', kind='commitment')"),
             _section("Requirements sent to a member at work and not yet confirmed", unconfirmed, cap=ASK_LINES, more="Tasks(op='get', task_id=…) shows a card's requirements"),
             team_section if team_section[0] else (["Team: nobody yet"], ""),
             _section("One-off", one_offs, cap=TEAM_LINES, more="Team"),
@@ -1073,7 +1080,7 @@ class Orchestrators:
                 return f"{who(member)} {ending}{(' on ' + task) if task else ''}: \"{_one_line(str(p.get('text') or ''), IMPLICIT_REPORT_CHARS)}\" — ReadStaff(\"{name}\") for the whole turn"
             # A report is the member's answer to the orchestrator and arrives whole: cut at 300
             # characters, a detailed reply reached it as a stub, and no tool could show the rest.
-            return f"{who(member)} reported {p.get('kind')}{(' on ' + task) if task else ''}: \"{_verbatim(str(p.get('text') or ''))}\"{refs_line(p.get('files'))}{self._report_tail(p)}"
+            return f"{who(member)} reported {p.get('kind')}{(' on ' + task) if task else ''}: \"{_verbatim(str(p.get('text') or ''))}\"{refs_line(p.get('files'))}{self._report_tail(p)}{self._steps_tail(p)}"
         if kind == "staff.channel":
             if p.get("team_tools") == "missing":
                 return f"{who(member)}'s team tools are not connected: {_one_line(str(p.get('detail') or ''), 200)}. They keep working, but will not Report or AskOrchestrator; Tell and ReadStaff still work"
@@ -1133,6 +1140,20 @@ class Orchestrators:
             number = f" #{p.get('seq')}" if kind == "dispatch.created" and p.get("seq") else ""
             return f"[from the main orchestrator] {what} {p.get('dispatch_id') or ''}{number}{': ' + title if title else ''}: {text}{refs_line(p.get('files'))}"
         return kind
+
+    @staticmethod
+    def _steps_tail(p: Any) -> str:
+        """What the orchestrator is told of steps the host delivered: that they reached the operator
+        whole, where they are, and whether they were walked — so it does not retell them."""
+        steps = p.get("operator_steps")
+        if not isinstance(steps, dict):
+            return ""
+        handle = f"att:{steps['file']['id']}" if isinstance(steps.get("file"), dict) and steps["file"].get("id") else "a file of the project"
+        walked = "walked on the running version" if steps.get("verified") == "on-running-version" else f"NOT checked on the running version ({steps.get('verified_how') or 'no word how'})"
+        return (
+            f" — its steps for the operator, \"{steps.get('goal')}\" ({len(steps.get('steps') or [])} steps, {walked}), were put in front of the "
+            f"operator word for word ({handle}); do not retell them — add only what they lack"
+        )
 
     @staticmethod
     def _report_tail(p: Any) -> str:
@@ -1346,17 +1367,166 @@ class Orchestrators:
         lines += [f"- {clock} dispatch {d.id} (#{d.seq}) is open again" for d in reopened]
         await self._note(self.session_of(project), f"[events · {project.name} · {len(lines)} since {clock}]\n" + "\n".join(lines))
 
-    async def _note(self, session_id: str, text: str) -> None:
+    async def _note(self, session_id: str, text: str, extra: dict[str, Any] | None = None) -> None:
         """A line in the orchestrator's chat that the model never reads: written to the transcript the
         app shows, not to the history its turns are built from. It reads like a batch of events, so the
-        app draws it as one."""
+        app draws it as one — or, with ``extra`` naming what it carries, as a card of its own."""
         if not session_id:
             return
-        note = Message(role=MessageRole.user, content_blocks=[TextBlock(text=text)], metadata={"daedalus.origin": "events", "daedalus.notice": True, OPERATOR_WORDS_METADATA_KEY: False})
+        note = Message(role=MessageRole.user, content_blocks=[TextBlock(text=text)], metadata={"daedalus.origin": "events", "daedalus.notice": True, OPERATOR_WORDS_METADATA_KEY: False, **(extra or {})})
         try:
             await self.manager.sessions.append_transcript(session_id, [note])
         except Exception:  # noqa: BLE001 — the notification still says it
             logger.warning("could not write a note into the chat of %s", session_id, exc_info=True)
+
+    async def focus_state(self, project: Project) -> dict[str, Any]:
+        """What the operator's view of an orchestrated project is built from, read from the rows and
+        never from the model: the work in hand with its owner, acceptance and next step, the results
+        and cards waiting for the orchestrator's decision, what it took on for the operator, and what
+        became of each of the operator's messages that turned into a requirement or a commitment."""
+        db = self.manager.db
+        members = {m.id: m for m in await self.manager.staff.list(project.id, archived=True)}
+        rows = await db.fetchall(
+            "SELECT id, title, status, assignee_staff_id, acceptance_state, notes, updated_at FROM board_tasks WHERE project_id = ? AND status NOT IN ('done', 'dropped') ORDER BY priority, updated_at DESC",
+            (project.id,),
+        )
+        before = await self._previous_owners([r["id"] for r in rows if not r["assignee_staff_id"]])
+        loops = await self.loops.open(project.id)
+        waiting_on = {r["id"]: line.split("waits on: ", 1)[1] for r in rows for line in reversed(str(r["notes"] or "").splitlines()) if "waits on: " in line}
+        goals = []
+        for r in rows:
+            owner = members.get(r["assignee_staff_id"] or "")
+            loop = next((lp for lp in loops if lp.get("task_id") == r["id"]), None)
+            nxt = waiting_on.get(r["id"]) or ("waiting for the orchestrator's decision" if loop is not None else "")
+            goals.append({
+                "task_id": r["id"], "title": r["title"], "status": r["status"], "acceptance": r["acceptance_state"] or "",
+                "owner": {"id": owner.id, "name": owner.name} if owner is not None else None, "previous_owner": before.get(r["id"]),
+                "next": nxt, "updated_at": r["updated_at"],
+            })
+        results = [
+            {"id": lp["id"], "cause": lp["cause"], "task_id": lp.get("task_id"), "title": lp.get("title"), "staff_name": lp.get("staff_name"),
+             "summary": lp.get("summary") or "", "opened_at": lp["opened_at"], "reminded": lp.get("reminded_at") is not None}
+            for lp in loops
+        ]
+        commitments = [
+            {"id": c.id, "text": c.text, "task_id": c.refs.get("task_id") or None, "message_seq": c.refs.get("message_seq"), "at": c.at}
+            for c in await self.manager.projects.commitments(project.id)
+        ]
+        receipts: dict[int, list[dict[str, Any]]] = {}
+        req_rows = await db.fetchall(
+            "SELECT r.*, t.title AS task_title FROM task_requirements r JOIN board_tasks t ON t.id = r.task_id WHERE r.project_id = ? AND r.source LIKE 'operator:%' ORDER BY r.created_at DESC LIMIT 200",
+            (project.id,),
+        )
+        team = self.team
+        for row in req_rows:
+            seq_text = str(row["source"]).split(":", 1)[1]
+            if not seq_text.isdigit():
+                continue
+            deliveries = (await team.contracts.deliveries(row["task_id"])).get(row["id"], []) if team is not None else []
+            receipts.setdefault(int(seq_text), []).append({
+                "kind": "requirement", "label": f"R{row['number']}", "text": row["text"], "state": row["state"], "task_id": row["task_id"], "task_title": row["task_title"],
+                "deliveries": [{"staff_name": d["staff_name"], "acknowledged": bool(d["acknowledged_at"]), "opened": bool(d["opened_at"]), "via": d["via"], "cli": d["cli"]} for d in deliveries],
+            })
+        kept = {int(r["cid"]) for r in await db.fetchall(
+            "SELECT CAST(json_extract(refs_json, '$.commitment_id') AS INTEGER) AS cid FROM project_journal WHERE project_id = ? AND kind = 'commitment_kept'", (project.id,),
+        ) if r["cid"] is not None}
+        for row in await db.fetchall(
+            "SELECT id, text, refs_json FROM project_journal WHERE project_id = ? AND kind = 'commitment' AND json_extract(refs_json, '$.message_seq') IS NOT NULL ORDER BY id DESC LIMIT 200",
+            (project.id,),
+        ):
+            refs = json.loads(row["refs_json"] or "{}")
+            receipts.setdefault(int(refs["message_seq"]), []).append({"kind": "commitment", "id": row["id"], "text": row["text"], "task_id": refs.get("task_id"), "kept": row["id"] in kept})
+        asks = await self.manager.asks.open_for(project.id, routed_to="operator")
+        unconfirmed = await team.contracts.unconfirmed(project.id) if team is not None else []
+        return {
+            "project_id": project.id,
+            "counts": {"in_work": len(goals), "decisions": len(results), "waiting_for_you": len(asks), "unconfirmed": len(unconfirmed), "commitments": len(commitments)},
+            "goals": goals,
+            "open_results": results,
+            "commitments": commitments,
+            "receipts": {str(k): v for k, v in receipts.items()},
+        }
+
+    async def operator_message_seq(self, session_id: str) -> int | None:
+        """The seq of the operator's latest message in the orchestrator's chat: what a requirement or a
+        commitment made now answers, so the operator can see what became of their words."""
+        try:
+            messages = await self.manager.sessions.list_transcript(session_id, limit=60)
+        except Exception:  # noqa: BLE001 — a requirement stands without its receipt
+            return None
+        for message in reversed(messages):
+            meta = message.metadata or {}
+            if message.role is MessageRole.user and meta.get("daedalus.origin") == "operator" and meta.get("daedalus.delivery") != "drained":
+                seqs = await self.manager.sessions.transcript_seqs(session_id, [self.manager.sessions.transcript_key(message)])
+                return seqs[0] if seqs else None
+        return None
+
+    async def keep_commitments_of(self, project_id: str, task_id: str, why: str) -> list[int]:
+        """Close the commitments a card carried once the card itself is settled."""
+        kept = []
+        for commitment in await self.manager.projects.commitments(project_id):
+            if commitment.refs.get("task_id") == task_id:
+                await self.manager.projects.keep_commitment(project_id, commitment.id, "system", why)
+                kept.append(commitment.id)
+        return kept
+
+    async def steer_note(self, session_id: str, text: str) -> str:
+        """An operator's message that arrives while the orchestrator's turn is under way, said to be so.
+
+        It is placed before the turn's next model call, beside whatever that turn was about. A
+        complaint about a member's missing instruction for the mail arrived while the orchestrator
+        was reading the updater's report, and it answered it about the updater. The note names what
+        the turn began with, so the message is read on its own rather than as part of that."""
+        try:
+            await self.current(session_id)
+        except NotCurrent:
+            return text
+        topic = ""
+        try:
+            for message in reversed(await self.manager.sessions.list_transcript(session_id, limit=40)):
+                meta = message.metadata or {}
+                if message.role is MessageRole.user and not meta.get("daedalus.queued") and meta.get("daedalus.delivery") != "drained" and not meta.get("daedalus.notice"):
+                    body = prompts.without_turn_context("".join(b.text for b in message.content_blocks if isinstance(b, TextBlock)))
+                    topic = _one_line(body, 200)
+                    break
+        except Exception:  # noqa: BLE001 — the note stands without the topic
+            topic = ""
+        return prompts.MID_TURN_NOTE.format(began=f" that began with: «{topic}»" if topic else "") + text
+
+    async def hand_steps(self, event: AppEvent) -> None:
+        """A member's steps for the operator, put in front of them by the host, word for word: in the
+        orchestrator's chat as a card of their own, and as a notification.
+
+        The orchestrator used to be the only way such steps reached the operator, and its retelling
+        lost the table of accounts, the steps, then a step with the current password. It is told the
+        steps arrived instead (see :meth:`line`), and has nothing to retell."""
+        p = event.payload
+        steps = p.get("operator_steps")
+        if not isinstance(steps, dict) or not event.project_id:
+            return
+        project = await self.manager.projects.get(event.project_id)
+        if project is None:
+            return
+        member = await self.manager.staff.get(event.staff_id) if event.staff_id else None
+        name = member.name if member is not None else "a member"
+        view = OperatorSteps(**{k: v for k, v in steps.items() if k != "file"})
+        text = view.markdown(member=name, task=str(p.get("task_id") or ""))
+        extra = {"daedalus.operator_steps": {**steps, "member": name, "task_id": p.get("task_id") or "", "event_seq": event.seq}}
+        await self._note(self.session_of(project), text, extra)
+        notifications = self.app.notifications
+        if notifications is not None:
+            await notifications.post(Draft(
+                "orchestrator_report",
+                f"{project.name}: steps for you — {view.goal}" + ("" if view.walked else " (not checked on the running version)"),
+                text,
+                kind="operator_steps",
+                tone="info" if view.walked else "warning",
+                project_id=project.id,
+                staff_id=event.staff_id,
+                link=f"/app/project/{project.id}",
+                dedupe_key=f"operator-steps:{event.seq}",
+                source="staff",
+            ))
 
     # -- following the sessions ----------------------------------------------------------------------
 
@@ -1537,6 +1707,7 @@ class Orchestrators:
         manager = self.manager
         manager.service_hooks["orchestrator"] = self.service
         manager.turn_notes_hooks.append(self.turn_notes)
+        manager.steer_hooks.append(self.steer_note)
         manager.preset_hooks.append(self.preset_for)
         manager.on_finished(self.on_run_finished)
         manager.delete_hooks.append(self.on_session_deleted)
@@ -1550,6 +1721,7 @@ class Orchestrators:
         if self.team is not None:
             self.team.own_requests = self
             self.team.report_hooks.append(self.loops.reported)
+            self.team.report_hooks.append(self.hand_steps)
         try:
             follower = self.manager.bus.on(EventFilter(types=("task.assigned", "task.moved", "task.accepted")), self.loops.on_task, name="orchestrator-open-results")
         except RuntimeError:  # attached outside a running loop: nothing is published there either

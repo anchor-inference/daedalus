@@ -26,6 +26,7 @@ from daedalus.staff_runtime import LiveSession
 from daedalus.stores.files import HANDOVER_MAX_FILES, MAIN, FileRefused, human_size, parse_handle
 from daedalus.stores.projects import (
     BRIEF_SECTIONS,
+    COMMITMENT_KIND,
     OPERATOR_ONLY_SECTIONS,
     RULE_KIND,
     Project,
@@ -198,6 +199,8 @@ async def journal(
     rule: int | None = None,
     before: int | None = None,
     limit: int = 20,
+    commitment: int | None = None,
+    task_id: str | None = None,
 ) -> str:
     kind = "".join(c for c in (kind or "").lower() if c.isalnum() or c in "_-")[:30]
     if op == "read":
@@ -217,8 +220,29 @@ async def journal(
         await orch._changed(project.id, "journal", "orchestrator")
         told = await _announce_rule(orch, project, prompts.STAFF_RULE_LIFTED.format(text=lifted_rule.text))
         return f"rule #{lifted_rule.id} lifted (journal #{entry.id}); it leaves the state block and the briefs{told}"
+    if op == "keep":
+        if commitment is None:
+            raise Refused("op='keep' needs commitment, the id of the commitment kept (the state block lists the open ones)")
+        try:
+            kept, entry = await orch.manager.projects.keep_commitment(project.id, int(commitment), "orchestrator", why)
+        except ProjectError as exc:
+            raise Refused(str(exc)) from exc
+        await orch._changed(project.id, "journal", "orchestrator")
+        return f"commitment #{kept.id} is closed (journal #{entry.id})"
     if op != "write":
-        raise Refused("op is write, read or lift")
+        raise Refused("op is write, read, lift or keep")
+    if kind == COMMITMENT_KIND:
+        # One per ask of a message that asked several things: a question about the plan and a
+        # clean-up asked together once came back as the clean-up alone, and nothing showed the
+        # other was still owed.
+        if task_id and await orch.manager.db.fetchone("SELECT 1 FROM board_tasks WHERE id = ? AND project_id = ?", (task_id, project.id)) is None:
+            raise Refused(f"no task {task_id} on {project.name}'s board")
+        try:
+            entry = await orch.manager.projects.add_commitment(project.id, "orchestrator", text, task_id=task_id or "", message_seq=await orch.operator_message_seq(session_id))
+        except ProjectError as exc:
+            raise Refused(str(exc)) from exc
+        await orch._changed(project.id, "journal", "orchestrator")
+        return f"commitment #{entry.id} is open: the state block and the operator's list show it until Journal(op='keep', commitment={entry.id})" + (f" or task {task_id} is accepted" if task_id else "")
     if kind == RULE_KIND:
         # The operator's standing instruction is kept as a rule, not appended to the brief: a line
         # added at the end of the brief's notes fell past the part of each section the state block
@@ -395,6 +419,7 @@ async def tasks(
             line += "\nIts result still waits for your decision: say what the card waits on (waiting_on=…), give the next step, or Decide"
     elif op == "move" and status == "dropped":
         await orch.loops.close(project.id, task_id=task["id"], by="orchestrator", decision=f"dropped{': ' + note if note else ''}")
+        await orch.keep_commitments_of(project.id, task["id"], f"its task {task['id']} was dropped")
     if member_id and orch.team is not None:
         member = await orch.manager.staff.get(member_id)
         try:

@@ -34,7 +34,7 @@ from daedalus.host.prompts import split_headline
 from daedalus.host.run_outcome import OUTCOME_METADATA_KEY
 from daedalus.security import redact
 
-VIEW_VERSION = 8
+VIEW_VERSION = 9
 """Bumped whenever the shape below changes; stored views from an older version are recomputed. It
 covers this file only — what the redactor masks is covered by the key, by value and by shape, so a
 new secret format does not depend on anyone remembering this number."""
@@ -77,7 +77,7 @@ def message_view(message: Message) -> dict[str, Any]:
             tool_results.append(_result_preview(block))
     compaction = message.metadata.get("daedalus.compaction") if isinstance(message.metadata, dict) else None
     is_summary = bool(message.metadata.get(COMPACTION_SUMMARY_METADATA_KEY)) if isinstance(message.metadata, dict) else False
-    body = prompts.without_turn_context("".join(text))
+    body = prompts.without_host_notes("".join(text))
     if is_summary:
         body = _SUMMARY_WRAP_RE.sub("", body).strip()
         # A summary without the host's record came from the core mid-run; the host's own (auto/manual) sit between runs.
@@ -85,8 +85,14 @@ def message_view(message: Message) -> dict[str, Any]:
     origin = message.metadata.get("daedalus.origin") if isinstance(message.metadata, dict) else None
     delivery = message.metadata.get("daedalus.delivery") if isinstance(message.metadata, dict) else None
     internal = message.role is MessageRole.user and not is_summary and (
-        origin == "core" or delivery == "drained" or message.metadata.get("daedalus.queued", False) or (origin != "operator" and _looks_like_core_nudge(body))
+        # The copy that opens a turn with a message queued while the turn before ran is where the model
+        # read it, so it is the one shown. It used to be hidden as a repeat of the queued row — which is
+        # hidden too — and an operator's message sent in the last seconds of a turn vanished from the chat.
+        origin == "core" or message.metadata.get("daedalus.queued", False) or (origin != "operator" and _looks_like_core_nudge(body))
     )
+    reply = message.metadata.get("daedalus.reply_to") if isinstance(message.metadata, dict) else None
+    if reply and body.startswith("[In reply to: «"):
+        body = body.split("\n", 1)[1] if "\n" in body else ""  # the chat draws what it answers from ``reply_to``
     headline = ""
     if message.role is MessageRole.assistant:
         body, headline = split_headline(body)
@@ -121,6 +127,13 @@ def message_view(message: Message) -> dict[str, Any]:
         "yagni": message.metadata.get("daedalus.yagni") if isinstance(message.metadata, dict) else None,
         # The closing line of a run that produced no answer (``run_outcome``): why it stopped and where.
         "outcome": message.metadata.get(OUTCOME_METADATA_KEY) if isinstance(message.metadata, dict) else None,
+        # How an operator's message reached the model: ``steer`` placed into a turn under way,
+        # ``drained`` opening the turn after the one it was written during, ``follow_up`` after it.
+        "delivery": delivery if isinstance(delivery, str) else None,
+        # What the message answers (a report, an event line), as the operator chose it in the chat.
+        "reply_to": message.metadata.get("daedalus.reply_to") if isinstance(message.metadata, dict) else None,
+        # A member's steps for the operator the host put in the chat, drawn as a card of their own.
+        "operator_steps": message.metadata.get("daedalus.operator_steps") if isinstance(message.metadata, dict) else None,
     }
 
 
