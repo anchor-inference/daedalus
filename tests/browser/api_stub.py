@@ -24,7 +24,7 @@ import sys
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime, timedelta
-from urllib.parse import unquote
+from urllib.parse import unquote, unquote_plus
 
 # Outside services_port_range (8100-8119), the range this product hands to an agent's own preview
 # servers: a harness that serves its build into that range competes with the installation running
@@ -272,6 +272,71 @@ VOICE_NOTE_PREFIX = "🎙 Voice note, transcribed automatically (wording may be 
 """What the host puts before a transcript (daedalus/transport/telegram/voice.py)."""
 
 
+SESSION_TAIL = 600
+"""How many messages the host answers ``GET /api/sessions/<id>`` with when no ``tail`` is asked for."""
+
+
+def session_page(detail: dict, params: dict[str, str]) -> dict:
+    """One page of a session, as the host reads it: the newest ``tail`` messages, older than
+    ``before=<seq>`` when that is given.
+
+    A history no longer than the host's first page is answered whole to a read of its end, as it
+    always was here: the checks that add a message mid-run and read the chat again depend on that,
+    and the host would answer them the same messages anyway, only fewer of them.
+    """
+    messages = detail["messages"]
+    before = int(params.get("before") or 0)
+    if not before and len(messages) <= SESSION_TAIL:
+        return detail
+    tail = int(params.get("tail") or SESSION_TAIL)
+    rows = [m for m in messages if not before or (m.get("seq") or 0) < before][-tail:]
+    oldest = messages[0]["seq"] if messages else 0
+    return {**detail, "messages": rows, "first_seq": rows[0]["seq"] if rows else 0, "has_older": bool(rows) and rows[0]["seq"] > oldest}
+
+
+def search_messages(messages: list[dict], words: str, limit: int = 30) -> dict:
+    """``GET /api/sessions/<id>/search``: every message whose text holds the words, newest first, with
+    a passage around the match and the match in [brackets], as the host marks it."""
+    needle = words.strip().casefold()
+    hits = []
+    for m in messages:
+        text = m.get("text") or ""
+        at = text.casefold().find(needle) if needle else -1
+        if at < 0:
+            continue
+        start, end = max(0, at - 40), min(len(text), at + len(needle) + 60)
+        snippet = ("…" if start else "") + text[start:at] + "[" + text[at:at + len(needle)] + "]" + text[at + len(needle):end] + ("…" if end < len(text) else "")
+        hits.append({"seq": m["seq"], "snippet": " ".join(snippet.split()), "role": m["role"], "at": m.get("created_at", ""), "origin": m.get("origin")})
+    hits.sort(key=lambda h: -h["seq"])
+    return {"hits": hits[:limit], "partial": False, "semantic": False, "reason": "off"}
+
+
+def long_history(detail: dict, pairs: int = 700, planted: dict[int, str] | None = None) -> dict[int, int]:
+    """Put a long conversation in front of a session's own: ``pairs`` questions and answers, several
+    of the host's pages of them, so that an early message is only reached by reading older pages.
+
+    The session's own messages are moved after the new ones, their seqs shifted up. ``planted`` puts
+    words into the answer of the pair with that index (for a search to find); the answer is the
+    seq of each pair's question, by index.
+    """
+    shift = 2 * pairs + 10
+    for m in detail["messages"]:
+        if isinstance(m.get("seq"), int):
+            m["seq"] += shift
+    earlier: list[dict] = []
+    questions: dict[int, int] = {}
+    for i in range(pairs):
+        seq = 1 + 2 * i
+        questions[i] = seq
+        at = (datetime(2026, 9, 1, tzinfo=UTC) + timedelta(minutes=30 * i)).isoformat().replace("+00:00", "Z")
+        extra = f" {planted[i]}" if planted and i in planted else ""
+        earlier.append({"role": "user", "seq": seq, "origin": "operator", "text": f"Question {i}: how is the next part going?", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": at})
+        earlier.append({"role": "assistant", "seq": seq + 1, "text": f"Answer {i}.{extra}\n\nA paragraph of the answer that takes a line or two on any screen, about the work of the day.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": at})
+    detail["messages"] = earlier + detail["messages"]
+    detail["first_seq"] = 1
+    return questions
+
+
 def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 
@@ -314,6 +379,9 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
     if method.upper() == "GET" and len(parts) == 6 and parts[2] == "sessions" and parts[4:] == ["tools", "timing"]:
         # A session's Details reads the time its tools took; nobody here timed any.
         return 200, "application/json", json.dumps({"items": []})
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "sessions" and parts[3] != "search" and parts[4] == "search":
+        # The chat's own search, in a chat a harness did not fill: nothing found, the words only.
+        return 200, "application/json", json.dumps({"hits": [], "partial": False, "semantic": False, "reason": "off"})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "mcp":
         return 200, "application/json", json.dumps({"enabled": [], "servers": []})
     if method.upper() == "GET" and len(parts) == 5 and parts[3] == "provider" and parts[2] == "usage":
@@ -325,6 +393,9 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
     parts = path.split("/")
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "files":
         return 200, "application/json", json.dumps({"files": []})
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "focus-state":
+        # An orchestrator's chat nobody invented a project for has nothing in hand, and no goal line.
+        return 200, "application/json", json.dumps(empty_focus_state(parts[3]))
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "usage":
         # A project nobody invented spend for spent nothing; a harness with a team answers it itself.
         nothing = {w: {"usd": 0.0, "tokens": 0, "unpriced": 0} for w in ("today", "week", "all")}
@@ -795,6 +866,25 @@ LONG_OPTIONS = {
 """The long-options question in both languages (``FocusStub.question_of_long_options``)."""
 
 
+def empty_focus_state(pid: str) -> dict:
+    """``GET /api/projects/<id>/focus-state`` of a project with nothing in hand: the chat draws no line."""
+    return {"project_id": pid, "counts": {"in_work": 0, "decisions": 0, "waiting_for_you": 0, "unconfirmed": 0, "commitments": 0}, "goals": [], "open_results": [], "commitments": [], "receipts": {}}
+
+
+def steps_markdown(steps: dict, member: str, task: str) -> str:
+    """The steps as the host writes them into the chat and the file (``OperatorSteps.markdown``), in English as the host writes."""
+    lines = [f"# {steps['goal']}", "", f"From {member}" + (f", task {task}" if task else "") + "."]
+    if steps["verified"] != "on-running-version":
+        lines += ["", "**Not checked on the running version.**" + (f" {steps['verified_how']}" if steps["verified_how"] else "")]
+    if steps["roles"]:
+        lines += ["", "| account | what it is for |", "|---|---|", *(f"| {r['account']} | {r['purpose']} |" for r in steps["roles"])]
+    lines += ["", *(f"{i}. {step}" for i, step in enumerate(steps["steps"], start=1))]
+    for label, key in (("Expected", "expected"), ("How to check", "check"), ("Limits", "limits")):
+        if steps[key]:
+            lines += ["", f"**{label}:** {steps[key]}"]
+    return "\n".join(lines) + "\n"
+
+
 class FocusStub:
     """A project with its orchestrator switched on, as focus mode reads it, kept between requests.
 
@@ -852,6 +942,14 @@ class FocusStub:
         self.seen: list[str] = []
         self.revoked: list[tuple[str, str]] = []
         """Every standing grant the operator took back: ``(staff id, rule)``."""
+        self.focus_states: dict[str, dict] = {}
+        """What ``GET /api/projects/<id>/focus-state`` answers, by project; a project not here has an empty one."""
+        self.posted: list[tuple[str, dict]] = []
+        """Every message the operator sent to a chat of the project: ``(session id, body)``, as posted."""
+        self.search_busy = False
+        """Whether a chat's search answers 429, as the host does while its search runs for someone else."""
+        self.searched: list[tuple[str, str]] = []
+        """Every search inside a chat: ``(session id, words)``."""
 
     def project(self, pid: str) -> dict | None:
         return next((p for p in self.projects if p["id"] == pid), None)
@@ -866,7 +964,15 @@ class FocusStub:
         if path.startswith("/api/sessions/") and method == "GET" and path.count("/") == 3:
             sid = path.split("/")[3]
             if sid in self.details:
-                return 200, self.details[sid]
+                return 200, session_page(self.details[sid], params)
+        if path.startswith("/api/sessions/") and path.endswith("/search") and method == "GET" and path.count("/") == 4:
+            sid = path.split("/")[3]
+            if sid in self.details:
+                words = unquote_plus(params.get("q", ""))
+                self.searched.append((sid, words))
+                if self.search_busy:
+                    return 429, {"detail": "search is busy"}
+                return 200, search_messages(self.details[sid]["messages"], words, int(params.get("limit") or 30))
         if path == "/api/asks" and method == "GET":
             rows = [a for a in self.asks if a["project_id"] == params.get("project")]
             if params.get("open") != "0":
@@ -917,6 +1023,25 @@ class FocusStub:
             if refused:
                 ask["resolution"].update(outcome=f"approved, but the folder could not be added: {refused}", error=refused)
             return 200, {"state": "answered", "delivered": not refused, "error": refused, "ask": ask}
+        if path.startswith("/api/projects/") and path.endswith("/focus-state") and method == "GET":
+            pid = path.split("/")[3]
+            return 200, self.focus_states.get(pid) or empty_focus_state(pid)
+        if path.startswith("/api/sessions/") and path.endswith("/messages") and method == "POST" and path.count("/") == 4:
+            sid = path.split("/")[3]
+            if sid in self.details:
+                # The message lands in the transcript as the host writes it: what it answers kept
+                # beside the words rather than in them (``transcript_view.message_view``).
+                payload = dict(body or {})
+                self.posted.append((sid, payload))
+                messages = self.details[sid]["messages"]
+                seq = max((m.get("seq") or 0 for m in messages), default=0) + 1
+                reply = payload.get("reply_to")
+                if reply is not None and not any(m.get("seq") == reply.get("seq") for m in messages):
+                    return 404, {"detail": "that message is not in this conversation"}
+                now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+                messages.append({"role": "user", "seq": seq, "origin": "operator", "text": payload.get("text", ""), "thinking": "", "tool_calls": [], "tool_results": [], "created_at": now,
+                                 "delivery": "steer" if payload.get("steer") else None, "reply_to": reply})
+                return 200, {"run_id": f"run-{seq}"}
         if path.startswith("/api/projects/") and path.endswith("/orchestrator") and method == "POST":
             pid = path.split("/")[3]
             project = self.project(pid)
@@ -1314,6 +1439,11 @@ class FocusStub:
         def result(cid: str, content: str, error: bool = False) -> dict:
             return {"id": cid, "content": content, "is_error": error}
 
+        steps = {
+            "goal": words["steps.goal"], "steps": [words["steps.1"], words["steps.2"], words["steps.3"]],
+            "roles": [{"account": words["steps.bakery"], "purpose": words["steps.bakery.for"]}, {"account": words["steps.baker"], "purpose": words["steps.baker.for"]}],
+            "expected": words["steps.expected"], "check": words["steps.check"], "limits": words["steps.limits"], "verified": "unverified", "verified_how": words["steps.how"],
+        }
         events = (
             "[events · Bakery 2.0 · 3 since 09:51]\n"
             '- 09:51 Max (Codex) finished a turn on "Notify: endpoint" (t-endpoint): "3 files, tests green" — ReadStaff("Max") for the whole reply\n'
@@ -1343,6 +1473,19 @@ class FocusStub:
                 result("c6", "3 files changed, tests green"), result("c7", "answered qk7m2x: allowed"), result("c8", "asked the operator as [q4r8tz]; do not wait — the answer arrives as an event in a later wake-up"),
             ], "created_at": "2026-09-24T09:54:22Z"},
             {"role": "assistant", "seq": 17, "text": words["orch.after"], "thinking": "", "tool_calls": [], "tool_results": [], "created_at": "2026-09-24T09:55:00Z"},
+            # A correction that became a requirement Lev confirmed, and a promise to the operator.
+            {"role": "user", "seq": 18, "origin": "operator", "text": words["op.photos"], "thinking": "", "tool_calls": [], "tool_results": [], "created_at": "2026-09-24T09:56:00Z", "delivery": None, "reply_to": None},
+            {"role": "assistant", "seq": 19, "text": words["orch.photos"], "thinking": "", "tool_calls": [], "tool_results": [], "created_at": "2026-09-24T09:56:30Z"},
+            # Naya's steps for the operator, carried by the host as a card; she could not walk them on the running version.
+            {"role": "user", "seq": 20, "origin": "events", "text": steps_markdown(steps, "Naya", "t-bot"), "thinking": "", "tool_calls": [], "tool_results": [], "created_at": "2026-09-24T09:57:00Z",
+             "operator_steps": {**steps, "file": {"id": "5e0b7a11c0de", "name": "operator-steps-t-bot-1.md", "mime": "text/markdown", "size": 1180}, "member": "Naya", "task_id": "t-bot", "event_seq": 412}},
+            # The operator's question about those steps, written while a turn ran and placed into it.
+            {"role": "user", "seq": 21, "origin": "operator", "text": words["op.steps"], "thinking": "", "tool_calls": [], "tool_results": [], "created_at": "2026-09-24T09:57:40Z",
+             "delivery": "steer", "reply_to": {"seq": 20, "excerpt": f"Naya: {words['steps.goal']}"}},
+            {"role": "assistant", "seq": 22, "text": words["orch.steps"], "thinking": "", "tool_calls": [], "tool_results": [], "created_at": "2026-09-24T09:58:00Z"},
+            # Sent in the last seconds of that turn: read at the start of the next, sent on to Olga, not confirmed yet.
+            {"role": "user", "seq": 23, "origin": "operator", "text": words["op.hours"], "thinking": "", "tool_calls": [], "tool_results": [], "created_at": "2026-09-24T09:58:02Z", "delivery": "drained", "reply_to": None},
+            {"role": "assistant", "seq": 24, "text": words["orch.hours"], "thinking": "", "tool_calls": [], "tool_results": [], "created_at": "2026-09-24T09:58:30Z"},
         ]
         lev = [
             {"role": "user", "seq": 3, "origin": "orchestrator", "text": words["lev.task"], "thinking": "", "tool_calls": [], "tool_results": [], "created_at": "2026-09-24T09:30:00Z"},
@@ -1398,7 +1541,52 @@ class FocusStub:
         # The project without an orchestrator has a team and a board of its own, both empty.
         others: list[TeamStub | BoardStub] = [TeamStub(garden_project), BoardStub(garden_project)]
         rules = [{"id": 120, "at": "2026-09-24T08:30:00Z", "author": "operator", "kind": "rule", "text": words["journal.rule"], "refs": {}}]
-        return cls(projects=projects, listing=listing, details=details, team=team, board=board, others=others, asks=asks, brief=brief, journal=journal, schedules=schedules, rules=rules, wakeups=wakeups, watches=watches, terminals=terminals, messages=messages)
+        stub = cls(projects=projects, listing=listing, details=details, team=team, board=board, others=others, asks=asks, brief=brief, journal=journal, schedules=schedules, rules=rules, wakeups=wakeups, watches=watches, terminals=terminals, messages=messages)
+        stub.focus_states[pid] = cls.focus_state_of_bakery(lang, pid)
+        return stub
+
+    @staticmethod
+    def focus_state_of_bakery(lang: str, pid: str) -> dict:
+        """The bakery as its orchestrator's goal line reads it: five cards in hand, the checkout blocked on
+        the operator's discount answer, Max's done report and Lev's call for input waiting for the
+        orchestrator's decision, two promises, and what became of two of the operator's messages —
+        a requirement Lev confirmed, and one sent to Olga she has not confirmed yet."""
+        words, w = FOCUS_WORDS[lang], CONTRACT_WORDS[lang]
+
+        def goal(task_id: str, title: str, status: str, owner: tuple[str, str] | None, *, acceptance: str = "", nxt: str = "", previous: str | None = None) -> dict:
+            return {"task_id": task_id, "title": words[title], "status": status, "acceptance": acceptance, "owner": {"id": owner[0], "name": owner[1]} if owner else None,
+                    "previous_owner": previous, "next": nxt, "updated_at": "2026-09-24T09:50:00Z"}
+
+        decision = "waiting for the orchestrator's decision"
+        goals = [
+            goal("t-checkout", "task.checkout", "doing", ("st-ira", "Ira"), nxt=words["next.spring"]),
+            goal("t-endpoint", "task.endpoint", "review", ("st-max", "Max"), acceptance="handed_in", nxt=decision),
+            goal("t-photos", "task.photos", "doing", ("st-lev", "Lev"), nxt=decision),
+            goal("t-bot", "task.bot", "doing", ("st-naya", "Naya")),
+            goal("t-hours", "task.hours", "todo", ("st-olga", "Olga")),
+        ]
+        results = [
+            {"id": 7, "cause": "report_done", "task_id": "t-endpoint", "title": words["task.endpoint"], "staff_name": "Max", "summary": "3 files, tests green", "opened_at": "2026-09-24T09:51:00Z", "reminded": False},
+            {"id": 5, "cause": "report_needs_input", "task_id": "t-photos", "title": words["task.photos"], "staff_name": "Lev", "summary": words["result.lev"], "opened_at": "2026-09-24T09:36:00Z", "reminded": True},
+        ]
+        commitments = [
+            {"id": 131, "text": words["commit.gallery"], "task_id": "t-photos", "message_seq": 18, "at": "2026-09-24T09:56:30Z"},
+            {"id": 134, "text": words["commit.holidays"], "task_id": "t-hours", "message_seq": 23, "at": "2026-09-24T09:58:30Z"},
+        ]
+        receipts = {
+            "18": [
+                {"kind": "requirement", "label": "R1", "text": w["r.short"], "state": "active", "task_id": "t-photos", "task_title": words["task.photos"],
+                 "deliveries": [{"staff_name": "Lev", "acknowledged": True, "opened": False, "via": "message", "cli": False}]},
+                {"kind": "commitment", "id": 131, "text": words["commit.gallery"], "task_id": "t-photos", "kept": False},
+            ],
+            "23": [
+                {"kind": "requirement", "label": "R2", "text": words["r.hours"], "state": "active", "task_id": "t-hours", "task_title": words["task.hours"],
+                 "deliveries": [{"staff_name": "Olga", "acknowledged": False, "opened": False, "via": "message", "cli": False}]},
+                {"kind": "commitment", "id": 134, "text": words["commit.holidays"], "task_id": "t-hours", "kept": False},
+            ],
+        }
+        counts = {"in_work": len(goals), "decisions": len(results), "waiting_for_you": 1, "unconfirmed": 2, "commitments": len(commitments)}
+        return {"project_id": pid, "counts": counts, "goals": goals, "open_results": results, "commitments": commitments, "receipts": receipts}
 
 
 def health(at, *, tools: str, silent: bool = False) -> dict:  # type: ignore[no-untyped-def]
@@ -1588,6 +1776,27 @@ FOCUS_WORDS: dict[str, dict[str, str]] = {
         "ira.accepted": "SPRING10 comes off the sum without delivery, as the brief says.", "ira.reply2": "Done: the discount now leaves delivery out.",
         "ira.sent": "Add Stripe for the payment step", "ira.reply3": "Installing Stripe's browser library for the payment step.",
         "ira.queued": "After Stripe, check the page on a phone",
+        "op.photos": "Lev's captions: under 80 characters, and no emoji.",
+        "orch.photos": "On Lev's card as a requirement; he has confirmed it.",
+        "next.spring": "the operator — SPRING10 before or after delivery [q4r8tz]",
+        "op.steps": "Which of the two accounts does the baker sign in with?",
+        "orch.steps": "The baker's own account. The bakery account only owns the bot; Naya's steps say so in the table.",
+        "op.hours": "The hours page must list the holiday hours too.",
+        "orch.hours": "Added to Olga's card and sent to her. I will tell you when the page shows them.",
+        "steps.goal": "Connect the bot to the baker's chat",
+        "steps.how": "the test chat answered; the baker's own chat could not be reached from here",
+        "steps.bakery": "the bakery account (@bakery_orders_bot's owner)", "steps.bakery.for": "owns the bot; never sign in to the chat with it",
+        "steps.baker": "the baker's own Telegram account", "steps.baker.for": "receives the orders",
+        "steps.1": "Open Telegram on the baker's phone, signed in as the baker.",
+        "steps.2": "Find @bakery_orders_bot and press Start.",
+        "steps.3": "Send /link and the six-digit code the site shows under Settings → Notifications.",
+        "steps.expected": "The bot answers \"Linked: orders will arrive here\".",
+        "steps.check": "Place a test order on the site with the code TEST; it arrives within a minute.",
+        "steps.limits": "Only one chat can be linked; linking another replaces it.",
+        "r.hours": "List the holiday hours on the hours page",
+        "commit.gallery": "Tell you when the menu gallery is live",
+        "commit.holidays": "Tell you when the page shows the holiday hours",
+        "result.lev": "12 of 18 captions written; 6 photos have no row in the sheet",
     },
     "ru": {
         "op.ask": "Добавь в проект папку ~/work/bakery-bot. Нужно, чтобы пекарь получал в Telegram сообщение о каждом новом заказе: эндпоинт — Максу, бота — Нае.",
@@ -1619,6 +1828,27 @@ FOCUS_WORDS: dict[str, dict[str, str]] = {
         "ira.accepted": "Скидка SPRING10 — от суммы без доставки, так в брифе.", "ira.reply2": "Готово: скидка теперь без доставки.",
         "ira.sent": "Подключи Stripe для шага оплаты", "ira.reply3": "Ставлю браузерную библиотеку Stripe для шага оплаты.",
         "ira.queued": "После Stripe проверь страницу на телефоне",
+        "op.photos": "Подписи у Льва — короче 80 символов и без эмодзи.",
+        "orch.photos": "Это требование в карточке Льва; он его подтвердил.",
+        "next.spring": "оператора — SPRING10 до или после доставки [q4r8tz]",
+        "op.steps": "С каким из двух аккаунтов входит пекарь?",
+        "orch.steps": "Со своим. Аккаунт пекарни только владеет ботом — в таблице у Наи это есть.",
+        "op.hours": "На странице часов работы нужны и праздничные часы.",
+        "orch.hours": "Добавил в карточку Ольги и отправил ей. Скажу, когда страница их покажет.",
+        "steps.goal": "Подключить бота к чату пекаря",
+        "steps.how": "тестовый чат ответил; до чата самого пекаря отсюда не дотянуться",
+        "steps.bakery": "аккаунт пекарни (владелец @bakery_orders_bot)", "steps.bakery.for": "владеет ботом; в чат с ним не входить",
+        "steps.baker": "личный Telegram пекаря", "steps.baker.for": "получает заказы",
+        "steps.1": "Откройте Telegram на телефоне пекаря, под его аккаунтом.",
+        "steps.2": "Найдите @bakery_orders_bot и нажмите «Старт».",
+        "steps.3": "Отправьте /link и шестизначный код из раздела сайта «Настройки → Уведомления».",
+        "steps.expected": "Бот отвечает «Привязано: заказы будут приходить сюда».",
+        "steps.check": "Оформите на сайте тестовый заказ с кодом TEST — он придёт в течение минуты.",
+        "steps.limits": "Привязать можно один чат; новая привязка заменяет старую.",
+        "r.hours": "Указать праздничные часы на странице часов работы",
+        "commit.gallery": "Сказать вам, когда галерея меню будет на сайте",
+        "commit.holidays": "Сказать вам, когда страница покажет праздничные часы",
+        "result.lev": "12 из 18 подписей готовы; для 6 фото в таблице нет строки",
     },
 }
 

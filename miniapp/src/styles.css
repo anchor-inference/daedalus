@@ -424,6 +424,29 @@ a { color: var(--accent); text-decoration: none; }
 .turn { display:flex; flex-direction:column; gap:6px; }
 .turn-slot { display:flex; flex-direction:column; min-width:0; }
 .older-note { text-align:center; min-height:18px; }
+/* The message a link or a search hit opened: lit for a moment so the eye finds it among the turns
+   around it, then back to how every turn looks. An outline, not a border, so nothing moves. */
+.anchored { border-radius:var(--radius-md); animation:anchored 2.6s ease-out both; }
+@keyframes anchored {
+  0%, 45% { outline:2px solid var(--accent); outline-offset:4px; background:color-mix(in srgb, var(--accent) 9%, transparent); }
+  100% { outline:2px solid transparent; outline-offset:4px; background:transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .anchored { animation:none; outline:2px solid var(--accent); outline-offset:4px; }
+}
+.anchor-note { display:flex; align-items:center; gap:8px; padding:6px 6px 6px 12px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface-2); color:var(--fg-2); font-size:var(--fs-13); min-width:0; }
+.anchor-note .grow { min-width:0; overflow-wrap:anywhere; }
+/* The chat's own search: a field and the hits under it, as wide as a phone allows. */
+.menu.pop.chat-search-pop { width:min(380px, calc(100vw - 16px)); max-width:min(380px, calc(100vw - 16px)); padding:6px; overflow:auto; }
+.chat-search { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.chat-search .field.search { width:100%; }
+.chat-search-note { padding:6px 8px; font-size:var(--fs-13); }
+.chat-search-hits { display:flex; flex-direction:column; gap:2px; }
+.menu.pop .chat-hit { display:flex; flex-direction:column; align-items:stretch; text-align:left; gap:2px; min-width:0; padding:6px 8px; }
+.chat-hit-meta { display:flex; gap:8px; font-size:var(--fs-12); color:var(--fg-2); min-width:0; }
+.chat-hit-meta b { font-weight:600; color:var(--fg); }
+.chat-hit-snippet { font-size:var(--fs-13); line-height:1.35; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.chat-hit-snippet mark { background:color-mix(in srgb, var(--accent) 28%, transparent); color:inherit; border-radius:3px; padding:0 1px; }
 .msg.user { align-self:flex-end; max-width:86%; min-width:0; background:var(--surface-2); color:var(--fg); padding:10px 14px; border-radius:var(--radius-lg); border-bottom-right-radius:var(--radius-xs); margin-bottom:6px; font-family: var(--font-prose, var(--font)); font-size:var(--fs-14); line-height:1.5; word-break:break-word; }
 :root[data-user="plain"] .msg.user { background: transparent; padding-left: 0; padding-right: 0; }
 .msg.user p { margin:0; }
@@ -3319,6 +3342,106 @@ button.staff-row:hover { background: var(--surface-2); }
 .event-line.warn { box-shadow: inset 2px 0 0 var(--warn); }
 .event-line.bad { box-shadow: inset 2px 0 0 var(--bad); }
 .event-line.more { display: block; color: var(--fg-3); font-size: var(--fs-12); }
+/* A line that can be answered keeps its answer button at its end; on a desk it shows on hover, on a
+   touch screen always, since there is no hover to find it by. */
+.event-line.answerable { grid-template-columns: auto minmax(0, 1fr) auto; }
+.event-reply.iconbtn.small { width: 22px; height: 22px; align-self: center; background: transparent; color: var(--fg-3); }
+.event-reply.iconbtn.small:hover { background: var(--surface-2); color: var(--fg); }
+@media (hover: hover) {
+  .event-reply { opacity: 0; transition: opacity var(--t-fast); }
+  .event-line:hover .event-reply, .event-reply:focus-visible { opacity: 1; }
+}
+
+/* A member's steps for the operator: a card of their own, edged in the warning tone while the member
+   has not walked them on the version that runs. */
+.steps-card { margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); display: grid; gap: 8px; box-shadow: inset 3px 0 0 var(--info); min-width: 0; }
+.steps-card.unverified { box-shadow: inset 3px 0 0 var(--warn); }
+.steps-head { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--fg-3); font-size: var(--fs-11); }
+.steps-kind { flex: none; font-weight: 600; color: var(--fg-2); }
+.steps-from { min-width: 0; }
+.steps-goal { font-size: var(--fs-14); font-weight: 600; color: var(--fg); overflow-wrap: anywhere; }
+.steps-badge { display: flex; align-items: flex-start; gap: 6px; padding: 4px 8px; border-radius: var(--radius-sm); font-size: var(--fs-12); line-height: var(--lh-ui); overflow-wrap: anywhere; }
+.steps-badge svg { flex: none; margin-top: 2px; }
+.steps-badge.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.steps-badge.warn svg { color: var(--warn); }
+.steps-badge.ok { background: color-mix(in srgb, var(--ok) 8%, transparent); }
+.steps-badge.ok svg { color: var(--ok); }
+.steps-roles { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--fs-13); }
+.steps-roles th, .steps-roles td { text-align: left; vertical-align: top; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.steps-roles th { font-size: var(--fs-11); font-weight: 600; color: var(--fg-3); }
+.steps-roles th:first-child { width: 38%; }
+.steps-list { margin: 0; padding-left: 22px; display: grid; gap: 4px; font-size: var(--fs-13); line-height: var(--lh-ui); overflow-wrap: anywhere; }
+.steps-facts { margin: 0; display: grid; gap: 6px; font-size: var(--fs-13); line-height: var(--lh-ui); }
+.steps-facts dt { font-size: var(--fs-11); color: var(--fg-3); }
+.steps-facts dd { margin: 0; overflow-wrap: anywhere; }
+.steps-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.steps-foot .artifact { flex: 1 1 240px; min-width: 0; }
+.steps-reply { display: inline-flex; align-items: center; gap: 6px; }
+
+/* What an operator's message answered, at the top of its bubble. */
+.msg-quote { display: flex; align-items: flex-start; gap: 6px; margin: 0 0 4px; padding: 2px 8px; border-left: 2px solid var(--accent); color: var(--fg-2); font-size: var(--fs-12); text-decoration: none; }
+.msg-quote svg { flex: none; margin-top: 3px; }
+.msg-quote-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.msg-quote:hover { color: var(--fg); }
+
+/* What became of an operator's message: small print under it, on its side of the chat. */
+.msg-fate { list-style: none; margin: 0 4px 0 0; padding: 0; display: grid; gap: 1px; justify-items: end; max-width: 100%; font-size: var(--fs-11); line-height: var(--lh-ui); color: var(--fg-3); }
+.fate-line { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 0 6px; text-align: right; overflow-wrap: anywhere; min-width: 0; }
+.fate-line.arrival { color: var(--info); }
+.fate-line.read svg { color: var(--ok); margin-right: 2px; }
+.fate-line.replaced .fate-what { text-decoration: line-through; }
+.fate-state.ok { color: var(--ok); }
+.fate-state.open { color: var(--warn); }
+
+/* The quote waiting over the composer for the next message. */
+.reply-chip { display: flex; align-items: center; gap: 6px; width: min(100%, var(--chat-w)); margin-inline: auto; padding: 2px 2px 2px 10px; border-left: 2px solid var(--accent); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-12); min-width: 0; }
+.reply-chip > svg { flex: none; color: var(--accent); }
+.reply-chip-label { flex: none; color: var(--fg-3); }
+.reply-chip-text { flex: 1; min-width: 0; color: var(--fg); }
+.reply-chip-remove.iconbtn.small { flex: none; background: transparent; }
+
+/* The goal line over the orchestrator's composer, and the list it opens upward. */
+.goal-strip { display: grid; gap: 6px; width: min(100%, var(--chat-w)); margin-inline: auto; min-width: 0; container: goal / inline-size; }
+.goal-line { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: var(--row-h-dense); padding: 2px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-2); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; }
+.goal-line:hover { background: var(--surface-2); color: var(--fg); }
+.goal-line > svg { flex: none; color: var(--fg-3); }
+.goal-strip.attn .goal-line { border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+.goal-counts { flex: 1; min-width: 0; display: flex; gap: 12px; overflow: hidden; white-space: nowrap; }
+.goal-count { flex: none; }
+.goal-count.decisions, .goal-count.waiting_for_you { color: var(--warn); }
+.goal-count-short { display: none; }
+.goal-chev { flex: none; display: inline-flex; color: var(--fg-3); transform: rotate(180deg); transition: transform var(--t-fast); }
+.goal-strip.open .goal-chev { transform: none; }
+.goal-list { display: grid; gap: 10px; max-height: min(50vh, 420px); overflow: auto; overscroll-behavior: contain; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); min-width: 0; }
+.goal-sec ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.goal-sec-head { margin: 0 0 4px; font-size: var(--fs-11); font-weight: 600; color: var(--fg-3); }
+.goal-sec-head .num { font-weight: 400; }
+.goal-item { display: grid; gap: 2px; min-width: 0; padding-left: 8px; box-shadow: inset 2px 0 0 var(--line-strong); font-size: var(--fs-13); line-height: var(--lh-ui); }
+.goal-item.blocked, .goal-item.result.report_needs_input, .goal-item.result.task_unowned { box-shadow: inset 2px 0 0 var(--warn); }
+.goal-item.result.report_done { box-shadow: inset 2px 0 0 var(--ok); }
+.goal-item.result.report_stuck { box-shadow: inset 2px 0 0 var(--bad); }
+.goal-item-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.goal-title { flex: 1; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
+.goal-status, .goal-age { flex: none; font-size: var(--fs-11); color: var(--fg-3); }
+.goal-item-meta { display: flex; flex-wrap: wrap; gap: 2px 8px; min-width: 0; font-size: var(--fs-12); color: var(--fg-2); }
+.goal-owner.unowned { color: var(--warn); }
+.goal-accept { flex: none; padding: 0 6px; border-radius: 999px; background: var(--surface-3); font-size: var(--fs-11); }
+.goal-accept.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.goal-accept.attn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.goal-next { color: var(--warn); overflow-wrap: anywhere; min-width: 0; }
+.goal-summary { overflow-wrap: anywhere; min-width: 0; }
+.goal-empty { font-size: var(--fs-12); color: var(--fg-3); }
+/* A narrow composer says the five counts in their short words, one step smaller and without the
+   leading glyph: at 390 px the Russian words were 44 px wider than the row, and a count cut off is a
+   count hidden. Measured on the strip rather than the window, since a desk with the panel open
+   leaves the conversation a phone's width too. */
+@container goal (max-width: 640px) {
+  .goal-line { gap: 6px; font-size: var(--fs-11); }
+  .goal-line > svg { display: none; }
+  .goal-counts { gap: 8px; }
+  .goal-count-long { display: none; }
+  .goal-count-short { display: inline; }
+}
 .event-time { color: var(--fg-3); font-size: var(--fs-11); font-family: var(--mono); }
 .event-text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 /* The questions an orchestrator's turn put to the operator, under its worked group. */
