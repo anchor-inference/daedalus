@@ -1922,7 +1922,10 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 .settings-row-text { min-width: 0; }
 .settings-row-title { display: block; font-size: var(--fs-14); font-weight: 500; color: var(--fg); line-height: 1.35; }
 .settings-row-desc { margin-top: 2px; max-width: 60ch; color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; }
-.settings-row-ctl { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; justify-self: end; }
+/* At most the row's width: a control whose content is wider (a long pick, joined) is cut short
+   inside it. Without the cap its width was its content's, and a row aligned to its end pushed the
+   overhang off the left of a phone's screen. */
+.settings-row-ctl { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; max-width: 100%; justify-self: end; }
 .settings-row-ctl .segmented { margin: 0; }
 .settings-row-ctl .btn { flex: none; }
 /* The intro under a card's heading keeps the same measure as a row's description. */
@@ -1964,7 +1967,7 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 .dropdown-btn[aria-invalid="true"] { border-color: var(--warn); }
 .dropdown-btn .ic { flex: none; color: var(--fg-3); }
 .dropdown-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dropdown-list { position: absolute; top: calc(100% + 4px); right: 0; z-index: 25; display: flex; flex-direction: column; width: max-content; min-width: max(100%, 200px); max-width: min(360px, calc(100vw - 32px)); max-height: 320px; overflow-y: auto; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-3); box-shadow: var(--shadow-pop); }
+.dropdown-list { position: absolute; top: calc(100% + 4px); right: 0; z-index: 25; display: flex; flex-direction: column; width: max-content; min-width: min(max(100%, 200px), calc(100vw - 16px)); max-width: min(360px, calc(100vw - 16px)); max-height: 320px; overflow-y: auto; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-3); box-shadow: var(--shadow-pop); }
 .dropdown-list.up { top: auto; bottom: calc(100% + 4px); }
 .dropdown-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: var(--row-h); padding: 6px 10px; border-radius: var(--radius-sm); color: var(--fg); font-size: var(--fs-13); text-align: left; cursor: pointer; }
 .dropdown-item.active { background: var(--surface-2); }
@@ -1975,10 +1978,31 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 .dropdown-order { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: var(--fs-12); font-weight: 600; }
 /* A phone keeps a compact control beside its words; a control that cannot be compact takes its own
    right-aligned line under them (Row's `stack`), rather than squeezing the title to a word a line. */
+/* On a phone a row holding a value to pick or type — a dropdown, a multi-select, a number, a line
+   of text — has one shape on every page: the words on top, the control under them across the whole
+   row. The rows once chose for themselves, beside the words or under them, and each control stood
+   at its own width, so a dropdown ended at one edge, a number field at another and a number with a
+   unit at a third. A switch, a segmented choice or a button stays beside its words: it is narrow. */
 @media (max-width: 599px) {
-  .settings-row.stack { grid-template-columns: minmax(0, 1fr); }
   .settings-row { gap: 8px 16px; }
+  .settings-row.stack,
+  .settings-row:not(.tgroup):has(> .settings-row-ctl > :is(.dropdown, .settings-num, input.field, textarea)) { grid-template-columns: minmax(0, 1fr); }
+  .settings-row:not(.tgroup):has(> .settings-row-ctl > :is(.dropdown, .settings-num, input.field, textarea)) > .settings-row-ctl { justify-self: stretch; justify-content: stretch; }
   .settings-row-ctl { flex-wrap: wrap; }
+  .settings-row-ctl > .dropdown { flex: 1 1 100%; }
+  .settings-row-ctl > .dropdown > .dropdown-btn { width: 100%; max-width: none; justify-content: space-between; }
+  .settings-row-ctl > .dropdown > .dropdown-btn > .dropdown-value { flex: 1; text-align: left; }
+  /* The list is as wide as its control, which is as wide as the row: it cannot overhang either edge. */
+  .settings-row-ctl > .dropdown > .dropdown-list { left: 0; right: 0; width: auto; min-width: 0; max-width: none; }
+  .settings-row-ctl > input.field, .settings-row-ctl > textarea { flex: 1 1 100%; width: 100%; }
+  /* A number and its unit are one box across the row, the unit inside it after the digits: fields
+     with and without a unit then share both edges. */
+  .settings-row-ctl > .settings-num { flex: 1 1 100%; gap: 0; min-height: var(--ctl-h-sm); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card-2); }
+  .settings-row-ctl > .settings-num:focus-within { border-color: var(--accent); }
+  .settings-row-ctl > .settings-num:has(input[aria-invalid="true"]) { border-color: var(--bad); }
+  .settings-row-ctl > .settings-num input.field { flex: 1; width: auto; min-width: 0; border: 0; background: transparent; box-shadow: none; outline: none; }
+  .settings-row-ctl > .settings-num .settings-unit { min-width: 0; padding-right: 10px; }
+  .settings-row-ctl > .settings-num .settings-unit:empty { padding: 0; }
   .settings-inline-field { width: min(100%, 260px); margin-right: 0 !important; }
   .settings-name-field { flex: 1 1 160px; width: auto; }
 }
