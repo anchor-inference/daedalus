@@ -23,7 +23,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import posixpath
 import secrets
 import time
 import uuid
@@ -1329,11 +1328,11 @@ class CliStaffRuntime:
         return await self._turns(live)
 
     def _transcript_ref(self, live: LiveSession) -> str:
-        """Where the CLI keeps the session's turns, once its first hook said so; empty before that.
-        Every adapter reads a file there, so a ref that is not an absolute path is none."""
+        """Where the CLI keeps the session's turns — a file, or OpenCode's own session — once the CLI
+        said so; empty before that. The CLI's session id is not one: it stood in for a record never
+        written, and an adapter that reads a file refused it as a path that is not absolute."""
         session = self.sessions.get(live.id)
-        ref = (session.transcript_ref if session is not None else "") or live.session.transcript_ref or ""
-        return ref if posixpath.isabs(ref) else ""
+        return (session.transcript_ref if session is not None else "") or live.session.transcript_ref or ""
 
     async def _turns(self, live: LiveSession) -> list[Turn]:
         session = self.sessions.get(live.id)
