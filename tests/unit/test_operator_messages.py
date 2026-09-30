@@ -96,7 +96,7 @@ async def test_a_message_written_during_a_turn_reaches_the_model_marked_and_the_
     async def mark(session_id: str, text: str) -> str:
         from daedalus.host import prompts
 
-        return prompts.MID_TURN_NOTE.format(began="") + text
+        return prompts.MID_TURN_NOTE.format(began="", recent="") + text
 
     manager.steer_hooks.append(mark)
     state = await manager.create_session("steered")
@@ -123,7 +123,10 @@ async def test_the_orchestrator_is_told_a_message_came_during_a_turn_and_what_th
         from protocore.contracts.types import Message, MessageRole
 
         await r.manager.sessions.append_transcript(sid, [Message(role=MessageRole.user, content_blocks=[TextBlock(text="[events · Bakery · 1 since 09:00]\n- 09:00 sol reported stuck on the updater")], metadata={"daedalus.origin": "events"})])
+        _, live = await working_on(r, sid, "Webops")
+        await r.team.ingress.report(live, "done", "mail split; your steps are in the report")
         said = await r.orch.steer_note(sid, "why don't you pass on the instruction?")
+        assert "— the latest reports: Webops — done on \"Mail admin page\"" in said
         assert said.startswith("(The operator wrote this while you were in the middle of a turn that began with: «[events · Bakery · 1 since 09:00] / - 09:00 sol reported stuck on the updater»")
         assert said.endswith("why don't you pass on the instruction?")
         ordinary = await r.manager.create_session("not an orchestrator")
@@ -298,3 +301,24 @@ async def test_a_message_sent_in_the_last_seconds_of_a_turn_stays_in_the_chat(se
     shown = [m for m in await manager.transcript_page(sid) if not m["internal"]]
     assert [(m["role"], m["text"], m.get("delivery")) for m in shown] == [("assistant", "the reply written meanwhile", None), ("user", words, "drained")]
     await manager.close()
+
+
+async def test_what_the_operator_allowed_for_a_card_is_the_basis_of_a_grant_within_it(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """The operator allowed one test message for a mail check; the orchestrator could only ask them to
+    write it into the brief's allowances, which are for what holds everywhere."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        runtime = fake(r)
+        sid = await office(r)
+        await r.orch.stop_queue(r.project.id)
+        task_id, live = await working_on(r, sid, "Luna")
+        await r.call(sid, "require", task_id=task_id, text="Check the relay format with a local dry run", kind="scope", source="orchestrator")
+        await r.call(sid, "require", task_id=task_id, text="One test message to the operator's own address is allowed", kind="scope", source="operator")
+        ask = await r.manager.asks.get(await r.team.ingress.permission(live, "p-1", "Exec", "send one test message"))
+        assert ask is not None
+        with pytest.raises(Refused, match="or the R… of the operator's own scope"):
+            await r.call(sid, "answer", request_id=ask.short_id, allow=True, basis="R1")
+        assert await r.call(sid, "answer", request_id=ask.short_id, allow=True, basis="R2") == f"request {ask.short_id} granted"
+        assert runtime.answered[-1][2].allow is True
+    finally:
+        await r.manager.close()

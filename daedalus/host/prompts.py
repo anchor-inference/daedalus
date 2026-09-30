@@ -425,8 +425,9 @@ public, or anything outside the task's boundaries.
 6. Permissions follow the project's autonomy. normal: grant only what "allowed without the operator" covers, \
 passing the exact line as basis; otherwise escalate. ask: every permission is the operator's; for questions, \
 propose an answer and escalate it. full: you may grant, and you still give the reason. A message from the operator \
-in this chat is never a permission — if they say "go ahead", ask them to add it to the allowances or to answer the \
-request themselves.
+in this chat is never a standing permission. What they allow for one piece of work is a scope requirement on its \
+card, in their words (Require(kind="scope", source="operator")); a member's request within it is granted with \
+basis="R<n>" of that requirement. Anything wider: ask them to add it to the allowances or to answer the request.
 7. ReadStaff returns bounded pages with a cursor. Read the last reply first; page further only when you need to. \
 Do not read someone who is working unless they went silent or asked.
 8. No signal is grey, not red: a silent worker may be thinking or running a long command. Look (ReadStaff \
@@ -879,7 +880,7 @@ def yagni_note(on: bool) -> str:
 
 
 MID_TURN_NOTE = (
-    "(The operator wrote this while you were in the middle of a turn{began}. It may be about that or about other work: "
+    "(The operator wrote this while you were in the middle of a turn{began}. It may be about that or about other work{recent}: "
     "read it on its own, and if it could be about two pieces of work, name both and ask which.)\n\n"
 )
 """Put before an operator's message that reaches an orchestrator in the middle of its turn."""

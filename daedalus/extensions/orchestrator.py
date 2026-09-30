@@ -1491,7 +1491,24 @@ class Orchestrators:
                     break
         except Exception:  # noqa: BLE001 — the note stands without the topic
             topic = ""
-        return prompts.MID_TURN_NOTE.format(began=f" that began with: «{topic}»" if topic else "") + text
+        project, _ = await self.current(session_id)
+        recent = await self._recent_reports(project)
+        return prompts.MID_TURN_NOTE.format(began=f" that began with: «{topic}»" if topic else "", recent=f" — the latest reports: {recent}" if recent else "") + text
+
+    async def _recent_reports(self, project: Project, *, members: int = 3) -> str:
+        """The latest report of each of the last few members to report, in a line: what an operator's
+        message that names no work may well be about."""
+        now = datetime.now(UTC)
+        seen: dict[str, str] = {}
+        for event in reversed(await self.manager.bus.latest(EventFilter(types=("staff.report",), project_id=project.id), limit=20)):
+            if not event.staff_id or event.staff_id in seen or event.payload.get("kind") == "checkpoint":
+                continue
+            member = await self.manager.staff.get(event.staff_id)
+            task = await self._task_bit(event.payload["task_id"]) if event.payload.get("task_id") else "no card"
+            seen[event.staff_id] = f"{member.name if member else 'a member'} — {event.payload.get('kind')} on {task} ({_age(event.at, now)} ago)"
+            if len(seen) >= members:
+                break
+        return "; ".join(seen.values())
 
     async def hand_steps(self, event: AppEvent) -> None:
         """A member's steps for the operator, put in front of them by the host, word for word: in the

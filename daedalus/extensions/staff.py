@@ -1187,16 +1187,29 @@ class Team:
                 raise StaffError(f"in {project.name} the operator decides permissions")
             if orchestrator.autonomy == "normal":
                 quoted = " ".join(basis.split())
+                if await self._granted_on_the_card(ask, quoted):
+                    return None
                 allowances = (await self.manager.projects.brief(project.id))["allowed_without_operator"].body
                 lines = [" ".join(line.split()) for line in allowances.splitlines()]
                 if len(quoted) < BASIS_MIN or not any(quoted in line for line in lines if line):
                     raise StaffError(
                         "a grant needs, as its basis, a line quoted verbatim from the brief's 'allowed without the operator' "
-                        f"(at least {BASIS_MIN} characters); otherwise escalate the request to the operator"
+                        f"(at least {BASIS_MIN} characters), or the R… of the operator's own scope on the member's card; "
+                        "otherwise escalate the request to the operator"
                     )
             elif not (basis.strip() or (text or "").strip()):
                 raise StaffError("a grant states its reason")
         return None
+
+    async def _granted_on_the_card(self, ask: Ask, basis: str) -> bool:
+        """Whether the basis names what the operator allowed for the very work the member asks within:
+        a scope requirement of theirs on its card. The operator allowed one test message for a mail
+        check, and the orchestrator could only ask them to write it into the brief's allowances — the
+        brief is for what holds everywhere, the card for this work."""
+        if not ask.task_id or not re.fullmatch(r"R\d{1,3}", basis):
+            return False
+        requirement = await self.contracts.find(ask.task_id, basis)
+        return requirement is not None and requirement.state == "active" and requirement.kind == "scope" and requirement.from_operator
 
     async def _deliver(self, ask: Ask, *, allow: bool | None, text: str | None, selected: list[str] | None, by: str, always: bool = False, server: bool = False) -> tuple[bool, str]:
         if ask.origin == "orchestrator":
