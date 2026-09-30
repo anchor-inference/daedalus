@@ -87,15 +87,10 @@ def drag(page: Page, name: str, handle: str, pane: str, sign: int) -> dict:
     start = width(page, pane)
     page.mouse.move(x, y)
     page.evaluate(FRAME)
-    # The page commits now and then with nobody touching it (a clock, a spinner): the same stretch of
-    # frames with the pointer still is the baseline a drag is compared against.
-    idle = page.evaluate("() => window.__commits")
-    for _ in range(STEPS):
-        page.evaluate(FRAME)
-    idle = page.evaluate("() => window.__commits") - idle
     commits, writes = page.evaluate("() => [window.__commits, window.__widthWrites]")
     watch = Watch(page.context.browser, page)
     watch.begin()
+    moving_from = page.evaluate("() => performance.now()")
     page.mouse.down()
     page.evaluate(FRAME)
     off: list[float] = []
@@ -108,11 +103,19 @@ def drag(page: Page, name: str, handle: str, pane: str, sign: int) -> dict:
         if i in (1, STEPS // 2, STEPS):
             running.append(page.evaluate(TRANSITIONS))
     during = page.evaluate("() => [window.__commits, window.__widthWrites]")
+    moved_for = page.evaluate("() => performance.now()") - moving_from
     page.mouse.up()
     page.evaluate(FRAME)
     page.wait_for_timeout(300)
     work = watch.end()
     after = page.evaluate("() => [window.__commits, window.__widthWrites]")
+    # The page commits now and then with nobody touching it (the conversation's poll, a clock): the
+    # baseline is a stretch with the pointer still that lasts as long as the drag did. It used to be
+    # twelve frames, a fraction of a second, against a drag that on a loaded machine takes seconds of
+    # round trips: the drag then caught two polls and the still stretch none, "7 commits against 0".
+    idle = page.evaluate("() => window.__commits")
+    page.wait_for_timeout(max(100, int(moved_for)))
+    idle = page.evaluate("() => window.__commits") - idle
     return {
         "start": round(start, 1),
         "end": round(width(page, pane), 1),
