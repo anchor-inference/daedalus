@@ -292,6 +292,66 @@ Generated with a tool: see the session log at https://example.invalid/session_01
   fi
   echo "self-check: the audit refuses a pattern that survives only in history"
 
+  # The same separation, asked of the other place. Every credential in the first fixture is
+  # committed, so it lives in the working tree and in history at once: with the working-tree reader
+  # replaced by a no-op (`git grep -InE "$PATTERNS" -- .` -> `printf ""`) the self-check still
+  # passed, because the history reader printed the same file names and every assertion above rests
+  # on a name, not on the section that printed it. Measured, and the reason this arm exists. Here
+  # the credential is in the working tree of a TRACKED file and in no commit at all, so the only
+  # reader that can name it is the one under test -- and the assertion is that the section which
+  # reads the working tree is where it is named. (A file that is untracked would do the separation
+  # too, and would be found by neither section: `git grep` reads tracked files.)
+  local live status3 report3
+  live=$(mktemp -d)
+  # The build itself is in the condition, and its result is checked below: under `set -e` a subshell
+  # whose `git commit` refused would end the self-check silently, since the caller never gets to run.
+  # The other arms that build fixtures have the same shape; this one at least names its own failure.
+  if ! (
+    cd "$live"
+    git init -q .
+    git config user.email a@b.c
+    git config user.name a
+    printf 'a file with nothing in it\n' > notes.txt
+    git add -A
+    git commit -qm "a clean tree"
+    printf 'a key %s_%s\n' ghp "$(printf 'A%.0s' $(seq 1 40))" > notes.txt
+  ); then
+    echo "SELF-CHECK FAILED: the working-tree-only fixture could not be built"
+    rm -rf "$live"
+    return 1
+  fi
+  # The build above cannot prove the fixture landed: with `false` in place of the commit the subshell
+  # still exits 0, because the whole `if ! ( ... )` sits in a condition context where `set -e` does not
+  # fire (measured — the first version of this guard trusted it and the arm passed a fixture with no
+  # commit at all). So the state is read rather than assumed: exactly one tracked file modified and
+  # unstaged, the credential in the working tree, and no credential in the commit. An arm satisfied by
+  # a fixture that never landed is the defect this script exists to refuse.
+  local live_status live_committed
+  live_status=$(git -C "$live" status --porcelain 2>/dev/null || printf 'no working tree')
+  live_committed=$(git -C "$live" show HEAD:notes.txt 2>/dev/null || printf 'no commit')
+  if [ "$live_status" != " M notes.txt" ] \
+     || ! grep -qE "$PATTERNS" "$live/notes.txt" \
+     || printf '%s' "$live_committed" | grep -qE "$PATTERNS"; then
+    echo "SELF-CHECK FAILED: the working-tree-only fixture did not land as the arm describes it"
+    rm -rf "$live"
+    return 1
+  fi
+  status3=0
+  bash "$SELF" "$live" > "$live/out.txt" 2>&1 || status3=$?
+  report3=$(cat "$live/out.txt")
+  rm -rf "$live"
+  if [ "$status3" -eq 0 ]; then
+    echo "SELF-CHECK FAILED: the audit passed a repository whose only credential is uncommitted in its working tree"
+    printf '%s\n' "$report3"
+    return 1
+  fi
+  if ! printf '%s\n' "$report3" | sed -n '/^== working tree$/,/^== history/p' | grep -q "notes.txt"; then
+    echo "SELF-CHECK FAILED: the fault that lives only in the working tree was not named by the section that reads it"
+    printf '%s\n' "$report3"
+    return 1
+  fi
+  echo "self-check: the audit refuses a fault that lives only in the working tree"
+
   # A hit line is what gets quoted back at this file, so it must be the line `git grep` printed and
   # nothing else. `git grep <commit>` already carries the commit, and prefixing it again printed
   # `<sha>:<sha>:<path>...` -- a reader comparing this output with plain `git grep` would see a
