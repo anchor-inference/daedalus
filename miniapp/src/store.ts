@@ -11,6 +11,25 @@ type Entry = { data: unknown; at: number; error: string | null };
 const cache = new Map<string, Entry>();
 const listeners = new Map<string, Set<() => void>>();
 const inflight = new Map<string, Promise<unknown>>();
+/** How many reads of a key in a row have failed with nothing yet to show, for the retry below. */
+const misses = new Map<string, number>();
+
+/** When a read that failed with nothing on screen is tried again: a second, then twice as long each
+ *  time up to eight seconds, and never later than the key's own poll would have tried it.
+ *
+ *  A first read that failed used to wait for the poll: a member's page read its member every 15 s,
+ *  so one dropped request left it on "Loading" for fifteen seconds — which is exactly how long a
+ *  browser check gave it before calling the page broken. */
+export function retryDelay(miss: number, pollMs: number): number {
+  const delay = Math.min(1000 * 2 ** Math.max(0, miss - 1), 8000);
+  return pollMs > 0 ? Math.min(delay, pollMs) : delay;
+}
+
+/** Whether a failure is worth retrying by itself: the host was not reached or failed, not a refusal
+ *  (a 404 for a service this installation does not have stays an answer until the next poll). */
+function transient(e: unknown): boolean {
+  return !(e instanceof ApiError) || e.status >= 500;
+}
 
 function notify(key: string) {
   for (const l of listeners.get(key) ?? []) l();
@@ -51,6 +70,7 @@ async function fetchInto<T>(key: string): Promise<T> {
     .then((data) => {
       // Only the newest request for a key writes; a slower, older one has nothing to add.
       setOffline(false);
+      misses.delete(key);
       if (inflight.get(key) === p && !held.has(key)) {
         cache.set(key, { data, at: Date.now(), error: null });
         notify(key);
@@ -61,6 +81,7 @@ async function fetchInto<T>(key: string): Promise<T> {
       if (!(e instanceof ApiError)) setOffline(true);
       else setOffline(false);
       const prev = cache.get(key);
+      if (prev?.data === undefined && transient(e)) misses.set(key, (misses.get(key) ?? 0) + 1);
       if (inflight.get(key) === p) {
         cache.set(key, { data: prev?.data, at: prev?.at ?? 0, error: asSentence(e.message || "Request failed") });
         notify(key);
@@ -149,6 +170,14 @@ export function useQuery<T>(key: string | null, opts: { pollMs?: number; staleMs
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [key, pollMs, staleMs, refresh]);
+  // Nothing to show yet and the last read failed on the way: try again soon rather than at the poll.
+  // `miss` changes with every failure, so each one schedules the next attempt.
+  const miss = key ? misses.get(key) ?? 0 : 0;
+  useEffect(() => {
+    if (!key || miss === 0) return;
+    const timer = window.setTimeout(() => void refresh(), retryDelay(miss, pollMs));
+    return () => window.clearTimeout(timer);
+  }, [key, miss, pollMs, refresh]);
   const entry = key ? cache.get(key) : undefined;
   return { data: entry?.data as T | undefined, error: entry?.error ?? null, loading: !!key && !entry, refresh };
 }

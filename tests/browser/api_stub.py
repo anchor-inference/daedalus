@@ -837,6 +837,9 @@ class FocusStub:
         self.batches: list[tuple[str, list[dict]]] = []
         """Every batch the Questions tab sent: the path, and the items exactly as posted."""
         self.late: dict[str, dict] = {}
+        self.answered_first: dict[str, str] = {}
+        """Requests someone else answers the moment the operator's answer arrives, and who: the request
+        stays open on the page until then, so no read of the page's in between can take it away."""
         """Requests answered elsewhere a moment before the next send, with that answer."""
         self.refusals: dict[str, str] = {}
         """Requests whose approval the host takes and then cannot carry out, by id, with the reason
@@ -897,6 +900,8 @@ class FocusStub:
             ask = next((a for a in self.asks if ref in (a["id"], a["short_id"])), None)
             if ask is None:
                 return 404, {"detail": "no such request"}
+            if ask["id"] in self.answered_first and not ask["resolved_at"]:
+                ask.update(resolved_at="2026-09-25T10:00:00Z", resolved_by=self.answered_first[ask["id"]])
             if ask["resolved_at"]:
                 return 409, {"detail": f"request {ask['short_id']} was already answered by the {ask['resolved_by']}"}
             payload = dict(body or {})
