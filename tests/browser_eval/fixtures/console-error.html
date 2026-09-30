@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Account settings</title><script src="/eval.js"></script>
+<style>body{font-family:sans-serif;max-width:760px;margin:2em auto} label{display:block;margin:.6em 0}</style></head>
+<body>
+<h1>Account settings</h1>
+<label>Display name <input id="name" value="Maria Lindqvist"></label>
+<label>Theme <select id="theme"><option>Light</option><option selected>Dark</option></select></label>
+<p><button id="save">Save settings</button> <span id="status"></span></p>
+<script>
+  // The page's own bug: the profile it saves into was never loaded, so every save throws.
+  const settings = { name: "", theme: "" };
+  document.getElementById("save").onclick = () => {
+    record("console-error", "save");
+    if (!settings.profile) throw new TypeError("settings.profile is undefined, cannot save the theme");
+    document.getElementById("status").textContent = "Saved.";
+  };
+</script>
+</body></html>

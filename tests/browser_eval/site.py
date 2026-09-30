@@ -52,6 +52,13 @@ SEARCH = {
     "usb hub": [("Seven-port powered hub", "UH-7700-PW"), ("Travel hub", "UH-2210-TR")],
 }
 
+PRODUCTS = [
+    {"id": 311, "name": "Enamel pot", "price": 42.0, "warehouse_code": "WH-2208", "stock": 14},
+    {"id": 312, "name": "Copper kettle", "price": 79.5, "warehouse_code": "WH-7731", "stock": 3},
+    {"id": 313, "name": "Oak chopping board", "price": 24.9, "warehouse_code": "WH-1049", "stock": 40},
+    {"id": 314, "name": "Cast-iron pan", "price": 55.0, "warehouse_code": "WH-7713", "stock": 9},
+]
+"""What the kitchen page's API answers: the warehouse codes are in no page, only in this data."""
 CSV = "date,description,amount\n2026-08-01,Opening balance,1200.00\n2026-08-04,Groceries,-84.20\n2026-08-11,Salary,2450.00\n2026-08-19,Rent,-950.00\n2026-08-31,Closing balance,2615.80\n"
 
 
@@ -164,6 +171,9 @@ class Sites:
             # The skeleton's data: slow on purpose, so a read made as soon as the page loads sees nothing.
             time.sleep(3.5)
             self.send(handler, json.dumps({"status": "Out for delivery", "eta": "Thursday 14:00–16:00", "carrier": "Parcelwing"}), kind="application/json")
+        elif path == "api/products":
+            # The page shows names and prices; the warehouse codes are only in the data behind it.
+            self.send(handler, json.dumps({"category": query.get("category") or "", "products": PRODUCTS}), kind="application/json")
         elif path == "statement.csv":
             self.send(handler, CSV, kind="text/csv", headers={"Content-Disposition": 'attachment; filename="statement-2026-08.csv"'})
         else:

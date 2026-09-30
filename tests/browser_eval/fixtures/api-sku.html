@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Kitchen — Northwind Home</title>
+<style>body{font-family:sans-serif;max-width:760px;margin:2em auto} li{margin:.4em 0}</style></head>
+<body>
+<h1>Kitchen</h1>
+<p>Everything for the kitchen, shipped from our own warehouse.</p>
+<ul id="list"><li>Loading…</li></ul>
+<script>
+  fetch("/api/products?category=kitchen", { headers: { "Accept": "application/json" } })
+    .then((r) => r.json())
+    .then((data) => {
+      const list = document.getElementById("list");
+      list.replaceChildren(...data.products.map((p) => {
+        const li = document.createElement("li");
+        li.textContent = p.name + " — €" + p.price.toFixed(2);
+        return li;
+      }));
+    });
+</script>
+</body></html>

@@ -297,6 +297,32 @@ TASKS: list[Task] = [
         ("shadow DOM",),
     ),
     Task(
+        "console-error", "console-error",
+        "The Save settings button on this page does nothing when I press it. Find out why: what exact error does the page report?",
+        both(recorded("save"), said(r"settings\.profile is undefined")),
+        ("console errors: an error only the console shows",),
+    ),
+    Task(
+        "api-sku", "api-sku",
+        "This page loads its products from the shop's own API, and every product there has an internal warehouse code the page "
+        "does not show. What is the warehouse code of the Copper kettle?",
+        said(r"WH-7731", never=(r"WH-7713",)),
+        ("network log: a value only the page's API response holds",),
+    ),
+    Task(
+        "hidden-reason", "hidden-reason",
+        "This invoice page should have a Download invoice button, but I cannot see it. Why is it not shown? Name the element "
+        "that hides it and the CSS rule that does.",
+        said(r"billing-actions", r"display\s*:?\s*none"),
+        ("inspect: why an element does not show",),
+    ),
+    Task(
+        "alert-save", "alert-save",
+        "Save the note \"Call the plumber on Monday\" in this notepad.",
+        recorded("save", lambda d: isinstance(d, dict) and d.get("text") == "Call the plumber on Monday", only=True),
+        ("dialogs: an alert after saving",),
+    ),
+    Task(
         "wizard", "wizard",
         "Start a trial on the Team plan, with the workspace name \"Harbor Analytics\" and a team size of 6–20 people.",
         posted(plan="team", workspace="Harbor Analytics", size="6–20"),
