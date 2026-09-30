@@ -25,6 +25,10 @@ func (d *Daemon) registerPage(s *server.Server) {
 		"download.read":   d.downloadRead,
 		"download.delete": d.downloadDelete,
 		"upload.put":      d.uploadPut,
+		"page.logs":       d.logs,
+		"page.network":    d.network,
+		"page.request":    d.request,
+		"page.inspect":    d.inspect,
 	} {
 		s.Handle(name, h)
 	}
@@ -143,7 +147,16 @@ func (d *Daemon) dialogAnswer(ctx context.Context, c *server.Conn, params json.R
 	if err != nil {
 		return nil, err
 	}
-	return d.Page.AnswerDialog(ctx, t, p.Accept, p.Text)
+	mark := t.AutoDialogMark()
+	out, err := d.Page.AnswerDialog(ctx, t, p.Accept, p.Text)
+	if err != nil {
+		return nil, err
+	}
+	// An answer can bring the next dialog: an alert after a confirm is answered on its own.
+	if auto := t.AutoDialogsSince(mark); len(auto) > 0 {
+		out["dialogs_auto"] = auto
+	}
+	return out, nil
 }
 
 func (d *Daemon) downloadList(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
@@ -203,4 +216,83 @@ func (d *Daemon) uploadPut(ctx context.Context, c *server.Conn, params json.RawM
 		return nil, err
 	}
 	return d.Page.PutUpload(g, p.UploadID, p.Name, p.Offset, p.Data)
+}
+
+func (d *Daemon) logs(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		TabID  string          `json:"tab_id"`
+		After  int64           `json:"after,omitempty"`
+		Level  string          `json:"level,omitempty"`
+		Limit  int             `json:"limit,omitempty"`
+		Origin *browser.Origin `json:"origin,omitempty"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	t, err := d.gatedTab(ctx, p.TabID, p.Origin)
+	if err != nil {
+		return nil, err
+	}
+	return d.Page.Logs(t, p.After, p.Level, p.Limit)
+}
+
+func (d *Daemon) network(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		TabID    string          `json:"tab_id"`
+		After    int64           `json:"after,omitempty"`
+		Types    []string        `json:"types,omitempty"`
+		Host     string          `json:"host,omitempty"`
+		Method   string          `json:"method,omitempty"`
+		Contains string          `json:"contains,omitempty"`
+		Failed   bool            `json:"failed,omitempty"`
+		Limit    int             `json:"limit,omitempty"`
+		Origin   *browser.Origin `json:"origin,omitempty"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	if len(p.Contains) > 500 || len(p.Host) > 253 || len(p.Method) > 20 || len(p.Types) > 16 {
+		return nil, wire.Errorf(wire.CodeInvalidParams, "the filter is too long")
+	}
+	t, err := d.gatedTab(ctx, p.TabID, p.Origin)
+	if err != nil {
+		return nil, err
+	}
+	return d.Page.Network(t, p.After, page.NetworkFilter{Types: p.Types, Host: p.Host, Method: p.Method, Contains: p.Contains, Failed: p.Failed}, p.Limit)
+}
+
+func (d *Daemon) request(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		TabID    string          `json:"tab_id"`
+		ID       string          `json:"id"`
+		Body     bool            `json:"body,omitempty"`
+		MaxChars int             `json:"max_chars,omitempty"`
+		Origin   *browser.Origin `json:"origin,omitempty"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	t, err := d.gatedTab(ctx, p.TabID, p.Origin)
+	if err != nil {
+		return nil, err
+	}
+	return d.Page.Request(ctx, t, p.ID, p.Body, p.MaxChars)
+}
+
+func (d *Daemon) inspect(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		TabID    string          `json:"tab_id"`
+		Ref      string          `json:"ref,omitempty"`
+		Selector string          `json:"selector,omitempty"`
+		MaxChars int             `json:"max_chars,omitempty"`
+		Origin   *browser.Origin `json:"origin,omitempty"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	t, err := d.gatedTab(ctx, p.TabID, p.Origin)
+	if err != nil {
+		return nil, err
+	}
+	return d.Page.Inspect(ctx, t, p.Ref, p.Selector, p.MaxChars)
 }

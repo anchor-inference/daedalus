@@ -383,7 +383,30 @@ func (d *Daemon) navigate(ctx context.Context, c *server.Conn, params json.RawMe
 	if err != nil {
 		return nil, err
 	}
-	return d.Manager.Navigate(ctx, t, p.URL, timeout)
+	return d.loaded(t, func() (browser.NavResult, error) { return d.Manager.Navigate(ctx, t, p.URL, timeout) })
+}
+
+// navigated is a navigation's result with what the page model saw it bring: the document's HTTP
+// status, the dialogs answered on the way (a beforeunload question of the page left), and the errors
+// and warnings the new page logged, so a page that loads broken says so without another call.
+type navigated struct {
+	browser.NavResult
+	Status      int                  `json:"status,omitempty"`
+	DialogsAuto []browser.AutoDialog `json:"dialogs_auto,omitempty"`
+	Logged      map[string]int       `json:"logged,omitempty"`
+}
+
+func (d *Daemon) loaded(t *browser.Tab, nav func() (browser.NavResult, error)) (any, error) {
+	logs, dialogs := d.Page.Mark(t), t.AutoDialogMark()
+	r, err := nav()
+	if err != nil {
+		return nil, err
+	}
+	out := navigated{NavResult: r, Status: d.Page.DocumentStatus(t), DialogsAuto: t.AutoDialogsSince(dialogs)}
+	if errs, warns := d.Page.LogCounts(t, logs); errs+warns > 0 {
+		out.Logged = map[string]int{"errors": errs, "warnings": warns}
+	}
+	return out, nil
 }
 
 func timeoutOf(ms, def, most int64) (time.Duration, error) {
@@ -406,7 +429,7 @@ func (d *Daemon) history(delta int) server.Handler {
 		if err != nil {
 			return nil, err
 		}
-		return d.Manager.History(ctx, t, delta, 30*time.Second)
+		return d.loaded(t, func() (browser.NavResult, error) { return d.Manager.History(ctx, t, delta, 30*time.Second) })
 	}
 }
 

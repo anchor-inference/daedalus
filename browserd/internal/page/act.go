@@ -274,6 +274,7 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 		before = p.region(ctx, t)
 	}
 	loaderBefore, urlBefore := t.Loader(), t.URL()
+	logsBefore, dialogsBefore := p.Mark(t), t.AutoDialogMark()
 	tabsBefore := map[string]bool{}
 	for _, x := range t.Group.Tabs() {
 		tabsBefore[x.ID] = true
@@ -323,6 +324,12 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 		if ref != "" {
 			t.SetValue(dialogBeforeKey{}, &dialogBefore{loader: loaderBefore, lines: before})
 		}
+	}
+	if auto := t.AutoDialogsSince(dialogsBefore); len(auto) > 0 {
+		res.Effects["dialogs_auto"] = auto
+	}
+	if errs, warns := p.LogCounts(t, logsBefore); errs+warns > 0 {
+		res.Effects["logged"] = map[string]int{"errors": errs, "warnings": warns}
 	}
 	if dl := p.latestDownload(t.Group.ID, downloadsBefore); dl != nil {
 		res.Effects["download"] = map[string]any{"id": dl.ID, "name": dl.Name, "state": dl.State}

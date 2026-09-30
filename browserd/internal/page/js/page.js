@@ -1586,10 +1586,215 @@
     return found;
   }
 
+  // The styles inspect reports: what decides whether an element shows and takes a click, and how it
+  // looks. The rest only when they are not their default, so a plain element reads in one line.
+  const INSPECT_STYLES = ["display", "visibility", "opacity", "position", "z-index", "overflow", "pointer-events", "cursor",
+    "color", "background-color", "font-size", "font-weight"];
+  const INSPECT_UNLESS = { transform: "none", "clip-path": "none", filter: "none", "content-visibility": "visible",
+    "user-select": "auto", top: "auto", left: "auto", right: "auto", bottom: "auto" };
+  const INSPECT_HTML = 4000;
+
+  // named says which element an explanation is about: its role and name when it has them, else its
+  // tag with its id or first class, and its ref, so the agent can inspect that one too.
+  function named(el) {
+    const r = role(el);
+    const nm = (LANDMARKS.has(r) || native(el, r) || STRUCTURE.has(r)) ? accessibleName(el, r) : "";
+    let s = r && nm ? r + " " + quote(clip(nm, 60)) : tag(el);
+    if (!(r && nm)) {
+      if (el.id) s += "#" + clip(el.id, 30);
+      else if (typeof el.className === "string" && el.className.trim()) s += "." + clip(el.className.trim().split(/\s+/)[0], 30);
+    }
+    return s + " (" + ref(el) + ")";
+  }
+
+  // cleanHTML is el's markup as a reader needs it: without scripts, styles and handlers, long values
+  // cut, whitespace folded, and the value of every secret field (and of a hidden field or a meta tag
+  // that holds a request token) replaced, so the markup says no more than the snapshot does.
+  function cleanHTML(el, max) {
+    const copy = el.cloneNode(true);
+    const orig = [el, ...el.querySelectorAll("*")];
+    const dup = [copy, ...copy.querySelectorAll("*")];
+    for (let i = 0; i < dup.length; i++) {
+      const o = orig[i], d = dup[i];
+      if (!d || !o) continue;
+      if (["script", "style", "noscript", "template"].includes(tag(d))) {
+        d.replaceChildren();
+        d.setAttribute("data-browserd", "content left out");
+        continue;
+      }
+      for (const a of Array.from(d.attributes)) {
+        if (/^on/i.test(a.name)) d.removeAttribute(a.name);
+        else if (a.value.length > 200) d.setAttribute(a.name, a.value.slice(0, 199) + "…");
+      }
+      const t = tag(o);
+      if (t === "input" || t === "textarea") {
+        const hiddenToken = t === "input" && inputType(o) === "hidden" && /(token|csrf|xsrf|secret|key|auth|session|nonce)/i.test(o.name || o.id || "");
+        if (secret(o) || hiddenToken) {
+          if (d.hasAttribute("value") || hiddenToken || secret(o)) d.setAttribute("value", "[secret]");
+          if (t === "textarea") d.textContent = "[secret]";
+        } else if (t === "input" && o.value !== (o.getAttribute("value") || "") && !["checkbox", "radio", "file"].includes(inputType(o))) {
+          // What the field holds now, which the markup's value attribute does not follow.
+          d.setAttribute("value", clip(o.value, 200));
+        }
+      }
+      if (t === "meta" && /(csrf|xsrf|token)/i.test(o.getAttribute("name") || "")) d.setAttribute("content", "[secret]");
+    }
+    let html = copy.outerHTML.replace(/\s+/g, " ").replace(/> </g, "><");
+    let truncated = false;
+    if (html.length > max) {
+      html = html.slice(0, max - 1) + "…";
+      truncated = true;
+    }
+    return { html, truncated, length: copy.outerHTML.length };
+  }
+
+  // why is what keeps el from being seen or clicked, each reason naming the element it comes from.
+  function why(el) {
+    const out = [];
+    const self = style(el);
+    for (let n = el, first = true; n; n = up(n), first = false) {
+      if (n.nodeType !== Node.ELEMENT_NODE) continue;
+      const s = style(n);
+      const who = first ? "itself" : named(n);
+      if (n.hidden && s.display === "none") out.push("hidden (the hidden attribute) on " + who);
+      else if (s.display === "none") out.push("display: none on " + who);
+      if (s.contentVisibility === "hidden") out.push("content-visibility: hidden on " + who);
+      if (parseFloat(s.opacity) < 0.05) out.push("opacity " + s.opacity + " on " + who);
+      if (n.hasAttribute("inert")) out.push("inert (the inert attribute: nothing in it takes a click or the focus) on " + who);
+      if (tag(n) === "html") break;
+    }
+    if (self.visibility === "hidden" || self.visibility === "collapse") {
+      // Inherited: the one that set it is the highest in the chain still hidden.
+      let from = el;
+      for (let n = up(el); n && n.nodeType === Node.ELEMENT_NODE; n = up(n)) {
+        if (style(n).visibility !== self.visibility) break;
+        from = n;
+      }
+      out.push("visibility: " + self.visibility + " on " + (from === el ? "itself" : named(from)));
+    }
+    const b = box(el);
+    if (b.w < 1 || b.h < 1) out.push("no size (" + Math.round(b.w) + "×" + Math.round(b.h) + " px)" + (self.display === "contents" ? ": display: contents, its children are what shows" : ""));
+    const clipRect = self.clip && self.clip !== "auto" && /rect\(\s*0(px)?[ ,]+0(px)?[ ,]+0(px)?[ ,]+0(px)?\s*\)/.test(self.clip);
+    if (clipRect || self.clipPath === "inset(50%)" || (self.position === "absolute" && b.w <= 1 && b.h <= 1 && self.overflow === "hidden")) {
+      out.push("visually hidden (clipped to nothing: the pattern that keeps text for screen readers only)");
+    }
+    if (self.pointerEvents === "none") out.push("pointer-events: none: clicks go through it to what is under it");
+    if (el.disabled || el.getAttribute("aria-disabled") === "true" || (el.closest && el.closest("fieldset[disabled]") && !el.closest("legend"))) out.push("disabled");
+    // Cut off by a pane around it: shown only inside that pane's box.
+    if (b.w >= 1 && b.h >= 1) {
+      for (let n = up(el); n && n.nodeType === Node.ELEMENT_NODE && tag(n) !== "body" && tag(n) !== "html"; n = up(n)) {
+        if (n.ownerDocument !== el.ownerDocument) break;
+        const s = style(n);
+        if (s.overflowX === "visible" && s.overflowY === "visible") continue;
+        const pb = box(n);
+        const outside = b.x + b.w <= pb.x || b.x >= pb.x + pb.w || b.y + b.h <= pb.y || b.y >= pb.y + pb.h;
+        if (!outside) continue;
+        if (/(auto|scroll|overlay)/.test(s.overflowX + " " + s.overflowY)) {
+          out.push("out of view inside the scrolling pane " + named(n) + ": scroll it into view (BrowserAct scroll with this ref)");
+        } else {
+          out.push("cut off by " + named(n) + " (overflow: " + s.overflow + "): it lies outside that box");
+        }
+        break;
+      }
+    }
+    return out;
+  }
+
+  // inspect is one element as a developer's tools show it: its markup, its box, the styles that
+  // decide whether it shows and takes a click, its state, and in words why it is not seen or not
+  // clickable when it is not. It reads; it moves nothing, the scroll included.
+  function inspect(r, maxHTML, selector) {
+    let el = null, matches = 0;
+    if (selector) {
+      // An element the outline gives no ref — one that is not shown is the usual reason to ask — found
+      // by the selector the agent knows from the site's own code. Only in this document: a selector
+      // says nothing of the documents of frames.
+      let all;
+      try {
+        all = document.querySelectorAll(selector);
+      } catch (e) {
+        return { error: "bad_selector", message: String(e.message || e) };
+      }
+      matches = all.length;
+      el = all[0] || null;
+      if (!el) return { error: "no_match", message: selector };
+      r = ref(el);
+    } else {
+      el = lookup(r) || frameByRef(r);
+    }
+    if (!el) return { error: "stale", ref: r };
+    const s = style(el);
+    const b = box(el);
+    const w = who(el);
+    const rl = role(w);
+    const styles = {};
+    for (const k of INSPECT_STYLES) styles[k] = s.getPropertyValue(k);
+    for (const [k, dflt] of Object.entries(INSPECT_UNLESS)) {
+      const v = s.getPropertyValue(k);
+      if (v && v !== dflt && !(k === "content-visibility" && v === "auto")) styles[k] = v;
+    }
+    const se = document.scrollingElement || document.documentElement;
+    const doc = { x: b.x + (se ? se.scrollLeft : 0), y: b.y + (se ? se.scrollTop : 0) };
+    const reasons = why(el);
+    let where = "";
+    if (b.w >= 1 && b.h >= 1) {
+      if (doc.x + b.w <= 0 || doc.y + b.h <= 0) {
+        where = "placed outside the page (at " + Math.round(doc.x) + ", " + Math.round(doc.y) + "), where no scroll reaches";
+      } else if (b.y >= innerHeight) {
+        where = "below the viewport by " + Math.round(b.y - innerHeight + 1) + " px: an action scrolls it into view";
+      } else if (b.y + b.h <= 0) {
+        where = "above the viewport by " + Math.round(-(b.y + b.h) + 1) + " px: an action scrolls it into view";
+      } else if (b.x >= innerWidth) {
+        where = "right of the viewport by " + Math.round(b.x - innerWidth + 1) + " px";
+      } else if (b.x + b.w <= 0) {
+        where = "left of the viewport by " + Math.round(-(b.x + b.w) + 1) + " px";
+      }
+    }
+    if (where.startsWith("placed outside")) reasons.push(where);
+    const shown = el.checkVisibility ? el.checkVisibility({ opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true }) : s.display !== "none";
+    const visible = shown && b.w >= 1 && b.h >= 1 && !reasons.some((x) => x.startsWith("visually hidden") || x.startsWith("cut off") || x.startsWith("placed outside") || x.startsWith("opacity"));
+    let covered = "";
+    if (visible && onScreen(el)) {
+      covered = coveredBy(el);
+      if (covered) reasons.push("covered by " + covered + ": a click there lands on it, not on this");
+    }
+    const state = {};
+    if (w.disabled || w.getAttribute("aria-disabled") === "true") state.disabled = true;
+    if (w.readOnly) state.readonly = true;
+    if (w.required || w.getAttribute("aria-required") === "true") state.required = true;
+    if (w.checked === true || w.getAttribute("aria-checked") === "true") state.checked = true;
+    if (w === w.ownerDocument.activeElement && w !== w.ownerDocument.body) state.focused = true;
+    if (w.willValidate && w.validity && !w.validity.valid) {
+      state.invalid = clip(w.validationMessage || "invalid", 200);
+    }
+    if (secret(w)) state.secret = true;
+    else {
+      const v = valueOf(w, rl);
+      if (v !== null && v !== "") state.value = v;
+    }
+    const exp = w.getAttribute && w.getAttribute("aria-expanded");
+    if (exp) state.expanded = exp === "true";
+    const panes = [];
+    for (let n = up(el); n && panes.length < 2; n = up(n)) {
+      if (n.nodeType !== Node.ELEMENT_NODE || n === se || tag(n) === "body" || tag(n) === "html") continue;
+      if (scrollableY(n) || scrollableX(n)) {
+        panes.push({ ref: ref(n), name: named(n), top: Math.round(n.scrollTop), height: Math.round(n.scrollHeight), view: Math.round(n.clientHeight) });
+      }
+    }
+    const markup = cleanHTML(el, Math.max(200, Math.min(maxHTML || INSPECT_HTML, 200000)));
+    return {
+      ref: r, tag: tag(el), role: rl || "", name: accessibleName(w, rl), html: markup.html, html_truncated: markup.truncated,
+      html_length: markup.length, box: b, page: doc, viewport: { w: innerWidth, h: innerHeight }, where, styles, visible,
+      clickable: visible && !covered && s.pointerEvents !== "none" && !state.disabled && !(el.closest && el.closest("[inert]")), reasons, state,
+      panes, shadow: !!el.shadowRoot, children: el.children.length, text_length: collapse(el.innerText || el.textContent || "").length,
+      ...(selector ? { matches } : {}),
+    };
+  }
+
   globalThis.__browserd = {
     snapshot, readable, prepare, measure, hit, hovered, focus, selectAll, selectOption, element, evidence, mask, markHumanTyped, selection,
     hasText, exists, captchas, ref, describe, focusedRef, region, find, elementAt, scrollInfo, scrollBy, scrollToText,
-    route, frameElement, frameOrigin, prepareFrame, hitFrame, crossFrames, setPrefix, markListened, listenerRoot,
+    route, frameElement, frameOrigin, prepareFrame, hitFrame, crossFrames, setPrefix, markListened, listenerRoot, inspect,
     scrollState: () => {
       const st = scrollState();
       return { top: st.top, height: st.height, view: st.view, above: st.above, below: st.below, pane: st.el ? ref(st.el) : "" };

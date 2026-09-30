@@ -10,6 +10,14 @@ import (
 	"github.com/ascorblack/daedalus/ptyd/proto/wire"
 )
 
+// NetworkBufferBytes and NetworkResourceBytes bound what Chromium keeps of a tab's response bodies:
+// in all, and of one response. A JSON answer of an API is far below the second; a response past it
+// is never kept, and the oldest go first when the first is reached.
+const (
+	NetworkBufferBytes   = 8 << 20
+	NetworkResourceBytes = 1 << 20
+)
+
 // strayWait is how long a page that belongs to no known group (a popup opened without an opener)
 // waits for a claim before it is given to its browser's most recently used group.
 const strayWait = time.Second
@@ -121,9 +129,17 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 	}{
 		{"Page.enable", nil},
 		{"Page.setLifecycleEventsEnabled", map[string]any{"enabled": true}},
-		// For the status of a page's document and the challenge of a site that asks for a password;
-		// no bodies are kept.
-		{"Network.enable", map[string]any{"maxTotalBufferSize": 0, "maxResourceBufferSize": 0}},
+		// For the page's requests as the agent reads them (page.network), the status of its document
+		// and the challenge of a site that asks for a password. Chromium keeps the most recent
+		// responses' bodies within these bounds, so the one the agent asks for is there to read; the
+		// rest are never copied out of the browser.
+		{"Network.enable", map[string]any{"maxTotalBufferSize": NetworkBufferBytes, "maxResourceBufferSize": NetworkResourceBytes}},
+		// The page's console and its uncaught errors, and the browser's own words about it (a
+		// resource that failed to load, a blocked script), for page.logs. Measured on the pinned
+		// build: enabling Runtime runs no getter of the page's (an accessor is previewed as such), so
+		// a page cannot tell it is on the way it could with older builds.
+		{"Runtime.enable", nil},
+		{"Log.enable", nil},
 		{"Emulation.setUserAgentOverride", map[string]any{"userAgent": b.userAgent, "userAgentMetadata": b.uaMetadata}},
 		// The frames of other sites, each in a process of its own, are attached to as they come, so
 		// the page model can read them (Manager.attachFrame).

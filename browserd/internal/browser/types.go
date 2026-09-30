@@ -447,6 +447,10 @@ type Tab struct {
 	closed  bool
 	values  map[any]any
 	frames  map[string]string // frame id -> session, for the frames of other sites in their own process
+
+	auto     []AutoDialog // the dialogs the daemon answered by itself, the last few (dialogs.go)
+	autoSeq  int64
+	autoOpen bool // one of them is being answered, and its closing is not an agent's dialog closing
 }
 
 // Call sends a command to the tab's page.
@@ -668,6 +672,7 @@ func (t *Tab) event(e cdp.Event) {
 		t.publishUpdate()
 	case "Page.javascriptDialogOpening":
 		var p struct {
+			URL           string `json:"url"`
 			Message       string `json:"message"`
 			Type          string `json:"type"`
 			DefaultPrompt string `json:"defaultPrompt"`
@@ -676,6 +681,10 @@ func (t *Tab) event(e cdp.Event) {
 			return
 		}
 		d := &Dialog{Type: p.Type, Message: p.Message, DefaultPrompt: p.DefaultPrompt}
+		if t.autoDialog(d, p.URL) {
+			// Never the tab's open dialog: nothing waits on it or is refused for it.
+			return
+		}
 		t.mu.Lock()
 		t.dialog = d
 		t.broadcastLocked()
@@ -685,6 +694,7 @@ func (t *Tab) event(e cdp.Event) {
 	case "Page.javascriptDialogClosed":
 		t.mu.Lock()
 		had := t.dialog != nil
+		t.autoOpen = false
 		t.dialog = nil
 		t.broadcastLocked()
 		t.mu.Unlock()

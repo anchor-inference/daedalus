@@ -132,6 +132,7 @@ func fixture(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/after-login", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "<title>Signed in</title>signed in")
 	})
+	devtoolsPages(mux)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv

@@ -244,13 +244,24 @@ func checkScript(raw json.RawMessage) error {
 		return wire.Errorf(wire.CodeInvalidParams, "not a regular expression: %s", se.Message)
 	case "nothing":
 		return wire.Errorf(wire.CodeNotFound, "nothing is at that point of the page")
+	case "bad_selector":
+		return wire.Errorf(wire.CodeInvalidParams, "not a CSS selector: %s", se.Message)
+	case "no_match":
+		return wire.Errorf(wire.CodeNotFound, "no element of the page matches %s", se.Message)
 	}
 	return fmt.Errorf("the page script answered %s", se.Error)
 }
 
-// TabEvent watches pages for what needs the operator: a site asking for a password (HTTP
+// TabEvent follows what a page says and asks for: its console and requests for the agent to read
+// (logs.go, network.go), and what needs the operator — a site asking for a password (HTTP
 // authentication, which the agent never answers) and a CAPTCHA.
 func (p *Model) TabEvent(t *browser.Tab, e cdp.Event) {
+	switch {
+	case strings.HasPrefix(e.Method, "Network."):
+		p.networkEvent(t, e)
+	case strings.HasPrefix(e.Method, "Runtime.") || e.Method == "Log.entryAdded" || e.Method == "Page.javascriptDialogOpening":
+		p.logEvent(t, e)
+	}
 	switch e.Method {
 	case "Network.responseReceived":
 		var r struct {
