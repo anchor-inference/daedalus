@@ -20,6 +20,11 @@
 </p>
 
 <p align="center">
+  <a href="https://www.youtube.com/watch?v=z5rGA8SNroU"><img src="https://i.ytimg.com/vi/z5rGA8SNroU/maxresdefault.jpg" alt="Daedalus: The Task Board — a 3-minute film about the agent and its team of subagents. Watch in English on YouTube" width="100%" /></a>
+  <br/><sub><b>The film, 2:57</b> · ▶ <a href="https://www.youtube.com/watch?v=z5rGA8SNroU">English</a> · ▶ <a href="https://www.youtube.com/watch?v=IViNxnRmwkc">Русский (Russian)</a> · <a href="https://daedalus.anchorinference.com/en/">daedalus.anchorinference.com</a></sub>
+</p>
+
+<p align="center">
   <img src="docs/screenshots/browser.gif" alt="The agent's own browser, live, with the actions it took: the operator takes control, leaves a note for the agent and gives the browser back" width="100%" />
 </p>
 
