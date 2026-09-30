@@ -162,7 +162,10 @@ def read_log(path: str | Path) -> list[dict[str, Any]]:
         text = Path(path).read_text(encoding="utf-8")
     except FileNotFoundError:
         return []
-    return [json.loads(line) for line in text.splitlines() if line.strip()]
+    # Only whole lines: a test polls this while a fake is still appending, and a long entry reaches
+    # the file in more than one write, so the last line can be half there (a full suite on a loaded
+    # machine failed on exactly that). It is read on the next poll, once its newline has landed.
+    return [json.loads(line) for line in text.split("\n")[:-1] if line.strip()]
 
 
 # -- state that survives the process: version, sign-in, trust ------------------------------------------
