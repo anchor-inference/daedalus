@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useEdgeFade } from "./edgefade";
 import { int, relTime, usd } from "./format";
 import { api, LoopView, ServiceView, ShareMode, ToolInfo } from "./api";
@@ -150,7 +150,20 @@ function PickList<T extends string>({ options, chosen, order, shown, value, onPi
   const [up, setUp] = useState(false);
   const wrap = useRef<HTMLSpanElement>(null);
   const button = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLSpanElement>(null);
   const listId = useId();
+  // The list hangs from the control's right edge, and a control near the left edge of a phone hung
+  // it off the screen: only the order badges of the web search's fallbacks were left to see. Once
+  // drawn, it is moved sideways by whatever it overhangs, 8 px short of either edge.
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!open || !el) return;
+    el.style.transform = "";
+    const r = el.getBoundingClientRect();
+    const edge = document.documentElement.clientWidth;
+    const shift = r.left < 8 ? 8 - r.left : r.right > edge - 8 ? Math.max(8 - r.left, edge - 8 - r.right) : 0;
+    if (shift) el.style.transform = `translateX(${Math.round(shift)}px)`;
+  }, [open, options.length]);
   useEffect(() => {
     if (!open) return;
     const away = (e: PointerEvent) => {
@@ -211,7 +224,7 @@ function PickList<T extends string>({ options, chosen, order, shown, value, onPi
     }
   }
   return (
-    <span ref={wrap} className={`dropdown ${className}`.trim()}>
+    <span ref={wrap} className={`dropdown ${className}`.trim()} data-multi={multi ? "" : undefined}>
       <button
         ref={button}
         id={id}
@@ -233,7 +246,7 @@ function PickList<T extends string>({ options, chosen, order, shown, value, onPi
         <Icon name="chevron" size={14} />
       </button>
       {open && (
-        <span id={listId} role="listbox" aria-label={label} aria-multiselectable={multi || undefined} className={`dropdown-list ${up ? "up" : ""}`}>
+        <span ref={list} id={listId} role="listbox" aria-label={label} aria-multiselectable={multi || undefined} className={`dropdown-list ${up ? "up" : ""}`}>
           {options.map((option, i) => {
             const on = chosen(option);
             const n = order?.(option) ?? 0;
