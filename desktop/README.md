@@ -39,7 +39,17 @@ the release's `SHA256SUMS`, and unpacks it into `./Daedalus`:
 curl -fsSL https://raw.githubusercontent.com/anchor-inference/daedalus/main/desktop/install.sh | sh
 ```
 
-`DAEDALUS_DIR=/somewhere/else` puts it elsewhere. Or take the archive by hand from the
+On Windows, the same in PowerShell (not yet run on a real Windows machine):
+
+```powershell
+irm https://raw.githubusercontent.com/anchor-inference/daedalus/main/desktop/install.ps1 | iex
+```
+
+`DAEDALUS_DIR=/somewhere/else` puts it elsewhere. Run over an installation that already has data,
+neither script replaces anything itself: the launcher's `upgrade` does it — the installed one, or for
+a launcher older than that command the one just downloaded — after a yes and a checked backup of the
+data and the launcher, and it rolls back on failure. [UPDATES.md](UPDATES.md) has the whole of it.
+Or take the archive by hand from the
 [releases page](https://github.com/anchor-inference/daedalus/releases) (the tags beginning with
 `desktop-v`):
 
@@ -358,7 +368,9 @@ nothing else changes.
 | `daedalus-desktop status` | what is configured, what is running |
 | `daedalus-desktop stop` | stop the containers; they stay down until started again |
 | `daedalus-desktop logs -f` | the stack's logs |
-| `daedalus-desktop update` | move both checkouts to what is published, refresh the images, restart |
+| `daedalus-desktop update` | move both checkouts to what is published and restart, after a checked backup of the data; a failed start puts the data back. Native mode only for now; see [UPDATES.md](UPDATES.md) |
+| `daedalus-desktop check-update` | say whether a newer launcher release is published; installs nothing |
+| `daedalus-desktop upgrade [--yes]` | move to a newer launcher release: asks, stops the stack, backs up and verifies the data, swaps the launcher, updates and starts, and rolls both back on failure. Native mode only for now; see [UPDATES.md](UPDATES.md) |
 | `daedalus-desktop open` | open the app in the browser |
 | `daedalus-desktop pair` | print a fresh pairing link for signing in to the app |
 | `daedalus-desktop uninstall [--keep-data]` | remove the containers, networks and volumes (Docker mode; see [Uninstalling](#uninstalling)) |

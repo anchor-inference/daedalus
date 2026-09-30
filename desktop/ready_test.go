@@ -66,6 +66,9 @@ func TestWaitReadyPollsUntilTheAppAnswers(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
+	// The stack's own answer, as a native start expects it.
+	server.Config.Handler = bootAnswer("boot-1", server.Config.Handler)
+	expectBoot(portOf(t, server.URL), bootExpectation{id: "boot-1"})
 	if err := WaitReady(context.Background(), portOf(t, server.URL), 20*time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +82,7 @@ func TestWaitReadySaysWhatItLastSaw(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
+	expectBoot(portOf(t, server.URL), bootExpectation{anyAnswer: true})
 	err := WaitReady(context.Background(), portOf(t, server.URL), 3*time.Second)
 	if err == nil {
 		t.Fatal("a 404 is not ready")
@@ -125,4 +129,12 @@ func TestApplyAsksTheSupervisorRatherThanRestartingTheContainers(t *testing.T) {
 			t.Fatalf("got %v, want %v", args, want)
 		}
 	}
+}
+
+// bootAnswer is what the app does with DAEDALUS_BOOT_ID: it echoes it on every response.
+func bootAnswer(id string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(bootHeader, id)
+		next.ServeHTTP(w, r)
+	})
 }

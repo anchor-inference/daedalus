@@ -215,6 +215,10 @@ class Settings(BaseSettings):
     core_repo_dir: Path = _REPO_ROOT.parent / "protocore-exp"
     supervisor_socket: Path = Path("/run/daedalus/supervisor.sock")
     supervisor_tcp: str = ""
+    boot_id: str = Field(default_factory=lambda: os.environ.get("DAEDALUS_BOOT_ID", "").strip())
+    """The id the desktop launcher gives each start of the supervisor, which the bot inherits and
+    echoes on /app: how the launcher tells this process's answer from one by a stack a crashed
+    launcher left on the same port. Random per start, not a secret; empty elsewhere."""
     """``host:port`` the supervisor listens on where unix sockets are not available (Windows); empty
     everywhere else, and then the socket above is what is used. One or the other, never both."""
     runtime_dir: Path | None = Field(default_factory=lambda: env_path("DAEDALUS_RUNTIME"))

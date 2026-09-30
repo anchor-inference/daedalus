@@ -199,6 +199,17 @@ function drawStatus(status) {
     // card with a blank strip at the bottom where the button had been.
     el("change-actions").hidden = !change.pending;
   }
+  // A newer launcher release. The page only tells: installing it is `daedalus-desktop upgrade` with
+  // the launcher closed, which asks, backs up and checks the backup first.
+  const offer = status.upgrade;
+  if (el("upgrade")) {
+    el("upgrade").hidden = !offer;
+    if (offer) {
+      el("upgrade-title").textContent = T("upgrade.card.title").replace("%s", String(offer.to).replace(/^desktop-v/, ""));
+      el("upgrade-body").textContent = T("upgrade.card.body").replace("%s", String(offer.from).replace(/^desktop-v/, ""));
+      if (offer.command) el("upgrade-command").textContent = offer.command;
+    }
+  }
   // One primary button per page. A pending change owns it, because restarting is the step that
   // matters; with nothing running, opening the app leads to a page that does not answer, so the
   // button steps back instead of being the brightest thing under a warning that says so.

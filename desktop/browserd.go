@@ -170,5 +170,6 @@ func (n *Native) newBrowserd(ctx context.Context) child {
 		Env:     browserdEnv(n.paths, base, isSetuidRoot),
 		LogPath: filepath.Join(n.paths.RuntimeLogs, "browserd.log"),
 		Log:     n.log,
+		PidFile: filepath.Join(pidsDir(n.paths), "browserd.json"),
 	}
 }

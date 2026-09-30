@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -48,8 +49,73 @@ func WaitReadyNative(ctx context.Context, port string, timeout time.Duration) er
 	return waitReady(ctx, port, timeout, 200*time.Millisecond)
 }
 
+// An answer on the app's port proves nothing by itself: a stack a crashed launcher left behind, or
+// any other program, answers there just as well. So the launcher says, before it starts a stack,
+// what it expects to hear from it, and waitReady accepts only that:
+//
+//   - native: the launcher gives the supervisor a fresh DAEDALUS_BOOT_ID, the bot inherits it, and
+//     the app echoes it on every response as X-Daedalus-Boot. An answer with another id, or from a
+//     port that was already taken before this start, is not this stack.
+//   - An app older than the header answers without one. For an upgrade's or an update's health
+//     check that is a failure, full stop: "the port was free and our supervisor is alive" does not
+//     tie the answer to our process — anything may have taken the port after the check. For an
+//     ordinary start (legacy), such an answer is taken on those two conditions, as before this
+//     check existed; nothing is committed or rolled back on it.
+//   - Docker: the containers are compose's, and the answer is accepted as it always was. Docker mode
+//     is not upgraded or updated by the launcher (UPDATES.md), which is where this would matter.
+//
+// With nothing expected on a port, waitReady refuses: it has nothing to recognise an answer by.
+type bootExpectation struct {
+	id          string
+	anyAnswer   bool
+	legacy      bool // an ordinary start, which may take an app without the header (see above)
+	portWasFree bool
+	alive       func() bool
+}
+
+const bootHeader = "X-Daedalus-Boot"
+
+var (
+	bootMu   sync.Mutex
+	expected = map[string]bootExpectation{}
+)
+
+func expectBoot(port string, e bootExpectation) {
+	bootMu.Lock()
+	expected[port] = e
+	bootMu.Unlock()
+}
+
+func expectation(port string) (bootExpectation, bool) {
+	bootMu.Lock()
+	defer bootMu.Unlock()
+	e, ok := expected[port]
+	return e, ok
+}
+
+// ours decides whether one answer came from the stack this launcher started.
+func (e bootExpectation) ours(response *http.Response) (bool, string) {
+	if e.anyAnswer {
+		return true, ""
+	}
+	got := response.Header.Get(bootHeader)
+	switch {
+	case got == e.id && got != "":
+		return true, ""
+	case got != "":
+		return false, "answered by a stack this launcher did not start (another boot id)"
+	case e.legacy && e.portWasFree && e.alive != nil && e.alive():
+		return true, ""
+	}
+	return false, "answered without this start's boot id, so the answer cannot be tied to the stack this launcher started"
+}
+
 func waitReady(ctx context.Context, port string, timeout, interval time.Duration) error {
 	url := "http://127.0.0.1:" + port + "/app"
+	want, ok := expectation(port)
+	if !ok {
+		return fmt.Errorf("nothing this launcher started is expected on port %s, so an answer there would not be this installation's stack", port)
+	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	deadline := time.Now().Add(timeout)
 	last := "no answer"
@@ -62,9 +128,14 @@ func waitReady(ctx context.Context, port string, timeout, interval time.Duration
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
-				return nil
+				mine, why := want.ours(resp)
+				if mine {
+					return nil
+				}
+				last = why
+			} else {
+				last = resp.Status
 			}
-			last = resp.Status
 		}
 		select {
 		case <-ctx.Done():

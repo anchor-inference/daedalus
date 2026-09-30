@@ -51,6 +51,13 @@ type App struct {
 	// means running a command inside the container, which is far too slow for every status poll.
 	changeNotice ChangeNotice
 	changeAt     time.Time
+
+	// lock is the installation lock while this process is the launcher running the stack.
+	lock *InstallLock
+
+	// offer is a newer launcher release the check found (release.go), or nil. The launcher only
+	// tells: `daedalus-desktop upgrade` is what installs it, after a yes and a checked backup.
+	offer *Offer
 }
 
 // logLimit is how much of the running commentary the page keeps. It is a progress view, not a log
@@ -238,6 +245,8 @@ func (a *App) start(ctx context.Context) error {
 	}
 	a.enter(StageStart)
 	a.log("waiting for the app to answer")
+	// Compose owns the containers, and their answer is taken as it always was (ready.go).
+	expectBoot(APIPort(a.paths), bootExpectation{anyAnswer: true})
 	if err := WaitReady(ctx, APIPort(a.paths), readyTimeout); err != nil {
 		return err
 	}
@@ -276,7 +285,8 @@ func (a *App) stop(ctx context.Context) error {
 	if a.Native() {
 		a.log("stopping the agent")
 		a.native.Stop(ctx)
-		return nil
+		// And what a launcher that died left running, which no Process of this one knows about.
+		return StopOrphans(ctx, a.paths, a.log)
 	}
 	if err := CheckDocker(ctx); err != nil {
 		return err
@@ -422,17 +432,21 @@ func (a *App) RunRestart(ctx context.Context, id string) error {
 }
 
 // Update moves both checkouts to what is published, refreshes the images and restarts. The agent's
-// own merged pull requests arrive this way.
+// own merged pull requests arrive this way. It is the command line's `update` and the page's button,
+// and it never changes the stack without a checked backup to go back to (update.go): the app's
+// migrations run on the start that follows, and they are not assumed to be reversible.
 func (a *App) Update(ctx context.Context) error {
 	id, err := a.begin("update")
 	if err != nil {
 		return err
 	}
-	err = a.update(ctx)
+	err = a.safeUpdate(ctx)
 	a.end(id, err)
 	return err
 }
 
+// update is the move itself, with no backup around it. Only safeUpdate and an upgrade's --finish —
+// which each hold a verified backup and a journal — call it.
 func (a *App) update(ctx context.Context) error {
 	if a.Native() {
 		// The processes are stopped first: an update rewrites the tree they are running out of, and
@@ -612,6 +626,9 @@ type Status struct {
 	// Change is the agent's own code: a commit waiting for a restart, or what became of the last
 	// one. Empty unless the stack is running, because the container is what holds the answer.
 	Change ChangeNotice `json:"change"`
+
+	// Upgrade is a newer launcher release, when the check found one.
+	Upgrade *Offer `json:"upgrade,omitempty"`
 }
 
 func (a *App) Status(ctx context.Context) Status {
@@ -631,6 +648,7 @@ func (a *App) Status(ctx context.Context) Status {
 		Stage:      string(a.stage),
 		Done:       a.stageDone,
 		Size:       a.stageSize,
+		Upgrade:    a.offer,
 	}
 	status.Steps = Stages(a.mode)
 	a.mu.Unlock()

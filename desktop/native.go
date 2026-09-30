@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -92,6 +93,8 @@ type Process struct {
 	Env     []string
 	LogPath string
 	Log     func(string, ...any)
+	// PidFile is where the running child is recorded (orphans.go), or empty for none.
+	PidFile string
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
@@ -186,7 +189,9 @@ func (pr *Process) runOnce(ctx context.Context) error {
 	pr.starts++
 	pr.mu.Unlock()
 	pr.logf("%s started pid=%d", pr.Name, cmd.Process.Pid)
+	writeChildRecord(pr.PidFile, ChildRecord{Name: pr.Name, PID: cmd.Process.Pid, Program: pr.Argv[0], Started: time.Now().UTC(), IsolatedConsole: runtime.GOOS == "windows"})
 	err := cmd.Wait()
+	removeChildRecord(pr.PidFile, cmd.Process.Pid)
 	if logFile != nil {
 		logFile.Close()
 	}
@@ -272,6 +277,12 @@ type Native struct {
 	ptyd       child
 	browserd   child
 	git        string
+
+	// bootID is the id the running supervisor was given, which the app echoes (ready.go).
+	bootID string
+	// strictHealth is set for the start that ends an upgrade or an update: only an answer carrying
+	// bootID counts (ready.go). An ordinary start also takes an older app's answer without one.
+	strictHealth bool
 
 	// What the progress page is told: which piece of a start this is, and how far through the one
 	// download whose size is known in advance. Both are optional — the command line has no page to
@@ -619,6 +630,10 @@ func quoteArgv(path string) string {
 // Start brings the native installation up: the runtime, the key proxy, the supervisor, and then the
 // wait for the app to answer. Calling it twice is calling it once — the processes are already there.
 func (n *Native) Start(ctx context.Context) error {
+	port, portWasFree, err := n.clearTheWay(ctx)
+	if err != nil {
+		return err
+	}
 	if err := n.Ensure(ctx); err != nil {
 		return err
 	}
@@ -634,16 +649,19 @@ func (n *Native) Start(ctx context.Context) error {
 			Env:     keyproxyEnv(n.paths, base, readEnv(readFile(n.paths.KeyproxyEnv)), settings, home),
 			LogPath: filepath.Join(n.paths.RuntimeLogs, "keyproxy.log"),
 			Log:     n.log,
+			PidFile: filepath.Join(pidsDir(n.paths), "keyproxy.json"),
 		}
 	}
 	if n.supervisor == nil {
+		n.bootID = newBootID()
 		n.supervisor = &Process{
 			Name:    "supervisor",
 			Argv:    []string{n.venvPython(), filepath.Join(n.paths.Bot, "launcher", "supervisor.py")},
 			Dir:     n.paths.Bot,
-			Env:     supervisorEnv(n.paths, base, settings),
+			Env:     append(supervisorEnv(n.paths, base, settings), "DAEDALUS_BOOT_ID="+n.bootID),
 			LogPath: filepath.Join(n.paths.RuntimeLogs, "supervisor.log"),
 			Log:     n.log,
+			PidFile: filepath.Join(pidsDir(n.paths), "supervisor.json"),
 		}
 	}
 	if n.ptyd == nil {
@@ -669,7 +687,36 @@ func (n *Native) Start(ctx context.Context) error {
 	n.supervisor.Start(ctx)
 	n.enter(StageStart)
 	n.log("waiting for the app to answer")
-	return WaitReadyNative(ctx, APIPort(n.paths), nativeReadyTimeout)
+	expectBoot(port, n.expectation(portWasFree))
+	return WaitReadyNative(ctx, port, nativeReadyTimeout)
+}
+
+// expectation is what this start's health check accepts (ready.go): the answer carrying this
+// supervisor's boot id — and, for an ordinary start only, an older app's answer without one.
+func (n *Native) expectation(portWasFree bool) bootExpectation {
+	supervisor := n.supervisor
+	alive := func() bool {
+		running, ok := supervisor.(interface{ Running() bool })
+		return ok && running.Running()
+	}
+	return bootExpectation{id: n.bootID, legacy: !n.strictHealth, portWasFree: portWasFree, alive: alive}
+}
+
+// clearTheWay is the first step of a start: what a launcher that died left running is stopped, and
+// then the app's port has to be free — or an answer on it after the start would not be this start's.
+// A supervisor this launcher already runs is the one exception: Start is idempotent.
+func (n *Native) clearTheWay(ctx context.Context) (string, bool, error) {
+	if err := StopOrphans(ctx, n.paths, n.log); err != nil {
+		return "", false, err
+	}
+	port := APIPort(n.paths)
+	if n.supervisor != nil {
+		return port, true, nil
+	}
+	if portAnswers(port) {
+		return port, false, fmt.Errorf("something this launcher did not start already answers on the app's port %s; stop it (or change API_PORT) and start again", port)
+	}
+	return port, true, nil
 }
 
 // newPtyd is the terminal daemon's process, or nil when this build carries none; then the run
@@ -696,6 +743,7 @@ func (n *Native) newPtyd() child {
 		Env:     ptydEnv(base, n.runtimeTools()),
 		LogPath: filepath.Join(n.paths.RuntimeLogs, "ptyd.log"),
 		Log:     n.log,
+		PidFile: filepath.Join(pidsDir(n.paths), "ptyd.json"),
 	}
 }
 
@@ -966,4 +1014,13 @@ func parsePort(value, fallback string) string {
 		return fallback
 	}
 	return strings.TrimSpace(value)
+}
+
+// newBootID is a fresh random id for one start of the supervisor.
+func newBootID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("t%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }

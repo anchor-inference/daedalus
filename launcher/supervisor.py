@@ -1244,7 +1244,7 @@ async def main() -> int:
         supervisor.want_running = False
         asyncio.ensure_future(supervisor.stop_child())
 
-    for sig in (signal.SIGTERM, signal.SIGINT):
+    for sig in (signal.SIGTERM, signal.SIGINT, *((signal.SIGBREAK,) if hasattr(signal, "SIGBREAK") else ())):
         try:
             loop.add_signal_handler(sig, _terminate)
         except NotImplementedError:

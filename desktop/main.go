@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -50,7 +51,15 @@ commands:
   stop        stop the containers (they stay until started again)
   status      what is configured, what is running
   logs [-f]   the stack's logs
-  update      move both checkouts to what is published, refresh the images, restart
+  update      move both checkouts to what is published and restart, after a checked
+              backup of the data; a failed start puts the data back. Native mode only
+              for now: Docker mode is refused (desktop/UPDATES.md has the manual path)
+  check-update  say whether a newer launcher release is published (installs nothing)
+  upgrade     install a newer launcher release: asks first, stops the stack, backs the
+              data up and checks the backup, replaces the launcher, updates and starts
+              the stack, and puts the data and the launcher back if any of that fails.
+              --yes skips the question; --rollback undoes an upgrade that did not finish.
+              Native mode only for now: Docker mode is refused (desktop/UPDATES.md)
   open        open the app in the browser
   pair        print a fresh pairing link for signing in to the app
   uninstall   remove the containers, networks and volumes
@@ -78,9 +87,14 @@ flags:
   --keep-data uninstall: keep the volumes and the data folder
   -f          logs: follow
   --version   print the version and exit
+  --yes       upgrade: do not ask (the backup and the rollback still happen)
+  --rollback  upgrade: put back the launcher and the data an unfinished upgrade replaced
 `
 
 func main() {
+	if runFixtureStack() {
+		return
+	}
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
@@ -99,6 +113,17 @@ type options struct {
 	follow   bool
 	help     bool
 	version  bool
+
+	// upgrade's flags; --finish is what the old launcher runs the new one with.
+	yes      bool
+	finish   bool
+	rollback bool
+
+	// The bridge an installer runs for an installation whose launcher predates upgrade.
+	bridge  bool
+	root    string
+	archive string
+	sums    string
 }
 
 func run(argv []string) error {
@@ -133,6 +158,20 @@ func run(argv []string) error {
 		// A mode named on the command line of a first run is the choice, not an override for one
 		// run: the launcher would otherwise ask the question again on the next start.
 		if err := StoreMode(paths, opts.mode); err != nil {
+			return err
+		}
+	}
+
+	switch opts.command {
+	case "upgrade":
+		return UpgradeCommand(ctx, app, opts)
+	case "check-update":
+		return CheckUpdateCommand(ctx, paths)
+	case "status", "logs":
+	default:
+		// Starting, stopping or updating on top of an upgrade that neither finished nor was undone
+		// would run one launcher's stack on data the other may have migrated.
+		if err := InterruptedUpgrade(paths); err != nil {
 			return err
 		}
 	}
@@ -213,6 +252,15 @@ func startCommand(ctx context.Context, app *App, opts options) error {
 	if err := app.paths.EnsureDirs(); err != nil {
 		return err
 	}
+	// This launcher runs the stack from now until it exits, and nothing else may change the
+	// installation meanwhile — an upgrade, an update from a terminal, a second launcher whose page
+	// could not be found.
+	lock, err := AcquireLock(app.paths, "launcher")
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+	app.lock = lock
 	// Links are registered with the desktop on a first start, since a folder with an executable in
 	// it has no installer to do it. Nothing depends on it working.
 	if err := RegisterScheme(app.paths); err != nil {
@@ -325,17 +373,27 @@ func bringUp(ctx context.Context, app *App, server *Server, surface *Surface, op
 // way to show a notification says so once and is not asked again. A click the launcher is told
 // about (Linux) brings the surface forward on the thing the notification is about.
 func watch(ctx context.Context, app *App, surface *Surface) {
+	var mu sync.Mutex
 	off := false
 	open := func(link string) { surface.Focus(ctx, link) }
-	app.Watch(ctx, func(n Notification) {
+	show := func(n Notification) error {
+		mu.Lock()
+		defer mu.Unlock()
 		if off {
-			return
+			return errors.New("desktop notifications are off")
 		}
 		if err := Notify(n, open); err != nil {
 			off = true
 			app.log("desktop notifications are off: %v", err)
+			return err
 		}
-	})
+		return nil
+	}
+	// A newer launcher is announced the same way, and only announced: installing it is the
+	// operator's `daedalus-desktop upgrade`, which backs the data up first (upgrade.go). The app
+	// shows it too, in its own notification centre (daedalus/extensions/launcher_updates.py).
+	go app.CheckReleases(ctx, show)
+	app.Watch(ctx, func(n Notification) { _ = show(n) })
 }
 
 // setupCommand asks the questions and stops there, for an operator who wants to change a key
@@ -387,6 +445,28 @@ func parseArgs(argv []string) (options, error) {
 			opts.keepData = true
 		case "-f", "--follow":
 			opts.follow = true
+		case "--yes", "-y":
+			opts.yes = true
+		case "--finish":
+			opts.finish = true
+		case "--rollback":
+			opts.rollback = true
+		case "--bridge":
+			opts.bridge = true
+		case "--root", "--archive", "--sums":
+			value, err := next()
+			if err != nil {
+				return opts, err
+			}
+			switch arg {
+			case "--root":
+				opts.root = value
+			case "--archive":
+				opts.archive = value
+			default:
+				opts.sums = value
+			}
+
 		case "--data":
 			data, err := next()
 			if err != nil {
