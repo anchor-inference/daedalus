@@ -95,7 +95,10 @@ function BriefCard({ projectId, section, toast }: { projectId: string; section: 
 // ── the journal ──────────────────────────────────────────────────────────────────────────────
 
 const JOURNAL_PAGE = 30;
-export const JOURNAL_KINDS = ["note", "decision", "plan", "answer", "reassignment", "report", "grant", "hire", "dismiss", "folder", "escalation", "replacement", "brief", "watch"];
+export const JOURNAL_KINDS = ["note", "decision", "plan", "answer", "reassignment", "report", "grant", "hire", "dismiss", "folder", "escalation", "replacement", "brief", "watch", "rule", "rule_lifted"];
+/** The longest rule the host keeps (``RULE_TEXT_MAX``): a rule is an instruction, not a document. */
+const RULE_MAX = 600;
+type JournalPage = { entries: JournalEntry[]; next_before: number | null; rules?: JournalEntry[] };
 
 export function JournalPage({ projectId, back, toast }: { projectId: string; back?: string | null; toast: (text: string) => void }) {
   const { project } = useProject(projectId);
@@ -103,12 +106,14 @@ export function JournalPage({ projectId, back, toast }: { projectId: string; bac
   const usage = useUsage(projectId);
   const orchestratorSpend = spendLine(usage?.orchestrator);
   const first = `${journalKey(projectId)}?limit=${JOURNAL_PAGE}`;
-  const { data, error, refresh } = useQuery<{ entries: JournalEntry[]; next_before: number | null }>(first, { pollMs: 30000, staleMs: 5000 });
+  const { data, error, refresh } = useQuery<JournalPage>(first, { pollMs: 30000, staleMs: 5000 });
   const [older, setOlder] = useState<JournalEntry[]>([]);
   const [next, setNext] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [note, setNote] = useState("");
+  const [asRule, setAsRule] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [lifting, setLifting] = useState<number | null>(null);
   useEffect(() => {
     setOlder([]);
     setNext(data?.next_before ?? null);
@@ -117,7 +122,7 @@ export function JournalPage({ projectId, back, toast }: { projectId: string; bac
     if (next === null) return;
     setLoadingMore(true);
     try {
-      const page = await api.get<{ entries: JournalEntry[]; next_before: number | null }>(`${journalKey(projectId)}?limit=${JOURNAL_PAGE}&before=${next}`);
+      const page = await api.get<JournalPage>(`${journalKey(projectId)}?limit=${JOURNAL_PAGE}&before=${next}`);
       setOlder((held) => [...held, ...page.entries]);
       setNext(page.next_before);
     } catch (e) {
@@ -131,9 +136,10 @@ export function JournalPage({ projectId, back, toast }: { projectId: string; bac
     if (!text) return;
     setBusy(true);
     try {
-      await api.post(journalKey(projectId), { text });
+      await api.post(journalKey(projectId), asRule ? { text, kind: "rule" } : { text });
       setNote("");
-      toast(t("focus.journal.added"));
+      setAsRule(false);
+      toast(t(asRule ? "focus.rules.added" : "focus.journal.added"));
       invalidate(journalKey(projectId));
     } catch (e) {
       toast(errorText(e));
@@ -141,6 +147,19 @@ export function JournalPage({ projectId, back, toast }: { projectId: string; bac
       setBusy(false);
     }
   }
+  async function lift(rule: JournalEntry) {
+    setLifting(rule.id);
+    try {
+      await api.post(`${journalKey(projectId)}/${rule.id}/lift`, {});
+      toast(t("focus.rules.lifted"));
+      invalidate(journalKey(projectId));
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      setLifting(null);
+    }
+  }
+  const rules = data?.rules ?? [];
   const entries = [...(data?.entries ?? []), ...older];
   const names = new Map((team?.staff ?? []).map((m) => [m.id, m.name]));
   const titles = new Map((board?.tasks ?? []).map((task) => [task.id, task.title]));
@@ -154,9 +173,35 @@ export function JournalPage({ projectId, back, toast }: { projectId: string; bac
             {orchestratorSpend && <span className="sub">{t("pusage.orchestrator", { line: orchestratorSpend })}</span>}
           </div>
         )}
+        {rules.length > 0 && (
+          <section className="journal-rules" aria-label={t("focus.rules.title")}>
+            <div className="journal-rules-head">
+              <span className="journal-rules-title">{t("focus.rules.title")}</span>
+              <span className="sub">{t("focus.rules.hint")}</span>
+            </div>
+            <ol className="journal-list">
+              {rules.map((rule) => (
+                <li key={rule.id} className="journal-rule">
+                  <div className="journal-meta">
+                    <span className={`chip tiny author ${rule.author}`}>{t(`focus.author.${rule.author}`)}</span>
+                    <span className="journal-kind num">#{rule.id}</span>
+                    <span className="grow" />
+                    <time className="journal-time num" dateTime={rule.at} title={absTime(rule.at)}>{relTime(rule.at)}</time>
+                    <button className="btn small ghost" disabled={lifting === rule.id} onClick={() => void lift(rule)}>{t("focus.rules.lift")}</button>
+                  </div>
+                  <div className="journal-text">{rule.text}</div>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
         <form className="journal-note" onSubmit={(e) => { e.preventDefault(); void add(); }}>
-          <textarea className="field" rows={2} value={note} maxLength={4000} placeholder={t("focus.journal.placeholder")} aria-label={t("focus.journal.placeholder")} onChange={(e) => setNote(e.target.value)} />
-          <button className="btn small primary" type="submit" disabled={busy || !note.trim()}>{t("focus.journal.add")}</button>
+          <textarea className="field" rows={2} value={note} maxLength={asRule ? RULE_MAX : 4000} placeholder={t(asRule ? "focus.rules.placeholder" : "focus.journal.placeholder")} aria-label={t(asRule ? "focus.rules.placeholder" : "focus.journal.placeholder")} onChange={(e) => setNote(e.target.value)} />
+          <button className="btn small primary" type="submit" disabled={busy || !note.trim()}>{t(asRule ? "focus.rules.add" : "focus.journal.add")}</button>
+          <label className="toggle-row journal-as-rule">
+            <input type="checkbox" checked={asRule} onChange={(e) => setAsRule(e.target.checked)} />
+            <span>{t("focus.rules.as")}</span>
+          </label>
         </form>
         {!data && !error && <Skeleton rows={4} />}
         {error && !data && <div className="empty"><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
@@ -167,6 +212,7 @@ export function JournalPage({ projectId, back, toast }: { projectId: string; bac
               <div className="journal-meta">
                 <span className={`chip tiny author ${entry.author}`}>{t(`focus.author.${entry.author}`)}</span>
                 <span className="journal-kind">{JOURNAL_KINDS.includes(entry.kind) ? t(`focus.kind.${entry.kind}`) : entry.kind}</span>
+                {entry.lifted && <span className="chip tiny">{t("focus.rules.liftedChip")}</span>}
                 <span className="grow" />
                 <time className="journal-time num" dateTime={entry.at} title={absTime(entry.at)}>{relTime(entry.at)}</time>
               </div>

@@ -240,6 +240,30 @@ async def test_the_journal_takes_a_note_and_pages_newest_first(running: Any, tmp
     assert (await client.get("/api/projects/nope/journal", headers=HEADERS)).status_code == 404
 
 
+async def test_the_operator_makes_and_lifts_rules_and_every_page_carries_those_in_force(running: Any, tmp_path: Path) -> None:
+    _, client = running
+    pid = (await client.post("/api/projects", headers=HEADERS, json={"name": "Bakery", "folders": [{"path": str(tmp_path / "site")}]})).json()["id"]
+    rule = (await client.post(f"/api/projects/{pid}/journal", headers=HEADERS, json={"text": " Hand out work the moment a member is free. ", "kind": "rule"})).json()
+    assert (rule["kind"], rule["author"], rule["text"]) == ("rule", "operator", "Hand out work the moment a member is free.")
+    for n in range(3):
+        await client.post(f"/api/projects/{pid}/journal", headers=HEADERS, json={"text": f"note {n}"})
+    page = (await client.get(f"/api/projects/{pid}/journal", headers=HEADERS, params={"limit": 2})).json()
+    assert [r["id"] for r in page["rules"]] == [rule["id"]] and rule["id"] not in [e["id"] for e in page["entries"]]
+
+    too_long = await client.post(f"/api/projects/{pid}/journal", headers=HEADERS, json={"text": "x" * 601, "kind": "rule"})
+    assert too_long.status_code == 400 and "a rule is at most 600 characters" in too_long.json()["detail"]
+    assert (await client.post(f"/api/projects/{pid}/journal", headers=HEADERS, json={"text": "x", "kind": "decision"})).status_code == 422
+
+    lifted = await client.post(f"/api/projects/{pid}/journal/{rule['id']}/lift", headers=HEADERS, json={"why": "the team is small now"})
+    assert lifted.status_code == 200 and lifted.json()["kind"] == "rule_lifted" and lifted.json()["refs"] == {"rule_id": rule["id"]}
+    page = (await client.get(f"/api/projects/{pid}/journal", headers=HEADERS, params={"limit": 50})).json()
+    assert page["rules"] == [] and next(e for e in page["entries"] if e["id"] == rule["id"])["lifted"] is True
+    again = await client.post(f"/api/projects/{pid}/journal/{rule['id']}/lift", headers=HEADERS, json={})
+    assert again.status_code == 400 and "was lifted already" in again.json()["detail"]
+    note_id = page["entries"][0]["id"]
+    assert (await client.post(f"/api/projects/{pid}/journal/{note_id}/lift", headers=HEADERS, json={})).status_code == 400
+
+
 def test_who_can_reach_a_folder(tmp_path: Path) -> None:
     def folder(env: str) -> ProjectFolder:
         return ProjectFolder(id="f", project_id="p", path=tmp_path, label="", env=env, is_git=False, readonly=False, position=0, created_at=datetime.now(UTC))

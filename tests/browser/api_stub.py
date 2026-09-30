@@ -809,7 +809,7 @@ class FocusStub:
     orchestrator stay in English, as the host writes them.
     """
 
-    def __init__(self, *, projects: list[dict], listing: dict, details: dict[str, dict], team: TeamStub, board: BoardStub, others: list[TeamStub | BoardStub] | None = None, asks: list[dict], brief: list[dict], journal: list[dict], schedules: list[dict], wakeups: list[dict] | None = None, watches: list[dict] | None = None, terminals: list[dict], messages: dict[str, list[dict]]) -> None:
+    def __init__(self, *, projects: list[dict], listing: dict, details: dict[str, dict], team: TeamStub, board: BoardStub, others: list[TeamStub | BoardStub] | None = None, asks: list[dict], brief: list[dict], journal: list[dict], schedules: list[dict], rules: list[dict] | None = None, wakeups: list[dict] | None = None, watches: list[dict] | None = None, terminals: list[dict], messages: dict[str, list[dict]]) -> None:
         self.projects = projects
         self.listing = listing
         self.details = details
@@ -819,6 +819,11 @@ class FocusStub:
         self.asks = asks
         self.brief = brief
         self.journal = journal
+        self.rules: list[dict] = list(rules or [])
+        """The operator's rules in force, pinned over the journal; ``ruled`` and ``lifted`` are what the page
+        made and lifted."""
+        self.ruled: list[str] = []
+        self.lifted: list[int] = []
         self.schedules = schedules
         self.wakeups = wakeups or []
         self.woken: list[dict] = []
@@ -930,17 +935,33 @@ class FocusStub:
                     section.update(body=payload.get("body", ""), updated_by="operator", updated_at="2026-09-24T10:00:00Z")
                 return 200, section or {}
             return 200, {"sections": self.brief}
+        if path.startswith("/api/projects/") and "/journal/" in path and path.endswith("/lift") and method == "POST":
+            rule_id = int(path.split("/")[-2])
+            rule = next((r for r in self.rules if r["id"] == rule_id), None)
+            if rule is None:
+                return 400, {"detail": f"entry #{rule_id} is not a rule of this project"}
+            self.rules.remove(rule)
+            self.lifted.append(rule_id)
+            entry = {"id": max((e["id"] for e in self.journal), default=0) + 1, "at": "2026-09-24T10:00:00Z", "author": "operator", "kind": "rule_lifted", "text": f"Lifted rule #{rule_id}", "refs": {"rule_id": rule_id}}
+            self.journal.insert(0, entry)
+            return 200, entry
         if path.startswith("/api/projects/") and path.endswith("/journal"):
             if method == "POST":
                 text = str((body or {}).get("text", ""))
-                self.notes.append(text)
-                entry = {"id": max((e["id"] for e in self.journal), default=0) + 1, "at": "2026-09-24T10:00:00Z", "author": "operator", "kind": "note", "text": text, "refs": {}}
+                kind = str((body or {}).get("kind") or "note")
+                if kind == "rule":
+                    self.ruled.append(text)
+                else:
+                    self.notes.append(text)
+                entry = {"id": max((e["id"] for e in [*self.journal, *self.rules]), default=0) + 1, "at": "2026-09-24T10:00:00Z", "author": "operator", "kind": kind, "text": text, "refs": {}}
                 self.journal.insert(0, entry)
+                if kind == "rule":
+                    self.rules.append(entry)
                 return 200, entry
             limit = int(params.get("limit", "50"))
             before = int(params["before"]) if params.get("before") else None
             rows = [e for e in self.journal if before is None or e["id"] < before][:limit]
-            return 200, {"entries": rows, "next_before": rows[-1]["id"] if len(rows) == limit else None}
+            return 200, {"entries": rows, "next_before": rows[-1]["id"] if len(rows) == limit else None, "rules": self.rules}
         if path == "/api/schedules" and method == "GET":
             return 200, self.schedules
         if path.startswith("/api/projects/") and "/watches" in path:
@@ -1372,7 +1393,8 @@ class FocusStub:
         listing = {"sessions": sessions, "projects": folders_listed}
         # The project without an orchestrator has a team and a board of its own, both empty.
         others: list[TeamStub | BoardStub] = [TeamStub(garden_project), BoardStub(garden_project)]
-        return cls(projects=projects, listing=listing, details=details, team=team, board=board, others=others, asks=asks, brief=brief, journal=journal, schedules=schedules, wakeups=wakeups, watches=watches, terminals=terminals, messages=messages)
+        rules = [{"id": 120, "at": "2026-09-24T08:30:00Z", "author": "operator", "kind": "rule", "text": words["journal.rule"], "refs": {}}]
+        return cls(projects=projects, listing=listing, details=details, team=team, board=board, others=others, asks=asks, brief=brief, journal=journal, schedules=schedules, rules=rules, wakeups=wakeups, watches=watches, terminals=terminals, messages=messages)
 
 
 def health(at, *, tools: str, silent: bool = False) -> dict:  # type: ignore[no-untyped-def]
@@ -1554,6 +1576,7 @@ FOCUS_WORDS: dict[str, dict[str, str]] = {
         "brief.constraints": "No new services; the bot runs on the host.", "brief.done": "A test order reaches the baker's chat.",
         "brief.notes": "Max's endpoint is merged before Naya starts.",
         "journal.decision": "The bot waits for the endpoint: one contract, not two.", "journal.note": "Remember the Friday price change.",
+        "journal.rule": "When a member reports and another is free, hand out the next step at once; never leave free hands idle.",
         "wake.name": "Check the checkout", "wake.note": "Look at Ira's checkout after lunch",
         "ira.task": "Task: the checkout page. Cart → promo code → payment. Done when checkout.test.tsx is green. Do not touch api/.",
         "ira.reply1": "The discount was taken from the total with delivery. Fixed in `cart.ts`; the checkout tests pass.",
@@ -1583,6 +1606,7 @@ FOCUS_WORDS: dict[str, dict[str, str]] = {
         "brief.constraints": "Без новых сервисов; бот работает на хосте.", "brief.done": "Тестовый заказ доходит до чата пекаря.",
         "brief.notes": "Эндпоинт Макса сливается до того, как начнёт Ная.",
         "journal.decision": "Бот ждёт эндпоинт: один контракт, а не два.", "journal.note": "Не забыть про смену цен в пятницу.",
+        "journal.rule": "Когда сотрудник отчитался, а другой свободен, сразу поручай следующий шаг; свободные руки не должны простаивать.",
         "wake.name": "Проверить оформление заказа", "wake.note": "После обеда посмотреть оформление заказа у Иры",
         "ira.task": "Задача: страница оформления заказа. Корзина → промокод → оплата. Готово, когда checkout.test.tsx зелёный. Не трогать api/.",
         "ira.reply1": "Скидка считалась от суммы с доставкой. Исправлено в `cart.ts`; тесты оформления проходят.",

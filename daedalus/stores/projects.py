@@ -32,6 +32,18 @@ bounded by this section, so an orchestrator able to edit it could grant itself a
 BRIEF_AUTHORS = ("operator", "orchestrator", "system")
 JOURNAL_AUTHORS = ("orchestrator", "operator", "system")
 JOURNAL_PAGE_MAX = 200
+RULE_KIND = "rule"
+"""A journal entry that is a standing rule of the operator's: in force until an entry of
+``RULE_LIFTED_KIND`` names it, shown whole to the orchestrator every turn and to every member with
+each task."""
+RULE_LIFTED_KIND = "rule_lifted"
+RULE_TEXT_MAX = 600
+"""A rule is an instruction, not a document: what it needs is in the brief or the journal."""
+RULES_MAX = 10
+RULES_CHARS = 1500
+"""How many rules, and how much of them, may be in force at once. Bounded when a rule is written
+rather than when one is shown, so every rule in force is always shown whole: a cut at shown time is
+what hid the operator's instruction in the first place."""
 
 
 class ProjectError(ValueError):
@@ -262,6 +274,14 @@ class JournalEntry:
 
     def view(self) -> dict[str, Any]:
         return {"id": self.id, "at": self.at, "author": self.author, "kind": self.kind, "text": self.text, "refs": self.refs}
+
+
+def _entry(row: Any) -> JournalEntry:
+    try:
+        refs = json.loads(row["refs_json"] or "{}")
+    except (TypeError, ValueError):
+        refs = {}
+    return JournalEntry(int(row["id"]), row["project_id"], row["at"], row["author"], row["kind"], row["text"], refs if isinstance(refs, dict) else {})
 
 
 def _is_managed(path: Path, managed_root: Path | None) -> bool:
@@ -1024,21 +1044,60 @@ class ProjectStore:
             await cursor.close()
         return JournalEntry(entry_id, project_id, at, author, kind, text, refs)
 
-    async def journal(self, project_id: str, *, before: int | None = None, limit: int = 50) -> list[JournalEntry]:
-        """Newest first, one page; ``before`` is the id of the oldest entry already shown."""
+    async def journal(self, project_id: str, *, before: int | None = None, limit: int = 50, kind: str | None = None) -> list[JournalEntry]:
+        """Newest first, one page; ``before`` is the id of the oldest entry already shown, ``kind``
+        keeps only the entries of that kind."""
         limit = max(1, min(int(limit), JOURNAL_PAGE_MAX))
-        if before is None:
-            rows = await self._db.fetchall("SELECT * FROM project_journal WHERE project_id = ? ORDER BY id DESC LIMIT ?", (project_id, limit))
-        else:
-            rows = await self._db.fetchall("SELECT * FROM project_journal WHERE project_id = ? AND id < ? ORDER BY id DESC LIMIT ?", (project_id, int(before), limit))
-        out = []
-        for r in rows:
-            try:
-                refs = json.loads(r["refs_json"] or "{}")
-            except (TypeError, ValueError):
-                refs = {}
-            out.append(JournalEntry(int(r["id"]), r["project_id"], r["at"], r["author"], r["kind"], r["text"], refs if isinstance(refs, dict) else {}))
-        return out
+        where, args = "project_id = ?", [project_id]
+        if before is not None:
+            where, args = where + " AND id < ?", [*args, int(before)]
+        if kind:
+            where, args = where + " AND kind = ?", [*args, kind]
+        rows = await self._db.fetchall(f"SELECT * FROM project_journal WHERE {where} ORDER BY id DESC LIMIT ?", (*args, limit))  # noqa: S608 — the clauses are this method's own
+        return [_entry(r) for r in rows]
+
+    async def rules(self, project_id: str) -> list[JournalEntry]:
+        """The operator's rules in force, oldest first: every rule no lifting names.
+
+        Lifting is an entry of its own rather than a mark on the rule, so the journal stays a record
+        of what happened, in order, and needs no column for it."""
+        rows = await self._db.fetchall(
+            "SELECT * FROM project_journal WHERE project_id = ? AND kind = ? AND id NOT IN ("
+            "SELECT CAST(json_extract(refs_json, '$.rule_id') AS INTEGER) FROM project_journal WHERE project_id = ? AND kind = ?"
+            ") ORDER BY id",
+            (project_id, RULE_KIND, project_id, RULE_LIFTED_KIND),
+        )
+        return [_entry(r) for r in rows]
+
+    async def lifted_rules(self, project_id: str) -> set[int]:
+        rows = await self._db.fetchall("SELECT json_extract(refs_json, '$.rule_id') AS rule_id FROM project_journal WHERE project_id = ? AND kind = ?", (project_id, RULE_LIFTED_KIND))
+        return {int(r["rule_id"]) for r in rows if r["rule_id"] is not None}
+
+    async def add_rule(self, project_id: str, author: str, text: str) -> JournalEntry:
+        """Write a standing rule, within the bounds that keep every rule in force on show."""
+        body = (text or "").strip()
+        if not body:
+            raise ProjectError("a rule needs its text")
+        if len(body) > RULE_TEXT_MAX:
+            raise ProjectError(f"a rule is at most {RULE_TEXT_MAX} characters: say the instruction, and keep the detail in the brief or a note")
+        standing = await self.rules(project_id)
+        if len(standing) >= RULES_MAX:
+            raise ProjectError(f"{len(standing)} rules are in force already, the most there may be: lift one, or fold two into one, first")
+        if sum(len(r.text) for r in standing) + len(body) > RULES_CHARS:
+            raise ProjectError(f"the rules in force would come to more than {RULES_CHARS} characters with this one: lift one, or say them shorter, first")
+        return await self.record(project_id, author, RULE_KIND, body)
+
+    async def lift_rule(self, project_id: str, rule_id: int, author: str, why: str = "") -> tuple[JournalEntry, JournalEntry]:
+        """Take a rule out of force; the rule and the entry that lifts it."""
+        row = await self._db.fetchone("SELECT * FROM project_journal WHERE id = ? AND project_id = ?", (int(rule_id), project_id))
+        if row is None or row["kind"] != RULE_KIND:
+            raise ProjectError(f"entry #{rule_id} is not a rule of this project")
+        rule = _entry(row)
+        if rule.id in await self.lifted_rules(project_id):
+            raise ProjectError(f"rule #{rule.id} was lifted already")
+        said = " ".join(rule.text.split())
+        text = f"Lifted rule #{rule.id}: {said[:200]}{'…' if len(said) > 200 else ''}" + (f"\nWhy: {why.strip()}" if why.strip() else "")
+        return rule, await self.record(project_id, author, RULE_LIFTED_KIND, text, {"rule_id": rule.id})
 
     # -- the link to sessions ------------------------------------------------------
 
@@ -1098,5 +1157,10 @@ __all__ = [
     "ProjectFolder",
     "ProjectSettings",
     "ProjectStore",
+    "RULES_CHARS",
+    "RULES_MAX",
+    "RULE_KIND",
+    "RULE_LIFTED_KIND",
+    "RULE_TEXT_MAX",
     "normalise_root",
 ]

@@ -92,7 +92,10 @@ class Dispatches:
         refs = await self._share(files, project.id, dispatch.id)
         await self.manager.projects.record(
             project.id, "system", "dispatch",
-            f"The main orchestrator handed over dispatch {dispatch.id} (#{dispatch.seq}){': ' + dispatch.title if dispatch.title else ''}: {_one_line(dispatch.text, 600)}"
+            # Named, not quoted: the text is the dispatch's own, whole, one Peek away, and a quote cut to
+            # fit the journal was taken for the whole request.
+            f"The main orchestrator handed over dispatch {dispatch.id} (#{dispatch.seq}){': ' + dispatch.title if dispatch.title else ''}, "
+            f"{len(dispatch.text)} characters; Peek(op='dispatch', ref='{dispatch.id}') reads it whole"
             + (f" — files: {', '.join(f.short() for f in files)}" if files else ""),
             {"dispatch_id": dispatch.id, **({"files": [r["id"] for r in refs]} if refs else {})},
         )
@@ -283,7 +286,7 @@ class Dispatches:
         dispatches = [d for d in await self.store.recent(project_id=project.id, limit=40) if d.status in ("open", "blocked")]
         if not dispatches:
             return lines, ""
-        lines.append("Dispatches from the main orchestrator (close each with exactly one ProjectReport(dispatch_id=…, kind=done|blocked)):")
+        lines.append("Dispatches from the main orchestrator (close each with exactly one ProjectReport(dispatch_id=…, kind=done|blocked); Peek(op='dispatch', ref=…) reads one whole):")
         last = await self.store.last_messages([d.id for d in dispatches])
         for dispatch in sorted(dispatches, key=lambda d: d.seq)[:STATE_LINES]:
             said = last.get(dispatch.id)

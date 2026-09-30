@@ -55,6 +55,30 @@ async def test_a_dispatch_wakes_the_project_orchestrator_at_once_and_its_state_l
         await r.manager.close()
 
 
+async def test_a_long_dispatch_reaches_the_orchestrator_whole_and_can_be_read_again(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """A dispatch was cut at 600 characters in the wake-up and in the journal, and nothing gave the rest."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        dispatches = install(r)
+        sid = await office(r)
+        text = "\n".join(f"{n}. The section needs item {n} checked against the supplier's list, with the price." for n in range(1, 16))
+        assert len(text) > 1000
+        dispatch = await dispatches.create(await r.refreshed(), text=text, title="Menu audit", from_session="main")
+        [created] = await events(r.manager, "dispatch.created")
+        line = await r.orch.line(await r.refreshed(), created)
+        assert "15. The section needs item 15 checked" in line and "…" not in line
+
+        [entry] = [e for e in await r.manager.projects.journal(r.project.id) if e.kind == "dispatch"]
+        assert f"{len(text)} characters; Peek(op='dispatch', ref='{dispatch.id}') reads it whole" in entry.text and "1. The section" not in entry.text
+        await r.call(sid, "project_report", text="Ten items checked", kind="progress", dispatch_id=dispatch.id)
+        said = await r.call(sid, "peek", op="dispatch", ref=dispatch.id)
+        assert said.startswith(f"dispatch {dispatch.id} (#1), open, from ") and text in said and "orchestrator (progress): Ten items checked" in said
+        with pytest.raises(Refused, match="has no dispatch 'dzzzzz'"):
+            await r.call(sid, "peek", op="dispatch", ref="dzzzzz")
+    finally:
+        await r.manager.close()
+
+
 async def test_a_progress_report_is_a_message_and_a_done_report_closes_the_dispatch_once(settings: Settings, db: Database, tmp_path: Path) -> None:
     r = await rig(settings, db, tmp_path)
     try:

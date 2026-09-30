@@ -152,6 +152,16 @@ strongest preset; the model chip in its chat changes the project's choice. In `G
 such a project carries `orchestrator: {"enabled", "session_id", "staff", "working", "needs_you"}`
 (null for a project without one), and `GET /api/sessions/{id}` names what a session is to its
 project: `orchestrator_of` (the project's id) or `staff` (`{"id", "session_id"}`).
+
+**Your rules for a project.** A standing instruction — "whenever X, do Y", "never Z" — is a rule, not
+a line of the brief: `POST /api/projects/{id}/journal` with `{"text", "kind": "rule"}` makes one (at
+most 600 characters; at most ten rules and 1500 characters in force at once, so all of them are always
+shown), and `POST /api/projects/{id}/journal/{entry}/lift` (`{"why"}`, optional) takes one out of
+force. The orchestrator records what you tell it in its chat the same way, with `Journal(kind="rule")`.
+Every rule in force is shown whole in the orchestrator's state block every turn and in the brief of
+every task a member is handed, and the members at work on a task are told when a rule is made or
+lifted. `GET …/journal` carries the rules in force as `rules` beside every page, and the entry of a
+lifted rule has `lifted: true`.
 It asks in batches — `AskOperator(questions=[{title, text, options, multi, …}])` — and takes back what
 no longer matters with `WithdrawQuestions(ids, reason)`. What waits for you is a list in the Questions
 tab of the panel beside its chat (a sheet behind the header's button on a phone), staff waiting on a

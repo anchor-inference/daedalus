@@ -18,7 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from daedalus.extensions import questions, wakeups
 from daedalus.extensions.project_usage import ProjectUsage
 from daedalus.extensions.watches import WatchRefused
-from daedalus.stores.projects import FolderSpec, Project, ProjectError, ProjectFolder, ProjectSettings
+from daedalus.host import prompts
+from daedalus.stores.projects import RULE_KIND, FolderSpec, Project, ProjectError, ProjectFolder, ProjectSettings
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -112,6 +113,14 @@ class JournalNote(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(max_length=JOURNAL_NOTE_MAX_CHARS)
+    kind: Literal["note", "rule"] = "note"
+    """A note, or a standing rule the orchestrator and every member are shown until it is lifted."""
+
+
+class RuleLift(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    why: str = Field(default="", max_length=1000)
 
 
 class OrchestratorBody(BaseModel):
@@ -404,7 +413,17 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         await existing(project_id)
         entries = await manager.projects.journal(project_id, before=before, limit=limit)
         wanted = max(1, min(int(limit), 200))
-        return {"entries": [e.view() for e in entries], "next_before": entries[-1].id if len(entries) == wanted else None}
+        lifted = await manager.projects.lifted_rules(project_id)
+        views = [{**e.view(), "lifted": True} if e.kind == RULE_KIND and e.id in lifted else e.view() for e in entries]
+        # The rules in force ride with every page: the page shows them pinned above the entries,
+        # whichever page of the journal the entries are.
+        rules = [r.view() for r in await manager.projects.rules(project_id)]
+        return {"entries": views, "next_before": entries[-1].id if len(entries) == wanted else None, "rules": rules}
+
+    async def tell_the_team(project_id: str, text: str) -> None:
+        team = app.extensions.get("staff")
+        if team is not None:
+            await team.announce_rule(project_id, text, by="operator")
 
     @api.post("/api/projects/{project_id}/journal")
     async def post_journal(project_id: str, body: JournalNote, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -412,7 +431,25 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         text = body.text.strip()
         if not text:
             raise HTTPException(400, "a note needs some text")
-        entry = await manager.projects.record(project_id, "operator", "note", text)
+        if body.kind == RULE_KIND:
+            try:
+                entry = await manager.projects.add_rule(project_id, "operator", text)
+            except ProjectError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            await tell_the_team(project_id, prompts.STAFF_RULE_ADDED.format(text=entry.text))
+        else:
+            entry = await manager.projects.record(project_id, "operator", "note", text)
+        await manager.bus.publish("project.changed", {"change": "journal", "actor": "operator"}, project_id=project_id)
+        return entry.view()
+
+    @api.post("/api/projects/{project_id}/journal/{rule_id}/lift")
+    async def lift_rule(project_id: str, rule_id: int, body: RuleLift, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        await existing(project_id)
+        try:
+            rule, entry = await manager.projects.lift_rule(project_id, rule_id, "operator", body.why)
+        except ProjectError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        await tell_the_team(project_id, prompts.STAFF_RULE_LIFTED.format(text=rule.text))
         await manager.bus.publish("project.changed", {"change": "journal", "actor": "operator"}, project_id=project_id)
         return entry.view()
 

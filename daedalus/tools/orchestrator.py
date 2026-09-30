@@ -94,11 +94,16 @@ async def folders(
     description=(
         "The project's journal, which survives compaction and restarts. op='write' (default): text, why (the reason), "
         "kind (decision, plan, answer, reassignment, note …). Record every decision the operator would want to find "
-        "later. op='read': newest first, limit entries, before=<id> for older ones."
+        "later. kind='rule' records a standing instruction of the operator's ('whenever X, do Y'), in their words: "
+        "it is shown whole in every turn's state block and given to every member with each task until "
+        "op='lift' with rule=<its id> takes it out of force. op='read': newest first, limit entries, before=<id> "
+        "for older ones, kind to read only one kind."
     ),
 )
-async def journal(context: ToolContext, op: str = "write", text: str = "", why: str = "", kind: str = "decision", before: int | None = None, limit: int = 20) -> ToolResult:
-    return await _call(context, "journal", op=op, text=text, why=why, kind=kind, before=before, limit=limit)
+async def journal(
+    context: ToolContext, op: str = "write", text: str = "", why: str = "", kind: str = "", rule: int | None = None, before: int | None = None, limit: int = 20,
+) -> ToolResult:
+    return await _call(context, "journal", op=op, text=text, why=why, kind=kind, rule=rule, before=before, limit=limit)
 
 
 @search_hint(
@@ -162,7 +167,8 @@ async def tasks(
         "Look into the project's files, read-only, when you must check something yourself. op: 'read' (path, offset, "
         "limit lines), 'ls' (path), 'find' (glob pattern), 'search' (regex pattern), 'git_log' (ref, path, limit), "
         "'git_diff' (ref or range such as main..agent/ira/t1, path), 'git_status', 'files' (the project's kept files: "
-        "the operator's attachments and what staff reported back, each with a handle att:…). folder: id or label "
+        "the operator's attachments and what staff reported back, each with a handle att:…), 'dispatch' (ref: a "
+        "dispatch's id — its whole text and what was said on it). folder: id or label "
         "(default the primary folder); paths are relative to it. path='att:…' reads a kept file. Output is bounded; "
         "narrow the path to see more."
     ),

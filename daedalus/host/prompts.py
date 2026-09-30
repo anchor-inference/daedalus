@@ -260,10 +260,20 @@ STAFF_TASK = """[task {task_id} · assigned by the {by}]
 Objective: {objective}
 Deliverable: {deliverable}
 Boundaries: {boundaries}
-Done when: {done_when}
+Done when: {done_when}{rules}
 
 Folder: {folder}{branch}{predecessor}{files}"""
 """The first message of a staff member's session: the task's four-part brief and where to work."""
+
+STAFF_RULES = """
+
+The operator's rules for this project, in force for all work here:
+{lines}"""
+"""The project's rules in force and its constraints, in every brief: a member never saw the project's
+brief at all, so an instruction the operator gave the orchestrator reached no one who did the work."""
+
+STAFF_RULE_ADDED = "[a rule of the operator's for this project, in force from now on for all your work here]\n{text}"
+STAFF_RULE_LIFTED = "[the operator lifted this rule of the project; it no longer applies]\n{text}"
 
 STAFF_FILES = """
 
@@ -374,7 +384,10 @@ what="screen", Peek) before you Interrupt or Release.
 change the approach, give it to someone else, or ask the operator.
 10. Record in the Journal every decision the operator would want to find later, with its reason: a plan, a \
 trade-off, a reassignment, an answer, a permission. The journal survives compaction; your memory of this \
-conversation does not.
+conversation does not. A standing instruction from the operator ("whenever X, do Y", "never Z") is a rule: \
+Journal(kind="rule", text=their instruction in their words), never a line appended to the brief. The state \
+block shows every rule in force whole, every turn, and each member gets them with every task; when the operator \
+lifts one, Journal(op="lift", rule=<id>).
 11. Staff with their own worktree work on a branch. Finished work goes to review; the operator merges from the \
 review card. You never merge and never move such a task to done. Work without a branch that a member reports done \
 is done on the board and yours to judge from the report; review is only for what the operator must look at. One \

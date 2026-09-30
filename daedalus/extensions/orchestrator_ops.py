@@ -18,10 +18,18 @@ from typing import TYPE_CHECKING, Any
 from daedalus.extensions import wakeups
 from daedalus.extensions.notifications import Draft
 from daedalus.extensions.watches import WatchRefused
+from daedalus.host import prompts
 from daedalus.host.peek import LocalFolderAccess, PeekRefused
 from daedalus.staff_runtime import LiveSession
 from daedalus.stores.files import HANDOVER_MAX_FILES, MAIN, FileRefused, human_size, parse_handle
-from daedalus.stores.projects import BRIEF_SECTIONS, OPERATOR_ONLY_SECTIONS, Project, ProjectError, ProjectFolder
+from daedalus.stores.projects import (
+    BRIEF_SECTIONS,
+    OPERATOR_ONLY_SECTIONS,
+    RULE_KIND,
+    Project,
+    ProjectError,
+    ProjectFolder,
+)
 from daedalus.stores.staff import HARNESS_NAMES, Ask, StaffError
 from daedalus.tools.vision import VisionUnavailable, kept_body
 
@@ -32,7 +40,7 @@ BRIEF_BODY_MAX = 20_000
 JOURNAL_TEXT_MAX = 4000
 REPORT_TEXT_MAX = 4000
 REPORT_KINDS = ("progress", "done", "blocked", "decision")
-PEEK_OPS = ("read", "ls", "find", "search", "git_log", "git_diff", "git_status", "files")
+PEEK_OPS = ("read", "ls", "find", "search", "git_log", "git_diff", "git_status", "files", "dispatch")
 TASK_OPS = ("list", "get", "create", "update", "move")
 FOLDER_OPS = ("list", "add", "update", "remove")
 TEAM_MESSAGES = 5
@@ -171,15 +179,50 @@ async def _reload(orch: Orchestrators, project_id: str, change: str) -> None:
 # -- the journal -----------------------------------------------------------------------------------
 
 
-async def journal(orch: Orchestrators, project: Project, session_id: str, *, op: str = "write", text: str = "", why: str = "", kind: str = "decision", before: int | None = None, limit: int = 20) -> str:
+async def journal(
+    orch: Orchestrators,
+    project: Project,
+    session_id: str,
+    *,
+    op: str = "write",
+    text: str = "",
+    why: str = "",
+    kind: str = "",
+    rule: int | None = None,
+    before: int | None = None,
+    limit: int = 20,
+) -> str:
+    kind = "".join(c for c in (kind or "").lower() if c.isalnum() or c in "_-")[:30]
     if op == "read":
-        entries = await orch.manager.projects.journal(project.id, before=before, limit=max(1, min(int(limit), 50)))
+        entries = await orch.manager.projects.journal(project.id, before=before, limit=max(1, min(int(limit), 50)), kind=kind or None)
         if not entries:
-            return "(the journal is empty)" if before is None else "(no older entries)"
-        lines = [f"#{e.id} {e.at[:16].replace('T', ' ')} {e.author}/{e.kind}: {e.text}" for e in entries]
-        return "\n".join(lines) + f"\n(older: Journal(op='read', before={entries[-1].id}))"
+            return "(the journal is empty)" if before is None and not kind else "(no older entries)" if before is not None else f"(no {kind} entries)"
+        lifted = await orch.manager.projects.lifted_rules(project.id) if any(e.kind == RULE_KIND for e in entries) else set()
+        lines = [f"#{e.id} {e.at[:16].replace('T', ' ')} {e.author}/{e.kind}{' (lifted)' if e.kind == RULE_KIND and e.id in lifted else ''}: {e.text}" for e in entries]
+        return "\n".join(lines) + f"\n(older: Journal(op='read', before={entries[-1].id}{f', kind={kind!r}' if kind else ''}))"
+    if op == "lift":
+        if rule is None:
+            raise Refused("op='lift' needs rule, the id of the rule to lift (the state block lists the rules in force with their ids)")
+        try:
+            lifted_rule, entry = await orch.manager.projects.lift_rule(project.id, int(rule), "orchestrator", why)
+        except ProjectError as exc:
+            raise Refused(str(exc)) from exc
+        await orch._changed(project.id, "journal", "orchestrator")
+        told = await _announce_rule(orch, project, prompts.STAFF_RULE_LIFTED.format(text=lifted_rule.text))
+        return f"rule #{lifted_rule.id} lifted (journal #{entry.id}); it leaves the state block and the briefs{told}"
     if op != "write":
-        raise Refused("op is write or read")
+        raise Refused("op is write, read or lift")
+    if kind == RULE_KIND:
+        # The operator's standing instruction is kept as a rule, not appended to the brief: a line
+        # added at the end of the brief's notes fell past the part of each section the state block
+        # shows, and the orchestrator never saw the instruction again after the turn that wrote it.
+        try:
+            entry = await orch.manager.projects.add_rule(project.id, "orchestrator", text)
+        except ProjectError as exc:
+            raise Refused(str(exc)) from exc
+        await orch._changed(project.id, "journal", "orchestrator")
+        told = await _announce_rule(orch, project, prompts.STAFF_RULE_ADDED.format(text=entry.text))
+        return f"rule #{entry.id} is in force: the state block shows it whole every turn, and every member gets it with each task{told}"
     body = " ".join(text.split()) if "\n" not in text else text.strip()
     if not body:
         raise Refused("a journal entry needs text")
@@ -187,10 +230,19 @@ async def journal(orch: Orchestrators, project: Project, session_id: str, *, op:
         body += f"\nWhy: {why.strip()}"
     if len(body) > JOURNAL_TEXT_MAX:
         raise Refused(f"a journal entry is at most {JOURNAL_TEXT_MAX} characters")
-    kind = "".join(c for c in kind.lower() if c.isalnum() or c in "_-")[:30] or "decision"
-    entry = await orch.manager.projects.record(project.id, "orchestrator", kind, body)
+    entry = await orch.manager.projects.record(project.id, "orchestrator", kind or "decision", body)
     await orch._changed(project.id, "journal", "orchestrator")
     return f"journal entry #{entry.id} written"
+
+
+async def _announce_rule(orch: Orchestrators, project: Project, text: str) -> str:
+    """Tell the members at work now of a rule made or lifted: the host does it, so no member works on
+    under a rule that changed while its brief was already written."""
+    team = orch.team
+    if team is None:
+        return ""
+    told = await team.announce_rule(project.id, text, by="orchestrator")
+    return f"; {', '.join(told)} {'is' if len(told) == 1 else 'are'} told when their current turn ends" if told else ""
 
 
 # -- the team --------------------------------------------------------------------------------------
@@ -371,6 +423,8 @@ async def peek(orch: Orchestrators, project: Project, session_id: str, *, op: st
         raise Refused(f"op is one of {', '.join(PEEK_OPS)}")
     if op == "files":
         return await project_files(orch, project)
+    if op == "dispatch":
+        return await read_dispatch(orch, project, ref or path)
     if parse_handle(path) is not None and (path.strip().startswith("att:") or not folder):
         if op not in ("read", "ls"):
             raise Refused(f"{path} is a kept file: read it with op='read'")
@@ -400,6 +454,27 @@ async def peek(orch: Orchestrators, project: Project, session_id: str, *, op: st
         return await access.git_status()
     except PeekRefused as exc:
         raise Refused(str(exc)) from exc
+
+
+async def read_dispatch(orch: Orchestrators, project: Project, ref: str) -> str:
+    """A dispatch of this project whole — what the operator asked for, relayed — with what was said on it.
+
+    The journal and the wake-up once carried a dispatch cut at 600 characters, and no tool gave the
+    rest: a long request reached the orchestrator as its first paragraph."""
+    dispatch = await orch.manager.dispatches.get(ref) if (ref or "").strip() else None
+    if dispatch is None or dispatch.project_id != project.id:
+        raise Refused(f"{project.name} has no dispatch {ref!r}; the state block lists the open ones")
+    lines = [
+        f"dispatch {dispatch.id} (#{dispatch.seq}), {dispatch.status}, from {dispatch.created_at[:16].replace('T', ' ')}" + (f": {dispatch.title}" if dispatch.title else ""),
+        dispatch.text,
+    ]
+    if dispatch.result:
+        lines += ["", f"result: {dispatch.result}"]
+    messages = await orch.manager.dispatches.messages(dispatch.id)
+    if messages:
+        lines += ["", "said on it since, oldest first:"]
+        lines += [f"— {m.at[:16].replace('T', ' ')} {m.author} ({m.kind}): {m.text}" for m in messages]
+    return "\n".join(lines)
 
 
 # -- speaking to the operator ----------------------------------------------------------------------

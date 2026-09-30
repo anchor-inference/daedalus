@@ -3316,7 +3316,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .journal-note { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; margin: 8px 0 12px; }
 .journal-note textarea { resize: vertical; font: inherit; margin: 0; }
 .journal-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.journal-entry { display: grid; gap: 4px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); }
+.journal-entry, .journal-rule { display: grid; gap: 4px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); }
 .journal-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .chip.author.orchestrator { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .chip.author.operator { color: var(--info); border-color: color-mix(in srgb, var(--info) 45%, transparent); }
@@ -3325,6 +3325,12 @@ button.staff-row:hover { background: var(--surface-2); }
 .journal-time { color: var(--fg-3); font-size: var(--fs-11); }
 .journal-text { font-size: var(--fs-13); line-height: var(--lh-ui); white-space: pre-wrap; overflow-wrap: anywhere; }
 .journal-refs { display: flex; flex-wrap: wrap; gap: 6px; }
+.journal-note .journal-as-rule { grid-column: 1 / -1; margin: 0; min-height: 0; font-size: var(--fs-13); }
+.journal-rules { display: grid; gap: 6px; margin: 0 0 12px; }
+.journal-rules-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; }
+.journal-rules-title { font-weight: 600; font-size: var(--fs-13); }
+.journal-rules-head .sub { font-size: var(--fs-12); }
+.journal-rule { border-color: color-mix(in srgb, var(--info) 40%, var(--line)); }
 .chip.link { cursor: pointer; color: var(--fg); }
 .wakeups { display: grid; gap: 8px; padding: 4px 0; }
 .wakeup-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); }

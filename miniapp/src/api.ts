@@ -950,7 +950,7 @@ export type QuestionOutcome = {
 export type MainView = { session_id: string; dispatches: Dispatch[]; asks: MainAsk[]; questions: number; setup: { project_id: string; name: string }[] };
 
 /** One entry of a project's journal: who wrote it, what kind, and what it refers to. */
-export type JournalEntry = { id: number; at: string; author: "operator" | "orchestrator" | "staff" | "system"; kind: string; text: string; refs: Record<string, string> };
+export type JournalEntry = { id: number; at: string; author: "operator" | "orchestrator" | "staff" | "system"; kind: string; text: string; refs: Record<string, string>; lifted?: boolean };
 
 export type BriefSection = { section: string; body: string; updated_at: string | null; updated_by: string | null };
 

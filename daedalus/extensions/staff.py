@@ -85,6 +85,9 @@ RESULT_MAX = 1500
 """How much of a done report is kept on its card: the summary, not the whole transcript of the work."""
 BASIS_MIN = 12
 """The least a quoted allowance may be: a line of the brief, not a word that happens to occur in it."""
+STAFF_RULES_CHARS = 2000
+"""How much of a brief the project's rules and constraints may take together."""
+STAFF_CONSTRAINTS_MIN = 400
 
 OPEN_TASK = ("todo", "blocked")
 FINISHED_TASK = ("done", "dropped")
@@ -702,7 +705,7 @@ class Team:
         )
         await self.publish("staff.status", {"status": "starting", "previous": None, "actor": by}, member=member)
         fresh, earlier = await self.brief_files(delivered)
-        first = self.first_message(member, task, folder, worktree, predecessor, by, fresh, earlier)
+        first = self.first_message(member, task, folder, worktree, predecessor, by, fresh, earlier, rules=await self.rules_block(project.id))
         try:
             recorded = await self.manager.staff.add_message(member.id, first, origin=by, mode="after_turn", staff_session_id=session.id)
             first_id = recorded.id
@@ -768,7 +771,7 @@ class Team:
             await self.manager.staff.request_pause(session.id, False)  # a new assignment resumes a paused member
         live = LiveSession(member, session)
         fresh, earlier = await self.brief_files(delivered)
-        text = prompts.STAFF_NEXT_TASK + self.first_message(member, task, folder, None, predecessor, by, fresh, earlier)
+        text = prompts.STAFF_NEXT_TASK + self.first_message(member, task, folder, None, predecessor, by, fresh, earlier, rules=await self.rules_block(member.project_id))
         try:
             message_id = (await self.manager.staff.add_message(member.id, text, origin=by, mode="after_turn", staff_session_id=session.id)).id
         except StaffError:
@@ -821,7 +824,41 @@ class Team:
         subagents = self.app.extensions.get("subagents")
         return subagents.persona(name) if subagents is not None else None
 
-    def first_message(self, member: Staff, task: BoardTask, folder: ProjectFolder, worktree: Worktree | None, predecessor: StaffSession | None, by: str, delivered: list[Delivered] | None = None, earlier: list[Delivered] | None = None) -> str:
+    async def rules_block(self, project_id: str) -> str:
+        """The operator's rules in force and the brief's constraints, for a member's brief.
+
+        The rules go whole: they are bounded where they are written. The constraints section is free
+        text of any length and gets what is left of ``STAFF_RULES_CHARS``, and never less than
+        ``STAFF_CONSTRAINTS_MIN``; the orchestrator holds the rest.
+        """
+        rules = [" ".join(r.text.split()) for r in await self.manager.projects.rules(project_id)]
+        lines = [f"- {rule}" for rule in rules]
+        constraints = " ".join((await self.manager.projects.brief(project_id))["constraints"].body.split())
+        if constraints:
+            room = max(STAFF_CONSTRAINTS_MIN, STAFF_RULES_CHARS - sum(len(line) + 1 for line in lines))
+            if len(constraints) > room:
+                constraints = constraints[:room].rstrip() + " … (the orchestrator has the rest)"
+            lines.append(f"- The project's constraints: {constraints}")
+        return prompts.STAFF_RULES.format(lines="\n".join(lines)) if lines else ""
+
+    async def announce_rule(self, project_id: str, text: str, *, by: str) -> list[str]:
+        """Tell each member at work on a task now of a rule made or lifted, when their turn ends; the
+        names of those told. An idle member is not woken for it: its next brief carries the rules."""
+        told: list[str] = []
+        for staff_id, session in (await self.manager.staff.live_sessions(project_id)).items():
+            task = await self.task(session.task_id) if session.task_id else None
+            member = await self.manager.staff.get(staff_id)
+            if task is None or task.status != "doing" or member is None or not member.active:
+                continue
+            try:
+                await self.tell(member, text, when="after_turn", by=by)
+            except Exception:  # noqa: BLE001 — one member who cannot be told must not keep the rule from the rest
+                logger.warning("could not tell %s of a changed rule", member.name, exc_info=True)
+                continue
+            told.append(member.name)
+        return told
+
+    def first_message(self, member: Staff, task: BoardTask, folder: ProjectFolder, worktree: Worktree | None, predecessor: StaffSession | None, by: str, delivered: list[Delivered] | None = None, earlier: list[Delivered] | None = None, *, rules: str = "") -> str:
         before = ""
         if predecessor is not None:
             why = predecessor.end_reason or predecessor.status
@@ -839,6 +876,7 @@ class Team:
             deliverable=task.deliverable,
             boundaries=task.boundaries,
             done_when=task.done_when,
+            rules=rules,
             folder=worktree.cwd if worktree is not None else folder.path,
             branch=f"\nBranch: {worktree.branch} (from {worktree.base_ref})" if worktree is not None else "",
             predecessor=before,

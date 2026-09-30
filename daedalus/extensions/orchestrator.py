@@ -40,7 +40,16 @@ from daedalus.host.session_runner import HOME_KEY, WorkspaceUnreachable, home_of
 from daedalus.host.wake_queue import Batch, TargetState, Wake, WakeQueue
 from daedalus.staff_runtime import ReadRequest
 from daedalus.stores.files import refs_line
-from daedalus.stores.projects import BRIEF_SECTIONS, OrchestratorSettings, Project, ProjectError, ProjectFolder
+from daedalus.stores.projects import (
+    BRIEF_SECTIONS,
+    RULES_CHARS,
+    BriefSection,
+    JournalEntry,
+    OrchestratorSettings,
+    Project,
+    ProjectError,
+    ProjectFolder,
+)
 from daedalus.stores.staff import ACTIVE_STATUSES, HARNESS_NAMES, Ask, Staff
 
 if TYPE_CHECKING:
@@ -568,7 +577,8 @@ class Orchestrators:
 
         folders = [self._folder_line(f) for f in project.folders]
         brief = await self.manager.projects.brief(project.id)
-        brief_parts = [f"{SECTION_LABELS[name]}: {_one_line(brief[name].body, BRIEF_SECTION_CHARS) or '(empty)'}" for name in BRIEF_SECTIONS]
+        brief_parts = [f"{SECTION_LABELS[name]}: {self._brief_part(brief[name])}" for name in BRIEF_SECTIONS]
+        rules = self._rules_lines(await self.manager.projects.rules(project.id))
 
         team_lines: list[str] = []
         one_offs: list[str] = []
@@ -615,6 +625,7 @@ class Orchestrators:
             (head, ""),
             (["Folders: " + " · ".join(folders)] if folders else [], ""),
             (["Brief — " + " · ".join(brief_parts)], ""),
+            (rules, ""),
             team_section if team_section[0] else (["Team: nobody yet"], ""),
             _section("One-off", one_offs, cap=TEAM_LINES, more="Team"),
             _section("Waiting for your answer", for_me, cap=ASK_LINES, more="the requests list"),
@@ -631,6 +642,39 @@ class Orchestrators:
             except Exception:  # noqa: BLE001 — one section that fails must not take the state away
                 logger.exception("an orchestrator state section failed for %s", project.id)
         return fit(sections, config.orchestrator.state_max_chars)
+
+    def _brief_part(self, section: BriefSection) -> str:
+        """A section of the brief as the state block shows it: the start of it, and when that is not
+        all, how much more there is, when it changed and how to read it. It used to end at the cut
+        with no word of what was past it."""
+        flat = " / ".join(line.strip() for line in section.body.strip().splitlines() if line.strip())
+        if not flat:
+            return "(empty)"
+        if len(flat) <= BRIEF_SECTION_CHARS:
+            return flat
+        return f"{flat[:BRIEF_SECTION_CHARS].rstrip()}… ({len(flat)} characters, changed {self._moment(section.updated_at or '')}; Brief(section={section.section!r}) shows it whole)"
+
+    def _rules_lines(self, rules: list[JournalEntry]) -> list[str]:
+        """The operator's rules in force, each whole, under the brief.
+
+        Their own lines, not a list the fitting may shorten: an instruction appended to the brief's
+        notes fell past the part of the section the block shows, and no later turn saw it. They are
+        bounded where they are written (``RULES_MAX``, ``RULES_CHARS``), so they always fit; if an
+        older bound let more in, the newest are shown and the rest named with where to read them.
+        """
+        if not rules:
+            return []
+        shown: list[str] = []
+        used = 0
+        for rule in reversed(rules):
+            line = f"  #{rule.id} ({self._moment(rule.at)}) " + " / ".join(part.strip() for part in rule.text.splitlines() if part.strip())
+            if shown and used + len(line) > RULES_CHARS + 200:
+                break
+            shown.insert(0, line)
+            used += len(line)
+        head = "The operator's rules in force (each holds until the operator lifts it: Journal(op=\"lift\", rule=<id>)):"
+        rest = len(rules) - len(shown)
+        return [head, *shown] + ([f"  … {rest} older rule{'s' if rest != 1 else ''} in force: Journal(op=\"read\", kind=\"rule\")"] if rest else [])
 
     def _folder_line(self, folder: ProjectFolder) -> str:
         marks = [m for m in ("git" if folder.is_git else "", folder.env if folder.env != self.manager.projects.local_env else "", "read-only" if folder.readonly else "") if m]
@@ -978,7 +1022,9 @@ class Orchestrators:
             return f"watch [{p.get('watch_id')}] fired{': ' + said if said else ''}"
         if kind in ("dispatch.created", "dispatch.message"):
             title = str(p.get("title") or "")
-            text = _one_line(str(p.get("text") or ""), 600)
+            # Whole, as the operator's answers are: a dispatch is the operator's request relayed, and
+            # the store bounds it. Cut at 600 characters, a long one arrived as its first paragraph.
+            text = _verbatim(str(p.get("text") or ""))
             if kind == "dispatch.message" and p.get("kind") == "cancelled":
                 return f"[from the main orchestrator] dispatch {p.get('dispatch_id') or ''} is cancelled: {text}"
             what = "follow-up on dispatch" if kind == "dispatch.message" else "dispatch"
