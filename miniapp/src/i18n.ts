@@ -4039,6 +4039,8 @@ Object.assign(DICT, {
   "browser.act.forward": { en: "Went forward", ru: "Перешёл вперёд" },
   "browser.act.reload": { en: "Reloaded the page", ru: "Обновил страницу" },
   "browser.act.handoff": { en: "Asked you: {what}", ru: "Попросил вас: {what}" },
+  "browser.act.dialog": { en: "Answered the page's question", ru: "Ответил на вопрос страницы" },
+  "browser.act.dialog_auto": { en: "The page said “{what}”; accepted for the agent", ru: "Страница сообщила «{what}»; принято за агента" },
   "browser.act.download": { en: "Downloaded {name}", ru: "Скачал {name}" },
   "browser.act.take": { en: "You took control", ru: "Вы взяли управление" },
   "browser.act.give": { en: "You gave the browser back", ru: "Вы вернули браузер" },

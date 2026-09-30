@@ -72,7 +72,7 @@ export function secure(url: string): boolean {
 }
 
 /** A row of the action log in words: an i18n key and what fills it. */
-export function actionWords(row: Pick<BrowserActionRow, "kind" | "element" | "name" | "text" | "text_len" | "keys" | "url" | "needs" | "download"> & { ok?: boolean }): { key: string; vars: Record<string, string | number> } {
+export function actionWords(row: Pick<BrowserActionRow, "kind" | "element" | "name" | "text" | "text_len" | "keys" | "url" | "needs" | "download"> & { ok?: boolean; actor?: string }): { key: string; vars: Record<string, string | number> } {
   const what = row.name || row.element || "";
   switch (row.kind) {
     case "click":
@@ -99,6 +99,10 @@ export function actionWords(row: Pick<BrowserActionRow, "kind" | "element" | "na
       return { key: `browser.act.${row.kind}`, vars: {} };
     case "handoff":
       return { key: "browser.act.handoff", vars: { what: row.needs?.what ?? what } };
+    case "dialog":
+      // The page's own alert, which the browser accepted so it never stopped the agent: its words are
+      // the row's element. Otherwise the agent answered a confirm or a prompt.
+      return row.actor === "page" ? { key: "browser.act.dialog_auto", vars: { what } } : { key: "browser.act.dialog", vars: {} };
     case "download":
       return { key: "browser.act.download", vars: { name: row.download?.name ?? what } };
     case "take":

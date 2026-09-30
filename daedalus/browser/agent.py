@@ -90,6 +90,16 @@ NOT_A_REF = (
     "gives the ref beside each match; an element the outline shows without a ref cannot be acted on by ref."
 )
 FIND_MATCHES = 30
+LOG_LEVELS = ("error", "warning", "info", "debug")
+LOGS_SHOWN = 60
+"""Console entries one BrowserLogs shows; the rest wait for the next call, as the daemon pages them."""
+NETWORK_TYPES = ("api", "document", "xhr", "fetch", "script", "stylesheet", "image", "font", "media", "websocket", "eventsource", "manifest", "other")
+NETWORK_SHOWN = 50
+BODY_CHARS = 20_000
+"""Characters of a response body one BrowserNetwork(body=true) shows unless the call asks for fewer."""
+INSPECT_HTML = 4_000
+CURSORS = 512
+"""The owners and tabs whose place in the console and the request log is remembered."""
 EXTRACT_MAX_CHARS = 120_000
 """Characters of a page extraction reads: about ten parts, which bounds what one call costs."""
 EXTRACT_CHUNK = 12_000
@@ -528,6 +538,10 @@ class BrowserAgent:
         """What each owner's extraction requests gathered, by owner and request, the newest last."""
         self.told: OrderedDict[str, set[str]] = OrderedDict()
         """The hosts each owner has been shown the site notes of, so a note is said once, not on every read."""
+        self.cursors: OrderedDict[str, int] = OrderedDict()
+        """Where each owner last read a tab's console and its requests (``logs|network\x00owner\x00group\x00tab``
+        → the daemon's sequence number), so each call says only what came since. Lost with the host,
+        which only means the next call reads from the start."""
 
     # -- the group and the tab -----------------------------------------------------------------
 
@@ -674,7 +688,9 @@ class BrowserAgent:
         status = f" (HTTP {result['status']})" if result.get("status") else ""
         failed = f"; the page did not load: {result['error']}" if result.get("error") else ""
         title = str(result.get("title") or "").strip()
-        return f"Tab {current['id']} is on {result.get('url') or url}{status}{failed}." + (f" Its title: {fenced(origin_of(str(result.get('url') or '')), title)}" if title else "") + "\nNext: BrowserSnapshot to see it."
+        self._told(group, current, result.get("dialogs_auto"))
+        said = self._page_said(result, reached)
+        return f"Tab {current['id']} is on {result.get('url') or url}{status}{failed}." + (f" Its title: {fenced(origin_of(str(result.get('url') or '')), title)}" if title else "") + "".join(f"\n{line}" for line in said) + "\nNext: BrowserSnapshot to see it."
 
     async def _through_wall(self, caller: Caller, group: dict[str, Any], go: Callable[[], Awaitable[Any]]) -> Any:
         """Run a call that loads an address; when the network wall asks rather than refuses (a host
@@ -1069,6 +1085,7 @@ class BrowserAgent:
             failure = _older(exc, step)
             await refused(explain(failure))
             raise failure from None
+        self._told(group, current, (result.get("effects") or {}).get("dialogs_auto"))
         done = result.get("element") if isinstance(result.get("element"), dict) else {}
         assert isinstance(done, dict)
         name = name or str(done.get("name") or "")
@@ -1120,11 +1137,223 @@ class BrowserAgent:
         if effects.get("download"):
             download = effects["download"]
             said.append(f"It downloaded {download.get('name')} ({_size(int(download.get('size') or 0))}); BrowserDownload(name) copies it to you.")
+        said.extend(self._page_said(effects, str(effects.get("url") or tab.get("url") or "")))
         changes = str(result.get("diff") or "").strip()
         if diff and changes:
             url = str(effects.get("url") or tab.get("url") or "")
             said.append("What changed on the page (+ appeared, - went):\n" + fenced(origin_of(url), changes[:2000]))
         return said
+
+    @staticmethod
+    def _page_said(result: dict[str, Any], url: str) -> list[str]:
+        """What the page said on its own during a call, a sentence each: the dialogs the browser
+        answered for the agent (an alert, the question before leaving a page) and how many errors and
+        warnings it logged, so a broken page says so without another call."""
+        said: list[str] = []
+        for dialog in result.get("dialogs_auto") or []:
+            if not isinstance(dialog, dict):
+                continue
+            kind = str(dialog.get("type") or "dialog")
+            how = "the browser left the page, as you asked" if kind == "beforeunload" else "the browser accepted it"
+            said.append(f"The page showed {'an' if kind[:1] in 'aeiou' else 'a'} {kind}; {how}:\n" + fenced(origin_of(str(dialog.get("url") or url)), str(dialog.get("message") or "")[:500] or "(no text)"))
+        logged = result.get("logged") if isinstance(result.get("logged"), dict) else {}
+        errors, warnings = int(logged.get("errors") or 0), int(logged.get("warnings") or 0)
+        if errors or warnings:
+            counted = " and ".join(p for p in (_count(errors, "error"), _count(warnings, "warning")) if p)
+            said.append(f"The page logged {counted} meanwhile; BrowserLogs shows them.")
+        return said
+
+    def _told(self, group: dict[str, Any], tab: dict[str, Any], dialogs: Any) -> None:
+        """The dialogs a result is about to tell the agent of, so the service does not tell them again."""
+        if dialogs:
+            self.service.told_dialogs(group["id"], tab["id"], dialogs)
+
+    def _cursor(self, what: str, caller: Caller, group: str, tab: str, value: int | None = None) -> int:
+        """The place ``caller`` read ``what`` of a tab to; with ``value``, moved there."""
+        key = f"{what}\x00{self._who(caller)}\x00{group}\x00{tab}"
+        place = self.cursors.pop(key, 0)
+        self.cursors[key] = place if value is None else value
+        while len(self.cursors) > CURSORS:
+            self.cursors.popitem(last=False)
+        return self.cursors[key]
+
+    async def logs(self, caller: Caller, *, tab: str | None = None, level: str | None = None, all: bool = False) -> str:  # noqa: A002 — the tool's own argument name
+        """The page's console since the caller's last look: what it logged, what it threw and did not
+        catch, and what the browser said about it (a resource that failed to load)."""
+        if level is not None and level not in LOG_LEVELS:
+            raise InvalidRequest(f"level is one of {', '.join(LOG_LEVELS)} (the least severe to show)")
+        group = await self._group(caller)
+        current = await self._tab(group, tab)
+        after = 0 if all else self._cursor("logs", caller, group["id"], current["id"])
+        params: dict[str, Any] = {"tab_id": current["id"], "after": after, "limit": LOGS_SHOWN, "origin": self._origin(caller)}
+        if level:
+            params["level"] = level
+        try:
+            result = await self.service.call(group["id"], "page.logs", params, what="reading the page's console", timeout=20.0)
+        except Unsupported:
+            raise Unsupported("This browser service cannot read a page's console yet (it is older than the host).") from None
+        url = str(result.get("url") or current.get("url") or "")
+        entries = [e for e in result.get("entries") or [] if isinstance(e, dict)]
+        self._cursor("logs", caller, group["id"], current["id"], int(result.get("last") or 0))
+        since = "kept for this tab" if not after else "since your last BrowserLogs"
+        if not entries:
+            return f"Tab {current['id']} — {url}: no console messages or page errors {since}" + (f" at {level} or above" if level else "") + "."
+        errors = sum(1 for e in entries if e.get("level") == "error")
+        warnings = sum(1 for e in entries if e.get("level") == "warning")
+        counted = ", ".join(p for p in (_count(errors, "error"), _count(warnings, "warning")) if p)
+        body = "\n".join(_log_line(e, url) for e in entries)
+        await self._screen(group, caller, url, body)
+        head = f"Tab {current['id']} — {url} · {_count(len(entries), 'entry', 'entries')} {since}" + (f" ({counted})" if counted else "")
+        tail: list[str] = []
+        if result.get("dropped"):
+            tail.append("Older entries were dropped before you read them: the tab keeps its last 200.")
+        if int(result.get("more") or 0):
+            tail.append(f"{int(result['more'])} more after these: call BrowserLogs again.")
+        return "\n".join([head, fenced(origin_of(url), body), *tail])
+
+    async def network(
+        self,
+        caller: Caller,
+        *,
+        tab: str | None = None,
+        id: str | None = None,  # noqa: A002 — the tool's own argument name
+        body: bool = False,
+        type: str | None = None,  # noqa: A002 — the tool's own argument name
+        host: str | None = None,
+        contains: str | None = None,
+        method: str | None = None,
+        failed: bool = False,
+        all: bool = False,  # noqa: A002 — the tool's own argument name
+        max_chars: int | None = None,
+    ) -> str:
+        """The page's requests since the caller's last look, or one request with its headers and, with
+        body, its response's body. A reading of what the page did, never a request of the agent's
+        own; the daemon has cut every credential before any of it reaches the host."""
+        group = await self._group(caller)
+        current = await self._tab(group, tab)
+        url = str(current.get("url") or "")
+        # What a page loads on a site the operator watches the agent on is read as the page is acted
+        # on there: with someone looking.
+        await self._watch(group, caller, url)
+        if id:
+            return await self._request(caller, group, current, id.strip(), body=body, max_chars=max_chars)
+        if body:
+            raise InvalidRequest("body=true reads one request's response: give its id (r12) from the list")
+        types = [t.strip().lower() for t in (type or "").split(",") if t.strip()]
+        unknown = [t for t in types if t not in NETWORK_TYPES]
+        if unknown:
+            raise InvalidRequest(f"type is one or more of {', '.join(NETWORK_TYPES)}, comma-separated ('api' is xhr, fetch, websocket and eventsource)")
+        after = 0 if all else self._cursor("network", caller, group["id"], current["id"])
+        params: dict[str, Any] = {"tab_id": current["id"], "after": after, "limit": NETWORK_SHOWN, "origin": self._origin(caller)}
+        for key, value in (("host", host), ("contains", contains), ("method", method)):
+            if value and value.strip():
+                params[key] = value.strip()
+        if types:
+            params["types"] = types
+        if failed:
+            params["failed"] = True
+        try:
+            result = await self.service.call(group["id"], "page.network", params, what="listing the page's requests", timeout=20.0)
+        except Unsupported:
+            raise Unsupported("This browser service cannot list a page's requests yet (it is older than the host).") from None
+        url = str(result.get("url") or url)
+        requests = [r for r in result.get("requests") or [] if isinstance(r, dict)]
+        self._cursor("network", caller, group["id"], current["id"], int(result.get("last") or 0))
+        since = "kept for this tab" if not after else "since your last BrowserNetwork"
+        filtered = bool(types or host or contains or method or failed)
+        if not requests:
+            return f"Tab {current['id']} — {url}: no requests {since}" + (" that match" if filtered else "") + ". Act on the page (or reload it) and look again."
+        lines = "\n".join(_request_line(r) for r in requests)
+        head = f"Tab {current['id']} — {url} · {_count(len(requests), 'request')} {since}" + (" that match" if filtered else "")
+        tail: list[str] = []
+        if int(result.get("skipped") or 0):
+            tail.append(f"{result['skipped']} earlier ones are not shown: narrow with type='api', host= or contains=, or all=true with a filter.")
+        if result.get("dropped"):
+            tail.append("Older requests were dropped before you read them: the tab keeps its last 300.")
+        tail.append("BrowserNetwork(id='r…') shows one with its headers; add body=true for its response (JSON and text). Credentials are cut before you see anything.")
+        return "\n".join([head, fenced(origin_of(url), lines), *tail])
+
+    async def _request(self, caller: Caller, group: dict[str, Any], current: dict[str, Any], rid: str, *, body: bool, max_chars: int | None) -> str:
+        if not re.fullmatch(r"r\d+", rid):
+            raise InvalidRequest(f"{rid!r} is not a request id; they look like r12 and come from BrowserNetwork's list")
+        params: dict[str, Any] = {"tab_id": current["id"], "id": rid, "origin": self._origin(caller)}
+        limit = max(500, min(max_chars or BODY_CHARS, BODY_CHARS * 5, caller.budget - 3000))
+        if body:
+            params.update({"body": True, "max_chars": limit})
+        try:
+            result = await self.service.call(group["id"], "page.request", params, what="reading the request", timeout=30.0)
+        except Unsupported:
+            raise Unsupported("This browser service cannot read a page's requests yet (it is older than the host).") from None
+        request = result.get("request") if isinstance(result.get("request"), dict) else {}
+        assert isinstance(request, dict)
+        target = str(request.get("url") or "")
+        said = [_request_line(request)]
+        if request.get("initiator"):
+            said.append(f"started by: {request['initiator']}")
+        for title, key in (("Request headers", "request_headers"), ("Response headers", "response_headers")):
+            heads = [h for h in request.get(key) or [] if isinstance(h, dict)]
+            if heads:
+                said.append(f"{title}:\n" + "\n".join(f"  {h.get('name')}: {h.get('value')}" for h in heads))
+        if request.get("post_data"):
+            said.append("It sent a body, which is never shown: a form's body can hold a password.")
+        text = result.get("body")
+        refused = ""
+        if body and isinstance(text, str):
+            refused = self._outside_allowlist(group, target)
+            if not refused:
+                said.append(f"Response body ({request.get('mime') or 'no stated type'}{', cut at ' + str(limit) + ' characters' if result.get('truncated') else ''}):\n{text}")
+        elif body:
+            refused = str(result.get("body_error") or "no body was read")
+        page = str(current.get("url") or "")
+        shown = "\n".join(said)
+        await self._screen(group, caller, target or page, shown)
+        if body and not refused:
+            await self._audit(group, caller, "network", {"tab": current["id"], "id": rid, "url": target[:2000], "chars": len(text) if isinstance(text, str) else 0})
+        out = [f"Tab {current['id']} — request {rid}", fenced(origin_of(target or page), shown)]
+        if refused:
+            out.append(f"No body: {refused}.")
+        return "\n".join(out)
+
+    def _outside_allowlist(self, group: dict[str, Any], url: str) -> str:
+        """Why a response's body is not read: it came from a host outside the operator's allowlist,
+        which a page may load from but the agent may not read what it says. ``""`` to read it."""
+        if self.service.wall is None:
+            return ""
+        rules = self.service.wall(str(group.get("env") or ""))
+        allowed = rules.get("egress_allow") if isinstance(rules, dict) else None
+        host = host_of(url)
+        if allowed is None or not host or host_allowed(host, allowed):
+            return ""
+        return f"it came from {host}, outside the operator's allowlist; a page may load from there, but what it said is not read"
+
+    async def inspect(self, caller: Caller, *, ref: str | None = None, selector: str | None = None, tab: str | None = None, html: bool = True, max_chars: int | None = None) -> str:
+        """One element as a developer's tools show it: its markup, box, key styles and state, and in
+        words why it does not show or take a click."""
+        if bool(ref) == bool(selector):
+            raise InvalidRequest("give ref (e14, from BrowserSnapshot) or selector (a CSS selector of the page's own document, for an element the outline does not show)")
+        if ref and not REF_SHAPE.fullmatch(ref):
+            self._stalled(caller)
+            raise InvalidRequest(NOT_A_REF.format(ref=ref) + " An element the outline does not show can be found with selector=.")
+        if selector and len(selector) > 500:
+            raise InvalidRequest("selector is at most 500 characters")
+        group = await self._group(caller)
+        current = await self._tab(group, tab)
+        limit = max(200, min(max_chars or INSPECT_HTML, 50_000, caller.budget - 3000))
+        params: dict[str, Any] = {"tab_id": current["id"], "max_chars": limit, "origin": self._origin(caller)}
+        if ref:
+            params["ref"] = ref
+        else:
+            params["selector"] = selector
+        try:
+            result = await self.service.call(group["id"], "page.inspect", params, what="inspecting the element", timeout=30.0)
+        except Unsupported:
+            raise Unsupported("This browser service cannot inspect an element yet (it is older than the host). BrowserSnapshot(scope=<ref>) reads it.") from None
+        url = str(current.get("url") or "")
+        text = _inspected(result, html=html)
+        await self._screen(group, caller, url, text)
+        name = str(result.get("ref") or ref or "")
+        head = f"Tab {current['id']} — {url} · {name}" + (f" (the first of {int(result['matches'])} matching {selector!r})" if selector and int(result.get("matches") or 0) > 1 else "")
+        return f"{head}\n{fenced(origin_of(url), text)}"
 
     async def _thumbnail(self, group: dict[str, Any], tab: dict[str, Any], ref: str, key: str) -> str:
         """A small picture of the element asked about, for the permission card; nothing when it cannot
@@ -1187,6 +1416,9 @@ class BrowserAgent:
         changes = str((result or {}).get("diff") or "").strip()
         if changes:
             said += "\nWhat changed on the page (+ appeared, - went):\n" + fenced(origin_of(str(current.get("url") or "")), changes[:2000])
+        self._told(group, current, (result or {}).get("dialogs_auto"))
+        for line in self._page_said(result or {}, str(current.get("url") or "")):
+            said += "\n" + line
         return said
 
     async def handoff(self, caller: Caller, *, reason: str, what: str) -> str:
@@ -1316,6 +1548,15 @@ class BrowserAgent:
                 return await self.download(caller, name=_str(a, "name") or "", to=_str(a, "to")), False
             if tool == "BrowserNote":
                 return await self.note(caller, note=_str(a, "note") or "", host=_str(a, "host")), False
+            if tool == "BrowserLogs":
+                return await self.logs(caller, tab=_str(a, "tab"), level=_str(a, "level"), all=bool(a.get("all"))), False
+            if tool == "BrowserNetwork":
+                return await self.network(
+                    caller, tab=_str(a, "tab"), id=_str(a, "id"), body=bool(a.get("body")), type=_str(a, "type"), host=_str(a, "host"), contains=_str(a, "contains"),
+                    method=_str(a, "method"), failed=bool(a.get("failed")), all=bool(a.get("all")), max_chars=_int(a, "max_chars"),
+                ), False
+            if tool == "BrowserInspect":
+                return await self.inspect(caller, ref=_str(a, "ref"), selector=_str(a, "selector"), tab=_str(a, "tab"), html=a.get("html") is not False, max_chars=_int(a, "max_chars")), False
         except OverCap as exc:
             return exc.message, True
         except BrowserGone as exc:
@@ -1354,6 +1595,110 @@ def _float(arguments: dict[str, Any], key: str) -> float | None:
 def _int(arguments: dict[str, Any], key: str) -> int | None:
     value = arguments.get(key)
     return int(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
+def _count(n: int, one: str, many: str = "") -> str:
+    """``n`` things in words: "1 error", "3 errors"; nothing for none."""
+    if not n:
+        return ""
+    return f"{n} {one if n == 1 else many or one + 's'}"
+
+
+def _short(url: str, page: str) -> str:
+    """An address as a line of a log says it: without the page's own origin, which the header names."""
+    origin = origin_of(page)
+    if origin.startswith("http") and url.startswith(origin + "/"):
+        return url[len(origin):]
+    return url
+
+
+def _log_line(entry: dict[str, Any], page: str) -> str:
+    """One console entry: its level, where it came from, its words, where in the code, how often."""
+    text = str(entry.get("text") or "").replace("\n", "\n    ")
+    where = _short(str(entry.get("url") or ""), page)[:200]
+    if where and entry.get("line"):
+        where += f":{entry['line']}"
+    count = int(entry.get("count") or 0)
+    return f"- {entry.get('level')} · {entry.get('source')}: {text}" + (f" ({where})" if where else "") + (f" ×{count}" if count > 1 else "")
+
+
+def _request_line(r: dict[str, Any]) -> str:
+    """One request as the list gives it: its id, what was asked, what came back, and how."""
+    if r.get("pending"):
+        outcome = "pending"
+    elif r.get("blocked"):
+        outcome = f"refused by the network wall ({r['blocked']})"
+    elif r.get("failed"):
+        outcome = f"failed: {r['failed']}"
+    else:
+        outcome = str(r.get("status") or "—")
+    parts = [str(r.get("id") or ""), str(r.get("method") or "GET"), outcome, str(r.get("type") or "")]
+    if r.get("mime"):
+        parts.append(str(r["mime"]))
+    if r.get("body_size"):
+        parts.append(_size(int(r["body_size"])))
+    if r.get("ms"):
+        parts.append(f"{int(r['ms'])} ms")
+    if r.get("cached"):
+        parts.append("from cache")
+    line = " ".join(parts) + " " + str(r.get("url") or "")[:500]
+    if r.get("redirect"):
+        line += f" → {str(r['redirect'])[:300]}"
+    if r.get("frame"):
+        line += " (by a frame)"
+    return line
+
+
+def _inspected(r: dict[str, Any], *, html: bool) -> str:
+    """page.inspect's answer as a few lines: what the element is, whether it shows and takes a
+    click and why not, where it is, its styles and state, the panes it scrolls in, its markup."""
+    what = f"{r.get('role') or r.get('tag')}" + (f" \"{str(r.get('name'))[:120]}\"" if r.get("name") else "") + f" <{r.get('tag')}>"
+    if r.get("frame"):
+        what += f", inside frame {r['frame']}"
+    reasons = [str(x) for x in r.get("reasons") or []]
+    shown = "visible" if r.get("visible") else "not visible"
+    click = "can be clicked" if r.get("clickable") else "cannot be clicked"
+    lines = [what, f"{shown}, {click}" + (": " + "; ".join(reasons) if reasons else ".")]
+    box = r.get("box") if isinstance(r.get("box"), dict) else {}
+    view = r.get("viewport") if isinstance(r.get("viewport"), dict) else {}
+    if box:
+        where = f"box: x {round(float(box.get('x') or 0))}, y {round(float(box.get('y') or 0))}, {round(float(box.get('w') or 0))}×{round(float(box.get('h') or 0))} px"
+        if view:
+            where += f" in a {view.get('w')}×{view.get('h')} viewport"
+        if r.get("where") and not str(r.get("where")).startswith("placed outside"):
+            where += f"; {r['where']}"
+        lines.append(where)
+    styles = r.get("styles") if isinstance(r.get("styles"), dict) else {}
+    if styles:
+        lines.append("styles: " + "; ".join(f"{k} {v}" for k, v in styles.items() if v not in (None, "")))
+    state = r.get("state") if isinstance(r.get("state"), dict) else {}
+    if state:
+        words = []
+        for key, value in state.items():
+            if value is True:
+                words.append(key)
+            elif key == "value":
+                words.append(f'value "{str(value)[:120]}"')
+            elif key == "invalid":
+                words.append(f'invalid: "{str(value)[:200]}"')
+            elif value is not False:
+                words.append(f"{key} {value}")
+        if words:
+            lines.append("state: " + ", ".join(words))
+    for pane in r.get("panes") or []:
+        if isinstance(pane, dict):
+            lines.append(f"scrolls inside {pane.get('name')}: at {pane.get('top')} of {pane.get('height')} px, {pane.get('view')} shown")
+    extra = []
+    if r.get("shadow"):
+        extra.append("it has an open shadow root, whose content the markup does not show")
+    if r.get("children"):
+        extra.append(f"{r['children']} child elements")
+    if extra:
+        lines.append("; ".join(extra))
+    if html and r.get("html"):
+        cut = f", cut from {r.get('html_length')} characters" if r.get("html_truncated") else ""
+        lines.append(f"markup (scripts, styles and handlers left out{cut}):\n{r['html']}")
+    return "\n".join(lines)
 
 
 def _size(n: int) -> str:

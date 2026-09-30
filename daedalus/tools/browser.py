@@ -32,8 +32,9 @@ from daedalus.tools.vision import VisionUnavailable, look
 BROWSER_TOOLS = (
     "BrowserOpen", "BrowserNavigate", "BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserAct",
     "BrowserTabs", "BrowserWait", "BrowserDialog", "BrowserHandoff", "BrowserClose", "BrowserDownload", "BrowserNote",
+    "BrowserLogs", "BrowserNetwork", "BrowserInspect",
 )
-READ_ONLY_TOOLS = ("BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserTabs", "BrowserWait")
+READ_ONLY_TOOLS = ("BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserTabs", "BrowserWait", "BrowserLogs", "BrowserNetwork", "BrowserInspect")
 """The tools that only read the page or wait on it: a command-line agent's own permission rules may
 let these through without asking; every other one changes something."""
 DOWNLOADS_DIR = "downloads"
@@ -327,7 +328,11 @@ async def browser_wait(context: ToolContext, until: str = "load", value: str | N
 )
 @tool(
     name="BrowserDialog",
-    description="Answer the page's alert, confirm or prompt: accept=true or false, text for a prompt. Every other action waits while one is open.",
+    description=(
+        "Answer the page's confirm or prompt: accept=true or false, text for a prompt. Every other action waits while "
+        "one is open. An alert, and the question a page asks before you leave it, are accepted for you and said in the "
+        "result."
+    ),
 )
 async def browser_dialog(context: ToolContext, accept: bool, text: str | None = None, tab: str | None = None) -> ToolResult:
     return await _run(context, "BrowserDialog", {"accept": accept, "text": text, "tab": tab})
@@ -396,6 +401,82 @@ async def browser_note(context: ToolContext, note: str, host: str | None = None)
     return await _run(context, "BrowserNote", {"note": note, "host": host})
 
 
-TOOLS = [browser_open, browser_navigate, browser_snapshot, browser_text, browser_look, browser_act, browser_tabs, browser_wait, browser_dialog, browser_handoff, browser_close, browser_download, browser_note]
+@tool_group("browser")
+@search_hint(
+    "console log errors exceptions uncaught devtools javascript error debug site broken failed to load warnings "
+    "консоль лог логи ошибки исключения отладка девтулз джаваскрипт сайт сломан не работает не загрузилось предупреждения"
+)
+@tool(
+    name="BrowserLogs",
+    description=(
+        "The page's console since your last BrowserLogs on that tab: what it logged, the errors it threw and did not "
+        "catch (with where in the code), and what the browser said about it (a script or picture that failed to load, "
+        "404s). For a site you build or one that misbehaves: read it after an action instead of guessing from the "
+        "page. level ('error', 'warning', 'info', 'debug') is the least severe to show; all=true reads everything the "
+        "tab keeps."
+    ),
+)
+async def browser_logs(context: ToolContext, tab: str | None = None, level: str | None = None, all: bool = False) -> ToolResult:  # noqa: A002 — the tool's argument name
+    return await _run(context, "BrowserLogs", {"tab": tab, "level": level, "all": all or None})
+
+
+@tool_group("browser")
+@search_hint(
+    "network requests xhr fetch api endpoint json response status headers devtools network tab find api 500 error "
+    "сеть запросы апи эндпоинт джейсон ответ статус заголовки вкладка сеть найти апи ошибка сервера"
+)
+@tool(
+    name="BrowserNetwork",
+    description=(
+        "The requests the page made since your last BrowserNetwork on that tab: id, method, status, type, size, time "
+        "and address — to find the JSON API a page is built from, or why a request fails. type narrows it ('api' for "
+        "xhr, fetch, websocket and eventsource; or 'document', 'script', 'image' …, comma-separated); host, contains, "
+        "method and failed=true too; all=true lists everything the tab keeps. id='r12' shows one request with its "
+        "headers; body=true adds its response body (JSON and text, at most max_chars). Read only: it never sends a "
+        "request, and credentials (cookies, Authorization, tokens, keys) are cut before you see anything."
+    ),
+)
+async def browser_network(
+    context: ToolContext,
+    tab: str | None = None,
+    id: str | None = None,  # noqa: A002 — the tool's argument name
+    body: bool = False,
+    type: str | None = None,  # noqa: A002 — the tool's argument name
+    host: str | None = None,
+    contains: str | None = None,
+    method: str | None = None,
+    failed: bool = False,
+    all: bool = False,  # noqa: A002 — the tool's argument name
+    max_chars: int | None = None,
+) -> ToolResult:
+    return await _run(context, "BrowserNetwork", {
+        "tab": tab, "id": id, "body": body or None, "type": type, "host": host, "contains": contains, "method": method, "failed": failed or None, "all": all or None,
+        "max_chars": max_chars,
+    })
+
+
+@tool_group("browser")
+@search_hint(
+    "inspect element why not visible hidden covered not clickable css computed style box html markup devtools elements "
+    "осмотреть элемент почему не видно скрыт перекрыт не кликается стили разметка хтмл размер позиция"
+)
+@tool(
+    name="BrowserInspect",
+    description=(
+        "One element as a developer's tools show it: whether it is visible and can be clicked, and if not why "
+        "(display none on which ancestor, opacity, no size, off the page, cut off by a pane, covered by what, "
+        "disabled, pointer-events), its box, key computed styles, state (value, invalid and why) and its markup "
+        "without scripts or secret values. ref from BrowserSnapshot; or selector (CSS) for an element the outline does "
+        "not show, such as a hidden one. html=false leaves the markup out; max_chars bounds it."
+    ),
+)
+async def browser_inspect(context: ToolContext, ref: str | None = None, selector: str | None = None, tab: str | None = None, html: bool = True, max_chars: int | None = None) -> ToolResult:
+    return await _run(context, "BrowserInspect", {"ref": ref, "selector": selector, "tab": tab, "html": html, "max_chars": max_chars})
+
+
+TOOLS = [
+    browser_open, browser_navigate, browser_snapshot, browser_text, browser_look, browser_act, browser_tabs, browser_wait, browser_dialog, browser_handoff, browser_close,
+    browser_download, browser_note, browser_logs, browser_network, browser_inspect,
+]
 
 __all__ = ["BROWSER_TOOLS", "READ_ONLY_TOOLS", "TOOLS", "SessionFiles"]

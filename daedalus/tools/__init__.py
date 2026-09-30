@@ -104,8 +104,9 @@ TOOL_GROUPS: dict[str, ToolGroupSpec] = {
     "browser": ToolGroupSpec(
         "A real browser you drive, for sites that need JavaScript or a login: open pages, click and type, look at "
         "how a page looks (BrowserLook), downloads (BrowserDownload), hand-over to the operator for a sign-in or a "
-        "payment. Not a Puppeteer or Playwright MCP server, not a headless browser in the shell; WebFetch for plain "
-        "pages",
+        "payment, and a developer's view of a site you build or debug: its console errors (BrowserLogs), its "
+        "requests and API responses (BrowserNetwork), why an element is hidden (BrowserInspect). Not a Puppeteer or "
+        "Playwright MCP server, not a headless browser in the shell; WebFetch for plain pages",
         "lazy",
     ),
     "docs": ToolGroupSpec(

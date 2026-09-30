@@ -64,6 +64,8 @@ describe("the action log in words", () => {
     expect(actionWords({ kind: "navigate", element: "", name: "", url: "https://www.github.com/x" })).toEqual({ key: "browser.act.open", vars: { where: "github.com" } });
     expect(actionWords({ kind: "handoff", element: "", name: "", needs: { reason: "login", what: "sign in" } }).key).toBe("browser.act.handoff");
     expect(actionWords({ kind: "teleport", element: "x", name: "" }).key).toBe("browser.act.other");
+    expect(actionWords({ kind: "dialog", element: "Saved!", name: "", actor: "page" })).toEqual({ key: "browser.act.dialog_auto", vars: { what: "Saved!" } });
+    expect(actionWords({ kind: "dialog", element: "", name: "", actor: "agent" }).key).toBe("browser.act.dialog");
   });
 
   it("merges the listing and the live rows by id, newest first", () => {

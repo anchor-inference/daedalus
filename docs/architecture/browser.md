@@ -122,15 +122,19 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 | `tab.new` | `{group_id, url?, origin?}` → `Tab`; it becomes the active tab |
 | `tab.select` | `{tab_id, origin?}` → `Tab` |
 | `tab.close` | `{tab_id, origin?}` → `{}` |
-| `page.navigate` | `{tab_id, url, origin?, timeout_ms? ≤ 60000 = 30000}` → `{url, title, status?, error?}` |
-| `page.back`, `page.forward`, `page.reload` | `{tab_id, origin?}` → `{url, title}` |
+| `page.navigate` | `{tab_id, url, origin?, timeout_ms? ≤ 60000 = 30000}` → `{url, title, status?, error?, dialogs_auto?, logged?}`: `status` is the HTTP status of the document now shown; `dialogs_auto` and `logged` as in an action's reply (Actions, below) |
+| `page.back`, `page.forward`, `page.reload` | `{tab_id, origin?}` → as `page.navigate`'s; no `status` for a page the back-forward cache restored |
 | `page.snapshot` | `{tab_id, scope_ref?, max_chars? ≤ 200000 = 40000, view? "page" \| "viewport", origin?}` → `{url, title, text, refs, truncated, frames, viewport{w, h}, scroll{top, height, view, above, below, pane?}, loading}` |
 | `page.find` | `{tab_id, query ≤ 500 bytes, regex?, case_sensitive?, max? ≤ 100 = 20, origin?}` → `{url, matches: [{text, in?{ref, role, name}, near?: [{ref, role, name}]}], total, text}` (The snapshot, below) |
 | `page.text` | `{tab_id, ref?, max_chars? ≤ 200000 = 40000, origin?}` → `{url, title, text, truncated}` |
 | `page.screenshot` | `{tab_id, ref?, full_page?, max_width? ≤ 2560 = 1280, format? "jpeg" \| "png", quality?, origin?}` → `{format, width, height, data_b64, masked}` |
 | `page.act` | see Actions → `{action_id, ok, effects, point?, box?, diff?, ref?}` |
 | `page.wait` | `{tab_id, for: "load" \| "idle" \| "text" \| "gone" \| "url", value?, timeout_ms ≤ 60000, origin?}` → `{matched: <for> \| "timeout", url}` |
-| `dialog.answer` | `{tab_id, accept, text?, origin?}` → `{diff?, effects?{navigated, url} \| {dialog}}`: when an action opened the dialog, `diff` is what the action and the answer changed together (the page cannot be read between them); a navigation or a next dialog the answer started is said in `effects`. `1001` with no dialog open |
+| `dialog.answer` | `{tab_id, accept, text?, origin?}` → `{diff?, effects?{navigated, url} \| {dialog}, dialogs_auto?}`: when an action opened the dialog, `diff` is what the action and the answer changed together (the page cannot be read between them); a navigation or a next dialog the answer started is said in `effects`, and an alert it brought, which the daemon answered, in `dialogs_auto`. `1001` with no dialog open |
+| `page.logs` | `{tab_id, after? = 0, level? "error" \| "warning" \| "info" \| "debug" = "info", limit? ≤ 200 = 100, origin?}` → `{url, entries: [LogEntry], last, more, dropped}` (The console, the requests and one element, below) |
+| `page.network` | `{tab_id, after? = 0, types?, host?, method?, contains?, failed?, limit? ≤ 200 = 50, origin?}` → `{url, requests: [Request], last, skipped, dropped, total}` |
+| `page.request` | `{tab_id, id, body?, max_chars? 100–200000 = 20000, origin?}` → `{request: Request with its headers, body?, truncated?, body_error?}` |
+| `page.inspect` | `{tab_id, ref \| selector, max_chars? 200–50000 = 4000, origin?}` → `{ref, tag, role, name, visible, clickable, reasons[], where, box, page, viewport, styles{}, state{}, panes[], html, html_truncated, html_length, shadow, children, text_length, frame?, matches?}` |
 | `download.list` | `{group_id}` → `{downloads: [Download]}` |
 | `download.read` | `{id, offset, max? ≤ 512 KiB}` → `{data_b64, offset, size, eof}` |
 | `download.delete` | `{id}` → `{}` |
@@ -246,8 +250,12 @@ upload_ids?, x?, y?, allow_point?, dry_run?, origin?}`
   checked, file, select}, point, box, sensitive{kinds[], evidence{}}}` — the host's preflight for the
   sensitive-action policy (Sensitive actions, below). The same `element` and `sensitive` are in the
   reply of the real action.
-- **The reply** is `{action_id, ok, effects{navigated?, url?, new_tab?, dialog?, download?,
-  unchanged?, scroll?, scrolled?, found?}, point, box, element, sensitive, diff?, ref?}`. `point` and `box` are in CSS pixels of the
+- **The reply** is `{action_id, ok, effects{navigated?, url?, new_tab?, dialog?, dialogs_auto?,
+  logged?, download?, unchanged?, scroll?, scrolled?, found?}, point, box, element, sensitive, diff?,
+  ref?}`. `dialogs_auto` lists the dialogs the daemon answered on its own while the action ran
+  (`[{seq, type, message, url, at}]`, Dialogs, below), and `logged {errors, warnings}` counts what the
+  page wrote to its console at those levels meanwhile, uncaught errors included; both are absent when
+  there is nothing to say. `point` and `box` are in CSS pixels of the
   viewport, as dispatched. `diff` is what the action changed in the page's outline, lines that
   appeared as `+ …` and lines that went as `- …`, at most 2 KB; it is left out after a navigation.
   `unchanged` says a `check` or `uncheck` found the box already so. Every `scroll` returns
@@ -379,6 +387,85 @@ and a blank box drawn over them, then both removed), in every frame of another s
 `masked` lists their refs; a page whose frames of other sites cannot all be reached for it (more than
 64, or one that does not answer) is not captured.
 
+## The console, the requests and one element
+
+What a developer's tools show of a page, as reads the agent can make — never a way to run code in
+the page or to send a request of its own. Every page is set up with `Runtime.enable`, `Log.enable`
+and `Network.enable`. Measured on the pinned build: enabling Runtime runs none of the page's getters
+(a logged object with an accessor, and an error whose `stack` is one, are previewed without calling
+them), so the page cannot tell it is on the way it could with older builds; a test holds this.
+
+- **`page.logs`** is the tab's console: what the page logged (`console`), what it threw and did not
+  catch, promise rejections included (`exception`, with the first three frames of its stack), and
+  what the browser said about it — a resource that failed to load (`network`), a blocked script or a
+  deprecation (`browser`) — plus a `dialog` line for each dialog. `LogEntry {seq, at, level: error |
+  warning | info | debug, source, text, url?, line?, count?}`. A logged value is rendered one level
+  deep from Chromium's own preview (`{a: 1, b: "x", g: (getter)}`); `%s`, `%d`, `%o` and `%c` are
+  filled as the console fills them. Each tab keeps its last 200 entries, each at most 500
+  characters; the same entry again in a row is folded into the last with a `count` and a new `seq`,
+  so a page logging in a loop fills one line and a reader who saw it is still told it came again.
+  `after` is the `seq` read to (the host keeps it per owner and tab, so each call says only what is
+  new); `level` is the least severe returned; `more` counts the entries past `limit`, which the next
+  call with `after: last` returns; `dropped` says some after `after` were pushed out unread. An
+  `after` past the log's end (a daemon restarted under a host that kept its place) reads from the
+  start. The browser's own request for `/favicon.ico` is left out: a site without an icon is not at
+  fault. The objects Chromium keeps for the console's messages are released once a second, so a
+  page logging large objects does not grow for it.
+- **`page.network`** lists the tab's requests. `Request {id: "r<n>", seq, method, url, type, status?,
+  mime?, at, ms?, size?, body_size?, cached?, pending?, failed?, blocked?, initiator?, redirect?,
+  frame?}`: `type` is Chromium's resource type in lower case (`document`, `xhr`, `fetch`, `script`,
+  `image`, `websocket`, `eventsource` …), `size` what came over the network and `body_size` the
+  decoded body, `failed` Chromium's error, `blocked` the network wall's reason when the wall answered
+  instead of the site, `initiator` `script <url>:<line>`, `parser <url>` or Chromium's word, and
+  each hop of a redirect is a request of its own whose `redirect` names the next. `types` filters
+  (`api` is `xhr`, `fetch`, `websocket` and `eventsource`), `host` takes the host or a domain above
+  it, `failed` keeps what failed or answered 400 or more. Past `limit` the newest are kept and
+  `skipped` counts the rest: after a page loads, its API calls come last. Each tab keeps its last 300
+  requests. A `data:` address is not a request and is not kept.
+- **`page.request`** is one request with `request_headers`, `response_headers` (the cookies it
+  carried and set included, from the wire's own headers), `status_text`, `protocol` and `post_data`
+  (whether it sent a body — the body itself is never kept or returned: a sign-in sends its password
+  in one). With `body` it adds the response's body, read from Chromium, which keeps the newest
+  responses' bodies up to 8 MiB a tab and 1 MiB each (`Network.enable`'s buffers); a body pushed out,
+  a request pending or failed, a redirect, a response without a body, or one that is not text (only
+  JSON, text, scripts, XML and forms are read) is `body_error` in words instead. At most `max_chars`
+  characters, `truncated` when cut.
+- **Credentials never leave the daemon.** Every address kept has its user and password removed and
+  the value of every query and fragment parameter whose name holds a credential word (`token`, `key`,
+  `secret`, `password`, `session`, `sig`, `auth`, `code`, `csrf`, … split at `-`, `_`, `.` and case
+  changes, so `access_token`, `X-Amz-Signature` and `apiKey` all are) replaced by `[withheld]`, as is
+  anything shaped like a JSON web token. Headers named `Authorization`, `Proxy-Authorization`,
+  `Cookie`, `Set-Cookie` or with such a word keep their name and lose their value. A body has, in
+  JSON, the value of every member named by a narrower list (`token`, `password`, `secret`, `session`,
+  `api_key` and their kind, but not `code`, `key` or `hash`, which are an API's ordinary fields) cut
+  at any depth with the members kept in their order; in a form, its secret pairs; in HTML, the value
+  of hidden and password inputs and of a request token's meta tag; in any text, `name: "value"` and
+  `name=value` pairs with such a name, and JSON web tokens. What the agent learns is that a request
+  carried an `Authorization` header or a token parameter, which finding an API needs — never its
+  value.
+- **`page.inspect`** describes one element as a developer's tools do, from the daemon's world:
+  `visible` and `clickable`, and `reasons` in words — `display: none` on which ancestor, `visibility`,
+  `opacity` 0, `hidden`, `inert`, no size, placed outside the page, cut off by an ancestor's
+  `overflow`, out of view inside a scrolling pane (clickable: an action scrolls it in), covered by
+  what (the same hit test a click makes), `pointer-events: none`, disabled — each naming the element
+  it comes from with a ref; `where` says how far outside the viewport it is; `box` in the tab's
+  viewport, `page` in the document; `styles` (`display`, `visibility`, `opacity`, `position`,
+  `z-index`, `overflow`, `pointer-events`, `cursor`, `color`, `background-color`, `font-size`,
+  `font-weight`, and `transform`, `clip-path`, `filter`, `content-visibility` and the offsets when not
+  their default); `state` (`disabled`, `readonly`, `required`, `checked`, `focused`, `expanded`,
+  `invalid` with the browser's message, `value` unless the field is secret); `panes`, the scrolling
+  ancestors; and `html`, its markup with scripts, styles and `on…` handlers left out, long attributes
+  cut, whitespace folded, the value of every secret field, and of a hidden field or a meta tag that
+  holds a request token, replaced, and what a field holds now written into its `value`. A frame's own
+  ref inspects the frame element. `selector`, a CSS selector of the tab's own document, finds an
+  element the outline shows no ref for (a hidden one is the usual reason to ask) and gives it a ref;
+  `matches` counts what it matched. It moves nothing, except that a ref inside a frame of another
+  site has its frame brought into view first, as every call on such a ref does.
+- All four are reads, gated like `page.snapshot`: refused while a person drives, and while a dialog
+  is open for the ones that run in the page (`page.inspect`, a body). The page's words in them are
+  the page's; the host frames them as untrusted. The console and the requests of a frame of another
+  site, which runs in its own session, are not followed yet; a same-site frame's are the tab's.
+
 ## Sensitive actions
 
 The daemon classifies an action from the element and the page. `sensitive.kinds` is any of:
@@ -402,6 +489,17 @@ tap. The daemon only classifies; asking is the host's policy.
 - A page dialog (`alert`, `confirm`, `prompt`, `beforeunload`) publishes `dialog.opened {group_id,
   tab_id, type, message, default_prompt?}` and blocks the page until `dialog.answer`;
   `dialog.closed` follows.
+- **Except an alert or a beforeunload question while the agent holds the page** (the group's owner is
+  `agent`). The daemon accepts it at once: an alert has one answer and only stops the page until
+  someone gives it (the agent spent a call on every "Saved!", and one a page raised on a timer
+  refused every later call with `1107`); a beforeunload question comes from the agent's own
+  navigation, reload or closing, which is what it asked for. It never becomes the tab's open dialog:
+  `dialog.auto {group_id, tab_id, seq, type, message, url, accepted: true}` is published instead of
+  `dialog.opened`, the reply of the call that met it lists it in `dialogs_auto`, and the console has
+  a `dialog` line for it. `seq` counts such dialogs per tab, so the host tells each once. A `confirm`
+  or a `prompt` is a decision ("Delete this?") and stays the agent's. While a person drives, or the
+  agent is paused for one, every dialog is theirs to see and answer as before. Should Chromium refuse
+  the answer, the dialog is published and kept open as any other rather than leaving a stopped page.
 - `page.wait`: `load` (the load event), `idle` (no network request for 500 ms), `text` (the text
   appears in the page), `gone` (a ref, or a text, disappears), `url` (the URL contains `value`).
 - **`needs_you {group_id, tab_id, reason, what, url, by}`** asks for the operator; `by` is `daemon`
@@ -430,6 +528,7 @@ are in `data`. The daemon keeps the last 20 000, no more than 64 MiB. `events.su
 | `action_done` | `{action_id, group_id, tab_id, ok, effects, error?}` |
 | `control` | `{group_id, owner, holder, until, reason}` |
 | `dialog.opened`, `dialog.closed` | as above |
+| `dialog.auto` | `{group_id, tab_id, seq, type, message, url, accepted}` — a dialog the daemon answered for the agent (Dialogs, above) |
 | `download.started` | `{group_id, download: Download}` |
 | `download.done` | `{group_id, download: Download}` |
 | `needs_you` | as above |
@@ -687,7 +786,9 @@ element?, ref?, text?, keys?, option?, submit?, to_ref?, direction?: up|down|lef
 y?, steps?, tab?)`, `BrowserTabs(action: list|new|select|close, tab?, url?)`, `BrowserWait(until:
 load|idle|text|gone|url, value?, timeout_s ≤ 60, tab?)`, `BrowserDialog(accept, text?, tab?)`,
 `BrowserHandoff(reason: login|captcha|two_factor|payment|confirm|other, what)`, `BrowserClose(tab? |
-all)`, `BrowserDownload(name, to?)`, `BrowserNote(note, host?)`.
+all)`, `BrowserDownload(name, to?)`, `BrowserNote(note, host?)`, `BrowserLogs(tab?, level?, all?)`,
+`BrowserNetwork(tab?, type?, host?, contains?, method?, failed?, all?, id?, body?, max_chars?)`,
+`BrowserInspect(ref? | selector?, tab?, html? = true, max_chars?)`.
 
 - **Reading.** `view` is passed to `page.snapshot`. `BrowserText(find=…, regex?)` is `page.find`
   (30 matches), fenced as the page's words. `BrowserText(query=…, schema?)` reads the page (`page.text`,
@@ -712,6 +813,19 @@ all)`, `BrowserDownload(name, to?)`, `BrowserNote(note, host?)`.
   outside the fence and labelled as the operator's approval, not the page's words. Notes are kept in
   the host's `kv` table (`browser.site_notes`) per project (or for every agent, from a chat of its
   own), at most five approved per site and twenty waiting per scope; the audit row is `note`.
+- **A developer's view.** `BrowserLogs` reads `page.logs` after the place the owner last read that
+  tab to, 60 entries at a time, one line each (`- error · exception: … (/app.js:40) ×3`), fenced as
+  the page's words; `all=true` reads from the start. `BrowserNetwork` lists `page.network` the same
+  way, 50 at a time (`r7 POST 201 fetch application/json 312 B 45 ms <url>`); with `id` it is
+  `page.request`, and `body=true` its response's body, at most 20 000 characters unless asked for
+  fewer, and never from a host outside the operator's `egress_allow` (a page may load from one; what
+  it said is not read). On a site the operator watches, both wait for the live view as acting does
+  (watch mode, below). A body read is a line of the audit (`network`, with the request's address and
+  size). `BrowserInspect` is `page.inspect` in a few lines. The injection monitor, when on, reads each
+  of the three before the agent does. An action's, a navigation's and a dialog answer's result says
+  in a line how many errors and warnings the page logged meanwhile, and, fenced, the text of an alert
+  the browser accepted; an alert no call met (a page alerting on a timer) is told at the start of the
+  next browser call, once, and is a line of the action log either way (`dialog`, by the page).
 - **Loop notes.** The host notes, after a result and never blocking, the same action on the same
   target with no change three times, the same read twice, the same address three times, and every
   five calls that changed nothing, with a plain word to stop guessing and say what is missing.
@@ -755,7 +869,7 @@ all)`, `BrowserDownload(name, to?)`, `BrowserNote(note, host?)`.
 Every launch offers the tools through `ptyd tools-mcp --set browser` (terminals.md, Other tool sets)
 under the server `daedalus_browser`; the launch file is the native tools' own names, descriptions
 and schemas. Claude Code and Grok let the reads (`BrowserSnapshot`, `BrowserText`, `BrowserLook`,
-`BrowserTabs`, `BrowserWait`) through unasked and ask about the rest by the member's mode; OpenCode
+`BrowserTabs`, `BrowserWait`, `BrowserLogs`, `BrowserNetwork`, `BrowserInspect`) through unasked and ask about the rest by the member's mode; OpenCode
 runs MCP tools unasked; Codex asks by its own approval policy; pi's bridge registers the set's tools
 from the same file. A call arrives as a held `tools` post and runs through the same operations for
 the owner `m-<staff>`; a sensitive action or an egress ask becomes the member's permission request
@@ -828,7 +942,9 @@ or it closes; `acting` is true for a few seconds after each action.
 
 The action log is the audit's `act`, `navigate`, `tab_new`, `look`, `dialog`, `handoff`, `download`,
 `download_saved`, `take`, `give`, `pause`, `open`, `close`, `blocked`, `watch`, `monitor`, `extract` and
-`note` rows; sensitive decisions are in the audit only.
+`note` rows (a `dialog` row by the page is one the browser accepted for the agent, its text as the
+row's `element`); sensitive decisions and `network` (a response body the agent read) are in the audit
+only.
 
 `BrowserActionRow` is `{id, at, actor: agent | operator | page | system, kind, element, name, tab,
 point?, box?, text?, text_len?, keys?, url?, ok?, error?, sensitive?{kinds, decision: allowed_once |

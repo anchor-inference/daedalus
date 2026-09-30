@@ -68,6 +68,10 @@ class Element:
     covered_by: str = ""
     """What a page put over it: a click is refused ``1004 {ref, covered_by}``, as the daemon refuses one."""
     checked: bool = False
+    alerts: str = ""
+    """A click on it shows an alert with this message, which the daemon answers by itself."""
+    logs: list[dict[str, Any]] = field(default_factory=list)
+    """Console entries a click on it makes the page write (``{level, source, text}``)."""
 
     @property
     def secret(self) -> bool:
@@ -96,6 +100,13 @@ class Page:
     text: str = ""
     elements: dict[str, Element] = field(default_factory=dict)
     heading: str = ""
+    logs: list[dict[str, Any]] = field(default_factory=list)
+    """Console entries the page writes as it loads."""
+    requests: list[dict[str, Any]] = field(default_factory=list)
+    """Requests the page makes as it loads (``page.network``'s shape, without id and seq); a
+    ``body`` key is its response's body, which ``page.request`` gives."""
+    inspected: dict[str, dict[str, Any]] = field(default_factory=dict)
+    """Ref or selector → what ``page.inspect`` answers for it."""
 
     def outline(self) -> str:
         lines = [f'- heading "{self.heading}" [level=1]'] if self.heading else []
@@ -113,6 +124,23 @@ class Tab:
     history: list[Page] = field(default_factory=list)
     dialog: dict[str, Any] | None = None
     created_at: str = field(default_factory=stamp)
+    logs: list[dict[str, Any]] = field(default_factory=list)
+    requests: list[dict[str, Any]] = field(default_factory=list)
+    log_seq: int = 0
+    request_seq: int = 0
+    dialog_seq: int = 0
+
+    def log(self, entry: dict[str, Any]) -> None:
+        self.log_seq += 1
+        self.logs.append({"seq": self.log_seq, "at": int(time.time() * 1000), "level": "info", "source": "console", **entry})
+
+    def loaded(self, page: Page) -> None:
+        """What a page writes and asks for as it loads, kept by the tab as the daemon keeps it."""
+        for entry in page.logs:
+            self.log(entry)
+        for request in page.requests:
+            self.request_seq += 1
+            self.requests.append({"id": f"r{self.request_seq}", "seq": self.request_seq, "at": int(time.time() * 1000), **request})
 
     def view(self, active: bool) -> dict[str, Any]:
         return {"id": self.id, "group_id": self.group_id, "url": self.page.url, "title": self.page.title, "favicon_url": "", "loading": False, "active": active, "opener": None, "created_at": self.created_at}
@@ -309,6 +337,15 @@ class FakeBrowserd:
         tab = self.tab_of(group_id) if group_id in self.groups else None
         frames.append({"no": len(frames) + 1, "at": int(time.time() * 1000), "tab": tab.id if tab else "", "url": tab.page.url if tab else "", "kind": kind, "action_id": action_id, "w": 1280, "h": 800, "bytes": len(self.screenshot), "data": self.screenshot})
 
+    def auto_dialog(self, group_id: str, kind: str, message: str) -> dict[str, Any]:
+        """A dialog the daemon answered by itself while the agent held the page, published as it is."""
+        tab = self.tab_of(group_id)
+        tab.dialog_seq += 1
+        answered = {"seq": tab.dialog_seq, "type": kind, "message": message, "url": tab.page.url, "at": int(time.time() * 1000)}
+        tab.log({"level": "info", "source": "dialog", "text": f"{kind} (accepted by the browser): {message}"})
+        self.emit("dialog.auto", {"group_id": group_id, "tab_id": tab.id, "accepted": True, **answered})
+        return answered
+
     def set_control(self, group_id: str, owner: str, holder: str | None = None, reason: str = "") -> None:
         group = self.groups[group_id]
         group.control = {"owner": owner, "holder": holder, "until": int(time.time() * 1000) + 1_800_000 if owner == "human" else None, "reason": reason}
@@ -499,7 +536,8 @@ class FakeBrowserd:
     def _page_at(self, url: str) -> Page:
         known = self.pages.get(url)
         if known is not None:
-            return Page(url=known.url, title=known.title, text=known.text, elements=dict(known.elements), heading=known.heading)
+            return Page(url=known.url, title=known.title, text=known.text, elements=dict(known.elements), heading=known.heading, logs=list(known.logs),
+                        requests=[dict(r) for r in known.requests], inspected=dict(known.inspected))
         return Page(url=url or "about:blank")
 
     async def _handle(self, method: str, params: dict[str, Any]) -> Any:  # noqa: C901 — one dispatcher, as the daemon's
@@ -585,8 +623,14 @@ class FakeBrowserd:
             self._through_wall(group, url)
             tab.history.append(tab.page)
             tab.page = self._page_at(url)
+            tab.loaded(tab.page)
             self.emit("tab.updated", {"group_id": group.id, "tab_id": tab.id, "url": tab.page.url, "title": tab.page.title, "favicon_url": "", "loading": False})
-            return {"url": tab.page.url, "title": tab.page.title, "status": 200}
+            reply: dict[str, Any] = {"url": tab.page.url, "title": tab.page.title, "status": 200}
+            errors = sum(1 for e in tab.page.logs if e.get("level") == "error")
+            warnings = sum(1 for e in tab.page.logs if e.get("level") == "warning")
+            if errors or warnings:
+                reply["logged"] = {"errors": errors, "warnings": warnings}
+            return reply
         if method in ("page.back", "page.forward", "page.reload"):
             group, tab = self._tab(params)
             await self._held_back(group, params)
@@ -633,6 +677,73 @@ class FakeBrowserd:
             tab.dialog = None
             self.emit("dialog.closed", {"group_id": group.id, "tab_id": tab.id})
             return {}
+        if method == "page.logs":
+            group, tab = self._tab(params)
+            await self._held_back(group, params)
+            self._page_call(tab)
+            levels = {"error": 3, "warning": 2, "info": 1, "debug": 0}
+            floor = levels.get(str(params.get("level") or "info"))
+            if floor is None:
+                raise _Fail(-32602, "level is error, warning, info or debug")
+            after = int(params.get("after") or 0)
+            if after > tab.log_seq:
+                after = 0
+            limit = int(params.get("limit") or 100)
+            matched = [e for e in tab.logs if e["seq"] > after and levels.get(e["level"], 0) >= floor]
+            shown = matched[:limit]
+            return {"url": tab.page.url, "entries": shown, "last": shown[-1]["seq"] if len(matched) > limit else tab.log_seq, "more": len(matched) - len(shown), "dropped": False}
+        if method == "page.network":
+            group, tab = self._tab(params)
+            await self._held_back(group, params)
+            self._page_call(tab)
+            after = int(params.get("after") or 0)
+            if after > tab.request_seq:
+                after = 0
+            types = [str(t) for t in params.get("types") or []]
+            api = {"xhr", "fetch", "websocket", "eventsource"}
+
+            def match(r: dict[str, Any]) -> bool:
+                if types and not any(t == r.get("type") or (t == "api" and r.get("type") in api) for t in types):
+                    return False
+                if params.get("host") and str(params["host"]) not in str(r.get("url")):
+                    return False
+                if params.get("contains") and str(params["contains"]).lower() not in str(r.get("url")).lower():
+                    return False
+                if params.get("method") and str(params["method"]).upper() != r.get("method"):
+                    return False
+                return not params.get("failed") or bool(r.get("failed")) or int(r.get("status") or 0) >= 400
+
+            matched = [r for r in tab.requests if r["seq"] > after and match(r)]
+            limit = int(params.get("limit") or 50)
+            shown = matched[-limit:]
+            return {"url": tab.page.url, "requests": [{k: v for k, v in r.items() if k not in ("body", "request_headers", "response_headers")} for r in shown],
+                    "last": tab.request_seq, "skipped": len(matched) - len(shown), "dropped": False, "total": len(tab.requests)}
+        if method == "page.request":
+            group, tab = self._tab(params)
+            await self._held_back(group, params)
+            self._page_call(tab)
+            found = next((r for r in tab.requests if r["id"] == params.get("id")), None)
+            if found is None:
+                raise _Fail(1001, f"no request {params.get('id')} on this tab")
+            out: dict[str, Any] = {"request": {k: v for k, v in found.items() if k != "body"}}
+            if params.get("body"):
+                if "body" in found:
+                    limit = int(params.get("max_chars") or 20_000)
+                    out["body"] = found["body"][:limit]
+                    out["truncated"] = len(found["body"]) > limit
+                else:
+                    out["body_error"] = "the response is image/png, not text"
+            return out
+        if method == "page.inspect":
+            group, tab = self._tab(params)
+            await self._held_back(group, params)
+            self._page_call(tab)
+            key = str(params.get("ref") or params.get("selector") or "")
+            if key not in tab.page.inspected:
+                if params.get("selector"):
+                    raise _Fail(1001, f"no element of the page matches {key}")
+                raise _Fail(1103, f"{key} is not on the page any more", {"ref": key})
+            return {"ref": key, **tab.page.inspected[key]}
         if method == "download.list":
             gid = str(params.get("group_id"))
             return {"downloads": [dict(d) for d in self.downloads.values() if d["group_id"] == gid]}
@@ -857,6 +968,15 @@ class FakeBrowserd:
             if element.downloads is not None:
                 download = self.add_download(group.id, *element.downloads)
                 effects["download"] = {"id": download["id"], "name": download["name"], "size": download["size"]}
+            if element.alerts:
+                effects["dialogs_auto"] = [self.auto_dialog(group.id, "alert", element.alerts)]
+            if element.logs:
+                for entry in element.logs:
+                    tab.log(entry)
+                errors = sum(1 for e in element.logs if e.get("level") == "error")
+                warnings = sum(1 for e in element.logs if e.get("level") == "warning")
+                if errors or warnings:
+                    effects["logged"] = {"errors": errors, "warnings": warnings}
         self.emit("action_done", {"action_id": action_id, "group_id": group.id, "tab_id": tab.id, "ok": True, "effects": effects})
         self.keyframe(group.id, "action", action_id)
         reply: dict[str, Any] = {"action_id": action_id, "ok": True, "effects": effects, "point": point, "box": box, "element": described, "sensitive": sensitive}
