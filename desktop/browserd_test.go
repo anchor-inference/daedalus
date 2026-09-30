@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -44,12 +45,15 @@ func TestTheBrowserDaemonRunsInTheSealedRuntimeAsTheHostEnvironment(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The run directory and the profiles are both under the runtime directory, which the agent's
-	// policy seals whole.
+	// The run directory and the profiles are both under the local state folder, which the agent's
+	// policy seals whole, and neither is in the data folder an upgrade copies.
 	for _, dir := range []string{browserdRunDir(paths), browserdStateDir(paths)} {
-		if rel, err := filepath.Rel(paths.Runtime, dir); err != nil || strings.HasPrefix(rel, "..") {
-			t.Fatalf("%s is outside the runtime directory", dir)
+		if !within(dir, paths.Local) || within(dir, paths.Data) {
+			t.Fatalf("%s is not in the sealed local state folder", dir)
 		}
+	}
+	if env := envMap(supervisorEnv(paths, nil, nil)); env["DAEDALUS_LOCAL"] != paths.Local {
+		t.Fatalf("the agent is not told which folder to seal: %q", env["DAEDALUS_LOCAL"])
 	}
 	argv := browserdArgv("/opt/browserd", paths, nil)
 	want := []string{"/opt/browserd", "serve", "--env", "host", "--run-dir", browserdRunDir(paths), "--state-dir", browserdStateDir(paths), "--listen"}
@@ -129,5 +133,25 @@ func TestTheMemoryScopeIsProbedBeforeItIsUsed(t *testing.T) {
 	}
 	if systemScope(context.Background(), found, fails) != nil || systemScope(context.Background(), missing, works) != nil {
 		t.Fatal("a scope that cannot start anything was used")
+	}
+}
+
+// The daemon works in the local state folder, never in the data folder: a daemon that outlived a
+// crashed launcher with its working directory in the data folder held every later switch and
+// restore of it off.
+func TestTheBrowserDaemonDoesNotWorkInTheDataFolder(t *testing.T) {
+	p := fixtureData(t)
+	binary := filepath.Join(t.TempDir(), "browserd")
+	if err := os.WriteFile(binary, []byte("a daemon"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DAEDALUS_BROWSERD", binary)
+	child := NewNative(p, func(string, ...any) {}).newBrowserd(context.Background())
+	proc, ok := child.(*Process)
+	if !ok || proc == nil {
+		t.Fatalf("no browser daemon process: %#v", child)
+	}
+	if proc.Dir != p.Local || within(proc.Dir, p.Data) {
+		t.Fatalf("the daemon works in %s", proc.Dir)
 	}
 }

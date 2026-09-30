@@ -111,12 +111,10 @@ func SuggestMode(ctx context.Context) Mode {
 func (m Mode) Describe() string {
 	switch m {
 	case ModeNative:
-		return "native — the agent runs on this machine, out of " + runtimeFolderName + "; lighter and faster, no container boundary"
+		return "native — the agent runs on this machine, out of a runtime the launcher downloads into this user's cache folder; lighter and faster, no container boundary"
 	case ModeDocker:
 		return "docker — the agent runs in a container with its own filesystem and network"
 	default:
 		return "not chosen yet"
 	}
 }
-
-const runtimeFolderName = "data/runtime"

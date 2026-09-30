@@ -12,9 +12,9 @@ needs on a page of its own, writes the environment files, and then runs the agen
 | **What it needs** | nothing | Docker Desktop (macOS, Windows) or Docker Engine with the compose plugin |
 | **What runs the agent** | a process under the launcher, out of a private folder of pinned, checksummed binaries | a container from one published image, with its own filesystem and its own network |
 | **First run downloads** | **103 MB** measured on Linux x86-64; ~96 MB on macOS (CPython is half the size there), ~148 MB on Windows (MinGit) | **114 MB** to pull the runtime image — 478 MB once unpacked — plus Docker itself, which is a ~600 MB application with a multi-gigabyte VM disk behind it |
-| **On disk** | 245 MB of `data/runtime/` (73 MB of it a wheel cache you can delete), 390 MB for the whole installation | 478 MB of image, plus the volumes |
+| **On disk** | 245 MB of runtime in the user's cache folder (73 MB of it a wheel cache you can delete), 390 MB for the whole installation | 478 MB of image, plus the volumes |
 | **Start to app** | 26 s from an empty folder, **4.3 s** warm | the image pull, then seconds; Docker Desktop itself must be up first |
-| **Browser** | `daedalus-desktop install browser` — both Chromium builds into `data/runtime/browsers/` ([the agent's browser](#the-agents-browser)) | `COMPOSE_PROFILES=browser`: the `browser` service from the `:browser` tag of the same image, sharing every layer below the last |
+| **Browser** | `daedalus-desktop install browser` — both Chromium builds into the runtime's `browsers/` ([the agent's browser](#the-agents-browser)) | `COMPOSE_PROFILES=browser`: the `browser` service from the `:browser` tag of the same image, sharing every layer below the last |
 | **Isolation** | **no container boundary** — `Exec` runs as you, behind the policy rules ([the isolation, honestly](#the-isolation-honestly)) | a command that goes wrong stops at the container's edge |
 
 Neither is the "real" one. Docker buys a wall; native buys weight and speed, and
@@ -28,18 +28,40 @@ says why the three are not the same.
 
 It is about 8 MB without the window and 10–12 MB with it, twice that as the universal macOS build.
 In Docker mode everything that runs is in containers; in native mode the launcher downloads what it
-needs into `data/runtime/` and runs it from there.
+needs into a runtime folder in the user's cache location (outside `data/`) and runs it from there.
 
 ## Get it
 
-One line on macOS and Linux — it takes the newest `desktop-v*` release, checks the download against
-the release's `SHA256SUMS`, and unpacks it into `./Daedalus`:
+One line on macOS and Linux — it takes the newest `desktop-v*` release, checks the release's
+signature by the project's key and the download against its `SHA256SUMS`, and unpacks it into
+`./Daedalus`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/anchor-inference/daedalus/main/desktop/install.sh | sh
 ```
 
-`DAEDALUS_DIR=/somewhere/else` puts it elsewhere. Or take the archive by hand from the
+On Windows, the same in PowerShell (not yet run on a real Windows machine):
+
+```powershell
+irm https://raw.githubusercontent.com/anchor-inference/daedalus/main/desktop/install.ps1 | iex
+```
+
+Both print the release key's fingerprint before they install anything. It must read
+
+```
+f75fa5a293fdd55b36c794f4787f7af8646e4dac95e19d74e6288e55c357c285
+```
+
+the SHA-256 of the key line `RWTfU1OT+iSFoaxGzNfGzkwHdVs2o8WmnCzBUo/LBUw2L4ssGN4xYx/2` (minisign key id
+`A18524FA935353DF`), published here and in every release's notes; a script that prints anything else
+is not the project's. [SIGNING.md](SIGNING.md) has the rest.
+
+`DAEDALUS_DIR=/somewhere/else` puts it elsewhere. Run over an installation that already has data,
+neither script replaces anything itself: the launcher's `upgrade` does it — the installed one, or for
+a launcher older than that command the one just downloaded — after a yes and with the data protected
+first (a kept copy of the data folder on Linux with ext4, a checked backup elsewhere), and it rolls
+back on failure. [UPDATES.md](UPDATES.md) has the whole of it.
+Or take the archive by hand from the
 [releases page](https://github.com/anchor-inference/daedalus/releases) (the tags beginning with
 `desktop-v`):
 
@@ -161,28 +183,34 @@ Daedalus/
     browser-profile/        only when the app is shown in a browser window rather than the launcher's own
 ```
 
-In **native mode** the same folder also holds everything a container would have held. There are no
-Docker volumes: the database, the sessions and the workspaces are files here, so backing the
-installation up is copying one directory and removing it is deleting one directory.
+In **native mode** the same folder also holds the data a container would have kept in volumes:
+the database, the sessions and the workspaces are files here. What can be rebuilt — the runtime —
+and this machine's own state live outside it, so that an update copies and protects only what
+cannot be rebuilt ([UPDATES.md](UPDATES.md#the-runtime-lives-outside-the-data-folder) has where, per
+platform):
 
 ```
   data/
     mode                    docker or native, written once and read on every start
-    runtime/
-      uv/uv                 the installer for everything below it
-      python/               the CPython uv manages, for this installation only
-      venv/                 the environment the agent runs in, built from the checkout's lock file
-      bin/rg                what Search uses
-      git/                  MinGit — Windows only; elsewhere git is the machine's own
-      node/                 an extra, fetched on demand
-      browsers/             an extra, fetched on demand
-      cache/                uv's wheel cache; safe to delete, and the next sync refills it
-      logs/                 the supervisor's, the key proxy's and the terminal daemon's output, rolled by the launcher
-      ptyd/run/             the terminal daemon's endpoint and token (sealed with the rest of runtime/)
-      ptyd/state/           its launches, shell scripts and journal of agent writes
-      installed/            which version and which hash each tool was unpacked from
     state/                  the database, the sessions, the pairing links, the known-good history
     workspaces/             one per session
+
+  <runtime>/                ~/.cache/daedalus/<key> on Linux; Application Support on macOS; %LOCALAPPDATA% on Windows
+    uv/uv                   the installer for everything below it
+    python/                 the CPython uv manages, for this installation only
+    envs/<digest>/          the environment the agent runs in, one per lock file of the checkout
+    bin/rg                  what Search uses
+    git/                    MinGit — Windows only; elsewhere git is the machine's own
+    node/  browsers/        extras, fetched on demand
+    cache/                  uv's wheel cache; safe to delete, and the next sync refills it
+    installed/              which version and which hash each tool was unpacked from
+
+  <local state>/            ~/.local/state/daedalus/<key> on Linux, beside the runtime elsewhere
+    logs/                   the supervisor's, the key proxy's and the terminal daemon's output
+    pids/                   the records of running children
+    ptyd/run/  ptyd/state/  the terminal daemon's endpoint and token (sealed), its journal of agent writes
+    browserd/               the browser daemon's endpoint and the agent's browser profiles (sealed)
+    supervisor.sock         the supervisor's socket
 ```
 
 `data/` is next to the `.app` when the launcher runs from a bundle, and next to the working
@@ -358,7 +386,9 @@ nothing else changes.
 | `daedalus-desktop status` | what is configured, what is running |
 | `daedalus-desktop stop` | stop the containers; they stay down until started again |
 | `daedalus-desktop logs -f` | the stack's logs |
-| `daedalus-desktop update` | move both checkouts to what is published, refresh the images, restart |
+| `daedalus-desktop update` | move both checkouts to what is published and restart, after a checked backup of the data; a failed start puts the data back. Native mode only for now; see [UPDATES.md](UPDATES.md) |
+| `daedalus-desktop check-update` | say whether a newer launcher release is published; installs nothing |
+| `daedalus-desktop upgrade [--yes]` | move to a newer launcher release: asks, stops the stack, backs up and verifies the data, swaps the launcher, updates and starts, and rolls both back on failure. Native mode only for now; see [UPDATES.md](UPDATES.md) |
 | `daedalus-desktop open` | open the app in the browser |
 | `daedalus-desktop pair` | print a fresh pairing link for signing in to the app |
 | `daedalus-desktop uninstall [--keep-data]` | remove the containers, networks and volumes (Docker mode; see [Uninstalling](#uninstalling)) |
@@ -426,7 +456,7 @@ was. What that changes, in both directions.
 
 ### What is downloaded, and where
 
-Everything goes into `data/runtime/` and nowhere else. No package manager is run, no PATH is
+Everything goes into the runtime folder and nowhere else. No package manager is run, no PATH is
 changed, nothing is installed system-wide. Every version is pinned in `desktop/runtime.go` next to
 the SHA-256 the publisher published, and **a download whose hash does not match is not used**: it is
 refused by name and the start fails saying so.
@@ -441,7 +471,7 @@ refused by name and the start fails saying so.
 | the environment | from `uv.lock` | the rest of the 103 MB | 85 MB | PyPI, through uv, against the lock |
 
 **Measured, Linux x86-64, from an empty folder to the app answering: 103 MB over the wire, 26
-seconds.** On disk that is 245 MB of `data/runtime/` (73 MB of it uv's wheel cache, deletable at any
+seconds.** On disk that is 245 MB of runtime (73 MB of it uv's wheel cache, deletable at any
 time) and 390 MB for the whole installation including both checkouts. A warm start — everything
 already downloaded — is **4.3 seconds** from launching the binary to `/app/` answering 200. macOS is
 smaller (CPython is about half the size there) and Windows larger by MinGit.
@@ -492,7 +522,7 @@ not in the container at all:
 
 | | |
 |---|---|
-| **The installation's own files are refused, to read as well as to write** | `data/daedalus-secrets/` (the provider keys), `data/state/daedalus.sqlite` and its journals, `data/state/supervisor.token`, the launcher's executable and the whole of `data/runtime/`. Through `Exec` too — `cat`, `cp`, a redirection, a `tar -C` — because the rule reads the paths in the command, not only the tool that was called. A denial is final: no approval lifts it. |
+| **The installation's own files are refused, to read as well as to write** | `data/daedalus-secrets/` (the provider keys), `data/state/daedalus.sqlite` and its journals, `data/state/supervisor.token`, the launcher's executable and the whole of the runtime and the local state folders. Through `Exec` too — `cat`, `cp`, a redirection, a `tar -C` — because the rule reads the paths in the command, not only the tool that was called. A denial is final: no approval lifts it. |
 | **A path in your home folder, outside every project, asks** | Anything under `$HOME` that is not a project root, a session workspace, one of the two checkouts or part of the installation is a question with an approval key. *Allow once* in the app, or `/allow <key>` in the chat, lets that exact call through one time. |
 
 Everything else is where it was: the egress allowlist still escalates a host it does not know, the
@@ -533,7 +563,7 @@ terminal running** and the app reattaches. **Quitting the launcher ends them**, 
 nothing of the installation keeps running behind a closed launcher. A daemon that crashes is started
 again with the supervisor's backoff; the terminals it held are gone, and the app shows them lost.
 
-- On Linux and macOS the daemon listens on a socket in `data/runtime/ptyd/run/` (loopback TCP when
+- On Linux and macOS the daemon listens on a socket in the local state's `ptyd/run/` (loopback TCP when
   the folder is so deep that the socket's path would be too long); on Windows on a loopback port,
   with the directory's access list giving it to you alone. The directory is sealed from the agent.
 - **Updating it** is updating the launcher: a new release carries its daemon, and the restart that
@@ -553,7 +583,7 @@ beside `ptyd` (`browserd`, `browserd.exe`, or `Contents/MacOS/browserd` in the M
 launcher starts it after the terminal daemon, as another child of its own, so applying a change or
 restarting the agent leaves every browser open; **quitting the launcher closes them**. Chromium is
 not in the archive: `daedalus-desktop install browser` fetches Playwright's pinned builds into
-`data/runtime/browsers/` — the full Chromium the daemon runs, and the headless shell the browser
+the runtime's `browsers/` — the full Chromium the daemon runs, and the headless shell the browser
 skills drive (Playwright's headless launch looks for that one and does not start without it).
 
 - **The wall.** There is no container here. Every connection a page makes goes through the daemon's
@@ -570,9 +600,9 @@ skills drive (Playwright's headless launch looks for that one and does not start
 - **Memory.** On Linux the daemon and every Chromium it starts run in a systemd scope of yours
   capped at 3 GB (`systemd-run --user --scope -p MemoryMax=3G`), when your session has a user
   manager to ask; without one they run uncapped and the launcher's log says so.
-- **Profiles**, which hold the logins you make for the agent, live in `data/runtime/browserd/state/`,
-  and the run directory in `data/runtime/browserd/run/`; both are inside the runtime directory the
-  agent's policy seals whole. `DAEDALUS_BROWSERD=/path/to/browserd` names a daemon built by hand
+- **Profiles**, which hold the logins you make for the agent, live in the local state's
+  `browserd/state/`, and the run directory in `browserd/run/` beside it; the agent's policy seals
+  the local state folder whole. `DAEDALUS_BROWSERD=/path/to/browserd` names a daemon built by hand
   (`browserd/release.sh`); a build without one shows the browser unavailable with "this build
   carries no browserd".
 - Docker mode on a desktop runs the `browser` compose service instead when `COMPOSE_PROFILES=browser`
@@ -584,7 +614,7 @@ skills drive (Playwright's headless launch looks for that one and does not start
 
 Implemented and cross-compiled, with the path and argument logic under tests of its own, but **not
 run on a real Windows machine** — see [what is not yet proven](#what-is-not-yet-proven).
-MinGit is unpacked into `data/runtime/git` with no installer and no PATH change. It ships `sh.exe`
+MinGit is unpacked into the runtime's `git/` with no installer and no PATH change. It ships `sh.exe`
 (a dash), **not** bash: `Exec` runs `sh -c` there, so a command written with bash arrays or `[[ ]]`
 will not run. The supervisor listens on `127.0.0.1:8769` instead of a socket file — which is a port
 any process on the machine can reach, where the socket file has an owner; it is the platform's
@@ -606,7 +636,7 @@ limitation, not a choice, and it is stated here rather than hidden.
 
 ## Disk
 
-In **native mode** there are no images at all: `data/runtime/` is 245 MB after a first start (73 MB
+In **native mode** there are no images at all: the runtime is 245 MB after a first start (73 MB
 of it uv's wheel cache, safe to delete at any time) and the whole installation is about 390 MB with
 both checkouts in it. `install node` adds 58 MB of download, `install browser` 316 MB (656 MB on disk).
 
@@ -638,11 +668,26 @@ first time, and everything after it is the same.
 
 ## Uninstalling
 
-**Delete the folder.** Everything the installation owns is inside it — the checkouts, the database,
-the sessions, the workspaces, the keys, and in native mode the runtime as well — and nothing was put
-anywhere else: no package manager was run, no PATH was changed, nothing was installed system-wide.
+**Run `daedalus-desktop uninstall`, then delete the folder.** The folder holds what the installation
+owns — the checkouts, the database, the sessions, the workspaces, the keys, and beside the data folder
+`.daedalus-update/`, the copies of the data an update kept. No package manager was run, no PATH was
+changed, nothing was installed system-wide.
 
-Three things live outside it, all of them small, all of them optional to clean up:
+In native mode two things of the installation's live outside the folder, because neither may be part
+of what an update copies and switches: the downloaded runtime (the interpreter, the environments, the
+tools) and this machine's local state (the logs, the terminal and browser daemons' endpoints, the
+browser profiles with their logins). `uninstall` removes both; by hand they are
+
+| | Runtime | Local state |
+|---|---|---|
+| Linux | `~/.cache/daedalus/<name>-<hash>` | `~/.local/state/daedalus/<name>-<hash>` |
+| macOS | `~/Library/Application Support/Daedalus/Runtime/<name>-<hash>` | `~/Library/Application Support/Daedalus/State/<name>-<hash>` |
+| Windows | `%LOCALAPPDATA%\Daedalus\Runtime\<name>-<hash>` | `%LOCALAPPDATA%\Daedalus\State\<name>-<hash>` |
+
+where `<name>-<hash>` is the data folder's name and a hash of its path, so two installations on one
+machine never share them.
+
+Three more things live outside it, all of them small, all of them optional to clean up:
 
 | | Where | Remove it with |
 |---|---|---|

@@ -138,6 +138,8 @@ def _runtime_paths() -> list[str]:
     ]
     if runtime_dir := os.environ.get("DAEDALUS_RUNTIME", "").strip():
         named.append(runtime_dir)
+    if local_dir := os.environ.get("DAEDALUS_LOCAL", "").strip():
+        named.append(local_dir)
     return [str(Path(path)) for path in named if path.strip()]
 
 
@@ -184,6 +186,11 @@ class Settings(BaseSettings):
             return cls.model_fields[info.field_name].default
         return value
 
+    @field_validator("boot_id", mode="before")
+    @classmethod
+    def _stripped(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
     telegram_bot_token: str = ""
     bench_state_dir: Path | None = None
     """State directory the Harbor adapter uses (``BENCH_STATE_DIR``): its own config.toml and database, never the bot's."""
@@ -215,12 +222,23 @@ class Settings(BaseSettings):
     core_repo_dir: Path = _REPO_ROOT.parent / "protocore-exp"
     supervisor_socket: Path = Path("/run/daedalus/supervisor.sock")
     supervisor_tcp: str = ""
-    """``host:port`` the supervisor listens on where unix sockets are not available (Windows); empty
-    everywhere else, and then the socket above is what is used. One or the other, never both."""
+    """``host:port`` the supervisor listens on where a unix socket will not do — Windows, and a socket
+    path too long for the system (a deep folder on macOS); empty otherwise, and then the socket above
+    is what is used. One or the other, never both."""
+    boot_id: str = Field(default="", validation_alias="DAEDALUS_BOOT_ID")
+    """The id the desktop launcher gives each start of the supervisor, which the bot inherits and
+    echoes on /app: how the launcher tells this process's answer from one by a stack a crashed
+    launcher left on the same port. Random per start, not a secret; empty elsewhere. Read from
+    ``DAEDALUS_BOOT_ID`` only: without the alias the settings would also take a bare ``BOOT_ID``
+    from whatever environment the process inherited."""
     runtime_dir: Path | None = Field(default_factory=lambda: env_path("DAEDALUS_RUNTIME"))
     """The portable runtime a native installation runs out of: the interpreter executing this process,
     the environment it imports from, and the binaries the tools call. ``None`` in a container, where
     the image carries all three and no directory of the installation's own has to be named."""
+    local_dir: Path | None = Field(default_factory=lambda: env_path("DAEDALUS_LOCAL"))
+    """The native installation's local state, outside the data folder beside the runtime: the logs,
+    the terminal and browser daemons' endpoints and tokens, the browser profiles with their logins.
+    Sealed like the runtime; ``None`` in a container."""
     secrets_override: Path | None = Field(default_factory=lambda: env_path("DAEDALUS_SECRETS"))
     """Where the launcher keeps the provider keys, when that is not the default place under the state
     directory. Natively they sit beside the checkouts instead, so that no project root and no mount
@@ -352,6 +370,8 @@ class Settings(BaseSettings):
         paths = [self.secrets_dir, self.state_dir]
         if self.runtime_dir is not None:
             paths.append(self.runtime_dir)
+        if self.local_dir is not None:
+            paths.append(self.local_dir)
         if self.launcher_path is not None:
             paths.append(self.launcher_path)
         if self.env_file_path is not None:
@@ -362,6 +382,18 @@ class Settings(BaseSettings):
         # reads it to ask the launcher for a component; the agent asks the app.
         if self.native:
             paths.append(self.state_dir.parent / "launcher.json")
+            # What the launcher keeps to put the data back after an update: the verified backups and
+            # the upgrade's own folder inside the data folder, and beside it the control folder of the
+            # fenced switch, whose kept copies are whole copies of the data folder — the provider keys,
+            # the state directory and launcher.json among them. Sealing the live files and leaving
+            # their copies readable one folder over would seal nothing.
+            data = self.state_dir.parent
+            paths.extend((data / "backups", data / "upgrade", data.parent / ".daedalus-update"))
+            # A copy a switch left beside the data folder (.<data>-slot-<op>) is a whole copy too. One
+            # exists only while a switch runs — the agent is stopped then — or after a crash, when
+            # nothing starts until `update resolve` has filed it under the control folder above; the
+            # ones present at a start are named, and that is every one the agent could ever meet.
+            paths.extend(sorted(data.parent.glob(f".{data.name}-slot-*")))
         paths.extend(self.sealed_everywhere)
         return tuple(paths)
 

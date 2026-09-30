@@ -172,7 +172,12 @@ async def test_an_opencode_session_from_its_start_to_its_release(settings: Setti
         [system] = log(s, "system_prompt")
         assert system["text"].startswith("You are Ada, a staff member of the project Bakery")
         assert log(s, "skills")[0]["names"] == ["daedalus-team"]
-        assert s.runtime.channel(await s.team.live(row.id))["team_tools"] == "connected"  # type: ignore[arg-type]
+        # The team's tools connect beside the turn, not before it ends: the channel says "waiting"
+        # until the plugin has called in, which on a loaded machine can be after the turn is done.
+        async def tools_connected() -> bool:
+            return s.runtime.channel(await s.team.live(row.id))["team_tools"] == "connected"  # type: ignore[arg-type]
+
+        await eventually(tools_connected, "the team's tools connected")
         assert [m.state for m in await s.manager.staff.messages(ada.id)] == ["acknowledged"]
         # The first message went by the server, under the id the host chose, into the session the TUI shows.
         [submitted] = [e for e in log(s, "submitted") if e.get("via") == "prompt_async"]

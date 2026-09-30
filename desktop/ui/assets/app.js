@@ -199,6 +199,63 @@ function drawStatus(status) {
     // card with a blank strip at the bottom where the button had been.
     el("change-actions").hidden = !change.pending;
   }
+  // A newer launcher release. The page only tells: installing it is `daedalus-desktop upgrade` with
+  // the launcher closed, which asks, backs up and checks the backup first.
+  const offer = status.upgrade;
+  if (el("upgrade")) {
+    el("upgrade").hidden = !offer;
+    if (offer) {
+      el("upgrade-title").textContent = T("upgrade.card.title").replace("%s", String(offer.to).replace(/^desktop-v/, ""));
+      el("upgrade-body").textContent = T("upgrade.card.body").replace("%s", String(offer.from).replace(/^desktop-v/, ""));
+      if (offer.command) el("upgrade-command").textContent = offer.command;
+    }
+  }
+  // What the data folder's switches kept, and anything about them that needs the operator. The
+  // lines come from the control folder beside the data; the words from the page's own table.
+  const switches = status.switches || { items: [] };
+  if (el("switches")) {
+    const items = switches.items || [];
+    el("switches").hidden = items.length === 0;
+    el("switches").classList.toggle("decide", Boolean(switches.trouble));
+    el("switches-title").textContent = T(switches.trouble ? "switch.card.trouble" : "switch.card.title");
+    const list = el("switches-items");
+    const kept = new Map((status.kept || []).map((copy) => [copy.name, copy]));
+    // A copy that may hold a late write, or lost one on removal, is the operator's to look at
+    // first; the removal would keep it anyway, so the page does not offer it.
+    const doubted = new Set(items.filter((item) => item.kind === "late" || item.kind === "lost").map((item) => String(item.path).split(/[\\/]/).pop()));
+    list.replaceChildren(...items.map((item) => {
+      const li = document.createElement("li");
+      if (item.kind === "unscanned") {
+        // Only how many: the list of names is the command line's (`update status -v`), and on the
+        // page it read as twenty processes to worry about.
+        li.textContent = T(pluralKey("switch.item.unscanned", Number(item.path))).replace("%s", item.path);
+        return li;
+      }
+      const name = String(item.path).split(/[\\/]/).pop();
+      const copy = item.kind === "retained" ? kept.get(name) : undefined;
+      const removable = copy && !doubted.has(name);
+      const text = document.createElement("span");
+      text.textContent = T("switch.item." + item.kind).replace("%s", copy ? name + " · " + size(copy.bytes) : item.path);
+      if (item.detail && item.kind !== "unfinished") text.title = item.detail;
+      li.append(text);
+      if (removable) {
+        // Removed the way the launcher removes one after an update: under the fence, kept with the
+        // reason on anything amiss. The question is the page's own because it cannot be undone.
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "quiet";
+        remove.dataset.removeCopy = name;
+        remove.textContent = T("switch.remove");
+        remove.addEventListener("click", async () => {
+          if (!window.confirm(T("switch.remove.confirm").replace("%s", name))) return;
+          remove.disabled = true;
+          await act("remove-copy/" + encodeURIComponent(name));
+        });
+        li.append(" ", remove);
+      }
+      return li;
+    }));
+  }
   // One primary button per page. A pending change owns it, because restarting is the step that
   // matters; with nothing running, opening the app leads to a page that does not answer, so the
   // button steps back instead of being the brightest thing under a warning that says so.
@@ -207,15 +264,37 @@ function drawStatus(status) {
   open.classList.toggle("quiet", !status.running);
   open.title = status.running ? "" : T("status.open.idle");
   if (status.docker_missing) showAlert(T("alert.docker"), T("docker.missing"));
-  else if (status.failure) showAlert(T("alert.failure"), status.failure);
+  // A failure the launcher recognises is said in the page's language; the program's own words stay
+  // behind it, on hover, for whoever reads the report.
+  else if (status.failure) showAlert(T("alert.failure"), status.failure_key ? T(status.failure_key) : status.failure, status.failure_key ? status.failure : "");
   else el("alert").hidden = true;
   const log = status.log || [];
   el("log").textContent = log.length ? log.join("\n") : T("status.log.empty");
 }
 
-function showAlert(title, body) {
+// pluralKey picks the form of a counted line. Russian has three (1 and 21; 2–4 and 22–24; the rest,
+// 11–14 among them), English two; the rule is the launcher's own (awayLine in watch.go).
+function pluralKey(base, count) {
+  const ru = document.documentElement.lang === "ru";
+  if (ru && count % 10 === 1 && count % 100 !== 11) return base + ".one";
+  if (ru && count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14)) return base + ".few";
+  if (!ru && count === 1) return base + ".one";
+  return base + ".many";
+}
+
+// size is a kept copy's size in the page's language, to one decimal where that is all it takes.
+function size(bytes) {
+  const units = [["switch.size.gb", 1 << 30], ["switch.size.mb", 1 << 20], ["switch.size.kb", 1 << 10]];
+  const [key, unit] = units.find(([, unit]) => bytes >= unit) || units[units.length - 1];
+  const value = bytes / unit;
+  const text = (value < 10 ? value.toFixed(1) : Math.round(value).toString()).replace(".", document.documentElement.lang === "ru" ? "," : ".");
+  return T(key).replace("%s", text);
+}
+
+function showAlert(title, body, raw = "") {
   el("alert-title").textContent = title;
   el("alert-body").textContent = body;
+  el("alert-body").title = raw;
   el("alert").hidden = false;
 }
 

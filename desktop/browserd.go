@@ -29,11 +29,12 @@ const noBrowserdReason = "this build carries no browserd; the agent's browser is
 const browserdMemoryMax = "3G"
 
 // browserdRunDir holds the daemon's endpoint and token, and browserdStateDir the agent's profiles,
-// downloads and uploads. Both are inside the runtime directory, which the agent's policy seals
+// downloads and uploads. Both are inside the local state folder, which the agent's policy seals
 // whole: the token drives browsers holding the logins made in them, and the profiles are those
-// logins.
-func browserdRunDir(p Paths) string   { return filepath.Join(p.Runtime, "browserd", "run") }
-func browserdStateDir(p Paths) string { return filepath.Join(p.Runtime, "browserd", "state") }
+// logins. They were never in the backups and are not in what an upgrade copies; the migration out
+// of the data folder carries them over rather than rebuilding them.
+func browserdRunDir(p Paths) string   { return filepath.Join(p.Local, "browserd", "run") }
+func browserdStateDir(p Paths) string { return filepath.Join(p.Local, "browserd", "state") }
 
 // browserdBinary is the daemon this launcher runs: DAEDALUS_BROWSERD when it is set (a daemon built
 // by hand), else the browserd packaged beside the launcher's own executable. "" when there is none.
@@ -163,12 +164,16 @@ func (n *Native) newBrowserd(ctx context.Context) child {
 	if scope == nil && runtime.GOOS == "linux" {
 		n.log("no systemd user manager to cap the browser's memory in; it runs uncapped")
 	}
+	// The working directory is the local state folder, not the data folder: a working directory
+	// there pins it, and a daemon that outlived a crashed launcher then held every later switch or
+	// restore of the data off.
 	return &Process{
 		Name:    "browser daemon",
 		Argv:    browserdArgv(binary, n.paths, scope),
-		Dir:     n.paths.Data,
+		Dir:     n.paths.Local,
 		Env:     browserdEnv(n.paths, base, isSetuidRoot),
 		LogPath: filepath.Join(n.paths.RuntimeLogs, "browserd.log"),
 		Log:     n.log,
+		PidFile: filepath.Join(pidsDir(n.paths), "browserd.json"),
 	}
 }

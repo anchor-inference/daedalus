@@ -466,6 +466,12 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		job = id
 		go func() { _ = s.app.RunRestart(ctx, id) }()
 	default:
+		if name, ok := strings.CutPrefix(action, "remove-copy/"); ok {
+			// A kept copy of the data, removed under the fence (kept.go). Behind the same token
+			// as every other action: it deletes a whole copy of the operator's data.
+			go func() { _ = s.app.RemoveKeptCopy(ctx, name) }()
+			break
+		}
 		http.Error(w, "no such action", http.StatusNotFound)
 		return
 	}

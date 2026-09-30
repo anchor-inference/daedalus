@@ -113,7 +113,8 @@ func TestOnlyTheNamedEntriesAreUnpacked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode()&0o111 == 0 {
+	// Windows has no execute bit: a file is a program by its name there, and Go reports none.
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 		t.Fatal("the binary came out without the execute bit")
 	}
 }
@@ -129,7 +130,7 @@ func TestAZipKeepsItsTreeAndItsExecutables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode()&0o111 == 0 {
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 		t.Fatal("an .exe came out of the zip unexecutable")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "etc", "gitconfig")); err != nil {
@@ -220,27 +221,85 @@ func TestTheStampIsVersionAndHashTogether(t *testing.T) {
 	}
 }
 
-// The runtime lives inside the data folder and nowhere else: uninstalling is deleting one directory.
-func TestTheRuntimeLayoutIsInsideTheDataFolder(t *testing.T) {
+// The data folder holds what cannot be rebuilt; the runtime (a cache) and the local state are
+// outside it, so an upgrade copies and fences only the data. The runtime would otherwise bring
+// thousands of hard links into uv's cache with it.
+func TestTheRuntimeLayoutIsOutsideTheDataFolder(t *testing.T) {
 	data := t.TempDir()
 	paths, err := NewPaths(data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, dir := range []string{paths.Runtime, paths.RuntimeUV, paths.RuntimePython, paths.RuntimeVenv, paths.RuntimeBin, paths.RuntimeGit, paths.RuntimeNode, paths.RuntimeBrowsers, paths.RuntimeLogs, paths.State, paths.Workspaces} {
-		if !strings.HasPrefix(dir, data+string(os.PathSeparator)) {
+	for _, dir := range []string{paths.State, paths.Workspaces} {
+		if !within(dir, data) {
 			t.Errorf("%s is outside the data folder", dir)
+		}
+	}
+	for _, dir := range []string{paths.Runtime, paths.RuntimeUV, paths.RuntimePython, paths.RuntimeVenv, paths.RuntimeEnvs, paths.RuntimeCache, paths.RuntimeBin, paths.RuntimeGit, paths.RuntimeNode, paths.RuntimeBrowsers} {
+		if within(dir, data) || !within(dir, paths.Runtime) {
+			t.Errorf("%s is not in the runtime folder outside the data folder", dir)
+		}
+	}
+	for _, dir := range []string{paths.RuntimeLogs, paths.SupervisorSocket, pidsDir(paths), ptydRunDir(paths), browserdStateDir(paths)} {
+		if within(dir, data) || !within(dir, paths.Local) {
+			t.Errorf("%s is not in the local state folder outside the data folder", dir)
 		}
 	}
 	if err := paths.EnsureNativeDirs(); err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(paths.State)
+	for _, dir := range []string{paths.State, paths.Local} {
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+			t.Fatalf("%s is %v, not private", dir, info.Mode().Perm())
+		}
+	}
+	if exists(paths.LegacyRuntime) {
+		t.Fatal("a fresh installation made a runtime folder inside the data folder")
+	}
+}
+
+// Where the runtime goes on each platform, and the guard against it landing in the data folder.
+func TestTheLocalRootsFollowThePlatformAndStayOutOfTheData(t *testing.T) {
+	t.Setenv("DAEDALUS_LOCAL_ROOT", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("XDG_STATE_HOME", "")
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	cache, state, err := platformLocalBases()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
-		t.Fatalf("the state directory is %v, not private", info.Mode().Perm())
+	want := map[string][2]string{
+		"linux":   {filepath.Join(home, ".cache", "daedalus"), filepath.Join(home, ".local", "state", "daedalus")},
+		"darwin":  {filepath.Join(home, "Library", "Application Support", "Daedalus", "Runtime"), filepath.Join(home, "Library", "Application Support", "Daedalus", "State")},
+		"windows": {filepath.Join(home, "AppData", "Local", "Daedalus", "Runtime"), filepath.Join(home, "AppData", "Local", "Daedalus", "State")},
+	}
+	if w, ok := want[runtime.GOOS]; ok && (cache != w[0] || state != w[1]) {
+		t.Fatalf("%s: %s %s", runtime.GOOS, cache, state)
+	}
+	if runtime.GOOS == "linux" {
+		t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "c"))
+		t.Setenv("XDG_STATE_HOME", "relative/is/ignored")
+		cache, state, _ = platformLocalBases()
+		if cache != filepath.Join(home, "c", "daedalus") || state != filepath.Join(home, ".local", "state", "daedalus") {
+			t.Fatalf("XDG: %s %s", cache, state)
+		}
+	}
+	// Two data folders never share an environment.
+	a, _, _ := localRoots(filepath.Join(home, "one", "data"))
+	b, _, _ := localRoots(filepath.Join(home, "two", "data"))
+	if a == b {
+		t.Fatal("two installations share one runtime folder")
+	}
+	// A cache folder pointed into the data folder is refused rather than followed.
+	t.Setenv("DAEDALUS_LOCAL_ROOT", filepath.Join(home, "data", "inside"))
+	if _, _, err := localRoots(filepath.Join(home, "data")); err == nil {
+		t.Fatal("a runtime inside the data folder was accepted")
 	}
 }
 

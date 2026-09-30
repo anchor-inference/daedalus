@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -24,6 +25,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,6 +94,8 @@ type Process struct {
 	Env     []string
 	LogPath string
 	Log     func(string, ...any)
+	// PidFile is where the running child is recorded (orphans.go), or empty for none.
+	PidFile string
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
@@ -186,7 +190,9 @@ func (pr *Process) runOnce(ctx context.Context) error {
 	pr.starts++
 	pr.mu.Unlock()
 	pr.logf("%s started pid=%d", pr.Name, cmd.Process.Pid)
+	writeChildRecord(pr.PidFile, ChildRecord{Name: pr.Name, PID: cmd.Process.Pid, Program: childProgram(pr.Argv), Started: time.Now().UTC(), IsolatedConsole: runtime.GOOS == "windows"})
 	err := cmd.Wait()
+	removeChildRecord(pr.PidFile, cmd.Process.Pid)
 	if logFile != nil {
 		logFile.Close()
 	}
@@ -272,6 +278,12 @@ type Native struct {
 	ptyd       child
 	browserd   child
 	git        string
+
+	// bootID is the id the running supervisor was given, which the app echoes (ready.go).
+	bootID string
+	// strictHealth is set for the start that ends an upgrade or an update: only an answer carrying
+	// bootID counts (ready.go). An ordinary start also takes an older app's answer without one.
+	strictHealth bool
 
 	// What the progress page is told: which piece of a start this is, and how far through the one
 	// download whose size is known in advance. Both are optional — the command line has no page to
@@ -411,17 +423,92 @@ func (n *Native) syncVenv(ctx context.Context) error {
 	if !exists(n.paths.Bot) {
 		return errors.New("the checkout is missing; the runtime cannot be built from it")
 	}
+	// The checkout may have just been cloned or moved: the environment is the one for its lock.
+	n.paths.selectEnv()
 	if n.venvMatchesCheckout() {
+		pruneEnvs(n.paths, n.log)
 		return nil
 	}
-	n.log("building the environment (this is the long part of a first run)")
+	n.log("building the environment (this is the long part of a first run, and quick when the next version's was prepared)")
 	cmd := exec.CommandContext(ctx, uvBinary(n.paths), "sync", "--frozen", "--inexact")
 	cmd.Dir = n.paths.Bot
 	cmd.Env = n.runtimeEnv()
 	if out, err := runCmd(cmd); err != nil {
 		return fmt.Errorf("the environment could not be built: %s", strings.TrimSpace(out))
 	}
-	return n.stampVenv()
+	if err := n.stampVenv(); err != nil {
+		return err
+	}
+	pruneEnvs(n.paths, n.log)
+	return nil
+}
+
+// prepareEnv builds the environment a checkout at project would run in — a staged release, say —
+// beside the one in use, before anything of the installation is switched. Only the third-party
+// dependencies are installed: the project itself and its ../protocore-exp are installed as
+// pointers to where they are, and where they are now is the staging folder, not the data folder
+// they will run from. The pointers are made by the next start's syncVenv, which is quick because
+// everything heavy is already here. The environment in use is not touched, so a switch that is
+// refused or rolled back leaves the installation exactly as it was, down to its interpreter.
+func (n *Native) prepareEnv(ctx context.Context, project string) (string, error) {
+	digest, err := dependencyDigest(project)
+	if err != nil {
+		return "", err
+	}
+	dir := envDir(n.paths, digest)
+	if dir == n.paths.RuntimeVenv {
+		return dir, nil
+	}
+	cmd := exec.CommandContext(ctx, uvBinary(n.paths), "sync", "--frozen", "--inexact", "--no-install-local")
+	cmd.Dir = project
+	env := n.runtimeEnv()
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "UV_PROJECT_ENVIRONMENT=") {
+			env[i] = "UV_PROJECT_ENVIRONMENT=" + dir
+		}
+	}
+	cmd.Env = env
+	if out, err := runCmd(cmd); err != nil {
+		return "", fmt.Errorf("the next version's environment could not be prepared: %s", strings.TrimSpace(out))
+	}
+	now := time.Now()
+	_ = os.Chtimes(dir, now, now)
+	return dir, nil
+}
+
+// keptEnvs is how many environments stay besides the one in use: the one before it (the version
+// a rollback returns to) and one more. They are a cache — uv rebuilds any of them from its own.
+const keptEnvs = 2
+
+// pruneEnvs removes environments beyond the newest few. Never the one in use.
+func pruneEnvs(p Paths, log func(string, ...any)) {
+	entries, err := os.ReadDir(p.RuntimeEnvs)
+	if err != nil {
+		return
+	}
+	type env struct {
+		path string
+		mod  time.Time
+	}
+	var others []env
+	for _, entry := range entries {
+		path := filepath.Join(p.RuntimeEnvs, entry.Name())
+		if !entry.IsDir() || path == p.RuntimeVenv {
+			continue
+		}
+		if info, err := entry.Info(); err == nil {
+			others = append(others, env{path, info.ModTime()})
+		}
+	}
+	sort.Slice(others, func(i, j int) bool { return others[i].mod.After(others[j].mod) })
+	for i, e := range others {
+		if i < keptEnvs {
+			continue
+		}
+		if err := os.RemoveAll(e.path); err == nil && log != nil {
+			log("removed an old environment: %s", e.path)
+		}
+	}
 }
 
 // dependencyStamp is the file the supervisor writes into the environment to record what it was
@@ -529,6 +616,8 @@ func supervisorEnv(p Paths, base []string, settings map[string]string) []string 
 	// The agent computes what it must never write into, and where its shell is on Windows, from the
 	// folder the installation really lives in rather than from a constant naming a container's.
 	add("DAEDALUS_RUNTIME", p.Runtime)
+	// The local state holds the daemons' tokens and the browser profiles; sealed like the runtime.
+	add("DAEDALUS_LOCAL", p.Local)
 	add("DAEDALUS_BOT_REPO", p.Bot)
 	add("DAEDALUS_CORE_REPO", p.Core)
 	add("DAEDALUS_STATE", p.State)
@@ -561,10 +650,10 @@ func supervisorEnv(p Paths, base []string, settings map[string]string) []string 
 	// The app serves the operator's own machine, and the services a session starts are reached at
 	// the same address: nothing here is published to a network.
 	add("SERVICES_PUBLIC_HOST", "127.0.0.1")
-	if runtime.GOOS == "windows" {
+	if supervisorOverTCP(p, runtime.GOOS) {
 		add("DAEDALUS_SUPERVISOR_TCP", "127.0.0.1:"+parsePort(settings["DAEDALUS_SUPERVISOR_PORT"], defaultSupervisorPort))
 	} else {
-		add("DAEDALUS_SUPERVISOR_SOCKET", filepath.Join(p.State, "supervisor.sock"))
+		add("DAEDALUS_SUPERVISOR_SOCKET", p.SupervisorSocket)
 	}
 	add("KEYPROXY_BASE_URL", "http://127.0.0.1:"+parsePort(settings["KEYPROXY_PORT"], defaultKeyproxyPort))
 	if exists(p.RuntimeBrowsers) {
@@ -619,6 +708,10 @@ func quoteArgv(path string) string {
 // Start brings the native installation up: the runtime, the key proxy, the supervisor, and then the
 // wait for the app to answer. Calling it twice is calling it once — the processes are already there.
 func (n *Native) Start(ctx context.Context) error {
+	port, portWasFree, err := n.clearTheWay(ctx)
+	if err != nil {
+		return err
+	}
 	if err := n.Ensure(ctx); err != nil {
 		return err
 	}
@@ -634,16 +727,19 @@ func (n *Native) Start(ctx context.Context) error {
 			Env:     keyproxyEnv(n.paths, base, readEnv(readFile(n.paths.KeyproxyEnv)), settings, home),
 			LogPath: filepath.Join(n.paths.RuntimeLogs, "keyproxy.log"),
 			Log:     n.log,
+			PidFile: filepath.Join(pidsDir(n.paths), "keyproxy.json"),
 		}
 	}
 	if n.supervisor == nil {
+		n.bootID = newBootID()
 		n.supervisor = &Process{
 			Name:    "supervisor",
 			Argv:    []string{n.venvPython(), filepath.Join(n.paths.Bot, "launcher", "supervisor.py")},
 			Dir:     n.paths.Bot,
-			Env:     supervisorEnv(n.paths, base, settings),
+			Env:     append(supervisorEnv(n.paths, base, settings), "DAEDALUS_BOOT_ID="+n.bootID),
 			LogPath: filepath.Join(n.paths.RuntimeLogs, "supervisor.log"),
 			Log:     n.log,
+			PidFile: filepath.Join(pidsDir(n.paths), "supervisor.json"),
 		}
 	}
 	if n.ptyd == nil {
@@ -669,7 +765,36 @@ func (n *Native) Start(ctx context.Context) error {
 	n.supervisor.Start(ctx)
 	n.enter(StageStart)
 	n.log("waiting for the app to answer")
-	return WaitReadyNative(ctx, APIPort(n.paths), nativeReadyTimeout)
+	expectBoot(port, n.expectation(portWasFree))
+	return WaitReadyNative(ctx, port, nativeReadyTimeout)
+}
+
+// expectation is what this start's health check accepts (ready.go): the answer carrying this
+// supervisor's boot id — and, for an ordinary start only, an older app's answer without one.
+func (n *Native) expectation(portWasFree bool) bootExpectation {
+	supervisor := n.supervisor
+	alive := func() bool {
+		running, ok := supervisor.(interface{ Running() bool })
+		return ok && running.Running()
+	}
+	return bootExpectation{id: n.bootID, legacy: !n.strictHealth, portWasFree: portWasFree, alive: alive}
+}
+
+// clearTheWay is the first step of a start: what a launcher that died left running is stopped, and
+// then the app's port has to be free — or an answer on it after the start would not be this start's.
+// A supervisor this launcher already runs is the one exception: Start is idempotent.
+func (n *Native) clearTheWay(ctx context.Context) (string, bool, error) {
+	if err := StopOrphans(ctx, n.paths, n.log); err != nil {
+		return "", false, err
+	}
+	port := APIPort(n.paths)
+	if n.supervisor != nil {
+		return port, true, nil
+	}
+	if portAnswers(port) {
+		return port, false, fmt.Errorf("something this launcher did not start already answers on the app's port %s; stop it (or change API_PORT) and start again", port)
+	}
+	return port, true, nil
 }
 
 // newPtyd is the terminal daemon's process, or nil when this build carries none; then the run
@@ -696,6 +821,7 @@ func (n *Native) newPtyd() child {
 		Env:     ptydEnv(base, n.runtimeTools()),
 		LogPath: filepath.Join(n.paths.RuntimeLogs, "ptyd.log"),
 		Log:     n.log,
+		PidFile: filepath.Join(pidsDir(n.paths), "ptyd.json"),
 	}
 }
 
@@ -847,7 +973,9 @@ func botEnv(p Paths, env []string) []string {
 		"BOT_REPO_DIR="+p.Bot,
 		"CORE_REPO_DIR="+p.Core,
 	)
-	if runtime.GOOS == "windows" {
+	// The same rule the supervisor is started with: a command pointed at a socket the supervisor
+	// does not listen on reads the defaults of a container that is not here.
+	if supervisorOverTCP(p, runtime.GOOS) {
 		out = append(out, "SUPERVISOR_TCP="+envValue(env, "DAEDALUS_SUPERVISOR_TCP"))
 	} else {
 		out = append(out, "SUPERVISOR_SOCKET="+envValue(env, "DAEDALUS_SUPERVISOR_SOCKET"))
@@ -868,7 +996,7 @@ func envValue(env []string, name string) string {
 // SupervisorReachable reports whether the supervisor is listening, which is what the status page
 // needs to know before it offers a button that talks to it.
 func (n *Native) SupervisorReachable() bool {
-	if runtime.GOOS == "windows" {
+	if supervisorOverTCP(n.paths, runtime.GOOS) {
 		port := parsePort(readEnv(readFile(n.paths.Env))["DAEDALUS_SUPERVISOR_PORT"], defaultSupervisorPort)
 		conn, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 2*time.Second)
 		if err != nil {
@@ -879,7 +1007,7 @@ func (n *Native) SupervisorReachable() bool {
 	}
 	// Dialled, not stat'ed: a supervisor that was killed leaves the socket file behind, and a status
 	// page that reads the file offers buttons that talk to nothing.
-	conn, err := net.DialTimeout("unix", filepath.Join(n.paths.State, "supervisor.sock"), 2*time.Second)
+	conn, err := net.DialTimeout("unix", n.paths.SupervisorSocket, 2*time.Second)
 	if err != nil {
 		return false
 	}
@@ -966,4 +1094,52 @@ func parsePort(value, fallback string) string {
 		return fallback
 	}
 	return strings.TrimSpace(value)
+}
+
+// newBootID is a fresh random id for one start of the supervisor.
+func newBootID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("t%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+// prepareUpdate fetches the published checkouts and builds the environment they declare beside the
+// one in use, in a staging folder inside the runtime: the data folder is not touched, and the
+// running agent keeps its interpreter. The move applies the same archives afterwards.
+func (a *App) prepareUpdate(ctx context.Context) error {
+	archives, err := FetchRepos(ctx, a.paths)
+	if err != nil {
+		return err
+	}
+	staging, err := os.MkdirTemp(a.paths.Runtime, "staging-")
+	if err != nil {
+		if err := os.MkdirAll(a.paths.Runtime, 0o755); err != nil {
+			return err
+		}
+		if staging, err = os.MkdirTemp(a.paths.Runtime, "staging-"); err != nil {
+			return err
+		}
+	}
+	defer os.RemoveAll(staging)
+	for name, archive := range archives {
+		if err := unpackTarball(archive, filepath.Join(staging, name)); err != nil {
+			return err
+		}
+	}
+	if _, ok := archives["daedalus"]; ok {
+		if err := a.native.Ensure(ctx); err != nil {
+			return err
+		}
+		env, err := a.native.prepareEnv(ctx, filepath.Join(staging, "daedalus"))
+		if err != nil {
+			return err
+		}
+		a.log("the next version's environment is ready: %s", env)
+	}
+	a.mu.Lock()
+	a.fetched = archives
+	a.mu.Unlock()
+	return nil
 }

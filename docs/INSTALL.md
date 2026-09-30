@@ -13,7 +13,8 @@ else, so uninstalling is deleting the folder.
 curl -fsSL https://raw.githubusercontent.com/anchor-inference/daedalus/main/desktop/install.sh | sh
 ```
 
-That takes the newest `desktop-v*` release, checks it against the release's `SHA256SUMS`, and
+That takes the newest `desktop-v*` release, checks its signature by the project's release key
+(fingerprint in the [README](../README.md#run-it)) and the download against its `SHA256SUMS`, and
 unpacks it into `./Daedalus`. By hand, take the archive for your machine from the
 [releases](https://github.com/anchor-inference/daedalus/releases): `Daedalus-macOS.zip` holds
 `Daedalus.app` for both kinds of Mac and is opened with a double-click,

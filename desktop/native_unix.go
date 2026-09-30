@@ -35,3 +35,22 @@ func killGroup(cmd *exec.Cmd) {
 		_ = cmd.Process.Kill()
 	}
 }
+
+// terminatePID and killPID end a recorded child's whole group; the group id is its pid, because it
+// was started with Setpgid.
+func terminatePID(pid int, _ bool) {
+	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
+		_ = syscall.Kill(pid, syscall.SIGTERM)
+	}
+}
+
+func killPID(pid int) {
+	// kill(0) and kill(-0) mean this process's own group, and -1 means everything this user may
+	// signal: a record that says 0 or 1 — missing, damaged, or not ours — must never reach them.
+	if pid <= 1 {
+		return
+	}
+	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
+}

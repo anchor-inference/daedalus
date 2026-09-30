@@ -32,6 +32,11 @@ TEXT: dict[str, dict[str, str]] = {
         "deny": "Deny",
         "open": "Open",
         "telegram.prefix": "🔔",
+        "launcher.upgrade": "Daedalus {version} is available",
+        "launcher.upgrade.current": "This installation's launcher is {version}. Nothing is installed by itself.",
+        "launcher.upgrade.command": "Close the launcher and run in a terminal:\n{command}",
+        "launcher.upgrade.promise": "It asks first, keeps the data from before the upgrade — on Linux with ext4 as a whole copy of the data folder, elsewhere as a verified backup — and puts the data and the launcher back if the new version does not come up.",
+        "launcher.upgrade.notes": "Release notes: {url}",
     },
     "ru": {
         "run.finished": "Готово: {title}",
@@ -51,6 +56,11 @@ TEXT: dict[str, dict[str, str]] = {
         "deny": "Отклонить",
         "open": "Открыть",
         "telegram.prefix": "🔔",
+        "launcher.upgrade": "Вышел Daedalus {version}",
+        "launcher.upgrade.current": "Лаунчер этой установки — {version}. Само ничего не устанавливается.",
+        "launcher.upgrade.command": "Закройте лаунчер и выполните в терминале:\n{command}",
+        "launcher.upgrade.promise": "Сначала будет вопрос; данные до обновления сохраняются — на Linux с ext4 целой копией папки данных, в остальных случаях проверенной резервной копией, — а если новая версия не поднимется, данные и лаунчер вернутся как были.",
+        "launcher.upgrade.notes": "Что нового: {url}",
     },
 }
 

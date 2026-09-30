@@ -216,8 +216,13 @@ class Application:
 
     def install_signal_handlers(self) -> None:
         loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, self.stopping.set)
+        for sig in (signal.SIGINT, signal.SIGTERM, *((signal.SIGBREAK,) if hasattr(signal, "SIGBREAK") else ())):
+            try:
+                loop.add_signal_handler(sig, self.stopping.set)
+            except NotImplementedError:
+                # Proactor loops on Windows have no add_signal_handler. CTRL_BREAK
+                # reaches this process group when the launcher stops the stack.
+                signal.signal(sig, lambda *_: loop.call_soon_threadsafe(self.stopping.set))
 
     async def run(self) -> None:
         if self.front is None:

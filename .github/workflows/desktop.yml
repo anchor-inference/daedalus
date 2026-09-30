@@ -60,6 +60,12 @@ jobs:
 
   # So the window is compiled where it exists, before the tag is built. Without this a syntax error
   # in window.go passes `test` and surfaces in `binaries`, which is after the tag has been pushed.
+  #
+  # And the tests, on the two systems the Linux runner cannot stand in for. There the data is
+  # protected by the verified backup, not by the Linux writer fence, and that path — the backup, its
+  # check, the rollback, the bridge from an old launcher — is the only protection those installations
+  # have; this is where it runs on the real systems. On Windows the tests also run install.ps1 once,
+  # under Windows PowerShell, against a release served on loopback (installer_ps_run_test.go).
   window:
     strategy:
       fail-fast: false
@@ -74,6 +80,10 @@ jobs:
       - run: go build ./...
         working-directory: desktop
       - run: go vet ./...
+        working-directory: desktop
+      - run: go test ./...
+        working-directory: desktop
+      - run: go test -tags nowebview ./...
         working-directory: desktop
 
   # The daemon's tests on each system it ships for. Linux and the Mac build the emulator and test with
@@ -192,8 +202,11 @@ jobs:
           path: browserd-dist
           retention-days: 1
 
+  # Not held back by `window`: its macOS and Windows tests are the first to run on those systems,
+  # and while they are red a release may still ship the Linux archives alone. What `window` finds
+  # is read before the Mac and Windows archives are published, not as a gate on building them.
   binaries:
-    needs: [test, window]
+    needs: [test]
     if: startsWith(github.ref, 'refs/tags/desktop-v')
     strategy:
       fail-fast: false
@@ -385,10 +398,17 @@ jobs:
           | Linux ARM64 | \`daedalus-desktop-linux-arm64.tar.gz\` | \`tar -xzf\` it into an empty folder and run \`./daedalus-desktop\`. |
           | Windows x86-64 | \`daedalus-desktop-windows-amd64.zip\` | \`Expand-Archive daedalus-desktop-windows-amd64.zip -DestinationPath Daedalus\` in PowerShell, then run \`daedalus-desktop.exe\`. The executable is unsigned, so SmartScreen warns once: **More info → Run anyway**. The window needs the WebView2 runtime, which Windows 11 and any machine with a current Edge already has; without it the launcher opens a browser instead. |
 
-          The launcher makes everything else — the checkouts, the keys, the database — inside the folder
-          you put it in, so deleting that folder deletes the installation.
+          The launcher makes the checkouts, the keys and the database inside the folder you put it in,
+          and natively keeps its downloaded runtime and local state outside it;
+          \`daedalus-desktop uninstall\` removes those, and deleting the folder then removes the rest.
 
-          \`SHA256SUMS\` covers every archive here. [desktop/README.md](https://github.com/${{ github.repository }}/blob/main/desktop/README.md) has the folder layout, the disk the images take, and every command.
+          \`SHA256SUMS\` covers every archive here, and \`SHA256SUMS.sig\` signs it together with this
+          release's tag, by the project's release key — minisign key id \`A18524FA935353DF\`, key line
+          \`RWTfU1OT+iSFoaxGzNfGzkwHdVs2o8WmnCzBUo/LBUw2L4ssGN4xYx/2\`, whose SHA-256 (what the
+          installers print as its fingerprint) is
+          \`f75fa5a293fdd55b36c794f4787f7af8646e4dac95e19d74e6288e55c357c285\`. The launcher and the
+          installers refuse a release that is not signed by it; desktop/SIGNING.md shows how to check
+          the signature by hand. [desktop/README.md](https://github.com/${{ github.repository }}/blob/main/desktop/README.md) has the folder layout, the disk the images take, and every command.
           NOTES
           cat dist/notes.md
 
@@ -398,9 +418,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Always a draft. A launcher refuses a release without SHA256SUMS.sig by the project's key,
+          # and that key is on the operator's machine only, so the release is signed there
+          # (desktop/sign-release.sh) and published from there. A release already published is
+          # never touched: new archives under a signature over the old SHA256SUMS would be refused
+          # by every launcher, and replacing both is a new release, not a re-run.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "$GITHUB_REF_NAME is already published; its files are not replaced" >&2
+              exit 1
+            fi
             gh release edit "$GITHUB_REF_NAME" --notes-file dist/notes.md
           else
-            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file dist/notes.md
+            gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" --notes-file dist/notes.md
+          fi
+          # A re-run over a draft that was already signed replaces the archives and SHA256SUMS; the
+          # old signature would then cover checksums that are gone, and every launcher refuses the
+          # release. It goes with them, and the draft has to be signed again (desktop/SIGNING.md).
+          if gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | grep -qx 'SHA256SUMS.sig'; then
+            gh release delete-asset "$GITHUB_REF_NAME" SHA256SUMS.sig --yes
+            echo "::warning::SHA256SUMS.sig was removed from the draft $GITHUB_REF_NAME: sign it again with desktop/sign-release.sh"
           fi
           gh release upload "$GITHUB_REF_NAME" dist/archives/* --clobber

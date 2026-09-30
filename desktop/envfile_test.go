@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -94,7 +95,8 @@ func TestWriteSetupKeepsProviderKeysOutOfTheCheckout(t *testing.T) {
 	}
 	if info, err := os.Stat(paths.KeyproxyEnv); err != nil {
 		t.Fatal(err)
-	} else if info.Mode().Perm() != 0o600 {
+	} else if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		// Windows has no permission bits for Go to report: every writable file reads 0666 there.
 		t.Fatalf("the secrets file is %v, want 0600", info.Mode().Perm())
 	}
 	if readFile(paths.BotEnv) != env {

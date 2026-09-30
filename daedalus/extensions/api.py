@@ -1247,11 +1247,22 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     # still leaves the process the moment it arrives.
     api.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_BYTES)
 
+    # The desktop launcher gives each start of the supervisor an id, and the bot inherits it. Echoing
+    # it on the answers to /app and /app/ — what the launcher's health check asks for — is how the
+    # launcher tells this process's answer from one by a stack a crashed launcher left running on the
+    # same port. It is a random value per start, not a secret.
+    boot_id = app.settings.boot_id
+
     @api.middleware("http")
     async def shared_dialog_pages_stay_out_of_indexes(request: Request, call_next: Any) -> Any:
         # The address bar ends on /app/c/<slug>, which is the app shell. The shell is a static file,
         # so the noindex has to be added on the way out; the dialog itself is fetched separately.
         response = await call_next(request)
+        # Only on the two answers the launcher's health check reads (/app, and /app/ it redirects to).
+        # Nothing public carries it — the shared pages under /c/, /s/ and /app/c/ are read by people
+        # outside, who have no use for when the stack restarted.
+        if boot_id and request.url.path in ("/app", "/app/"):
+            response.headers["X-Daedalus-Boot"] = boot_id
         if request.url.path.startswith("/app/c/"):
             response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
             response.headers["Cache-Control"] = "no-store"

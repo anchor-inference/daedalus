@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -347,7 +348,9 @@ func TestTheHandoverFileIsPrivateToItsOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mode := info.Mode().Perm(); mode != 0o600 {
+	// Windows has no permission bits for Go to report: every writable file reads 0666 there, and
+	// what keeps the file private is the folder's ACL, not a mode.
+	if mode := info.Mode().Perm(); runtime.GOOS != "windows" && mode != 0o600 {
 		t.Fatalf("the launcher's handover file is %o, want 600: it carries the token for start, stop and the extras", mode)
 	}
 }

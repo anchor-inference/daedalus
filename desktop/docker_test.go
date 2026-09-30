@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -196,6 +197,7 @@ func TestPATHWinsOverTheKnownLocations(t *testing.T) {
 }
 
 func TestDockerRunsWithItsOwnFolderOnPATH(t *testing.T) {
+	skipOnWindowsForAnotherSystemsPaths(t)
 	path := dockerSearchPath("darwin", "/Users/o", "/Applications/Docker.app/Contents/Resources/bin/docker", "/usr/bin:/bin")
 	want := "/Applications/Docker.app/Contents/Resources/bin:/usr/local/bin:/opt/homebrew/bin:/Users/o/.docker/bin:/usr/bin:/bin"
 	if path != want {
@@ -204,8 +206,20 @@ func TestDockerRunsWithItsOwnFolderOnPATH(t *testing.T) {
 }
 
 func TestDockerPATHWithoutAClientStillNamesTheKnownFolders(t *testing.T) {
+	skipOnWindowsForAnotherSystemsPaths(t)
 	path := dockerSearchPath("linux", "", "", "")
 	if path != "/usr/bin:/usr/local/bin:/snap/bin" {
 		t.Fatalf("PATH = %q", path)
+	}
+}
+
+// skipOnWindowsForAnotherSystemsPaths: dockerSearchPath joins with this machine's separators, as it
+// must — it is only ever asked about the system it runs on. Asked on Windows about a Mac's or a
+// Linux machine's folders it answers in backslashes and semicolons, which says nothing about the
+// code; what these tests check is the order of the folders on those two systems.
+func skipOnWindowsForAnotherSystemsPaths(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the paths are a Mac's and a Linux machine's, joined with this machine's separators")
 	}
 }

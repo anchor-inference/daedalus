@@ -20,7 +20,7 @@ skills/         SKILL.md skills the agent can load
 personas/       the persona the prompt is built from
 deploy/         Dockerfile, compose, key proxy, SearXNG settings, env examples
 desktop/        the launcher: one binary that runs the stack on a personal machine — the setup
-                page, the app window, the portable runtime native mode downloads into data/runtime/
+                page, the app window, the portable runtime native mode downloads (outside data/)
 tests/          unit and integration tests; tests/browser drives the built app with a real mouse
 docs/           design and decisions (2026-09-06, historical), screenshots, diagrams
 ```
