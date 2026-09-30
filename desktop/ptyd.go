@@ -25,10 +25,10 @@ const unavailableFile = "unavailable"
 const noPtydReason = "this build carries no ptyd; host terminals are unavailable"
 
 // ptydRunDir holds the daemon's endpoint and token, and ptydStateDir its logs, launches and shell
-// scripts. Both are inside the runtime directory, which the agent's policy seals whole: the token
+// scripts. Both are inside the local state folder, which the agent's policy seals whole: the token
 // opens a shell as the operator.
-func ptydRunDir(p Paths) string   { return filepath.Join(p.Runtime, "ptyd", "run") }
-func ptydStateDir(p Paths) string { return filepath.Join(p.Runtime, "ptyd", "state") }
+func ptydRunDir(p Paths) string   { return filepath.Join(p.Local, "ptyd", "run") }
+func ptydStateDir(p Paths) string { return filepath.Join(p.Local, "ptyd", "state") }
 
 // ptydBinary is the daemon this launcher runs: DAEDALUS_PTYD when it is set (a daemon built by
 // hand), else the ptyd packaged beside the launcher's own executable — which inside the macOS bundle

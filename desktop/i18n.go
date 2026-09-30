@@ -142,6 +142,16 @@ var messages = map[Lang]map[string]string{
 		"upgrade.notify.body":  "You have %s. Nothing is installed by itself: close the launcher and run `daedalus-desktop upgrade` — it backs your data up and checks the backup first.",
 		"upgrade.card.title":   "Daedalus %s is available",
 		"upgrade.card.body":    "This launcher is %s. Nothing is installed by itself: close the launcher and run the command below in a terminal. It asks first, backs up your data and this launcher and checks the backup, and puts everything back if the new version does not come up.",
+
+		"switch.card.title":      "Kept copies of your data",
+		"switch.card.trouble":    "Something here needs you",
+		"switch.card.command":    "daedalus-desktop update status",
+		"switch.item.retained":   "Kept: %s",
+		"switch.item.unrecorded": "Kept without a record of its contents — remove it by hand once you no longer need it: %s",
+		"switch.item.late":       "A late write may be in %s",
+		"switch.item.lost":       "A write may have been lost while this copy was being removed: %s",
+		"switch.item.unfinished": "A switch of the data folder did not finish (%s). Nothing was deleted; run daedalus-desktop update resolve to see what is where",
+		"switch.item.unscanned":  "%s processes could not be inspected during the last switch",
 	},
 	LangRU: {
 		"setup.title": "Настройка Daedalus",
@@ -264,6 +274,16 @@ var messages = map[Lang]map[string]string{
 		"upgrade.notify.body":  "У вас %s. Само ничего не ставится: закройте лаунчер и выполните `daedalus-desktop upgrade` — он сначала сделает и проверит бэкап данных.",
 		"upgrade.card.title":   "Вышел Daedalus %s",
 		"upgrade.card.body":    "Этот лаунчер — %s. Само ничего не ставится: закройте лаунчер и выполните команду ниже в терминале. Она спросит подтверждение, сделает и проверит бэкап данных и лаунчера, а если новая версия не поднимется — вернёт всё как было.",
+
+		"switch.card.title":      "Сохранённые копии ваших данных",
+		"switch.card.trouble":    "Здесь нужно ваше внимание",
+		"switch.card.command":    "daedalus-desktop update status",
+		"switch.item.retained":   "Сохранено: %s",
+		"switch.item.unrecorded": "Сохранено без описи содержимого — удалите вручную, когда станет не нужно: %s",
+		"switch.item.late":       "Возможно, в %s попала поздняя запись",
+		"switch.item.lost":       "Пока удалялась эта копия, запись могла потеряться: %s",
+		"switch.item.unfinished": "Переключение папки данных не завершилось (%s). Ничего не удалено; выполните daedalus-desktop update resolve, чтобы увидеть, что где",
+		"switch.item.unscanned":  "%s процессов не удалось проверить во время последнего переключения",
 	},
 }
 

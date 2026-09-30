@@ -26,7 +26,14 @@ import (
 
 const helperEnv = "DAEDALUS_TEST_HELPER"
 
+// platformTestHelper runs a helper that only exists on one platform (it exits by itself), or
+// returns when the mode is not its own.
+var platformTestHelper func(mode string)
+
 func TestMain(m *testing.M) {
+	if platformTestHelper != nil {
+		platformTestHelper(os.Getenv(helperEnv))
+	}
 	switch os.Getenv(helperEnv) {
 	case "hold-lock":
 		// An upgrade (or a launcher) holding the installation lock until it is killed.
@@ -66,6 +73,24 @@ func TestMain(m *testing.M) {
 			w.WriteHeader(http.StatusOK)
 		}))
 		os.Exit(0)
+	}
+	// The tests of the update and upgrade paths exercise the verified-backup protection, the one
+	// Windows and macOS use, unless a test asks for the fence itself.
+	if os.Getenv("DAEDALUS_DATA_FENCE") == "" {
+		os.Setenv("DAEDALUS_DATA_FENCE", "off")
+	}
+	// NewPaths puts the runtime and the local state under the user's cache and state folders; no
+	// test may write into the real ones.
+	if os.Getenv("DAEDALUS_LOCAL_ROOT") == "" {
+		root, err := os.MkdirTemp("", "daedalus-local-")
+		if err != nil {
+			fmt.Println("no temporary folder for the local roots:", err)
+			os.Exit(2)
+		}
+		os.Setenv("DAEDALUS_LOCAL_ROOT", root)
+		code := m.Run()
+		os.RemoveAll(root)
+		os.Exit(code)
 	}
 	os.Exit(m.Run())
 }

@@ -44,12 +44,15 @@ func TestTheBrowserDaemonRunsInTheSealedRuntimeAsTheHostEnvironment(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The run directory and the profiles are both under the runtime directory, which the agent's
-	// policy seals whole.
+	// The run directory and the profiles are both under the local state folder, which the agent's
+	// policy seals whole, and neither is in the data folder an upgrade copies.
 	for _, dir := range []string{browserdRunDir(paths), browserdStateDir(paths)} {
-		if rel, err := filepath.Rel(paths.Runtime, dir); err != nil || strings.HasPrefix(rel, "..") {
-			t.Fatalf("%s is outside the runtime directory", dir)
+		if !within(dir, paths.Local) || within(dir, paths.Data) {
+			t.Fatalf("%s is not in the sealed local state folder", dir)
 		}
+	}
+	if env := envMap(supervisorEnv(paths, nil, nil)); env["DAEDALUS_LOCAL"] != paths.Local {
+		t.Fatalf("the agent is not told which folder to seal: %q", env["DAEDALUS_LOCAL"])
 	}
 	argv := browserdArgv("/opt/browserd", paths, nil)
 	want := []string{"/opt/browserd", "serve", "--env", "host", "--run-dir", browserdRunDir(paths), "--state-dir", browserdStateDir(paths), "--listen"}

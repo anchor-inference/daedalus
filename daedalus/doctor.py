@@ -630,7 +630,7 @@ BROWSER_FIXES = {
     "not_installed_container": "start the browser service: add COMPOSE_PROFILES=browser to .env, then docker compose -f deploy/compose.yaml --env-file .env up -d --build browser",
     "not_installed_host": "this build of the launcher carries no browserd; a release build does",
     "not_running_container": "start it: docker compose -f deploy/compose.yaml --env-file .env up -d browser (its log: docker compose logs browser)",
-    "not_running_host": "restart the launcher; the daemon's log is runtime/logs/browserd.log in the data folder",
+    "not_running_host": "restart the launcher; the daemon's log is browserd.log in the logs folder of the launcher's local state (`daedalus-desktop logs` names it)",
     "permission_denied": "the browser service's run directory belongs to its own user; this process must run as root, or as that user",
     "protocol_mismatch": "recreate the browser service from this build's image (docker compose up -d browser), which ends its browsers",
 }

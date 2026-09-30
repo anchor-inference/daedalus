@@ -98,5 +98,8 @@ func terminatePID(pid int, isolated bool) {
 }
 
 func killPID(pid int) {
+	if pid <= 0 {
+		return
+	}
 	_ = exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(pid)).Run()
 }

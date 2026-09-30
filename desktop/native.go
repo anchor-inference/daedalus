@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -422,17 +423,92 @@ func (n *Native) syncVenv(ctx context.Context) error {
 	if !exists(n.paths.Bot) {
 		return errors.New("the checkout is missing; the runtime cannot be built from it")
 	}
+	// The checkout may have just been cloned or moved: the environment is the one for its lock.
+	n.paths.selectEnv()
 	if n.venvMatchesCheckout() {
+		pruneEnvs(n.paths, n.log)
 		return nil
 	}
-	n.log("building the environment (this is the long part of a first run)")
+	n.log("building the environment (this is the long part of a first run, and quick when the next version's was prepared)")
 	cmd := exec.CommandContext(ctx, uvBinary(n.paths), "sync", "--frozen", "--inexact")
 	cmd.Dir = n.paths.Bot
 	cmd.Env = n.runtimeEnv()
 	if out, err := runCmd(cmd); err != nil {
 		return fmt.Errorf("the environment could not be built: %s", strings.TrimSpace(out))
 	}
-	return n.stampVenv()
+	if err := n.stampVenv(); err != nil {
+		return err
+	}
+	pruneEnvs(n.paths, n.log)
+	return nil
+}
+
+// prepareEnv builds the environment a checkout at project would run in — a staged release, say —
+// beside the one in use, before anything of the installation is switched. Only the third-party
+// dependencies are installed: the project itself and its ../protocore-exp are installed as
+// pointers to where they are, and where they are now is the staging folder, not the data folder
+// they will run from. The pointers are made by the next start's syncVenv, which is quick because
+// everything heavy is already here. The environment in use is not touched, so a switch that is
+// refused or rolled back leaves the installation exactly as it was, down to its interpreter.
+func (n *Native) prepareEnv(ctx context.Context, project string) (string, error) {
+	digest, err := dependencyDigest(project)
+	if err != nil {
+		return "", err
+	}
+	dir := envDir(n.paths, digest)
+	if dir == n.paths.RuntimeVenv {
+		return dir, nil
+	}
+	cmd := exec.CommandContext(ctx, uvBinary(n.paths), "sync", "--frozen", "--inexact", "--no-install-local")
+	cmd.Dir = project
+	env := n.runtimeEnv()
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "UV_PROJECT_ENVIRONMENT=") {
+			env[i] = "UV_PROJECT_ENVIRONMENT=" + dir
+		}
+	}
+	cmd.Env = env
+	if out, err := runCmd(cmd); err != nil {
+		return "", fmt.Errorf("the next version's environment could not be prepared: %s", strings.TrimSpace(out))
+	}
+	now := time.Now()
+	_ = os.Chtimes(dir, now, now)
+	return dir, nil
+}
+
+// keptEnvs is how many environments stay besides the one in use: the one before it (the version
+// a rollback returns to) and one more. They are a cache — uv rebuilds any of them from its own.
+const keptEnvs = 2
+
+// pruneEnvs removes environments beyond the newest few. Never the one in use.
+func pruneEnvs(p Paths, log func(string, ...any)) {
+	entries, err := os.ReadDir(p.RuntimeEnvs)
+	if err != nil {
+		return
+	}
+	type env struct {
+		path string
+		mod  time.Time
+	}
+	var others []env
+	for _, entry := range entries {
+		path := filepath.Join(p.RuntimeEnvs, entry.Name())
+		if !entry.IsDir() || path == p.RuntimeVenv {
+			continue
+		}
+		if info, err := entry.Info(); err == nil {
+			others = append(others, env{path, info.ModTime()})
+		}
+	}
+	sort.Slice(others, func(i, j int) bool { return others[i].mod.After(others[j].mod) })
+	for i, e := range others {
+		if i < keptEnvs {
+			continue
+		}
+		if err := os.RemoveAll(e.path); err == nil && log != nil {
+			log("removed an old environment: %s", e.path)
+		}
+	}
 }
 
 // dependencyStamp is the file the supervisor writes into the environment to record what it was
@@ -540,6 +616,8 @@ func supervisorEnv(p Paths, base []string, settings map[string]string) []string 
 	// The agent computes what it must never write into, and where its shell is on Windows, from the
 	// folder the installation really lives in rather than from a constant naming a container's.
 	add("DAEDALUS_RUNTIME", p.Runtime)
+	// The local state holds the daemons' tokens and the browser profiles; sealed like the runtime.
+	add("DAEDALUS_LOCAL", p.Local)
 	add("DAEDALUS_BOT_REPO", p.Bot)
 	add("DAEDALUS_CORE_REPO", p.Core)
 	add("DAEDALUS_STATE", p.State)
@@ -575,7 +653,7 @@ func supervisorEnv(p Paths, base []string, settings map[string]string) []string 
 	if runtime.GOOS == "windows" {
 		add("DAEDALUS_SUPERVISOR_TCP", "127.0.0.1:"+parsePort(settings["DAEDALUS_SUPERVISOR_PORT"], defaultSupervisorPort))
 	} else {
-		add("DAEDALUS_SUPERVISOR_SOCKET", filepath.Join(p.State, "supervisor.sock"))
+		add("DAEDALUS_SUPERVISOR_SOCKET", p.SupervisorSocket)
 	}
 	add("KEYPROXY_BASE_URL", "http://127.0.0.1:"+parsePort(settings["KEYPROXY_PORT"], defaultKeyproxyPort))
 	if exists(p.RuntimeBrowsers) {
@@ -927,7 +1005,7 @@ func (n *Native) SupervisorReachable() bool {
 	}
 	// Dialled, not stat'ed: a supervisor that was killed leaves the socket file behind, and a status
 	// page that reads the file offers buttons that talk to nothing.
-	conn, err := net.DialTimeout("unix", filepath.Join(n.paths.State, "supervisor.sock"), 2*time.Second)
+	conn, err := net.DialTimeout("unix", n.paths.SupervisorSocket, 2*time.Second)
 	if err != nil {
 		return false
 	}
@@ -1023,4 +1101,43 @@ func newBootID() string {
 		return fmt.Sprintf("t%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
+}
+
+// prepareUpdate fetches the published checkouts and builds the environment they declare beside the
+// one in use, in a staging folder inside the runtime: the data folder is not touched, and the
+// running agent keeps its interpreter. The move applies the same archives afterwards.
+func (a *App) prepareUpdate(ctx context.Context) error {
+	archives, err := FetchRepos(ctx, a.paths)
+	if err != nil {
+		return err
+	}
+	staging, err := os.MkdirTemp(a.paths.Runtime, "staging-")
+	if err != nil {
+		if err := os.MkdirAll(a.paths.Runtime, 0o755); err != nil {
+			return err
+		}
+		if staging, err = os.MkdirTemp(a.paths.Runtime, "staging-"); err != nil {
+			return err
+		}
+	}
+	defer os.RemoveAll(staging)
+	for name, archive := range archives {
+		if err := unpackTarball(archive, filepath.Join(staging, name)); err != nil {
+			return err
+		}
+	}
+	if _, ok := archives["daedalus"]; ok {
+		if err := a.native.Ensure(ctx); err != nil {
+			return err
+		}
+		env, err := a.native.prepareEnv(ctx, filepath.Join(staging, "daedalus"))
+		if err != nil {
+			return err
+		}
+		a.log("the next version's environment is ready: %s", env)
+	}
+	a.mu.Lock()
+	a.fetched = archives
+	a.mu.Unlock()
+	return nil
 }

@@ -138,6 +138,8 @@ def _runtime_paths() -> list[str]:
     ]
     if runtime_dir := os.environ.get("DAEDALUS_RUNTIME", "").strip():
         named.append(runtime_dir)
+    if local_dir := os.environ.get("DAEDALUS_LOCAL", "").strip():
+        named.append(local_dir)
     return [str(Path(path)) for path in named if path.strip()]
 
 
@@ -225,6 +227,10 @@ class Settings(BaseSettings):
     """The portable runtime a native installation runs out of: the interpreter executing this process,
     the environment it imports from, and the binaries the tools call. ``None`` in a container, where
     the image carries all three and no directory of the installation's own has to be named."""
+    local_dir: Path | None = Field(default_factory=lambda: env_path("DAEDALUS_LOCAL"))
+    """The native installation's local state, outside the data folder beside the runtime: the logs,
+    the terminal and browser daemons' endpoints and tokens, the browser profiles with their logins.
+    Sealed like the runtime; ``None`` in a container."""
     secrets_override: Path | None = Field(default_factory=lambda: env_path("DAEDALUS_SECRETS"))
     """Where the launcher keeps the provider keys, when that is not the default place under the state
     directory. Natively they sit beside the checkouts instead, so that no project root and no mount
@@ -356,6 +362,8 @@ class Settings(BaseSettings):
         paths = [self.secrets_dir, self.state_dir]
         if self.runtime_dir is not None:
             paths.append(self.runtime_dir)
+        if self.local_dir is not None:
+            paths.append(self.local_dir)
         if self.launcher_path is not None:
             paths.append(self.launcher_path)
         if self.env_file_path is not None:

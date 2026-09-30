@@ -32,6 +32,10 @@ case "$(uname -m)" in x86_64 | amd64) arch=amd64 ;; arm64 | aarch64) arch=arm64 
 asset="daedalus-desktop-linux-$arch.tar.gz"
 
 work="${SMOKE_DIR:-$(mktemp -d)}"
+# Every launcher here keeps its runtime and state under the smoke's folder, never in this user's
+# real cache and state folders; and the data is protected by the verified backup, which is what
+# these checks read back byte for byte (the fenced switch has its own tests, protect_linux_test.go).
+export DAEDALUS_LOCAL_ROOT="$work/local" DAEDALUS_DATA_FENCE=off
 mkdir -p "$work"
 server_pid=""
 cleanup() { if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; fi; }
@@ -207,7 +211,7 @@ n_before="$(ls "$AD/backups" | wc -l)"
 DAEDALUS_UPGRADE_FIXTURE=ok "$A" update --data "$AD" >"$work/h2.log" 2>&1 || die "H: $(cat "$work/h2.log")"
 expect_eq "$(cat "$AD/state/daedalus.sqlite")" "schema migrated by desktop-v0.14.0" "H: an update that works keeps its migration"
 expect_eq "$(stage_of "$AD")" "update:committed" "H: the journal says the update was committed"
-[ "$(ls "$AD/backups" | wc -l)" -ge "$n_before" ] && grep -q "updated; the backup taken before it" "$work/h2.log" && ok "H: the update took a backup first"
+[ "$(ls "$AD/backups" | wc -l)" -ge "$n_before" ] && grep -q "updated; the data from before it stays at $AD/backups/" "$work/h2.log" && ok "H: the update took a backup first"
 DD="$work/d/Daedalus/data"
 before="$(tree "$DD")"
 # The Docker installation is still on v0.12.0 (the bridge refused it), and that launcher's own update

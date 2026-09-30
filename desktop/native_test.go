@@ -171,8 +171,10 @@ func TestTheSupervisorIsGivenThisInstallationsPaths(t *testing.T) {
 			t.Error("Windows was given a unix socket path as well as a port")
 		}
 	} else {
-		if env["DAEDALUS_SUPERVISOR_SOCKET"] != filepath.Join(paths.State, "supervisor.sock") {
-			t.Errorf("the socket is not in the state directory: %q", env["DAEDALUS_SUPERVISOR_SOCKET"])
+		// In the local state folder: a stale socket left by a killed supervisor is a special file,
+		// and one inside the data folder would refuse every fenced switch.
+		if env["DAEDALUS_SUPERVISOR_SOCKET"] != paths.SupervisorSocket || !within(paths.SupervisorSocket, paths.Local) {
+			t.Errorf("the socket is not in the local state folder: %q", env["DAEDALUS_SUPERVISOR_SOCKET"])
 		}
 		if env["DAEDALUS_SUPERVISOR_TCP"] != "" {
 			t.Error("a loopback port was opened where a socket file will do")
@@ -271,7 +273,7 @@ func TestACommandRunForTheInstallationSeesBothSpellings(t *testing.T) {
 		if env["SUPERVISOR_TCP"] == "" {
 			t.Error("the command has no supervisor to talk to")
 		}
-	} else if env["SUPERVISOR_SOCKET"] != filepath.Join(paths.State, "supervisor.sock") {
+	} else if env["SUPERVISOR_SOCKET"] != paths.SupervisorSocket {
 		t.Errorf("the command was pointed at %q", env["SUPERVISOR_SOCKET"])
 	}
 }
@@ -303,8 +305,8 @@ func TestTheFirstLineThatCarriesSomethingIsTheAnswer(t *testing.T) {
 	}
 }
 
-// The agent is told where the host terminal daemon keeps its endpoint, and that is inside the
-// runtime directory, which the agent's policy seals: the token there opens a shell as the operator.
+// The agent is told where the host terminal daemon keeps its endpoint, and that is inside the local
+// state folder, which the agent's policy seals: the token there opens a shell as the operator.
 func TestTheAgentIsToldWhereTheHostTerminalsAre(t *testing.T) {
 	paths, err := NewPaths(t.TempDir())
 	if err != nil {
@@ -314,8 +316,8 @@ func TestTheAgentIsToldWhereTheHostTerminalsAre(t *testing.T) {
 	if env["TERMINALS_HOST_DIR"] != ptydRunDir(paths) {
 		t.Fatalf("TERMINALS_HOST_DIR = %q", env["TERMINALS_HOST_DIR"])
 	}
-	if !strings.HasPrefix(env["TERMINALS_HOST_DIR"], paths.Runtime+string(filepath.Separator)) {
-		t.Fatalf("the run directory %q is outside the sealed runtime", env["TERMINALS_HOST_DIR"])
+	if !within(env["TERMINALS_HOST_DIR"], env["DAEDALUS_LOCAL"]) {
+		t.Fatalf("the run directory %q is outside the sealed local state folder", env["TERMINALS_HOST_DIR"])
 	}
 	argv := ptydArgv("/opt/ptyd", paths)
 	want := []string{"/opt/ptyd", "serve", "--env", "host", "--run-dir", ptydRunDir(paths), "--state-dir", ptydStateDir(paths), "--listen"}

@@ -450,3 +450,28 @@ with sync_playwright() as p:
         page.screenshot(path=shot, full_page=True)
     browser.close()
 `
+
+// A native agent nobody can see is one nobody can stop: `update` from the command line leaves no
+// stack running behind it, while the page's button keeps its launcher's stack.
+func TestAnUpdateFromTheCommandLineLeavesNoStackBehind(t *testing.T) {
+	u, in := updater(t)
+	if err := u.update(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, u.out)
+	}
+	if in.stack.leaves != 1 {
+		t.Fatalf("the stack was left running after a command-line update (%d)", in.stack.leaves)
+	}
+	u, in = updater(t)
+	lock, err := AcquireLock(in.paths, "launcher")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release()
+	u.lock, u.inLauncher = lock, true
+	if err := u.update(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, u.out)
+	}
+	if in.stack.leaves != 0 {
+		t.Fatal("the launcher's own stack was stopped after its update")
+	}
+}

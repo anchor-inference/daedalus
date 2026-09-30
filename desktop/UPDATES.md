@@ -6,12 +6,14 @@ the code its stack runs. One spec, two thin installers (`install.sh` for macOS a
 on all three systems.
 
 **The invariant.** Nothing that changes what the stack runs — a new launcher, new checkouts, the
-app's migrations on the start after them — happens before a backup of the data (and, for a new
-launcher, of the launcher's own files) has been written and read back against its manifest. A
-failure after that point puts the data and the launcher back from it. Where that cannot be
-promised, the command refuses and changes nothing. That holds for `upgrade`, for the installers'
-bridge from launchers that predate `upgrade`, and for `update`. Docker mode cannot promise it yet
-and is refused by all three.
+app's migrations on the start after them — happens before the data folder is protected: on Linux
+with ext4 it is switched to a fenced copy while the kernel keeps every writer out, and the folder
+as it was is kept whole ([the writer fence](#the-writer-fence-linux-ext4)); everywhere else it is
+backed up and the backup read back against its manifest. A new launcher's own files are kept
+aside as well. A failure after that point puts the data and the launcher back the same way. Where
+that cannot be promised, the command refuses and changes nothing. That holds for `upgrade`, for
+the installers' bridge from launchers that predate `upgrade`, and for `update`. Docker mode cannot
+promise it yet and is refused by all three.
 
 ## Two versions, not one
 
@@ -99,7 +101,7 @@ processes each hold "the" lock.
   stop the Daedalus processes by hand and run `--rollback` again. `--finish` keeps the finish lock
   to itself: the descriptor it inherited is close-on-exec, so nothing it starts — git, uv, the
   stack — holds the lock after it is gone.
-- **Orphans.** Each native child is recorded under `runtime/pids` with its pid, its program and the
+- **Orphans.** Each native child is recorded under `pids/` in the launcher's local state folder with its pid, its program and the
   system's start time for that pid. A launcher that died leaves those records; the next start,
   `stop`, upgrade or update stops every child whose pid, program *and* start time still match, whole
   process group, and waits until they are gone. A pid now used by another process is left alone and
@@ -126,8 +128,19 @@ With the launcher closed, `daedalus-desktop upgrade [--data DIR] [--yes]`:
      cwd and open files refuses the backup if a data writer remains. The same gate runs before
      a rollback restores data. Processes in another protected cgroup cannot always be inspected;
      use a disposable machine for preview and check for foreign data writers first;
-   - the disk must have room for about twice the data, plus a margin;
-   - the **backup** is written into `<data>/backups/<time>-<version>/`: `data.tar.gz` (the data
+   - the next version's checkouts are fetched and their Python environment is built beside the one
+     in use (only the third-party packages; the project itself is linked in at the start that
+     follows), so a slow download happens before anything stops and a rollback finds the old
+     environment untouched;
+   - a data folder that still holds `runtime/` (a v0.12 installation) has it moved out first
+     ([the runtime](#the-runtime-lives-outside-the-data-folder)), and that move refuses while
+     anything answers on the app's port;
+   - on Linux with ext4 the data folder is **switched to a fenced copy** and the folder as it was
+     is kept whole under `.daedalus-update/retained/pre-<op>/` beside it
+     ([the writer fence](#the-writer-fence-linux-ext4)); a refusal of the fence — a writer, a file of
+     another user — is final and nothing was changed;
+   - elsewhere (Windows, macOS, other filesystems, or `DAEDALUS_DATA_FENCE=off`) the disk must have
+     room for about twice the data, plus a margin, and the **backup** is written into `<data>/backups/<time>-<version>/`: `data.tar.gz` (the data
      folder without `runtime/`, `backups/`, `upgrade/` and `launcher.json`) and `launcher.tar.gz`
      (the launcher's files the release replaces), with `manifest.json` naming every entry's kind,
      mode, size and SHA-256. It is **read back** against the manifest. The folder is 0700 and the
@@ -141,14 +154,20 @@ With the launcher closed, `daedalus-desktop upgrade [--data DIR] [--yes]`:
    managed to record.
 5. **Hands over** to the new launcher: `upgrade --finish` checks it is the version expected,
    updates the checkouts, starts the stack and waits for the app to answer.
-6. **Commits** (older backups pruned to the newest 3) — or, on any failure after the backup,
+6. **Commits** (older backups pruned to the newest 3; with the fence, older kept copies removed,
+   each under a fresh fence) — or, on any failure after the data was protected,
    **rolls back** (a Ctrl+C included: the terminal's SIGINT reaches both launchers; the old one keeps
    waiting instead of killing the new one, and the rollback runs to its end whatever arrives while it
-   does): stops the stack, moves the current data aside into
+   does): stops the stack and puts the data from before back — with the fence, by the same
+   exchange under the same fence, keeping what the new version left as
+   `.daedalus-update/retained/failed-<op>/` for the operator; with a backup, it moves the current
+   data aside into
    a folder of its own, `<data>/upgrade/replaced-<time>-<random>/`, verifies and restores the backup, checks the restored tree
    against the manifest, and puts the previous launcher's files back — from `old/`, or from
    `launcher.tar.gz` when those are gone. A new launcher that does not run at all is rolled back
-   by the old one.
+   by the old one. When the new version fails while the launcher that began the upgrade is alive,
+   `--finish` leaves the rollback to it (it holds the installation lock a fenced restore needs);
+   when that launcher is gone, `--finish` takes the lock and rolls back itself.
 
 Every step is written to `<data>/upgrade/journal.json` (fsynced) before the next begins. While it
 says an upgrade or update is unresolved, every command except `upgrade`, `status`, `logs` and
@@ -186,9 +205,12 @@ run; its files are replaced (moved aside, not deleted) as on a fresh install.
 ## Updating the checkouts: `daedalus-desktop update`
 
 `update` (the command and the Update button on the launcher's page) moves the checkouts to what is
-published and restarts. It now keeps the same invariant: the stack is stopped, the data folder is
-backed up and verified, the journal records an update in progress, and only then are the checkouts
-moved and the stack started. A start that fails puts the data back from the backup; a crash
+published and restarts. It keeps the same invariant: the next version's checkouts are fetched and
+its environment prepared, the stack is stopped, the data folder is protected (fenced switch or
+verified backup), the journal records an update in progress, and only then are the checkouts moved
+and the stack started. The page's button runs the switch inside the launcher that holds the
+installation lock; the launcher hands its lock to the switch and takes the new live tree's lock
+back. A start that fails puts the data from before back; a crash
 half-way is found on the next start and undone with `upgrade --rollback`. The command or the button
 is the yes; there is no second question. The launcher's files are not touched.
 
@@ -257,16 +279,70 @@ straight to the console. Not yet run anywhere (no PowerShell here).
 The one-line bootstrap is transparent, not self-updating: the script is fetched from `main` each
 time and does nothing a reader cannot see.
 
-## What a rollback does not cover: runtime/
+## The writer fence (Linux, ext4)
 
-`runtime/` (Python, the virtualenv, uv's cache) is not in the backup: it is large and the launcher
-builds it. After a rollback the checkouts are the old ones and the virtualenv was synced for the new;
-the next start sees that the lock file's digest no longer matches the environment's stamp and runs
-`uv sync --frozen --inexact` again. The packages it needs are the ones it installed before the
-upgrade, and uv's cache in `runtime/cache` is never pruned by the launcher, so this normally works
-offline. Not verified on a real stack (it needs one). If the cache were cleared by hand and there
-were no network, the rolled-back installation would not start until there was — the data would be
-intact.
+A backup taken from a folder is a copy of what was in it when it was read; a process that writes
+through a shared mapping a moment later is in neither the backup nor the check. The fence closes
+that gap with the kernel's own means, without privileges:
+
+- a **read lease** on every file of the data folder: the kernel refuses it while anyone holds the
+  file writable (a descriptor or a shared mapping, even one whose descriptor is closed), and a new
+  writer blocks in `open()` until the switch lets go — it answers at once, so the writer waits
+  milliseconds; the lease belongs to the inode, so a second name elsewhere changes nothing;
+- **inotify** on every directory, watched before it is listed, for what leases do not cover;
+- every **sweep** also compares each file's size, link count, metadata, inode flags and extended
+  attributes, which catches a truncation, a chmod, a chattr or a setxattr through any name.
+
+The data folder is copied through the held descriptors, the copy fenced and compared, and the two
+exchanged by one `renameat2(RENAME_EXCHANGE)`; the processes of this user are scanned (every
+thread) for a foothold in the old tree, and a last sweep precedes the commit. Anything found before
+the exchange refuses (`REFUSED`, exit 3); after it, the exchange is undone (`ROLLED_BACK`, 4). A
+state the fence cannot trust — root, a container, CAP_LEASE, file leases off, another filesystem,
+a file of another user, a special file, inode flags, a mount inside the folder, a folder that still
+holds `runtime/` — refuses before anything changes (`FAIL_CLOSED`, 5). A third party who exchanges
+or renames the trees stops the switch without anything being filed as ours. Every attempt writes a
+report to `.daedalus-update/reports/` (fsynced) before it returns.
+
+The tree from before is kept under `.daedalus-update/retained/`, beside the data folder, and is
+removed only under a fresh fence and after a full comparison with the manifest recorded when it
+was kept: any difference keeps it (`RETAINED`); a doubt after unlinks have begun is reported as
+`LOST_POSSIBLE`. Age is a reason to try, never a reason to delete.
+
+- `daedalus-desktop update status` lists every kept copy with its reason, a possible late write or
+  loss, and a switch that did not finish, and exits non-zero when something needs the operator.
+  The launcher's page shows the same in a card of its own.
+- `daedalus-desktop update resolve [--apply]` settles a switch that stopped half way (a crash, a
+  power cut): it says which tree is at data and where the other one is, and with `--apply` files the
+  other one for the operator. Whatever is at data stays live and untouched; nothing is deleted.
+- `DAEDALUS_DATA_FENCE=auto` (the default) uses the fence wherever it is available; `off` takes the
+  verified backup on Linux too. A fence that is available and refuses is final — the backup is
+  never the fallback for a refusal.
+
+It needs, per file of the data folder, two open descriptors for the length of a switch (the
+launcher raises its own limit to the hard one and refuses when that is not enough) and one inotify
+watch per directory. A switch of an installation with about 8 000 files and 520 MB took 7–11 s on
+the test machine.
+
+## The runtime lives outside the data folder
+
+The runtime (uv, Python, the environments, uv's cache, the extras) is a cache, and the launcher's
+local state (logs, child records, the daemons' endpoints and tokens, terminal logs, the browser
+profiles, the supervisor's socket) belongs to this machine: neither is data, and neither is copied
+or fenced by an update.
+
+| | runtime | local state |
+|---|---|---|
+| Linux | `$XDG_CACHE_HOME/daedalus/<key>` (`~/.cache/...`) | `$XDG_STATE_HOME/daedalus/<key>` (`~/.local/state/...`) |
+| macOS | `~/Library/Application Support/Daedalus/Runtime/<key>` | `…/Daedalus/State/<key>` |
+| Windows | `%LOCALAPPDATA%\Daedalus\Runtime\<key>` | `…\Daedalus\State\<key>` |
+
+`<key>` is the data folder's name and a digest of its path, so two installations never share one.
+macOS does not use `~/Library/Caches`, which the system may empty under a running agent. A data
+folder from before the move still has `runtime/`: the launcher moves it out once, under its lock —
+the logs, the terminal state and the browser profiles are copied and checked, then the old folder
+is set aside next to the new runtime (or removed when it is on another filesystem); the interpreter
+and the environments are rebuilt, because a moved venv keeps its old paths. Environments are kept
+one per dependency lock under `envs/`, so a rollback finds the old one as it was.
 
 ## What the checks do and do not prove
 
@@ -306,7 +382,14 @@ intact.
 - Shell smoke (`desktop/upgrade-smoke.sh`): the same end to end through `install.sh`, 22 checks.
 - Python (`tests/unit/test_launcher_updates.py`): the app's announcement (once per release, with
   the command) and `X-Daedalus-Boot` on every answer.
-- Browser (`DAEDALUS_BROWSER_TEST=1`): the launcher page's card, rendered and read back.
+- Browser (`DAEDALUS_BROWSER_TEST=1`): the launcher page's cards (the upgrade and the kept
+  copies, the latter in English and Russian), rendered and read back.
+- The fence (`fence*_test.go`, Linux, ext4; `DAEDALUS_FENCE_REQUIRE_EXT4=1` makes a skip a
+  failure): writers held and arriving at each step, every change through a second name, the
+  runtime guard, overflow at each phase, foreign exchanges, crashes and `update resolve`, removal
+  races, and the update and upgrade taking the fence (`protect_linux_test.go`). The switch's
+  guarantees are checked against their own removal by `fence_mutations.py`, which must turn every
+  targeted test red. `DAEDALUS_FENCE_LONG=1` waits out the kernel's lease-break-time.
 
 ## Checking on a real, disposable native installation
 

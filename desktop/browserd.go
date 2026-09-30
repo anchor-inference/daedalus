@@ -29,11 +29,12 @@ const noBrowserdReason = "this build carries no browserd; the agent's browser is
 const browserdMemoryMax = "3G"
 
 // browserdRunDir holds the daemon's endpoint and token, and browserdStateDir the agent's profiles,
-// downloads and uploads. Both are inside the runtime directory, which the agent's policy seals
+// downloads and uploads. Both are inside the local state folder, which the agent's policy seals
 // whole: the token drives browsers holding the logins made in them, and the profiles are those
-// logins.
-func browserdRunDir(p Paths) string   { return filepath.Join(p.Runtime, "browserd", "run") }
-func browserdStateDir(p Paths) string { return filepath.Join(p.Runtime, "browserd", "state") }
+// logins. They were never in the backups and are not in what an upgrade copies; the migration out
+// of the data folder carries them over rather than rebuilding them.
+func browserdRunDir(p Paths) string   { return filepath.Join(p.Local, "browserd", "run") }
+func browserdStateDir(p Paths) string { return filepath.Join(p.Local, "browserd", "state") }
 
 // browserdBinary is the daemon this launcher runs: DAEDALUS_BROWSERD when it is set (a daemon built
 // by hand), else the browserd packaged beside the launcher's own executable. "" when there is none.

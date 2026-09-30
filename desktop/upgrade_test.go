@@ -149,16 +149,19 @@ type fakeStack struct {
 	updates   int
 	restores  int
 	snapshots int
+	leaves    int
 }
 
 func (s *fakeStack) Configured() bool           { return true }
 func (s *fakeStack) Stop(context.Context) error { s.stops++; return nil }
-func (s *fakeStack) Leave(context.Context)      {}
+func (s *fakeStack) Leave(context.Context)      { s.leaves++ }
 func (s *fakeStack) Snapshot(context.Context, string, *Manifest) error {
 	s.snapshots++
 	return nil
 }
 func (s *fakeStack) Restore(context.Context, string, *Manifest) error { s.restores++; return nil }
+func (s *fakeStack) Prepare(context.Context) error                    { return nil }
+
 func (s *fakeStack) UpdateAndCheck(context.Context) error {
 	s.updates++
 	if s.onUpdate != nil {
@@ -218,7 +221,7 @@ func (in *installation) upgrader(answer string, tty bool) *Upgrader {
 		old := version
 		version = "desktop-v0.13.0"
 		defer func() { version = old }()
-		next := &Upgrader{paths: in.paths, stack: in.stack, mode: ModeNative, out: u.out, opts: upgradeOptions{finish: true, now: u.opts.now}}
+		next := &Upgrader{paths: in.paths, stack: in.stack, mode: ModeNative, out: u.out, opts: upgradeOptions{finish: true, now: u.opts.now, finishLock: u.finishLock}}
 		return next.Run(ctx)
 	}
 	return u

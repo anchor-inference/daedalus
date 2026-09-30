@@ -54,6 +54,11 @@ commands:
   update      move both checkouts to what is published and restart, after a checked
               backup of the data; a failed start puts the data back. Native mode only
               for now: Docker mode is refused (desktop/UPDATES.md has the manual path)
+  update status  the copies of the data folder kept by its switches, and anything that needs you:
+              a write that may have been lost or may have missed the live data, a switch
+              that did not finish (exits non-zero then)
+  update resolve [--apply]  settle a switch that did not finish: says what is where, and with
+              --apply files the tree that is not live for you, never touching the live one
   check-update  say whether a newer launcher release is published (installs nothing)
   upgrade     install a newer launcher release: asks first, stops the stack, backs the
               data up and checks the backup, replaces the launcher, updates and starts
@@ -124,6 +129,9 @@ type options struct {
 	root    string
 	archive string
 	sums    string
+
+	// apply makes `update resolve` act instead of only saying what it would do.
+	apply bool
 }
 
 func run(argv []string) error {
@@ -167,6 +175,15 @@ func run(argv []string) error {
 		return UpgradeCommand(ctx, app, opts)
 	case "check-update":
 		return CheckUpdateCommand(ctx, paths)
+	case "update":
+		// Reading the switches' records and settling one that stopped are what an interrupted
+		// state needs most; neither waits for it to be cleared.
+		if opts.extra != "" {
+			return switchReportCommand(paths, opts)
+		}
+		if err := InterruptedUpgrade(paths); err != nil {
+			return err
+		}
 	case "status", "logs":
 	default:
 		// Starting, stopping or updating on top of an upgrade that neither finished nor was undone
@@ -261,6 +278,11 @@ func startCommand(ctx context.Context, app *App, opts options) error {
 	}
 	defer lock.Release()
 	app.lock = lock
+	// A data folder from before the runtime moved out of it: carried over and moved aside once,
+	// before anything reads the old records or starts a child.
+	if err := migrateLegacyRuntime(ctx, app.paths, app.log); err != nil {
+		return fmt.Errorf("moving the runtime out of the data folder: %w", err)
+	}
 	// Links are registered with the desktop on a first start, since a folder with an executable in
 	// it has no installer to do it. Nothing depends on it working.
 	if err := RegisterScheme(app.paths); err != nil {
@@ -443,6 +465,8 @@ func parseArgs(argv []string) (options, error) {
 			opts.setup = true
 		case "--keep-data":
 			opts.keepData = true
+		case "--apply":
+			opts.apply = true
 		case "-f", "--follow":
 			opts.follow = true
 		case "--yes", "-y":
@@ -503,6 +527,11 @@ func parseArgs(argv []string) (options, error) {
 			// arrives in the place a command would. It is not a command: it says what to show.
 			if IsDeepLink(arg) {
 				opts.link = arg
+				continue
+			}
+			if opts.command == "update" && opts.extra == "" && (arg == "status" || arg == "resolve") {
+				// What the data folder's switches left behind, and settling one that stopped.
+				opts.extra = arg
 				continue
 			}
 			if opts.command == "install" && opts.extra == "" {

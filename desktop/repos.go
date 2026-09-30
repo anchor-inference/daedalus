@@ -355,15 +355,49 @@ func EnsureRepos(ctx context.Context, p Paths, git gitRunner, log func(string, .
 // UpdateRepos moves both checkouts to what is published, as a commit on top of what they hold. The
 // agent's own merged work arrives this way, and so does everything else in the published tree.
 func UpdateRepos(ctx context.Context, p Paths, git gitRunner, log func(string, ...any)) error {
+	archives, err := FetchRepos(ctx, p)
+	if err != nil {
+		return err
+	}
+	return ApplyRepos(ctx, p, git, log, archives)
+}
+
+// fixtureTarball is set by fixture_stack.go in a build tagged upgradefixture, and nil otherwise: it
+// lets an end-to-end run move the checkouts to a tree of its own instead of what GitHub publishes.
+var fixtureTarball func(name string) ([]byte, bool)
+
+// FetchRepos downloads what both checkouts would be moved to, and changes nothing. An update
+// fetches first so that the next version's environment can be built from exactly these trees
+// before the data folder is switched, and the move itself then applies the same bytes.
+func FetchRepos(ctx context.Context, p Paths) (map[string][]byte, error) {
+	archives := make(map[string][]byte)
 	for _, r := range repos(p) {
 		if !exists(r.dir) {
 			continue
 		}
-		log("updating %s", r.name)
+		if fixtureTarball != nil {
+			if archive, ok := fixtureTarball(r.name); ok {
+				archives[r.name] = archive
+				continue
+			}
+		}
 		archive, err := fetchTarball(ctx, tarballURL(r.remote))
 		if err != nil {
-			return err
+			return nil, err
 		}
+		archives[r.name] = archive
+	}
+	return archives, nil
+}
+
+// ApplyRepos moves each checkout to its fetched archive, as a commit on top of what it holds.
+func ApplyRepos(ctx context.Context, p Paths, git gitRunner, log func(string, ...any), archives map[string][]byte) error {
+	for _, r := range repos(p) {
+		archive, ok := archives[r.name]
+		if !ok || !exists(r.dir) {
+			continue
+		}
+		log("updating %s", r.name)
 		if err := removeTracked(ctx, git, r.dir, r.name); err != nil {
 			return err
 		}

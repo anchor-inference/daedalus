@@ -174,11 +174,16 @@ func (s *smoke) unpublish(tag string) {
 func (s *smoke) env(extra ...string) []string {
 	env := []string{}
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "DAEDALUS_") {
+		// The test's own local root is kept, so that no launcher of the smoke writes its runtime
+		// or its state into this user's real cache and state folders.
+		if strings.HasPrefix(kv, "DAEDALUS_") && !strings.HasPrefix(kv, "DAEDALUS_LOCAL_ROOT=") {
 			continue
 		}
 		env = append(env, kv)
 	}
+	// The smoke checks the verified backup byte for byte, which is what Windows and macOS use; the
+	// fenced switch is exercised end to end by protect_linux_test.go and on a real installation.
+	env = append(env, "DAEDALUS_DATA_FENCE=off")
 	tmp := filepath.Join(s.work, "tmp")
 	os.MkdirAll(tmp, 0o700)
 	env = append(env, "TMPDIR="+tmp)
@@ -779,7 +784,8 @@ func (s *smoke) stackRun(t *testing.T, name string) (root, data, port string, cm
 
 func stackPID(data string) int {
 	var record ChildRecord
-	body, err := os.ReadFile(filepath.Join(data, "runtime", "pids", "supervisor.json"))
+	p, _ := NewPaths(data)
+	body, err := os.ReadFile(filepath.Join(pidsDir(p), "supervisor.json"))
 	if err != nil || json.Unmarshal(body, &record) != nil {
 		return 0
 	}
@@ -881,7 +887,9 @@ func (s *smoke) unconfirmedStackRefusesRestore(t *testing.T) {
 	root, data, port, cmd := s.stackRun(t, "n7a-unconfirmed")
 	stack, finish := stackPID(data), finishPID(data)
 	t.Cleanup(func() { killPID(stack) })
-	os.Remove(filepath.Join(data, "runtime", "pids", "supervisor.json"))
+	if p, err := NewPaths(data); err == nil {
+		os.Remove(filepath.Join(pidsDir(p), "supervisor.json"))
+	}
 	syscall.Kill(finish, syscall.SIGKILL)
 	cmd.Process.Wait()
 	j := journalOf(data)

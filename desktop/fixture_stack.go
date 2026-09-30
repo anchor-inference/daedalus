@@ -37,6 +37,14 @@ func init() {
 	handoverHook = pause("DAEDALUS_UPGRADE_FIXTURE_HANDOVER_PAUSE")
 	finishStartHook = pause("DAEDALUS_UPGRADE_FIXTURE_FINISH_PAUSE")
 
+	// DAEDALUS_UPGRADE_FIXTURE_TARBALLS names a folder of <checkout>.tar.gz: an update in this build
+	// moves the checkouts to those trees instead of the published ones, with everything else real.
+	if dir := os.Getenv("DAEDALUS_UPGRADE_FIXTURE_TARBALLS"); dir != "" {
+		fixtureTarball = func(name string) ([]byte, bool) {
+			body, err := os.ReadFile(filepath.Join(dir, name+".tar.gz"))
+			return body, err == nil
+		}
+	}
 	fixtureStack = func(p Paths, log func(string, ...any)) upgradeStack {
 		if !exists(filepath.Join(p.Data, fixtureMarker)) {
 			log("DAEDALUS_UPGRADE_FIXTURE is ignored: %s has no %s", p.Data, fixtureMarker)
@@ -81,6 +89,9 @@ func (f *fixture) Leave(ctx context.Context) {
 		f.proc = nil
 	}
 }
+
+// Prepare: the fixture has no environment to build.
+func (f *fixture) Prepare(context.Context) error { return nil }
 
 func (f *fixture) UpdateAndCheck(ctx context.Context) error {
 	if err := os.MkdirAll(f.p.State, 0o700); err != nil {

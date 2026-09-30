@@ -210,6 +210,22 @@ function drawStatus(status) {
       if (offer.command) el("upgrade-command").textContent = offer.command;
     }
   }
+  // What the data folder's switches kept, and anything about them that needs the operator. The
+  // lines come from the control folder beside the data; the words from the page's own table.
+  const switches = status.switches || { items: [] };
+  if (el("switches")) {
+    const items = switches.items || [];
+    el("switches").hidden = items.length === 0;
+    el("switches").classList.toggle("decide", Boolean(switches.trouble));
+    el("switches-title").textContent = T(switches.trouble ? "switch.card.trouble" : "switch.card.title");
+    const list = el("switches-items");
+    list.replaceChildren(...items.map((item) => {
+      const li = document.createElement("li");
+      li.textContent = T("switch.item." + item.kind).replace("%s", item.path);
+      if (item.detail && item.kind !== "unscanned" && item.kind !== "unfinished") li.title = item.detail;
+      return li;
+    }));
+  }
   // One primary button per page. A pending change owns it, because restarting is the step that
   // matters; with nothing running, opening the app leads to a page that does not answer, so the
   // button steps back instead of being the brightest thing under a warning that says so.

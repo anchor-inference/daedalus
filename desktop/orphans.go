@@ -13,7 +13,7 @@ import (
 // Native children run in process groups of their own (native_unix.go, native_windows.go), so a
 // launcher that is killed — OOM, a closed session, `kill -9` — leaves them running with nothing
 // above them. Each child therefore leaves a record while it runs: its pid and the program it was
-// started as, under <data>/runtime/pids. A record whose process is gone is stale and is dropped; a
+// started as, under <local>/pids. A record whose process is gone is stale and is dropped; a
 // record whose process is alive *and* is still that program is an orphan of this installation, and
 // is stopped before anything starts the stack again, backs it up or upgrades it.
 //
@@ -35,7 +35,7 @@ type ChildRecord struct {
 	IsolatedConsole bool `json:"isolated_console,omitempty"`
 }
 
-func pidsDir(p Paths) string { return filepath.Join(p.Runtime, "pids") }
+func pidsDir(p Paths) string { return filepath.Join(p.Local, "pids") }
 
 func writeChildRecord(file string, record ChildRecord) {
 	if file == "" {

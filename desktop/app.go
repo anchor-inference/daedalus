@@ -15,6 +15,8 @@ import (
 // paths do exactly the same thing to the stack.
 type App struct {
 	paths Paths
+	// fetched are the checkouts' archives an update's prepare downloaded, for its move to apply.
+	fetched map[string][]byte
 	// mode is which of the two shapes this installation has. It is resolved before anything is
 	// started and every method below asks it once: the launcher does the same things either way,
 	// and only how it does them differs.
@@ -455,7 +457,18 @@ func (a *App) update(ctx context.Context) error {
 		if err := a.native.Ensure(ctx); err != nil {
 			return err
 		}
-		if err := UpdateRepos(ctx, a.paths, a.native.gitRunner(), a.log); err != nil {
+		// What prepareUpdate fetched, when it ran: the environment was built for exactly these trees.
+		a.mu.Lock()
+		archives := a.fetched
+		a.fetched = nil
+		a.mu.Unlock()
+		if archives == nil {
+			var err error
+			if archives, err = FetchRepos(ctx, a.paths); err != nil {
+				return err
+			}
+		}
+		if err := ApplyRepos(ctx, a.paths, a.native.gitRunner(), a.log, archives); err != nil {
 			return err
 		}
 		return a.start(ctx)
@@ -488,12 +501,17 @@ func (a *App) uninstall(ctx context.Context, keepData bool) error {
 	if a.Native() {
 		a.native.Stop(ctx)
 		if keepData {
-			a.log("the agent is stopped; %s still holds the runtime, the state and your keys", a.paths.Data)
+			a.log("the agent is stopped; %s still holds the state and your keys, and %s the runtime", a.paths.Data, a.paths.Runtime)
 			return nil
 		}
-		a.log("removing the downloaded runtime")
-		if err := os.RemoveAll(a.paths.Runtime); err != nil {
-			return err
+		// The runtime is a cache and the local state this machine's own record of the installation
+		// (logs, the daemons' endpoints, the browser profiles) — both went with the runtime folder
+		// when it lived inside the data folder, and both go here.
+		a.log("removing the downloaded runtime and this machine's local state")
+		for _, dir := range []string{a.paths.Runtime, a.paths.Local} {
+			if err := os.RemoveAll(dir); err != nil {
+				return err
+			}
 		}
 		a.log("the runtime is gone; %s still holds the checkouts, the state and your keys — delete it by hand when you are done with it", a.paths.Data)
 		return nil
@@ -629,6 +647,10 @@ type Status struct {
 
 	// Upgrade is a newer launcher release, when the check found one.
 	Upgrade *Offer `json:"upgrade,omitempty"`
+
+	// Switches is what the data folder's fenced switches kept, and anything about them that needs
+	// the operator: a possible late write or loss, a switch that did not finish.
+	Switches fenceSummary `json:"switches"`
 }
 
 func (a *App) Status(ctx context.Context) Status {
@@ -652,6 +674,7 @@ func (a *App) Status(ctx context.Context) Status {
 	}
 	status.Steps = Stages(a.mode)
 	a.mu.Unlock()
+	status.Switches = fenceSummarize(fenceControlPath(a.paths.Data))
 	if a.Native() {
 		status.Ports = NativePorts(a.paths)
 		status.Running = a.native.Running()

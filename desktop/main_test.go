@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseArgsTakesTheCommandFromAnywhere(t *testing.T) {
 	opts, err := parseArgs([]string{"logs", "-f"})
@@ -39,5 +42,25 @@ func TestParseArgsRefusesWhatItCannotMean(t *testing.T) {
 	}
 	if _, err := parseArgs([]string{"--port", "70000"}); err == nil {
 		t.Fatal("a number that is not a port is an error")
+	}
+}
+
+func TestUpdateStatusAndResolveAreSubcommandsOfUpdate(t *testing.T) {
+	for argv, want := range map[string][2]string{
+		"update":                 {"update", ""},
+		"update status":          {"update", "status"},
+		"update resolve":         {"update", "resolve"},
+		"update resolve --apply": {"update", "resolve"},
+	} {
+		opts, err := parseArgs(strings.Fields(argv))
+		if err != nil || opts.command != want[0] || opts.extra != want[1] {
+			t.Fatalf("%q: %+v %v", argv, opts, err)
+		}
+		if opts.apply != strings.Contains(argv, "--apply") {
+			t.Fatalf("%q: apply %v", argv, opts.apply)
+		}
+	}
+	if _, err := parseArgs([]string{"update", "everything"}); err == nil {
+		t.Fatal("an unknown word after update was taken")
 	}
 }

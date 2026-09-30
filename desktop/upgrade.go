@@ -83,6 +83,10 @@ type Journal struct {
 	Swapping string `json:"swapping,omitempty"`
 	// FinishToken is the finish lock's token while `upgrade --finish` holds it.
 	FinishToken string `json:"finish_token,omitempty"`
+	// Fence and Pre are the fenced switch that protected the data and the kept copy it left, when
+	// the fence was the protection (protect.go); Backup is empty then.
+	Fence string `json:"fence,omitempty"`
+	Pre   string `json:"pre,omitempty"`
 }
 
 func journalFile(p Paths) string { return filepath.Join(upgradeDir(p), "journal.json") }
@@ -172,6 +176,9 @@ type upgradeStack interface {
 	// Snapshot and Restore cover what lives outside the data folder: Docker's volumes and images.
 	Snapshot(ctx context.Context, backup string, manifest *Manifest) error
 	Restore(ctx context.Context, backup string, manifest *Manifest) error
+	// Prepare fetches what the update will move the checkouts to and builds its environment beside
+	// the one in use, before anything is stopped or switched. Nothing of the installation changes.
+	Prepare(ctx context.Context) error
 	// UpdateAndCheck moves the checkouts, starts the stack and waits for the app to answer.
 	UpdateAndCheck(ctx context.Context) error
 	// Leave is called after a successful upgrade: native mode stops the processes the launcher is
@@ -418,9 +425,14 @@ func (u *Upgrader) begin(ctx context.Context) error {
 	if u.stack.Configured() {
 		u.say("  2. the stack is stopped")
 	}
-	u.say("  3. the data folder %s and the launcher's files are backed up into %s,", u.paths.Data, backupsDir(u.paths))
-	u.say("     and the backup is read back and checked before anything is replaced")
-	u.say("     (the backup holds your keys too; it is readable only by you)")
+	if how, _, _ := chooseProtection(u.paths, u.mode); how == protectFence {
+		u.say("  3. the data folder %s is switched to a copy while the kernel keeps every writer out;", u.paths.Data)
+		u.say("     the folder as it was is kept whole in %s", filepath.Join(fenceControlPath(u.paths.Data), "retained"))
+	} else {
+		u.say("  3. the data folder %s and the launcher's files are backed up into %s,", u.paths.Data, backupsDir(u.paths))
+		u.say("     and the backup is read back and checked before anything is replaced")
+		u.say("     (the backup holds your keys too; it is readable only by you)")
+	}
 	u.say("  4. the launcher's files in %s are replaced; the old ones are kept", root)
 	if u.stack.Configured() {
 		u.say("  5. the new launcher updates the checkouts and starts the stack — the app's database")
@@ -516,6 +528,14 @@ func (u *Upgrader) prepare(ctx context.Context, journal *Journal, source upgrade
 		return err
 	}
 
+	if err := u.stack.Prepare(ctx); err != nil {
+		return fmt.Errorf("the next version's environment could not be prepared, so nothing was changed: %w", err)
+	}
+	// A data folder from before the runtime moved out of it — a v0.12 installation above all — is
+	// moved out first: the fence refuses a data folder that still holds one.
+	if err := migrateLegacyRuntime(ctx, u.paths, func(format string, args ...any) { u.say(format, args...) }); err != nil {
+		return fmt.Errorf("moving the runtime out of the data folder: %w; nothing else was changed", err)
+	}
 	if u.stack.Configured() {
 		u.say("Stopping the stack...")
 		if err := u.stack.Stop(ctx); err != nil {
@@ -523,7 +543,7 @@ func (u *Upgrader) prepare(ctx context.Context, journal *Journal, source upgrade
 		}
 	}
 	if err := quiesceData(ctx, u.paths); err != nil {
-		return fmt.Errorf("the data is still in use, so no backup was taken: %w", err)
+		return fmt.Errorf("the data is still in use, so nothing was changed: %w", err)
 	}
 	var present []string
 	for _, name := range items {
@@ -531,11 +551,9 @@ func (u *Upgrader) prepare(ctx context.Context, journal *Journal, source upgrade
 			present = append(present, name)
 		}
 	}
-	backup, err := u.backUp(ctx, root, present)
-	if err != nil {
+	if err := u.protect(ctx, journal, root, present); err != nil {
 		return err
 	}
-	journal.Backup = backup
 	journal.Stage = stageBackedUp
 	if err := writeJournal(u.paths, journal); err != nil {
 		return err
@@ -788,8 +806,8 @@ func (u *Upgrader) finish(ctx context.Context) error {
 		return err
 	}
 	defer finishLock.Release()
-	u.lock = finishLock
-	defer func() { u.lock = nil }()
+	u.lock, u.finishLock = finishLock, finishLock
+	defer func() { u.lock, u.finishLock = nil, nil }()
 	journal.Stage = stageFinishing
 	if err := writeJournal(u.paths, journal); err != nil {
 		return u.rollback(ctx, journal, err)
@@ -800,7 +818,7 @@ func (u *Upgrader) finish(ctx context.Context) error {
 	if u.stack.Configured() {
 		u.say("Updating the checkouts and starting the stack...")
 		if err := u.stack.UpdateAndCheck(ctx); err != nil {
-			return u.rollback(ctx, journal, fmt.Errorf("the stack did not come up on %s: %w", journal.To, err))
+			return u.finishFailed(ctx, journal, fmt.Errorf("the stack did not come up on %s: %w", journal.To, err))
 		}
 	}
 	u.stack.Leave(ctx)
@@ -815,12 +833,14 @@ func (u *Upgrader) finish(ctx context.Context) error {
 		return u.rollback(ctx, journal, err)
 	}
 	markWorkFinished(journal)
-	if err := PruneBackups(u.paths, backupKeep); err != nil {
-		u.say("old backups could not be pruned: %v", err)
-	}
+	u.cleanUpAfter(journal)
 	u.say("")
 	u.say("Upgraded to %s.", journal.To)
-	u.say("The backup taken before it stays at %s; the previous launcher's files are in %s.", journal.Backup, filepath.Join(journal.Work, "old"))
+	kept := journal.Backup
+	if journal.Pre != "" {
+		kept = filepath.Join(fenceControlPath(u.paths.Data), "retained", journal.Pre)
+	}
+	u.say("The data from before it stays at %s; the previous launcher's files are in %s.", kept, filepath.Join(journal.Work, "old"))
 	u.say("Start the launcher as usual.")
 	return nil
 }
@@ -855,28 +875,10 @@ func (u *Upgrader) rollback(ctx context.Context, journal *Journal, cause error) 
 			return fail("stopping data writers before restoring the data", err)
 		}
 	}
-	if restoreData && journal.Backup != "" {
-		// A folder of its own for every attempt: a rollback interrupted and run again, or two in one
-		// second, must never collide with the folder the last one filled.
-		if err := os.MkdirAll(upgradeDir(u.paths), 0o700); err != nil {
-			return fail("making room for the replaced data", err)
+	if restoreData {
+		if err := u.restoreProtected(ctx, journal); err != nil {
+			return fail("putting the data from before back", err)
 		}
-		aside, err := os.MkdirTemp(upgradeDir(u.paths), "replaced-"+u.now().UTC().Format("20060102T150405Z")+"-")
-		if err != nil {
-			return fail("making room for the replaced data", err)
-		}
-		u.say("Restoring the data from %s (what is there now is moved to %s)...", journal.Backup, aside)
-		if err := RestoreBackup(u.paths, journal.Backup, aside); err != nil {
-			return fail("restoring the data", err)
-		}
-		manifest, err := ReadManifest(journal.Backup)
-		if err != nil {
-			return fail("reading the backup's manifest", err)
-		}
-		if err := u.stack.Restore(ctx, journal.Backup, manifest); err != nil {
-			return fail("restoring Docker's volumes and images", err)
-		}
-		u.say("Data restored and checked against the backup.")
 	}
 	if err := unswap(journal); err != nil {
 		_ = writeJournal(u.paths, journal)
@@ -888,13 +890,57 @@ func (u *Upgrader) rollback(ctx context.Context, journal *Journal, cause error) 
 		return fail("recording the rollback", err)
 	}
 	markWorkFinished(journal)
+	if journal.Kind == kindUpdate {
+		u.say("Rolled back: the data and the checkouts are as they were before the update. Start the launcher as usual.")
+		return fmt.Errorf("the update failed and was rolled back: %w", cause)
+	}
 	u.say("Rolled back to %s. Start the launcher as usual.", journal.From)
 	return fmt.Errorf("upgrade to %s failed and was rolled back: %w", journal.To, cause)
+}
+
+// finishFailed is a --finish whose new version did not come up. Putting the data back from a
+// fenced copy is a switch of its own, and a switch needs the installation lock — which the launcher
+// that began the upgrade holds for as long as it lives, waiting for this process. So when it is
+// alive, this process stops the stack, records why, and leaves the rollback to it: it rolls back
+// any upgrade this process did not decide. When it is gone, the lock is free, and this process takes
+// it and rolls back itself. A backup is restored here as it always was: it needs no lock.
+func (u *Upgrader) finishFailed(ctx context.Context, journal *Journal, cause error) error {
+	if journal.Pre == "" {
+		return u.rollback(ctx, journal, cause)
+	}
+	lock, err := acquireAt(u.paths, lockPath(u.paths), "rollback")
+	if err == nil {
+		defer lock.Release()
+		u.lock = lock
+		return u.rollback(ctx, journal, cause)
+	}
+	if !errors.Is(err, errLocked) {
+		return u.rollback(ctx, journal, fmt.Errorf("%v; and the installation lock could not be read: %w", cause, err))
+	}
+	u.say("The new version did not come up: %v", cause)
+	if u.stack.Configured() {
+		if err := u.stack.Stop(ctx); err != nil {
+			u.say("the stack could not be stopped: %v", err)
+		}
+	}
+	journal.Error = cause.Error()
+	if err := writeJournal(u.paths, journal); err != nil {
+		return err
+	}
+	u.say("The launcher that began the upgrade puts the data and itself back.")
+	return fmt.Errorf("not upgraded: %w", cause)
 }
 
 // rollbackFailedMessage is what the operator is told when a rollback could not finish: what went
 // wrong, that nothing must start, and where everything needed to finish by hand is.
 func rollbackFailedMessage(p Paths, journal *Journal) string {
+	if journal.Pre != "" {
+		return fmt.Sprintf("the %s failed and its rollback could not finish: %s\n"+
+			"Do not start the launcher. The data folder from before the %s is kept whole at %s;\n"+
+			"`daedalus-desktop update status` and `update resolve` say what is where. Then run\n"+
+			"`daedalus-desktop upgrade --rollback --data %s` again, or remove %s once everything is back",
+			journal.Kind, journal.Error, journal.Kind, filepath.Join(fenceControlPath(p.Data), "retained", journal.Pre), p.Data, journalFile(p))
+	}
 	if journal.Work == "" {
 		return fmt.Sprintf("the %s failed and its rollback could not finish: %s\n"+
 			"Do not start the launcher. By hand:\n"+
@@ -1330,6 +1376,14 @@ func stopRecordedStack(ctx context.Context, p Paths, log func(string, ...any)) e
 		return fmt.Errorf("something still answers on the app's port %s after the stop; it may be a stack still using the data", port)
 	}
 	return nil
+}
+
+// Prepare fetches the published checkouts and builds their environment beside the running one.
+func (s appStack) Prepare(ctx context.Context) error {
+	if !s.app.Native() {
+		return nil
+	}
+	return s.app.prepareUpdate(ctx)
 }
 
 // UpdateAndCheck is the move without a backup around it: the caller holds one.

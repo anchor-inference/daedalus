@@ -45,6 +45,11 @@ func terminatePID(pid int, _ bool) {
 }
 
 func killPID(pid int) {
+	// kill(0) and kill(-0) mean this process's own group, and -1 means everything this user may
+	// signal: a record that says 0 or 1 — missing, damaged, or not ours — must never reach them.
+	if pid <= 1 {
+		return
+	}
 	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}

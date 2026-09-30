@@ -18,7 +18,8 @@ import (
 // macOS and Linux, a file opened with no sharing on Windows — so it goes away with the process that
 // held it, whatever way that process ended, and there is no stale lock to clean up by hand.
 //
-// The file's content says who holds it, for the message the next one sees, and carries a token: an
+// The .holder file beside it says who holds it, for the message the next one sees, and carries a
+// token (on Linux and macOS the lock file itself stays empty: it is held read-only): an
 // upgrade's --finish runs in a second process (the new launcher) while the first still holds the
 // lock, and finds the same token in the journal. That is how it knows the lock it cannot take is
 // the upgrade's own and not someone else's.
@@ -42,12 +43,14 @@ type InstallLock struct {
 	// inherited marks a descriptor shared with another process (the upgrade's first launcher):
 	// releasing it closes this process's copy and leaves the lock with the other one.
 	inherited bool
+	// borrowed marks another holder's descriptor in this same process: used, never closed.
+	borrowed bool
 }
 
 // shared is the same held lock seen from a second holder in this process: releasing it does not
 // release the first one's.
 func (l *InstallLock) shared() *InstallLock {
-	return &InstallLock{holder: l.holder, path: l.path, inherited: true}
+	return &InstallLock{file: l.file, holder: l.holder, path: l.path, inherited: true, borrowed: true}
 }
 
 var errLocked = errors.New("the installation is locked")
@@ -139,6 +142,10 @@ func (l *InstallLock) Release() {
 	if l == nil || l.file == nil {
 		return
 	}
+	if l.borrowed {
+		l.file = nil
+		return
+	}
 	if l.inherited {
 		// Closing this copy only; an unlock here would unlock the other holder's too.
 		_ = l.file.Close()
@@ -149,6 +156,25 @@ func (l *InstallLock) Release() {
 	_ = l.file.Truncate(0)
 	unlockFile(l.file)
 	l.file = nil
+}
+
+// follow moves this lock to the same lock file in the tree a fenced switch has just made live. The
+// switch holds that file already and hands it over; the file held until now locks the retained
+// tree, and is let go only after the swap, so the installation is never unlocked in between.
+func (l *InstallLock) follow(file *os.File) {
+	if l == nil || file == nil {
+		return
+	}
+	old, inherited, borrowed := l.file, l.inherited, l.borrowed
+	l.file, l.inherited, l.borrowed = file, false, false
+	if old == nil || borrowed {
+		return
+	}
+	if inherited {
+		_ = old.Close()
+		return
+	}
+	unlockFile(old)
 }
 
 // Token is what an upgrade writes into its journal for --finish to find.

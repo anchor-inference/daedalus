@@ -106,8 +106,9 @@ func TestABackupRestoresTheFolderAsItWas(t *testing.T) {
 	if !exists(filepath.Join(p.Data, "workspaces", "empty")) {
 		t.Fatal("an empty directory was lost")
 	}
-	// The runtime and the backups are left where they are; what was replaced is kept aside.
-	if got := read(t, filepath.Join(p.Runtime, "venv", "big")); got == "" {
+	// The runtime (here a data folder from before it moved out) and the backups are left where
+	// they are; what was replaced is kept aside.
+	if got := read(t, filepath.Join(p.LegacyRuntime, "venv", "big")); got == "" {
 		t.Fatal("the runtime was touched")
 	}
 	if got := read(t, filepath.Join(aside, "state", "daedalus.sqlite")); got != "schema v2\n" {
