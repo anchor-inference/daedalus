@@ -84,7 +84,34 @@ async def test_the_operators_own_task_and_a_branch_still_go_to_review(settings: 
         await r.manager.close()
 
 
-async def test_the_next_round_of_the_same_work_continues_its_card(settings: Settings, db: Database, tmp_path: Path) -> None:
+async def test_new_work_for_the_same_member_never_takes_over_the_card_they_just_handed_in(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """A new assignment used to continue the member's last card whenever it came within two hours of
+    the hand-in: the presentation the operator had asked for was renamed into a lessons card and left
+    the board. Now it gets a card of its own, and the answer names the card it could have been."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r)
+        sid = await office(r)
+        leo = await r.manager.staff.hire(r.project.id, name="Leo", role="Designer", isolation="shared")
+        presentation = task_of(await r.call(sid, "assign", staff="Leo", title="Presentation of the product", **PLAN))
+        await hand_in(r, leo, "slides.pdf, twelve slides")
+
+        said = await r.call(sid, "assign", staff="Leo", title="Lessons from the videos, to the archive", **REVISED)
+        lessons = task_of(said)
+        assert lessons != presentation
+        assert f"previous card {presentation} \"Presentation of the product\" was handed in" in said and f"Assign(task_id='{presentation}')" in said
+        card = await r.board.get(presentation)
+        assert card["title"] == "Presentation of the product" and card["status"] == "done"
+        assert card["brief"]["objective"] == PLAN["objective"] and "round 2" not in card["notes"]
+        assert (await r.board.get(lessons))["brief"]["objective"] == REVISED["objective"]
+    finally:
+        await r.manager.close()
+
+
+async def test_a_round_that_forgot_its_task_id_is_refused_and_a_task_id_continues_the_card(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """The failure the continuing guarded against — thirteen cards in two days, each a step of the
+    same work — is caught by the title instead: nearly the title just handed in is refused until the
+    task_id or new=true says which it is."""
     r = await rig(settings, db, tmp_path)
     try:
         fake(r)
@@ -93,8 +120,13 @@ async def test_the_next_round_of_the_same_work_continues_its_card(settings: Sett
         first = task_of(await r.call(sid, "assign", staff="Ada", title="Tariff plan", **PLAN))
         await hand_in(r, ada)
 
-        said = await r.call(sid, "assign", staff="Ada", title="Tariff plan, revision 2", **REVISED)
-        assert task_of(said) == first and "continues Ada's task" in said and "Tasks(op='create')" in said
+        with pytest.raises(Refused, match=f"handed in {first} \"Tariff plan\" .* reads as the same work.*task_id='{first}'.*new=true"):
+            await r.call(sid, "assign", staff="Ada", title="Tariff plan, revision 2", **REVISED)
+        assert len(await r.board.list(project_id=r.project.id)) == 1, "a refused hand-over writes nothing"
+
+        said = await r.call(sid, "assign", staff="Ada", task_id=first, title="Tariff plan, revision 2", **REVISED)
+        assert task_of(said) == first
+        assert 'The card was renamed: "Tariff plan" → "Tariff plan, revision 2"' in said
         card = await r.board.get(first)
         assert card["title"] == "Tariff plan, revision 2" and card["status"] == "doing"
         assert card["brief"]["objective"] == REVISED["objective"]
@@ -102,17 +134,32 @@ async def test_the_next_round_of_the_same_work_continues_its_card(settings: Sett
 
         await hand_in(r, ada, "revised")
         again = await r.call(sid, "assign", staff="Ada", task_id=first, done_when="plan.md answers all four questions")
-        assert task_of(again) == first and "continues" not in again, "a task_id is the orchestrator's own choice"
+        assert task_of(again) == first and "renamed" not in again
         card = await r.board.get(first)
         assert "round 3 begins" in card["notes"] and card["brief"]["done_when"] == "plan.md answers all four questions"
         assert len([t for t in await r.board.list(project_id=r.project.id) if t["assignee_staff_id"] == ada.id]) == 1
+
+        await hand_in(r, ada, "final")
+        separate = task_of(await r.call(sid, "assign", staff="Ada", title="Tariff plan, revision 2", new=True, **BRIEF))
+        assert separate != first, "new=true is the orchestrator saying it is separate work"
     finally:
         await r.manager.close()
 
 
+def test_titles_read_as_the_same_work_only_when_they_are_or_begin_with_each_other() -> None:
+    from daedalus.extensions.orchestrator_team import _same_work
+
+    assert _same_work("Tariff plan", "tariff  plan!")
+    assert _same_work("Tariff plan, revision 2", "Tariff plan")
+    assert _same_work("План тарифов", "План тарифов — раунд 2")
+    assert not _same_work("Fix login", "Fix"), "too short to mean the same work"
+    assert not _same_work("Tariff planning", "Tariff plan"), "a prefix of a word is not the same title"
+    assert not _same_work("Presentation of the product", "Lessons from the videos, to the archive")
+
+
 async def test_other_work_gets_a_card_of_its_own(settings: Settings, db: Database, tmp_path: Path) -> None:
-    """Continuing is for the obvious next round only: not after a pause, not for work that waits on
-    something, not while the member's card is still open, and not for a card with a branch."""
+    """Without a task_id nothing is continued: not after a pause, not for work that waits on
+    something, and a card with a branch is not reopened even by its task_id."""
     r = await rig(settings, db, tmp_path)
     try:
         fake(r)

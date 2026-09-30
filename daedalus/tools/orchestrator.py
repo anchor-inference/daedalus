@@ -371,9 +371,10 @@ async def dismiss(context: ToolContext, staff: str, release: bool = False, keep_
     name="Assign",
     description=(
         "Hand a member a task: task_id of a task on the board, or title plus the brief for a new one. A revision or "
-        "the next step of work a member just handed in is the same task: pass its task_id (it is reopened, its history "
-        "kept), and a new title given right after a hand-in continues that member's card too. The brief has "
-        "four parts, each a real sentence, on the task or given here: objective (what and why), deliverable (what "
+        "the next step of work a member handed in is the same task: pass its task_id (it is reopened, its history "
+        "kept). Without a task_id the work gets a card of its own; a title that repeats the one the member just "
+        "handed in is refused as a round that forgot its task_id — new=true when it is separate work after all. "
+        "The brief has four parts, each a real sentence, on the task or given here: objective (what and why), deliverable (what "
         "exists when done), boundaries (where to work, what not to touch), done_when (a check anyone can run). "
         "folder, priority (1 first … 5) and depends_on are optional. files: handles (att:…) or paths in the project's "
         "folders; the host copies each where the member can open it before the brief is sent, and the brief names "
@@ -394,10 +395,11 @@ async def assign(
     priority: int | None = None,
     depends_on: list[str] | None = None,
     files: list[str] | None = None,
+    new: bool = False,
 ) -> ToolResult:
     return await _call(
         context, "assign", staff=staff, task_id=task_id, title=title, objective=objective, deliverable=deliverable, boundaries=boundaries,
-        done_when=done_when, folder=folder, priority=priority, depends_on=depends_on, files=files,
+        done_when=done_when, folder=folder, priority=priority, depends_on=depends_on, files=files, new=new,
     )
 
 
