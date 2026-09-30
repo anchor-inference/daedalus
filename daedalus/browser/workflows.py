@@ -98,7 +98,7 @@ def _element(step: dict[str, Any]) -> str:
 
 
 HANDOFF_WORDS = {
-    "login": ("sign in", "the operator signs in here"),
+    "login": ("sign in", "the operator signs in"),
     "two_factor": ("enter the one-time code", "the operator enters the one-time code"),
     "payment": ("enter the card details", "the operator enters the card details"),
 }
