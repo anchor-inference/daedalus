@@ -17,3 +17,7 @@ ptyd/libghostty/patches/*.patch -whitespace
 # and its shell scripts are compiled in and written out for the shells to read. A checkout on Windows,
 # where git turns line ends into CRLF by default, would change both, so nothing here is converted.
 ptyd/** -text
+
+# Signed fixtures are bytes, not text: a Windows checkout turning their line ends into CRLF changed
+# the message a signature covers, and the signature no longer verified.
+desktop/testdata/** -text

@@ -55,7 +55,8 @@ func installerPSWithKey(t *testing.T, key string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	line := regexp.MustCompile(`\n\$ReleaseKeys = @\([^)\n]*\)\n`)
+	// \r too: a Windows checkout gives the script CRLF line ends, and the line was not found there.
+	line := regexp.MustCompile(`\r?\n\$ReleaseKeys = @\([^)\r\n]*\)\r?\n`)
 	if len(line.FindAllString(string(body), -1)) != 1 {
 		t.Fatal("install.ps1 has no single $ReleaseKeys line to fill")
 	}
