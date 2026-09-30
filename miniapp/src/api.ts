@@ -181,6 +181,8 @@ export const api = {
   /** The commands the terminal's shell reported, oldest first; with `output`, the text each one printed. 501 when its program reports none. */
   terminalCommands: (id: string, last: number, output: boolean) =>
     call<{ commands: TerminalCommand[] }>("GET", `/api/terminals/${encodeURIComponent(id)}/commands?last=${last}&output=${output ? 1 : 0}`),
+  /** A name of the operator's own; an empty one gives the terminal back the title its program sets. */
+  renameTerminal: (id: string, title: string) => call<TerminalView>("PATCH", `/api/terminals/${encodeURIComponent(id)}`, { title }),
   /** Forgets an exited or lost terminal; refused (409) while it runs. */
   removeTerminal: (id: string) => call<unknown>("DELETE", `/api/terminals/${encodeURIComponent(id)}`),
 };

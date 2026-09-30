@@ -17,6 +17,7 @@ import { go, PageHeader } from "../shell";
 import { invalidate, useQuery } from "../store";
 import { EnvPill } from "../envpill";
 import { TerminalView } from "../terminal/view";
+import { TerminalRowMenu } from "../terminal/rowmenu";
 import type { Team } from "../team/team";
 import { errorText } from "../ui";
 import { briefKey, journalKey, staffKey, terminalsKey, useFocus, useProject, useUsage } from "./data";
@@ -288,7 +289,7 @@ export function FoldersPage({ projectId, back, compact, toast }: { projectId: st
 
 /** The project's terminals, one of them on screen. The session dock holds a session's own; this is
  *  every terminal of the project, whoever opened it, in one place. */
-export function TerminalsPage({ projectId, selected, back }: { projectId: string; selected: string | null; back?: string | null }) {
+export function TerminalsPage({ projectId, selected, back, toast }: { projectId: string; selected: string | null; back?: string | null; toast: (text: string) => void }) {
   const { project } = useProject(projectId);
   const { data } = useQuery<{ terminals: import("../api").TerminalView[] }>(terminalsKey(projectId), { pollMs: 10000, staleMs: 3000 });
   const terminals = data?.terminals ?? [];
@@ -312,12 +313,16 @@ export function TerminalsPage({ projectId, selected, back }: { projectId: string
         <div className="focus-terminal-list">
           {data && terminals.length === 0 && <div className="empty calm">{t("focus.terminals.empty")}</div>}
           {terminals.map((term) => (
-            <button key={term.id} className={`focus-row ${term.id === selected ? "current" : ""} ${term.status === "running" ? "" : "ended"}`} onClick={() => navigate(projectPagePath(projectId, "terminals", { t: term.id }), { replace: !!selected })}>
-              <Icon name="terminal" size={16} />
-              <span className="focus-row-label truncate">{term.title || t("term.untitled")}</span>
-              <EnvPill env={term.env} />
-              {term.status !== "running" && term.exit_code !== null && <span className="focus-row-meta">{t("focus.terminal.code", { code: term.exit_code })}</span>}
-            </button>
+            <div key={term.id} className={`focus-term-row ${term.id === selected ? "current" : ""}`} data-terminal={term.id}>
+              <button className={`focus-row ${term.id === selected ? "current" : ""} ${term.status === "running" ? "" : "ended"}`} onClick={() => navigate(projectPagePath(projectId, "terminals", { t: term.id }), { replace: !!selected })}>
+                <Icon name="terminal" size={16} />
+                <span className="focus-row-label truncate">{term.title || t("term.untitled")}</span>
+                <EnvPill env={term.env} />
+                {term.status !== "running" && term.exit_code !== null && <span className="focus-row-meta">{t("focus.terminal.code", { code: term.exit_code })}</span>}
+              </button>
+              {/* A removed terminal that was on screen leaves the page on the list, not on a view of nothing. */}
+              <TerminalRowMenu row={term} toast={toast} onRemoved={term.id === selected ? () => navigate(projectPagePath(projectId, "terminals"), { replace: true }) : undefined} />
+            </div>
           ))}
         </div>
         <div className="focus-terminal-view">

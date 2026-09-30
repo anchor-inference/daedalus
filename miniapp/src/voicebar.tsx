@@ -31,7 +31,14 @@ export type VoiceNote = {
   discard: () => void;
 };
 
+/** Where a note is heard: its session's, or the host's own for the start page, which has none yet. */
+export function transcribeUrl(sessionId: string): string {
+  return sessionId ? `/api/sessions/${sessionId}/transcribe` : "/api/transcribe";
+}
+
 type Options = {
+  /** The session the note is for; empty on the start page, where the message makes the session.
+   *  It also names the note kept in this browser, so the start page keeps its own. */
   sessionId: string;
   asr: AsrStatus | null | undefined;
   /** The words, marked as a transcript, and whether they go out at once. */
@@ -102,7 +109,7 @@ export function useVoiceNote({ sessionId, asr, onWords, onAttach, toast }: Optio
       const form = new FormData();
       if (name) form.append("recording", name);
       else form.append("audio", await blobToWav(blob), "recording.wav");
-      return fetch(`/api/sessions/${session}/transcribe`, { method: "POST", headers: api.authHeaders(), body: form, signal: controller.signal });
+      return fetch(transcribeUrl(session), { method: "POST", headers: api.authHeaders(), body: form, signal: controller.signal });
     };
     try {
       let res = await post(kept);
@@ -218,7 +225,7 @@ export function useVoiceNote({ sessionId, asr, onWords, onAttach, toast }: Optio
   const letGo = useCallback((kept: string) => {
     audio.current = null;
     void forgetNote(live.current.sessionId);
-    if (kept) void api.delete(`/api/sessions/${live.current.sessionId}/transcribe/${encodeURIComponent(kept)}`).catch(() => undefined);
+    if (kept) void api.delete(`${transcribeUrl(live.current.sessionId)}/${encodeURIComponent(kept)}`).catch(() => undefined);
     dispatch({ type: "settled" });
   }, []);
 

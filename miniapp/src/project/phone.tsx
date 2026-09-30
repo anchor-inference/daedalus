@@ -21,6 +21,7 @@ import { alwaysServer, answeredBy, askWords, canAlways, composerWhen, nowChoice 
 import { HealthLine } from "../staff/health";
 import { invalidate, useQuery } from "../store";
 import { PhoneTerminal, type PhoneTerminalProps } from "../terminal/mobile";
+import { TerminalRowMenu } from "../terminal/rowmenu";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { StaffSheet } from "../team/StaffSheet";
 import type { Staff, Team } from "../team/team";
@@ -396,14 +397,17 @@ export function PhoneTerminals({ projectId, toast }: { projectId: string; toast:
         {data && rows.length === 0 && <div className="empty calm">{t("focus.terminals.empty")}</div>}
         <div className="phone-terms" role="list">
           {rows.map((row) => (
-            <a key={row.id} role="listitem" className={`phone-term ${row.status === "running" ? "" : "ended"} ${row.env}`} href={pathFor("terminals", row.id)} onClick={(e) => go(e, pathFor("terminals", row.id))} data-terminal={row.id}>
-              <Icon name={row.env === "host" ? "lock" : "terminal"} size={18} />
-              <span className="phone-term-main">
-                <span className="phone-term-title truncate">{row.title || t("term.untitled")}</span>
-                <span className="phone-term-line truncate">{[row.owner.label, terminalLine(row)].filter(Boolean).join(" · ")}</span>
-              </span>
-              <EnvPill env={row.env} />
-            </a>
+            <div key={row.id} role="listitem" className="phone-term-row">
+              <a className={`phone-term ${row.status === "running" ? "" : "ended"} ${row.env}`} href={pathFor("terminals", row.id)} onClick={(e) => go(e, pathFor("terminals", row.id))} data-terminal={row.id}>
+                <Icon name={row.env === "host" ? "lock" : "terminal"} size={18} />
+                <span className="phone-term-main">
+                  <span className="phone-term-title truncate">{row.title || t("term.untitled")}</span>
+                  <span className="phone-term-line truncate">{[row.owner.label, terminalLine(row)].filter(Boolean).join(" · ")}</span>
+                </span>
+                <EnvPill env={row.env} />
+              </a>
+              <TerminalRowMenu row={row} toast={toast} />
+            </div>
           ))}
         </div>
       </div>

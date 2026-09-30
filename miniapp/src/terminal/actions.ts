@@ -32,9 +32,20 @@ export async function createTerminalConfirmed(body: TerminalCreate): Promise<Ter
   }
 }
 
+/** What ending a terminal asks first, or null to end it at once. A staff member's terminal always
+ *  asks: its program is the member's session, and ending it stops the member mid-task whether or
+ *  not a command happens to be running at that moment. Any other terminal asks only when something
+ *  runs in it (a program, not the idle shell). */
+export function endQuestion(row: Pick<TerminalView, "owner" | "live" | "title">, shownTitle?: string): { title: string; body: string } | null {
+  const title = shownTitle || row.title || t("term.untitled");
+  if (row.owner.kind === "staff") return { title: t("term.end.staff.title"), body: t("term.end.staff", { name: row.owner.label || t("term.card.unnamed") }) };
+  if (row.live?.busy) return { title: t("term.end.title"), body: t("term.end.confirm", { command: title }) };
+  return null;
+}
+
 /**
- * End a terminal's process. Asks first only when something is running in it (a program, not the idle
- * shell); an idle prompt ends at once. A terminal that has already ended is left alone.
+ * End a terminal's process, after the question `endQuestion` asks, if any. A terminal that has
+ * already ended is left alone.
  */
 export async function endTerminal(id: string, shownTitle: string | undefined, toast: (text: string) => void): Promise<void> {
   let row: TerminalView;
@@ -45,8 +56,8 @@ export async function endTerminal(id: string, shownTitle: string | undefined, to
     return;
   }
   if (row.status !== "running") return;
-  const title = shownTitle || row.title || t("term.untitled");
-  if (row.live?.busy && !(await confirmDialog({ title: t("term.end.title"), body: t("term.end.confirm", { command: title }), action: t("term.end"), danger: true }))) return;
+  const question = endQuestion(row, shownTitle);
+  if (question && !(await confirmDialog({ ...question, action: t("term.end"), danger: true }))) return;
   try {
     await api.killTerminal(id);
   } catch (error) {

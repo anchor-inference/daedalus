@@ -15,6 +15,7 @@ import { HtmlPreview, HtmlNavigation } from "./htmlpreview";
 import { parseCsv } from "./csv";
 export { parseCsv } from "./csv";
 import { FileSkeleton } from "./feedback";
+import { createSharedFetch, type Joined } from "./sharedfetch";
 
 /** Where the bytes come from: a file under a session API root, or a File object from the composer.
  * `lines` ("20-40", or a single number) is what an answer cited: the file opens as source with that range marked. */
@@ -87,9 +88,18 @@ function sourceName(src: PreviewSource): string {
   return "file" in src ? src.file.name : src.path.split("/").pop() || src.path;
 }
 
-async function sourceBlob(src: PreviewSource, signal: AbortSignal, progress: (value: number | null) => void): Promise<Blob> {
-  if ("file" in src) return src.file;
-  const res = await fetch(`${src.base}/download?path=${encodeURIComponent(src.path)}`, { headers: api.authHeaders(), signal });
+const downloads = createSharedFetch<Blob>();
+
+/** The bytes of a source. A file on the host is read once however many viewers ask for it at the
+ *  same moment (sharedfetch.ts); a file from the composer is already here. */
+function sourceBlob(src: PreviewSource, onProgress: (value: number | null) => void): Joined<Blob> {
+  if ("file" in src) return { promise: Promise.resolve(src.file), release: () => undefined };
+  const url = `${src.base}/download?path=${encodeURIComponent(src.path)}`;
+  return downloads.join(url, (signal, progress) => fetchBlob(url, signal, progress), onProgress);
+}
+
+async function fetchBlob(url: string, signal: AbortSignal, progress: (value: number | null) => void): Promise<Blob> {
+  const res = await fetch(url, { headers: api.authHeaders(), signal });
   if (!res.ok) throw new Error(res.status === 404 ? t("preview.nofile") : t("preview.failed", { status: res.status }));
   if (!res.body) return res.blob();
   const reader = res.body.getReader();
@@ -115,8 +125,8 @@ export function useBlobUrl(src: PreviewSource | null): { url: string | null; blo
     let url: string | null = null;
     let gone = false;
     setState({ url: null, blob: null, error: null, progress: null });
-    const controller = new AbortController();
-    sourceBlob(src, controller.signal, (progress) => { if (!gone) setState((s) => ({ ...s, progress })); })
+    const read = sourceBlob(src, (progress) => { if (!gone) setState((s) => ({ ...s, progress })); });
+    read.promise
       .then((blob) => {
         if (gone) return;
         url = URL.createObjectURL(blob);
@@ -125,7 +135,7 @@ export function useBlobUrl(src: PreviewSource | null): { url: string | null; blo
       .catch((e) => !gone && setState({ url: null, blob: null, error: errorText(e), progress: null }));
     return () => {
       gone = true;
-      controller.abort();
+      read.release();
       if (url) URL.revokeObjectURL(url);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -189,11 +199,13 @@ export type ViewerInfo = { url: string | null; size: number | null; name: string
  *  Preview tab, a phone sheet. It fetches, parses and draws; the host draws the chrome around it. */
 export function Viewer({ src, onInfo, onNavigation, className }: { src: PreviewSource; onInfo?: (info: ViewerInfo) => void; onNavigation?: (nav: HtmlNavigation | null) => void; className?: string }) {
   const name = sourceName(src);
-  // A cited range is about the source, so a Markdown or CSV file opens as text rather than rendered.
+  // A cited range is about the source, so a Markdown or CSV file opens as text rather than rendered;
+  // the rendered view stays one press away. The range once decided the view outright, with the
+  // Preview button disabled, and a file an answer cited by lines could never be read rendered.
   const cited = "path" in src && src.lines ? parseRange(src.lines) : null;
-  const [source, setSource] = useState(false);
+  const [source, setSource] = useState(!!cited);
   const [binary, setBinary] = useState(false);
-  const kind = binary ? "other" : (source || cited) && ["markdown", "csv", "html", "json", "diff", "text"].includes(previewKind(name)) ? "text" : previewKind(name);
+  const kind = binary ? "other" : source && ["markdown", "csv", "html", "json", "diff", "text"].includes(previewKind(name)) ? "text" : previewKind(name);
   const { url, blob, error, progress } = useBlobUrl(src);
   const [body, setBody] = useState<{ html?: string; text?: string; rows?: string[][]; sheets?: { name: string; rows: string[][] }[]; error?: string } | null>(null);
   const [sheet, setSheet] = useState(0);
@@ -245,7 +257,7 @@ export function Viewer({ src, onInfo, onNavigation, className }: { src: PreviewS
   return (
     <div className={`viewer ${kind} ${className ?? ""}`}>
       {!onInfo && loading && <div className={`preview-progress ${progress === null ? "busy" : ""}`} role="progressbar" aria-label={t("common.loading")}><i style={progress === null ? undefined : { width: `${progress * 100}%` }} /></div>}
-      {["markdown", "html", "json", "diff"].includes(previewKind(name)) && <div className="source-tools segmented"><button className={!source && !cited ? "on" : ""} onClick={() => setSource(false)} disabled={!!cited}>{t("preview.rendered")}</button><button className={source || cited ? "on" : ""} onClick={() => setSource(true)}>{t("preview.source")}</button></div>}
+      {["markdown", "html", "json", "diff"].includes(previewKind(name)) && <div className="source-tools segmented"><button className={!source ? "on" : ""} aria-pressed={!source} onClick={() => setSource(false)}>{t("preview.rendered")}</button><button className={source ? "on" : ""} aria-pressed={source} onClick={() => setSource(true)}>{t("preview.source")}</button></div>}
       {body?.sheets && body.sheets.length > 1 && (
         <div className="segmented preview-tabs">
           {body.sheets.map((s, i) => (

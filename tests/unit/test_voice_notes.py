@@ -312,6 +312,39 @@ def test_a_kept_recording_can_be_let_go(tmp_path: Path, provider: Provider) -> N
         assert not any((tmp_path / "workspace" / "inbox" / KEPT_RECORDINGS).iterdir())
 
 
+def test_a_note_on_the_start_page_is_heard_before_there_is_a_session(tmp_path: Path, provider: Provider) -> None:
+    provider.fail = 400
+    app = FakeApp(tmp_path, {"url": "http://asr.test/v1"})
+    audio = _wav(tmp_path / "note.wav", _talk(4)).read_bytes()
+    with TestClient(build_app(app, "tok")) as client:  # type: ignore[arg-type]
+        failed = client.post("/api/transcribe", files={"audio": ("recording.wav", audio, "audio/wav")}, headers=HEAD)
+        assert failed.status_code == 502
+        name = failed.json()["detail"]["recording"]
+        kept = tmp_path / "state" / KEPT_RECORDINGS / name
+        assert kept.read_bytes() == audio, "with no workspace yet, the host's state keeps it"
+        assert not (tmp_path / "workspace").exists(), "no session's inbox was touched"
+
+        provider.fail = None
+        again = client.post("/api/transcribe", data={"recording": name}, headers=HEAD)
+        assert again.status_code == 200 and "piece1" in again.json()["text"]
+        assert not kept.exists()
+        assert client.post("/api/transcribe", data={"recording": "../../etc/passwd"}, headers=HEAD).status_code == 404
+        assert client.post("/api/transcribe", headers=HEAD).status_code == 422
+
+        provider.fail = 500
+        name = client.post("/api/transcribe", files={"audio": ("r.wav", audio, "audio/wav")}, headers=HEAD).json()["detail"]["recording"]
+        assert client.delete(f"/api/transcribe/{name}", headers=HEAD).json() == {"deleted": True}
+        assert client.delete("/api/transcribe/not-a-name", headers=HEAD).status_code == 404
+        assert not any((tmp_path / "state" / KEPT_RECORDINGS).iterdir())
+
+
+def test_a_start_page_note_needs_the_token(tmp_path: Path) -> None:
+    app = FakeApp(tmp_path, {"url": "http://asr.test/v1"})
+    with TestClient(build_app(app, "tok")) as client:  # type: ignore[arg-type]
+        assert client.post("/api/transcribe", data={"recording": "0123456789ab.wav"}).status_code == 401
+        assert client.delete("/api/transcribe/0123456789ab.wav").status_code == 401
+
+
 def test_the_site_is_told_the_chain(tmp_path: Path) -> None:
     app = FakeApp(tmp_path, {"url": "http://asr.test/v1", "fallback": "gigaam-ru"})
     app.install("gigaam-ru")
