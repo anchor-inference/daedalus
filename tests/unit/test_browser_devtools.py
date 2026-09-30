@@ -181,3 +181,13 @@ def test_lines_as_the_model_reads_them() -> None:
     assert said.splitlines()[0] == 'textbox "Email" <input>, inside frame f2'
     assert "visible, can be clicked." in said and 'state: required, invalid: "Please fill out this field.", value "a@"' in said and "scrolls inside div.list (e9)" in said
     assert json.dumps(said)  # plain text, nothing the model cannot read
+
+
+async def test_a_daemon_older_than_the_host_is_said_plainly(rig: Rig) -> None:
+    dev_site(rig)
+    sid = await rig.session()
+    await rig.call(sid, "BrowserOpen", url="https://dev.test/")
+    for tool, method, arguments in (("BrowserLogs", "page.logs", {}), ("BrowserNetwork", "page.network", {}), ("BrowserNetwork", "page.request", {"id": "r1"}), ("BrowserInspect", "page.inspect", {"ref": "e2"})):
+        rig.daemon.fail[method] = (-32601, f"method not found: {method}", None)
+        text, failed = await rig.call(sid, tool, **arguments)
+        assert failed and "older than the host" in text, (tool, text)
