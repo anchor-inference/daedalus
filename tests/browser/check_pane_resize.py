@@ -15,7 +15,9 @@ What is measured, at 1440 × 900, for both edges:
   chat area or the panel (their computed transition-duration is 0 s);
 - React commits no more while the pointer moves than while it is still (counted through the devtools
   hook, the one place every commit passes), and storage is written once, on release;
-- no long task of 50 ms or more happens during the drags;
+- no task of the page's main thread takes more than 50 ms during the drags, counted in the thread's
+  own CPU time on a processor calibrated in the same page (see main_thread.py), so a machine busy
+  with other work does not fail the drag and a slow handler still does;
 - the width survives a reload.
 
     cd miniapp && npm run build
@@ -37,6 +39,7 @@ from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
+from main_thread import Watch, prepare  # noqa: E402
 from screenshots import S1, UNHANDLED, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -46,14 +49,9 @@ ASSERT = os.environ.get("ASSERT", "1") != "0"
 STEPS = 12
 STRIDE = 7
 
-# Before the app loads: long tasks are collected, React's commits are counted through a stand-in
-# devtools hook (react-dom reports every commit to one when it is present), and writes of a pane's
-# width to storage are counted.
+# Before the app loads: React's commits are counted through a stand-in devtools hook (react-dom
+# reports every commit to one when it is present), and writes of a pane's width to storage are counted.
 PROBES = """
-window.__long = [];
-try {
-  new PerformanceObserver((list) => { for (const e of list.getEntries()) window.__long.push(Math.round(e.duration)); }).observe({ type: 'longtask', buffered: false });
-} catch (e) {}
 window.__commits = 0;
 window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
   supportsFiber: true, isDisabled: false, renderers: new Map(),
@@ -96,7 +94,8 @@ def drag(page: Page, name: str, handle: str, pane: str, sign: int) -> dict:
         page.evaluate(FRAME)
     idle = page.evaluate("() => window.__commits") - idle
     commits, writes = page.evaluate("() => [window.__commits, window.__widthWrites]")
-    page.evaluate("() => { window.__long.length = 0; }")
+    watch = Watch(page.context.browser, page)
+    watch.begin()
     page.mouse.down()
     page.evaluate(FRAME)
     off: list[float] = []
@@ -112,6 +111,7 @@ def drag(page: Page, name: str, handle: str, pane: str, sign: int) -> dict:
     page.mouse.up()
     page.evaluate(FRAME)
     page.wait_for_timeout(300)
+    work = watch.end()
     after = page.evaluate("() => [window.__commits, window.__widthWrites]")
     return {
         "start": round(start, 1),
@@ -122,7 +122,9 @@ def drag(page: Page, name: str, handle: str, pane: str, sign: int) -> dict:
         "commitsWhileStill": idle,
         "writesWhileMoving": during[1] - writes,
         "writesOnRelease": after[1] - during[1],
-        "longTasks": page.evaluate("() => window.__long.slice()"),
+        "longTasks": work.tasks[:5],
+        "taskBudget": round(work.budget),
+        "work": work.describe(),
     }
 
 
@@ -148,8 +150,8 @@ def judge(name: str, m: dict) -> list[str]:
         problems.append(f"{name}: the width was written to storage {m['writesWhileMoving']} times during the drag")
     if m["writesOnRelease"] != 1:
         problems.append(f"{name}: the width was written {m['writesOnRelease']} times on release, not once")
-    if any(d >= 50 for d in m["longTasks"]):
-        problems.append(f"{name}: long tasks during the drag: {m['longTasks']} ms")
+    if any(d > m["taskBudget"] for d in m["longTasks"]):
+        problems.append(f"{name}: a task over the budget during the drag: {m['work']}")
     return problems
 
 
@@ -160,6 +162,7 @@ def run() -> int:
         context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
         context.add_init_script(PROBES)
         page = context.new_page()
+        prepare(page)
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/agents/{S1}?token=t&scheme=dark&lang=en")
         page.wait_for_selector(".chat-scroll .timeline", timeout=15000)
