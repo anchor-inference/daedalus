@@ -157,7 +157,7 @@ func TestChromiumBehindTheWall(t *testing.T) {
 		egress = append(egress, e)
 		egressMu.Unlock()
 	}})
-	if err := w.Configure(Config{SealedPorts: []int{port(sealedSrv)}, ServicesPorts: [][2]int{{port(servicesSrv), port(servicesSrv)}}, AskLoopback: true}); err != nil {
+	if err := w.Configure(Config{SealedPorts: []int{port(sealedSrv)}, ServicesPorts: [][2]int{{port(servicesSrv), port(servicesSrv)}}, LocalSites: LocalAsk}); err != nil {
 		t.Fatal(err)
 	}
 	routes := map[netip.AddrPort]netip.AddrPort{

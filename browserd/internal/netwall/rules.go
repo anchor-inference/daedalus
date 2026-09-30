@@ -52,6 +52,13 @@ const (
 	ReasonBadTarget    = "bad_target"   // not a host and port the proxy can make sense of
 )
 
+// The values of Config.LocalSites.
+const (
+	LocalServices = "services"
+	LocalAsk      = "ask"
+	LocalAllow    = "allow"
+)
+
 // Limits on what the host may configure; they bound the work of every decision.
 const (
 	maxPorts       = 256
@@ -78,10 +85,15 @@ type Config struct {
 	// http://127.0.0.1:8103 opens the service it names; the host's address is open in the services
 	// ranges and refused on every other port. Empty natively.
 	LoopbackRewrite string `json:"loopback_rewrite,omitempty"`
-	// AskLoopback makes the other ports of this machine an ask rather than a refusal: natively they
-	// are the operator's own local apps. In a container this machine is the browser's container,
-	// which serves nothing, so it stays false.
-	AskLoopback bool `json:"ask_loopback"`
+	// LocalSites is what the other ports of this machine are — natively its loopback, in a container
+	// the Docker host — outside the services ranges and the sealed ports: the operator's own local
+	// apps and the dev servers the agent's coding members start. "services" (and empty) refuses
+	// them, "ask" makes each an ask, "allow" opens them. A sealed port is refused whatever it says.
+	LocalSites string `json:"local_sites"`
+	// HostAddrs, in a container, are the Docker host's other addresses (its LAN address), judged as
+	// the Docker host rather than as the private network: a link the agent prints as
+	// http://<lan address>:5173 is the same local site as http://127.0.0.1:5173.
+	HostAddrs []string `json:"host_addrs,omitempty"`
 	// LANAllow lists LAN addresses (an address or a prefix: "172.20.1.20", "10.0.3.0/24") the
 	// operator may open for the browser: each is asked, never open by itself. Everything private not
 	// listed is refused. Metadata addresses cannot be listed.
@@ -113,17 +125,38 @@ func DecodeConfig(raw json.RawMessage) (Config, error) {
 
 // rules is a Config made ready to judge with.
 type rules struct {
-	sealed      map[uint16]bool
-	services    [][2]int
-	rewrite     string
-	askLoopback bool
-	lan         []netip.Prefix
-	egress      []string
-	hasEgress   bool
+	sealed    map[uint16]bool
+	services  [][2]int
+	rewrite   string
+	local     string
+	hostAddrs map[netip.Addr]bool
+	lan       []netip.Prefix
+	egress    []string
+	hasEgress bool
 }
 
 func (c Config) compile() (*rules, error) {
-	r := &rules{sealed: map[uint16]bool{}, rewrite: strings.ToLower(strings.TrimSuffix(strings.TrimSpace(c.LoopbackRewrite), ".")), askLoopback: c.AskLoopback}
+	r := &rules{sealed: map[uint16]bool{}, rewrite: strings.ToLower(strings.TrimSuffix(strings.TrimSpace(c.LoopbackRewrite), ".")), hostAddrs: map[netip.Addr]bool{}}
+	switch c.LocalSites {
+	case "", LocalServices:
+		r.local = LocalServices
+	case LocalAsk, LocalAllow:
+		r.local = c.LocalSites
+	default:
+		return nil, fmt.Errorf("local_sites: %q is not services, ask or allow", c.LocalSites)
+	}
+	if len(c.HostAddrs) > maxListEntries {
+		return nil, fmt.Errorf("host_addrs: at most %d entries", maxListEntries)
+	}
+	for _, entry := range c.HostAddrs {
+		a, err := netip.ParseAddr(strings.TrimSpace(entry))
+		if err != nil {
+			return nil, fmt.Errorf("host_addrs: %q is not an address", entry)
+		}
+		// A metadata or multicast address is judged by its class before the Docker host is asked
+		// about, so listing one opens nothing.
+		r.hostAddrs[a.Unmap()] = true
+	}
 	if len(c.SealedPorts) > maxPorts {
 		return nil, fmt.Errorf("sealed_ports: at most %d", maxPorts)
 	}
@@ -353,9 +386,12 @@ func (v Verdict) Message() string {
 		if v.Decision == Ask {
 			return where + " is a port on this machine outside the services ranges; the operator can open it"
 		}
-		return where + " is a port on this machine outside the services ranges"
+		return where + " is a port on this machine outside the services ranges; the operator can open local sites in the browser settings"
 	case ReasonGateway:
-		return where + " is the Docker host outside the services ranges"
+		if v.Decision == Ask {
+			return where + " is a port on the Docker host outside the services ranges; the operator can open it"
+		}
+		return where + " is the Docker host outside the services ranges; the operator can open local sites in the browser settings"
 	case ReasonPrivate:
 		return where + " is on a private network; the operator can list LAN addresses in the browser settings"
 	case ReasonLinkLocal:

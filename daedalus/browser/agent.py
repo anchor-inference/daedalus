@@ -68,6 +68,7 @@ DOWNLOAD_MAX_BYTES = 500 << 20
 NETWORK_WORDS = {
     "egress_allow": "outside the operator's allowlist",
     "loopback": "a port of this machine that is not one of the agent's services",
+    "gateway": "a port of this machine that is not one of the agent's services",
     "lan_allow": "an address on the local network the operator listed",
 }
 """Why the wall asks, as a person reads it in the question."""

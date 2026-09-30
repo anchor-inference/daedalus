@@ -63,7 +63,7 @@ func TestTheNetworkWallThroughTheDaemon(t *testing.T) {
 	if err := h.call("net.configure", map[string]any{"sealed_port": []int{1}}, nil); code(err) != -32602 {
 		t.Fatalf("a misspelt rule was accepted: %v", err)
 	}
-	h.must("net.configure", map[string]any{"services_ports": [][2]int{{sitePort, sitePort}}, "ask_loopback": true, "lan_allow": []string{}}, nil)
+	h.must("net.configure", map[string]any{"services_ports": [][2]int{{sitePort, sitePort}}, "local_sites": "ask", "lan_allow": []string{}}, nil)
 	err := h.call("page.navigate", map[string]any{"tab_id": o.Tab.ID, "url": other.URL + "/"}, nil)
 	if data := blocked(err); data == nil || data["decision"] != "ask" {
 		t.Fatalf("an asked port: %v", err)

@@ -231,7 +231,7 @@ func crossSites(t *testing.T) *harness {
 		w.SetTestRedirect(func(netip.AddrPort) netip.AddrPort { return fixtureAddr })
 		return netwall.NewBrowsers(w)
 	})
-	h.must("net.configure", map[string]any{"services_ports": [][2]int{}, "ask_loopback": false, "lan_allow": []string{}}, nil)
+	h.must("net.configure", map[string]any{"services_ports": [][2]int{}, "local_sites": "services", "lan_allow": []string{}}, nil)
 	return h
 }
 

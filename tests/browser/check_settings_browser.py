@@ -40,7 +40,7 @@ MIB = 1 << 20
 
 BROWSER = {
     "env": "auto", "running_cap": 2, "idle_close_minutes": 10, "agent_wait_seconds": 60, "control_wait_seconds": 20, "ticket_ttl_seconds": 30,
-    "audit_retention_days": 90, "closed_retention_hours": 72, "lan_allow": [], "rules": [], "record_frames": False, "record_takeover": False,
+    "audit_retention_days": 90, "closed_retention_hours": 72, "local_sites": "ask", "lan_allow": [], "rules": [], "record_frames": False, "record_takeover": False,
     "record_retention_days": 7, "record_max_mb": 500, "watch_mode": False, "watch_domains": ["mail.google.com"], "injection_monitor": False, "injection_monitor_preset": "",
     "extract_preset": "", "point_clicks": False,
 }
@@ -189,6 +189,13 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
         say("the recording's default or watch mode was not saved")
     if saved["watch_domains"] != ["mail.google.com", "*.bank.example"] or saved["lan_allow"] != ["10.0.5.20", "10.0.5.0/24"]:
         say(f"the lists were saved as {saved['watch_domains']} and {saved['lan_allow']}")
+
+    # Local sites: asked about by default, opened for every port when the operator says so.
+    page.locator("#browser-local-sites").click()
+    page.locator(".dropdown-list [role=option][data-value='allow']").click()
+    page.wait_for_timeout(900)
+    if host.settings["browser"].get("local_sites") != "allow":
+        say(f"local sites were saved as {host.settings['browser'].get('local_sites')!r}")
 
     # Reading for the agent and clicks at a point: off until switched, then saved with the rest.
     # A switch and a compact picker in their rows, like every other browser setting.

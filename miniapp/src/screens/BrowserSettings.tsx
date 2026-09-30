@@ -1,7 +1,7 @@
 // Settings → Environments → browser sessions: the agent's browser as the operator runs it — which Chromium, whether its
 // sandbox holds, what runs now and what it costs, the profiles that keep its logins, how many may run
 // at once, how long an idle one lives, what is recorded, where the agent may act only while watched,
-// which addresses on the local network it may be let into, the injection monitor, the model that reads
+// which local sites and addresses on the local network it may be let into, the injection monitor, the model that reads
 // a page for the agent and whether it may click at a point, and the site notes agents proposed.
 //
 // Everything here is the host's `[browser]` section; the host hands the daemon its part at once, so a
@@ -26,6 +26,7 @@ export const DEFAULT_BROWSER: BrowserSettings = {
   idle_close_minutes: 10,
   agent_wait_seconds: 60,
   control_wait_seconds: 20,
+  local_sites: "ask",
   lan_allow: [],
   record_frames: false,
   record_takeover: false,
@@ -351,7 +352,16 @@ function Network({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserS
   useEffect(() => setText(b.lan_allow.join("\n")), [b.lan_allow]);
   return (
     <div className="card bs-network">
-      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.lan.title")}</div>
+      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.local.title")}</div>
+      <div className="sub">{t("bs.local.sub")}</div>
+      <Row title={t("bs.local.title")} stack>
+        <Dropdown id="browser-local-sites" label={t("bs.local.title")} value={b.local_sites} onChange={(local_sites) => set({ local_sites })} options={[
+          { id: "services", label: t("bs.local.services") },
+          { id: "ask", label: t("bs.local.ask") },
+          { id: "allow", label: t("bs.local.allow") },
+        ]} />
+      </Row>
+      <div className="section-title">{t("bs.lan.title")}</div>
       <div className="sub">{t("bs.lan.sub")}</div>
       <label className="field" htmlFor="browser-lan">{t("bs.lan.label")}</label>
       <textarea id="browser-lan" className="field bs-list" rows={3} value={text} spellCheck={false} placeholder="10.0.5.20" onChange={(e) => setText(e.target.value)} onBlur={() => {

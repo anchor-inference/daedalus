@@ -864,12 +864,12 @@ on every connection and within two seconds of a change.
 
 ### The network wall's rules and asks
 
-On every connection the host sends `net.configure` (The network wall, below): in a container
-`sealed_ports` = the API's port, `services_ports` = the agent's and the terminals' ranges,
-`loopback_rewrite: "host.docker.internal"`, `ask_loopback: false`; natively `sealed_ports` = the
-policy's sealed ports (the API, the launcher, the terminal daemons' ports) and the key proxy's port,
-the same ranges, `ask_loopback: true`; both with `[browser] lan_allow` and, when the operator has one,
-`[policy] egress_allow`. A navigation the wall refuses with `decision: "ask"` becomes the caller's
+On every connection the host sends `net.configure` (The network wall, below): `sealed_ports` = the
+policy's sealed ports (the API, the launcher, the terminal daemons' ports) and the key proxy's port
+when it is on loopback, `services_ports` = the agent's and the terminals' ranges, `local_sites` from
+`[browser] local_sites`, `lan_allow` from `[browser] lan_allow` and, when the operator has one,
+`[policy] egress_allow`; in a container also `loopback_rewrite: "host.docker.internal"` and
+`host_addrs` = `SERVICES_PUBLIC_HOST` when it is an address. A navigation the wall refuses with `decision: "ask"` becomes the caller's
 question to the operator (rule `browser.network`, the key over the group, host and port); on a yes
 the host sends `net.grant {group_id, host, port}` and navigates once more. A `deny` is told to the
 agent as the wall's refusal. Every `egress` event is written to `egress_log` under the tool `Browser`
@@ -913,9 +913,11 @@ The rules, in the order they are applied to one address and port:
 | multicast, broadcast | deny | `multicast` |
 | unspecified, reserved, benchmarking, Teredo, documentation | deny | `reserved` |
 | this machine, a port in `services_ports`, natively | allow | |
-| this machine, any other port | ask natively (`ask_loopback`), deny in a container | `loopback` |
-| the Docker host (`loopback_rewrite`), a port in `services_ports` | allow | |
-| the Docker host, any other port | deny | `gateway` |
+| this machine, any other port, natively | by `local_sites`: `services` deny, `ask` ask, `allow` allow | `loopback` |
+| this machine in a container (the browser's own container, which serves nothing) | deny | `loopback` |
+| the Docker host (`loopback_rewrite`, or an address in `host_addrs`), a sealed port | deny | `sealed_port` |
+| the Docker host, a port in `services_ports` | allow | |
+| the Docker host, any other port | by `local_sites`, as natively | `gateway` |
 | a private or link-local address in `lan_allow` | ask | `lan_allow` |
 | any other private (`10/8`, `172.16/12`, `192.168/16`, `100.64/10`, `fc00::/7`, `fec0::/10`) or link-local address | deny | `private`, `link_local` |
 | a name with no address | deny | `unresolvable` |
@@ -925,15 +927,22 @@ An IPv4 address carried inside IPv6 (mapped, NAT64, 6to4) is judged as the IPv4 
 and `*.localhost` are this machine without a lookup. **Until the host configures it the wall is at
 its strictest**: public addresses only.
 
-`net.configure {sealed_ports: [port], services_ports: [[lo, hi]], loopback_rewrite?, ask_loopback,
-lan_allow: [address or prefix], egress_allow?: [host]}` → `{}`, strictly decoded. The host sends:
+`net.configure {sealed_ports: [port], services_ports: [[lo, hi]], loopback_rewrite?, local_sites,
+host_addrs?: [address], lan_allow: [address or prefix], egress_allow?: [host]}` → `{}`, strictly
+decoded. `local_sites` is `services` (the default, and what an empty value means), `ask` or `allow`.
+The host sends:
 
 - **natively**: `sealed_ports` = its API, the key proxy, the terminal daemons' hook listeners, the
   launcher's page (the policy's own sealed ports); `services_ports` = the agent's and the
-  terminals' ranges; `ask_loopback: true`;
-- **in a container**: `sealed_ports` = the API; `services_ports` the same;
-  `loopback_rewrite: "host.docker.internal"`, so `http://127.0.0.1:8103` — the address the agent
-  prints — opens the service published on the Docker host; `ask_loopback: false`;
+  terminals' ranges; `local_sites` from the settings (`ask` by default);
+- **in a container**: the same, plus `loopback_rewrite: "host.docker.internal"`, so
+  `http://127.0.0.1:8103` — the address the agent prints — opens the service published on the
+  Docker host. Unless `local_sites` is `services`, a loopback address on any other port is sent there
+  too, so a dev server's `http://localhost:5173` is the Docker host's port 5173; and `host_addrs`
+  names the host's LAN address, judged as the Docker host rather than as the private network.
+  A server that listens on the host's loopback only is reached through the host's forwarding
+  (`deploy/browser-host-loopback.sh`), without which the Docker host answers only on the ports
+  bound to every interface;
 - `lan_allow` from the browser settings (empty by default), and `egress_allow` when the operator has
   an allowlist (absent means none; an empty list allows no host).
 

@@ -565,7 +565,7 @@ async def main(argv: list[str] | None = None) -> int:
     await db.open()
     # The fixture's two ports are let through as the agent's services, as the integration tests do;
     # every other port of this machine is still asked about, as it is natively.
-    rules = {"sealed_ports": [], "services_ports": [[p, p] for p in sites.ports], "ask_loopback": True, "lan_allow": []}
+    rules = {"sealed_ports": [], "services_ports": [[p, p] for p in sites.ports], "local_sites": "ask", "lan_allow": []}
     service = Browsers(db, run_dirs={"container": None, "host": run}, config=lambda: BrowserConfig(env="host", running_cap=max(2, args.concurrency)), owners=Everyone(), wall=lambda env: rules)  # type: ignore[arg-type]
     await service.start()
     episodes: list[Episode] = []

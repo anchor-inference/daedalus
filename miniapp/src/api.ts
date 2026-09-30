@@ -352,6 +352,7 @@ export type BrowserSettings = {
   idle_close_minutes: number;
   agent_wait_seconds: number;
   control_wait_seconds: number;
+  local_sites: "services" | "ask" | "allow";
   lan_allow: string[];
   record_frames: boolean;
   record_takeover: boolean;

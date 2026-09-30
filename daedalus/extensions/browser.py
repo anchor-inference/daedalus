@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -67,21 +68,27 @@ def build(app: Application) -> Browsers:
         network wall). The daemon cannot know them: this installation's own ports, the ranges its
         services are published on, the operator's allowlist and LAN addresses."""
         ranges = [r for r in (_port_range(settings.services_port_range), _port_range(settings.terminals_port_range)) if r]
-        rules: dict[str, Any] = {"services_ports": ranges, "lan_allow": list(app.config.browser.lan_allow)}
+        # The installation's own doors, sealed in both environments: in a container they are on the
+        # Docker host, which the local sites setting can open to the browser.
+        sealed = set(manager.sealed_ports())
+        # The key proxy is a loopback port natively; whatever reaches it spends the keys.
+        with contextlib.suppress(ValueError):
+            keys = urlsplit(keyproxy_base())
+            if keys.hostname in ("127.0.0.1", "localhost", "::1") and keys.port:
+                sealed.add(keys.port)
+        rules: dict[str, Any] = {
+            "sealed_ports": sorted(sealed),
+            "services_ports": ranges,
+            "local_sites": app.config.browser.local_sites,
+            "lan_allow": list(app.config.browser.lan_allow),
+        }
         if env == "container":
             # The daemon's own network reaches this container's published ports on the Docker host;
-            # an address the agent prints for its service (127.0.0.1:8103) is sent there.
-            rules.update({"sealed_ports": [settings.api_port], "loopback_rewrite": "host.docker.internal", "ask_loopback": False})
-        else:
-            # Natively the browser shares this machine's loopback with the API, the key proxy, the
-            # terminal daemons' hook listeners and the launcher: every door the policy seals.
-            sealed = set(manager.sealed_ports())
-            # The key proxy is a loopback port natively too; whatever reaches it spends the keys.
+            # an address the agent prints for its service (127.0.0.1:8103) is sent there, and so is a
+            # local site's, and the host's LAN address is the same machine.
+            rules["loopback_rewrite"] = "host.docker.internal"
             with contextlib.suppress(ValueError):
-                keys = urlsplit(keyproxy_base())
-                if keys.hostname in ("127.0.0.1", "localhost", "::1") and keys.port:
-                    sealed.add(keys.port)
-            rules.update({"sealed_ports": sorted(sealed), "ask_loopback": True})
+                rules["host_addrs"] = [str(ipaddress.ip_address(settings.services_public_host.strip()))]
         allow = [h for h in app.config.policy.egress_allow if h.strip()]
         if allow:
             rules["egress_allow"] = allow

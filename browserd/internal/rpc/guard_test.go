@@ -50,7 +50,7 @@ func TestAPagesOwnNavigationsMeetTheAllowlist(t *testing.T) {
 		w.SetTestRedirect(func(netip.AddrPort) netip.AddrPort { return fixtureAddr })
 		return netwall.NewBrowsers(w)
 	})
-	rules := map[string]any{"services_ports": [][2]int{}, "ask_loopback": false, "lan_allow": []string{}, "egress_allow": []string{"allowed.example"}}
+	rules := map[string]any{"services_ports": [][2]int{}, "local_sites": "services", "lan_allow": []string{}, "egress_allow": []string{"allowed.example"}}
 	h.must("net.configure", rules, nil)
 	o := h.open("g1", "project-a", "")
 	var nav struct {

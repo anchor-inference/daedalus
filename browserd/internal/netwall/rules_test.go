@@ -125,7 +125,7 @@ func TestClassifyTable(t *testing.T) {
 }
 
 func TestDecodeConfigIsStrict(t *testing.T) {
-	good := `{"sealed_ports":[8765,3200],"services_ports":[[8100,8119],[8120,8139]],"loopback_rewrite":"host.docker.internal","ask_loopback":false,"lan_allow":["172.20.1.20","10.0.3.0/24"],"egress_allow":["example.com","*.example.org"]}`
+	good := `{"sealed_ports":[8765,3200],"services_ports":[[8100,8119],[8120,8139]],"loopback_rewrite":"host.docker.internal","local_sites":"services","host_addrs":["172.30.0.9"],"lan_allow":["172.20.1.20","10.0.3.0/24"],"egress_allow":["example.com","*.example.org"]}`
 	c, err := DecodeConfig(json.RawMessage(good))
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestDecodeGrant(t *testing.T) {
 
 // nativeConfig is what the host sends natively: its own doors sealed, the services ranges open on
 // this machine, the operator's other local ports asked.
-var nativeConfig = Config{SealedPorts: []int{8765, 3200, 47001}, ServicesPorts: [][2]int{{8100, 8119}, {8120, 8139}}, AskLoopback: true, LANAllow: []string{"172.20.1.20", "10.9.0.0/16"}}
+var nativeConfig = Config{SealedPorts: []int{8765, 3200, 47001}, ServicesPorts: [][2]int{{8100, 8119}, {8120, 8139}}, LocalSites: LocalAsk, LANAllow: []string{"172.20.1.20", "10.9.0.0/16"}}
 
 // containerConfig is what it sends to the container's daemon: loopback in the services ranges goes
 // to the Docker host.
@@ -325,7 +325,7 @@ func TestContainerRules(t *testing.T) {
 		{"localhost", 8125, Allow, ""},
 		{"host.docker.internal", 8110, Allow, ""},
 		{"172.18.0.1", 8119, Allow, ""},
-		{"host.docker.internal", 8765, Deny, ReasonGateway},
+		{"host.docker.internal", 8765, Deny, ReasonSealedPort},
 		{"172.18.0.1", 22, Deny, ReasonGateway},
 		{"127.0.0.1", 8765, Deny, ReasonSealedPort},
 		{"127.0.0.1", 3000, Deny, ReasonLoopback},
@@ -348,6 +348,71 @@ func TestContainerRules(t *testing.T) {
 		if asked == "127.0.0.1" || asked == "localhost" {
 			t.Fatalf("a loopback name was asked of the resolver: %v", res.asked)
 		}
+	}
+}
+
+// The operator's local sites: the Docker host's other ports in a container, this machine's natively.
+// The sealed ports and the metadata address stay shut whatever the setting says.
+func TestLocalSites(t *testing.T) {
+	names := map[string][]string{"host.docker.internal": {"172.18.0.1"}, "dev.example": {"172.30.0.9"}}
+	judge := func(c Config, host string, port int, grant bool) (Decision, string, []netip.Addr) {
+		w, _, _ := newTestWall(t, c, names)
+		p, _ := w.Listen("b1")
+		defer p.Close()
+		if grant {
+			p.Grant(host, port, time.Now().Add(time.Hour))
+		}
+		v := w.judge(context.Background(), p, host, port)
+		return v.Decision, v.Reason, v.Addrs
+	}
+	container := containerConfig
+	container.HostAddrs = []string{"172.30.0.9"}
+	for _, c := range []struct {
+		local  string
+		host   string
+		port   int
+		grant  bool
+		d      Decision
+		reason string
+	}{
+		{LocalServices, "127.0.0.1", 5173, false, Deny, ReasonLoopback},
+		{LocalServices, "172.30.0.9", 5173, false, Deny, ReasonGateway},
+		{LocalAsk, "127.0.0.1", 5173, false, Ask, ReasonGateway},
+		{LocalAsk, "localhost", 5173, true, Allow, ""},
+		{LocalAsk, "172.30.0.9", 8840, false, Ask, ReasonGateway},
+		{LocalAsk, "dev.example", 8840, true, Allow, ""},
+		{LocalAllow, "127.0.0.1", 5173, false, Allow, ""},
+		{LocalAllow, "172.30.0.9", 3000, false, Allow, ""},
+		{LocalAllow, "127.0.0.1", 8765, false, Deny, ReasonSealedPort},
+		{LocalAllow, "172.30.0.9", 8765, false, Deny, ReasonSealedPort},
+		{LocalAllow, "169.254.169.254", 80, false, Deny, ReasonMetadata},
+		{LocalAllow, "172.30.0.10", 80, false, Deny, ReasonPrivate},
+	} {
+		cfg := container
+		cfg.LocalSites = c.local
+		d, reason, addrs := judge(cfg, c.host, c.port, c.grant)
+		if d != c.d || reason != c.reason {
+			t.Errorf("container %s: %s:%d = %s/%s, want %s/%s", c.local, c.host, c.port, d, reason, c.d, c.reason)
+		}
+		if d == Allow && c.host == "127.0.0.1" && (len(addrs) != 1 || addrs[0] != netip.MustParseAddr("172.18.0.1")) {
+			t.Errorf("container %s: %s:%d dials %v, not the Docker host", c.local, c.host, c.port, addrs)
+		}
+	}
+	native := nativeConfig
+	for local, want := range map[string]Decision{LocalServices: Deny, LocalAsk: Ask, LocalAllow: Allow} {
+		native.LocalSites = local
+		if d, _, _ := judge(native, "127.0.0.1", 5173, false); d != want {
+			t.Errorf("native %s: 127.0.0.1:5173 = %s, want %s", local, d, want)
+		}
+		if d, reason, _ := judge(native, "127.0.0.1", 8765, false); d != Deny || reason != ReasonSealedPort {
+			t.Errorf("native %s: the sealed port is %s/%s", local, d, reason)
+		}
+	}
+	if _, err := DecodeConfig(json.RawMessage(`{"local_sites":"always"}`)); err == nil {
+		t.Error("an unknown local_sites was accepted")
+	}
+	if _, err := DecodeConfig(json.RawMessage(`{"host_addrs":["not-an-address"]}`)); err == nil {
+		t.Error("a host address that is not one was accepted")
 	}
 }
 

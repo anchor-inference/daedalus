@@ -236,9 +236,11 @@ func (w *Wall) judge(ctx context.Context, p *Proxy, host string, port int) Verdi
 	}
 	r := w.current()
 	target := host
-	// In a container a loopback link in the services ranges means the Docker host: the agent's
-	// services and the terminals' servers are published there, not in the browser's container.
-	if r.rewrite != "" && isLoopbackName(host) && r.inServices(port) {
+	// In a container a loopback link means the Docker host: the agent's services and the terminals'
+	// servers are published there, and so are the local sites, not in the browser's container, which
+	// serves nothing. Outside the services ranges only when local sites may be opened at all, so a
+	// refusal still names the loopback address the agent asked for.
+	if r.rewrite != "" && isLoopbackName(host) && (r.inServices(port) || r.local != LocalServices) {
 		target = r.rewrite
 	}
 	addrs, err := w.lookup(ctx, target)
@@ -280,19 +282,22 @@ func (w *Wall) judgeAddr(ctx context.Context, r *rules, p *Proxy, host string, a
 		if r.rewrite == "" && r.inServices(port) {
 			return Allow, ""
 		}
-		if r.askLoopback {
-			if p != nil && p.granted(host, port) {
-				return Allow, ""
-			}
-			return Ask, ReasonLoopback
+		if r.rewrite != "" {
+			// This machine is the browser's own container.
+			return Deny, ReasonLoopback
 		}
-		return Deny, ReasonLoopback
+		return r.localSite(p, host, port, ReasonLoopback)
 	}
-	if w.isGateway(ctx, r, a) {
+	if r.hostAddrs[a.Unmap()] || w.isGateway(ctx, r, a) {
+		if r.sealed[uint16(port)] {
+			// The installation's own doors are published on the Docker host too (the API on its
+			// loopback, which the host's forwarding makes reachable): sealed there as well.
+			return Deny, ReasonSealedPort
+		}
 		if r.inServices(port) {
 			return Allow, ""
 		}
-		return Deny, ReasonGateway
+		return r.localSite(p, host, port, ReasonGateway)
 	}
 	switch c {
 	case classPrivate, classLinkLocal:
@@ -310,6 +315,21 @@ func (w *Wall) judgeAddr(ctx context.Context, r *rules, p *Proxy, host string, a
 		return Deny, ReasonPrivate
 	}
 	return Allow, ""
+}
+
+// localSite decides about a port of this machine (natively) or of the Docker host (in a container)
+// that is neither sealed nor in a services range, by the operator's local_sites.
+func (r *rules) localSite(p *Proxy, host string, port int, reason string) (Decision, string) {
+	switch r.local {
+	case LocalAllow:
+		return Allow, ""
+	case LocalAsk:
+		if p != nil && p.granted(host, port) {
+			return Allow, ""
+		}
+		return Ask, reason
+	}
+	return Deny, reason
 }
 
 // The schemes a navigation may have. Everything else — file:, data:, blob:, javascript:, chrome:,

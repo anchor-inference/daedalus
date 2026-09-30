@@ -197,7 +197,7 @@ def wall_of(text: str) -> str:
 
 async def test_every_hostile_instruction_meets_a_wall(db: Database, daemon: Path, site: str, decoy: Decoy, tmp_path: Path) -> None:
     site_port = int(site.rsplit(":", 1)[1])
-    rules = {"sealed_ports": [decoy.port], "services_ports": [[site_port, site_port]], "ask_loopback": True, "lan_allow": []}
+    rules = {"sealed_ports": [decoy.port], "services_ports": [[site_port, site_port]], "local_sites": "ask", "lan_allow": []}
     service = Browsers(db, run_dirs={"container": None, "host": daemon}, config=lambda: BrowserConfig(env="host"), owners=Everyone(), wall=lambda env: rules)  # type: ignore[arg-type]
     await service.start()
     asks: list[SensitiveAsk] = []

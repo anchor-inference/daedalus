@@ -94,7 +94,7 @@ async def test_open_read_click_and_watch_through_the_host(db: Database, daemon: 
     port = int(site.rsplit(":", 1)[1].strip("/"))
     # The fixture is on this machine's loopback: the wall lets it through as one of the services,
     # and asks about any other port of this machine, as it does natively.
-    rules = {"sealed_ports": [], "services_ports": [[port, port]], "ask_loopback": True, "lan_allow": []}
+    rules = {"sealed_ports": [], "services_ports": [[port, port]], "local_sites": "ask", "lan_allow": []}
     service = Browsers(db, run_dirs={"container": daemon, "host": None}, config=lambda: BrowserConfig(), owners=Everyone(), wall=lambda env: rules)  # type: ignore[arg-type]
     await service.start()
     try:

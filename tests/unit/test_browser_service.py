@@ -281,7 +281,7 @@ async def test_a_group_the_daemon_forgot_reads_as_closed_idle_and_a_missing_thin
 
 
 async def test_the_wall_gets_its_rules_on_every_connection_and_egress_is_logged(db: Database, run_dir: Path, owners: FakeOwners, daemon: FakeBrowserd, cfg: BrowserConfig) -> None:
-    rules = {"sealed_ports": [8765], "services_ports": [[8100, 8119]], "loopback_rewrite": "host.docker.internal", "ask_loopback": False, "lan_allow": []}
+    rules = {"sealed_ports": [8765], "services_ports": [[8100, 8119]], "loopback_rewrite": "host.docker.internal", "local_sites": "ask", "lan_allow": []}
     made = Browsers(db, run_dirs={"container": run_dir, "host": None}, config=lambda: cfg, owners=owners, wall=lambda env: dict(rules))  # type: ignore[arg-type]
     await made.start()
     try:

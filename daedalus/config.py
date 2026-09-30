@@ -1556,6 +1556,11 @@ class BrowserConfig(BaseModel):
     audit_retention_days: int = Field(default=90, ge=1)
     closed_retention_hours: int = Field(default=72, ge=1)
     """How long a closed group's row stays listed."""
+    local_sites: Literal["services", "ask", "allow"] = "ask"
+    """The other ports of the machine the agent runs on — the operator's local apps and the dev
+    servers coding members start: ``services`` opens only the agent's own services ranges, ``ask``
+    asks about each port, ``allow`` opens them all. The installation's own doors (the API, the key
+    proxy, the daemons, the launcher) stay shut whatever it says."""
     lan_allow: list[str] = Field(default_factory=list)
     """Addresses or prefixes on the local network the browser may reach after the operator's yes
     (the network wall asks about each; it never lets metadata addresses through)."""
