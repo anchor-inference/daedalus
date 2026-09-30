@@ -247,6 +247,7 @@ class Runner:
             for role, text in opening.history:
                 messages.append({"role": role, "content": text})
             pending = first
+            steered = False
             async with asyncio.timeout(EPISODE_TIMEOUT_S):
                 while pending and result.turns < scenario.turns:
                     result.turns += 1
@@ -279,6 +280,7 @@ class Runner:
                             record.texts.append((result.turns, str(kept["content"])))
                         if not calls:
                             break
+                        steer = opening.steer if result.turns == 1 and not steered else ""
                         for call in calls:
                             name = str((call.get("function") or {}).get("name") or "")
                             raw = (call.get("function") or {}).get("arguments") or "{}"
@@ -300,12 +302,22 @@ class Runner:
                             record.calls.append(Call(result.turns, name, arguments, text, failed))
                             messages.append({"role": "tool", "tool_call_id": call.get("id") or "", "content": text})
                             log.write(json.dumps({"tool": name, "arguments": arguments, "failed": failed, "result": text}, ensure_ascii=False) + "\n")
+                        if steer:
+                            # The operator wrote while the turn was under way: the core puts the
+                            # message before the next model call.
+                            steered = True
+                            messages.append({"role": "user", "content": await stand.steered(steer)})
+                            log.write(json.dumps({"steer": messages[-1]["content"]}, ensure_ascii=False) + "\n")
                         if silent:
                             break
                     else:
                         result.stopped = f"turn {result.turns} used all {MAX_STEPS} steps"
                     await stand.turn_ended(turn_started)
                     pending = await stand.news()
+                    if opening.steer and not steered:
+                        # The turn ended before the message could be placed: it opens the next one.
+                        steered = True
+                        pending = "\n\n".join(part for part in (pending, opening.steer) if part)
         except TimeoutError:
             result.stopped = f"took longer than {EPISODE_TIMEOUT_S:.0f} s"
         except OutOfBudget as exc:
@@ -317,6 +329,7 @@ class Runner:
             result.seconds = round(time.monotonic() - started, 1)
             if stand is not None:
                 try:
+                    record.delivered = await stand.delivered()
                     result.success, result.why = await scenario.check(stand, record)
                 except Exception as exc:  # noqa: BLE001 — a check that cannot read the result fails it
                     result.success, result.why = False, f"the check failed: {type(exc).__name__}: {exc}"

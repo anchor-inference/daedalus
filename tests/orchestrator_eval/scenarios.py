@@ -45,9 +45,14 @@ class Record:
     def ok(self, name: str) -> list[Call]:
         return [c for c in self.calls if c.name == name and not c.failed]
 
+    delivered: list[str] = field(default_factory=list)
+    """What the host itself put in front of the operator during the episode — a member's instruction
+    passed on word for word — where the build under test does that."""
+
     def said(self) -> str:
-        """Everything the orchestrator said where the operator reads it: its replies, its reports, its questions."""
-        parts = [text for _, text in self.texts]
+        """Everything the operator reads of the episode: the orchestrator's replies, reports and
+        questions, and whatever the host delivered to them itself."""
+        parts = [text for _, text in self.texts] + list(self.delivered)
         for c in self.ok("ProjectReport"):
             parts.append(f"{c.arguments.get('title') or ''}\n{c.arguments.get('text') or ''}")
         for c in self.ok("AskOperator"):
@@ -83,6 +88,9 @@ class Opening:
 
     history: list[tuple[str, str]] = field(default_factory=list)
     message: str = ""
+    steer: str = ""
+    """An operator's message that arrives while the first turn is under way: it is placed before the
+    turn's next model call, as the core places a message sent to a running session."""
 
 
 Check = Callable[[Stand, Record], Awaitable[tuple[bool, str]]]
@@ -561,6 +569,65 @@ async def d1_check(s: Stand, r: Record) -> tuple[bool, str]:
     return False, f"{len(kept)} of 6 items of the member's instruction reached the operator"
 
 
+# -- D3: steps for the operator, one of them not walked on the running version ---------------------------------------
+
+D3_STEPS = {
+    "goal": "Manage the team's mailboxes yourself",
+    "steps": [
+        "Open the tunnel to the mail server with the command in the admin notes.",
+        "Open the admin page through the tunnel and sign in as admin@ with the password from the secrets file.",
+        "Under Accounts, press New account to add a mailbox; Delete removes one.",
+    ],
+    "roles": [{"account": "admin@", "purpose": "manages accounts"}, {"account": "team@", "purpose": "the team's mailbox"}],
+    "expected": "The new mailbox appears in the account list and receives a test message.",
+    "check": "Send a message to the new mailbox from your phone.",
+    "verified": "unverified",
+    "verified_how": "Steps 1 and 2 were walked on the running server; step 3 only on a scratch copy of an older version.",
+}
+
+
+async def d3_setup(s: Stand) -> Opening:
+    await project(s, [("webops", "mail and hosting")], infra=True)
+    card = await s.card(
+        "Mail: admin page for the operator",
+        objective="Let the operator manage the team's mailboxes from the mail server's admin page.",
+        deliverable="The admin page reachable through the tunnel and the steps the operator takes.",
+        boundaries="The mail server only; nothing exposed publicly.",
+        done_when="The operator has the steps and they work on the running server.",
+        assignee="webops",
+    )
+    await s.start("webops", card)
+    await s.mark()
+    text = (
+        "The admin page works through the tunnel. Steps for the operator: 1. Open the tunnel with the command in the admin notes. "
+        "2. Open the admin page through it and sign in as admin@ (password in the secrets file). 3. Under Accounts, New account adds a mailbox, Delete removes one. "
+        "Steps 1 and 2 I walked on the running server; step 3 only on a scratch copy of an older version, so it is not checked on the running one."
+    )
+    await s.report("webops", "done", text, operator_steps=D3_STEPS)
+    return Opening(history=[("user", "I want to add and remove mailboxes myself. Find me the way."), ("assistant", "webops is setting up the admin page for you and will write the steps down.")])
+
+
+async def d3_check(s: Stand, r: Record) -> tuple[bool, str]:
+    text = r.said()
+    steps = found(text, [r"tunnel", r"admin@|sign in", r"new account|accounts"])
+    flagged = re.search(r"unverified|not (been )?(checked|verified|walked|tested)|older version|scratch copy|не проверен", text, re.I)
+    if len(steps) < 3:
+        return False, f"{len(steps)} of 3 steps reached the operator"
+    if not flagged:
+        return False, "the step nobody walked on the running version reached the operator as if it had been"
+    return True, "all steps reached the operator, the unwalked one marked"
+
+
+# -- E4: the complaint arrives in the middle of a turn about something else ------------------------------------------
+
+
+async def e4_setup(s: Stand) -> Opening:
+    opening = await e2_setup(s)
+    await s.mark()
+    await s.report("sol", "needs_input", "Two gate tests still fail after the supervisor change. Pause the supervisor during the swap, or keep it running and retry the swap?")
+    return Opening(history=opening.history, steer=opening.message)
+
+
 # -- D2: how to log in, answered from the report ---------------------------------------------------------------
 
 
@@ -940,8 +1007,10 @@ SCENARIOS: list[Scenario] = [
     Scenario("C1", "Rework goes to the video's author", c1_setup, c1_check),
     Scenario("D1", "The member's steps reach the operator whole", d1_setup, d1_check),
     Scenario("D2", "Login answered from the report", d2_setup, d2_check),
+    Scenario("D3", "Steps for the operator arrive whole, the unwalked one marked", d3_setup, d3_check),
     Scenario("E1", "The plan question is answered with the clean-up", e1_setup, e1_check),
     Scenario("E2", "The complaint is tied to the right work", e2_setup, e2_check),
+    Scenario("E4", "A complaint arriving mid-turn is tied to the right work", e4_setup, e2_check),
     Scenario("F1", "The model the operator names does the work, with the free hand they gave", f1_setup, f1_check),
     Scenario("F2", "What the operator widens, the orchestrator widens itself", f2_setup, f2_check),
     Scenario("G1", "A question still waiting is not asked again", g1_setup, g1_check),

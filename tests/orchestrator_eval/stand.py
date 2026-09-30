@@ -253,10 +253,33 @@ class Stand:
         if live is not None:
             await self.team.ingress.status(live, "idle", detail="waiting for work")
 
-    async def report(self, name: str, kind: str, text: str, artifacts: list[str] | None = None) -> str:
+    async def report(self, name: str, kind: str, text: str, artifacts: list[str] | None = None, operator_steps: dict[str, Any] | None = None) -> str:
+        """A member's report through the team's ingress. Steps for the operator go with it only where
+        the build takes them; elsewhere a member had no way to send them and the text alone carries them."""
+        import inspect
+
         live = await self.team.live_of(self.members[name])
         assert live is not None, f"{name} has no session to report from"
-        return await self.team.ingress.report(live, kind, text, artifacts)
+        extra: dict[str, Any] = {}
+        if operator_steps is not None and "operator_steps" in inspect.signature(self.team.ingress.report).parameters:
+            extra["operator_steps"] = operator_steps
+        return await self.team.ingress.report(live, kind, text, artifacts, **extra)
+
+    async def steered(self, text: str) -> str:
+        """An operator's message placed into a running turn, as the build under test words it."""
+        hook = getattr(self.orch, "steer_note", None)
+        return str(await hook(self.session_id, text)) if hook is not None else text
+
+    async def delivered(self) -> list[str]:
+        """What the host put in front of the operator in the orchestrator's chat, beside the model:
+        notes the model never reads and the notifications posted."""
+        from daedalus.host.prompts import without_turn_context
+
+        texts = [f"{getattr(d, 'title', '')}\n{getattr(d, 'body', '')}" for d in self.notes.posted]
+        for message in await self.manager.sessions.list_transcript(self.session_id):
+            if message.metadata.get("daedalus.notice"):
+                texts.append(without_turn_context("".join(getattr(b, "text", "") for b in message.content_blocks)))
+        return texts
 
     async def attach(self, name: str, data: bytes, mime: str) -> StoredFile:
         """A file the operator attached in the orchestrator's chat: kept by handle in the project's scope."""
