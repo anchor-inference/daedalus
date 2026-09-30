@@ -459,6 +459,9 @@ func (cl *Client) run() {
 				cancel()
 				continue
 			}
+			if cl.hub.Observe != nil {
+				cl.hub.Observe(t, in)
+			}
 			err := cl.hub.dispatch(ctx, t, in)
 			cl.hub.log.Debug("input", "t", in.T, "type", in.Type, "error", err)
 			if err != nil {

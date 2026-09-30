@@ -27,6 +27,7 @@ import (
 	"github.com/ascorblack/daedalus/browserd/internal/rpc"
 	"github.com/ascorblack/daedalus/browserd/internal/view"
 	"github.com/ascorblack/daedalus/browserd/internal/wire"
+	"github.com/ascorblack/daedalus/browserd/internal/workflow"
 	"github.com/ascorblack/daedalus/ptyd/proto/events"
 	"github.com/ascorblack/daedalus/ptyd/proto/server"
 	"github.com/ascorblack/daedalus/ptyd/proto/server/clienttest"
@@ -217,13 +218,16 @@ func startWall(t *testing.T, edit func(*config.Limits), args []string, makeWall 
 			return l.RecordMaxBytes, time.Duration(l.RecordRetentionMs) * time.Millisecond
 		}}
 	model.AfterAction = recorder.AfterAction
-	d := &rpc.Daemon{Config: cfg, Instance: "test", StartedAt: time.Now(), Manager: m, Hub: hub, Page: model, Events: evlog, Log: log, Net: wall, Record: recorder}
+	steps := &workflow.Recorder{Pages: model, Groups: m.Group, Publish: m.Publish, Events: evlog, Log: log}
+	hub.Observe = steps.Before
+	d := &rpc.Daemon{Config: cfg, Instance: "test", StartedAt: time.Now(), Manager: m, Hub: hub, Page: model, Events: evlog, Log: log, Net: wall, Record: recorder, Workflow: steps}
 	srv := server.New(ep.Token, log, d.Hello)
 	d.Register(srv)
 	h := &harness{t: t, manager: m, site: site, stop: make(chan struct{}), evlog: evlog}
 	go hub.Run(h.stop)
 	go m.RunTitles(h.stop)
 	go recorder.Run(h.stop)
+	go steps.Run(h.stop)
 	go func() { _ = srv.Serve(ep.Listener) }()
 	c, err := clienttest.Dial(cfg.RunDir)
 	if err != nil {

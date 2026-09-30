@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +33,10 @@ type Hub struct {
 	// HumanInput is told of every input a person sends to a tab, so the page model can remember the
 	// fields they typed into as secret. It may be nil.
 	HumanInput func(t *browser.Tab, kind string)
+	// Observe is told of each input of the person who drives, before it is dispatched: the
+	// recording of their steps reads what the input lands on while the page is still as they saw it.
+	// It may be nil.
+	Observe func(t *browser.Tab, in wire.Input)
 	// Selection reads the text selected on a tab for a person's copy (page.Model.Selection). It may
 	// be nil, and a copy is then answered with an error.
 	Selection func(ctx context.Context, t *browser.Tab, max int) (text string, truncated, withheld bool, err error)
@@ -308,6 +313,24 @@ func (h *Hub) route(e events.Event) {
 	case "action", "action_done", "needs_you":
 		for _, cl := range cls {
 			cl.event(withType(e.Type, data))
+		}
+	case "workflow.started", "workflow.step", "workflow.stopped":
+		// The panel of the person recording shows each step as it is taken. A stopped recording is
+		// said without its steps, which the host keeps; a view needs only that it ended.
+		v := map[string]any{"type": "workflow", "state": strings.TrimPrefix(e.Type, "workflow."), "id": data["id"]}
+		if wf, ok := data["workflow"].(interface{ Summary() map[string]any }); ok {
+			for k, x := range wf.Summary() {
+				v[k] = x
+			}
+		}
+		if st, ok := data["step"]; ok {
+			v["step"], v["steps"], v["recording"] = st, data["steps"], true
+			if n, ok := data["replaces"]; ok {
+				v["replaces"] = n
+			}
+		}
+		for _, cl := range cls {
+			cl.event(v)
 		}
 	case "dialog.opened", "dialog.closed":
 		for _, cl := range cls {

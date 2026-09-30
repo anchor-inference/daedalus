@@ -143,6 +143,9 @@ func (d *Daemon) dialogAnswer(ctx context.Context, c *server.Conn, params json.R
 	if err != nil {
 		return nil, err
 	}
+	if d.Workflow != nil && !p.Origin.IsAgent() {
+		d.Workflow.Dialog(t, p.Accept)
+	}
 	return d.Page.AnswerDialog(ctx, t, p.Accept, p.Text)
 }
 
