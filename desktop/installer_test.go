@@ -36,9 +36,18 @@ func TestTheInstallerPicksTheReleaseTheLauncherWould(t *testing.T) {
 		{"prerelease": false, "tag_name": "desktop-v0.13.10"},
 		{"prerelease": false, "tag_name": "desktop-v0.13.9"},
 	})
+	// A number with a leading zero is not a version to the launcher (parseVersion), so it is not one
+	// to the installer either: otherwise the installer would put in place a release the launcher's
+	// own check then never recognises, and every later offer would be compared against nothing.
+	leadingZero, _ := json.Marshal([]map[string]any{
+		{"prerelease": false, "tag_name": "desktop-v01.0.0"},
+		{"prerelease": false, "tag_name": "desktop-v0.13.00"},
+		{"prerelease": false, "tag_name": "desktop-v0.13.1"},
+	})
 	for name, c := range map[string]struct{ listing, want string }{
 		"GitHub's own order, with text that looks like a tag": {githubOrder, "desktop-v0.13.0"},
 		"keys sorted, versions compared as numbers":           {string(sortedKeys), "desktop-v0.13.10"},
+		"a leading zero is not a version":                     {string(leadingZero), "desktop-v0.13.1"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

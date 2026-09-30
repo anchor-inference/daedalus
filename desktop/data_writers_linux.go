@@ -173,6 +173,9 @@ func uninspectableWriter(pid int, what string, err error) error {
 	return fmt.Errorf("cannot inspect %s of pid %d (%s): %w; cannot prove it has no data handles. Stop this process or run the upgrade in an isolated cgroup, then retry", what, pid, comm, err)
 }
 
+// checkFolderWriters is the same look at another folder: the runtime from before the move.
+func checkFolderWriters(dir string) error { return checkDataWriters(dir) }
+
 func checkDataWriters(data string) error {
 	canonical, err := filepath.EvalSymlinks(data)
 	if err != nil {

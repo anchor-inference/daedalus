@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,7 +53,7 @@ func fenceResolve(data, control string, apply bool) ([]fenceResolution, error) {
 		return nil, err
 	}
 	if control == "" {
-		control = ".daedalus-update"
+		control = fenceControlName(data)
 	}
 	if _, err := os.Lstat(filepath.Join(parentPath, control)); err != nil {
 		return nil, nil // no switch has ever run here
@@ -122,7 +123,8 @@ func fenceResolve(data, control string, apply bool) ([]fenceResolution, error) {
 			r.Actions = append(r.Actions, fmt.Sprintf("file the data the failed version left as %s, for the operator", target))
 			if apply {
 				holder := &fenceTree{label: "P", dirs: []*fenceNode{{rel: ".", kind: "dir", parent: slotDir, name: j.Slot, dev: j.P[0], ino: j.P[1]}}}
-				if err := k.adopt(holder, "failed-"+j.Op, j.Op, "failed", nil, "manual", fmt.Sprintf("left by a restore that stopped at %q; kept by `update resolve`", j.Phase)); err != nil {
+				meta := k.recordFor(fenceRetainedMeta{Name: "failed-" + j.Op, Kind: "failed", Op: j.Op, GC: "manual", Reason: fmt.Sprintf("left by a restore that stopped at %q; kept by `update resolve`", j.Phase)})
+				if err := k.adopt(holder, meta, false); err != nil {
 					return out, fmt.Errorf("filing %s: %w", j.Slot, err)
 				}
 				k.forget(j.Slot)
@@ -141,7 +143,8 @@ func fenceResolve(data, control string, apply bool) ([]fenceResolution, error) {
 				}
 				holder := &fenceTree{label: atSlot, dirs: []*fenceNode{{rel: ".", kind: "dir", parent: slotDir, name: j.Slot, dev: key[0], ino: key[1]}}}
 				reason := fmt.Sprintf("left by a switch that stopped at %q; kept by `update resolve`", j.Phase)
-				if err := k.adopt(holder, kind+"-"+j.Op, j.Op, kind, nil, "manual", reason); err != nil {
+				meta := k.recordFor(fenceRetainedMeta{Name: kind + "-" + j.Op, Kind: kind, Op: j.Op, GC: "manual", Reason: reason})
+				if err := k.adopt(holder, meta, false); err != nil {
 					return out, fmt.Errorf("filing %s: %w", j.Slot, err)
 				}
 			}
@@ -155,8 +158,18 @@ func fenceResolve(data, control string, apply bool) ([]fenceResolution, error) {
 		}
 		r.Actions = append(r.Actions, "mark the switch resolved, so that the next one may start")
 		if apply {
+			// A record the switch wrote in advance for a tree that never arrived under it names
+			// nothing; it goes, so that nothing later mistakes it for a kept copy.
+			for _, kind := range []string{"pre", "failed"} {
+				name := kind + "-" + j.Op
+				if _, err := os.Lstat(filepath.Join(k.path, "retained", name)); errors.Is(err, os.ErrNotExist) {
+					k.forget(name)
+				}
+			}
 			j.Phase = "resolved"
-			k.journal(j)
+			if err := k.journal(j); err != nil {
+				return out, fmt.Errorf("marking %s resolved: %w", j.Op, err)
+			}
 			r.Applied = true
 			body, _ := json.MarshalIndent(r, "", "  ")
 			if err := k.writeFile("reports", j.Op+"-resolved.json", body); err != nil {
@@ -166,4 +179,15 @@ func fenceResolve(data, control string, apply bool) ([]fenceResolution, error) {
 		out = append(out, r)
 	}
 	return out, nil
+}
+
+// recordFor is the record resolve files a found tree under: always for the operator (gc manual),
+// with the manifest the switch measured under its fence when it wrote that tree's record in advance.
+// The tree may have changed since — nothing fenced it after the crash — and a restore or a removal
+// then finds the difference instead of trusting it.
+func (k *fenceControl) recordFor(meta fenceRetainedMeta) fenceRetainedMeta {
+	if prior, err := k.readMeta(meta.Name); err == nil && prior.Op == meta.Op && prior.Kind == meta.Kind {
+		meta.Manifest = prior.Manifest
+	}
+	return meta
 }

@@ -8,6 +8,9 @@ are restored whatever happens. Run from desktop/ on ext4:
 
     TMPDIR=<dir on ext4> python3 fence_mutations.py [name ...]
 
+Nothing here needs root or touches a real device: every target runs as this user on a scratch
+directory, and disk faults are injected through the switch's seams rather than provoked.
+
 One JSON line per target, then a summary; exit status 0 only when every target of every mutation
 went red and the unmutated control run was green.
 """
@@ -33,8 +36,8 @@ MUTATIONS = {
     ], ["TestARootModeChangedAndRestoredAfterTheExchangeRollsBack", "TestFenceNameCreatedWhileListingRefuses/directory",
         "TestFenceNameCreatedWhileListingRefuses/file"]),
     "gcnofence": ([
-        ("fence_control_linux.go", "\tleases := 0\n\tr, err := fenceOpenTree(\"R\", retained, name, euid, seams, &leases)",
-         "\tif true {\n\t\t_ = os.RemoveAll(filepath.Join(k.path, \"retained\", name))\n\t\t_ = unix.Unlinkat(int(retained.Fd()), name+\".json\", 0)\n\t\tg.Outcome = fenceDeleted\n\t\treturn g\n\t}\n\tleases := 0\n\tr, err := fenceOpenTree(\"R\", retained, name, euid, seams, &leases)", 1),
+        ("fence_control_linux.go", "\tleases := 0\n\tr, err := fenceOpenTree(\"R\", dir, name, euid, seams, &leases)",
+         "\tif inRetained {\n\t\t_ = os.RemoveAll(filepath.Join(k.path, \"retained\", name))\n\t\tk.forget(meta.Name)\n\t\tg.Outcome = fenceDeleted\n\t\treturn\n\t}\n\tleases := 0\n\tr, err := fenceOpenTree(\"R\", dir, name, euid, seams, &leases)", 1),
     ], ["TestFenceRetainedTreeWithLateMappingIsNeverRemoved", "TestFenceWriterAfterExchangeLandsInTheKeptCopy",
         "TestFenceRemovalKeepsTheTreeForANewMappedWriter"]),
     "nomodify": ([
@@ -84,8 +87,145 @@ MUTATIONS = {
     ], ["TestFenceFlagChangeAfterTheExchangeRollsBack", "TestFenceFlagChangeBeforeTheExchangeRefuses"]),
     "movenoident": ([
         ("fence_control_linux.go", "\tif err := fenceSameNamed(root); err != nil {\n\t\treturn fmt.Errorf(\"before the move: %w\", err)\n\t}\n", "", 1),
-        ("fence_control_linux.go", "\tif err := fenceSameNamed(root); err != nil {\n\t\t_ = unix.Renameat2(int(retained.Fd()), name, int(retained.Fd()), \"foreign-\"+name, unix.RENAME_NOREPLACE)\n\t\treturn fmt.Errorf(\"after the move: %w\", err)\n\t}\n", "", 1),
+        ("fence_control_linux.go", "\tif err := fenceSameNamed(root); err != nil {\n\t\tk.forget(name)\n\t\t_ = unix.Renameat2(int(retained.Fd()), name, int(retained.Fd()), \"foreign-\"+name, unix.RENAME_NOREPLACE)\n\t\treturn fmt.Errorf(\"after the move: %w\", err)\n\t}\n", "", 1),
     ], ["TestFenceForeignExchangeBeforeRetentionFailsClosed"]),
+
+    # Durability: the copy on the disk before it goes live, the exchange before anything is decided.
+    "nosynccopy": ([
+        ("fence_switch_linux.go", "\tif err := s.durable(\"copy\", func() error { return unix.Syncfs(int(s.cDir.Fd())) }); err != nil {\n\t\ts.set(fenceFailClosed, \"the copy could not be written to the disk, so nothing was switched: \"+err.Error())\n\t\treturn\n\t}\n", "", 1),
+    ], ["TestTheCopyReachesTheDiskBeforeItBecomesLive", "TestACopyThatCannotReachTheDiskIsNeverSwitchedIn"]),
+    "nodirsync": ([
+        ("fence_switch_linux.go", "\tif err := s.durable(\"exchange\", s.syncFolders); err != nil {\n\t\ts.rollback(\"the exchange could not be written to the disk: \"+err.Error(), nil, false)\n\t\treturn\n\t}\n", "", 1),
+    ], ["TestTheCopyReachesTheDiskBeforeItBecomesLive", "TestAnExchangeThatCannotReachTheDiskIsRolledBack"]),
+    "noadvancerecord": ([
+        ("fence_switch_linux.go", "if err := s.ctl.writeMeta(pending); err != nil {", "if err := error(nil); err != nil {", 1),
+    ], ["TestAFullDiskAfterTheExchangeStillFilesTheDataFromBefore"]),
+    # Space: checked before the copy; a partial copy goes even when no record fits.
+    "nospacecheck": ([
+        ("fence_switch_linux.go", "if reason := s.checkSpace(seams, &fs); reason != \"\" {", "if reason := \"\"; reason != \"\" {", 1),
+    ], ["TestACopyWithoutRoomIsRefusedBeforeItStarts"]),
+    "slotneedsrecord": ([
+        ("fence_control_linux.go", "if err := k.writeMeta(meta); err != nil && inRetained {", "if err := k.writeMeta(meta); err != nil {", 1),
+    ], ["TestAFullDiskDuringTheCopyLeavesNothingBehind"]),
+    # Filing, resolving, removing.
+    "adoptreplace": ([
+        ("fence_control_linux.go", "unix.Renameat2(int(from.Fd()), root.name, int(retained.Fd()), name, unix.RENAME_NOREPLACE)", "unix.Renameat2(int(from.Fd()), root.name, int(retained.Fd()), name, 0)", 1),
+    ], ["TestFilingNeverReplacesATreeUnderTheSameName"]),
+    "resolveauto": ([
+        ("fence_resolve_linux.go", "Kind: \"failed\", Op: j.Op, GC: \"manual\"", "Kind: \"failed\", Op: j.Op, GC: \"auto\"", 1),
+        ("fence_resolve_linux.go", "Kind: kind, Op: j.Op, GC: \"manual\"", "Kind: kind, Op: j.Op, GC: \"auto\"", 1),
+    ], ["TestAnUnfinishedSwitchIsResolvedWithoutTouchingTheLiveData/after-exchange", "TestAnUnfinishedSwitchIsResolvedWithoutTouchingTheLiveData/before-exchange"]),
+    "nomaps": ([
+        ("fence_proc_linux.go", "if rel, ok := inodes[key]; ok {\n\t\t\trefs = append(refs, fenceProcRef{PID: pid, What: \"mapping\", Path: rel})", "if rel, ok := inodes[key]; ok && false {\n\t\t\trefs = append(refs, fenceProcRef{PID: pid, What: \"mapping\", Path: rel})", 1),
+    ], ["TestAProcessMappingTheDataIsFoundAfterTheExchange"]),
+    "gcnonlink": ([
+        ("fence_control_linux.go", " || uint64(st.Nlink) != node.entry.Nlink-taken[[2]uint64{node.dev, node.ino}]", "", 1),
+    ], ["TestARemovalKeepsATreeWhoseFileGotANameFromOutside"]),
+    "releasenosize": ([
+        ("fence_linux.go", " || statErr != nil || st.Size != node.entry.Size || uint64(st.Nlink) != node.entry.Nlink {", " || statErr != nil {", 1),
+    ], ["TestAFileEmptiedFromOutsideBeforeReleaseIsReported"]),
+    "nosha": ([
+        ("fence.go", "a.MtimeNS != b.MtimeNS || a.SHA256 != b.SHA256 || ", "a.MtimeNS != b.MtimeNS || ", 1),
+    ], ["TestARemovalKeepsATreeWhoseContentAloneChanged"]),
+    "nofinalgccheck": ([
+        ("fence_control_linux.go", "\t// Step seven: after the last unlink, every lease once more and the rest of the queue.\n\tif check() {", "\t// Step seven: after the last unlink, every lease once more and the rest of the queue.\n\tif false && check() {", 1),
+    ], ["TestARemovalSeesAWriterAfterItsLastUnlink"]),
+    "noresume": ([
+        ("fence_control_linux.go", "\tif meta.Status == fenceStatusRemoving {\n", "\tif false {\n", 1),
+    ], ["TestARemovalCutOffGoesOnFromTheTrash"]),
+    "sharedcontrol": ([
+        ("fence.go", "return filepath.Join(fenceControlFolder, filepath.Base(filepath.Clean(data)))", "return fenceControlFolder", 1),
+    ], ["TestTwoDataFoldersInOneParentKeepTheirCopiesApart"]),
+    "operatortakespre": ([
+        ("fence_control_linux.go", "if journal, err := readJournal(paths); err == nil && journal.unresolved() && journal.Pre == name {", "if journal, err := readJournal(paths); err == nil && false && journal.Pre == name {", 1),
+    ], ["TestTheOperatorCannotRemoveTheCopyAnUnfinishedUpdateNeeds"]),
+    "failedunbounded": ([
+        ("protect.go", "\t\tcase meta.Kind == \"failed\" && meta.Name != newestFailed && len(meta.LateWritePossible) == 0 && meta.Status == \"\":\n\t\t\toperator = true\n", "", 1),
+    ], ["TestOnlyTheNewestFailedCopyOutlivesALaterUpdate"]),
+    # The update around the switch.
+    "restoreok": ([
+        ("protect.go", "\t\tif rep.Outcome != fenceCommitted {\n\t\t\treturn fmt.Errorf(\"%s (%s); the report is %s\", rep.Reason, rep.Outcome, rep.ReportPath)", "\t\tif false {\n\t\t\treturn fmt.Errorf(\"%s (%s); the report is %s\", rep.Reason, rep.Outcome, rep.ReportPath)", 1),
+    ], ["TestARefusedRestoreIsARollbackThatFailed"]),
+    "journalinside": ([
+        ("upgrade.go", "func journalFile(p Paths) string { return filepath.Join(fenceControlPath(p.Data), \"upgrade.json\") }", "func journalFile(p Paths) string { return filepath.Join(upgradeDir(p), \"journal.json\") }", 1),
+    ], ["TestACrashAfterTheRestoreIsFinishedByTheRollback"]),
+    "restoretwice": ([
+        ("protect.go", "if key, err := fenceTreeKey(u.paths.Data); err == nil && journal.PreKey != [2]uint64{} && key == journal.PreKey {", "if key, err := fenceTreeKey(u.paths.Data); err == nil && false && key == journal.PreKey {", 1),
+    ], ["TestACrashAfterTheRestoreIsFinishedByTheRollback"]),
+    "startsonunfinished": ([
+        ("upgrade.go", "\t\tif item.Kind == \"unfinished\" {\n", "\t\tif item.Kind == \"never\" {\n", 1),
+    ], ["TestNothingStartsOnAnUnfinishedSwitch"]),
+    "updatenoquiesce": ([
+        ("update.go", "\tif _, err := u.quiesce(ctx); err != nil {", "\tif err := u.stack.Stop(ctx); err != nil {", 1),
+    ], ["TestAnUpdateRefusesADataWriterBeforeItsBackup"]),
+    "symlinkdata": ([
+        ("fence_switch_linux.go", "\t\tcase dst.Mode&unix.S_IFMT == unix.S_IFLNK:\n\t\t\treturn errors.New(\"the data folder is a symbolic link\")\n", "", 1),
+    ], ["TestADataFolderTheSwitchCannotExchangeTakesTheBackup"]),
+    "rollbackfails": ([
+        ("upgrade.go", "\t\tif err := u.rollback(ctx, journal, errRollbackRequested); !errors.Is(err, errRollbackRequested) {\n\t\t\treturn err\n\t\t}\n\t\treturn nil", "\t\treturn u.rollback(ctx, journal, errRollbackRequested)", 1),
+    ], ["TestAnInterruptedUpgradeIsRolledBackOnRequest", "TestASwapCutOffHalfwayIsPutBack", "TestAnUpdateCutOffIsFoundAndRolledBack"]),
+    # The runtime from before the move.
+    "migrateport": ([
+        ("migrate.go", "\tif port := APIPort(p); portAnswers(port) {\n\t\treturn fmt.Errorf(\"something answers on the app's port %s: a stack may still be running out of %s; close its launcher first\", port, p.LegacyRuntime)\n\t}\n", "", 1),
+    ], ["TestTheLegacyRuntimeIsNotMovedFromUnderAProcess/the_app's_port"]),
+    "migratewriters": ([
+        ("migrate.go", "\tif err := checkFolderWriters(p.LegacyRuntime); err != nil {", "\tif err := error(nil); err != nil {", 1),
+    ], ["TestTheLegacyRuntimeIsNotMovedFromUnderAProcess/a_working_directory"]),
+    "migratepartial": ([
+        ("migrate.go", "\t\tpartial := c.to + \".partial\"\n", "\t\tpartial := c.to\n", 1),
+    ], ["TestAMigrationCutOffIsCarriedWholeTheNextTime"]),
+    "newerlost": ([
+        ("migrate.go", "if !lastChanged(c.to).Before(lastChanged(c.from)) {", "if true {", 1),
+    ], ["TestTheNewerStateIsKeptLive"]),
+    # The daemons and the locks around the switch.
+    "scopedchild": ([
+        ("orphans.go", "if name := strings.TrimSuffix(filepath.Base(argv[0]), \".exe\"); name == \"systemd-run\" {", "if name := strings.TrimSuffix(filepath.Base(argv[0]), \".exe\"); name == \"never\" {", 1),
+    ], ["TestTheRecordOfAScopedChildNamesTheProgramItBecomes", "TestAScopedOrphanIsFoundAndStopped"]),
+    "inheritedanyfile": ([
+        ("lockpass_unix.go", "!os.SameFile(info, expected)", "!os.SameFile(info, expected) && false", 1),
+    ], ["TestAnInheritedDescriptorThatIsNotTheFinishLockIsRefused"]),
+    "abandonkeepsruntimeout": ([
+        ("upgrade.go", "\tif journal.RuntimeMovedOut && !putLegacyRuntimeBack(u.paths, u.say) {", "\tif false && journal.RuntimeMovedOut && !putLegacyRuntimeBack(u.paths, u.say) {", 1),
+    ], ["TestARefusedUpgradePutsTheOldRuntimeBack/fence_without_room", "TestARefusedUpgradePutsTheOldRuntimeBack/backup_that_does_not_verify"]),
+    "stagednosync": ([
+        ("upgrade.go", "\tif err := launcherSync(target, file.Sync); err != nil {", "\tif err := error(nil); err != nil {", 1),
+    ], ["TestAnUpgradeWritesTheLaunchersFilesToTheDiskBeforeRelyingOnThem"]),
+    "swapnosync": ([
+        ("upgrade.go", "\t\tif err := syncSwapFolders(journal); err != nil {\n\t\t\treturn fmt.Errorf(\"%s could not be written to the disk in place: %w\", current, err)\n\t\t}\n", "", 1),
+    ], ["TestAnUpgradeWritesTheLaunchersFilesToTheDiskBeforeRelyingOnThem"]),
+    "notdurableisforeign": ([
+        ("fence_switch_linux.go", "\tif errors.Is(err, errFenceNotDurable) {", "\tif false && errors.Is(err, errFenceNotDurable) {", 1),
+    ], ["TestAFilingThatCannotReachTheDiskStillCommits"]),
+    "zipupwardok": ([
+        ("upgrade.go", "strings.Contains(target, \"\\\\\") || target == \"\" || upward ||", "strings.Contains(target, \"\\\\\") || target == \"\" ||", 1),
+    ], ["TestAZipLinkThatClimbsIsRefused"]),
+    "zipentrytruncated": ([
+        ("upgrade.go", "limitedBody{limitedBody{body, &entryLeft}, &left}", "limitedBody{io.LimitReader(body, entryLeft), &left}", 1),
+    ], ["TestAZipEntryOverTheLimitIsRefusedNotTruncated"]),
+    "statusnounrecorded": ([
+        ("fence.go", "\t\t\t\tadd(fenceItem{Kind: \"unrecorded\", Path: tree, Detail: \"no record of what it holds\"}, false)\n", "", 1),
+    ], ["TestStatusNamesTreesWithoutARecordAndCopiesBesideTheData"]),
+    "statusnostrays": ([
+        ("fence.go", "\t\t\tadd(fenceItem{Kind: \"stray\", Path: stray, Detail: \"a copy a switch left beside the data folder\"}, false)\n", "\t\t\t_ = stray\n", 1),
+    ], ["TestStatusNamesTreesWithoutARecordAndCopiesBesideTheData"]),
+    "browserdindata": ([
+        ("browserd.go", "\t\tDir:     n.paths.Local,", "\t\tDir:     n.paths.Data,", 1),
+    ], ["TestTheBrowserDaemonDoesNotWorkInTheDataFolder"]),
+    "prunekeepsnone": ([
+        ("protect.go", "\tfor len(old) > 1 {", "\tfor len(old) > 0 {", 1),
+    ], ["TestACommittedUpdateClearsWhatNothingGoesBackTo"]),
+    "backupsnotpruned": ([
+        ("protect.go", "\tif err := PruneBackups(u.paths, backupKeep); err != nil {", "\tif err := error(nil); err != nil {", 1),
+    ], ["TestACommittedUpdateClearsWhatNothingGoesBackTo"]),
+    "legacykept": ([
+        ("protect.go", "\tremoveLegacyRuntimes(u.paths)\n", "", 1),
+    ], ["TestACommittedUpdateClearsWhatNothingGoesBackTo"]),
+    "nopermanenthint": ([
+        ("protect.go", "\tif fencePermanent(rep) {", "\tif false && fencePermanent(rep) {", 1),
+    ], ["TestALastingRefusalNamesTheBackupInstead"]),
+    "noputback": ([
+        ("upgrade.go", "\tif journal.RuntimeMovedOut {\n\t\tputLegacyRuntimeBack(u.paths, u.say)\n\t}\n", "", 1),
+    ], ["TestARolledBackUpgradePutsTheOldRuntimeBack"]),
 }
 
 

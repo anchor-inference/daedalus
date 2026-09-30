@@ -163,12 +163,13 @@ func TestTheSupervisorIsGivenThisInstallationsPaths(t *testing.T) {
 	if strings.Contains(strings.Join(supervisorEnv(paths, nil, nil), " "), "/srv/") {
 		t.Error("a container path reached a native installation's environment")
 	}
-	if runtime.GOOS == "windows" {
+	// Windows, and a socket path too long for sun_path (a deep temporary folder does it), get a port.
+	if supervisorOverTCP(paths, runtime.GOOS) {
 		if !strings.HasPrefix(env["DAEDALUS_SUPERVISOR_TCP"], "127.0.0.1:") {
-			t.Errorf("Windows was not given a loopback port: %q", env["DAEDALUS_SUPERVISOR_TCP"])
+			t.Errorf("no loopback port where a socket cannot be: %q", env["DAEDALUS_SUPERVISOR_TCP"])
 		}
 		if env["DAEDALUS_SUPERVISOR_SOCKET"] != "" {
-			t.Error("Windows was given a unix socket path as well as a port")
+			t.Error("a unix socket path was given as well as a port")
 		}
 	} else {
 		// In the local state folder: a stale socket left by a killed supervisor is a special file,
@@ -269,7 +270,7 @@ func TestACommandRunForTheInstallationSeesBothSpellings(t *testing.T) {
 			t.Errorf("%s = %q, want %q", key, env[key], want)
 		}
 	}
-	if runtime.GOOS == "windows" {
+	if supervisorOverTCP(paths, runtime.GOOS) {
 		if env["SUPERVISOR_TCP"] == "" {
 			t.Error("the command has no supervisor to talk to")
 		}

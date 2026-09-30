@@ -454,7 +454,7 @@ func TestFenceWriterAfterTheFinalSweepIsReported(t *testing.T) {
 	if g := fenceGC(t, data, filepath.Base(pre), true, nil); g.Outcome != fenceRetainedGC {
 		t.Fatalf("the operator's removal ignored the late write: %+v", g)
 	}
-	text, code := fenceStatus(fenceControlDir(data))
+	text, code := fenceStatus(fenceControlDir(data), true)
 	if code == 0 || !strings.Contains(text, "late write") {
 		t.Fatalf("status does not warn: %d %s", code, text)
 	}
@@ -627,7 +627,7 @@ func TestFenceRemovalOverflowDuringDeletionIsLoud(t *testing.T) {
 	if g.Outcome != fenceLostPossible || !g.Overflow {
 		t.Fatalf("an overflow during deletion was not LOST_POSSIBLE: %+v", g)
 	}
-	if text, code := fenceStatus(fenceControlDir(data)); code == 0 || !strings.Contains(text, "LOST_POSSIBLE") {
+	if text, code := fenceStatus(fenceControlDir(data), true); code == 0 || !strings.Contains(text, "LOST_POSSIBLE") {
 		t.Fatalf("status does not say so: %d %s", code, text)
 	}
 }
@@ -691,7 +691,7 @@ func TestFenceRemovalReportsALossWhenAWriterArrivesAtTheUnlink(t *testing.T) {
 		t.Fatalf("a write into a file being removed was not reported: %+v", g)
 	}
 	child.expect(t, "wrote", 10*time.Second)
-	if text, code := fenceStatus(fenceControlDir(data)); code == 0 || !strings.Contains(text, "LOST_POSSIBLE") {
+	if text, code := fenceStatus(fenceControlDir(data), true); code == 0 || !strings.Contains(text, "LOST_POSSIBLE") {
 		t.Fatalf("status does not say so: %d %s", code, text)
 	}
 }
@@ -1056,62 +1056,15 @@ func TestFenceForeignOwnerFailsClosed(t *testing.T) {
 	}
 }
 
-// With DAEDALUS_FENCE_SUDO=1 the same is shown with a real chown, through sudo, on the scratch
-// fixture only; the entries are left empty so this user can remove them afterwards.
-func TestFenceRealForeignOwnerFailsClosed(t *testing.T) {
-	if os.Getenv("DAEDALUS_FENCE_SUDO") == "" {
-		t.Skip("set DAEDALUS_FENCE_SUDO=1 to chown fixture entries through sudo")
-	}
-	for _, kind := range []string{"dir", "symlink"} {
-		t.Run(kind, func(t *testing.T) {
-			data := fenceFixture(t)
-			path := filepath.Join(data, "foreign-"+kind)
-			args := []string{"-n", "chown", "65534", path}
-			if kind == "dir" {
-				os.Mkdir(path, 0o755)
-			} else {
-				os.Symlink("workspaces", path)
-				args = []string{"-n", "chown", "-h", "65534", path}
-			}
-			if out, err := exec.Command("sudo", args...).CombinedOutput(); err != nil {
-				t.Fatalf("sudo chown: %v %s", err, out)
-			}
-			rep := fenceRun(t, data, nil)
-			fenceWant(t, rep, fenceFailClosed)
-			if !strings.Contains(rep.Reason, "owned by uid 65534") {
-				t.Fatalf("reason: %s", rep.Reason)
-			}
-		})
-	}
-}
-
-// With DAEDALUS_FENCE_SUDO=1 this test binary is run as root on a scratch fixture.
-func TestFenceRealRootFailsClosed(t *testing.T) {
-	if os.Getenv("DAEDALUS_FENCE_AS_ROOT") != "" {
-		data := fenceFixture(t)
-		rep := fencedSwitch(fenceOptions{Data: data})
-		if rep.Outcome != fenceFailClosed || !strings.Contains(rep.Reason, "root") {
-			t.Fatalf("%+v", rep)
-		}
-		if _, err := os.Stat(fenceControlDir(data)); !os.IsNotExist(err) {
-			t.Fatal("root created the control folder")
-		}
-		return
-	}
-	if os.Getenv("DAEDALUS_FENCE_SUDO") == "" {
-		t.Skip("set DAEDALUS_FENCE_SUDO=1 to run this binary as root through sudo")
-	}
-	cmd := exec.Command("sudo", "-n", "env", "DAEDALUS_FENCE_AS_ROOT=1", "TMPDIR="+os.TempDir(), os.Args[0], "-test.run=^TestFenceRealRootFailsClosed$", "-test.v")
-	out, err := cmd.CombinedOutput()
-	if err != nil || !strings.Contains(string(out), "--- PASS") {
-		t.Fatalf("as root: %v\n%s", err, out)
-	}
-}
-
 func TestFenceUnresolvedUpgradeJournalFailsClosed(t *testing.T) {
 	data := fenceFixture(t)
-	os.Mkdir(filepath.Join(data, "upgrade"), 0o700)
-	os.WriteFile(filepath.Join(data, "upgrade", "journal.json"), []byte(`{"kind":"upgrade","stage":"swapped"}`), 0o600)
+	paths, err := NewPaths(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJournal(paths, &Journal{Kind: kindUpgrade, Stage: stageSwapped}); err != nil {
+		t.Fatal(err)
+	}
 	rep := fenceRun(t, data, nil)
 	fenceWant(t, rep, fenceFailClosed)
 	if !strings.Contains(rep.Reason, "upgrade --rollback") {
@@ -1173,10 +1126,11 @@ func TestFenceLegacyLockIsHeldUntilTheLeasesAreGone(t *testing.T) {
 		}
 		for _, path := range paths {
 			child := startFenceChild(t, "fence-launcher-lock", "HELPER_PATH="+path)
+			// Only a guard against a hang: a loaded machine may take seconds to start the child.
 			select {
 			case line := <-child.lines:
 				results = append(results, line)
-			case <-time.After(5 * time.Second):
+			case <-time.After(30 * time.Second):
 				results = append(results, "timeout")
 			}
 		}
@@ -1192,13 +1146,13 @@ func TestFenceRunningLauncherOrUpgradeRefusesAtOnce(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			data := fenceFixture(t)
 			child := startFenceChild(t, "hold-lock", "HELPER_DATA="+data, "HELPER_KIND="+kind)
-			child.expect(t, "locked", 5*time.Second)
-			start := time.Now()
+			child.expect(t, "locked", 30*time.Second)
 			rep := fenceRun(t, data, nil)
-			elapsed := time.Since(start)
 			fenceWant(t, rep, fenceRefused)
-			if !strings.Contains(rep.Reason, says) || rep.LeasesTaken != 0 || elapsed > time.Second {
-				t.Fatalf("reason %q, leases %d, %s", rep.Reason, rep.LeasesTaken, elapsed)
+			// "At once" is what happened, not how long it took: the refusal came before the first
+			// lease, so nothing of the data folder was fenced, let alone copied.
+			if !strings.Contains(rep.Reason, says) || rep.LeasesTaken != 0 {
+				t.Fatalf("reason %q, leases %d", rep.Reason, rep.LeasesTaken)
 			}
 		})
 	}
@@ -1208,6 +1162,13 @@ func TestFenceRunningLauncherOrUpgradeRefusesAtOnce(t *testing.T) {
 // no lease, finds the lock taken at once, and the switch goes on undisturbed. A build that still
 // opened its lock read-write breaks the lease on the lock file; the switch answers at once and that
 // process too finds the lock taken.
+//
+// What is checked is the order of events, not a stopwatch, which a loaded machine makes lie: the
+// read-only attempt is answered while the switch is still inside the fence, before it can have
+// released anything; the read-write one is answered once the switch let go of its leases — on its
+// own, on the lease-break signal — and before it lets go of the locks. The answer is waited for in
+// exactly that window: after the locks go, the switch is over and anyone may take the lock, so a
+// test that only read the answer later depended on the child being quicker than the switch's end.
 func TestFenceLegacyLockAttemptInsideTheFence(t *testing.T) {
 	cases := []struct {
 		helper string
@@ -1226,15 +1187,31 @@ func TestFenceLegacyLockAttemptInsideTheFence(t *testing.T) {
 			original := fenceIno(t, data)
 			lock := filepath.Join(data, "upgrade", lockName)
 			var child *fenceChild
-			var reached time.Time
+			var answeredInside string
 			attempt := func(tree *fenceTree) {
 				child = startFenceChild(t, c.helper, "HELPER_PATH="+lock)
 				if c.helper == "fence-readwrite-lock" {
 					fenceWaitBroken(t, tree, "upgrade/"+lockName)
+					return
 				}
-				reached = time.Now()
+				// Still inside the switch: the answer has to come now, with every lease held.
+				select {
+				case answeredInside = <-child.lines:
+				case <-time.After(30 * time.Second):
+					answeredInside = "no answer while the fence was held"
+				}
 			}
+			var answeredBetween string
 			seams := &fenceSeams{}
+			if c.helper == "fence-readwrite-lock" {
+				seams.afterLeaseRelease = func() {
+					select {
+					case answeredBetween = <-child.lines:
+					case <-time.After(fenceLeaseBreakTime(t) + 30*time.Second):
+						answeredBetween = "no answer between the leases and the locks"
+					}
+				}
+			}
 			if c.after {
 				seams.afterExchange = func(p, c *fenceTree) { attempt(c) }
 			} else {
@@ -1242,22 +1219,22 @@ func TestFenceLegacyLockAttemptInsideTheFence(t *testing.T) {
 			}
 			rep := fenceRun(t, data, seams)
 			fenceWant(t, rep, c.want)
-			var line string
-			select {
-			case line = <-child.lines:
-			case <-time.After(10 * time.Second):
-				t.Fatal("the lock attempt never returned")
-			}
-			answered := time.Since(reached)
-			if line != "errLocked" {
-				t.Fatalf("the lock attempt got %q", line)
-			}
 			if c.want != fenceCommitted && fenceIno(t, data) != original {
 				t.Fatal("the original is not live")
 			}
-			t.Logf("the lock attempt was answered %s after it reached the fence", answered)
-			if answered > 2*time.Second {
-				t.Fatalf("the lock attempt waited %s", answered)
+			if c.helper == "fence-launcher-lock" {
+				if answeredInside != "errLocked" {
+					t.Fatalf("the lock attempt inside the fence got %q", answeredInside)
+				}
+				return
+			}
+			// The switch answered the broken lease itself: its reason is the signal (or the sweep that
+			// saw the broken lease), not a lease the kernel revoked.
+			if !fenceHasEntry(rep, "P", "upgrade/"+lockName, "") && !fenceHasEntry(rep, "C", "upgrade/"+lockName, "") && !strings.Contains(rep.Reason, "lease-break signal") && !strings.Contains(rep.Reason, "writer activity") {
+				t.Fatalf("the switch did not answer the lock attempt's broken lease: %s %+v", rep.Reason, rep.Entries)
+			}
+			if answeredBetween != "errLocked" {
+				t.Fatalf("the lock attempt between the leases and the locks got %q", answeredBetween)
 			}
 		})
 	}

@@ -21,7 +21,9 @@ import (
 // another filesystem, files of another user, a container, root — the switch refuses before it
 // changes anything.
 //
-// It is not wired into the upgrade path yet. The code below is the engine and its report.
+// It is the protection of every update and upgrade where it can be had (protect.go). The copy is on
+// the disk before it becomes live and the exchange before anything is decided on it: a switch that
+// commits survives a power cut the moment after. The code below is the engine and its report.
 
 // The outcome of one switch. Exactly one of these ends every attempt, and each has its own exit code
 // so that a script can tell them apart without parsing the message.
@@ -31,6 +33,10 @@ const (
 	fenceRolledBack = "ROLLED_BACK" // a writer was found after the exchange; the previous tree is live again
 	fenceFailClosed = "FAIL_CLOSED" // the fence cannot be trusted here; nothing changed, or an operator must look
 )
+
+// fenceStatusRemoving marks a record whose tree is being removed: it is in the trash from the first
+// unlink on, and a removal that was cut off goes on from there.
+const fenceStatusRemoving = "removing"
 
 // The outcome of removing a retained tree.
 const (
@@ -73,6 +79,11 @@ type fenceReport struct {
 	// ReportPath is where the report was written; empty when the control folder could not hold it,
 	// in which case the report went to standard error instead.
 	ReportPath string `json:"-"`
+
+	// Live is what the switch left at data: P (the folder as it was), C (the copy), or what a switch
+	// that a third party interfered with found there. An outcome other than COMMITTED does not by
+	// itself mean nothing changed; this does.
+	Live string `json:"live,omitempty"`
 }
 
 type fenceEntryReport struct {
@@ -115,6 +126,8 @@ type fenceGCReport struct {
 
 // fenceRetainedMeta sits beside every retained tree as <name>.json. The manifest is the one recorded
 // under the fence; removal compares the tree with it in full and keeps the tree on any difference.
+// Status is removing while the tree is on its way through the trash, and LOST_POSSIBLE once a
+// removal went wrong.
 type fenceRetainedMeta struct {
 	Name              string        `json:"name"`
 	Kind              string        `json:"kind"`
@@ -122,7 +135,7 @@ type fenceRetainedMeta struct {
 	GC                string        `json:"gc"`
 	Reason            string        `json:"reason,omitempty"`
 	LateWritePossible []string      `json:"late_write_possible,omitempty"`
-	Status            string        `json:"status,omitempty"` // LOST_POSSIBLE once a removal went wrong
+	Status            string        `json:"status,omitempty"`
 	Created           time.Time     `json:"created"`
 	Manifest          fenceManifest `json:"manifest"`
 }
@@ -187,11 +200,21 @@ func fenceEntryEqual(a, b fenceEntry) bool {
 	return true
 }
 
+// fenceControlFolder is the folder beside the data folder that holds every data folder's control
+// folder.
+const fenceControlFolder = ".daedalus-update"
+
+// fenceControlName is the control folder's path relative to the data folder's parent: one per data
+// folder, since two may share a parent.
+func fenceControlName(data string) string {
+	return filepath.Join(fenceControlFolder, filepath.Base(filepath.Clean(data)))
+}
+
 // fenceControlPath is the control folder beside data: same filesystem, so trees move into it with a
 // rename; outside data, so nothing the updater keeps there is ever part of what it fences. v0.12
 // launchers know nothing under the data folder's parent and never touch it.
 func fenceControlPath(data string) string {
-	return filepath.Join(filepath.Dir(data), ".daedalus-update")
+	return filepath.Join(filepath.Dir(filepath.Clean(data)), fenceControlName(data))
 }
 
 // fenceJournal is written, with fsync, before and after every step that changes where a tree is.
@@ -217,7 +240,7 @@ func fenceJournalFinished(phase string) bool { return phase == "done" || phase =
 // fenceItem is one thing the operator should know about the data folder's switches. The kinds are
 // what the launcher's page translates; the command line prints them in English.
 type fenceItem struct {
-	Kind   string `json:"kind"` // retained, unrecorded, late, lost, unfinished, unscanned
+	Kind   string `json:"kind"` // retained, unrecorded, late, lost, unfinished, unscanned, trash, stray, upgrade
 	Path   string `json:"path"`
 	Detail string `json:"detail,omitempty"`
 }
@@ -250,6 +273,16 @@ func fenceSummarize(control string) fenceSummary {
 		}
 		sum.Items = append(sum.Items, item)
 		sum.Trouble = sum.Trouble || trouble
+	}
+	// An update or upgrade that neither finished nor was rolled back comes first: its remedy is
+	// `upgrade --rollback`, not `update resolve`, and the page and the command line both say so.
+	var upgrade Journal
+	if err := readJSON(filepath.Join(control, "upgrade.json"), &upgrade); err == nil && upgrade.unresolved() {
+		kind := upgrade.Kind
+		if kind == "" {
+			kind = kindUpgrade
+		}
+		add(fenceItem{Kind: "upgrade", Path: kind, Detail: upgrade.Stage}, true)
 	}
 	journals, _ := filepath.Glob(filepath.Join(control, "journal", "*.json"))
 	sort.Strings(journals)
@@ -286,6 +319,37 @@ func fenceSummarize(control string) fenceSummary {
 		}
 		if meta.Status == fenceLostPossible {
 			add(fenceItem{Kind: "lost", Path: tree, Detail: meta.Reason}, true)
+		}
+	}
+	// Every tree the control folder holds is named, recorded or not: a copy nobody lists is a copy
+	// nobody removes, and each is the size of the data folder.
+	if entries, err := os.ReadDir(filepath.Join(control, "retained")); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			tree := filepath.Join(control, "retained", entry.Name())
+			if _, err := os.Stat(tree + ".json"); err != nil {
+				add(fenceItem{Kind: "unrecorded", Path: tree, Detail: "no record of what it holds"}, false)
+			}
+		}
+	}
+	if entries, err := os.ReadDir(filepath.Join(control, "trash")); err == nil {
+		for _, entry := range entries {
+			var meta fenceRetainedMeta
+			detail := "left in the trash; remove it by hand once you no longer need it"
+			if readJSON(filepath.Join(control, "retained", entry.Name()+".json"), &meta) == nil && meta.Status == fenceStatusRemoving {
+				detail = "a removal was cut off; the next update goes on with it"
+			}
+			add(fenceItem{Kind: "trash", Path: filepath.Join(control, "trash", entry.Name()), Detail: detail}, false)
+		}
+	}
+	dataName := filepath.Base(control)
+	parent := filepath.Dir(filepath.Dir(control))
+	if strays, _ := filepath.Glob(filepath.Join(parent, "."+dataName+"-slot-*")); len(strays) > 0 {
+		sort.Strings(strays)
+		for _, stray := range strays {
+			add(fenceItem{Kind: "stray", Path: stray, Detail: "a copy a switch left beside the data folder"}, false)
 		}
 	}
 	reports, _ := filepath.Glob(filepath.Join(control, "reports", "*.json"))
@@ -333,21 +397,29 @@ func fenceSummarize(control string) fenceSummary {
 }
 
 var fenceItemText = map[string]string{
+	"upgrade":    "the last %s did not finish (stage %s): `daedalus-desktop upgrade --rollback` puts everything back as it was before it",
 	"retained":   "kept %s: %s",
 	"unrecorded": "kept %s without a record of its contents (%s): remove it by hand once you no longer need it",
 	"late":       "a late write may be in %s: %s",
 	"lost":       "LOST_POSSIBLE: a write may have been lost while %s was being removed: %s",
 	"unfinished": "a switch did not finish (%s, stopped at %s): `daedalus-desktop update resolve` says what is where",
+	"trash":      "%s: %s",
+	"stray":      "%s: %s; `daedalus-desktop update resolve` says whose it is, and it may be removed by hand once no switch is unfinished",
 	"unscanned":  "%s processes could not be inspected during the last switch: %s",
 }
 
 // fenceStatus is `daedalus-desktop update status`: the summary in plain lines, and a non-zero code
-// whenever a write may have been lost, may have landed outside the live data, or a switch did not
-// finish.
-func fenceStatus(control string) (string, int) {
+// whenever a write may have been lost, may have landed outside the live data, or a switch or an
+// update did not finish. The processes the last switch could not inspect are counted, and listed
+// only when asked (verbose): on a desktop they are the other programs of the session, every time.
+func fenceStatus(control string, verbose bool) (string, int) {
 	sum := fenceSummarize(control)
 	var b strings.Builder
 	for _, item := range sum.Items {
+		if item.Kind == "unscanned" && !verbose {
+			fmt.Fprintf(&b, "%s processes could not be inspected during the last switch (`update status -v` lists them)\n", item.Path)
+			continue
+		}
 		fmt.Fprintf(&b, fenceItemText[item.Kind]+"\n", item.Path, item.Detail)
 	}
 	if len(sum.Items) == 0 {
@@ -363,7 +435,7 @@ func fenceStatus(control string) (string, int) {
 // switchReportCommand is `update status` and `update resolve`.
 func switchReportCommand(paths Paths, opts options) error {
 	if opts.extra == "status" {
-		text, code := fenceStatus(fenceControlPath(paths.Data))
+		text, code := fenceStatus(fenceControlPath(paths.Data), opts.verbose)
 		fmt.Print(text)
 		if code != 0 {
 			return errors.New("the lines above need you")

@@ -273,7 +273,7 @@ type fenceCount struct {
 
 // fenceCountTree is the capacity preflight: a read-only pass over the tree through directory
 // descriptors, before anything is created. It refuses early what the fenced walk would refuse
-// anyway (another owner, a hard link, a special file, inode flags) so that such a folder never even
+// anyway (another owner, a special file, inode flags) so that such a folder never even
 // gets a slot. It is not the fence; the fenced walk repeats every check.
 func fenceCountTree(label string, parent *os.File, name string, euid uint32, dev uint64, seams *fenceSeams) (fenceCount, error) {
 	var count fenceCount

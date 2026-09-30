@@ -196,7 +196,7 @@ func TestFenceStallAtTheUnlinkIsLoud(t *testing.T) {
 	if g.Outcome != fenceLostPossible {
 		t.Fatalf("a write lost to a stalled removal was not reported: %+v", g)
 	}
-	if _, code := fenceStatus(fenceControlDir(data)); code == 0 {
+	if _, code := fenceStatus(fenceControlDir(data), true); code == 0 {
 		t.Fatal("status is clean after LOST_POSSIBLE")
 	}
 	fenceMeasure(t, "stall at unlink", map[string]any{"outcome": g.Outcome, "reason": g.Reason})
@@ -208,7 +208,7 @@ func TestFenceStallAtTheUnlinkIsLoud(t *testing.T) {
 func TestFenceDeletesOnlyInTheRemoval(t *testing.T) {
 	files, _ := filepath.Glob("fence*.go")
 	fset := token.NewFileSet()
-	allowed := map[string]bool{"(*fenceControl).delete": true, "(*fenceControl).collect": true, "(*fenceControl).forget": true, "fenceSelfProbe": true}
+	allowed := map[string]bool{"(*fenceControl).delete": true, "(*fenceControl).collect": true, "(*fenceControl).forget": true, "fenceSelfProbe": true, "(*fenceControl).writeFile": true}
 	checked := 0
 	for _, file := range files {
 		if strings.HasSuffix(file, "_test.go") {
@@ -257,6 +257,9 @@ func TestFenceDeletesOnlyInTheRemoval(t *testing.T) {
 					}
 					if (name == "(*fenceControl).collect" || name == "(*fenceControl).forget") && !strings.Contains(text, `".json"`) {
 						t.Errorf("%s: the removal's driver may only drop the record file: %s", fset.Position(call.Pos()), text)
+					}
+					if name == "(*fenceControl).writeFile" && !strings.Contains(text, "tmp") {
+						t.Errorf("%s: a control file's write may only drop its own temporary file: %s", fset.Position(call.Pos()), text)
 					}
 				}
 				return true

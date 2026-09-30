@@ -502,6 +502,7 @@ func (a *App) uninstall(ctx context.Context, keepData bool) error {
 		a.native.Stop(ctx)
 		if keepData {
 			a.log("the agent is stopped; %s still holds the state and your keys, and %s the runtime", a.paths.Data, a.paths.Runtime)
+			a.noteKeptCopies()
 			return nil
 		}
 		// The runtime is a cache and the local state this machine's own record of the installation
@@ -514,6 +515,7 @@ func (a *App) uninstall(ctx context.Context, keepData bool) error {
 			}
 		}
 		a.log("the runtime is gone; %s still holds the checkouts, the state and your keys — delete it by hand when you are done with it", a.paths.Data)
+		a.noteKeptCopies()
 		return nil
 	}
 	if err := CheckDocker(ctx); err != nil {
@@ -536,6 +538,17 @@ func (a *App) uninstall(ctx context.Context, keepData bool) error {
 	}
 	a.log("the volumes are gone; %s still holds the checkouts and your keys — delete it by hand when you are done with it", a.paths.Data)
 	return nil
+}
+
+// noteKeptCopies names the control folder beside the data folder when it exists. It holds whole
+// copies of the data from before updates — keys and the launcher's token included — and is not
+// inside the data folder, so deleting that folder by hand would leave them behind unmentioned. It
+// is named, not removed: like the data folder, it is the operator's to delete.
+func (a *App) noteKeptCopies() {
+	control := fenceControlPath(a.paths.Data)
+	if exists(control) {
+		a.log("%s holds copies of the data from before updates, your keys among them — delete it together with %s", control, a.paths.Data)
+	}
 }
 
 // Open points the browser at the running app, at a link that signs the operator in when one is to
@@ -651,6 +664,8 @@ type Status struct {
 	// Switches is what the data folder's fenced switches kept, and anything about them that needs
 	// the operator: a possible late write or loss, a switch that did not finish.
 	Switches fenceSummary `json:"switches"`
+	// Kept is every recorded copy with its size, for the card's sizes and its Remove buttons.
+	Kept []keptCopy `json:"kept"`
 }
 
 func (a *App) Status(ctx context.Context) Status {
@@ -675,6 +690,7 @@ func (a *App) Status(ctx context.Context) Status {
 	status.Steps = Stages(a.mode)
 	a.mu.Unlock()
 	status.Switches = fenceSummarize(fenceControlPath(a.paths.Data))
+	status.Kept = keptCopies(fenceControlPath(a.paths.Data))
 	if a.Native() {
 		status.Ports = NativePorts(a.paths)
 		status.Running = a.native.Running()

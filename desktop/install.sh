@@ -4,19 +4,23 @@
 #   curl -fsSL https://raw.githubusercontent.com/anchor-inference/daedalus/main/desktop/install.sh | sh
 #
 # It takes the newest desktop-v* release, downloads the archive for this machine, checks it against
-# the release's SHA256SUMS, and unpacks it into ./Daedalus (or $DAEDALUS_DIR). Everything the
-# installation owns - the checkouts, the keys, the database - is then made by the launcher inside
-# that same folder, so removing the folder removes the installation.
+# the release's SHA256SUMS, and unpacks it into ./Daedalus (or $DAEDALUS_DIR). The launcher then makes
+# what the installation owns - the checkouts, the keys, the database - inside that same folder, and,
+# natively, the downloaded runtime and this machine's local state (logs, the browser profiles)
+# outside it: under ~/.cache and ~/.local/state on Linux, ~/Library/Application Support on macOS.
+# `daedalus-desktop uninstall` removes those two; removing the folder then removes the rest.
 #
 # Run it again over an installation that already has data and it never replaces anything itself.
 # A launcher that has `daedalus-desktop upgrade` is handed over to. One too old for that (v0.12.0
 # and before) is upgraded by the launcher this script just downloaded and checked, as a bridge
-# (`upgrade --bridge`): the same yes, the same checked backup - of the data and of the old
-# launcher's files - before anything is replaced, and the same rollback. Where that cannot be
+# (`upgrade --bridge`): the same yes, the same protection of the data first - a kept whole copy of the
+# data folder on Linux with ext4, a checked backup elsewhere - with the old launcher's files kept
+# aside, before anything is replaced, and the same rollback. Where that cannot be
 # promised (Docker mode, for now) nothing is changed.
 #
-# What this checks is that the archive matches the SHA256SUMS published beside it. That catches a
-# broken download; it does not prove who published the release, because SHA256SUMS is not signed.
+# What this checks is the release's signature over its tag and SHA256SUMS, by the project's release
+# key, and then that the archive matches SHA256SUMS: the first proves who published the release, the
+# second catches a broken download.
 #
 # DAEDALUS_RELEASES_API and DAEDALUS_DOWNLOAD_BASE point it at another release source (a local
 # fixture, in desktop/upgrade-smoke.sh); it says so when they are set.
@@ -27,16 +31,15 @@
 set -eu
 
 # The release keys this installer trusts: signify public keys (the base64 line), one per line, the
-# same ones compiled into the launcher (desktop/signing.go, desktop/SIGNING.md). EMPTY: no key has
-# been made yet, so releases are not authenticated - only checked against SHA256SUMS, which catches a
-# broken download and not a forged release. With a key here, a release is installed only if its
-# SHA256SUMS.sig verifies - over "daedalus-release <tag>" and SHA256SUMS together - before anything
-# from it is unpacked or run; without a verifier on this machine the installer refuses.
+# same ones compiled into the launcher (desktop/signing.go, desktop/SIGNING.md): the project's release
+# key, id df535393fa2485a1 (minisign shows it as A18524FA935353DF). A release is installed only if
+# its SHA256SUMS.sig verifies - over "daedalus-release <tag>" and SHA256SUMS together - before
+# anything from it is unpacked or run; without a verifier on this machine the installer refuses.
 #
 # What this cannot do: vouch for itself. This script arrives by `curl | sh` over TLS, unsigned; a
 # forged copy could leave the key out. Checking it end to end needs the key's fingerprint from a
-# channel GitHub does not control (SIGNING.md), compared with the one this prints.
-release_keys=""
+# channel GitHub does not control (SIGNING.md, the README), compared with the one this prints.
+release_keys="RWTfU1OT+iSFoaxGzNfGzkwHdVs2o8WmnCzBUo/LBUw2L4ssGN4xYx/2"
 
 repo="${DAEDALUS_REPO:-anchor-inference/daedalus}"
 dir="${DAEDALUS_DIR:-./Daedalus}"
@@ -73,7 +76,7 @@ else
 fi
 
 # The newest release whose tag names the launcher, chosen exactly as the launcher's own check
-# chooses (release.go): a plain desktop-vX.Y.Z tag, not a draft, not a prerelease, and the highest
+# chooses (release.go): a plain desktop-vX.Y.Z tag with no leading zeros, not a draft, not a prerelease, and the highest
 # version - not the first in the listing, which is ordered by date and puts a backport of an older
 # line above a newer release. The listing is JSON and this has no JSON parser: it is cut at commas
 # and at braces, and "tag_name", "draft" and "prerelease" are read from the stretch between two
@@ -84,7 +87,7 @@ listing="$(curl -fsSL "$api/releases?per_page=30")" || fail "Could not read the 
 tag="$(printf '%s\n' "$listing" | tr ',' '\n' | awk '
   function value(text) { sub(/^[^:]*:[[:space:]]*"/, "", text); sub(/".*$/, "", text); return text }
   function flush() {
-    if (tag ~ /^desktop-v[0-9]+\.[0-9]+\.[0-9]+$/ && draft != "true" && pre != "true") {
+    if (tag ~ /^desktop-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/ && draft != "true" && pre != "true") {
       split(substr(tag, 10), v, ".")
       print v[1], v[2], v[3], tag
     }
@@ -111,7 +114,7 @@ else
 fi
 
 # An installation with data is upgraded by its own launcher when that launcher knows how: it asks,
-# backs the data up and checks the backup, and rolls back on failure. The question needs a terminal,
+# protects the data (a kept copy or a checked backup), and rolls back on failure. The question needs a terminal,
 # and under `curl | sh` standard input is the script, so it is asked on /dev/tty.
 if [ -d "$target/data" ] && [ -x "$launcher" ] && "$launcher" --help 2>/dev/null | grep -q '^  upgrade '; then
   say "An installation with data is already in ${target}; handing over to its launcher's upgrade."
@@ -138,14 +141,14 @@ say "Downloading $asset from ${tag}..."
 fetch "$base/$asset" "$work/$asset" "$asset"
 fetch "$base/SHA256SUMS" "$work/SHA256SUMS" "SHA256SUMS"
 
-# The signature, whenever the release has one: the bridge below finds it beside SHA256SUMS. With no
-# key here it is only passed on; with one it is required and checked first.
-# Retried on network errors only: a release without a signature answers 404 at once.
+# The signature: required, checked first, and left beside SHA256SUMS, where the bridge below checks
+# it again. Retried on network errors only: a release without a signature answers 404 at once, and
+# verify_release then refuses it.
 sig_err="$(curl -fsSL --retry 4 --retry-delay 2 -o "$work/SHA256SUMS.sig" "$base/SHA256SUMS.sig" 2>&1)" || {
   rm -f "$work/SHA256SUMS.sig"
   case "$sig_err" in
     *"error: 404"*) ;;
-    *) [ -z "$release_keys" ] || fail "Could not download SHA256SUMS.sig (${sig_err##*curl: }); not installing an unverified release." ;;
+    *) fail "Could not download SHA256SUMS.sig (${sig_err##*curl: }); not installing an unverified release." ;;
   esac
 }
 
@@ -157,9 +160,15 @@ verify_release() {
   command -v openssl >/dev/null 2>&1 || fail "Checking the release's signature needs OpenSSL 3, which is not here. Nothing was installed; see SIGNING.md for checking it by hand."
   printf 'daedalus-release %s\n' "$1" >"$work/message"
   cat "$work/SHA256SUMS" >>"$work/message"
-  grep -v '^untrusted comment:' "$work/SHA256SUMS.sig" | tr -d ' \r\n' >"$work/sig.b64"
+  # The first line that is not the untrusted comment, and only that one: minisign follows it with a
+  # trusted comment and a second signature over that comment, and reading those in as well turned a
+  # good signature into base64 that does not decode.
+  awk '!/^untrusted comment:/ && NF { print; exit }' "$work/SHA256SUMS.sig" | tr -d ' \r\n' >"$work/sig.b64"
   openssl base64 -d -A -in "$work/sig.b64" -out "$work/sig.raw" 2>/dev/null || fail "SHA256SUMS.sig is not a signature. Nothing was installed."
   [ "$(wc -c <"$work/sig.raw" | tr -d ' ')" = 74 ] || fail "SHA256SUMS.sig is not an Ed25519 signature. Nothing was installed."
+  # "Ed" is a signature over the message itself; minisign's default "ED" is over a hash of it, which
+  # this check cannot verify; say which it is rather than that the signature is wrong.
+  [ "$(dd if="$work/sig.raw" bs=1 count=2 2>/dev/null)" = "Ed" ] || fail "SHA256SUMS.sig is a prehashed signature; releases are signed with minisign -S -l (SIGNING.md). Nothing was installed."
   sig_id="$(dd if="$work/sig.raw" bs=1 skip=2 count=8 2>/dev/null | od -An -tx1 | tr -d ' \n')"
   dd if="$work/sig.raw" bs=1 skip=10 count=64 of="$work/sig.bin" 2>/dev/null
   printf '%s\n' "$release_keys" | while IFS= read -r key; do
@@ -179,14 +188,10 @@ verify_release() {
   say "The release's signature verifies (key $sig_id), for $1."
 }
 
-if [ -n "$release_keys" ]; then
-  # Compare this with the fingerprint published outside GitHub (SIGNING.md): it is the only check on
-  # this script itself.
-  say "Release key fingerprint (SHA-256 of the key line): $(printf '%s' "$release_keys" | { sha256sum 2>/dev/null || shasum -a 256; } | cut -d' ' -f1)"
-  verify_release "$tag"
-else
-  say "This release is not authenticated: this installer carries no release key yet (SIGNING.md)."
-fi
+# Compare this with the fingerprint published outside GitHub (SIGNING.md, the README): it is the only
+# check on this script itself.
+say "Release key fingerprint (SHA-256 of the key line): $(printf '%s' "$release_keys" | { sha256sum 2>/dev/null || shasum -a 256; } | cut -d' ' -f1)"
+verify_release "$tag"
 
 # The checksum is the whole reason a release publishes SHA256SUMS: a download that was truncated or
 # tampered with in transit is caught here rather than by a launcher that fails to run.
@@ -202,15 +207,34 @@ expected="$(grep "  $asset\$" "$work/SHA256SUMS" | cut -d' ' -f1)"
 [ "$actual" = "$expected" ] || fail "The download does not match its checksum; not installing it."
 say "Checksum matches."
 
+# launcher_running <path>: whether a process is running that program. By what the process runs, not
+# by its command line: a launcher started as ./daedalus-desktop from its folder has no absolute path
+# in its command line, and matching the path there (pgrep -f) missed it and let the bridge replace a
+# running launcher's files. Linux names each process's program in /proc/<pid>/exe; macOS has no
+# /proc, and lsof names the program a process maps as its text.
+launcher_running() {
+  want="$(cd "$(dirname "$1")" && pwd -P)/$(basename "$1")"
+  if [ -d /proc/self ]; then
+    for exe in /proc/[0-9]*/exe; do
+      running="$(readlink "$exe" 2>/dev/null)" || continue
+      [ "${running% (deleted)}" = "$want" ] && return 0
+    done
+    return 1
+  fi
+  for pid in $(pgrep -x "$(basename "$1")" 2>/dev/null); do
+    lsof -a -p "$pid" -d txt -Fn 2>/dev/null | grep -qxF "n$want" && return 0
+  done
+  pgrep -f "$want" >/dev/null 2>&1
+}
+
 # The same folder again, under a launcher too old to have `upgrade` (v0.12.0 and before): this
 # script does not replace anything itself. The launcher just downloaded and checked does the whole
-# upgrade as a bridge - it asks, backs up the data and the old launcher's files and reads the
-# backup back before replacing anything, starts the stack on the new code, and puts both back if
-# that fails. When it cannot go ahead (Docker mode, a launcher still running, no yes) it changes
+# upgrade as a bridge - it asks, protects the data and keeps the old launcher's files aside before
+# replacing anything, starts the stack on the new code, and puts both back if that fails. When it cannot go ahead (Docker mode, a launcher still running, no yes) it changes
 # nothing, and neither does this script.
 if [ -d "$target/data" ]; then
   [ -e "$launcher" ] || fail "${target}/data exists but there is no launcher beside it; not touching it."
-  if pgrep -f "$launcher" >/dev/null 2>&1; then
+  if launcher_running "$launcher"; then
     fail "The launcher in ${target} is running; close it and run this again. Nothing was changed."
   fi
   stage="$work/stage"
@@ -224,7 +248,7 @@ if [ -d "$target/data" ]; then
   fi
   [ -x "$bridge" ] || fail "The archive has no launcher; nothing was changed."
   say "An installation with data is already in ${target}, under a launcher that predates upgrade."
-  say "The ${tag} launcher will upgrade it and back everything up first."
+  say "The ${tag} launcher will upgrade it, keeping the data and the launcher from before so that a failure puts both back."
   yes=""
   if [ "${DAEDALUS_UPGRADE_YES:-}" = "1" ]; then yes="--yes"; fi
   status=0
@@ -266,4 +290,5 @@ else
   say "Run it:  cd '$target' && ./daedalus-desktop"
   say "Docker Engine with the compose plugin must be installed and running."
 fi
-say "The launcher makes everything else - the checkouts, the keys, the data - inside that folder."
+say "The launcher makes the checkouts, the keys and the data inside that folder, and natively keeps its"
+say "downloaded runtime and local state outside it; \`daedalus-desktop uninstall\` removes those."

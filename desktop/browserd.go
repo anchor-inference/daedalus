@@ -164,10 +164,13 @@ func (n *Native) newBrowserd(ctx context.Context) child {
 	if scope == nil && runtime.GOOS == "linux" {
 		n.log("no systemd user manager to cap the browser's memory in; it runs uncapped")
 	}
+	// The working directory is the local state folder, not the data folder: a working directory
+	// there pins it, and a daemon that outlived a crashed launcher then held every later switch or
+	// restore of the data off.
 	return &Process{
 		Name:    "browser daemon",
 		Argv:    browserdArgv(binary, n.paths, scope),
-		Dir:     n.paths.Data,
+		Dir:     n.paths.Local,
 		Env:     browserdEnv(n.paths, base, isSetuidRoot),
 		LogPath: filepath.Join(n.paths.RuntimeLogs, "browserd.log"),
 		Log:     n.log,

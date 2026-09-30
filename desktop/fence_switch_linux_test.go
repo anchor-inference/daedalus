@@ -40,15 +40,15 @@ func TestFenceSwitchCommitsAndCollectsAQuietTree(t *testing.T) {
 	if _, err := os.Lstat(pre); !os.IsNotExist(err) {
 		t.Fatalf("retained tree still there: %v", err)
 	}
-	if _, code := fenceStatus(fenceControlDir(data)); code != 0 {
+	if _, code := fenceStatus(fenceControlDir(data), true); code != 0 {
 		t.Fatal("status reports trouble after a clean switch and removal")
 	}
 }
 
-// The counterexample that stopped the hash-based prototype, with the same action: a shared
-// writable mapping on a file of the data folder, written through after the decision. The full hashes before and after are kept to
-// show the write really changes the file. The switch must refuse before any exchange, and the late
-// write must land in the live data.
+// Why a hash compared before and after is not a fence: a shared writable mapping on a file of the
+// data folder, written through after the decision, changes the file without any open() the check
+// could see. The full hashes before and after are kept to show the write really changes the file.
+// The switch must refuse before any exchange, and the late write must land in the live data.
 func TestAHeldSharedMappingIsRefusedAndItsLateWriteStaysLive(t *testing.T) {
 	for _, closeFD := range []bool{false, true} {
 		t.Run("fd-closed="+strconv.FormatBool(closeFD), func(t *testing.T) {
@@ -154,8 +154,8 @@ func TestFenceWriterDuringCopyIsRefusedAtOnce(t *testing.T) {
 	fenceNoSlot(t, data)
 }
 
-// The root-metadata counterexample of the hash-based prototype, with its action unchanged: the
-// live root's mode is changed and put back right after the exchange, so the final mode is identical. The event must still roll the
+// A change that leaves nothing to compare: the live root's mode is changed and put back right after
+// the exchange, so the final mode is identical to the recorded one. The event must still roll the
 // switch back, name C's root, and leave the original live by inode.
 func TestARootModeChangedAndRestoredAfterTheExchangeRollsBack(t *testing.T) {
 	data := fenceFixture(t)

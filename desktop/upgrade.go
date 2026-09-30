@@ -38,12 +38,15 @@ import (
 //     verified backup) and the launcher's files are put back. A rollback that itself fails stops with
 //     the paths needed to finish it by hand, and the launcher refuses to start until it is resolved.
 //
-// Every step is recorded in a journal under <data>/upgrade before it starts, so an upgrade cut off
-// by a crash or a power cut is found on the next start rather than half-applied in silence.
+// Every step is recorded in a journal before it starts, so an upgrade cut off by a crash or a power
+// cut is found on the next start rather than half-applied in silence. The journal lives beside the
+// data folder, in its control folder (fence.go), and never inside it: the writer fence exchanges the
+// whole data folder, and a journal inside it would be exchanged too — a restore would make the
+// journal from before the update live again, which says nothing is unfinished.
 //
-// SHA256SUMS comes from the same release as the archive. It catches a broken download; it does not
-// prove who published the release. Signing the release (minisign, cosign) is what would, and is not
-// done yet — see UPDATES.md.
+// SHA256SUMS comes from the same release as the archive and only proves the download is the file
+// it lists; what proves who published the release is its signature by the project's release key,
+// checked before anything is unpacked (signing.go, SIGNING.md).
 
 // Journal kinds.
 const (
@@ -84,12 +87,18 @@ type Journal struct {
 	// FinishToken is the finish lock's token while `upgrade --finish` holds it.
 	FinishToken string `json:"finish_token,omitempty"`
 	// Fence and Pre are the fenced switch that protected the data and the kept copy it left, when
-	// the fence was the protection (protect.go); Backup is empty then.
-	Fence string `json:"fence,omitempty"`
-	Pre   string `json:"pre,omitempty"`
+	// the fence was the protection (protect.go); Backup is empty then. PreKey is the kept copy's
+	// identity (device and inode): a rollback cut off after it made that copy live again finds it at
+	// the data folder by this, and does not try to restore it a second time.
+	Fence  string    `json:"fence,omitempty"`
+	Pre    string    `json:"pre,omitempty"`
+	PreKey [2]uint64 `json:"pre_key,omitempty"`
+	// RuntimeMovedOut says this upgrade moved a runtime from before the move out of the data folder;
+	// a rollback to the launcher that used it puts it back.
+	RuntimeMovedOut bool `json:"runtime_moved_out,omitempty"`
 }
 
-func journalFile(p Paths) string { return filepath.Join(upgradeDir(p), "journal.json") }
+func journalFile(p Paths) string { return filepath.Join(fenceControlPath(p.Data), "upgrade.json") }
 
 func readJournal(p Paths) (*Journal, error) {
 	body, err := os.ReadFile(journalFile(p))
@@ -107,7 +116,7 @@ func readJournal(p Paths) (*Journal, error) {
 var writeJournalHook func(*Journal)
 
 func writeJournal(p Paths, journal *Journal) error {
-	if err := os.MkdirAll(upgradeDir(p), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(journalFile(p)), 0o700); err != nil {
 		return err
 	}
 	body, err := json.MarshalIndent(journal, "", "  ")
@@ -145,20 +154,44 @@ func interruptedUpgrade(p Paths, own *InstallLock) error {
 		return fmt.Errorf("%w: %s", errLocked, describeHolder(holder, true))
 	}
 	journal, err := readJournal(p)
-	if err != nil || !journal.unresolved() {
-		return nil
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("the update journal cannot be read, so nothing starts: %w", err)
 	}
-	if journal.Kind == kindUpdate {
-		return fmt.Errorf("an update of the checkouts did not finish (stage %q%s).\n"+
+	if err == nil && journal.unresolved() {
+		if journal.Kind == kindUpdate {
+			return fmt.Errorf("an update of the checkouts did not finish (stage %q%s).\n"+
+				"Nothing starts until it is resolved. Run `daedalus-desktop upgrade --rollback --data %s` to put the "+
+				"data back as it was before it; %s.",
+				journal.Stage, errSuffix(journal.Error), p.Data, keptDescription(p, journal))
+		}
+		return fmt.Errorf("an upgrade from %s to %s did not finish (stage %q%s).\n"+
 			"Nothing starts until it is resolved. Run `daedalus-desktop upgrade --rollback --data %s` to put the "+
-			"data back as it was before it; the backup is %s.",
-			journal.Stage, errSuffix(journal.Error), p.Data, journal.Backup)
+			"launcher and the data back as they were before it; %s. If the launcher is missing from %s, "+
+			"run that command with the previous launcher kept in %s.",
+			journal.From, journal.To, journal.Stage, errSuffix(journal.Error), p.Data, keptDescription(p, journal), journal.Root, filepath.Join(journal.Work, "old"))
 	}
-	return fmt.Errorf("an upgrade from %s to %s did not finish (stage %q%s).\n"+
-		"Nothing starts until it is resolved. Run `daedalus-desktop upgrade --rollback --data %s` to put the "+
-		"launcher and the data back as they were before it; the backup is %s. If the launcher is missing from %s, "+
-		"run that command with the previous launcher kept in %s.",
-		journal.From, journal.To, journal.Stage, errSuffix(journal.Error), p.Data, journal.Backup, journal.Root, filepath.Join(journal.Work, "old"))
+	// A switch of the data folder that did not reach its end: which tree is live is for `update
+	// resolve` to establish, and a stack started before that would run on whichever it is.
+	for _, item := range fenceSummarize(fenceControlPath(p.Data)).Items {
+		if item.Kind == "unfinished" {
+			return fmt.Errorf("a switch of the data folder did not finish (%s, stopped at %s).\n"+
+				"Nothing starts until it is settled. `daedalus-desktop update resolve --data %s` says what is where; "+
+				"with --apply it settles it without touching the live data", item.Path, item.Detail, p.Data)
+		}
+	}
+	return nil
+}
+
+// keptDescription says where the data from before an update is: the kept copy the fence left, or
+// the verified backup.
+func keptDescription(p Paths, journal *Journal) string {
+	switch {
+	case journal.Pre != "":
+		return "the data from before it is kept whole at " + filepath.Join(fenceControlPath(p.Data), "retained", journal.Pre)
+	case journal.Backup != "":
+		return "the verified backup is " + journal.Backup
+	}
+	return "it had not yet changed the data"
 }
 
 func errSuffix(message string) string {
@@ -306,7 +339,12 @@ func (u *Upgrader) Run(ctx context.Context) error {
 		if !journal.unresolved() {
 			return fmt.Errorf("the last upgrade (%s → %s) is %s; there is nothing to roll back", journal.From, journal.To, journal.Stage)
 		}
-		return u.rollback(ctx, journal, errors.New("rolled back on request"))
+		// A rollback that was asked for and finished is a success: its exit status says so, and only a
+		// rollback that could not finish is a failure.
+		if err := u.rollback(ctx, journal, errRollbackRequested); !errors.Is(err, errRollbackRequested) {
+			return err
+		}
+		return nil
 	case u.opts.finish:
 		return u.finish(ctx)
 	default:
@@ -364,6 +402,9 @@ func (u *Upgrader) preflight() error {
 	return nil
 }
 
+// errRollbackRequested is the cause of a rollback the operator asked for.
+var errRollbackRequested = errors.New("rolled back on request")
+
 // errDockerNotCovered is the refusal for Docker mode, from upgrade and from update alike.
 var errDockerNotCovered = errors.New("updating a Docker installation from the launcher is not available yet: restoring Docker's " +
 	"volumes and images after a failed update has not been proven, and the next start would pull :latest again. " +
@@ -420,8 +461,8 @@ func (u *Upgrader) begin(ctx context.Context) error {
 	}
 	u.say("")
 	u.say("What happens if you go ahead:")
-	u.say("  1. %s is checked against the release's SHA256SUMS", source.asset)
-	u.say("     (this catches a broken download; it does not prove who published the release)")
+	u.say("  1. SHA256SUMS is checked against the release key's signature, and %s against", source.asset)
+	u.say("     SHA256SUMS: a release the project's key did not sign is refused")
 	if u.stack.Configured() {
 		u.say("  2. the stack is stopped")
 	}
@@ -449,8 +490,12 @@ func (u *Upgrader) begin(ctx context.Context) error {
 	cleanOldWork(filepath.Dir(journal.Work))
 	if err := u.prepare(ctx, journal, source, root, item); err != nil {
 		// Nothing was replaced. What the attempt made — the staging folder, the journal, a backup
-		// that did not verify — goes too, so a refusal leaves the installation exactly as it was.
-		u.abandon(journal)
+		// that did not verify — goes too, and a runtime it moved out of the data folder comes back,
+		// so a refusal leaves the installation as it was. When the runtime cannot come back, the
+		// refusal says so rather than that nothing changed.
+		if note := u.abandon(journal); note != "" {
+			return fmt.Errorf("%w; but %s", err, note)
+		}
 		return err
 	}
 
@@ -531,20 +576,11 @@ func (u *Upgrader) prepare(ctx context.Context, journal *Journal, source upgrade
 	if err := u.stack.Prepare(ctx); err != nil {
 		return fmt.Errorf("the next version's environment could not be prepared, so nothing was changed: %w", err)
 	}
-	// A data folder from before the runtime moved out of it — a v0.12 installation above all — is
-	// moved out first: the fence refuses a data folder that still holds one.
-	if err := migrateLegacyRuntime(ctx, u.paths, func(format string, args ...any) { u.say(format, args...) }); err != nil {
-		return fmt.Errorf("moving the runtime out of the data folder: %w; nothing else was changed", err)
+	moved, err := u.quiesce(ctx)
+	if err != nil {
+		return err
 	}
-	if u.stack.Configured() {
-		u.say("Stopping the stack...")
-		if err := u.stack.Stop(ctx); err != nil {
-			return fmt.Errorf("the stack could not be stopped, so nothing was changed: %w", err)
-		}
-	}
-	if err := quiesceData(ctx, u.paths); err != nil {
-		return fmt.Errorf("the data is still in use, so nothing was changed: %w", err)
-	}
+	journal.RuntimeMovedOut = moved
 	var present []string
 	for _, name := range items {
 		if _, err := os.Lstat(filepath.Join(root, name)); err == nil {
@@ -561,8 +597,36 @@ func (u *Upgrader) prepare(ctx context.Context, journal *Journal, source upgrade
 	return nil
 }
 
+// quiesce stops everything that may write into the data folder, and makes sure nothing does, before
+// it is protected: the stack, then the services the agent started and left running, then a look at
+// every process for a working directory or an open file under the data folder. Only then does a
+// runtime from before the move leave the data folder — a v0.12 installation above all; the fence
+// refuses a data folder that still holds one — because moving it from under a process that still
+// runs out of it would pull its interpreter away mid-run.
+// It says whether a runtime was moved out.
+func (u *Upgrader) quiesce(ctx context.Context) (bool, error) {
+	if u.stack.Configured() {
+		u.say("Stopping the stack...")
+		if err := u.stack.Stop(ctx); err != nil {
+			return false, fmt.Errorf("the stack could not be stopped, so nothing was changed: %w", err)
+		}
+	}
+	if err := quiesceData(ctx, u.paths); err != nil {
+		return false, fmt.Errorf("the data is still in use, so nothing was changed: %w", err)
+	}
+	legacy := exists(u.paths.LegacyRuntime)
+	if err := migrateLegacyRuntime(ctx, u.paths, func(format string, args ...any) { u.say(format, args...) }); err != nil {
+		return false, fmt.Errorf("moving the runtime out of the data folder: %w; nothing else was changed", err)
+	}
+	return legacy && !exists(u.paths.LegacyRuntime), nil
+}
+
 // abandon removes what a prepare that failed left behind.
-func (u *Upgrader) abandon(journal *Journal) {
+func (u *Upgrader) abandon(journal *Journal) string {
+	note := ""
+	if journal.RuntimeMovedOut && !putLegacyRuntimeBack(u.paths, u.say) {
+		note = fmt.Sprintf("the runtime folder had been moved out of %s first and could not be put back: the previous launcher downloads it again on its next start (its browser logins and terminal state are kept in %s)", u.paths.Data, u.paths.Local)
+	}
 	if journal.Work != "" {
 		_ = os.RemoveAll(journal.Work)
 		_ = os.Remove(filepath.Dir(journal.Work)) // only when empty
@@ -573,7 +637,11 @@ func (u *Upgrader) abandon(journal *Journal) {
 	}
 	if current, err := readJournal(u.paths); err == nil && current.Started.Equal(journal.Started) && current.Kind == journal.Kind {
 		_ = os.Remove(journalFile(u.paths))
+		// The folders the journal made, only when nothing else is in them.
+		_ = os.Remove(filepath.Dir(journalFile(u.paths)))
+		_ = os.Remove(filepath.Dir(filepath.Dir(journalFile(u.paths))))
 	}
+	return note
 }
 
 // confirm waits for an explicit yes, or takes --yes.
@@ -836,11 +904,7 @@ func (u *Upgrader) finish(ctx context.Context) error {
 	u.cleanUpAfter(journal)
 	u.say("")
 	u.say("Upgraded to %s.", journal.To)
-	kept := journal.Backup
-	if journal.Pre != "" {
-		kept = filepath.Join(fenceControlPath(u.paths.Data), "retained", journal.Pre)
-	}
-	u.say("The data from before it stays at %s; the previous launcher's files are in %s.", kept, filepath.Join(journal.Work, "old"))
+	u.say("As for the data, %s; the previous launcher's files are in %s.", keptDescription(u.paths, journal), filepath.Join(journal.Work, "old"))
 	u.say("Start the launcher as usual.")
 	return nil
 }
@@ -884,6 +948,9 @@ func (u *Upgrader) rollback(ctx context.Context, journal *Journal, cause error) 
 		_ = writeJournal(u.paths, journal)
 		return fail("putting the previous launcher back", err)
 	}
+	if journal.RuntimeMovedOut {
+		putLegacyRuntimeBack(u.paths, u.say)
+	}
 	journal.Stage = stageRolledBack
 	journal.Error = cause.Error()
 	if err := writeJournal(u.paths, journal); err != nil {
@@ -892,9 +959,15 @@ func (u *Upgrader) rollback(ctx context.Context, journal *Journal, cause error) 
 	markWorkFinished(journal)
 	if journal.Kind == kindUpdate {
 		u.say("Rolled back: the data and the checkouts are as they were before the update. Start the launcher as usual.")
+		if errors.Is(cause, errRollbackRequested) {
+			return cause
+		}
 		return fmt.Errorf("the update failed and was rolled back: %w", cause)
 	}
 	u.say("Rolled back to %s. Start the launcher as usual.", journal.From)
+	if errors.Is(cause, errRollbackRequested) {
+		return cause
+	}
 	return fmt.Errorf("upgrade to %s failed and was rolled back: %w", journal.To, cause)
 }
 
@@ -1040,6 +1113,9 @@ func (u *Upgrader) stage(body, list []byte, source upgradeSource, staged, dataNa
 	if err != nil {
 		return nil, fmt.Errorf("the release archive was refused: %w", err)
 	}
+	if err := syncStagedFolders(staged); err != nil {
+		return nil, fmt.Errorf("the unpacked release could not be written to the disk: %w", err)
+	}
 	entries, err := os.ReadDir(staged)
 	if err != nil {
 		return nil, err
@@ -1078,6 +1154,31 @@ func checksumFor(list, name string) string {
 	return ""
 }
 
+// unpackLimit is the most a release may unpack to. A release is tens of megabytes; the limit is what
+// keeps a small archive that expands a thousandfold from filling the disk the data folder is on,
+// which the checksum alone does not rule out once a release is not the one it should be.
+var unpackLimit int64 = 2 << 30
+
+// limitedBody reads a body and counts it against what is left of the unpack limit.
+type limitedBody struct {
+	r    io.Reader
+	left *int64
+}
+
+func (b limitedBody) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	*b.left -= int64(n)
+	if *b.left < 0 {
+		return n, errUnpackTooLarge
+	}
+	return n, err
+}
+
+// zipEntryLimit is the most one file of a zip release may unpack to: no more than a whole release.
+var zipEntryLimit int64 = assetLimit
+
+var errUnpackTooLarge = errors.New("the release unpacks to more than a release may, in all or in one file")
+
 // unpackReleaseTar unpacks a Linux release: files and directories only.
 func unpackReleaseTar(archive []byte, dir string) error {
 	zipped, err := gzip.NewReader(bytes.NewReader(archive))
@@ -1085,7 +1186,8 @@ func unpackReleaseTar(archive []byte, dir string) error {
 		return err
 	}
 	defer zipped.Close()
-	reader := tar.NewReader(zipped)
+	left := unpackLimit
+	reader := tar.NewReader(limitedBody{zipped, &left})
 	for {
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -1118,13 +1220,16 @@ func unpackReleaseTar(archive []byte, dir string) error {
 }
 
 // unpackZip unpacks a macOS or Windows release. A symlink is accepted only inside the macOS bundle
-// and only when it points at something inside the same bundle, which is what a framework's
-// Versions/Current is; anything else — an absolute target, a ../ out of it — is refused.
+// and only downwards: a relative target without a single "..", which is what a framework's
+// Versions/Current and its links through it are. Checking where a ".." leads by the names alone is
+// not enough — through another link the parent of a folder is somewhere else entirely — and a
+// target that never goes up cannot leave the folder it is in, whatever links it passes through.
 func unpackZip(archive []byte, dir string) error {
 	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
 	if err != nil {
 		return err
 	}
+	left := unpackLimit
 	for _, file := range reader.File {
 		name, err := cleanEntryName(file.Name)
 		if err != nil {
@@ -1145,9 +1250,13 @@ func unpackZip(archive []byte, dir string) error {
 				return err
 			}
 			target := string(body)
-			if !strings.HasPrefix(name, "Daedalus.app/") || strings.HasPrefix(target, "/") ||
+			upward := false
+			for _, part := range strings.Split(target, "/") {
+				upward = upward || part == ".."
+			}
+			if !strings.HasPrefix(name, "Daedalus.app/") || strings.HasPrefix(target, "/") || strings.Contains(target, "\\") || target == "" || upward ||
 				!strings.HasPrefix(path.Clean(path.Join(path.Dir(name), target)), "Daedalus.app/") {
-				return fmt.Errorf("entry %q links to %q, outside the app bundle", name, target)
+				return fmt.Errorf("entry %q links to %q, which is not a link downwards inside the app bundle", name, target)
 			}
 			full, err := safeJoin(dir, name)
 			if err != nil {
@@ -1164,7 +1273,10 @@ func unpackZip(archive []byte, dir string) error {
 			if err != nil {
 				return err
 			}
-			err = writeStagedFile(dir, name, mode.Perm(), io.LimitReader(body, assetLimit))
+			// One entry larger than a whole release may be is refused, not cut short: a launcher
+			// truncated at the limit would be installed as if it were whole.
+			entryLeft := zipEntryLimit
+			err = writeStagedFile(dir, name, mode.Perm(), limitedBody{limitedBody{body, &entryLeft}, &left})
 			body.Close()
 			if err != nil {
 				return err
@@ -1213,7 +1325,63 @@ func writeStagedFile(root, name string, mode os.FileMode, body io.Reader) error 
 		file.Close()
 		return err
 	}
+	// On the disk before it is swapped in: the rename that puts it in place is made durable, and a
+	// power cut must not then leave an empty launcher under a journal that says upgraded.
+	if err := launcherSync(target, file.Sync); err != nil {
+		file.Close()
+		return err
+	}
 	return file.Close()
+}
+
+// launcherSyncHook sees every sync of the launcher's files and folders during an upgrade, in order;
+// a test uses it to check that each happens before the step that relies on it. Nil otherwise.
+var launcherSyncHook func(path string)
+
+// launcherSync runs one sync of the upgrade's own files through the hook.
+func launcherSync(path string, sync func() error) error {
+	if launcherSyncHook != nil {
+		launcherSyncHook(path)
+	}
+	return sync()
+}
+
+// syncStagedFolders syncs every folder of the unpacked release, deepest first, for the names in it.
+func syncStagedFolders(staged string) error {
+	var dirs []string
+	if err := filepath.WalkDir(staged, func(path string, entry os.DirEntry, err error) error {
+		if err == nil && entry.IsDir() {
+			dirs = append(dirs, path)
+		}
+		return err
+	}); err != nil {
+		return err
+	}
+	for i := len(dirs) - 1; i >= 0; i-- {
+		dir := dirs[i]
+		if err := launcherSync(dir, func() error { return syncDir(dir) }); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// syncSwapFolders makes the renames of one swapped item durable: the installation folder, where it
+// now is, and old/, where the item it replaced went.
+func syncSwapFolders(journal *Journal) error {
+	if journal.Root == "" {
+		// An update of the checkouts: no launcher files were swapped.
+		return nil
+	}
+	for _, dir := range []string{journal.Root, filepath.Join(journal.Work, "old")} {
+		if !exists(dir) {
+			continue
+		}
+		if err := launcherSync(dir, func() error { return syncDir(dir) }); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // swap moves each of the release's top-level items into the installation, the old one first into
@@ -1242,6 +1410,9 @@ func (u *Upgrader) swap(journal *Journal) error {
 		}
 		if err := os.Rename(filepath.Join(journal.Work, "new", item), current); err != nil {
 			return fmt.Errorf("could not put %s in place: %w", current, err)
+		}
+		if err := syncSwapFolders(journal); err != nil {
+			return fmt.Errorf("%s could not be written to the disk in place: %w", current, err)
 		}
 	}
 	return nil
@@ -1299,6 +1470,10 @@ func unswap(journal *Journal) error {
 		}
 	}
 	journal.Swapped, journal.Swapping = nil, ""
+	// The launcher from before is back only once these renames are on the disk too.
+	if err := syncSwapFolders(journal); err != nil {
+		return fmt.Errorf("the previous launcher's files could not be written to the disk in place: %w", err)
+	}
 	return nil
 }
 

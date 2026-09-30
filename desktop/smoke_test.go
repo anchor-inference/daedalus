@@ -44,6 +44,9 @@ type smoke struct {
 	mu     sync.Mutex
 	tags   []string // newest first, as GitHub lists them
 	files  map[string][]byte
+	// installer is install.sh carrying the test's release key where the project's is: every release
+	// here is signed with that key, and the new launchers are built to trust it and nothing else.
+	installer string
 }
 
 func TestSmoke(t *testing.T) {
@@ -90,7 +93,7 @@ func newSmoke(t *testing.T) *smoke {
 	}
 	build := func(dir, tags, tag string) {
 		out := filepath.Join(bin, tag)
-		cmd := exec.Command("go", "build", "-tags", tags, "-trimpath", "-ldflags", "-X main.version="+tag, "-o", out, ".")
+		cmd := exec.Command("go", "build", "-tags", tags, "-trimpath", "-ldflags", "-X main.version="+tag+" -X main.linkedFixtureReleaseKey="+keyLine(testReleaseKey), "-o", out, ".")
 		cmd.Dir, cmd.Env = dir, env
 		if b, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("build %s: %v\n%s", tag, err, b)
@@ -103,6 +106,7 @@ func newSmoke(t *testing.T) *smoke {
 	if help, _ := exec.Command(s.bins["desktop-v0.12.0"], "--help").Output(); strings.Contains(string(help), "\n  upgrade ") {
 		t.Fatal("the v0.12.0 build knows upgrade")
 	}
+	s.installer = installerWithKey(t, keyLine(testReleaseKey))
 	s.server = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.server.Close)
 	return s
@@ -118,6 +122,7 @@ func (s *smoke) serve(w http.ResponseWriter, r *http.Request) {
 				"assets": []map[string]any{
 					{"name": smokeAsset(), "browser_download_url": s.server.URL + "/download/" + tag + "/" + smokeAsset()},
 					{"name": "SHA256SUMS", "browser_download_url": s.server.URL + "/download/" + tag + "/SHA256SUMS"},
+					{"name": signatureAsset, "browser_download_url": s.server.URL + "/download/" + tag + "/" + signatureAsset},
 				}})
 		}
 		json.NewEncoder(w).Encode(list)
@@ -155,7 +160,9 @@ func (s *smoke) publish(tag string) {
 	sum := sha256.Sum256(buf.Bytes())
 	s.mu.Lock()
 	s.files["/download/"+tag+"/"+smokeAsset()] = buf.Bytes()
-	s.files["/download/"+tag+"/SHA256SUMS"] = []byte(hex.EncodeToString(sum[:]) + "  " + smokeAsset() + "\n")
+	sums := []byte(hex.EncodeToString(sum[:]) + "  " + smokeAsset() + "\n")
+	s.files["/download/"+tag+"/SHA256SUMS"] = sums
+	s.files["/download/"+tag+"/"+signatureAsset] = testReleaseSign(releaseMessage(tag, sums))
 	s.tags = append([]string{tag}, s.tags...)
 	s.mu.Unlock()
 }
@@ -192,7 +199,7 @@ func (s *smoke) env(extra ...string) []string {
 
 // install runs install.sh for a named installation with no terminal.
 func (s *smoke) install(name string, extra ...string) (string, error) {
-	cmd := exec.Command("setsid", "sh", "./install.sh")
+	cmd := exec.Command("setsid", "sh", s.installer)
 	cmd.Env = s.env(append([]string{"DAEDALUS_DIR=" + filepath.Join(s.work, name, "Daedalus")}, extra...)...)
 	cmd.Stdin = nil
 	out, err := cmd.CombinedOutput()
@@ -254,7 +261,7 @@ func (s *smoke) version(root string) string {
 
 func journalOf(data string) Journal {
 	var j Journal
-	body, _ := os.ReadFile(filepath.Join(data, "upgrade", "journal.json"))
+	body, _ := os.ReadFile(filepath.Join(fenceControlPath(data), "upgrade.json"))
 	json.Unmarshal(body, &j)
 	return j
 }
@@ -305,9 +312,7 @@ func treeOf(t *testing.T, dir string, skip ...string) string {
 }
 
 var dataSkip = []string{"backups", "upgrade", "runtime"}
-var rootSkip = []string{".daedalus-upgrade", "data/backups", "data/upgrade", "data/runtime"}
-
-// ---- scenarios ---------------------------------------------------------------------------------
+var rootSkip = []string{".daedalus-upgrade", ".daedalus-update", "data/backups", "data/upgrade", "data/runtime"}
 
 func (s *smoke) bridgeWorks(t *testing.T) {
 	s.publish("desktop-v0.12.0")
@@ -448,7 +453,7 @@ func (s *smoke) killedWhileMigrating(t *testing.T) {
 		t.Fatalf("stop after the crash: %v\n%s", err, out)
 	}
 	out, err := s.launcher(root, nil, "upgrade", "--rollback", "--data", data)
-	if err == nil || !strings.Contains(out, "Rolled back to desktop-v0.13.0") {
+	if err != nil || !strings.Contains(out, "Rolled back to desktop-v0.13.0") {
 		t.Fatalf("--rollback: %v\n%s", err, out)
 	}
 	if after := treeOf(t, root, rootSkip...); after != before {
@@ -665,7 +670,7 @@ func (s *smoke) parentKilledBeforeHandover(t *testing.T) {
 	if out, err := s.launcher(root, nil, "stop", "--data", data); err == nil || !strings.Contains(out, "did not finish") {
 		t.Fatalf("stop: %v\n%s", err, out)
 	}
-	if out, err := s.launcher(root, nil, "upgrade", "--rollback", "--data", data); err == nil || !strings.Contains(out, "Rolled back") {
+	if out, err := s.launcher(root, nil, "upgrade", "--rollback", "--data", data); err != nil || !strings.Contains(out, "Rolled back") {
 		t.Fatalf("--rollback: %v\n%s", err, out)
 	}
 	s.consistent(t, root, data, before)
@@ -744,7 +749,7 @@ func (s *smoke) randomParentKills(t *testing.T) {
 		}
 		j := journalOf(data)
 		if j.Stage != "" && j.Stage != stageCommitted && j.Stage != stageRolledBack && j.Stage != stagePrepared {
-			if out, err := s.launcher(root, nil, "upgrade", "--rollback", "--data", data); err == nil || !strings.Contains(out, "Rolled back") {
+			if out, err := s.launcher(root, nil, "upgrade", "--rollback", "--data", data); err != nil || !strings.Contains(out, "Rolled back") {
 				t.Fatalf("round %d: the documented --rollback failed at %s: %v\n%s", round, j.Stage, err, out)
 			}
 			j = journalOf(data)
@@ -866,7 +871,7 @@ func (s *smoke) bothKilledStackRunning(t *testing.T) {
 		t.Fatalf("with both launchers gone the installation is not merely unfinished: %v\n%s", err, out)
 	}
 	out, err := s.launcher(root, nil, "upgrade", "--rollback", "--data", data)
-	if err == nil || !strings.Contains(out, "Rolled back to desktop-v0.13.0") {
+	if err != nil || !strings.Contains(out, "Rolled back to desktop-v0.13.0") {
 		t.Fatalf("--rollback: %v\n%s", err, out)
 	}
 	if processAlive(stack) || portAnswers(port) {
@@ -907,7 +912,7 @@ func (s *smoke) unconfirmedStackRefusesRestore(t *testing.T) {
 	killPID(stack)
 	smokeWaitFor(t, "the stack to stop", 10*time.Second, func() bool { return !portAnswers(port) })
 	out, err := s.launcher(root, nil, "upgrade", "--rollback", "--data", data)
-	if err == nil || !strings.Contains(out, "Rolled back to desktop-v0.13.0") {
+	if err != nil || !strings.Contains(out, "Rolled back to desktop-v0.13.0") {
 		t.Fatalf("--rollback: %v\n%s", err, out)
 	}
 	body, _ = os.ReadFile(filepath.Join(data, "state", "daedalus.sqlite"))

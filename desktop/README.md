@@ -32,8 +32,9 @@ needs into a runtime folder in the user's cache location (outside `data/`) and r
 
 ## Get it
 
-One line on macOS and Linux — it takes the newest `desktop-v*` release, checks the download against
-the release's `SHA256SUMS`, and unpacks it into `./Daedalus`:
+One line on macOS and Linux — it takes the newest `desktop-v*` release, checks the release's
+signature by the project's key and the download against its `SHA256SUMS`, and unpacks it into
+`./Daedalus`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/anchor-inference/daedalus/main/desktop/install.sh | sh
@@ -45,10 +46,21 @@ On Windows, the same in PowerShell (not yet run on a real Windows machine):
 irm https://raw.githubusercontent.com/anchor-inference/daedalus/main/desktop/install.ps1 | iex
 ```
 
+Both print the release key's fingerprint before they install anything. It must read
+
+```
+f75fa5a293fdd55b36c794f4787f7af8646e4dac95e19d74e6288e55c357c285
+```
+
+the SHA-256 of the key line `RWTfU1OT+iSFoaxGzNfGzkwHdVs2o8WmnCzBUo/LBUw2L4ssGN4xYx/2` (minisign key id
+`A18524FA935353DF`), published here and in every release's notes; a script that prints anything else
+is not the project's. [SIGNING.md](SIGNING.md) has the rest.
+
 `DAEDALUS_DIR=/somewhere/else` puts it elsewhere. Run over an installation that already has data,
 neither script replaces anything itself: the launcher's `upgrade` does it — the installed one, or for
-a launcher older than that command the one just downloaded — after a yes and a checked backup of the
-data and the launcher, and it rolls back on failure. [UPDATES.md](UPDATES.md) has the whole of it.
+a launcher older than that command the one just downloaded — after a yes and with the data protected
+first (a kept copy of the data folder on Linux with ext4, a checked backup elsewhere), and it rolls
+back on failure. [UPDATES.md](UPDATES.md) has the whole of it.
 Or take the archive by hand from the
 [releases page](https://github.com/anchor-inference/daedalus/releases) (the tags beginning with
 `desktop-v`):
@@ -656,11 +668,26 @@ first time, and everything after it is the same.
 
 ## Uninstalling
 
-**Delete the folder.** Everything the installation owns is inside it — the checkouts, the database,
-the sessions, the workspaces, the keys, and in native mode the runtime as well — and nothing was put
-anywhere else: no package manager was run, no PATH was changed, nothing was installed system-wide.
+**Run `daedalus-desktop uninstall`, then delete the folder.** The folder holds what the installation
+owns — the checkouts, the database, the sessions, the workspaces, the keys, and beside the data folder
+`.daedalus-update/`, the copies of the data an update kept. No package manager was run, no PATH was
+changed, nothing was installed system-wide.
 
-Three things live outside it, all of them small, all of them optional to clean up:
+In native mode two things of the installation's live outside the folder, because neither may be part
+of what an update copies and switches: the downloaded runtime (the interpreter, the environments, the
+tools) and this machine's local state (the logs, the terminal and browser daemons' endpoints, the
+browser profiles with their logins). `uninstall` removes both; by hand they are
+
+| | Runtime | Local state |
+|---|---|---|
+| Linux | `~/.cache/daedalus/<name>-<hash>` | `~/.local/state/daedalus/<name>-<hash>` |
+| macOS | `~/Library/Application Support/Daedalus/Runtime/<name>-<hash>` | `~/Library/Application Support/Daedalus/State/<name>-<hash>` |
+| Windows | `%LOCALAPPDATA%\Daedalus\Runtime\<name>-<hash>` | `%LOCALAPPDATA%\Daedalus\State\<name>-<hash>` |
+
+where `<name>-<hash>` is the data folder's name and a hash of its path, so two installations on one
+machine never share them.
+
+Three more things live outside it, all of them small, all of them optional to clean up:
 
 | | Where | Remove it with |
 |---|---|---|

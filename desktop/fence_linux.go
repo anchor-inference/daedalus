@@ -42,6 +42,15 @@ var fenceSignal struct {
 	count atomic.Uint64
 }
 
+// fenceTreeKey is a folder's identity, (device, inode), not followed through a symlink.
+func fenceTreeKey(path string) ([2]uint64, error) {
+	var st unix.Stat_t
+	if err := unix.Lstat(path, &st); err != nil {
+		return [2]uint64{}, err
+	}
+	return [2]uint64{uint64(st.Dev), st.Ino}, nil
+}
+
 func fenceSIGIO() uint64 {
 	fenceSignal.once.Do(func() {
 		ch := make(chan os.Signal, 256)
@@ -123,6 +132,18 @@ type fenceSeams struct {
 	gcAfterTrash      func(r *fenceTree)
 	gcBeforeUnlink    func(r *fenceTree, rel string)
 	gcAfterDelete     func(r *fenceTree)
+	// sync is called before each step that makes the switch durable (the copy before the exchange,
+	// the folders after it, a tree filed under retained), with the step's name; an error it returns
+	// stands for the kernel's.
+	sync func(what string) error
+	// copyWrite is called before each file of the copy is written; an error it returns stands for
+	// the write's (a full disk half-way through the copy).
+	copyWrite func(rel string) error
+	// freeSpace replaces the free bytes the filesystem reports, for the space check before the copy.
+	freeSpace func() uint64
+	// controlWrite is called before a file of the control folder is written; an error it returns
+	// stands for the write's (a full disk).
+	controlWrite func(sub, name string) error
 }
 
 func (s *fenceSeams) call(f func()) {

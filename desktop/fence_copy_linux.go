@@ -99,6 +99,12 @@ func fenceCopyFile(node *fenceNode, want fenceEntry, parent *os.File, abort func
 	out := os.NewFile(uintptr(fd), node.rel)
 	defer out.Close()
 	src := int(node.file.Fd())
+	if seams != nil && seams.copyWrite != nil {
+		if err := seams.copyWrite(node.rel); err != nil {
+			fenceRecordPartial(out, node.rel, record)
+			return fenceFail("C", node.rel, "cannot write the copy", err)
+		}
+	}
 	buf := make([]byte, 1<<20)
 	for off := int64(0); off < want.Size; {
 		if err := abort(); err != nil {

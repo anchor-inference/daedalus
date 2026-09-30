@@ -113,7 +113,8 @@ func TestOnlyTheNamedEntriesAreUnpacked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode()&0o111 == 0 {
+	// Windows has no execute bit: a file is a program by its name there, and Go reports none.
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 		t.Fatal("the binary came out without the execute bit")
 	}
 }
@@ -129,7 +130,7 @@ func TestAZipKeepsItsTreeAndItsExecutables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode()&0o111 == 0 {
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 		t.Fatal("an .exe came out of the zip unexecutable")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "etc", "gitconfig")); err != nil {

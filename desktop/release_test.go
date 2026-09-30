@@ -27,6 +27,7 @@ func TestOnlyAPlainReleaseTagIsAVersion(t *testing.T) {
 		"desktop-v1.0.0.1":       false,
 		"desktop-v1.-1.0":        false,
 		"desktop-v0.0.0-local":   false,
+		"desktop-v+1.0.0":        false,
 	} {
 		if got := parseVersion(tag).ok; got != ok {
 			t.Errorf("%s: parsed %v, want %v", tag, got, ok)
@@ -93,12 +94,12 @@ func TestTheNewestCompleteReleaseIsOffered(t *testing.T) {
 	releaseServer(t, []map[string]any{
 		// Newest by version but still uploading: no archive yet, so not offered.
 		{"tag_name": "desktop-v0.15.0", "assets": assetsFor("SHA256SUMS")},
-		{"tag_name": "desktop-v0.16.0-rc1", "assets": assetsFor(asset, "SHA256SUMS")},
-		{"tag_name": "desktop-v0.17.0", "prerelease": true, "assets": assetsFor(asset, "SHA256SUMS")},
-		{"tag_name": "desktop-v0.18.0", "draft": true, "assets": assetsFor(asset, "SHA256SUMS")},
-		{"tag_name": "desktop-v0.13.0", "assets": assetsFor(asset, "SHA256SUMS")},
-		{"tag_name": "desktop-v0.14.0", "assets": assetsFor(asset, "SHA256SUMS")},
-		{"tag_name": "something-else-v9.0.0", "assets": assetsFor(asset, "SHA256SUMS")},
+		{"tag_name": "desktop-v0.16.0-rc1", "assets": assetsFor(asset, "SHA256SUMS", signatureAsset)},
+		{"tag_name": "desktop-v0.17.0", "prerelease": true, "assets": assetsFor(asset, "SHA256SUMS", signatureAsset)},
+		{"tag_name": "desktop-v0.18.0", "draft": true, "assets": assetsFor(asset, "SHA256SUMS", signatureAsset)},
+		{"tag_name": "desktop-v0.13.0", "assets": assetsFor(asset, "SHA256SUMS", signatureAsset)},
+		{"tag_name": "desktop-v0.14.0", "assets": assetsFor(asset, "SHA256SUMS", signatureAsset)},
+		{"tag_name": "something-else-v9.0.0", "assets": assetsFor(asset, "SHA256SUMS", signatureAsset)},
 	})
 	offer, _, err := FindUpgrade(context.Background(), "desktop-v0.12.0")
 	if err != nil {
@@ -185,7 +186,7 @@ func TestARunningLauncherAnnouncesANewReleaseOnce(t *testing.T) {
 		t.Skip(err)
 	}
 	withVersion(t, "desktop-v0.12.0")
-	releaseServer(t, []map[string]any{{"tag_name": "desktop-v0.13.0", "assets": assetsFor(asset, "SHA256SUMS")}})
+	releaseServer(t, []map[string]any{{"tag_name": "desktop-v0.13.0", "assets": assetsFor(asset, "SHA256SUMS", signatureAsset)}})
 	delay, interval := releaseCheckDelay, releaseCheckInterval
 	releaseCheckDelay, releaseCheckInterval = time.Millisecond, time.Millisecond
 	t.Cleanup(func() { releaseCheckDelay, releaseCheckInterval = delay, interval })

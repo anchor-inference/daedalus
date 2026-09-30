@@ -19,8 +19,9 @@ const fenceExt4Magic = 0xEF53
 
 type fenceOptions struct {
 	Data string
-	// Control is the control folder's name in the data folder's parent; empty means .daedalus-update.
-	// It must sit beside data: trees move into it by rename, which never crosses a filesystem.
+	// Control is the control folder's path relative to the data folder's parent; empty means
+	// .daedalus-update/<data folder's name>. It must sit beside data: trees move into it by rename,
+	// which never crosses a filesystem.
 	Control         string
 	BackendInDocker bool
 	// Held are the installation lock files the calling launcher already holds, by name (.lock, and during an
@@ -75,6 +76,12 @@ type fenceSwitch struct {
 	sigio      uint64
 	preName    string
 	pKey       [2]uint64
+	// recorded names the retained record written in advance of the exchange, until its tree is
+	// filed under it; a switch that ends otherwise removes it.
+	recorded string
+	// rejectedAtSlot is a rolled-back copy a full disk kept from being filed; it is removed as a
+	// slot that never went live is.
+	rejectedAtSlot bool
 	// needsOperator marks a switch a third party interfered with: its journal stays open, so no
 	// later switch starts until someone has looked.
 	needsOperator bool
@@ -290,7 +297,10 @@ func (s *fenceSwitch) run() {
 		s.set(fenceRefused, busy)
 		return
 	}
-	s.journal("started")
+	if err := s.journal("started"); err != nil {
+		s.set(fenceFailClosed, "the switch journal cannot be written, so nothing was changed: "+err.Error())
+		return
+	}
 	// Legacy locks first, before any lease: a running launcher answers here at once, instead of
 	// its log file costing a lease refusal, and nothing has to wait for a lease break.
 	if refusal := s.takeLegacyLocks(s.parent, s.dataName, "P"); refusal != "" {
@@ -336,7 +346,10 @@ func (s *fenceSwitch) run() {
 		}
 		s.cDir, s.cName = s.parent, s.slotName
 	}
-	s.journal("fencing")
+	if err := s.journal("fencing"); err != nil {
+		s.set(fenceFailClosed, "the switch journal cannot be written, so nothing was changed: "+err.Error())
+		return
+	}
 
 	s.sigio = fenceSIGIO()
 	p, err := fenceOpenTree("P", s.parent, s.dataName, s.euid, seams, &s.rep.LeasesTaken)
@@ -351,6 +364,10 @@ func (s *fenceSwitch) run() {
 		return
 	}
 	if s.opts.RestoreFrom == "" {
+		if reason := s.checkSpace(seams, &fs); reason != "" {
+			s.set(fenceRefused, reason)
+			return
+		}
 		s.record, err = fenceCopyTree(p, s.pm, s.slot, s.abort, seams)
 		if err != nil {
 			s.fromProblem(err, "copying")
@@ -420,7 +437,29 @@ func (s *fenceSwitch) run() {
 		s.set(fenceFailClosed, "the trees were renamed before the exchange")
 		return
 	}
-	s.journal("exchanging")
+	// The copy goes to the disk before it can become live. Without this a power cut in the half
+	// minute after a switch — before the kernel writes the copy's pages back on its own — leaves a
+	// live data folder of empty files under a journal that says committed, and the one whole copy
+	// filed for automatic removal. syncfs and not an fsync per file: one call, and it also covers
+	// the directories the copy made. A restore needs it as much: the kept copy was written by a
+	// switch long ago, but nothing since has made sure it reached the disk.
+	if err := s.durable("copy", func() error { return unix.Syncfs(int(s.cDir.Fd())) }); err != nil {
+		s.set(fenceFailClosed, "the copy could not be written to the disk, so nothing was switched: "+err.Error())
+		return
+	}
+	// The record of the tree data will leave is written now, while nothing has been exchanged: after
+	// the exchange a full disk could refuse it, and a tree filed without a record is one nobody can
+	// restore or remove.
+	pending := s.retainedRecord()
+	if err := s.ctl.writeMeta(pending); err != nil {
+		s.set(fenceRefused, "the record of the data from before cannot be written, so nothing was switched: "+err.Error())
+		return
+	}
+	s.recorded = pending.Name
+	if err := s.journal("exchanging"); err != nil {
+		s.set(fenceFailClosed, "the switch journal cannot be written, so nothing was switched: "+err.Error())
+		return
+	}
 	if err := unix.Renameat2(int(s.parent.Fd()), s.dataName, int(s.cDir.Fd()), s.cName, unix.RENAME_EXCHANGE); err != nil {
 		s.set(fenceFailClosed, "the exchange failed; nothing was switched: "+err.Error())
 		return
@@ -428,7 +467,12 @@ func (s *fenceSwitch) run() {
 	s.exchanged = true
 	p.rebind(s.cDir, s.cName)
 	c.rebind(s.parent, s.dataName)
-	s.journal("exchanged")
+	// The exchange itself, in both folders it changed, before anything is decided on it.
+	if err := s.durable("exchange", s.syncFolders); err != nil {
+		s.rollback("the exchange could not be written to the disk: "+err.Error(), nil, false)
+		return
+	}
+	s.journalAfter("exchanged")
 	if seams.afterExchange != nil {
 		seams.afterExchange(p, c)
 	}
@@ -467,27 +511,107 @@ func (s *fenceSwitch) run() {
 	if seams.afterFinalSweep != nil {
 		seams.afterFinalSweep(p, c)
 	}
-	s.journal("committing")
-	if s.opts.RestoreFrom != "" {
-		// The data the failed version left is kept for the operator: it may hold what the agent did
-		// under that version, and nothing decides that for them.
-		name, err := s.retain(p, "failed", s.pm, "manual", "the data as the version that did not come up left it")
-		if err != nil {
-			s.foreignExchange("the replaced tree was not where the exchange left it: " + err.Error())
-			return
-		}
-		s.preName = name
-		s.ctl.forget(s.opts.RestoreFrom)
-		s.set(fenceCommitted, "the data from before the update is live again; what replaced it is kept")
-		return
+	s.journalAfter("committing")
+	name, err := s.retain(p, pending, true)
+	if errors.Is(err, errFenceNotDurable) {
+		// Filed and recorded; only the sync of the folders failed. The switch stands, and says so.
+		s.rep.Limits = append(s.rep.Limits, err.Error())
+		name, err = pending.Name, nil
+		s.rep.Retained = append(s.rep.Retained, fenceRetained{Path: filepath.Join(s.ctl.path, "retained", name), Kind: pending.Kind, GC: pending.GC, Reason: pending.Reason})
 	}
-	name, err := s.retain(p, "pre", s.pm, "auto", "")
 	if err != nil {
 		s.foreignExchange("the previous tree was not where the exchange left it: " + err.Error())
 		return
 	}
+	s.recorded = ""
 	s.preName = name
+	if s.opts.RestoreFrom != "" {
+		s.ctl.forget(s.opts.RestoreFrom)
+		s.set(fenceCommitted, "the data from before the update is live again; what replaced it is kept")
+		return
+	}
 	s.set(fenceCommitted, "the copy is live; the previous tree is kept")
+}
+
+// retainedRecord is the record of the tree the exchange moves away from data: the data from
+// before, removable once a later update has committed; or, for a restore, the data the version that
+// did not come up left, kept for the operator — it may hold what the agent did under that version,
+// and nothing decides that for them.
+func (s *fenceSwitch) retainedRecord() fenceRetainedMeta {
+	if s.opts.RestoreFrom != "" {
+		return s.recordOf("failed", "manual", "the data as the version that did not come up left it")
+	}
+	return s.recordOf("pre", "auto", "")
+}
+
+// syncFolders makes a rename between the parent and the second tree's folder durable.
+func (s *fenceSwitch) syncFolders() error {
+	if err := s.parent.Sync(); err != nil {
+		return err
+	}
+	if s.cDir != s.parent {
+		return s.cDir.Sync()
+	}
+	return nil
+}
+
+// durable runs one step that makes the switch survive a power cut, through the test seam first.
+func (s *fenceSwitch) durable(what string, do func() error) error {
+	if s.seams != nil && s.seams.sync != nil {
+		if err := s.seams.sync(what); err != nil {
+			return err
+		}
+	}
+	return do()
+}
+
+// fenceSpaceMargin is what must stay free beyond the copy itself: the app writes its database and
+// logs on the same disk the moment it starts, and a disk the switch filled to the last block is
+// one it cannot even record its own outcome on.
+var fenceSpaceMargin uint64 = 512 << 20
+
+// checkSpace refuses a copy the filesystem has no room for. The copy costs more than the tree
+// occupies: every file is written out whole (a sparse file becomes dense) and each name of a file
+// with two names in the tree becomes a file of its own. The data from before stays until a later
+// update, so at the peak the disk holds it, the copy and the kept copy of the update before.
+func (s *fenceSwitch) checkSpace(seams *fenceSeams, fs *unix.Statfs_t) string {
+	block := uint64(fs.Bsize)
+	if block == 0 {
+		block = 4096
+	}
+	var need uint64
+	for _, entry := range s.pm {
+		need += block
+		if entry.Kind == "file" && entry.Size > 0 {
+			need += (uint64(entry.Size) + block - 1) / block * block
+		}
+	}
+	var st unix.Statfs_t
+	if err := unix.Fstatfs(int(s.parent.Fd()), &st); err != nil {
+		return "the free space cannot be read: " + err.Error()
+	}
+	free := st.Bavail * uint64(st.Bsize)
+	if seams.freeSpace != nil {
+		free = seams.freeSpace()
+	}
+	margin := fenceSpaceMargin
+	if need/10 > margin {
+		margin = need / 10
+	}
+	if free < need+margin {
+		return fmt.Sprintf("not enough free space for the copy of the data folder: it needs %s, and %s more must stay free, while %s is free; free some space and try again", fenceBytes(need), fenceBytes(margin), fenceBytes(free))
+	}
+	return ""
+}
+
+func fenceBytes(n uint64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+	}
+	return fmt.Sprintf("%d KiB", (n+1023)/1024)
 }
 
 func fenceMoved(s fenceSweepResult) bool {
@@ -510,7 +634,7 @@ func (s *fenceSwitch) controlName() string {
 	if s.opts.Control != "" {
 		return s.opts.Control
 	}
-	return ".daedalus-update"
+	return fenceControlName(s.opts.Data)
 }
 
 // sweepBoth sweeps P and C and checks everything that is not in either tree but must not move:
@@ -635,13 +759,17 @@ func fenceSameFile(file *os.File, fd int) bool {
 
 // retain moves a tree of ours into the control folder, checking by inode before and after: a name
 // alone could by now lead to someone else's tree, and nothing foreign may ever be filed as ours.
-func (s *fenceSwitch) retain(t *fenceTree, kind string, manifest fenceManifest, gc, reason string) (string, error) {
-	name := kind + "-" + s.rep.Op
-	if err := s.ctl.adopt(t, name, s.rep.Op, kind, manifest, gc, reason); err != nil {
+func (s *fenceSwitch) retain(t *fenceTree, meta fenceRetainedMeta, recorded bool) (string, error) {
+	if err := s.ctl.adopt(t, meta, recorded); err != nil {
 		return "", err
 	}
-	s.rep.Retained = append(s.rep.Retained, fenceRetained{Path: filepath.Join(s.ctl.path, "retained", name), Kind: kind, GC: gc, Reason: reason})
-	return name, nil
+	s.rep.Retained = append(s.rep.Retained, fenceRetained{Path: filepath.Join(s.ctl.path, "retained", meta.Name), Kind: meta.Kind, GC: meta.GC, Reason: meta.Reason})
+	return meta.Name, nil
+}
+
+// recordOf is the record of a tree this switch files, with the manifest measured under the fence.
+func (s *fenceSwitch) recordOf(kind, gc, reason string) fenceRetainedMeta {
+	return fenceRetainedMeta{Name: kind + "-" + s.rep.Op, Kind: kind, Op: s.rep.Op, GC: gc, Reason: reason, Created: time.Now().UTC(), Manifest: s.pm}
 }
 
 // rollback exchanges back through the pinned parent descriptor, and only after checking by inode
@@ -666,17 +794,36 @@ func (s *fenceSwitch) rollback(reason string, entries []fenceEntryReport, overfl
 		return
 	}
 	s.exchanged = false
-	s.journal("rolled-back")
+	if err := s.durable("exchange", s.syncFolders); err != nil {
+		s.rep.Limits = append(s.rep.Limits, "the rollback's exchange could not be written to the disk: "+err.Error())
+	}
+	s.dropPending()
+	s.journalAfter("rolled-back")
 	if s.opts.RestoreFrom != "" {
 		// The kept copy goes back to where it was kept, unchanged in name and record.
 		s.set(fenceRolledBack, reason)
 		return
 	}
-	if _, err := s.retain(s.c, "rejected", s.pm, "auto", reason); err != nil {
+	if _, err := s.retain(s.c, s.recordOf("rejected", "auto", reason), false); err != nil {
+		if errors.Is(err, errFenceNotRecorded) {
+			// A full disk: the copy stays at the slot, and the end of the switch removes it the way
+			// it removes a slot that never went live, with no record to write first.
+			s.rejectedAtSlot = true
+			s.set(fenceRolledBack, reason)
+			return
+		}
 		s.foreignExchange(reason + "; and the rejected copy was not at the slot: " + err.Error())
 		return
 	}
 	s.set(fenceRolledBack, reason)
+}
+
+// dropPending removes the record written in advance for a tree that will not be filed after all.
+func (s *fenceSwitch) dropPending() {
+	if s.recorded != "" {
+		s.ctl.forget(s.recorded)
+		s.recorded = ""
+	}
 }
 
 // foreignExchange is the stop for a third party that exchanged or renamed our trees. Nothing is
@@ -685,7 +832,8 @@ func (s *fenceSwitch) rollback(reason string, entries []fenceEntryReport, overfl
 func (s *fenceSwitch) foreignExchange(reason string) {
 	s.set(fenceFailClosed, "someone else exchanged or renamed the trees: "+reason)
 	s.needsOperator = true
-	s.journal("needs-operator")
+	s.dropPending()
+	s.journalAfter("needs-operator")
 	at := func(dir *os.File, name string) string {
 		var st unix.Stat_t
 		if err := unix.Fstatat(int(dir.Fd()), name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
@@ -701,6 +849,7 @@ func (s *fenceSwitch) foreignExchange(reason string) {
 		return "a foreign tree"
 	}
 	atData, atSlot := at(s.parent, s.dataName), at(s.cDir, s.cName)
+	s.rep.Live = atData
 	s.rep.Entries = append(s.rep.Entries,
 		fenceEntryReport{Tree: atData, Path: s.dataName, Cause: "found at data"},
 		fenceEntryReport{Tree: atSlot, Path: s.cName, Cause: "found where the second tree belongs"})
@@ -723,7 +872,7 @@ func (s *fenceSwitch) foreignExchange(reason string) {
 					kind = "failed"
 				}
 			}
-			if _, err := s.retain(t, kind, s.pm, "manual", "moved by someone else during the switch"); err != nil {
+			if _, err := s.retain(t, s.recordOf(kind, "manual", "moved by someone else during the switch"), false); err != nil {
 				s.rep.Retained = append(s.rep.Retained, fenceRetained{Path: filepath.Join(s.cDir.Name(), s.cName), Kind: kind, GC: "manual", Reason: "left in place: " + err.Error()})
 			}
 		default:
@@ -732,9 +881,19 @@ func (s *fenceSwitch) foreignExchange(reason string) {
 	}
 }
 
-func (s *fenceSwitch) journal(phase string) {
-	if s.ctl != nil {
-		s.ctl.journal(fenceJournal{Op: s.rep.Op, Phase: phase, Data: s.opts.Data, Slot: s.cName, SlotRetained: s.opts.RestoreFrom != "", P: s.pKey, C: s.slotKey})
+func (s *fenceSwitch) journal(phase string) error {
+	if s.ctl == nil {
+		return nil
+	}
+	return s.ctl.journal(fenceJournal{Op: s.rep.Op, Phase: phase, Data: s.opts.Data, Slot: s.cName, SlotRetained: s.opts.RestoreFrom != "", P: s.pKey, C: s.slotKey})
+}
+
+// journalAfter records a phase after the exchange. There is no going back on a write that fails
+// there — the entry before it names both trees by inode, which is all `update resolve` needs — so
+// the failure is only reported.
+func (s *fenceSwitch) journalAfter(phase string) {
+	if err := s.journal(phase); err != nil {
+		s.rep.Limits = append(s.rep.Limits, fmt.Sprintf("the switch journal could not record %q: %v", phase, err))
 	}
 }
 
@@ -742,6 +901,12 @@ func (s *fenceSwitch) journal(phase string) {
 // first, then the leases, then the legacy flocks, then our own locks. Between the leases and the
 // flocks a launcher that tries its lock gets errLocked, never the lock.
 func (s *fenceSwitch) finish() {
+	if s.rep.Live == "" {
+		s.rep.Live = "P"
+		if s.exchanged {
+			s.rep.Live = "C"
+		}
+	}
 	s.rep.ExitCode = fenceExitCode(s.rep.Outcome)
 	s.writeReport()
 	if s.seams != nil && s.seams.beforeRelease != nil && s.p != nil && s.c != nil {
@@ -805,8 +970,9 @@ func (s *fenceSwitch) finish() {
 		_ = s.slot.Close()
 	}
 	if s.ctl != nil {
+		s.dropPending()
 		if !s.needsOperator {
-			s.journal("done")
+			s.journalAfter("done")
 		}
 		s.ctl.unlock()
 		s.ctl.close()
@@ -820,7 +986,7 @@ func (s *fenceSwitch) finish() {
 // any retained tree is — under a fresh fence and after a full comparison with what we know we put
 // there. Anything else keeps it.
 func (s *fenceSwitch) collectSlot() {
-	if s.slot == nil || s.exchanged || s.rep.Outcome == fenceCommitted || s.rep.Outcome == fenceRolledBack || s.needsOperator {
+	if s.slot == nil || s.exchanged || s.rep.Outcome == fenceCommitted || (s.rep.Outcome == fenceRolledBack && !s.rejectedAtSlot) || s.needsOperator {
 		return
 	}
 	expected := s.record
@@ -835,18 +1001,27 @@ func (s *fenceSwitch) collectSlot() {
 			expected["."] = entry
 		}
 	}
-	name := "slot-" + s.rep.Op
-	slotNode := &fenceNode{rel: ".", kind: "dir", file: s.slot, parent: s.parent, name: s.slotName, dev: s.slotKey[0], ino: s.slotKey[1]}
-	holder := &fenceTree{label: "slot", dirs: []*fenceNode{slotNode}}
-	if err := s.ctl.adopt(holder, name, s.rep.Op, "slot", expected, "auto", "left by a switch that did not exchange"); err != nil {
-		s.rep.Retained = append(s.rep.Retained, fenceRetained{Path: filepath.Join(s.parentPath, s.slotName), Kind: "slot", GC: "manual", Reason: "left in place: " + err.Error()})
-		s.writeReport()
-		return
-	}
-	gc := s.ctl.collect(name, false, s.euid, s.seams)
+	// Removed straight from where it is, with its record kept in memory: the record goes to the disk
+	// only if the slot stays. A copy cut off by a full disk is the very thing that must go to give
+	// the space back, and a record written first would need space the disk no longer has.
+	meta := fenceRetainedMeta{Name: "slot-" + s.rep.Op, Kind: "slot", Op: s.rep.Op, GC: "auto", Reason: "left by a switch that did not exchange", Created: time.Now().UTC(), Manifest: expected}
+	gc := fenceGCReport{Name: meta.Name, Outcome: fenceRetainedGC, At: time.Now().UTC()}
+	s.ctl.remove(s.parent, s.slotName, meta, s.euid, s.seams, &gc)
+	s.ctl.writeGC(&gc)
 	s.rep.GC = append(s.rep.GC, gc)
 	if gc.Outcome != fenceDeleted {
-		s.rep.Retained = append(s.rep.Retained, fenceRetained{Path: filepath.Join(s.ctl.path, "retained", name), Kind: "slot", GC: "manual", Reason: gc.Reason})
+		slotNode := &fenceNode{rel: ".", kind: "dir", file: s.slot, parent: s.parent, name: s.slotName, dev: s.slotKey[0], ino: s.slotKey[1]}
+		holder := &fenceTree{label: "slot", dirs: []*fenceNode{slotNode}}
+		where := filepath.Join(s.ctl.path, "retained", meta.Name)
+		if fenceSameNamed(slotNode) == nil {
+			// Still where it was made: the removal never moved it. Filed for the operator.
+			meta.GC, meta.Reason = "manual", gc.Reason
+			if err := s.ctl.adopt(holder, meta, false); err != nil {
+				where = filepath.Join(s.parentPath, s.slotName)
+				gc.Reason += "; left in place: " + err.Error()
+			}
+		}
+		s.rep.Retained = append(s.rep.Retained, fenceRetained{Path: where, Kind: "slot", GC: "manual", Reason: gc.Reason})
 	}
 	s.writeReport()
 }
@@ -888,6 +1063,21 @@ func fencePlatform(data string) error {
 		return err
 	}
 	defer unix.Close(fd)
+	// The data folder itself, not followed: the switch exchanges it beside its parent's other
+	// entries, so a symlink to elsewhere, or a folder that is a mount of its own, is one it could
+	// only ever refuse — every update would stop there with no way through.
+	var pst, dst unix.Stat_t
+	if err := unix.Fstat(fd, &pst); err != nil {
+		return err
+	}
+	if err := unix.Fstatat(fd, filepath.Base(filepath.Clean(data)), &dst, unix.AT_SYMLINK_NOFOLLOW); err == nil {
+		switch {
+		case dst.Mode&unix.S_IFMT == unix.S_IFLNK:
+			return errors.New("the data folder is a symbolic link")
+		case dst.Dev != pst.Dev:
+			return errors.New("the data folder is a mount of its own")
+		}
+	}
 	var fs unix.Statfs_t
 	if err := unix.Fstatfs(fd, &fs); err != nil || uint64(fs.Type) != fenceExt4Magic {
 		return fmt.Errorf("the data folder's filesystem (type %#x) is not ext4", uint64(fs.Type))

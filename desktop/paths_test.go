@@ -15,7 +15,7 @@ func TestTheBundleKeepsItsDataBesideTheApp(t *testing.T) {
 	if got, want := DefaultDataDir(exe), filepath.Join("/Users/someone/Daedalus/data"); got != want {
 		t.Fatalf("the data folder would be %s, want %s", got, want)
 	}
-	if app, ok := bundleRoot(exe); !ok || app != "/Users/someone/Daedalus/Daedalus.app" {
+	if app, ok := bundleRoot(exe); !ok || app != filepath.FromSlash("/Users/someone/Daedalus/Daedalus.app") {
 		t.Fatalf("the bundle is %q (%v)", app, ok)
 	}
 }

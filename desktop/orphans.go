@@ -62,6 +62,25 @@ func removeChildRecord(file string, pid int) {
 	}
 }
 
+// childProgram is the program a child's record names: the one the process is once it runs. A child
+// started through systemd-run's scope (the browser daemon, for its memory cap) is systemd-run only
+// until it execs the command after "--"; a record naming systemd-run matched no running process,
+// so FindOrphans dropped it as someone else's, and a browser daemon left by a crashed launcher kept
+// its working directory in the data folder and refused every rollback until it was killed by hand.
+func childProgram(argv []string) string {
+	if len(argv) == 0 {
+		return ""
+	}
+	if name := strings.TrimSuffix(filepath.Base(argv[0]), ".exe"); name == "systemd-run" {
+		for i, arg := range argv {
+			if arg == "--" && i+1 < len(argv) {
+				return argv[i+1]
+			}
+		}
+	}
+	return argv[0]
+}
+
 // Orphan is a recorded child still running, or one whose program cannot be confirmed.
 type Orphan struct {
 	ChildRecord

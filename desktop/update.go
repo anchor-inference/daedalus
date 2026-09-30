@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -46,20 +45,14 @@ func (u *Upgrader) update(ctx context.Context) error {
 	if err := interruptedUpgrade(u.paths, u.lock); err != nil {
 		return err
 	}
-	if u.mode == ModeDocker {
-		return errDockerNotCovered
-	}
 	if err := u.stack.Prepare(ctx); err != nil {
 		return fmt.Errorf("the next version's environment could not be prepared, so nothing was changed: %w", err)
 	}
-	if err := migrateLegacyRuntime(ctx, u.paths, func(format string, args ...any) { u.say(format, args...) }); err != nil {
-		return fmt.Errorf("moving the runtime out of the data folder: %w; nothing else was changed", err)
-	}
-	if u.stack.Configured() {
-		u.say("stopping the agent before the data is protected")
-		if err := u.stack.Stop(ctx); err != nil {
-			return fmt.Errorf("the stack could not be stopped, so nothing was changed: %w", err)
-		}
+	// The same as an upgrade: the stack, the services it left running and every other writer of the
+	// data folder are gone before the data is protected. The fence would find a writer too, but the
+	// backup — the protection on every other platform — would take a torn copy of it.
+	if _, err := u.quiesce(ctx); err != nil {
+		return err
 	}
 	journal := &Journal{Kind: kindUpdate, From: version, To: version, Mode: string(u.mode), Stage: stagePrepared, Started: u.now().UTC()}
 	if err := u.protect(ctx, journal, "", nil); err != nil {
@@ -83,11 +76,7 @@ func (u *Upgrader) update(ctx context.Context) error {
 		u.stack.Leave(ctx)
 	}
 	u.cleanUpAfter(journal)
-	kept := journal.Backup
-	if journal.Pre != "" {
-		kept = filepath.Join(fenceControlPath(u.paths.Data), "retained", journal.Pre)
-	}
-	u.say("updated; the data from before it stays at %s", kept)
+	u.say("updated; %s", keptDescription(u.paths, journal))
 	return nil
 }
 

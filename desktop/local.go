@@ -36,12 +36,15 @@ import (
 //
 // <key> is the data folder's name and a digest of its absolute path: two installations on one
 // machine never share an environment, and moving a data folder costs one rebuild, nothing more.
+// The digest is of the path as the filesystem knows it, not as it was typed: symlinks resolved, and
+// on macOS and Windows, whose filesystems ignore case, folded to lower case. Hashed as typed, the
+// same folder reached through a symlink or spelled with another case was another installation, and
+// its browser logins and terminal logs were left behind without a word.
 // DAEDALUS_LOCAL_ROOT puts both under one folder (runtime/<key> and state/<key>); the tests use it.
 
 // localRoots returns the runtime and the local state folder for a data folder.
 func localRoots(data string) (runtimeDir, stateDir string, err error) {
-	sum := sha256.Sum256([]byte(data))
-	key := localKeyName(filepath.Base(data)) + "-" + hex.EncodeToString(sum[:])[:12]
+	key := localKey(data, runtime.GOOS, filepath.EvalSymlinks)
 	if root := strings.TrimSpace(os.Getenv("DAEDALUS_LOCAL_ROOT")); root != "" {
 		if !filepath.IsAbs(root) {
 			return "", "", errors.New("DAEDALUS_LOCAL_ROOT must be an absolute path")
@@ -60,6 +63,36 @@ func localRoots(data string) (runtimeDir, stateDir string, err error) {
 		}
 	}
 	return runtimeDir, stateDir, nil
+}
+
+// localKey is <key> for a data folder. A data folder that does not exist yet — the first start
+// creates it — is resolved through its deepest existing parent, so the key does not change once it
+// does.
+func localKey(data, goos string, resolve func(string) (string, error)) string {
+	canonical := canonicalPath(filepath.Clean(data), resolve)
+	if goos == "darwin" || goos == "windows" {
+		canonical = strings.ToLower(canonical)
+	}
+	sum := sha256.Sum256([]byte(canonical))
+	return localKeyName(filepath.Base(data)) + "-" + hex.EncodeToString(sum[:])[:12]
+}
+
+func canonicalPath(path string, resolve func(string) (string, error)) string {
+	var rest []string
+	for current := path; ; {
+		if resolved, err := resolve(current); err == nil {
+			for i := len(rest) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, rest[i])
+			}
+			return resolved
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return path
+		}
+		rest = append(rest, filepath.Base(current))
+		current = parent
+	}
 }
 
 func localKeyName(name string) string {

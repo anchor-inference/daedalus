@@ -252,23 +252,6 @@ func LockHeldByOther(p Paths, own *InstallLock) (Holder, bool) {
 	return Holder{}, false
 }
 
-// readLockHolder reports who holds the installation lock right now, if anyone.
-func readLockHolder(p Paths) (Holder, bool) {
-	if !exists(lockPath(p)) {
-		return Holder{}, false
-	}
-	file, err := lockFile(lockPath(p))
-	if err != nil {
-		holder, ok := readHolder(p)
-		if !ok {
-			holder = Holder{Kind: "unknown"}
-		}
-		return holder, true
-	}
-	unlockFile(file)
-	return Holder{}, false
-}
-
 // rewriteHolder records the current holder in the lock file and beside it.
 func (l *InstallLock) rewriteHolder() {
 	body, _ := json.Marshal(l.holder)

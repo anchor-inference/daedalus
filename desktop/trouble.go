@@ -22,7 +22,7 @@ var failureKeys = []struct {
 	key   string
 	marks []string
 }{
-	{"trouble.disk", []string{"no space left on device", "disk quota exceeded"}},
+	{"trouble.disk", []string{"no space left on device", "disk quota exceeded", "not enough free space"}},
 	{"trouble.docker", []string{
 		"cannot connect to the docker daemon",
 		"is the docker daemon running",
@@ -51,6 +51,9 @@ func FailureKey(failure string) string {
 	text := strings.ToLower(failure)
 	if strings.TrimSpace(text) == "" {
 		return ""
+	}
+	if key := fenceFailureKey(text); key != "" {
+		return key
 	}
 	for _, one := range failureKeys {
 		for _, mark := range one.marks {

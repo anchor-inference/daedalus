@@ -92,6 +92,7 @@ func launcherName() string {
 type fixtureRelease struct {
 	entries  []archiveEntry
 	badSum   bool
+	unsigned bool // published without SHA256SUMS.sig
 	requests int
 }
 
@@ -107,22 +108,30 @@ func (f *fixtureRelease) serve(t *testing.T, tag string) {
 	if f.badSum {
 		digest = strings.Repeat("0", 64)
 	}
+	sums := []byte(fmt.Sprintf("%s  %s\n", digest, asset))
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.requests++
 		switch r.URL.Path {
 		case "/releases":
-			json.NewEncoder(w).Encode([]map[string]any{{
-				"tag_name": tag, "html_url": server.URL + "/notes",
-				"assets": []map[string]any{
-					{"name": asset, "browser_download_url": server.URL + "/download/" + asset},
-					{"name": "SHA256SUMS", "browser_download_url": server.URL + "/download/SHA256SUMS"},
-				},
-			}})
+			assets := []map[string]any{
+				{"name": asset, "browser_download_url": server.URL + "/download/" + asset},
+				{"name": "SHA256SUMS", "browser_download_url": server.URL + "/download/SHA256SUMS"},
+			}
+			if !f.unsigned {
+				assets = append(assets, map[string]any{"name": signatureAsset, "browser_download_url": server.URL + "/download/" + signatureAsset})
+			}
+			json.NewEncoder(w).Encode([]map[string]any{{"tag_name": tag, "html_url": server.URL + "/notes", "assets": assets}})
 		case "/download/" + asset:
 			w.Write(archive)
 		case "/download/SHA256SUMS":
-			fmt.Fprintf(w, "%s  %s\n", digest, asset)
+			w.Write(sums)
+		case "/download/" + signatureAsset:
+			if f.unsigned {
+				http.NotFound(w, r)
+				return
+			}
+			w.Write(testReleaseSign(releaseMessage(tag, sums)))
 		default:
 			http.NotFound(w, r)
 		}
@@ -428,8 +437,12 @@ func TestAnInterruptedUpgradeIsRolledBackOnRequest(t *testing.T) {
 	}
 	// The next command is the new launcher's (it is the file in place), run by the operator.
 	rollback := &Upgrader{paths: in.paths, stack: in.stack, mode: ModeNative, out: &bytes.Buffer{}, opts: upgradeOptions{rollback: true}}
-	if err := rollback.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "rolled back") {
-		t.Fatalf("err = %v", err)
+	// A rollback that was asked for and finished is a success, in its exit status too.
+	if err := rollback.Run(context.Background()); err != nil {
+		t.Fatalf("a requested rollback that finished reported a failure: %v", err)
+	}
+	if j, err := readJournal(in.paths); err != nil || j.Stage != stageRolledBack {
+		t.Fatalf("journal after the rollback: %+v %v", j, err)
 	}
 	if in.file(t, launcherName()) != "old launcher" || in.file(t, "data/state/daedalus.sqlite") != "schema v1\n" {
 		t.Fatal("not put back")
@@ -530,8 +543,12 @@ func TestASwapCutOffHalfwayIsPutBack(t *testing.T) {
 		t.Fatal("a half-done swap does not block the launcher")
 	}
 	rollback := &Upgrader{paths: in.paths, stack: in.stack, mode: ModeNative, out: &bytes.Buffer{}, opts: upgradeOptions{rollback: true}}
-	if err := rollback.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "rolled back") {
-		t.Fatalf("err = %v", err)
+	// A rollback that was asked for and finished is a success, in its exit status too.
+	if err := rollback.Run(context.Background()); err != nil {
+		t.Fatalf("a requested rollback that finished reported a failure: %v", err)
+	}
+	if j, err := readJournal(in.paths); err != nil || j.Stage != stageRolledBack {
+		t.Fatalf("journal after the rollback: %+v %v", j, err)
 	}
 	if in.file(t, launcherName()) != "old launcher" || in.file(t, "ptyd") != "old ptyd" || in.file(t, "data/state/daedalus.sqlite") != "schema v1\n" {
 		t.Fatal("not put back")

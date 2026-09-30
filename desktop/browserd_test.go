@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -132,5 +133,25 @@ func TestTheMemoryScopeIsProbedBeforeItIsUsed(t *testing.T) {
 	}
 	if systemScope(context.Background(), found, fails) != nil || systemScope(context.Background(), missing, works) != nil {
 		t.Fatal("a scope that cannot start anything was used")
+	}
+}
+
+// The daemon works in the local state folder, never in the data folder: a daemon that outlived a
+// crashed launcher with its working directory in the data folder held every later switch and
+// restore of it off.
+func TestTheBrowserDaemonDoesNotWorkInTheDataFolder(t *testing.T) {
+	p := fixtureData(t)
+	binary := filepath.Join(t.TempDir(), "browserd")
+	if err := os.WriteFile(binary, []byte("a daemon"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DAEDALUS_BROWSERD", binary)
+	child := NewNative(p, func(string, ...any) {}).newBrowserd(context.Background())
+	proc, ok := child.(*Process)
+	if !ok || proc == nil {
+		t.Fatalf("no browser daemon process: %#v", child)
+	}
+	if proc.Dir != p.Local || within(proc.Dir, p.Data) {
+		t.Fatalf("the daemon works in %s", proc.Dir)
 	}
 }

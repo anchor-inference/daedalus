@@ -51,17 +51,19 @@ commands:
   stop        stop the containers (they stay until started again)
   status      what is configured, what is running
   logs [-f]   the stack's logs
-  update      move both checkouts to what is published and restart, after a checked
-              backup of the data; a failed start puts the data back. Native mode only
-              for now: Docker mode is refused (desktop/UPDATES.md has the manual path)
-  update status  the copies of the data folder kept by its switches, and anything that needs you:
-              a write that may have been lost or may have missed the live data, a switch
-              that did not finish (exits non-zero then)
+  update      move both checkouts to what is published and restart, once the data is
+              protected — on Linux with ext4 switched to a copy while the data from before
+              is kept whole, elsewhere a verified backup; a failed start puts the data
+              back. Native mode only for now: Docker mode is refused (desktop/UPDATES.md)
+  update status [-v]  the copies of the data folder kept by its switches, and anything that
+              needs you: a write that may have been lost or may have missed the live data, a
+              switch or an update that did not finish (exits non-zero then); -v also lists the
+              processes the last switch could not inspect
   update resolve [--apply]  settle a switch that did not finish: says what is where, and with
               --apply files the tree that is not live for you, never touching the live one
   check-update  say whether a newer launcher release is published (installs nothing)
-  upgrade     install a newer launcher release: asks first, stops the stack, backs the
-              data up and checks the backup, replaces the launcher, updates and starts
+  upgrade     install a newer launcher release: asks first, stops the stack, protects the
+              data as update does, replaces the launcher, updates and starts
               the stack, and puts the data and the launcher back if any of that fails.
               --yes skips the question; --rollback undoes an upgrade that did not finish.
               Native mode only for now: Docker mode is refused (desktop/UPDATES.md)
@@ -92,7 +94,7 @@ flags:
   --keep-data uninstall: keep the volumes and the data folder
   -f          logs: follow
   --version   print the version and exit
-  --yes       upgrade: do not ask (the backup and the rollback still happen)
+  --yes       upgrade: do not ask (the data is still protected, and the rollback still happens)
   --rollback  upgrade: put back the launcher and the data an unfinished upgrade replaced
 `
 
@@ -132,6 +134,8 @@ type options struct {
 
 	// apply makes `update resolve` act instead of only saying what it would do.
 	apply bool
+	// verbose makes `update status` list what it otherwise only counts.
+	verbose bool
 }
 
 func run(argv []string) error {
@@ -467,6 +471,8 @@ func parseArgs(argv []string) (options, error) {
 			opts.keepData = true
 		case "--apply":
 			opts.apply = true
+		case "-v", "--verbose":
+			opts.verbose = true
 		case "-f", "--follow":
 			opts.follow = true
 		case "--yes", "-y":

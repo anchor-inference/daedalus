@@ -18,20 +18,23 @@ import (
 //	SHA256SUMS.sig:  "untrusted comment: …\n" + base64("Ed" | key id (8 bytes) | signature (64 bytes)) + "\n"
 //	public key:      "untrusted comment: …\n" + base64("Ed" | key id (8 bytes) | public key (32 bytes)) + "\n"
 //
-// trustedReleaseKeys is empty on purpose: which key, who holds its private half and where (a CI
-// secret, a hardware token, an offline machine), and how it is rotated are the operator's decisions
-// (desktop/SIGNING.md), and no key is made up here. While it is empty, a release is not required to
-// be signed — which is exactly the state in which publishing to users is a no-go. Once it holds a key, a
-// release without a valid SHA256SUMS.sig by one of them is refused, before anything is unpacked.
-var trustedReleaseKeys []string
+// trustedReleaseKeys are the public halves of the keys a release must be signed by. The one below is
+// the project's release key (key id df535393fa2485a1, which minisign shows as A18524FA935353DF). Its
+// private half is kept by the operator on their own machine and never on a server or in CI; releases
+// are signed there with desktop/sign-release.sh. A release without a valid SHA256SUMS.sig by one of
+// these keys is refused, before anything is unpacked. The fingerprint to compare out of band is in
+// desktop/SIGNING.md and the README.
+var trustedReleaseKeys = []string{"RWTfU1OT+iSFoaxGzNfGzkwHdVs2o8WmnCzBUo/LBUw2L4ssGN4xYx/2"}
 
-// A fixture build can inject a disposable public key with -ldflags -X without modifying the
-// source tree. Normal builds leave this empty; the operator still chooses the production key.
+// A fixture build puts a disposable public key in place of the project's with -ldflags -X, so that a
+// smoke test can sign its own releases; the project's key cannot sign anything outside the
+// operator's machine. It replaces the list rather than adding to it, so a fixture build trusts
+// exactly what its test signs with. Normal builds leave this empty.
 var linkedFixtureReleaseKey string
 
 func init() {
 	if linkedFixtureReleaseKey != "" {
-		trustedReleaseKeys = append(trustedReleaseKeys, linkedFixtureReleaseKey)
+		trustedReleaseKeys = []string{linkedFixtureReleaseKey}
 	}
 }
 

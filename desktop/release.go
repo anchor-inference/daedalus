@@ -20,14 +20,15 @@ import (
 // A release of the launcher is a GitHub release whose tag is desktop-v<major>.<minor>.<patch>. The
 // launcher asks for the list the same way install.sh does, anonymously, and never installs what it
 // finds on its own: the check only tells the operator, and `daedalus-desktop upgrade` is what
-// installs — after a yes, a backup and a check of that backup (upgrade.go).
+// installs — after a yes, and with the data protected first (protect.go, upgrade.go).
 //
 // What a release changes is two things with separate versions. The launcher binary is the release's
 // own. The code the stack runs is whatever the launcher fetches into the checkouts — today the tip
 // of main and the :latest image, whatever the release (repos.go). An upgrade therefore swaps the
-// binary and then moves the checkouts the way the new binary does, and the backup is taken before
-// either, because the app's database migrations run on the start that follows and are not assumed
-// to be reversible.
+// binary and then moves the checkouts the way the new binary does, and the data is protected before
+// either — a whole kept copy behind the writer fence on Linux with ext4, a verified backup elsewhere —
+// because the app's database migrations run on the start that follows and are not assumed to be
+// reversible.
 const releaseTagPrefix = "desktop-v"
 
 // releaseCheckInterval is how often a running launcher asks. Twice a day is plenty for something
@@ -79,8 +80,9 @@ func parseVersion(tag string) semver {
 	}
 	numbers := [3]int{}
 	for i, part := range parts {
+		// Digits only: Atoi takes a sign, and "+1" is not a version any installer would accept.
 		n, err := strconv.Atoi(part)
-		if err != nil || n < 0 || part == "" || (len(part) > 1 && part[0] == '0') {
+		if err != nil || n < 0 || part == "" || strings.Trim(part, "0123456789") != "" || (len(part) > 1 && part[0] == '0') {
 			return semver{}
 		}
 		numbers[i] = n
@@ -394,7 +396,7 @@ func (a *App) CheckReleases(ctx context.Context, show func(Notification) error) 
 			continue
 		}
 		if !same {
-			a.log("%s is available (this is %s): close the launcher and run %s — it backs your data up first", offer.To, offer.From, offer.Command)
+			a.log("%s is available (this is %s): close the launcher and run %s — it keeps the data from before first", offer.To, offer.From, offer.Command)
 		}
 		if !notified(a.paths, offer.To) {
 			if err := show(UpgradeNotification(a.Lang(), *offer)); err == nil {
@@ -416,7 +418,7 @@ func CheckUpdateCommand(ctx context.Context, pathsForCommand Paths) error {
 		return nil
 	}
 	defer fmt.Printf("note: %s\n", authenticationNote())
-	fmt.Printf("%s is available (this is %s)\nrelease notes: %s\nto install it, close the launcher and run:\n  %s\nit asks first and backs your data and the launcher up\n", offer.To, offer.From, offer.URL, upgradeCommandLine(pathsForCommand))
+	fmt.Printf("%s is available (this is %s)\nrelease notes: %s\nto install it, close the launcher and run:\n  %s\nit asks first, and keeps the data and the launcher from before so that a failure puts both back\n", offer.To, offer.From, offer.URL, upgradeCommandLine(pathsForCommand))
 	return nil
 }
 

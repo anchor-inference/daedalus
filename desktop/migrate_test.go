@@ -129,6 +129,12 @@ func TestAFailedCarryChangesNothing(t *testing.T) {
 func TestACarryNeverOverwrites(t *testing.T) {
 	p := legacyInstallation(t)
 	writeTree(t, browserdStateDir(p), map[string]string{"profile/Cookies": "a newer login"})
+	// Older by an hour, not by however little the two writes above were apart: the filesystem's
+	// clock is coarse, and two writes in one tick have one time.
+	hourAgo := time.Now().Add(-time.Hour)
+	for _, name := range []string{"Cookies", "Local State"} {
+		os.Chtimes(filepath.Join(p.LegacyRuntime, "browserd", "state", "profile", name), hourAgo, hourAgo)
+	}
 	if err := migrateLegacyRuntime(context.Background(), p, func(string, ...any) {}); err != nil {
 		t.Fatal(err)
 	}

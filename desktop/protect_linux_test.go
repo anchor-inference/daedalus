@@ -228,15 +228,18 @@ func TestTheKeptCopiesCardIsShownInABrowser(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 			defer cancel()
-			out, err := exec.CommandContext(ctx, "python3", "-c", keptCopiesScript, server.URL()+"status", shot).CombinedOutput()
+			fresh := filepath.Base(fenceRetainedPath(data, again, "pre"))
+			out, err := exec.CommandContext(ctx, "python3", "-c", keptCopiesScript, server.URL()+"status", shot, fresh).CombinedOutput()
 			if err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
 			got := string(out)
 			t.Logf("%s", got)
 			want := map[string][]string{
-				"en": {"Something here needs you", "A write may have been lost", "Kept: ", "daedalus-desktop update status"},
-				"ru": {"Здесь нужно ваше внимание", "запись могла потеряться", "Сохранено: ", "daedalus-desktop update status"},
+				"en": {"Something here needs you", "A write may have been lost", "Kept: ", "daedalus-desktop update status", " KB", "Remove",
+					"buttons=1", "plural 1=1 process could", "plural 22=22 processes could", "removed=True"},
+				"ru": {"Здесь нужно ваше внимание", "запись могла потеряться", "Сохранено: ", "daedalus-desktop update status", " КБ", "Удалить",
+					"buttons=1", "plural 1=1 процесс не", "plural 22=22 процесса не", "plural 25=25 процессов не", "plural 11=11 процессов не", "removed=True"},
 			}[lang]
 			if !strings.Contains(got, "visible=True") {
 				t.Fatalf("the card is not visible:\n%s", got)
@@ -246,6 +249,14 @@ func TestTheKeptCopiesCardIsShownInABrowser(t *testing.T) {
 					t.Fatalf("%q is not on the card:\n%s", line, got)
 				}
 			}
+			// The Remove button went through the fence: the fresh copy is gone, its record too, and
+			// the copy that may have lost a write is still there.
+			if exists(fenceRetainedPath(data, again, "pre")) {
+				t.Fatalf("the copy the page removed is still there")
+			}
+			if !exists(filepath.Join(fenceControlPath(data), "retained", pre+".json")) {
+				t.Fatalf("the record of the copy that may have lost a write was removed")
+			}
 		})
 	}
 }
@@ -253,7 +264,7 @@ func TestTheKeptCopiesCardIsShownInABrowser(t *testing.T) {
 const keptCopiesScript = `
 import sys
 from playwright.sync_api import sync_playwright
-url, shot = sys.argv[1], sys.argv[2]
+url, shot, fresh = sys.argv[1], sys.argv[2], sys.argv[3]
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": 1000, "height": 1300})
@@ -264,7 +275,14 @@ with sync_playwright() as p:
     print("visible=%s" % card.is_visible())
     print("trouble=%s" % ("decide" in (card.get_attribute("class") or "")))
     print(card.inner_text())
+    print("buttons=%d" % page.locator("#switches-items button").count())
+    for n in (1, 22, 25, 11):
+        print("plural %d=%s" % (n, page.evaluate("n => T(pluralKey('switch.item.unscanned', n)).replace('%s', n)", n)))
     if shot:
         page.screenshot(path=shot, full_page=True)
+    page.on("dialog", lambda dialog: dialog.accept())
+    page.locator('button[data-remove-copy="%s"]' % fresh).click()
+    page.wait_for_selector('button[data-remove-copy="%s"]' % fresh, state="detached", timeout=30000)
+    print("removed=True")
     browser.close()
 `

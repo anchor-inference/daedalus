@@ -22,7 +22,7 @@
 #   F  a backup that cannot be written: refused before anything is replaced, nothing changes
 # From v0.13.0, by the launcher itself:
 #   G  check-update finds v0.14.0; upgrade to it
-#   H  update: backed up first; a failed start puts the data back; Docker refused
+#   H  update: backed up first (the fence is off here); a failed start puts the data back; Docker refused
 #   I  install.sh over a launcher that has upgrade hands over and changes nothing by itself
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -49,7 +49,7 @@ pass=0
 ok() { pass=$((pass + 1)); printf 'PASS  %s\n' "$*"; }
 die() { printf 'FAIL  %s\n' "$*" >&2; exit 1; }
 expect_eq() { [ "$1" = "$2" ] || die "$3: got '$1', want '$2'"; ok "$3"; }
-stage_of() { python3 -c 'import json,sys; j=json.load(open(sys.argv[1])); print(j.get("kind","")+":"+j["stage"])' "$1/upgrade/journal.json"; }
+stage_of() { python3 -c 'import json,sys; j=json.load(open(sys.argv[1])); print(j.get("kind","")+":"+j["stage"])' "$(dirname "$1")/.daedalus-update/$(basename "$1")/upgrade.json"; }
 # tree <dir>: every file under it with its hash, links with their targets — the whole state.
 # The installation lock (data/upgrade/.lock) is the one file a refused attempt may leave: it is
 # never deleted, because removing a locked file lets two processes each hold "the" lock.
@@ -57,17 +57,36 @@ tree() { (cd "$1" && find . \( -path '*/data/upgrade' -o -path './upgrade' \) -p
 
 echo "work folder: $work"
 
-# --- the launchers ----------------------------------------------------------------------------
+# A release key made for this run, in the project key's place: every release below is signed with it,
+# the new launchers are built to trust it and nothing else, and the installer run is install.sh with
+# it written where the project's key is. OpenSSL makes and uses the Ed25519 key; python lays out the
+# signify records (the "Ed" tag, an 8-byte key id, then the key or the signature).
+key="$work/release-key.pem"
+mkdir -p "$work"
+openssl genpkey -algorithm ed25519 -out "$key" 2>/dev/null || die "this OpenSSL cannot make an Ed25519 key"
+record() { python3 -c 'import base64,sys; print(base64.b64encode(b"Ed"+b"smoke001"+sys.stdin.buffer.read()[-32:] if sys.argv[1]=="key" else b"Ed"+b"smoke001"+sys.stdin.buffer.read()).decode())' "$1"; }
+public="$(openssl pkey -in "$key" -pubout -outform DER | record key)"
+sign() { # sign <tag> <SHA256SUMS> <out>: the signature over the tag line and SHA256SUMS
+  printf 'daedalus-release %s\n' "$1" >"$3.message"
+  cat "$2" >>"$3.message"
+  openssl pkeyutl -sign -inkey "$key" -rawin -in "$3.message" -out "$3.raw"
+  { printf 'untrusted comment: smoke\n'; record sig <"$3.raw"; } >"$3"
+  rm -f "$3.message" "$3.raw"
+}
+sed "s|^release_keys=\".*\"\$|release_keys=\"$public\"|" install.sh >"$work/install.sh"
+grep -qx "release_keys=\"$public\"" "$work/install.sh" || die "the installer's key line was not replaced"
+
+# The launchers.
 mkdir -p "$work/bin" "$work/src-v0.12.0"
 git -C .. archive desktop-v0.12.0 desktop | tar -x -C "$work/src-v0.12.0"
 (cd "$work/src-v0.12.0/desktop" && CGO_ENABLED=0 go build -tags nowebview -trimpath -ldflags "-X main.version=desktop-v0.12.0" -o "$work/bin/v0.12.0" .)
-build() { CGO_ENABLED=0 go build -tags nowebview,upgradefixture -trimpath -ldflags "-X main.version=$1" -o "$2" .; }
+build() { CGO_ENABLED=0 go build -tags nowebview,upgradefixture -trimpath -ldflags "-X main.version=$1 -X main.linkedFixtureReleaseKey=$public" -o "$2" .; }
 build desktop-v0.13.0 "$work/bin/v0.13.0"
 build desktop-v0.14.0 "$work/bin/v0.14.0"
 "$work/bin/v0.12.0" --help | grep -q '^  upgrade ' && die "the v0.12.0 build knows upgrade; it is not the old launcher"
 ok "the old launcher is built from the desktop-v0.12.0 tag and has no upgrade command"
 
-# --- the release server -----------------------------------------------------------------------
+# The release server.
 srv="$work/srv"
 mkdir -p "$srv/download"
 port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
@@ -89,12 +108,13 @@ publish() { # publish <tag> <binary>
   chmod +x "$stage/daedalus-desktop" "$stage/ptyd" "$stage/browserd"
   tar -czf "$srv/download/$tag/$asset" -C "$stage" daedalus-desktop ptyd browserd miniapp-dist
   (cd "$srv/download/$tag" && sha256sum "$asset" >SHA256SUMS)
+  sign "$tag" "$srv/download/$tag/SHA256SUMS" "$srv/download/$tag/SHA256SUMS.sig"
   published=("$tag" "${published[@]}")
   python3 - "$srv/releases" "http://127.0.0.1:$port" "$asset" "${published[@]}" <<'PY'
 import json, sys
 out, base, asset, *tags = sys.argv[1:]
 json.dump([{"tag_name": t, "draft": False, "prerelease": False, "html_url": f"{base}/notes/{t}",
-            "assets": [{"name": n, "browser_download_url": f"{base}/download/{t}/{n}"} for n in (asset, "SHA256SUMS")]}
+            "assets": [{"name": n, "browser_download_url": f"{base}/download/{t}/{n}"} for n in (asset, "SHA256SUMS", "SHA256SUMS.sig")]}
            for t in tags], open(out, "w"))
 PY
 }
@@ -115,10 +135,10 @@ seed() { # seed <data folder> [mode]: what an installation holds, and the fixtur
 installer() {
   local name="$1"
   shift
-  env DAEDALUS_DIR="$work/$name/Daedalus" "$@" setsid sh ./install.sh </dev/null >"$work/install-$name.log" 2>&1
+  env DAEDALUS_DIR="$work/$name/Daedalus" "$@" setsid sh "$work/install.sh" </dev/null >"$work/install-$name.log" 2>&1
 }
 
-# --- A: fresh installs of v0.12.0 -------------------------------------------------------------
+# A: fresh installs of v0.12.0.
 publish desktop-v0.12.0 "$work/bin/v0.12.0"
 for name in a b c d e; do
   installer "$name" || die "install.sh ($name): $(cat "$work/install-$name.log")"
@@ -133,7 +153,7 @@ old_sum="$(sha256sum "$work/bin/v0.12.0" | cut -d' ' -f1)"
 
 publish desktop-v0.13.0 "$work/bin/v0.13.0"
 
-# --- B: the bridge works ----------------------------------------------------------------------
+# B: the bridge works.
 A="$work/a/Daedalus/daedalus-desktop"; AD="$work/a/Daedalus/data"
 installer a DAEDALUS_UPGRADE_YES=1 DAEDALUS_UPGRADE_FIXTURE=ok || die "B: $(cat "$work/install-a.log")"
 grep -q "predates upgrade" "$work/install-a.log" || die "B: the installer did not take the bridge"
@@ -165,18 +185,18 @@ assert open(os.path.join(launcher, "ptyd")).read() == "fixture ptyd desktop-v0.1
 PY
 ok "B: the backup holds the pre-upgrade data and the v0.12.0 launcher byte for byte, checked by Python"
 
-# --- C: the bridge fails its health check ------------------------------------------------------
+# C: the bridge fails its health check.
 B="$work/b/Daedalus/daedalus-desktop"; BD="$work/b/Daedalus/data"
-before="$(tree "$work/b/Daedalus" | grep -v -e '\./data/backups' -e '\./data/upgrade' -e '\./\.daedalus-upgrade')"
+before="$(tree "$work/b/Daedalus" | grep -v -e '\./data/backups' -e '\./data/upgrade' -e '\./\.daedalus-upgrade' -e '\./\.daedalus-update')"
 if installer b DAEDALUS_UPGRADE_YES=1 DAEDALUS_UPGRADE_FIXTURE=fail; then die "C: a failed bridge exited 0"; fi
 grep -q 'Data restored and checked against the backup' "$work/install-b.log" || die "C: $(cat "$work/install-b.log")"
 expect_eq "$(sha256sum "$B" | cut -d' ' -f1)" "$old_sum" "C: the v0.12.0 launcher is back byte for byte"
-after="$(tree "$work/b/Daedalus" | grep -v -e '\./data/backups' -e '\./data/upgrade' -e '\./\.daedalus-upgrade')"
+after="$(tree "$work/b/Daedalus" | grep -v -e '\./data/backups' -e '\./data/upgrade' -e '\./\.daedalus-upgrade' -e '\./\.daedalus-update')"
 expect_eq "$after" "$before" "C: every file, link and folder of the installation is as it was"
 expect_eq "$(stage_of "$BD")" "upgrade:rolled-back" "C: the journal says rolled-back"
 expect_eq "$("$B" --version)" desktop-v0.12.0 "C: the v0.12.0 launcher runs again"
 
-# --- D, E, F: refusals that change nothing ----------------------------------------------------
+# D, E, F: refusals that change nothing.
 refuses() { # refuses <name> <what> <expected text> [env...]
   local name="$1" what="$2" text="$3"
   shift 3
@@ -193,14 +213,14 @@ mkdir -p "$work/e/Daedalus/data/backups" && chmod 0500 "$work/e/Daedalus/data/ba
 refuses e "F: a backup that cannot be written" "nothing was changed" DAEDALUS_UPGRADE_YES=1 DAEDALUS_UPGRADE_FIXTURE=ok
 chmod 0700 "$work/e/Daedalus/data/backups"
 
-# --- G: v0.13.0 upgrades itself ---------------------------------------------------------------
+# G: v0.13.0 upgrades itself.
 publish desktop-v0.14.0 "$work/bin/v0.14.0"
 out="$("$A" check-update --data "$AD")"
 case "$out" in *"desktop-v0.14.0 is available"*) ok "G: check-update finds desktop-v0.14.0" ;; *) die "G: $out" ;; esac
 DAEDALUS_UPGRADE_FIXTURE=ok "$A" upgrade --yes --data "$AD" >"$work/g.log" 2>&1 || die "G: $(cat "$work/g.log")"
 expect_eq "$("$A" --version)" desktop-v0.14.0 "G: v0.13.0 → v0.14.0 by the launcher's own upgrade"
 
-# --- H: update keeps the invariant ------------------------------------------------------------
+# H: update keeps the invariant.
 printf 'schema v1\n' >"$AD/state/daedalus.sqlite"
 before="$(tree "$AD" | grep -v -e '\./backups' -e '\./upgrade')"
 if DAEDALUS_UPGRADE_FIXTURE=fail "$A" update --data "$AD" >"$work/h1.log" 2>&1; then die "H: a failed update exited 0"; fi
@@ -211,7 +231,8 @@ n_before="$(ls "$AD/backups" | wc -l)"
 DAEDALUS_UPGRADE_FIXTURE=ok "$A" update --data "$AD" >"$work/h2.log" 2>&1 || die "H: $(cat "$work/h2.log")"
 expect_eq "$(cat "$AD/state/daedalus.sqlite")" "schema migrated by desktop-v0.14.0" "H: an update that works keeps its migration"
 expect_eq "$(stage_of "$AD")" "update:committed" "H: the journal says the update was committed"
-[ "$(ls "$AD/backups" | wc -l)" -ge "$n_before" ] && grep -q "updated; the data from before it stays at $AD/backups/" "$work/h2.log" && ok "H: the update took a backup first"
+# A check that fails says so: a chain of && without a die would skip it in silence.
+if [ "$(ls "$AD/backups" | wc -l)" -ge "$n_before" ] && grep -q "updated; the verified backup is $AD/backups/" "$work/h2.log"; then ok "H: the update took a backup first"; else die "H: the update took a backup first: $(cat "$work/h2.log")"; fi
 DD="$work/d/Daedalus/data"
 before="$(tree "$DD")"
 # The Docker installation is still on v0.12.0 (the bridge refused it), and that launcher's own update
@@ -223,7 +244,7 @@ rm "$work/d/Daedalus/daedalus-desktop-new"
 grep -q "not available yet" "$work/h4.log" || die "H: $(cat "$work/h4.log")"
 expect_eq "$(tree "$DD")" "$before" "H: Docker update refused with nothing changed"
 
-# --- I: install.sh over a launcher that has upgrade ------------------------------------------
+# I: install.sh over a launcher that has upgrade.
 before="$(tree "$work/a/Daedalus")"
 if installer a; then die "I: install.sh did not stop"; fi
 grep -q "handing over to its launcher's upgrade" "$work/install-a.log" || die "I: $(cat "$work/install-a.log")"

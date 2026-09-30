@@ -370,9 +370,33 @@ func fenceTestHelper(mode string) {
 			seams.afterExchange = func(p, c *fenceTree) { die() }
 		case "before-exchange":
 			seams.afterCFence = func(c *fenceTree) { die() }
+		case "committing":
+			seams.afterFinalSweep = func(p, c *fenceTree) { die() }
 		}
 		fencedSwitch(fenceOptions{Data: path, seams: seams})
 		fmt.Println("finished without dying")
+	case "fence-map-read":
+		// A reader that maps the file shared and read-only and closes its descriptor: it holds no
+		// file open, and nothing but its memory map says it is using the tree.
+		fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC, 0)
+		if err != nil {
+			fmt.Println("error", err)
+			os.Exit(3)
+		}
+		mapping, err := unix.Mmap(fd, 0, 1, unix.PROT_READ, unix.MAP_SHARED)
+		if err != nil {
+			fmt.Println("error", err)
+			os.Exit(3)
+		}
+		unix.Close(fd)
+		fmt.Println("ready", mapping[0])
+		for stdin.Scan() {
+		}
+	case "fence-switch":
+		// One switch of its own process, so that what it left in the page cache dies with nothing
+		// but the kernel to write it back.
+		rep := fencedSwitch(fenceOptions{Data: path})
+		fmt.Println("outcome", rep.Outcome, rep.Reason)
 	case "fence-readwrite-lock":
 		// The lock call of the builds before the lock was held read-only: O_CREAT|O_RDWR, then flock.
 		fd, err := unix.Open(path, unix.O_CREAT|unix.O_RDWR|unix.O_CLOEXEC, 0o600)

@@ -31,6 +31,7 @@ const helperEnv = "DAEDALUS_TEST_HELPER"
 var platformTestHelper func(mode string)
 
 func TestMain(m *testing.M) {
+	useTestReleaseKey()
 	if platformTestHelper != nil {
 		platformTestHelper(os.Getenv(helperEnv))
 	}
@@ -57,6 +58,9 @@ func TestMain(m *testing.M) {
 		fmt.Println("locked", lock.Token())
 		time.Sleep(time.Minute)
 		os.Exit(0)
+	case "minisign":
+		// sign_release_test.go's stand-in for minisign.
+		os.Exit(fakeMinisign(os.Args[1:]))
 	case "serve":
 		// A stack answering /app, with the boot id it was given (or none).
 		listener, err := net.Listen("tcp", "127.0.0.1:"+os.Getenv("HELPER_PORT"))
@@ -140,8 +144,6 @@ func freePort(t *testing.T) string {
 	return fmt.Sprint(l.Addr().(*net.TCPAddr).Port)
 }
 
-// ---- the lock --------------------------------------------------------------------------------
-
 func TestTheLockIsExclusiveAndSaysWhoHasIt(t *testing.T) {
 	p, _ := NewPaths(t.TempDir())
 	first, err := AcquireLock(p, "upgrade")
@@ -187,8 +189,6 @@ func TestAKilledHolderReleasesTheLock(t *testing.T) {
 	}
 	lock.Release()
 }
-
-// ---- two at once ---------------------------------------------------------------------------------
 
 func TestTwoUpgradesAtOnceOneRunsAndTheOtherChangesNothing(t *testing.T) {
 	withVersion(t, "desktop-v0.12.0")
@@ -237,8 +237,6 @@ func TestUpdateFromATerminalIsRefusedWhileALauncherHoldsTheInstallation(t *testi
 	_ = cmd
 }
 
-// ---- health ------------------------------------------------------------------------------------
-
 func TestHealthAcceptsOnlyThisStartsStack(t *testing.T) {
 	port := freePort(t)
 	_, line := helper(t, "serve", "HELPER_PORT="+port, "DAEDALUS_BOOT_ID=ours")
@@ -275,8 +273,6 @@ func TestAForeignAnswerAfterTheCheckDoesNotCommit(t *testing.T) {
 		t.Fatalf("an ordinary start no longer takes an older app's answer: %v", err)
 	}
 }
-
-// ---- orphans -----------------------------------------------------------------------------------
 
 func TestAStackACrashedLauncherLeftIsFoundAndStopped(t *testing.T) {
 	if runtime.GOOS == "windows" {

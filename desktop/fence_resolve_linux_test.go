@@ -34,7 +34,7 @@ func TestAnUnfinishedSwitchIsResolvedWithoutTouchingTheLiveData(t *testing.T) {
 			if blocked.Outcome != fenceFailClosed || !strings.Contains(blocked.Reason, "update resolve") {
 				t.Fatalf("an unfinished switch did not block the next: %+v", blocked)
 			}
-			if text, code := fenceStatus(fenceControlDir(data)); code == 0 || !strings.Contains(text, "update resolve") {
+			if text, code := fenceStatus(fenceControlDir(data), true); code == 0 || !strings.Contains(text, "update resolve") {
 				t.Fatalf("status does not point at the unfinished switch: %d %s", code, text)
 			}
 			plan, err := fenceResolve(data, "", false)
@@ -69,14 +69,24 @@ func TestAnUnfinishedSwitchIsResolvedWithoutTouchingTheLiveData(t *testing.T) {
 			if at == "after-exchange" && fenceIno(t, trees[0]) != original {
 				t.Fatal("the kept tree is not the original")
 			}
+			var meta fenceRetainedMeta
+			if err := readJSON(trees[0]+".json", &meta); err != nil || meta.GC != "manual" {
+				t.Fatalf("a tree resolve filed is not the operator's to remove (gc %q): %v", meta.GC, err)
+			}
+			if at == "after-exchange" && len(meta.Manifest) == 0 {
+				t.Fatal("the manifest the switch recorded in advance was not kept with the tree")
+			}
 			if g := fenceGC(t, data, filepath.Base(trees[0]), false, nil); g.Outcome != fenceRetainedGC {
 				t.Fatalf("a resolved tree was removed automatically: %+v", g)
 			}
 			if again, _ := fenceResolve(data, "", true); len(again) != 0 {
 				t.Fatalf("a resolved switch came back: %+v", again)
 			}
+			// Kept with the manifest the switch recorded before its exchange, the tree is an ordinary
+			// kept copy; without one it is listed as unrecorded.
+			wantKind := map[string]string{"after-exchange": "retained", "before-exchange": "unrecorded"}[at]
 			sum := fenceSummarize(fenceControlDir(data))
-			if sum.Trouble || len(sum.Items) == 0 || sum.Items[0].Kind != "unrecorded" {
+			if sum.Trouble || len(sum.Items) == 0 || sum.Items[0].Kind != wantKind {
 				t.Fatalf("after resolving, the kept tree should be listed and nothing be wrong: %+v", sum)
 			}
 			next := fenceRun(t, data, nil)

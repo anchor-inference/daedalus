@@ -190,7 +190,7 @@ func (pr *Process) runOnce(ctx context.Context) error {
 	pr.starts++
 	pr.mu.Unlock()
 	pr.logf("%s started pid=%d", pr.Name, cmd.Process.Pid)
-	writeChildRecord(pr.PidFile, ChildRecord{Name: pr.Name, PID: cmd.Process.Pid, Program: pr.Argv[0], Started: time.Now().UTC(), IsolatedConsole: runtime.GOOS == "windows"})
+	writeChildRecord(pr.PidFile, ChildRecord{Name: pr.Name, PID: cmd.Process.Pid, Program: childProgram(pr.Argv), Started: time.Now().UTC(), IsolatedConsole: runtime.GOOS == "windows"})
 	err := cmd.Wait()
 	removeChildRecord(pr.PidFile, cmd.Process.Pid)
 	if logFile != nil {
@@ -650,7 +650,7 @@ func supervisorEnv(p Paths, base []string, settings map[string]string) []string 
 	// The app serves the operator's own machine, and the services a session starts are reached at
 	// the same address: nothing here is published to a network.
 	add("SERVICES_PUBLIC_HOST", "127.0.0.1")
-	if runtime.GOOS == "windows" {
+	if supervisorOverTCP(p, runtime.GOOS) {
 		add("DAEDALUS_SUPERVISOR_TCP", "127.0.0.1:"+parsePort(settings["DAEDALUS_SUPERVISOR_PORT"], defaultSupervisorPort))
 	} else {
 		add("DAEDALUS_SUPERVISOR_SOCKET", p.SupervisorSocket)
@@ -973,7 +973,9 @@ func botEnv(p Paths, env []string) []string {
 		"BOT_REPO_DIR="+p.Bot,
 		"CORE_REPO_DIR="+p.Core,
 	)
-	if runtime.GOOS == "windows" {
+	// The same rule the supervisor is started with: a command pointed at a socket the supervisor
+	// does not listen on reads the defaults of a container that is not here.
+	if supervisorOverTCP(p, runtime.GOOS) {
 		out = append(out, "SUPERVISOR_TCP="+envValue(env, "DAEDALUS_SUPERVISOR_TCP"))
 	} else {
 		out = append(out, "SUPERVISOR_SOCKET="+envValue(env, "DAEDALUS_SUPERVISOR_SOCKET"))
@@ -994,7 +996,7 @@ func envValue(env []string, name string) string {
 // SupervisorReachable reports whether the supervisor is listening, which is what the status page
 // needs to know before it offers a button that talks to it.
 func (n *Native) SupervisorReachable() bool {
-	if runtime.GOOS == "windows" {
+	if supervisorOverTCP(n.paths, runtime.GOOS) {
 		port := parsePort(readEnv(readFile(n.paths.Env))["DAEDALUS_SUPERVISOR_PORT"], defaultSupervisorPort)
 		conn, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 2*time.Second)
 		if err != nil {

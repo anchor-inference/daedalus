@@ -44,6 +44,10 @@ func newBridge(t *testing.T, release *fixtureRelease) *bridgeCase {
 		sum = strings.Repeat("0", 64)
 	}
 	os.WriteFile(sumsPath, []byte(sum+"  "+asset+"\n"), 0o644)
+	// The signature beside SHA256SUMS, where the installers put it.
+	if !release.unsigned {
+		os.WriteFile(sumsPath+".sig", testReleaseSign(releaseMessage("desktop-v0.13.0", []byte(sum+"  "+asset+"\n"))), 0o644)
+	}
 	// The bridge's own file: the launcher out of the same archive, as install.sh unpacks it.
 	self := filepath.Join(t.TempDir(), "daedalus-desktop")
 	os.WriteFile(self, []byte("new launcher"), 0o755)
@@ -262,8 +266,6 @@ func TestAFailedBackupStopsBeforeAnythingIsReplaced(t *testing.T) {
 	}
 }
 
-// ---- update ------------------------------------------------------------------------------------
-
 func updater(t *testing.T) (*Upgrader, *installation) {
 	t.Helper()
 	withVersion(t, "desktop-v0.13.0")
@@ -343,8 +345,12 @@ func TestAnUpdateCutOffIsFoundAndRolledBack(t *testing.T) {
 		t.Fatal("a second update ran on top of an unfinished one")
 	}
 	rollback := &Upgrader{paths: in.paths, stack: in.stack, mode: ModeNative, out: &bytes.Buffer{}, opts: upgradeOptions{rollback: true}}
-	if err := rollback.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "rolled back") {
-		t.Fatalf("err = %v", err)
+	// A rollback that was asked for and finished is a success, in its exit status too.
+	if err := rollback.Run(context.Background()); err != nil {
+		t.Fatalf("a requested rollback that finished reported a failure: %v", err)
+	}
+	if j, err := readJournal(in.paths); err != nil || j.Stage != stageRolledBack {
+		t.Fatalf("journal after the rollback: %+v %v", j, err)
 	}
 	if in.file(t, "data/state/daedalus.sqlite") != "schema v1\n" {
 		t.Fatal("not put back")
@@ -378,8 +384,6 @@ func TestDockerUpdateIsRefusedWithNothingChanged(t *testing.T) {
 		t.Fatal("the refusal does not say where the manual path is")
 	}
 }
-
-// ---- the notice on the launcher's page ---------------------------------------------------------
 
 func TestTheStatusPageHasTheUpgradeCard(t *testing.T) {
 	body, err := uiFiles.ReadFile("ui/status.html")

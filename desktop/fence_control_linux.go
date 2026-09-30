@@ -25,22 +25,35 @@ type fenceControl struct {
 	key   [2]uint64
 	sub   map[string]*os.File
 	locks []*os.File
+	seams *fenceSeams
 }
 
 var fenceControlSubdirs = []string{"locks", "journal", "reports", "retained", "trash"}
 
+// fenceOpenControl opens (creating as needed) the control folder at name, a path relative to the
+// data folder's parent: .daedalus-update/<data folder's name> unless a test says otherwise. One
+// folder per data folder, because two data folders may share a parent (--data), and one's update
+// must never see, let alone remove, the other's kept copies or settle its unfinished switch.
 func fenceOpenControl(parent *os.File, name string, euid uint32, dev uint64, seams *fenceSeams) (*fenceControl, string) {
-	fd, reason := fenceMkdirPrivate(parent, name, euid, seams)
-	if reason != "" {
-		return nil, "the control folder: " + reason
+	dir, fd := parent, -1
+	for i, part := range strings.Split(filepath.Clean(name), string(filepath.Separator)) {
+		next, reason := fenceMkdirPrivate(dir, part, euid, seams)
+		if i > 0 {
+			dir.Close()
+		}
+		if reason != "" {
+			return nil, "the control folder: " + reason
+		}
+		fd = next
+		dir = os.NewFile(uintptr(fd), part)
 	}
 	var st unix.Stat_t
 	if err := unix.Fstat(fd, &st); err != nil || uint64(st.Dev) != dev {
-		unix.Close(fd)
+		dir.Close()
 		return nil, "the control folder is not on the data folder's filesystem"
 	}
-	k := &fenceControl{file: os.NewFile(uintptr(fd), name), path: filepath.Join(parent.Name(), name),
-		key: [2]uint64{uint64(st.Dev), st.Ino}, sub: make(map[string]*os.File)}
+	k := &fenceControl{file: dir, path: filepath.Join(parent.Name(), name),
+		key: [2]uint64{uint64(st.Dev), st.Ino}, sub: make(map[string]*os.File), seams: seams}
 	for _, sub := range fenceControlSubdirs {
 		subFD, reason := fenceMkdirPrivate(k.file, sub, euid, seams)
 		if reason != "" {
@@ -86,10 +99,22 @@ func (k *fenceControl) unlock() {
 	k.locks = nil
 }
 
-// writeFile replaces sub/name durably: a temporary file, fsync, rename, fsync of the folder.
-func (k *fenceControl) writeFile(sub, name string, body []byte) error {
+// writeFile replaces sub/name durably: a temporary file, fsync, rename, fsync of the folder. A write
+// that fails removes its temporary file: on a full disk an empty .tmp is one more thing nobody can
+// tell apart from a record.
+func (k *fenceControl) writeFile(sub, name string, body []byte) (err error) {
 	dir := k.sub[sub]
 	tmp := name + ".tmp"
+	defer func() {
+		if err != nil {
+			_ = unix.Unlinkat(int(dir.Fd()), tmp, 0)
+		}
+	}()
+	if k.seams != nil && k.seams.controlWrite != nil {
+		if err := k.seams.controlWrite(sub, name); err != nil {
+			return err
+		}
+	}
 	fd, err := unix.Openat(int(dir.Fd()), tmp, unix.O_WRONLY|unix.O_CREAT|unix.O_TRUNC|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o600)
 	if err != nil {
 		return err
@@ -131,10 +156,13 @@ func (k *fenceControl) readFile(sub, name string) ([]byte, error) {
 	return []byte(buf.String()), nil
 }
 
-func (k *fenceControl) journal(j fenceJournal) {
+func (k *fenceControl) journal(j fenceJournal) error {
 	j.Updated = time.Now().UTC()
-	body, _ := json.Marshal(j)
-	_ = k.writeFile("journal", j.Op+".json", body)
+	body, err := json.Marshal(j)
+	if err != nil {
+		return err
+	}
+	return k.writeFile("journal", j.Op+".json", body)
 }
 
 // unfinished names a switch that stopped without reaching its end — a crash, or a third party
@@ -167,25 +195,67 @@ func (k *fenceControl) unfinished() string {
 	return ""
 }
 
-// adopt files one of our trees under retained/<name>, by inode before and after the rename. If the
-// name led to something else by the time of the rename, that tree is set aside as foreign with no
-// record, and a tree without a record is never removed.
-func (k *fenceControl) adopt(t *fenceTree, name, op, kind string, manifest fenceManifest, gc, reason string) error {
+// errFenceNotDurable is adopt's answer when the tree is filed and recorded but the folders could not
+// be synced: the disk reported an error, and a power cut before its own writeback could undo the move.
+var errFenceNotDurable = errors.New("the move could not be written to the disk")
+
+// errFenceNotRecorded is adopt's answer when the record could not be written — a full disk above
+// all. The tree has not moved; nothing about it changed.
+var errFenceNotRecorded = errors.New("the record of the tree could not be written")
+
+// adopt files one of our trees under retained/<meta.Name>, by inode before and after the rename.
+// The record is written first — unless the caller wrote it in advance (recorded) — so that no moment
+// exists in which the tree is filed without one: a tree without a record can be neither restored
+// nor removed, and after a crash nobody could tell what it held. If the name led to something else
+// by the time of the rename, that tree is set aside as foreign and the record goes, and a tree
+// without a record is never removed. The rename is made durable before this returns.
+func (k *fenceControl) adopt(t *fenceTree, meta fenceRetainedMeta, recorded bool) error {
 	retained := k.sub["retained"]
 	root := t.root()
+	name := meta.Name
 	if err := fenceSameNamed(root); err != nil {
 		return fmt.Errorf("before the move: %w", err)
 	}
-	if err := unix.Renameat2(int(root.parent.Fd()), root.name, int(retained.Fd()), name, unix.RENAME_NOREPLACE); err != nil {
+	if !recorded {
+		if meta.Created.IsZero() {
+			meta.Created = time.Now().UTC()
+		}
+		if err := k.writeMeta(meta); err != nil {
+			return fmt.Errorf("%w: %v", errFenceNotRecorded, err)
+		}
+	}
+	from := root.parent
+	if err := unix.Renameat2(int(from.Fd()), root.name, int(retained.Fd()), name, unix.RENAME_NOREPLACE); err != nil {
+		k.forget(name)
 		return err
 	}
 	t.rebind(retained, name)
 	if err := fenceSameNamed(root); err != nil {
+		k.forget(name)
 		_ = unix.Renameat2(int(retained.Fd()), name, int(retained.Fd()), "foreign-"+name, unix.RENAME_NOREPLACE)
 		return fmt.Errorf("after the move: %w", err)
 	}
-	meta := fenceRetainedMeta{Name: name, Kind: kind, Op: op, GC: gc, Reason: reason, Created: time.Now().UTC(), Manifest: manifest}
-	return k.writeMeta(meta)
+	// Both folders the rename changed, so that a power cut cannot bring the tree back under its old
+	// name while its record says it is here.
+	if err := k.durable("retain", func() error {
+		if err := retained.Sync(); err != nil {
+			return err
+		}
+		return from.Sync()
+	}); err != nil {
+		return fmt.Errorf("%w: the move of %s: %v", errFenceNotDurable, name, err)
+	}
+	return nil
+}
+
+// durable runs one step that makes something survive a power cut, through the test seam first.
+func (k *fenceControl) durable(what string, do func() error) error {
+	if k.seams != nil && k.seams.sync != nil {
+		if err := k.seams.sync(what); err != nil {
+			return err
+		}
+	}
+	return do()
 }
 
 func (k *fenceControl) writeMeta(meta fenceRetainedMeta) error {
@@ -274,7 +344,30 @@ func (k *fenceControl) collect(name string, operator bool, euid int, seams *fenc
 		g.Reason = "kept until the operator removes it: " + meta.Reason
 		return g
 	}
+	if meta.Status == fenceStatusRemoving {
+		// A removal that was cut off (a crash, a kill) left the rest of the tree in the trash. It
+		// goes on from there, under the same fence, and what is left must still be exactly as
+		// recorded.
+		k.remove(k.sub["trash"], name, meta, euid, seams, &g)
+		return g
+	}
+	k.remove(k.sub["retained"], name, meta, euid, seams, &g)
+	return g
+}
+
+// remove is collect's work for a tree at dir/name whose record is meta — a tree under retained, or
+// the slot of a switch that never exchanged, whose record was never written: on a full disk the
+// record may not fit, and the slot is exactly what has to go to free the space. Whatever does not
+// end in DELETED leaves the tree under retained with its record, or where it was when the removal
+// never touched it.
+func (k *fenceControl) remove(dir *os.File, name string, meta fenceRetainedMeta, euid int, seams *fenceSeams, g *fenceGCReport) {
 	retained, trash := k.sub["retained"], k.sub["trash"]
+	inRetained, resume := dir == retained, dir == trash
+	// keep records the tree as kept for the operator, wherever it is left.
+	keep := func(change func(*fenceRetainedMeta)) {
+		change(&meta)
+		_ = k.writeMeta(meta)
+	}
 	sig := fenceSIGIO()
 	abort := func() error {
 		if fenceSIGIO() != sig {
@@ -283,10 +376,10 @@ func (k *fenceControl) collect(name string, operator bool, euid int, seams *fenc
 		return nil
 	}
 	leases := 0
-	r, err := fenceOpenTree("R", retained, name, euid, seams, &leases)
+	r, err := fenceOpenTree("R", dir, name, euid, seams, &leases)
 	if err != nil {
 		g.Reason = fenceGCReason(err)
-		return g
+		return
 	}
 	defer r.close()
 	if seams != nil && seams.gcAfterFence != nil {
@@ -295,7 +388,7 @@ func (k *fenceControl) collect(name string, operator bool, euid int, seams *fenc
 	current, err := r.manifest(abort)
 	if err != nil {
 		g.Reason = fenceGCReason(err)
-		return g
+		return
 	}
 	refs, unscanned, limits := fenceScanProcs(r.inodes())
 	g.Unscanned, g.Limits = unscanned, limits
@@ -304,28 +397,53 @@ func (k *fenceControl) collect(name string, operator bool, euid int, seams *fenc
 			g.Entries = append(g.Entries, fenceEntryReport{Tree: "R", Path: ref.Path, Cause: "a process is inside it (" + ref.What + ")", PID: ref.PID, TID: ref.TID})
 		}
 		g.Reason = "held open: a process is inside it"
-		return g
+		return
 	}
-	if diffs := fenceManifestDiff(meta.Manifest, current); len(diffs) > 0 {
+	var diffs []string
+	for _, diff := range fenceManifestDiff(meta.Manifest, current) {
+		// What the removal that was cut off already unlinked is missing, and only that may be; a
+		// directory it emptied has fewer links and an mtime of its own doing.
+		if resume && (strings.HasPrefix(diff, "missing: ") || meta.Manifest[strings.TrimPrefix(diff, "changed: ")].Kind == "dir") {
+			continue
+		}
+		diffs = append(diffs, diff)
+	}
+	if len(diffs) > 0 {
 		for _, diff := range diffs {
 			g.Entries = append(g.Entries, fenceEntryReport{Tree: "R", Path: diff, Cause: "differs from the record"})
 		}
 		g.Reason = "changed after it was recorded: possible late write"
-		return g
+		return
 	}
 	if err := fenceSameNamed(r.root()); err != nil {
 		g.Reason = "not where it was recorded: " + err.Error()
-		return g
+		return
 	}
-	if err := unix.Renameat2(int(retained.Fd()), name, int(trash.Fd()), name, unix.RENAME_NOREPLACE); err != nil {
+	if resume {
+		k.finishRemoval(r, meta, abort, seams, g, keep)
+		return
+	}
+	// The trash is written to before the first unlink: a removal cut off half-way leaves a tree in
+	// the trash that update status names, with the record that says what it was.
+	meta.Status = fenceStatusRemoving
+	if err := k.writeMeta(meta); err != nil && inRetained {
+		g.Reason = "the removal could not be recorded: " + err.Error()
+		return
+	}
+	if err := unix.Renameat2(int(dir.Fd()), name, int(trash.Fd()), meta.Name, unix.RENAME_NOREPLACE); err != nil {
+		meta.Status = ""
+		_ = k.writeMeta(meta)
+		if !inRetained {
+			k.forget(meta.Name)
+		}
 		g.Reason = "cannot be moved to the trash: " + err.Error()
-		return g
+		return
 	}
-	r.rebind(trash, name)
+	r.rebind(trash, meta.Name)
 	if err := fenceSameNamed(r.root()); err != nil {
 		g.Reason = "another tree arrived in the trash in its place: " + err.Error()
-		k.setMeta(name, func(m *fenceRetainedMeta) { m.GC = "manual"; m.Reason = g.Reason })
-		return g
+		keep(func(m *fenceRetainedMeta) { m.GC = "manual"; m.Reason = g.Reason })
+		return
 	}
 	if seams != nil && seams.gcAfterTrash != nil {
 		seams.gcAfterTrash(r)
@@ -341,28 +459,37 @@ func (k *fenceControl) collect(name string, operator bool, euid int, seams *fenc
 	if fenceSweepFails(sweep) {
 		g.Entries, g.Overflow = sweep.Entries, sweep.Overflow
 		g.Reason = "activity during the removal fence"
-		if err := k.putBack(r, name); err != nil {
+		if err := k.putBack(r, meta.Name); err != nil {
 			g.Reason += "; it stays in the trash: " + err.Error()
-			k.setMeta(name, func(m *fenceRetainedMeta) { m.GC = "manual"; m.Reason = g.Reason })
+			keep(func(m *fenceRetainedMeta) { m.GC = "manual"; m.Reason = g.Reason })
+			return
 		}
-		return g
+		keep(func(m *fenceRetainedMeta) { m.Status = "" })
+		return
 	}
-	k.delete(r, name, abort, seams, &g)
+	k.finishRemoval(r, meta, abort, seams, g, keep)
+}
+
+// finishRemoval is the unlinking, from the trash, and the record's end.
+func (k *fenceControl) finishRemoval(r *fenceTree, meta fenceRetainedMeta, abort func() error, seams *fenceSeams, g *fenceGCReport, keep func(func(*fenceRetainedMeta))) {
+	k.delete(r, meta.Name, abort, seams, g)
 	switch g.Outcome {
 	case fenceDeleted:
-		_ = unix.Unlinkat(int(retained.Fd()), name+".json", 0)
+		k.forget(meta.Name)
 	case fenceLostPossible:
-		k.setMeta(name, func(m *fenceRetainedMeta) { m.GC = "manual"; m.Status = fenceLostPossible; m.Reason = g.Reason })
+		keep(func(m *fenceRetainedMeta) { m.GC = "manual"; m.Status = fenceLostPossible; m.Reason = g.Reason })
 	default:
-		if err := k.putBack(r, name); err != nil {
+		if err := k.putBack(r, meta.Name); err != nil {
 			g.Reason += "; it stays in the trash: " + err.Error()
+			keep(func(m *fenceRetainedMeta) { m.GC = "manual"; m.Reason = "partly removed: " + g.Reason })
+			return
 		}
-		k.setMeta(name, func(m *fenceRetainedMeta) {
+		keep(func(m *fenceRetainedMeta) {
 			m.GC = "manual"
+			m.Status = ""
 			m.Reason = "partly removed: " + g.Reason
 		})
 	}
-	return g
 }
 
 // putBack returns a tree from the trash to retained, by inode.
@@ -545,8 +672,18 @@ func fenceCollectRetained(data, control, name string, operator bool, seams *fenc
 	if g.Reason != "" {
 		return g
 	}
+	if operator {
+		// The kept copy an unresolved update would roll back to is not the operator's to remove from
+		// the page: that update's rollback is the only thing still counting on it.
+		if paths, err := NewPaths(data); err == nil {
+			if journal, err := readJournal(paths); err == nil && journal.unresolved() && journal.Pre == name {
+				g.Reason = "an update that did not finish still needs it to roll back; run `upgrade --rollback` first"
+				return g
+			}
+		}
+	}
 	if control == "" {
-		control = ".daedalus-update"
+		control = fenceControlName(data)
 	}
 	parentPath := filepath.Dir(filepath.Clean(data))
 	pfd, err := unix.Open(parentPath, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)

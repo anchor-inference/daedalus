@@ -138,6 +138,14 @@ func NewPaths(dataDir string) (Paths, error) {
 	return p, nil
 }
 
+// supervisorOverTCP says the supervisor listens on loopback TCP instead of its socket: on Windows,
+// and wherever the socket's path would not fit in sun_path — 104 bytes on macOS, 108 on Linux — which
+// a long home folder under ~/Library/Application Support/Daedalus/State reaches. The rule is ptyd's
+// and browserd's, and the limit the same 100 bytes, below both.
+func supervisorOverTCP(p Paths, goos string) bool {
+	return goos == "windows" || len(p.SupervisorSocket) > 100
+}
+
 // selectEnv points RuntimeVenv at the environment for the checkout's current dependency lock. One
 // environment per lock is what lets an upgrade prepare the next version's beside the running one,
 // and a rollback find the old one untouched.

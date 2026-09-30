@@ -9,8 +9,7 @@ import (
 )
 
 // Windows and macOS have no read lease that shuts a writer out, so the fenced switch refuses there
-// before it touches anything. The operator's alternative is the verified backup and in-place
-// upgrade, whose kept copy is never removed automatically.
+// before it touches anything, and updates protect the data with the verified backup (protect.go).
 func fencedSwitch(opts fenceOptions) fenceReport {
 	now := time.Now().UTC()
 	return fenceReport{Data: opts.Data, Outcome: fenceFailClosed, ExitCode: fenceExitCode(fenceFailClosed),
@@ -25,6 +24,11 @@ type fenceOptions struct {
 	Handover        func(map[string]*os.File)
 	RestoreFrom     string
 	Upgrading       bool
+}
+
+// fenceTreeKey: no switch here, so no kept copy to recognise.
+func fenceTreeKey(string) ([2]uint64, error) {
+	return [2]uint64{}, errors.New("no fence on this platform")
 }
 
 // fencePlatform: there is no kernel writer fence here; updates take the verified backup.

@@ -186,7 +186,12 @@ func writeFileSync(name string, body []byte, mode os.FileMode) error {
 	if err := file.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp, name)
+	if err := os.Rename(tmp, name); err != nil {
+		return err
+	}
+	// The rename is durable only with its folder: without this a power cut can bring back the file
+	// from before, or leave only the .tmp, under a journal that the step after it already relied on.
+	return syncDir(filepath.Dir(name))
 }
 
 func sanitizeName(s string) string {
@@ -540,6 +545,12 @@ func extractArchive(archive, root string, allowed func(top string) bool) error {
 				file.Close()
 				return err
 			}
+			// On the disk before the rollback says rolled back: a restored file still in the cache
+			// when the power goes is an empty file under a journal that says all is well.
+			if err := file.Sync(); err != nil {
+				file.Close()
+				return err
+			}
 			if err := file.Close(); err != nil {
 				return err
 			}
@@ -564,13 +575,17 @@ func extractArchive(archive, root string, allowed func(top string) bool) error {
 	if err != nil {
 		return err
 	}
-	// Directory modes last: a read-only directory would refuse the files that go inside it.
+	// Directory modes last: a read-only directory would refuse the files that go inside it. Each
+	// directory is synced too, for the names in it, and the root for the top-level names.
 	for i := len(dirs) - 1; i >= 0; i-- {
+		if err := syncDir(dirs[i].name); err != nil {
+			return err
+		}
 		if err := os.Chmod(dirs[i].name, dirs[i].mode); err != nil {
 			return err
 		}
 	}
-	return nil
+	return syncDir(root)
 }
 
 // checkRestored compares the folder with the manifest, entry by entry.

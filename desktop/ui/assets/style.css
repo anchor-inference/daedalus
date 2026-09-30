@@ -248,6 +248,8 @@ button.primary:hover { background: #8cbcff; }
    may be moments away), but it no longer looks like the step to take. */
 button.quiet { background: transparent; color: var(--muted); }
 button.quiet:hover { background: var(--s2); }
+/* The Remove beside a kept copy: in the line of text it belongs to, not a row of its own. */
+#switches-items button { padding: 2px 10px; margin-left: 6px; font-size: 13px; vertical-align: baseline; }
 button[disabled] { opacity: 0.45; cursor: default; transform: none; }
 .button[aria-disabled="true"] { opacity: 0.45; cursor: default; pointer-events: none; transform: none; }
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: clamp(18px, 2vw, 26px); }

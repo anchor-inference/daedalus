@@ -10,11 +10,13 @@
 # Run again over an installation that already has data, it never replaces anything itself: a
 # launcher that has `daedalus-desktop.exe upgrade` is handed over to, and one too old for that
 # (v0.12.0 and before) is upgraded by the launcher just downloaded and checked, as a bridge
-# (`upgrade --bridge`) — the same yes, the same checked backup of the data and the old launcher's
-# files before anything is replaced, and the same rollback.
+# (`upgrade --bridge`) — the same yes, the same protection of the data (a checked backup, on
+# Windows) with the old launcher's files kept aside before anything is replaced, and the same
+# rollback.
 #
-# The checksum catches a broken download. It does not prove who published the release: SHA256SUMS
-# is not signed, and neither is the executable, so SmartScreen warns on the first start.
+# The release's signature over its tag and SHA256SUMS, by the project's release key, proves who
+# published it, and the checksum catches a broken download. The executable itself carries no
+# Authenticode signature, so SmartScreen warns on the first start.
 #
 # DAEDALUS_RELEASES_API and DAEDALUS_DOWNLOAD_BASE point it at another release source (a local
 # fixture); it says so when they are set.
@@ -29,14 +31,14 @@
 $ErrorActionPreference = 'Stop'
 
 # The release keys this installer trusts (signify public keys, the base64 line), the same as the
-# launcher's (desktop/signing.go, desktop/SIGNING.md). EMPTY: no key exists yet, so releases are not
-# authenticated. With a key here, a release is installed only if SHA256SUMS.sig verifies — over
-# "daedalus-release <tag>" and SHA256SUMS together — before anything from it is unpacked or run.
+# launcher's (desktop/signing.go, desktop/SIGNING.md): the project's release key, id df535393fa2485a1
+# (minisign shows it as A18524FA935353DF). A release is installed only if SHA256SUMS.sig verifies —
+# over "daedalus-release <tag>" and SHA256SUMS together — before anything from it is unpacked or run.
 # Windows PowerShell has no Ed25519 of its own; the check uses OpenSSL 3 (on PATH, or the one Git for
 # Windows ships) and without it the installer refuses. This script, arriving by `irm | iex` over TLS
 # unsigned, cannot vouch for itself: compare the key fingerprint it prints with one published outside
 # GitHub (SIGNING.md). None of this has been run on Windows yet.
-$ReleaseKeys = @()
+$ReleaseKeys = @('RWTfU1OT+iSFoaxGzNfGzkwHdVs2o8WmnCzBUo/LBUw2L4ssGN4xYx/2')
 
 function Fail([string]$message) {
     throw [System.InvalidOperationException]::new($message)
@@ -85,9 +87,25 @@ function Run-Launcher([string]$exe, [string[]]$arguments) {
 # of $ReleaseKeys, through OpenSSL 3. Any doubt is a refusal.
 function Test-ReleaseSignature([string]$tag, [string]$sums, [string]$sig, [string]$work) {
     if (-not (Test-Path $sig)) { Fail "$tag has no SHA256SUMS.sig, and this installer only installs signed releases. Nothing was installed." }
-    $openssl = (Get-Command openssl -ErrorAction SilentlyContinue | Select-Object -First 1)
-    $opensslPath = if ($openssl) { $openssl.Source } else { Join-Path $env:ProgramFiles 'Git\usr\bin\openssl.exe' }
-    if (-not (Test-Path $opensslPath)) { Fail 'Checking the release''s signature needs OpenSSL 3 (for example the one Git for Windows ships), which is not here. Nothing was installed.' }
+    # The first OpenSSL 3 found: the one on PATH, then the one Git for Windows ships. An older OpenSSL
+    # on PATH (1.1.1 is still common) has no -rawin, and taking it would refuse every good signature.
+    $candidates = @(Get-Command openssl -All -ErrorAction SilentlyContinue | ForEach-Object { $_.Source })
+    if ($env:ProgramFiles) { $candidates += Join-Path $env:ProgramFiles 'Git\usr\bin\openssl.exe' }
+    $opensslPath = $null
+    foreach ($candidate in $candidates) {
+        if (-not $candidate -or -not (Test-Path $candidate)) { continue }
+        $saved = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $said = (& $candidate version 2>$null | Out-String)
+        } catch {
+            $said = ''
+        } finally {
+            $ErrorActionPreference = $saved
+        }
+        if ($said -match '^OpenSSL [3-9]\.') { $opensslPath = $candidate; break }
+    }
+    if (-not $opensslPath) { Fail 'Checking the release''s signature needs OpenSSL 3 (for example the one Git for Windows ships), which is not here. Nothing was installed.' }
     $message = Join-Path $work 'message'
     $header = [Text.Encoding]::ASCII.GetBytes("daedalus-release $tag`n")
     [IO.File]::WriteAllBytes($message, [byte[]]($header + [IO.File]::ReadAllBytes($sums)))
@@ -144,7 +162,7 @@ function Install-Daedalus {
     Write-Host "Looking for the newest desktop release of $repo..."
     $releases = Invoke-RestMethod -UseBasicParsing -Uri "$api/releases?per_page=30" -Headers @{ 'User-Agent' = 'daedalus-install' }
     $release = @($releases) |
-        Where-Object { -not (Prop $_ 'draft') -and -not (Prop $_ 'prerelease') -and "$(Prop $_ 'tag_name')" -match '^desktop-v\d+\.\d+\.\d+$' } |
+        Where-Object { -not (Prop $_ 'draft') -and -not (Prop $_ 'prerelease') -and "$(Prop $_ 'tag_name')" -match '^desktop-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$' } |
         Sort-Object { [version]($_.tag_name -replace '^desktop-v', '') } -Descending |
         Select-Object -First 1
     if (-not $release) { Fail "No desktop-v* release found in $repo." }
@@ -165,7 +183,7 @@ function Install-Daedalus {
             Where-Object { $_.Path -and $_.Path.StartsWith($target, [StringComparison]::OrdinalIgnoreCase) }
         if ($running) { Fail "The launcher in $target is running; close it and run this again. Nothing was changed." }
         # Too old for upgrade (v0.12.0 and before): the launcher downloaded below does it as a bridge,
-        # after the same yes and the same checked backup of the data and the old launcher's files.
+        # after the same yes and the same checked backup of the data, with the old launcher's files kept aside.
         $bridgeNeeded = $true
     } elseif (Test-Path $data) {
         Fail "$data exists but there is no launcher beside it; not touching it."
@@ -181,24 +199,19 @@ function Install-Daedalus {
         Write-Host "Downloading $asset from $tag..."
         Invoke-WebRequest -UseBasicParsing -Uri "$downloads/$tag/$asset" -OutFile $zip
         Invoke-WebRequest -UseBasicParsing -Uri "$downloads/$tag/SHA256SUMS" -OutFile $sums
-        # The signature whenever the release has one, beside SHA256SUMS for the bridge; required and
-        # checked first when this installer has a key.
+        # The signature: required, checked first, and left beside SHA256SUMS for the bridge.
         $sig = "$sums.sig"
         try {
             Invoke-WebRequest -UseBasicParsing -Uri "$downloads/$tag/SHA256SUMS.sig" -OutFile $sig
         } catch {
             if (Test-Path $sig) { Remove-Item $sig }
-            if ($ReleaseKeys.Count -gt 0) { Fail "Could not download SHA256SUMS.sig; not installing an unverified release." }
+            Fail "Could not download SHA256SUMS.sig; not installing an unverified release."
         }
-        if ($ReleaseKeys.Count -gt 0) {
-            # Compare this with the fingerprint published outside GitHub (SIGNING.md).
-            $sha = [Security.Cryptography.SHA256]::Create()
-            $fingerprint = -join ($sha.ComputeHash([Text.Encoding]::ASCII.GetBytes(($ReleaseKeys -join "`n"))) | ForEach-Object { $_.ToString('x2') })
-            Write-Host "Release key fingerprint (SHA-256 of the key line): $fingerprint"
-            Test-ReleaseSignature $tag $sums $sig $work
-        } else {
-            Write-Host 'This release is not authenticated: this installer carries no release key yet (SIGNING.md).'
-        }
+        # Compare this with the fingerprint published outside GitHub (SIGNING.md, the README).
+        $sha = [Security.Cryptography.SHA256]::Create()
+        $fingerprint = -join ($sha.ComputeHash([Text.Encoding]::ASCII.GetBytes(($ReleaseKeys -join "`n"))) | ForEach-Object { $_.ToString('x2') })
+        Write-Host "Release key fingerprint (SHA-256 of the key line): $fingerprint"
+        Test-ReleaseSignature $tag $sums $sig $work
 
         $line = Get-Content $sums | Where-Object { $_ -match "^([0-9a-fA-F]{64})\s+\*?$([regex]::Escape($asset))$" } | Select-Object -First 1
         if (-not $line) { Fail "SHA256SUMS does not mention $asset." }
@@ -229,7 +242,7 @@ function Install-Daedalus {
             # This script replaces nothing over an installation with data. The new launcher does it, and
             # changes nothing when it cannot back up first (Docker mode, for now) or is not told yes.
             Write-Host "An installation with data is already in $target, under a launcher that predates upgrade."
-            Write-Host "The $tag launcher will upgrade it and back everything up first."
+            Write-Host "The $tag launcher will upgrade it, keeping the data and the launcher from before so that a failure puts both back."
             $bridgeArgs = @('upgrade', '--bridge', '--root', $target, '--data', $data, '--archive', $zip, '--sums', $sums)
             if ($env:DAEDALUS_UPGRADE_YES -eq '1') { $bridgeArgs += '--yes' }
             return (Run-Launcher (Join-Path $staged 'daedalus-desktop.exe') $bridgeArgs)
@@ -255,7 +268,8 @@ function Install-Daedalus {
     Write-Host "Installed $tag into $target."
     Write-Host "Run it:  & '$launcher'"
     Write-Host 'The executable is not signed, so SmartScreen warns once: More info, then Run anyway.'
-    Write-Host 'The launcher makes everything else - the checkouts, the keys, the data - inside that folder.'
+    Write-Host 'The launcher makes the checkouts, the keys and the data inside that folder, and keeps its downloaded'
+    Write-Host 'runtime and local state in %LOCALAPPDATA%\Daedalus; `daedalus-desktop.exe uninstall` removes those.'
         return 0
 }
 

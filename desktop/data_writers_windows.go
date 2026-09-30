@@ -91,6 +91,9 @@ func quiesceData(ctx context.Context, p Paths) error {
 	return checkWindowsDataWriters(p.Data)
 }
 
+// checkFolderWriters is the same look at another folder: the runtime from before the move.
+func checkFolderWriters(dir string) error { return checkWindowsDataWriters(dir) }
+
 func checkWindowsDataWriters(data string) error {
 	root, err := filepath.Abs(data)
 	if err != nil {
