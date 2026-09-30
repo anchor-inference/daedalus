@@ -1139,6 +1139,21 @@ class AsksStore:
             await cursor.close()
         return changed == 1
 
+    async def revise(self, ask_id: str, *, title: str, text: str, detail: dict[str, Any]) -> bool:
+        """Change an open request's words in place: the same row, the same id, so an answer the operator
+        has started to write stays with it. False when it was answered or withdrawn meanwhile."""
+        body = json.dumps(detail, ensure_ascii=False)
+        if len(body) > ASK_DETAIL_MAX:
+            raise StaffError(f"a request's detail is at most {ASK_DETAIL_MAX} characters of JSON")
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "UPDATE asks SET title = ?, text = ?, detail_json = ? WHERE id = ? AND resolved_at IS NULL",
+                (_plain(title, "the title", TITLE_MAX), _plain(text, "the text", TEXT_MAX, multiline=True), body, ask_id),
+            )
+            changed = cursor.rowcount
+            await cursor.close()
+        return changed == 1
+
     async def route(self, ask_id: str, to: str, suggestion: str = "") -> bool:
         """Send an open request to the orchestrator or the operator; the orchestrator's suggestion travels with it."""
         if to not in ASK_ROUTES:
