@@ -152,10 +152,13 @@ async def test_switching_on_opens_a_quiet_topic_the_operator_writes_in(settings:
         await s.r.orch.enable(s.r.project.id)
         sid = await s.orchestrator()
 
+        # Opening the topic binds the session first and saves the topic in the project's settings
+        # after it, in a second step: waiting for the binding alone raced that save under load.
         async def bound() -> bool:
-            return await s.front.binding_for_session(sid) is not None
+            binding = await s.front.binding_for_session(sid)
+            return binding is not None and (await s.r.refreshed()).settings.orchestrator.telegram_topic_id == binding.thread_id
 
-        await until_await(bound, "the project's topic was opened")
+        await until_await(bound, "the project's topic was opened and saved")
         binding = await s.front.binding_for_session(sid)
         assert binding is not None and (binding.chat_id, binding.title) == (FORUM, "Bakery") and s.bot.topics == ["Bakery"]
         assert (await s.r.refreshed()).settings.orchestrator.telegram_topic_id == binding.thread_id
