@@ -3,6 +3,7 @@
 // BackButton all return to where the reader came from, and a reload lands on the same screen.
 
 import { useEffect, useState } from "react";
+import { anchorHash, parseAnchor } from "./anchor";
 
 export const BASE = "/app";
 
@@ -91,13 +92,19 @@ export function projectStaffPath(projectId: string, staffId: string, query?: Rec
  * The host writes `/app/project/<id>/…` and `/app/main` into notifications, pushes and Telegram
  * messages, and those already sent keep their words: a tap on one weeks later must still land in
  * orchestration mode, where a project and the main chat now live. Everything else is returned as it came.
+ *
+ * A hash (`#m<seq>`, the message the link is about) is set aside and put back: left in, it stopped
+ * `/app/main#m5` from being recognised at all, and the main chat's rewrite would have eaten it.
  */
 export function canonical(path: string): string {
-  const m = /^\/app\/(project|main)(?=\/|\?|$)(.*)$/.exec(path);
+  const cut = path.indexOf("#");
+  const hash = cut < 0 ? "" : path.slice(cut);
+  const bare = cut < 0 ? path : path.slice(0, cut);
+  const m = /^\/app\/(project|main)(?=\/|\?|$)(.*)$/.exec(bare);
   if (!m) return path;
-  if (m[1] === "project") return `${PROJECT}${m[2]}`;
+  if (m[1] === "project") return `${PROJECT}${m[2]}${hash}`;
   // The main chat is orchestration's home; whatever followed it (the panel's query) goes along.
-  return `${ORCHESTRATION}${m[2].replace(/^\/[^?]*/, "")}`;
+  return `${ORCHESTRATION}${m[2].replace(/^\/[^?]*/, "")}${hash}`;
 }
 
 function withQuery(path: string, query?: Record<string, string | null | undefined>): string {
@@ -128,9 +135,18 @@ if ((window.history.state as HistoryState)?.d === undefined) {
   }
 }
 
-export function navigate(path: string, opts: { replace?: boolean } = {}): void {
+/**
+ * Goes to an address inside the app. `keepHash` is for a redirect — a plain session address moving to
+ * where the session lives, an old address rewritten — which is the same link read correctly: the
+ * message it pointed at (`#m<seq>`) goes along. Lost there, a link to a message in an orchestrator's
+ * chat opened at the chat's end, as if it pointed at nothing.
+ */
+export function navigate(path: string, opts: { replace?: boolean; keepHash?: boolean } = {}): void {
   path = canonical(path);
-  const current = window.location.pathname + window.location.search;
+  if (opts.keepHash && !path.includes("#")) path += window.location.hash;
+  // A path without a hash is compared without one: going where the reader already is does not take
+  // away the message they were sent to.
+  const current = window.location.pathname + window.location.search + (path.includes("#") ? window.location.hash : "");
   if (current === path) return;
   if (opts.replace) window.history.replaceState({ d: depth }, "", path);
   else {
@@ -151,6 +167,35 @@ window.addEventListener("popstate", () => {
   emit();
 });
 
+/**
+ * The message the address points at (`#m<seq>`), or null. It changes when the app navigates, when
+ * the reader goes Back to an entry with another hash, and when a link on the page sets one.
+ */
+export function useAnchor(): number | null {
+  const [seq, setSeq] = useState<number | null>(() => parseAnchor(window.location.hash));
+  useEffect(() => {
+    const on = () => setSeq(parseAnchor(window.location.hash));
+    listeners.add(on);
+    window.addEventListener("hashchange", on);
+    return () => {
+      listeners.delete(on);
+      window.removeEventListener("hashchange", on);
+    };
+  }, []);
+  return seq;
+}
+
+/** Writes the message the reader was taken to into the address, so a reload or a copied address
+ *  opens it again. Replaced, not pushed, and nobody is told: the screen that calls this has already
+ *  gone there, and Back should leave the chat rather than step through every hit that was opened. */
+export function markAnchor(seq: number): void {
+  try {
+    window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search + anchorHash(seq));
+  } catch {
+    /* a sandboxed frame */
+  }
+}
+
 export function useRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parse());
   useEffect(() => {
@@ -170,7 +215,7 @@ export function useRoute(): Route {
 export function migrateLegacyLocation(startParam?: string | null, mode?: "agents" | "orchestration", orchestrationHome = ORCHESTRATION): void {
   const here = window.location.pathname + window.location.search;
   if (canonical(here) !== here) {
-    navigate(canonical(here), { replace: true });
+    navigate(canonical(here), { replace: true, keepHash: true });
     return;
   }
   if (mode === "orchestration" && /^\/app\/?$/.test(window.location.pathname) && !window.location.hash && !startParam) {

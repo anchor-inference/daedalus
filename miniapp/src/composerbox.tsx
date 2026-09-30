@@ -1,7 +1,7 @@
 // A growing full-width field above one row of controls. Drafts belong to the session;
 // actions are supplied by the parent so the card also works inside the voice page.
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, AsrStatus, ModelFallback, Question, SlashCommand } from "./api";
 import { Popover } from "./dialogs";
 import { Icon } from "./icons";
@@ -87,6 +87,10 @@ export type ComposerProps = {
   onPreviewFile?: (file: File) => void;
   phone: boolean;
   toast: (text: string) => void;
+  /** Lines over the field that belong to the conversation rather than to the draft (the orchestrator's
+   *  goal line, the quote a message answers): inside the composer so they take the field's width at
+   *  every size instead of copying its padding rule by rule. */
+  above?: ReactNode;
 };
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(props, ref) {
@@ -371,6 +375,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   return (
     <div className="composer" data-primary={action}>
+      {props.above}
       {props.steers.length > 0 && (
         <div className="steers" aria-label={t("composer.steers")}>
           {props.steers.map((s) => (

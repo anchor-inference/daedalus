@@ -92,7 +92,9 @@ def open_orchestrator(context) -> Page:  # type: ignore[no-untyped-def]
     page = context.new_page()
     focus, main = stubs("en")
     held = focus.details["orch-bakery"]
-    held["messages"] = worked(10, 80) + [{**m, "seq": 1000 + n} for n, m in enumerate(held["messages"])]
+    # The worked turns come last, where the reader starts: the stub's own newest messages (a card of a
+    # member's steps, receipts under the operator's words) fill a phone's screen with no folded line.
+    held["messages"] = [{**m, "seq": 1 + n} for n, m in enumerate(held["messages"])] + worked(1000, 80)
     serve(page, focus, main, "en")
     go(page, f"/orchestration/project/{PID}", "en")
     page.wait_for_selector(".chat-scroll .timeline .thinking-head", timeout=15000)

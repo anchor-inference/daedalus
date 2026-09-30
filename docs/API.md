@@ -117,6 +117,21 @@ done, stuck or needs-input, and a card left in todo with nobody on it, stay in t
 block until one of its decisions follows; a turn that ends with one still open is followed by one
 `orchestrator.open_results` event, and never a second.
 
+**What the operator sees of it.** `GET /api/projects/{id}/focus-state` is built from those rows and
+never from a model: `counts` (`in_work`, `decisions`, `waiting_for_you`, `unconfirmed`,
+`commitments`), `goals` (each open card with its owner, acceptance and next step or what it waits on),
+`open_results` (the reports and cards waiting for the orchestrator's decision), `commitments` (what
+it took on for you — one per ask of a message that asked several things — until kept) and `receipts`:
+for each of your messages in its chat, by `seq`, the requirement it became and whether the member was
+given and confirmed it, or the commitment it became and whether it was kept. A member's steps for you
+(`Report(operator_steps=…)`: goal, steps, which account is which, what you see when it worked, and
+whether the member walked them on the running version) reach you from the host word for word — a card
+in the orchestrator's chat, a notification, and a file of the project. A message you send while a turn
+is under way reaches the model with a note saying so; one that arrives as a turn ends opens the next
+and is shown there (a message view's `delivery` says which). `POST /api/sessions/{id}/messages` takes
+`reply_to: {"seq", "excerpt"}` for what the message answers, and `GET /api/sessions/{id}/search?q=`
+finds messages inside one conversation by `seq`, which `#m<seq>` opens.
+
 **Reviewing and merging a staff branch.** The orchestrator proposes, you merge. `GET
 /api/board/{id}/review` reads, without changing anything, what merging the task's branch into its
 folder's current branch would bring: `commits` (at most 50), `files` with their added and removed

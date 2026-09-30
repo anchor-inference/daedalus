@@ -367,6 +367,7 @@ class SqliteSessionStore(ISessionStore):
                     "role": message.role.value,
                     "title": row["title"] if session_id is None else None,
                     "snippet": snippet(message_text(message), query, window=self.SNIPPET_WINDOW),
+                    "queued": bool(message.metadata.get("daedalus.queued")),
                 }
             )
         return out

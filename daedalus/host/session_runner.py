@@ -565,6 +565,9 @@ class SessionManager:
         """``(session_id, tool_call_id, via) -> refusal`` asked before a pending question is answered;
         a non-empty refusal (someone else answered first) stops the answer with that text."""
         self.turn_notes_hooks: list[Callable[[SessionState], Awaitable[str | None]]] = []
+        self.steer_hooks: list[Callable[[str, str], Awaitable[str]]] = []
+        """Each ``(session_id, text) -> text`` rewords an operator's message sent into a running turn,
+        for the model only; the transcript keeps the words as sent."""
         """``state -> notes`` asked at every run start before the workspace's own notes; the first that
         answers (not ``None``) replaces them. A project's orchestrator reads its project's state here."""
         self.preset_hooks: list[Callable[[SessionState], str | None]] = []
@@ -2494,6 +2497,7 @@ class SessionManager:
         client_message_id: str | None = None,
         via: str = "app",
         operator_words: Sequence[str] | None = None,
+        reply_to: dict[str, Any] | None = None,
     ) -> str:
         """Deliver input. Starts a run, or queues a follow-up when one is active.
 
@@ -2506,6 +2510,9 @@ class SessionManager:
         among a wake-up's events): compaction quotes them, and nothing else of the note.
         """
         words = operator_words_metadata(origin, text, operator_words)
+        if reply_to:
+            # Rides with the operator's words on every copy of the message, so the app draws what it answers.
+            words = {**words, "daedalus.reply_to": dict(reply_to)}
         state = await self.get_state(session_id)
         if state is None:
             raise KeyError(session_id)
@@ -2628,7 +2635,17 @@ class SessionManager:
                 # A message sent while the agent works is a steer: the core places it before the
                 # next model call (after the current tool batch). follow_up would wait for the end.
                 kind = "follow_up" if not steer and (follow_up or state.metadata.get("queue_mode") == "follow_up") else "steer"
-                queued = {**new_queued_prompt(kind, body).to_dict(), "origin": origin, "operator_words": None if operator_words is None else list(operator_words), "queued_at": datetime.now(UTC).isoformat()}
+                placed = body
+                if origin == "operator":
+                    for steer_hook in self.steer_hooks:
+                        try:
+                            placed = await steer_hook(session_id, placed)
+                        except Exception:  # noqa: BLE001 — the message goes as it was written
+                            logger.exception("steer hook failed for session %s", session_id)
+                # The operator's words are the message as written, never the host's note placed before it:
+                # compaction quotes them verbatim, and the note would have been quoted as the operator's.
+                said = list(operator_words) if operator_words is not None else ([body] if placed != body else None)
+                queued = {**new_queued_prompt(kind, placed).to_dict(), "origin": origin, "operator_words": said, "queued_at": datetime.now(UTC).isoformat()}
                 if client_message_id:
                     queued["id"] = client_message_id
                     receipt, created = await self.live.accept(

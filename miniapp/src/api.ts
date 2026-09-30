@@ -670,6 +670,26 @@ export type RunOutcome = {
   compaction?: { outcome: string; reason?: string; prompt_after?: number; trigger?: number; summariser_failures?: Record<string, number>; floor_dropped?: number } | null;
 };
 
+/** A message of the chat another one answers: its seq, and the words quoted from it. */
+export type ReplyRef = { seq: number; excerpt: string };
+
+/** Steps a member wrote for the operator to follow themselves (daedalus/extensions/operator_steps.py),
+ *  with the file the host kept them in and who wrote them. */
+export type OperatorSteps = {
+  goal: string;
+  steps: string[];
+  roles: { account: string; purpose: string }[];
+  expected: string;
+  check: string;
+  limits: string;
+  verified: "on-running-version" | "unverified";
+  verified_how: string;
+  file?: { id: string; name: string; mime?: string; size?: number } | null;
+  member: string;
+  task_id: string;
+  event_seq?: number;
+};
+
 export type MessageView = {
   run_id?: string | null;
   role: "system" | "user" | "assistant" | "tool";
@@ -690,6 +710,13 @@ export type MessageView = {
   outcome?: RunOutcome | null;
   /** The YAGNI switch this turn told the model about; the note itself is never shown. */
   yagni?: "on" | "off" | null;
+  /** How an operator's message reached the model: placed into a turn under way (`steer`), opening the
+   *  turn after the one it was written during (`drained`), or after it (`follow_up`). */
+  delivery?: "steer" | "drained" | "follow_up" | null;
+  /** What the message answers, as the operator chose it in the chat; the text no longer carries it. */
+  reply_to?: ReplyRef | null;
+  /** A member's steps for the operator that the host put into the orchestrator's chat. */
+  operator_steps?: OperatorSteps | null;
   text: string;
   thinking: string;
   tool_calls: { id: string; name: string; arguments: Record<string, unknown> }[];

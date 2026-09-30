@@ -80,7 +80,7 @@ from daedalus.host.events import EventFilter, event_stream, streamed_types
 from daedalus.host.policy import sealed_root
 from daedalus.host.presence import MAX_ID_LENGTH, MAX_PROJECTS, MAX_SESSIONS, MAX_TERMINALS, PresenceReport
 from daedalus.host.prompt_changes import PromptChangePlanner
-from daedalus.host.prompts import DEFAULT_RULES
+from daedalus.host.prompts import DEFAULT_RULES, without_turn_context
 from daedalus.host.services import SCRATCH_DIR_NAME
 from daedalus.host.session_runner import TENANT, Attachment, clip_title
 from daedalus.host.transcript_view import full_tool_result, message_view
@@ -104,7 +104,7 @@ from daedalus.stores import pairing, passkeys
 from daedalus.stores.harness import HarnessStore
 from daedalus.stores.media import MEDIA_TENANT
 from daedalus.stores.projects import Project
-from daedalus.stores.sqlite import ReceiptConflict
+from daedalus.stores.sqlite import ReceiptConflict, message_text
 from daedalus.stores.staff import ACTIVE_STATUSES, HARNESSES, Staff, StaffBusy, StaffError
 from daedalus.terminals.gateway import TERMINAL_WS_MAX_BYTES, Gateway, SocketGone, ticket_who
 from daedalus.terminals.model import EnvUnavailable, TerminalError, TerminalSpec
@@ -271,10 +271,17 @@ class PasskeyLoginBody(BaseModel):
     ceremony: str = Field(default="", max_length=64)
 
 
+class ReplyTo(BaseModel):
+    seq: int
+    excerpt: str = Field(default="", max_length=600)
+
+
 class SendMessageBody(BaseModel):
     text: str
     steer: bool = False
     client_message_id: str = Field(default="", max_length=64)
+    reply_to: ReplyTo | None = None
+    """What in the chat the message answers: a report, an event line, a reply of the agent's."""
 
 
 class VoiceSayBody(BaseModel):
@@ -394,6 +401,7 @@ class TeamReportBody(BaseModel):
     remember: str | None = None
     evidence: list[dict[str, str]] | None = None
     acknowledged: list[str] | None = None
+    operator_steps: dict[str, Any] | None = None
 
 
 class TeamAskBody(BaseModel):
@@ -1765,7 +1773,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     async def team_report(staff_session_id: str, body: TeamReportBody, request: Request) -> dict[str, Any]:
         team, live = await team_live(staff_session_id, request)
         try:
-            told = await team.ingress.report(live, body.kind, body.note, body.artifacts, body.remember, evidence=body.evidence, acknowledged=body.acknowledged)
+            told = await team.ingress.report(live, body.kind, body.note, body.artifacts, body.remember, evidence=body.evidence, acknowledged=body.acknowledged, operator_steps=body.operator_steps)
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"ok": True, "text": told}
@@ -1832,6 +1840,28 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         listing["sessions"].sort(key=lambda row: -row["match"]["score"])
         listing["projects"] = [p for p in listing["projects"] if any(s["project_id"] == p["id"] for s in listing["sessions"])]
         return {**listing, **found, "indexing": service.settings["mode"] == "local" and bool((await service.status())["pending"])}
+
+    @api.get("/api/sessions/{session_id}/search")
+    async def search_session(session_id: str, q: str = Query(min_length=1, max_length=500), limit: int = Query(default=30, ge=1, le=50),
+                             _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Search inside one conversation: each matching message by its seq, which the chat opens at
+        (``#m<seq>``). A message queued while a turn ran is found at the copy the chat shows, once."""
+        if await manager.get_state(session_id) is None:
+            raise HTTPException(404, "no such session")
+        service = await conversation_search()
+        try:
+            found = await service.query(q, limit=limit, session=session_id)
+        except SearchBusy as exc:
+            raise HTTPException(429, str(exc)) from exc
+        hits = []
+        for hit in found.pop("hits"):
+            rows = await manager.sessions.expand_transcript(session_id, int(hit["seq"]), int(hit["seq"]))
+            if not rows or rows[0][1].metadata.get("daedalus.queued"):
+                continue  # the copy where the model read it is the one the chat shows
+            message = rows[0][1]
+            hits.append({"seq": hit["seq"], "snippet": hit.get("snippet", ""), "role": message.role.value, "at": message.created_at.isoformat(), "origin": message.metadata.get("daedalus.origin")})
+        hits.sort(key=lambda h: -int(h["seq"]))
+        return {"hits": hits, **found}
 
     @api.get("/api/sessions")
     async def list_sessions(
@@ -2410,12 +2440,24 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.post("/api/sessions/{session_id}/messages")
     async def send_message(session_id: str, body: SendMessageBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        text, reply = body.text, None
+        if body.reply_to is not None:
+            # The message names what it answers, in words the model reads and a reference the app
+            # draws: a complaint about a member's missing instruction was once taken for one about
+            # another member's work, reported in the same minutes.
+            found = await manager.sessions.expand_transcript(session_id, body.reply_to.seq, body.reply_to.seq)
+            if not found:
+                raise HTTPException(404, "that message is not in this conversation")
+            excerpt = " ".join(body.reply_to.excerpt.split())[:300] or " ".join(without_turn_context(message_text(found[0][1])).split())[:300]
+            reply = {"seq": body.reply_to.seq, "excerpt": excerpt}
+            text = f"[In reply to: «{excerpt}»]\n{body.text}"
         try:
             run_id = await manager.submit(
                 session_id,
-                body.text,
+                text,
                 steer=body.steer,
                 client_message_id=body.client_message_id or None,
+                reply_to=reply,
             )
         except KeyError as exc:
             raise HTTPException(404, "no such session") from exc

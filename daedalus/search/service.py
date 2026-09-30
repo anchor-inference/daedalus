@@ -152,16 +152,16 @@ class ConversationSearch:
                 count = 0
             await asyncio.sleep(0.1 if count else 2)
 
-    async def query(self, query: str, *, project: str = '', limit: int = 30) -> dict[str, Any]:
+    async def query(self, query: str, *, project: str = '', limit: int = 30, session: str = '') -> dict[str, Any]:
         if self.readers >= 2:
             raise SearchBusy("conversation search is busy; try again")
         self.readers += 1
         try:
-            return await self._query(query, project=project, limit=limit)
+            return await self._query(query, project=project, limit=limit, session=session)
         finally:
             self.readers -= 1
 
-    async def _query(self, query: str, *, project: str = '', limit: int = 30) -> dict[str, Any]:
+    async def _query(self, query: str, *, project: str = '', limit: int = 30, session: str = '') -> dict[str, Any]:
         # No unbounded queue of ONNX calls when someone types quickly. The UI debounces and cancels;
         # concurrent callers get lexical results with the reason, rather than waiting behind work.
         reason = self.reason()
@@ -178,9 +178,9 @@ class ConversationSearch:
                         reason = 'error'
                         self.error = True
                 result = await offload(search, self.db.path, self.tenant, query, vector=vector,
-                                                 model=MODEL.space, dimension=MODEL.dimension, project=project, limit=limit)
+                                                 model=MODEL.space, dimension=MODEL.dimension, project=project, limit=limit, session=session)
                 return {**result, 'semantic': reason == 'ready' and vector is not None, 'reason': reason}
-        result = await offload(search, self.db.path, self.tenant, query, project=project, limit=limit)
+        result = await offload(search, self.db.path, self.tenant, query, project=project, limit=limit, session=session)
         return {**result, 'semantic': False, 'reason': reason}
 
     async def close(self) -> None:

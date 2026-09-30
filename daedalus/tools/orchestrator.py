@@ -97,13 +97,16 @@ async def folders(
         "later. kind='rule' records a standing instruction of the operator's ('whenever X, do Y'), in their words: "
         "it is shown whole in every turn's state block and given to every member with each task until "
         "op='lift' with rule=<its id> takes it out of force. op='read': newest first, limit entries, before=<id> "
-        "for older ones, kind to read only one kind."
+        "for older ones, kind to read only one kind. kind='commitment' records something you took on for the operator "
+        "— one per ask when a message asks several things, with task_id when a card carries it: the state block and the "
+        "operator's list show it until op='keep' with commitment=<id> (and why), or until its card is accepted."
     ),
 )
 async def journal(
     context: ToolContext, op: str = "write", text: str = "", why: str = "", kind: str = "", rule: int | None = None, before: int | None = None, limit: int = 20,
+    commitment: int | None = None, task_id: str | None = None,
 ) -> ToolResult:
-    return await _call(context, "journal", op=op, text=text, why=why, kind=kind, rule=rule, before=before, limit=limit)
+    return await _call(context, "journal", op=op, text=text, why=why, kind=kind, rule=rule, before=before, limit=limit, commitment=commitment, task_id=task_id)
 
 
 @search_hint(

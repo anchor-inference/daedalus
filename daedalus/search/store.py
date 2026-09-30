@@ -52,6 +52,15 @@ def collapse(hits: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
     return list(best.values())[:max(1, min(limit, 50))]
 
 
+def collapse_passages(hits: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """The best hit per message of one conversation, the conversation's title left out."""
+    best: dict[int, dict[str, Any]] = {}
+    for hit in sorted(hits, key=lambda h: (-h['score'], h.get('seq', 0), h.get('offset', 0))):
+        if hit.get('seq'):
+            best.setdefault(int(hit['seq']), hit)
+    return list(best.values())[:max(1, min(limit, 50))]
+
+
 @dataclass
 class Passage:
     seq: int
@@ -125,7 +134,7 @@ class Index:
 
 def search(path: Path, tenant: str, query: str, *, vector: list[float] | None = None,
            model: str = '', dimension: int = 0, project: str = '', limit: int = 30,
-           seconds: float = QUERY_SECONDS, max_vectors: int = MAX_VECTORS) -> dict[str, Any]:
+           seconds: float = QUERY_SECONDS, max_vectors: int = MAX_VECTORS, session: str = '') -> dict[str, Any]:
     """Dedicated read connection, SQL deadline, streaming vector pages and bounded candidate sets."""
     if not fts_query(query.strip()[:500]):
         return {'hits': [], 'partial': False}
@@ -138,8 +147,8 @@ def search(path: Path, tenant: str, query: str, *, vector: list[float] | None = 
     semantic: list[tuple[float, str, int, int, int]] = []
     hits: list[dict[str, Any]] = []
     partial = False
-    scope = 's.tenant_id=?' + (' AND s.project_id=?' if project else '')
-    params = (tenant, project) if project else (tenant,)
+    scope = 's.tenant_id=?' + (' AND s.project_id=?' if project else '') + (' AND s.id=?' if session else '')
+    params = (tenant,) + ((project,) if project else ()) + ((session,) if session else ())
     query = query.strip()[:500]
     try:
         match = fts_query(query)
@@ -202,7 +211,9 @@ def search(path: Path, tenant: str, query: str, *, vector: list[float] | None = 
         # Snippets get their own small deadline so a partial scan can still display its answers.
         conn.set_progress_handler(None, 0)
     try:
-        result = collapse(hits, limit)
+        # Inside one conversation every passage is an answer of its own; across conversations the
+        # best one stands for its conversation.
+        result = collapse_passages(hits, limit) if session else collapse(hits, limit)
         snippet_deadline = time.monotonic() + 0.15
         conn.set_progress_handler(lambda: int(time.monotonic() > snippet_deadline), 1000)
         visible = []

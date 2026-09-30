@@ -89,6 +89,16 @@ function firstInView(host: HTMLElement): { key: string; top: number } | null {
   return null;
 }
 
+/** What a screen may ask of its windowed list: to bring an item into the rendered range wherever it
+ *  is, and the element that shows it once it is there. */
+export type WindowedHandle = {
+  /** Scrolls to where the item is reckoned to be and renders the range around it. Roughly: an item
+   *  nobody has measured is where the guesses put it, so the caller aligns on `element` after. */
+  reveal: (key: string) => void;
+  /** The element that shows the item, or null while it is not rendered. */
+  element: (key: string) => HTMLElement | null;
+};
+
 export type WindowedProps = {
   /** One stable key per item, in order. */
   keys: string[];
@@ -108,9 +118,11 @@ export type WindowedProps = {
   dragging?: () => boolean;
   /** The first item is in the window: whatever comes before it, if anything does, is wanted now. */
   onTop?: () => void;
+  /** Filled with what the screen may ask of the list; see `WindowedHandle`. */
+  handle?: { current: WindowedHandle | null };
 };
 
-export function Windowed({ keys, render, scroller, estimate = 260, overscan = 900, gap = 14, threshold = 60, pinned, dragging, onTop }: WindowedProps) {
+export function Windowed({ keys, render, scroller, estimate = 260, overscan = 900, gap = 14, threshold = 60, pinned, dragging, onTop, handle }: WindowedProps) {
   const sizes = useRef(new Map<string, number>());
   /** The width every stored height was measured at: at another width they describe nothing. */
   const width = useRef(0);
@@ -235,7 +247,37 @@ export function Windowed({ keys, render, scroller, estimate = 260, overscan = 90
     return () => ro.disconnect();
   }, [scroller, windowed, range]);
 
-  if (!windowed) return <>{keys.map((_, i) => <Fragment key={keys[i]}>{render(i)}</Fragment>)}</>;
+  // Refreshed after every render, so a call reads the keys and the offsets the screen shows now.
+  useLayoutEffect(() => {
+    if (!handle) return;
+    const element = (key: string): HTMLElement | null => {
+      const host = scroller.current;
+      if (!host) return null;
+      if (windowed) return host.querySelector<HTMLElement>(`[data-slot="${CSS.escape(key)}"]`);
+      return (host.querySelector(`[data-mark="${CSS.escape(key)}"]`)?.nextElementSibling as HTMLElement | null) ?? null;
+    };
+    const reveal = (key: string) => {
+      const host = scroller.current;
+      const index = keys.indexOf(key);
+      if (!host || index < 0 || !windowed || element(key)) return;
+      // Where the list starts in the scroller, read off an item that is really there: the page above
+      // the list (the older-page note, a banner) is not in the offsets.
+      const slot = host.querySelector<HTMLElement>("[data-slot]");
+      const at = slot ? keys.indexOf(slot.dataset.slot!) : -1;
+      if (!slot || at < 0) return;
+      const off = offsets.current;
+      const listTop = slot.getBoundingClientRect().top - host.getBoundingClientRect().top + host.scrollTop - off[at];
+      // Nothing on screen now is worth holding: the reader is being taken away from it.
+      anchor.current = null;
+      host.scrollTop = listTop + off[index];
+      recompute();
+    };
+    handle.current = { reveal, element };
+  });
+
+  // Not windowed, the items are rendered bare and nothing names them; a hidden mark before each one
+  // does, and takes no room: an element that is not displayed is not a flex item, so it adds no gap.
+  if (!windowed) return <>{keys.map((_, i) => <Fragment key={keys[i]}>{handle && <i data-mark={keys[i]} hidden />}{render(i)}</Fragment>)}</>;
 
   const off = offsets.current;
   const total = off[keys.length] - gap;

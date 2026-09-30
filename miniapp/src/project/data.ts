@@ -8,6 +8,7 @@ import { useEvent, useStreamUp } from "../events";
 import { useProjects } from "../projects";
 import { invalidate, useQuery } from "../store";
 import type { Team } from "../team/team";
+import { isFocusState, type FocusState } from "./goalmodel";
 import { ProjectUsage, usageKey } from "./usage";
 
 const enc = encodeURIComponent;
@@ -19,6 +20,7 @@ export const briefKey = (projectId: string) => `/api/projects/${enc(projectId)}/
 export const journalKey = (projectId: string) => `/api/projects/${enc(projectId)}/journal`;
 export const wakeupsKey = (projectId: string) => `/api/projects/${enc(projectId)}/wakeups`;
 export const watchesKey = (projectId: string) => `/api/projects/${enc(projectId)}/watches`;
+export const focusStateKey = (projectId: string) => `/api/projects/${enc(projectId)}/focus-state`;
 
 type Board = ProjectBoardData & { project: { id: string; name: string } };
 
@@ -88,4 +90,19 @@ export function useUsage(projectId: string) {
     if (event.project_id === projectId) invalidate(usageKey(projectId));
   }, [projectId]);
   return data && data.total ? data : null;
+}
+
+/** The project as the orchestrator's chat reads it: the counts over the composer, the list they open,
+ *  and what became of each of the operator's messages. Read again whenever something it is built from
+ *  moves — a card, a report, a request, an open result — and slowly otherwise, as the net under the stream. */
+export function useFocusState(projectId: string | null): FocusState | null {
+  const live = useStreamUp();
+  const { data } = useQuery<FocusState>(projectId ? focusStateKey(projectId) : null, { pollMs: live ? 60000 : 15000, staleMs: 3000 });
+  useEvent(["project.changed", "task.", "staff.report", "orchestrator.open_results", "ask.", "run.finished"], (event) => {
+    if (!projectId || (event.project_id && event.project_id !== projectId)) return;
+    // Every chat's runs end on this stream; only the orchestrator's own, which carry the project, count.
+    if (event.type === "run.finished" && event.project_id !== projectId) return;
+    invalidate(focusStateKey(projectId));
+  }, [projectId]);
+  return isFocusState(data) ? data : null;
 }

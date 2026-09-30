@@ -283,12 +283,25 @@ export default function (pi: ExtensionAPI) {
         ),
       ),
       acknowledged: Type.Optional(Type.Array(Type.String(), { description: "Requirements (R…) you have taken into your plan." })),
+      operator_steps: Type.Optional(
+        Type.Object({
+          goal: Type.String(),
+          steps: Type.Array(Type.String()),
+          roles: Type.Optional(Type.Array(Type.Object({ account: Type.String(), purpose: Type.String() }))),
+          expected: Type.Optional(Type.String()),
+          check: Type.Optional(Type.String()),
+          limits: Type.Optional(Type.String()),
+          verified: StringEnum(["on-running-version", "unverified"] as const),
+          verified_how: Type.Optional(Type.String()),
+        }, { description: "Steps the operator follows themselves, delivered to them word for word; never a password in them." }),
+      ),
     }),
     async execute(_id, params, signal) {
       const fields: Json = { kind: params.kind, note: params.note, artifacts: params.artifacts ?? [] };
       if (params.remember?.trim()) fields.remember = params.remember;
       if (params.evidence?.length) fields.evidence = params.evidence;
       if (params.acknowledged?.length) fields.acknowledged = params.acknowledged;
+      if (params.operator_steps) fields.operator_steps = params.operator_steps;
       return text(await teamCall("report", fields, RECORDED, REPORT_HOLD_MS, signal));
     },
   });

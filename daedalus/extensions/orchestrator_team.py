@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.likeness import same_card
-from daedalus.extensions.orchestrator_contract import narrowed, narrowing_refusal, source_of
+from daedalus.extensions.orchestrator_contract import bound, narrowed, narrowing_refusal, source_of
 from daedalus.extensions.orchestrator_ops import Refused, _folder
 from daedalus.extensions.task_contract import (
     CHECK_MAX_CHARS,
@@ -441,7 +441,7 @@ async def assign(
         raise Refused("the board is not available on this installation")
     handed = await _files(orch, project, session_id, files)
     wanted_inputs = await _inputs(orch, project, session_id, inputs)
-    wanted_requirements = await _requirements(orch, project, requirements)
+    wanted_requirements = await _requirements(orch, project, session_id, requirements)
     wanted_checks = _checks(checks)
     given = {k: v.strip() for k, v in (("objective", objective), ("deliverable", deliverable), ("boundaries", boundaries), ("done_when", done_when)) if v is not None and v.strip()}
     target = _folder(project, folder) if folder else None
@@ -661,7 +661,7 @@ async def _inputs(orch: Orchestrators, project: Project, session_id: str, raw: l
     return [(stored, why) for stored, (_, why) in zip(found, wanted, strict=True)]
 
 
-async def _requirements(orch: Orchestrators, project: Project, raw: list[Any] | None) -> list[tuple[str, str, str, str]]:
+async def _requirements(orch: Orchestrators, project: Project, session_id: str, raw: list[Any] | None) -> list[tuple[str, str, str, str]]:
     """``(text, kind, source, why)`` of each requirement a hand-over carries, checked before anything
     is written. A bare string is the operator's condition, which is what a requirement usually is."""
     out: list[tuple[str, str, str, str]] = []
@@ -677,7 +677,7 @@ async def _requirements(orch: Orchestrators, project: Project, raw: list[Any] | 
             raise Refused("an input requirement names its file: put it in inputs=[…], not requirements")
         if kind not in REQUIREMENT_KINDS:
             raise Refused(f"a requirement's kind is one of {', '.join(k for k in REQUIREMENT_KINDS if k != 'input')}")
-        out.append((text, kind, await source_of(orch, project, str(source) if source else "operator"), why))
+        out.append((text, kind, await bound(orch, session_id, await source_of(orch, project, str(source) if source else "operator")), why))
     if len(out) > REQUIREMENTS_MAX:
         raise Refused(f"at most {REQUIREMENTS_MAX} requirements on a card; merge some")
     return out

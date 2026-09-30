@@ -82,6 +82,12 @@ class Requirement:
         """Whether the operator stated it: in their own words in the chat, or in an answer to a question."""
         return self.source == "operator" or self.source.startswith(("operator:", "answer:"))
 
+    @property
+    def message_seq(self) -> int | None:
+        """The operator's message in the orchestrator's chat this came from, when it is known."""
+        kind, _, ref = self.source.partition(":")
+        return int(ref) if kind == "operator" and ref.isdigit() else None
+
     def origin(self) -> str:
         if self.source.startswith("answer:"):
             return f"the operator's answer [{self.source.split(':', 1)[1]}]"
@@ -93,7 +99,7 @@ class Requirement:
         return {
             "id": self.id, "label": self.label, "number": self.number, "text": self.text, "kind": self.kind, "source": self.source,
             "from_operator": self.from_operator, "state": self.state, "replaces": self.replaces, "file_id": self.file_id,
-            "evidence": self.evidence or None, "mark": self.mark or None, "created_at": self.created_at,
+            "evidence": self.evidence or None, "mark": self.mark or None, "created_at": self.created_at, "message_seq": self.message_seq,
         }
 
 

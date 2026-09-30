@@ -35,6 +35,7 @@ from protocore.runtime.events.types import EventType
 
 from daedalus.extensions.board import NOTES_MAX_CHARS
 from daedalus.extensions.notifications import ActionConflict, ActionOutcome, ActionRefused, Draft
+from daedalus.extensions.operator_steps import normalise as normalise_steps
 from daedalus.extensions.task_contract import RETURNED, Contracts, Requirement
 from daedalus.harness.capabilities import CAPABILITIES
 from daedalus.harness.contract import mcp_server, standing_rule
@@ -1220,16 +1221,29 @@ class Team:
                 raise StaffError(f"in {project.name} the operator decides permissions")
             if orchestrator.autonomy == "normal":
                 quoted = " ".join(basis.split())
+                if await self._granted_on_the_card(ask, quoted):
+                    return None
                 allowances = (await self.manager.projects.brief(project.id))["allowed_without_operator"].body
                 lines = [" ".join(line.split()) for line in allowances.splitlines()]
                 if len(quoted) < BASIS_MIN or not any(quoted in line for line in lines if line):
                     raise StaffError(
                         "a grant needs, as its basis, a line quoted verbatim from the brief's 'allowed without the operator' "
-                        f"(at least {BASIS_MIN} characters); otherwise escalate the request to the operator"
+                        f"(at least {BASIS_MIN} characters), or the R… of the operator's own scope on the member's card; "
+                        "otherwise escalate the request to the operator"
                     )
             elif not (basis.strip() or (text or "").strip()):
                 raise StaffError("a grant states its reason")
         return None
+
+    async def _granted_on_the_card(self, ask: Ask, basis: str) -> bool:
+        """Whether the basis names what the operator allowed for the very work the member asks within:
+        a scope requirement of theirs on its card. The operator allowed one test message for a mail
+        check, and the orchestrator could only ask them to write it into the brief's allowances — the
+        brief is for what holds everywhere, the card for this work."""
+        if not ask.task_id or not re.fullmatch(r"R\d{1,3}", basis):
+            return False
+        requirement = await self.contracts.find(ask.task_id, basis)
+        return requirement is not None and requirement.state == "active" and requirement.kind == "scope" and requirement.from_operator
 
     async def _deliver(self, ask: Ask, *, allow: bool | None, text: str | None, selected: list[str] | None, by: str, always: bool = False, server: bool = False) -> tuple[bool, str]:
         if ask.origin == "orchestrator":
@@ -1749,7 +1763,7 @@ class Team:
         if op == "report":
             return await self.ingress.report(
                 live, str(kwargs.get("kind") or ""), str(kwargs.get("note") or ""), kwargs.get("artifacts"), kwargs.get("remember"),
-                evidence=kwargs.get("evidence"), acknowledged=kwargs.get("acknowledged"),
+                evidence=kwargs.get("evidence"), acknowledged=kwargs.get("acknowledged"), operator_steps=kwargs.get("operator_steps"),
             )
         raise ValueError(op)
 
@@ -1869,6 +1883,7 @@ class Ingress:
     async def report(
         self, live: LiveSession, kind: str, note: str, artifacts: list[str] | None = None, remember: str | None = None, *,
         call_id: str | None = None, evidence: list[dict[str, str]] | None = None, acknowledged: list[str] | None = None,
+        operator_steps: dict[str, Any] | None = None,
     ) -> str:
         if call_id and await self._reported(live, call_id):
             return f"reported {kind}"
@@ -1877,6 +1892,8 @@ class Ingress:
         note = (note or "").strip()
         if not note:
             raise ValueError("a report needs a note")
+        # Checked before anything moves, so steps that cannot be carried refuse the whole report.
+        steps = normalise_steps(operator_steps) if operator_steps else None
         task = await self.team.task(live.session.task_id) if live.session.task_id else None
         contracts = self.team.contracts
         told = f"reported {kind}"
@@ -1953,8 +1970,24 @@ class Ingress:
             payload["unproven"] = unproven
         if call_id:
             payload["call_id"] = call_id
+        if steps is not None:
+            kept_steps = await self._keep_steps(live, task, steps)
+            payload["operator_steps"] = {**steps.view(), "file": file_ref(kept_steps)}
+            told += f"; your steps for the operator go to them word for word ({kept_steps.short()})" + ("" if steps.walked else ", marked as not checked on the running version")
         await self._published(await self.team.publish("staff.report", payload, member=live.staff, session_id=live.session_id))
         return told
+
+    async def _keep_steps(self, live: LiveSession, task: BoardTask | None, steps: Any) -> StoredFile:
+        """The steps as a file of the project, so they stay where the operator can open them again."""
+        number = 1 + int((await self.manager.db.fetchone(
+            "SELECT count(*) AS n FROM files f JOIN file_access a ON a.file_id = f.id WHERE a.scope = ? AND f.name LIKE 'operator-steps-%'", (live.staff.project_id,),
+        ) or {"n": 0})["n"])
+        name = f"operator-steps-{task.id if task is not None else live.staff.name}-{number}.md"
+        text = steps.markdown(member=live.staff.name, task=task.id if task is not None else "")
+        return await self.manager.files.add(
+            text.encode("utf-8"), name=name, mime="text/markdown", origin="staff", origin_ref=f"{live.staff.name}:{task.id if task else ''}",
+            scope=live.staff.project_id, actor=f"staff:{live.staff.name}",
+        )
 
     async def _published(self, event: AppEvent | None) -> None:
         if event is None:

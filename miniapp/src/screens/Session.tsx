@@ -24,16 +24,20 @@ import { panelShortcut } from "../panel";
 import { Panel, usePanel, usePanelWidth } from "../panelhost";
 import { SessionDetails } from "../details";
 import { JobsTab } from "../jobs";
-import { navigate, pathFor, projectHome, projectSessionPath, useRoute } from "../router";
+import { markAnchor, navigate, pathFor, projectHome, projectSessionPath, useAnchor, useRoute } from "../router";
+import { turnFor, withOlder } from "../anchor";
+import { ChatSearch } from "../chatsearch";
 import { useMedia } from "../shell";
-import { SCROLL_KEYS, Windowed, keepOpened, openedLine, stillAtEnd, type OpenedLine } from "../virtual";
+import { SCROLL_KEYS, Windowed, keepOpened, openedLine, stillAtEnd, type OpenedLine, type WindowedHandle } from "../virtual";
 import { DICT, plural, t } from "../i18n";
 import { groupDetail, groupName, searchedGroup } from "../toolgroups";
 import { usePresenceScope } from "../presence";
 import { endsTerminals, TerminalButton, TerminalDock, TerminalFull, TerminalSheet, useSessionTerminals, useTerminalDock } from "../terminal/dock";
 import { insideTerminal } from "../terminal/keys";
 import { tabsFor } from "../panel";
-import { EventCard, FocusChat, FocusChatContext, stepDescription, useFocusChat } from "../project/chat";
+import { EventCard, FocusChat, FocusChatContext, MessageFate, ReplyChip, ReplyQuote, StepsCard, currentReply, setReply, stepDescription, useAnsweredMark, useFocusChat } from "../project/chat";
+import { GoalStrip } from "../project/goalstrip";
+import { excerptOf, messageBody, uploadText } from "../project/goalmodel";
 import { QuestionsLine, QuestionsPanel } from "../questions/QuestionsPanel";
 import { useQuestions, type QuestionScope } from "../questions/data";
 import { StaffHeader, StaffMessages, useMember } from "../project/staff";
@@ -64,6 +68,13 @@ const TAIL_AFTER_EVENT = 24;
 const EVENT_COALESCE_MS = 150;
 /** How many older messages a page holds when the reader scrolls past the top. */
 const OLDER_PAGE = 200;
+/** How many older pages a link to one message may read to reach it: four thousand messages back.
+ *  Further than that the chat stops and says so, rather than reading a whole history for one link. */
+const ANCHOR_PAGES = 20;
+/** Where the message a link opens is put: a little below the top of the screen, not under its edge. */
+const ANCHOR_MARGIN_PX = 12;
+/** How long that message stays lit, so the eye finds it among the turns around it. */
+const ANCHOR_LIT_MS = 2600;
 /**
  * Less than this left below the fold and the newest-message button is not offered. It was 160 px,
  * which is three or four lines of an answer: the end of a reply sat under the composer, cut mid-
@@ -144,14 +155,19 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const mainSession = useMain(leaveForOrchestration).data?.session_id;
   const orchestrationPath = leaveForOrchestration && detail ? orchestrationPathOf(detail, mainSession) : null;
   useEffect(() => {
-    if (orchestrationPath) navigate(orchestrationPath + window.location.search, { replace: true });
+    if (orchestrationPath) navigate(orchestrationPath + window.location.search, { replace: true, keepHash: true });
   }, [orchestrationPath]);
   const staffName = useMember(focus && detail?.staff ? detail.staff.id : null).data?.name ?? "";
   // What waits for the operator: the orchestrator's project's list, or every project's in the main
   // chat. The cards live in the panel's Questions tab; the chat carries one line that opens it.
   const questionScope = useMemo<QuestionScope | null>(() => (orchestrating ? { projectId: focus!.projectId } : main ? "all" : null), [orchestrating, focus?.projectId, main]);
   const waiting = useQuestions(questionScope).questions?.length ?? 0;
-  const focusChat = useMemo<FocusChat | null>(() => (focus ? { projectId: focus.projectId, orchestrator: orchestrating, toast } : null), [focus?.projectId, orchestrating, toast]);
+  // In the orchestrator's chat anything can be answered: the quote waits over the composer, which
+  // takes the focus so the operator types the answer straight away.
+  const focusChat = useMemo<FocusChat | null>(() => (focus ? {
+    projectId: focus.projectId, orchestrator: orchestrating, toast,
+    reply: orchestrating ? (target) => { setReply(id, target); composer.current?.focus(); } : undefined,
+  } : null), [focus?.projectId, orchestrating, toast, id]);
   const body = useRef<HTMLDivElement>(null);
   const [panelPct, dragPanel] = usePanelWidth(body);
   // The session's terminals: the dock under the conversation on a desktop, a sheet and a full-screen
@@ -289,9 +305,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       try {
         const next = await api.get<SessionDetail>(`/api/sessions/${id}`);
         if (mine !== readSeq.current) return;
-        msgs.current = next.messages;
+        // The older pages the reader went back to stay; see `withOlder`.
+        msgs.current = withOlder(msgs.current, next.messages);
         historyReadSeq.current = mine;
-        setDetail(next);
+        setDetail({ ...next, messages: msgs.current });
         setOffline(false);
       } catch (e) {
         // Timers and the event stream retry by themselves: one banner in the header, not a toast every few seconds.
@@ -676,6 +693,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     built.current = buildTurns(detail?.messages ?? [], built.current);
     return built.current;
   }, [detail?.messages]);
+  // What the receipts under the operator's messages measure "read" against.
+  useAnsweredMark(id, detail?.messages, orchestrating);
   const tail = busy ? liveBase(turns, detail?.run_id) : null;
   const settled = useMemo(() => (tail ? turns.slice(0, -1) : turns), [turns, tail]);
   const turnKeys = useMemo(() => settled.map((t) => t.key), [settled]);
@@ -703,6 +722,145 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     };
   }, [older, pageable, loadOlder]);
   const onTopOfList = useCallback(() => wantOlder.current(), []);
+
+  // A link to one message (`#m<seq>`) opens the chat at that message however far back it is: the
+  // pages before the loaded ones are read until it is among them. An orchestrator's chat runs for
+  // weeks, and a link into it that opened at the end was a link to nothing.
+  const anchor = useAnchor();
+  const windowHandle = useRef<WindowedHandle | null>(null);
+  /** The message the chat was last taken to, so that a render does not take the reader there again. */
+  const anchored = useRef<number | null>(null);
+  /** Each jump is numbered; one that finishes after a newer one was asked for is dropped. */
+  const jumps = useRef(0);
+  /** Where to go once the pages are in: a seq, or -1 for the top of what could be read. */
+  const [target, setTarget] = useState<{ seq: number; jump: number } | null>(null);
+  const [unreached, setUnreached] = useState<"far" | "gone" | null>(null);
+  const reach = useCallback(
+    async (seq: number, current: () => boolean): Promise<"here" | "far" | "gone"> => {
+      for (let pages = 0; ; pages++) {
+        const oldest = msgs.current[0]?.seq;
+        if (oldest == null) return "gone";
+        if (oldest <= seq) return "here";
+        if (pages >= ANCHOR_PAGES) return "far";
+        // One page at a time, shared with the reader's own scrolling up: the same page read twice
+        // at once would be put in front of the history twice.
+        while (olderBusy.current) {
+          await new Promise((resolve) => window.setTimeout(resolve, 50));
+          if (!current()) return "far";
+        }
+        if (msgs.current[0]?.seq !== oldest) continue;
+        olderBusy.current = true;
+        setOlder("loading");
+        try {
+          const page = await api.get<SessionDetail>(`/api/sessions/${id}?before=${oldest}&tail=${OLDER_PAGE}`);
+          if (!isOlderPage(page.messages, oldest)) {
+            setOlder("done");
+            return "gone";
+          }
+          msgs.current = prepend(msgs.current, page.messages);
+          setDetail((prev) => (prev ? { ...prev, messages: msgs.current } : prev));
+          setOlder(page.messages.length < OLDER_PAGE ? "done" : "more");
+        } catch {
+          setOlder("more");
+          return "far";
+        } finally {
+          olderBusy.current = false;
+        }
+        if (!current()) return "far";
+      }
+    },
+    [id],
+  );
+  const jump = useCallback(
+    async (seq: number) => {
+      const mine = ++jumps.current;
+      const current = () => mine === jumps.current;
+      // The reader is being taken somewhere: the end lets go of them, or the pins that follow the
+      // first load would pull them back down to it.
+      stick.current = false;
+      setUnreached(null);
+      const where = await reach(seq, current);
+      if (!current()) return;
+      if (where !== "here") setUnreached(where);
+      setTarget({ seq: where === "here" ? seq : -1, jump: mine });
+    },
+    [reach],
+  );
+  useEffect(() => {
+    anchored.current = null;
+    setTarget(null);
+    setUnreached(null);
+    return () => {
+      jumps.current += 1;
+    };
+  }, [id]);
+  // Only the pane the address is about follows its hash, and only once the session is known to stay
+  // on this screen: a plain address that is about to move to orchestration mode leaves the jump to
+  // the screen it moves to, which reads the same hash.
+  const follows = pane !== "right";
+  const anchorReady = follows && !!detail && !orchestrationPath;
+  useEffect(() => {
+    if (!follows || anchor == null || anchored.current === anchor) return;
+    stick.current = false;
+    if (!anchorReady) return;
+    anchored.current = anchor;
+    void jump(anchor);
+  }, [follows, anchorReady, anchor, jump]);
+  // A hit of the chat's search: the same jump, and the address says where the reader is now.
+  const openMessage = useCallback(
+    (seq: number) => {
+      markAnchor(seq);
+      anchored.current = seq;
+      void jump(seq);
+    },
+    [jump],
+  );
+  // At the message: its turn is rendered, put a little below the top of the screen and lit for a
+  // moment. The turns above it take their real heights over the next frames and move it, so it is put
+  // back a few times — until the reader takes the list over with a finger or the wheel.
+  useEffect(() => {
+    const host = scroller.current;
+    if (!target || !host) return;
+    const index = target.seq < 0 ? -1 : turnFor(turnKeys, target.seq);
+    if (index < 0) {
+      host.scrollTop = 0;
+      return;
+    }
+    const key = turnKeys[index];
+    windowHandle.current?.reveal(key);
+    let lit: HTMLElement | null = null;
+    let over = false;
+    const place = () => {
+      if (over || userScrolling.current) return;
+      const el = windowHandle.current?.element(key) ?? null;
+      if (!el) {
+        windowHandle.current?.reveal(key);
+        return;
+      }
+      const moved = el.getBoundingClientRect().top - host.getBoundingClientRect().top - ANCHOR_MARGIN_PX;
+      if (Math.abs(moved) >= 1) host.scrollTop += moved;
+      // The windowed list may render the turn anew as it moves; the light follows it.
+      if (el !== lit) {
+        lit?.classList.remove("anchored");
+        el.classList.add("anchored");
+        lit = el;
+      }
+    };
+    const frame = requestAnimationFrame(place);
+    const timers = [60, 180, 400, 800, 1400].map((ms) => window.setTimeout(place, ms));
+    const dim = window.setTimeout(() => {
+      over = true;
+      lit?.classList.remove("anchored");
+    }, ANCHOR_LIT_MS);
+    return () => {
+      cancelAnimationFrame(frame);
+      timers.forEach(clearTimeout);
+      window.clearTimeout(dim);
+      lit?.classList.remove("anchored");
+    };
+    // The keys are read as they are when the target is set, which is the render the pages went in with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target]);
 
   // Follow the newest content only while the reader is at the bottom and not scrolling by hand. A
   // list that grew because the reader opened something in it is not new content: the line they
@@ -880,15 +1038,18 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // queue is re-read so the card is there before the stream says so.
   async function send(text: string, files: File[], clientMessageId?: string, onProgress?: (fraction: number) => void) {
     const steer = busyRef.current && status === "running";
+    const reply = orchestrating ? currentReply(id) : null;
     if (files.length > 0) {
       const form = new FormData();
-      form.append("text", text);
+      form.append("text", uploadText(text, reply));
       if (clientMessageId) form.append("client_message_id", clientMessageId);
       for (const f of files) form.append("files", f, f.name);
       await api.upload(`/api/sessions/${id}/upload`, form, onProgress);
     } else {
-      await api.post(`/api/sessions/${id}/messages`, steer ? { text, steer: true, client_message_id: clientMessageId } : { text, client_message_id: clientMessageId });
+      await api.post(`/api/sessions/${id}/messages`, messageBody(text, { steer, clientMessageId, reply }));
     }
+    // Only once the message is out: a send that fails puts the words back and keeps what they answer.
+    if (reply) setReply(id, null);
     stick.current = true;
     if (steer) void loadSteers();
     load();
@@ -1058,6 +1219,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     return () => document.removeEventListener("keydown", onKey);
   }, [phone, pane, toggleDock]);
 
+  // Where this chat lives, for a link to one of its messages. The orchestrator's chat and a project's
+  // sessions are opened in orchestration mode; a link to their plain address took a detour through
+  // the Agents screen and a redirect before it arrived.
+  const link = focus
+    ? orchestrating ? projectHome(focus.projectId) : projectSessionPath(focus.projectId, id)
+    : main ? pathFor("orchestration") : (detail && orchestrationPathOf(detail, mainSession)) || pathFor("agents", id);
   const sessionCtx = useMemo(
     () => ({
       id,
@@ -1065,8 +1232,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       preview: openPreview,
       openJobs: () => panel.open("jobs"),
       toast,
+      link,
     }),
-    [id, detail?.workspace, openPreview, panel.open, toast],
+    [id, detail?.workspace, openPreview, panel.open, toast, link],
   );
 
   // What the answer cited, clicked: a file opens at the lines it named, a Verify receipt opens as a
@@ -1148,6 +1316,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             </button>
           )}
           {phone && browserShown && <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />}
+          <ChatSearch sessionId={id} onPick={openMessage} />
           <TerminalButton dock={terminalDock} phone={phone} />
           {!phone && <button className={`iconbtn ${panel.state.tab ? "on" : ""}`} onClick={panel.toggle} aria-label={t("panel.toggle")} title={t("panel.toggle.title")} aria-pressed={!!panel.state.tab}>
             <Icon name="panel" />
@@ -1197,6 +1366,14 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                   {snapshots.pruned_before ? t("session.pruned.before", { date: absDate(snapshots.pruned_before) }) : t("session.pruned")}
                 </div>
               )}
+              {unreached && (
+                <div className="anchor-note" role="status">
+                  <span className="grow">{t(unreached === "far" ? "anchor.far" : "anchor.gone")}</span>
+                  <button type="button" className="iconbtn" onClick={() => setUnreached(null)} aria-label={t("common.close")} title={t("common.close")}>
+                    <Icon name="close" size={16} />
+                  </button>
+                </div>
+              )}
               <SessionContext.Provider value={sessionCtx}>
                 <Windowed
                   keys={turnKeys}
@@ -1204,6 +1381,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                   pinned={() => stick.current}
                   dragging={() => userScrolling.current}
                   onTop={onTopOfList}
+                  handle={windowHandle}
                   render={(i) => (
                     <Safe>
                       <TurnView turn={settled[i]} live={false} onTurnAction={turnAction} />
@@ -1234,6 +1412,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           {staffId && <StaffMessages staffId={staffId} />}
           <Composer
             ref={composer}
+            above={orchestrating ? <><GoalStrip projectId={focus!.projectId} /><ReplyChip sessionId={id} /></> : undefined}
             sessionId={id}
             status={status}
             onSend={send}
@@ -1538,7 +1717,7 @@ function SystemNoteRow({ note, cacheKey, run }: { note: SystemNote; cacheKey?: s
 }
 
 const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Turn; live: boolean; onTurnAction?: (kind: "revert" | "fork" | "retry", seq: number) => void }) {
-  const { id: sessionId, preview, toast } = useContext(SessionContext);
+  const { id: sessionId, preview, toast, link } = useContext(SessionContext);
   const focusChat = useFocusChat();
   const [open, setOpen] = useDisclosed(`${sessionId}:turn:${turn.key}`, false);
   const [folded, setFolded] = useDisclosed(`${sessionId}:run:${turn.key}`, false);
@@ -1570,14 +1749,18 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   const artifacts = live ? [] : producedFiles(turn.activity);
   const families = open ? "" : focusChat?.orchestrator ? stepLine(turn.activity) : familyLine(turn.activity);
   const copyLink = async () => {
-    const url = `${window.location.origin}${pathFor("agents", sessionId)}#m${seq}`;
+    const url = `${window.location.origin}${link}#m${seq}`;
     toast((await copyText(url)) ? t("turn.link.copied") : url);
   };
   return (
     <div className={`turn ${turn.note?.kind === "loop" ? "loop-turn" : ""} ${folded && !live ? "folded" : ""}`} id={seq ? `m${seq}` : undefined}>
       {/* The project's events the orchestrator was woken with are the news of the chat: a card, open. */}
-      {turn.user && turn.note?.kind === "events" && <EventCard text={turn.note.body} />}
-      {turn.user && turn.note?.kind === "events" && !live && <KeptFiles text={turn.note.body} onOpen={preview} />}
+      {/* A member's steps for the operator are a note of the host's too, drawn from their fields as a
+          card of their own rather than as the markdown the model and the file carry. */}
+      {turn.user && turn.note?.kind === "events" && (turn.user.operator_steps
+        ? <StepsCard steps={turn.user.operator_steps} seq={seq} onOpen={preview} />
+        : <EventCard text={turn.note.body} seq={seq} />)}
+      {turn.user && turn.note?.kind === "events" && !turn.user.operator_steps && !live && <KeptFiles text={turn.note.body} onOpen={preview} />}
       {turn.user && turn.note && turn.note.kind !== "events" && <SystemNoteRow note={turn.note} cacheKey={live ? undefined : `n${seq ?? turn.key}`} run={turn.note.kind === "loop" && !live ? { folded, toggle: () => setFolded(!folded) } : undefined} />}
       <div className="turn-content" hidden={folded && !live}>
       {turn.user && !turn.note && (
@@ -1585,9 +1768,11 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           <div className="msg user">
             {inbound && <span className="msg-origin">{t("turn.origin.inbound", { source: inbound })}</span>}
             {turn.user.yagni && <span className="msg-origin msg-yagni" title={t("turn.yagni.title")}>{t(turn.user.yagni === "on" ? "turn.yagni.on" : "turn.yagni.off")}</span>}
+            {turn.user.reply_to && <ReplyQuote reply={turn.user.reply_to} />}
             <Md text={withoutAttachedList(turn.user.text)} cacheKey={live ? undefined : `u${seq ?? turn.key}`} />
           </div>
           <KeptFiles text={turn.user.text} onOpen={preview} />
+          {focusChat?.orchestrator && <MessageFate message={turn.user} sessionId={sessionId} projectId={focusChat.projectId} />}
           {/* Under the message, not beside it: a row beside the bubble is off-screen on a phone. */}
           <MessageActions
             text={turn.user.text}
@@ -1646,6 +1831,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           text={mediaCopyText(turn.answer, turn.media ?? [])}
           actions={[
             ...(seq ? [{ icon: "link" as IconName, label: t("turn.link"), onSelect: copyLink }] : []),
+            ...(turn.answerSeq && focusChat?.reply ? [{ icon: "reply" as IconName, label: t("reply.action"), onSelect: () => focusChat.reply!({ seq: turn.answerSeq!, excerpt: excerptOf(turn.answer) }) }] : []),
             ...(turn.answerSeq && onTurnAction ? [{ icon: "reload" as IconName, label: t("turn.retry"), onSelect: () => onTurnAction("retry", turn.answerSeq!) }] : []),
           ]}
           more={
@@ -2212,12 +2398,14 @@ function ReceiptDialog({ sessionId, receipt, onClose }: { sessionId: string; rec
   );
 }
 
-const SessionContext = createContext<{ id: string; workspace: string; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void }>({
+/** `link` is the address this chat lives at, which a link to one of its messages starts from. */
+const SessionContext = createContext<{ id: string; workspace: string; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string }>({
   id: "",
   workspace: "",
   preview: () => undefined,
   openJobs: () => undefined,
   toast: () => undefined,
+  link: "",
 });
 
 /** A tool's path as the workspace knows it: absolute paths inside the workspace become relative, others stay unreachable. */

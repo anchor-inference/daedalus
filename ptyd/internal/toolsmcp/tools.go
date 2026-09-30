@@ -54,8 +54,10 @@ func toolList(askHold time.Duration) []tool {
 				"goes to done, handed in for the orchestrator to check against your note). note: a short factual summary. " +
 				"evidence (with done): [{item, how, result}] for each check (C1 …) and requirement (R1 …) of the task — " +
 				"what you ran or looked at and what it showed. acknowledged: the requirements (R…) sent to you that you " +
-				"have taken into your plan, or the input files (R…) you have read. artifacts: paths or links of what you " +
-				"produced. remember: one line to keep in your notes for every later session.",
+				"have taken into your plan, or the input files (R…) you have read. operator_steps: when the operator has to " +
+				"do something themselves, the steps for them, delivered word for word: {goal, steps, roles?, expected?, check?, " +
+				"limits?, verified: 'on-running-version' or 'unverified', verified_how?}; never a password in them. " +
+				"artifacts: paths or links of what you produced. remember: one line to keep in your notes for every later session.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -76,6 +78,21 @@ func toolList(askHold time.Duration) []tool {
 						},
 					},
 					"acknowledged": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Requirements (R…) you have taken into your plan."},
+					"operator_steps": map[string]any{
+						"type":        "object",
+						"description": "Steps the operator follows themselves, delivered to them word for word.",
+						"properties": map[string]any{
+							"goal":         map[string]any{"type": "string"},
+							"steps":        stringList(),
+							"roles":        map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"account": map[string]any{"type": "string"}, "purpose": map[string]any{"type": "string"}}}},
+							"expected":     map[string]any{"type": "string"},
+							"check":        map[string]any{"type": "string"},
+							"limits":       map[string]any{"type": "string"},
+							"verified":     map[string]any{"type": "string", "enum": []string{"on-running-version", "unverified"}},
+							"verified_how": map[string]any{"type": "string"},
+						},
+						"required": []string{"goal", "steps", "verified"},
+					},
 				},
 				"required": []string{"kind", "note"},
 			},
@@ -179,12 +196,13 @@ func decode(name string, raw json.RawMessage) (request, error) {
 	switch name {
 	case reportTool:
 		var a struct {
-			Kind         string     `json:"kind"`
-			Note         string     `json:"note"`
-			Artifacts    []string   `json:"artifacts"`
-			Remember     string     `json:"remember"`
-			Evidence     []evidence `json:"evidence"`
-			Acknowledged []string   `json:"acknowledged"`
+			Kind          string         `json:"kind"`
+			Note          string         `json:"note"`
+			Artifacts     []string       `json:"artifacts"`
+			Remember      string         `json:"remember"`
+			Evidence      []evidence     `json:"evidence"`
+			Acknowledged  []string       `json:"acknowledged"`
+			OperatorSteps map[string]any `json:"operator_steps"`
 		}
 		if err := strict(raw, &a); err != nil {
 			return request{}, err
@@ -204,6 +222,10 @@ func decode(name string, raw json.RawMessage) (request, error) {
 		}
 		if len(a.Acknowledged) > 0 {
 			fields["acknowledged"] = a.Acknowledged
+		}
+		if len(a.OperatorSteps) > 0 {
+			// Passed as it came: the host checks the steps and says what is wrong with them.
+			fields["operator_steps"] = a.OperatorSteps
 		}
 		return request{op: "report", fields: fields, fallback: reportRecorded}, nil
 	case askTool:
@@ -263,6 +285,9 @@ func shapeOf(field string) string {
 	}
 	if field == "evidence" {
 		return "a list of objects with item, how and result"
+	}
+	if field == "operator_steps" {
+		return "an object with goal, steps and verified"
 	}
 	return "a string"
 }

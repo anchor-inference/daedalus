@@ -46,6 +46,7 @@ import shutil
 import sys
 import tempfile
 import time
+import uuid
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -69,6 +70,7 @@ PRICES = {
     # ($ per million input tokens missed by the cache, cached, output), for providers that report tokens only.
     "deepseek:deepseek-flash": (0.30, 0.006, 1.20),
     "deepseek:deepseek-v4-pro": (0.60, 0.012, 2.40),
+    "opencode:deepseek-v4.1-flash": (0.30, 0.006, 1.20),
 }
 
 MODEL_TIMEOUT_S = 240.0
@@ -113,6 +115,7 @@ class Model:
     name: str
     cap: float
     spent: float = 0.0
+    session: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     @property
     def label(self) -> str:
@@ -130,6 +133,13 @@ class Model:
         if self.upstream == "openrouter":
             body["usage"] = {"include": True}
         return body
+
+    def headers(self) -> dict[str, str]:
+        headers = {"x-daedalus-metered": "1"}
+        if self.upstream == "opencode":
+            # The OpenCode gateway routes by a session of the caller's; one per model run is enough.
+            headers["x-opencode-session"] = self.session
+        return headers
 
     def cost(self, usage: dict[str, Any]) -> float:
         if self.upstream in SUBSCRIPTIONS:
@@ -163,7 +173,7 @@ async def complete(http: httpx.AsyncClient, model: Model, messages: list[dict[st
         try:
             # The key proxy reports a call it forwards to the running bot's ledger unless it is told the
             # caller meters it itself; an evaluation must not show up in the operator's usage.
-            response = await http.post(model.url, json=model.body(messages, tools), headers={"x-daedalus-metered": "1"}, timeout=MODEL_TIMEOUT_S)
+            response = await http.post(model.url, json=model.body(messages, tools), headers=model.headers(), timeout=MODEL_TIMEOUT_S)
         except httpx.HTTPError as exc:
             last = f"{type(exc).__name__}: {exc}"
         else:
@@ -247,6 +257,7 @@ class Runner:
             for role, text in opening.history:
                 messages.append({"role": role, "content": text})
             pending = first
+            steered = False
             async with asyncio.timeout(EPISODE_TIMEOUT_S):
                 while pending and result.turns < scenario.turns:
                     result.turns += 1
@@ -279,6 +290,7 @@ class Runner:
                             record.texts.append((result.turns, str(kept["content"])))
                         if not calls:
                             break
+                        steer = opening.steer if result.turns == 1 and not steered else ""
                         for call in calls:
                             name = str((call.get("function") or {}).get("name") or "")
                             raw = (call.get("function") or {}).get("arguments") or "{}"
@@ -300,12 +312,22 @@ class Runner:
                             record.calls.append(Call(result.turns, name, arguments, text, failed))
                             messages.append({"role": "tool", "tool_call_id": call.get("id") or "", "content": text})
                             log.write(json.dumps({"tool": name, "arguments": arguments, "failed": failed, "result": text}, ensure_ascii=False) + "\n")
+                        if steer:
+                            # The operator wrote while the turn was under way: the core puts the
+                            # message before the next model call.
+                            steered = True
+                            messages.append({"role": "user", "content": await stand.steered(steer)})
+                            log.write(json.dumps({"steer": messages[-1]["content"]}, ensure_ascii=False) + "\n")
                         if silent:
                             break
                     else:
                         result.stopped = f"turn {result.turns} used all {MAX_STEPS} steps"
                     await stand.turn_ended(turn_started)
                     pending = await stand.news()
+                    if opening.steer and not steered:
+                        # The turn ended before the message could be placed: it opens the next one.
+                        steered = True
+                        pending = "\n\n".join(part for part in (pending, opening.steer) if part)
         except TimeoutError:
             result.stopped = f"took longer than {EPISODE_TIMEOUT_S:.0f} s"
         except OutOfBudget as exc:
@@ -317,6 +339,7 @@ class Runner:
             result.seconds = round(time.monotonic() - started, 1)
             if stand is not None:
                 try:
+                    record.delivered = await stand.delivered()
                     result.success, result.why = await scenario.check(stand, record)
                 except Exception as exc:  # noqa: BLE001 — a check that cannot read the result fails it
                     result.success, result.why = False, f"the check failed: {type(exc).__name__}: {exc}"

@@ -307,6 +307,8 @@ class StaffReport(TypedDict):
     """A done report's word on each check it names: ``{item, how, result}``, ``item`` a check or a requirement."""
     unproven: NotRequired[list[str]]
     """The checks and requirements a done report gave no evidence for."""
+    operator_steps: NotRequired[dict[str, Any]]
+    """Steps the member wrote for the operator (``operator_steps.OperatorSteps.view``) and the file they are kept in."""
 
 
 class StaffChannel(TypedDict):
