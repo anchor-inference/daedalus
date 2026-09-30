@@ -31,7 +31,7 @@ func driving(t *testing.T, h *harness) *person {
 		{"textbox", "Search"}, {"combobox", "Period"}, {"checkbox", "Include archived"}, {"button", "Show"},
 		{"textbox", "Comment"}, {"textbox", "Email"}, {"textbox", "Password"}, {"button", "Sign in"},
 		{"textbox", "Card number"}, {"textbox", "Code"}, {"link", "Export CSV"}, {"button", "Place order"},
-		{"link", "Download report"}, {"button", "Reset"},
+		{"link", "Download report"}, {"button", "Reset"}, {"combobox", "Birth year"},
 	} {
 		ref := refOf(t, snap, e[0], e[1])
 		r := h.mustAct(o.Tab.ID, map[string]any{"action": "click", "ref": ref, "element": e[1], "dry_run": true,
@@ -388,5 +388,28 @@ func TestARecordingFollowsTheAddressBarKeysScrollingDialogsAndDownloads(t *testi
 	}
 	if last := s[len(s)-1]; last.Action != "navigate" || last.Go != "back" {
 		t.Fatalf("the last step: %+v", last)
+	}
+}
+
+func TestAPersonalChoiceIsABlankEvenWithValuesKept(t *testing.T) {
+	h := start(t, nil)
+	p := driving(t, h)
+	h.must("workflow.start", map[string]any{"group_id": "g1", "values": "literal"}, nil)
+	// Reached with Tab, as a list is: a click on one opens Chromium's own drop-down, which a
+	// headless browser draws nowhere the live view shows.
+	p.click("Place order")
+	p.key("Tab", "Tab", 9)
+	p.key("ArrowDown", "ArrowDown", 40)
+	p.click("Show")
+	p.settle()
+	var wf workflow.Workflow
+	h.must("workflow.stop", map[string]any{"group_id": "g1"}, &wf)
+	sel := stepsOf(t, wf, "select")
+	if len(sel) != 1 || sel[0].Option != "" || sel[0].Slot != "birth_year" {
+		t.Fatalf("the birth year's step: %+v in %+v", sel, wf.Steps)
+	}
+	raw, _ := json.Marshal(wf)
+	if strings.Contains(string(raw), "1981") {
+		t.Fatalf("the recording kept the year: %s", raw)
 	}
 }

@@ -140,7 +140,7 @@ export function stepWords(step: BrowserStep): { key: string; vars: Record<string
       if (step.value !== undefined) return { key: step.submit ? "browser.step.typed.submit" : "browser.step.typed", vars: { what, text: step.value } };
       return { key: step.submit ? "browser.step.blank.submit" : "browser.step.blank", vars: { what, slot: step.slot ?? "" } };
     case "select":
-      return { key: "browser.step.select", vars: { what, option: step.option ?? "" } };
+      return step.option ? { key: "browser.step.select", vars: { what, option: step.option } } : { key: "browser.step.select.blank", vars: { what, slot: step.slot ?? "" } };
     case "press":
       return { key: (step.count ?? 1) > 1 ? "browser.step.press.n" : "browser.step.press", vars: { keys: step.keys ?? "", n: step.count ?? 1 } };
     case "scroll":

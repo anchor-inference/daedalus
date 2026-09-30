@@ -134,7 +134,8 @@ def step_line(step: dict[str, Any], host: str) -> str | None:
         line += ", then Enter (BrowserAct type, submit=true)." if step.get("submit") else " (BrowserAct type)."
         return line + asked
     if action == "select":
-        return f"Choose {_q(step.get('option'))} in {_element(step)} (BrowserAct select)."
+        choice = _q(step.get("option")) if step.get("option") else f"{{{step.get('slot') or 'option'}}}"
+        return f"Choose {choice} in {_element(step)} (BrowserAct select)."
     if action == "press":
         return f"Press {step.get('keys')}{times} (BrowserAct press)."
     if action == "handoff":

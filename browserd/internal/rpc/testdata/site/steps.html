@@ -27,6 +27,9 @@
   <label class="at" style="left:360px;top:360px">Code <input id="code" name="otp" style="width:120px;height:32px"></label>
   <a id="export" class="at" style="left:20px;top:440px;display:block;width:160px;height:32px" href="/site/steps.html?token=SECRETTOKEN1234567890abcdef&amp;period=last&amp;keyword=shoes#done">Export CSV</a>
   <button class="at" style="left:360px;top:440px;width:160px;height:32px" onclick="document.getElementById('out').textContent = 'ordered'">Place order</button>
+  <label class="at" style="left:620px;top:520px">Birth year
+    <select autocomplete="bday-year" style="width:120px;height:32px"><option>1980</option><option>1981</option><option>1982</option></select>
+  </label>
   <a class="at" style="left:20px;top:520px;display:block;width:200px;height:32px" href="/file.txt">Download report</a>
   <button class="at" style="left:360px;top:520px;width:160px;height:32px" onclick="document.getElementById('out').textContent = confirm('Reset the filters?') ? 'reset' : 'kept'">Reset</button>
 </main>

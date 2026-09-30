@@ -565,6 +565,10 @@ func (r *Recorder) commit(ctx context.Context, s *session, submit bool) bool {
 			return false
 		}
 		st = Step{Action: "select", Element: element(w.tg), Option: words(v.Option, maxText), key: w.tg.Key}
+		if w.tg.Field.Personal {
+			// A birth year or a country chosen from a list is the person's, like one typed.
+			st.Option, st.Slot = "", s.slot(w.tg)
+		}
 	case w.tg.Field.Text:
 		if v.Value == w.before.Value {
 			return false

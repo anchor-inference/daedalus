@@ -1079,7 +1079,8 @@ from the field (`search`, `report_period`, the same for the same field). With `v
 value is kept as well where it is at most 200 characters and holds no e-mail address, no run of nine
 digits or more (a telephone, a card, an account), no word that looks like a key, and the field is not
 a personal one (`autocomplete` of a name, an address, `email`, `tel`, `username`, a birthday, or
-`type="email"`/`"tel"`). A `select`'s option is the page's own word and is always kept.
+`type="email"`/`"tel"`). A `select`'s option is the page's own word and is kept, except in a
+personal field (a birth year, a country), where it is a blank as a typed value is.
 
 **Addresses and page words.** Every address in a step loses its user name, password and fragment; a
 query value becomes the blank `{name}` when its name is a credential's or a person's (`token`, `code`,

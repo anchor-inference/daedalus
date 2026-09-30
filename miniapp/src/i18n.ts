@@ -4113,6 +4113,7 @@ Object.assign(DICT, {
   "browser.step.blank": { en: "Typed into “{what}” (a blank: {slot})", ru: "Ввёл текст в «{what}» (пропуск: {slot})" },
   "browser.step.blank.submit": { en: "Typed into “{what}” and sent it (a blank: {slot})", ru: "Ввёл текст в «{what}» и отправил (пропуск: {slot})" },
   "browser.step.select": { en: "Chose “{option}” in “{what}”", ru: "Выбрал «{option}» в «{what}»" },
+  "browser.step.select.blank": { en: "Chose in “{what}” (a blank: {slot})", ru: "Выбрал вариант в «{what}» (пропуск: {slot})" },
   "browser.step.press": { en: "Pressed {keys}", ru: "Нажал {keys}" },
   "browser.step.press.n": { en: "Pressed {keys} ×{n}", ru: "Нажал {keys} ×{n}" },
   "browser.step.scroll.down": { en: "Scrolled down", ru: "Прокрутил вниз" },

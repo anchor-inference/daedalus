@@ -1599,7 +1599,7 @@
   ];
   // What a person types into these is who they are, not what the task is: never kept as a value
   // even when the operator lets ordinary values be kept, only as a blank to fill.
-  const PERSONAL_AUTOCOMPLETE = /(^|\s)(username|email|tel(-[a-z-]+)?|bday(-[a-z]+)?|name|given-name|family-name|additional-name|nickname|honorific-[a-z]+|street-address|address-line[123]|address-level[1-4]|postal-code|sex|impp|organization-title)(\s|$)/i;
+  const PERSONAL_AUTOCOMPLETE = /(^|\s)(username|email|tel(-[a-z-]+)?|bday(-[a-z]+)?|name|given-name|family-name|additional-name|nickname|honorific-[a-z]+|street-address|address-line[123]|address-level[1-4]|postal-code|country|country-name|sex|impp|organization-title)(\s|$)/i;
 
   // The most fields a sign-in box holds: a name, a password, a code, "remember me".
   const SIGN_IN_FIELDS = 4;
