@@ -241,6 +241,17 @@ async def test_hiring_checks_the_executor_the_model_and_the_name(settings: Setti
             await r.call(sid, "hire", name="Cleo", role="Code", harness="claude", agent="poet")
         said = await r.call(sid, "hire", name="Cleo", role="Code", harness="claude", agent="reviewer", model="opus", permission_mode="acceptEdits")
         assert said.startswith("hired Cleo") and "Claude Code" in said
+        # "default" means the CLI's own default, which is no agent: kept as none, never passed on.
+        said = await r.call(sid, "hire", name="Dora", role="Mail", harness="claude", agent="default", model="sonnet")
+        dora = await r.manager.staff.by_name(r.project.id, "Dora")
+        assert said.startswith("hired Dora") and dora is not None and dora.agent == ""
+        # An agent Claude Code brings with it is there though no agent file names it.
+        said = await r.call(sid, "hire", name="Ed", role="Look around", harness="claude", agent="Explore")
+        assert said.startswith("hired Ed")
+        # With no agent files at all, an unknown name is still refused rather than let through.
+        stub.catalog = Catalog(models=("opus", "sonnet"), modes=("acceptEdits", "manual"), efforts=("low", "high"))
+        with pytest.raises(Refused, match="offers no agent 'poet'"):
+            await r.call(sid, "hire", name="Fay", role="Code", harness="claude", agent="poet")
         stub.problem = "Claude Code is not installed in the container environment"
         with pytest.raises(Refused, match="not installed in the container"):
             await r.call(sid, "hire", name="Cody", role="Code", harness="claude")

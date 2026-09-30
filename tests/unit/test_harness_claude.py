@@ -1033,3 +1033,11 @@ async def test_the_staff_views_routes(settings: Settings, db: Database, config: 
             assert [r["rule"] for r in (await client.get(f"/api/staff/{ada.id}/session", headers=headers)).json()["rules"]] == ["mcp__daedalus_browser"]
             assert (await client.delete(f"/api/staff/{ada.id}/rules/mcp__daedalus_browser", headers=headers)).json() == {"rules": []}
             assert (await client.delete(f"/api/staff/{ada.id}/rules/mcp__daedalus_browser", headers=headers)).status_code == 404
+
+
+def test_an_agent_named_default_is_not_passed_to_the_cli() -> None:
+    # Claude Code has no agent called "default": passed on, it ends every launch before the first turn.
+    argv = list(ClaudeCodeAdapter().launch_plan(spec(agent="default")).argv)
+    assert "--agent" not in argv
+    argv = list(ClaudeCodeAdapter().launch_plan(spec(agent="reviewer")).argv)
+    assert argv[argv.index("--agent") + 1] == "reviewer"

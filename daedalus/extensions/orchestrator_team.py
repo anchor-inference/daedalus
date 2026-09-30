@@ -90,6 +90,16 @@ async def _journal(orch: Orchestrators, project: Project, kind: str, text: str, 
     await orch._changed(project.id, "journal", "orchestrator")
 
 
+BUILTIN_AGENTS: dict[str, tuple[str, ...]] = {"claude": ("general-purpose", "Explore", "Plan", "claude-code-guide", "statusline-setup")}
+"""Agents a CLI brings with it, which its catalog of agent files does not list."""
+
+
+def _agent_name(agent: str) -> str:
+    """"default" is what a model writes when it means the CLI's own default, which is no agent at all."""
+    agent = (agent or "").strip()
+    return "" if agent.lower() == "default" else agent
+
+
 async def _catalog_problem(orch: Orchestrators, harness: str, env: str, folder: ProjectFolder | None, fields: dict[str, str]) -> None:
     """Refuse a command-line member whose agent, model, mode or effort its CLI does not offer.
 
@@ -119,7 +129,16 @@ async def _catalog_problem(orch: Orchestrators, harness: str, env: str, folder: 
         "permission_mode": list(catalog.modes),
         "effort": list(catalog.efforts),
     }
+    agent = fields.get("agent", "")
+    if agent and agent not in offered["agent"] and agent not in BUILTIN_AGENTS.get(harness, ()):
+        # An empty list of agents used to let any name through, and the CLI then refused it at every
+        # launch: a member hired with agent "default" for Claude Code died four times in a row before
+        # its first turn. The name is checked against what the CLI really has, built in or defined.
+        shown = ", ".join([*BUILTIN_AGENTS.get(harness, ()), *offered["agent"]][:20]) or "none"
+        raise Refused(f"{_label(harness)} offers no agent {agent!r}; leave agent empty for its own default (agents here: {shown})")
     for name, value in fields.items():
+        if name == "agent":
+            continue
         choices = offered.get(name) or []
         if value and choices and value not in choices:
             shown = ", ".join(choices[:20]) + (" …" if len(choices) > 20 else "")
@@ -148,6 +167,7 @@ async def hire(
     one_off: bool = False,
 ) -> str:
     team = _team(orch)
+    agent = _agent_name(agent)
     harness = (harness or "daedalus").strip().lower()
     if harness not in HARNESSES:
         raise Refused(f"harness is one of {', '.join(HARNESSES)}")
@@ -211,6 +231,8 @@ async def staff_edit(
     notes: str | None = None,
 ) -> str:
     member = await _member(orch, project, staff)
+    if agent is not None:
+        agent = _agent_name(agent)
     changes: dict[str, Any] = {
         k: v for k, v in (
             ("role", role), ("agent", agent), ("model", model), ("effort", effort), ("permission_mode", permission_mode),

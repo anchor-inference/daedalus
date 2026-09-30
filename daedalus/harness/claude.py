@@ -322,7 +322,9 @@ class ClaudeCodeAdapter:
             files[SKILL_PATH] = spec.team_skill.encode()
         if spec.title:
             argv += ["--name", spec.title[:120]]
-        if spec.agent:
+        if spec.agent and spec.agent.lower() != "default":
+            # "default" is no agent of Claude Code's: passed on, it ends the launch with "--agent
+            # 'default' not found". Members hired with it before the hire refused it still start.
             argv += ["--agent", spec.agent]
         if spec.model:
             argv += ["--model", spec.model]
