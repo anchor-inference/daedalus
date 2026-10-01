@@ -5883,6 +5883,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     loop = asyncio.get_running_loop()
     server = _AppServer(config, lambda: loop.call_soon_threadsafe(app.stopping.set))
     app.extensions["api_token"] = token
+    app.extensions["api_server"] = server
     base = app.settings.miniapp_public_url or f"http://127.0.0.1:{app.settings.api_port}"
     # An installation with no other way in gets one at start: a link in a file only the operator can
     # read (never in the log, which is copied around and which the agent's own tools can read).

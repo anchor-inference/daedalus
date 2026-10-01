@@ -30,6 +30,9 @@ from daedalus.transport.telegram.front import TelegramFront
 
 logger = logging.getLogger(__name__)
 
+API_STOP_SECONDS = 10.0
+"""How long a stop waits for the app's lifespan cleanup once the API server is down."""
+
 
 class Application:
     def __init__(self, settings: Settings) -> None:
@@ -239,12 +242,37 @@ class Application:
         if not polling.done():
             await polling
 
+    async def _stop_api(self) -> None:
+        """Stop the API server and then let the app's lifespan finish, before anything else is cancelled.
+
+        The server is cancelled rather than asked to drain: the app holds event streams open for as
+        long as it is looked at, and a drain would wait on them. Cancelled, the server never ran its
+        lifespan's shutdown — the app's own cleanup was skipped, and the lifespan task, left waiting,
+        was cancelled by the event loop at exit and printed "ERROR: Traceback … CancelledError" at
+        the end of every stop.
+        """
+        server: Any = self.extensions.get("api_server")
+        task = next((t for t in self.background if t.get_name() == "api-server" and not t.done()), None)
+        if task is None:
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        lifespan = getattr(server, "lifespan", None)
+        if lifespan is None:
+            return
+        try:
+            async with asyncio.timeout(API_STOP_SECONDS):
+                await lifespan.shutdown()
+        except TimeoutError:
+            logger.warning("the app's lifespan did not finish within %.0f s", API_STOP_SECONDS)
+
     async def shutdown(self) -> None:
         """Stop everything; runs are drained before the transport closes so a finishing answer still reaches the chat."""
         if self._shut_down:
             return
         self._shut_down = True
         try:
+            await self._stop_api()
             for task in self.background:
                 task.cancel()
             await self.search.close()
