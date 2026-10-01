@@ -22,7 +22,7 @@ launcher is also the command line, for everything below that a terminal does.
 | **What runs the agent** | a process under the launcher, out of a private folder of pinned, checksummed binaries | a container from one published image, with its own filesystem and its own network |
 | **First run downloads** | **nothing**: the code, the runtime and every package come inside the application ([the seed](#the-seed)); a launcher without one, built from source, downloads 103 MB on Linux x86-64, ~96 MB on macOS, ~148 MB on Windows | **114 MB** to pull the runtime image — 478 MB once unpacked — plus Docker itself, which is a ~600 MB application with a multi-gigabyte VM disk behind it |
 | **On disk** | 245 MB of runtime in the user's cache folder (73 MB of it a wheel cache you can delete), 390 MB for the whole installation | 478 MB of image, plus the volumes |
-| **Start to app** | **26 s** from an empty folder on a Windows 11 desktop (126 s when it downloaded), **4.3 s** warm | the image pull, then seconds; Docker Desktop itself must be up first |
+| **Start to app** | **24 s** from an empty folder on a Windows 11 desktop, whatever the line (37–126 s when it downloaded), **4.3 s** warm | the image pull, then seconds; Docker Desktop itself must be up first |
 | **Browser** | `daedalus-desktop install browser` — both Chromium builds into the runtime's `browsers/` ([the agent's browser](#the-agents-browser)) | `COMPOSE_PROFILES=browser`: the `browser` service from the `:browser` tag of the same image, sharing every layer below the last |
 | **Isolation** | **no container boundary** — `Exec` runs as you, behind the policy rules ([the isolation, honestly](#the-isolation-honestly)) | a command that goes wrong stops at the container's edge |
 
@@ -35,9 +35,11 @@ first, the app once it answers — and nothing in the browser. A link in the app
 machine opens in your browser; everything on this machine stays in the window.
 [The window](#the-window) has the rest.
 
-The application is about 100 MB to download (Electron's own Chromium is most of it). In Docker mode
-everything that runs is in containers; in native mode the launcher downloads what it needs into a
-runtime folder in the user's cache location and runs it from there.
+The application is about 230 MB to download on Windows and Linux and 400 MB on macOS: Electron's own
+Chromium, and [the seed](#the-seed) — the code, the runtime and the packages a first run would
+otherwise download (about 115 MB for one system; the Mac carries both of its own). In Docker mode
+everything that runs is in containers; in native mode the launcher lays the runtime out into a folder
+in the user's cache location and runs it from there.
 
 ## Get it
 
@@ -560,11 +562,19 @@ The checkouts a seed makes are the release's commit, not `main`: **Update** move
 whenever it is pressed, exactly as before, and a new release's package cache is laid over the old one
 on the start after the upgrade. A fork named by `DAEDALUS_GIT_REMOTE` is never given the release's code.
 
-Measured on a Windows 11 desktop (i9-10900F, a home line that fetched GitHub at ~330 KB/s), from an
-empty folder to the app answering: **126 s** downloading — 14 s for the runtime, 43 s for the two
-checkouts, 61 s for the environment from PyPI, 8 s to start — and **26 s** from the seed — 2 s for the
-runtime, 9 s for the checkouts (most of it git committing the tree), 5 s for the environment, 10 s to
-start.
+Measured on a Windows 11 desktop (i9-10900F), from an empty folder to the app answering, with the
+same harness both ways (`--shell`, as the application starts it):
+
+| | runtime | checkouts | environment | start | total |
+|---|---|---|---|---|---|
+| downloading, evening line (GitHub at ~330 KB/s) | 14 s | 43 s | 61 s | 8 s | **126 s** |
+| downloading, the same line at night | 14 s | 11 s | 5 s | 7 s | **37 s** |
+| from the seed, twice | 3–5 s | 7–9 s | 4–5 s | 8 s | **24 s** |
+
+Most of the checkouts' seven seconds is git committing the tree; the start is the app's own boot. The
+figure with the seed does not move with the line, because nothing is fetched. Every package is larger
+by the seed: the Windows installer is 232 MB (113 MB without), the `.deb` 214 MB (108 MB), the `.dmg`
+402 MB (261 MB).
 
 Optional, fetched only when something asks for them — `daedalus-desktop install node` /
 `daedalus-desktop install browser`, or the buttons on the launcher's page:
