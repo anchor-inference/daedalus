@@ -351,3 +351,13 @@ def test_the_owner_is_only_restored_where_there_are_owners(monkeypatch: pytest.M
     monkeypatch.setattr(supervisor, "POSIX", False)
     supervisor.restore_owner(tmp_path)
     assert calls == []
+
+
+def test_the_bot_runs_in_utf8_mode_whoever_started_the_supervisor(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # A launcher older than the setting does not pass it down; on Windows the bot would otherwise read
+    # and write its files and logs in the locale's code page.
+    monkeypatch.delenv("PYTHONUTF8", raising=False)
+    monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
+    monkeypatch.setenv("DAEDALUS_STATE", str(tmp_path / "state"))
+    env = load_supervisor().bot_env()
+    assert env["PYTHONUTF8"] == "1" and env["PYTHONIOENCODING"] == "utf-8"

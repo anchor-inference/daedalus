@@ -528,3 +528,36 @@ func TestTheLauncherWaitsBrieflyForTheDaemon(t *testing.T) {
 		t.Fatal("a daemon that came up was not found")
 	}
 }
+
+// Every Python the launcher starts runs in UTF-8 mode, whatever the machine's code page or the
+// launcher's own environment says: on Windows the locale's cp1252 ended `daedalus check` on a
+// printed arrow and garbled the logs.
+func TestEveryPythonChildRunsInUTF8Mode(t *testing.T) {
+	t.Setenv("PYTHONUTF8", "0")
+	t.Setenv("PYTHONIOENCODING", "cp1252")
+	n := NewNative(fixtureData(t), func(string, ...any) {})
+	for name, env := range map[string][]string{"runtime": n.runtimeEnv(), "children": n.childBase()} {
+		got := readEnvList(env)
+		if got["PYTHONUTF8"] != "1" || got["PYTHONIOENCODING"] != "utf-8" {
+			t.Fatalf("%s: PYTHONUTF8=%q PYTHONIOENCODING=%q", name, got["PYTHONUTF8"], got["PYTHONIOENCODING"])
+		}
+		count := 0
+		for _, kv := range env {
+			if strings.HasPrefix(strings.ToUpper(kv), "PYTHONUTF8=") {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("%s: PYTHONUTF8 appears %d times", name, count)
+		}
+	}
+}
+
+func readEnvList(env []string) map[string]string {
+	out := map[string]string{}
+	for _, kv := range env {
+		key, value, _ := strings.Cut(kv, "=")
+		out[key] = value
+	}
+	return out
+}

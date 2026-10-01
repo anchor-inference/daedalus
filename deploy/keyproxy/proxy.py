@@ -651,7 +651,21 @@ def make_app() -> web.Application:
     return app
 
 
+def utf8_streams() -> None:
+    """Make standard output and error UTF-8, replacing what cannot be written rather than raising.
+
+    Its log is a file the launcher keeps, which on Windows outside UTF-8 mode is in the locale's code
+    page; a provider's error text carrying anything else must not end the proxy.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", None) or "").lower().replace("-", "").replace("_", "")
+        reconfigure = getattr(stream, "reconfigure", None)
+        if encoding != "utf8" and reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main() -> None:
+    utf8_streams()
     port = int(os.environ.get("KEYPROXY_PORT", "3200"))
     # A proxy that injects provider keys must not be one the local network can call, so the default
     # is the loopback interface and reaching further is something a caller asks for by name. In a

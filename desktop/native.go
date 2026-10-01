@@ -583,7 +583,7 @@ func (n *Native) searchPath() string {
 // two variables that keep uv inside the installation's own folder rather than in the user's cache
 // and home directory.
 func (n *Native) runtimeEnv() []string {
-	env := environWithout("PATH", "VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR")
+	env := pythonUTF8(environWithout("PATH", "VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR"))
 	return append(env,
 		"PATH="+n.searchPath(),
 		"UV_PROJECT_ENVIRONMENT="+n.paths.RuntimeVenv,
@@ -592,6 +592,24 @@ func (n *Native) runtimeEnv() []string {
 		"UV_PYTHON="+pythonVersion,
 		"GIT_TERMINAL_PROMPT=0",
 	)
+}
+
+// pythonUTF8 puts a Python child in UTF-8 mode: its own output, the files it opens without naming an
+// encoding, and the pipes it reads are UTF-8 whatever the machine's locale says. On Windows that is a
+// code page — cp1252 on an English machine — so a printed arrow ended `daedalus check` with a
+// UnicodeEncodeError, the logs the launcher keeps were written in one code page and read back as
+// another, and a UTF-8 file read without an encoding came back as mojibake. PYTHONIOENCODING is the
+// same promise for the standard streams of a Python too old or too embedded to honour the first.
+func pythonUTF8(env []string) []string {
+	out := make([]string, 0, len(env)+2)
+	for _, kv := range env {
+		key, _, _ := strings.Cut(kv, "=")
+		if upper := strings.ToUpper(key); upper == "PYTHONUTF8" || upper == "PYTHONIOENCODING" {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "PYTHONUTF8=1", "PYTHONIOENCODING=utf-8")
 }
 
 // environWithout is the process environment with some names taken out, so what follows can set them
@@ -726,8 +744,7 @@ func (n *Native) Start(ctx context.Context) error {
 	}
 	settings := readEnv(readFile(n.paths.Env))
 	home, _ := os.UserHomeDir()
-	base := environWithout("PATH", "VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR", "PYTHONPATH")
-	base = append(base, "PATH="+n.searchPath(), "UV_PYTHON_INSTALL_DIR="+n.paths.RuntimePython, "UV_CACHE_DIR="+filepath.Join(n.paths.Runtime, "cache"), "UV_PYTHON="+pythonVersion)
+	base := n.childBase()
 	if n.keyproxy == nil {
 		n.keyproxy = &Process{
 			Name:    "key proxy",
@@ -776,6 +793,13 @@ func (n *Native) Start(ctx context.Context) error {
 	n.log("waiting for the app to answer")
 	expectBoot(port, n.expectation(portWasFree))
 	return WaitReadyNative(ctx, port, nativeReadyTimeout)
+}
+
+// childBase is the environment the supervisor and the key proxy start from — and through the
+// supervisor the bot and every Python it runs — all in UTF-8 mode (pythonUTF8).
+func (n *Native) childBase() []string {
+	base := pythonUTF8(environWithout("PATH", "VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR", "PYTHONPATH"))
+	return append(base, "PATH="+n.searchPath(), "UV_PYTHON_INSTALL_DIR="+n.paths.RuntimePython, "UV_CACHE_DIR="+filepath.Join(n.paths.Runtime, "cache"), "UV_PYTHON="+pythonVersion)
 }
 
 // expectation is what this start's health check accepts (ready.go): the answer carrying this
@@ -963,7 +987,7 @@ func (n *Native) Apply(ctx context.Context, reason string) (string, error) {
 func (n *Native) RunPython(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, n.venvPython(), args...)
 	cmd.Dir = n.paths.Bot
-	base := append(environWithout("PATH", "VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT"), "PATH="+n.searchPath())
+	base := append(pythonUTF8(environWithout("PATH", "VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT")), "PATH="+n.searchPath())
 	cmd.Env = botEnv(n.paths, supervisorEnv(n.paths, base, readEnv(readFile(n.paths.Env))))
 	out, err := runCmd(cmd)
 	return strings.TrimSpace(out), err
