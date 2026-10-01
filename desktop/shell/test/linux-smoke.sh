@@ -50,7 +50,13 @@ run)
   [ -n "$page" ] || { cat "$log"; fail "the window never showed the launcher's page"; }
   echo "the window shows $page"
   url=$(echo "$page" | sed 's/.*"\(http[^"]*\)"/\1/')
-  curl -fsS "$url" | grep -q 'Daedalus' || fail "$url does not answer as the launcher's page"
+  # The address is read while the window may still be on its way: the launcher answers / with a
+  # redirect to the page the installation is at (/setup on a first start), and the window follows it.
+  # So does this check — without -L it read the redirect's own two-line body and failed a window that
+  # was fine.
+  landed=$(curl -fsSL -o /dev/null -w '%{url_effective}' "$url") || fail "$url does not answer"
+  curl -fsSL "$url" | grep -q 'data-page="\(setup\|progress\|status\)"' || fail "$landed is not one of the launcher's pages"
+  echo "the launcher answers it with $landed"
   test -f "$data/launcher.json" || fail "no launcher.json in $data: the data is not in the per-user folder"
   ps -eo pid,args | grep -v grep | grep -q '/opt/Daedalus/daedalus-desktop --shell' || fail "the launcher is not running under the application"
   # Closed the way a desktop closes it: SIGTERM to the application's main process.

@@ -383,6 +383,12 @@ jobs:
           node-version: "22"
       - name: Package
         working-directory: desktop/shell
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           if [ "$IS_RELEASE" = true ]; then version="${GITHUB_REF_NAME#desktop-v}"; else version=0.0.0; fi
           # The launcher and its daemons as one universal binary each, the same file in both halves of
@@ -396,12 +402,38 @@ jobs:
           cp -R stage/mac-universal stage/mac-arm64
           cp ../../docs/brand/avatar-bot.png build/icon.png
           npm ci --no-audit --no-fund
-          npx electron-builder --mac dmg dir --universal -c.extraMetadata.version="$version" --publish never
+          # A Developer ID when all five secrets are there: electron-builder signs with it, with the
+          # hardened runtime, and notarizes. Otherwise electron-builder signs nothing — not even with a
+          # certificate a runner's keychain happens to hold — and the bundle is signed ad hoc below.
+          notarize=""
+          if [ -n "$APPLE_CERTIFICATE_P12" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_PASSWORD" ]; then
+            export CSC_LINK="$APPLE_CERTIFICATE_P12" CSC_KEY_PASSWORD="$APPLE_CERTIFICATE_PASSWORD" APPLE_APP_SPECIFIC_PASSWORD="$APPLE_APP_PASSWORD"
+            notarize="-c.mac.notarize=true"
+            echo "signing with the Developer ID and notarizing"
+          else
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            echo "no Developer ID secrets: the application is signed ad hoc"
+          fi
+          npx electron-builder --mac dir --universal -c.extraMetadata.version="$version" $notarize --publish never
+          app=dist/mac-universal/Daedalus.app
+          if [ -z "$notarize" ]; then
+            # Ad hoc, the whole bundle at once: no timestamp (an ad-hoc signature has none) and no
+            # hardened runtime (it would refuse Electron's frameworks, signed by another team). Apple
+            # Silicon runs nothing unsigned, and the universal merge left the main executable's
+            # signature broken, so this is what makes the application start at all.
+            codesign --force --deep --sign - "$app"
+          fi
+          codesign --verify --deep --strict --verbose=1 "$app"
           mkdir -p ../../out
           # ditto, not zip: the bundle carries symlinks and the signature's extended attributes, and
           # the launcher's upgrade unpacks it as the bundle it was.
-          ditto -c -k --keepParent dist/mac-universal/Daedalus.app ../../out/Daedalus-macOS.zip
-          mv dist/Daedalus-macOS.dmg ../../out/
+          ditto -c -k --keepParent "$app" ../../out/Daedalus-macOS.zip
+          # The .dmg: the application and a link to /Applications to drag it onto.
+          root="$RUNNER_TEMP/dmg-root"
+          rm -rf "$root" && mkdir -p "$root"
+          ditto "$app" "$root/Daedalus.app"
+          ln -s /Applications "$root/Applications"
+          hdiutil create -volname Daedalus -srcfolder "$root" -fs HFS+ -format UDZO -ov ../../out/Daedalus-macOS.dmg
           ls -l ../../out
       - name: Mount the .dmg and check what is in it
         run: |

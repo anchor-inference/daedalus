@@ -63,15 +63,17 @@ nsis:
 mac:
   icon: build/icon.png
   category: public.app-category.developer-tools
+  # Only the application here: the .dmg is made from it afterwards (the workflow, hdiutil), so that
+  # it holds the application exactly as signed.
   target:
-    - target: dmg
-      arch: [universal]
     - target: dir
       arch: [universal]
-  # Ad-hoc: there is no Developer ID (README says how to open it the first time). Hardened runtime
-  # with an ad-hoc signature would refuse Electron's own frameworks, signed by another team.
-  identity: "-"
-  hardenedRuntime: false
+  # Signing. With a Developer ID (the APPLE_* secrets, handed to electron-builder as CSC_LINK) it
+  # signs with the hardened runtime and its own entitlements and notarizes. Without one the workflow
+  # turns electron-builder's signing off and signs the finished bundle ad hoc itself: electron-builder
+  # asked for an ad-hoc identity ("-") still passes --timestamp, which an ad-hoc signature cannot have,
+  # and codesign failed on the main executable.
+  hardenedRuntime: true
   gatekeeperAssess: false
   extraFiles:
     - from: stage/mac-${arch}
@@ -82,10 +84,6 @@ mac:
   # The launcher and its daemons are one universal binary each already (lipo in the workflow), so
   # the two halves of the application carry the same file and nothing is merged.
   x64ArchFiles: "Contents/MacOS/{daedalus-desktop,ptyd,browserd}"
-
-dmg:
-  artifactName: Daedalus-macOS.dmg
-  title: Daedalus
 
 linux:
   icon: build/icon.png
