@@ -144,6 +144,11 @@ def bot_env() -> dict[str, str]:
     if agent_bin := dependency_service().active_bin():
         env["DAEDALUS_AGENT_BIN"] = agent_bin
     env["GIT_TERMINAL_PROMPT"] = "0"
+    # The bot in Python's UTF-8 mode whoever started this supervisor: on Windows the locale's code page
+    # is otherwise what its output, its logs and every file it opens without an encoding are read and
+    # written in, and a launcher older than the setting does not pass it down.
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     # Commits the agent makes in its workspace carry its own identity; the repos' local config covers the self-development checkouts.
     for key, value in (("GIT_AUTHOR_NAME", "Daedalus"), ("GIT_AUTHOR_EMAIL", "daedalus@localhost"), ("GIT_COMMITTER_NAME", "Daedalus"), ("GIT_COMMITTER_EMAIL", "daedalus@localhost")):
         env.setdefault(key, value)
@@ -1267,5 +1272,19 @@ async def main() -> int:
     return 0
 
 
+def utf8_streams() -> None:
+    """Make standard output and error UTF-8, replacing what cannot be written rather than raising.
+
+    The supervisor's output is the launcher's log file, which on Windows outside UTF-8 mode is written in
+    the locale's code page; a commit subject or a path it logs must not end the supervisor.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", None) or "").lower().replace("-", "").replace("_", "")
+        reconfigure = getattr(stream, "reconfigure", None)
+        if encoding != "utf8" and reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 if __name__ == "__main__":
+    utf8_streams()
     sys.exit(asyncio.run(main()))

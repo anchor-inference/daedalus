@@ -13,6 +13,7 @@ The state and the workspaces are a temporary folder; nothing of the machine's ow
 
 from __future__ import annotations
 
+import http.client
 import os
 import secrets
 import signal
@@ -93,6 +94,7 @@ def main() -> int:
             if not listening.wait(30):
                 return report("the event stream did not open", log_path)
             stop_asked = time.monotonic()
+            before_stop = log_path.stat().st_size
             bot.send_signal(signal.CTRL_BREAK_EVENT if windows else signal.SIGTERM)  # type: ignore[attr-defined]
             try:
                 code = bot.wait(timeout=STOP_SECONDS)
@@ -100,6 +102,14 @@ def main() -> int:
                 return report(f"the bot did not stop within {STOP_SECONDS:.0f}s of being asked", log_path)
             if code != 0:
                 return report(f"the bot stopped with code {code}", log_path)
+            # A traceback on the way down is a stop in the wrong order — a background task reaching a
+            # database that was already closed, a server cancelled under its own lifespan — even
+            # when the exit code is clean. Only what was printed after the stop was asked counts.
+            with open(log_path, "rb") as log:
+                log.seek(before_stop)
+                after_stop = log.read().decode("utf-8", errors="replace")
+            if "Traceback" in after_stop:
+                return report("the bot printed a traceback", log_path)
             print(f"the bot stopped cleanly {time.monotonic() - stop_asked:.1f}s after it was asked")
             return 0
         finally:
@@ -131,8 +141,8 @@ def hold_event_stream(port: int, database: Path) -> threading.Event:
                 connected.set()
                 while stream.read(1):
                     pass
-        except OSError:
-            pass
+        except (OSError, ValueError, http.client.HTTPException):
+            pass  # the server ending the stream on its way down is the point, not a failure
 
     threading.Thread(target=read, daemon=True).start()
     return connected

@@ -54,7 +54,9 @@ func windowsRecordedServices(ctx context.Context, p Paths) ([]windowsServiceWrit
 	if !exists(python) {
 		python = "python"
 	}
-	out, err := exec.CommandContext(ctx, python, "-c", windowsServiceWriterQuery, db).CombinedOutput()
+	query := exec.CommandContext(ctx, python, "-c", windowsServiceWriterQuery, db)
+	query.Env = pythonUTF8(os.Environ())
+	out, err := query.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("cannot read running services from %s: %w (%s)", db, err, strings.TrimSpace(string(out)))
 	}

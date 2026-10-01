@@ -45,22 +45,27 @@ async def cmd_check(args: argparse.Namespace) -> int:
     try:
         manager = SessionManager(settings, config, db=db)
         await manager.start()
-        tools = sorted(t.name for t in manager.tools.list_all())
-        print(f"state: {settings.state_dir}")
-        print(f"config: {settings.config_path}")
-        print(f"repos: bot={settings.bot_repo_dir} core={settings.core_repo_dir}")
-        print(f"providers: {', '.join(manager.providers.available()) or '(none configured)'}")
-        found = config.default_preset()
-        if found is None:
-            print(f"model: none — {NO_MODEL_MESSAGE}")
-        else:
-            pid, preset = found
-            print(f"model: {pid} = {preset.provider}/{preset.model} thinking={preset.thinking} effort={preset.reasoning_effort}")
-        print(f"presets: {', '.join(config.presets) or '(none)'}"),
-        print(f"tools ({len(tools)}): {', '.join(tools)}")
-        skills = await manager.skills.list("daedalus")
-        print(f"skills ({len(skills)}): {', '.join(s.name for s in skills) or '(none)'}")
-        await manager.close()
+        # The manager closes in a finally of its own, before the database: it starts background work
+        # (the transcript index, the price refresh) that reads the database, and a check that failed
+        # half-way used to close the database under it and add two tracebacks to the real one.
+        try:
+            tools = sorted(t.name for t in manager.tools.list_all())
+            print(f"state: {settings.state_dir}")
+            print(f"config: {settings.config_path}")
+            print(f"repos: bot={settings.bot_repo_dir} core={settings.core_repo_dir}")
+            print(f"providers: {', '.join(manager.providers.available()) or '(none configured)'}")
+            found = config.default_preset()
+            if found is None:
+                print(f"model: none — {NO_MODEL_MESSAGE}")
+            else:
+                pid, preset = found
+                print(f"model: {pid} = {preset.provider}/{preset.model} thinking={preset.thinking} effort={preset.reasoning_effort}")
+            print(f"presets: {', '.join(config.presets) or '(none)'}"),
+            print(f"tools ({len(tools)}): {', '.join(tools)}")
+            skills = await manager.skills.list("daedalus")
+            print(f"skills ({len(skills)}): {', '.join(s.name for s in skills) or '(none)'}")
+        finally:
+            await manager.close()
     finally:
         await db.close()
     return 0
@@ -282,7 +287,23 @@ def _install_task_dump() -> None:
         signal.signal(signal.SIGUSR1, dump)
 
 
+def _utf8_streams() -> None:
+    """Make standard output and error UTF-8, replacing what cannot be written rather than raising.
+
+    Outside UTF-8 mode a Windows pipe or log file takes the locale's code page — cp1252 on an English
+    machine — and the arrow in the no-model sentence ended `daedalus check` with a UnicodeEncodeError
+    after it had already started its background work. The launcher runs every Python child in UTF-8
+    mode; this is for the ones started some other way.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", None) or "").lower().replace("-", "").replace("_", "")
+        reconfigure = getattr(stream, "reconfigure", None)
+        if encoding != "utf8" and reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _utf8_streams()
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,

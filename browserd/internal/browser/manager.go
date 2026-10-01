@@ -470,13 +470,16 @@ func (m *Manager) startBrowser(ctx context.Context, profile string) (*Browser, e
 	}
 	b.proc = proc
 	b.conn = proc.Conn
-	startCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
+	budget := config.ChromiumStart
+	if d := m.deps.Config.Chromium.StartTimeout; d > 0 {
+		budget = d
+	}
+	begin := time.Now()
 	var ver struct {
 		Product   string `json:"product"`
 		UserAgent string `json:"userAgent"`
 	}
-	if err := b.conn.Call(startCtx, "", "Browser.getVersion", nil, &ver); err != nil {
+	if err := proc.FirstAnswer(ctx, budget, "Browser.getVersion", &ver); err != nil {
 		proc.Kill()
 		m.closeWall(b)
 		b.removeTemp()
@@ -487,9 +490,13 @@ func (m *Manager) startBrowser(ctx context.Context, profile string) (*Browser, e
 			m.mu.Unlock()
 			return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": reason}, "%s", reason)
 		}
-		return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": lastLine(proc.Stderr())},
-			"Chromium did not answer on its pipe: %v", err)
+		return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": lastLine(proc.Stderr())}, "%v", err)
 	}
+	took := time.Since(begin)
+	// The setup calls get a budget of their own: a browser that has answered once is up, and a slow
+	// first answer must not leave them too little time.
+	startCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
 	b.Version = ver.Product
 	b.userAgent, b.uaMetadata = userAgent(ver.Product, ver.UserAgent)
 	for _, call := range []struct {
@@ -508,7 +515,10 @@ func (m *Manager) startBrowser(ctx context.Context, profile string) (*Browser, e
 			return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": err.Error()}, "Chromium refused %s: %v", call.method, err)
 		}
 	}
-	m.log.Info("browser started", "browser", b.ID, "profile", profile, "pid", proc.Pid, "chromium", ver.Product)
+	// How long the first answer took is logged so a slow start shows in the log before it ever runs
+	// out of budget.
+	m.log.Info("browser started", "browser", b.ID, "profile", profile, "pid", proc.Pid, "chromium", ver.Product,
+		"first_answer_ms", took.Milliseconds())
 	return b, nil
 }
 
