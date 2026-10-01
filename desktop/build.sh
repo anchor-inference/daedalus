@@ -1,18 +1,10 @@
 #!/usr/bin/env bash
-# Cross-compiles the launcher for the five platforms we publish, in the `nowebview` variant. The
-# build runs inside the Go container, so the host needs Docker and nothing else — the same
-# dependency the launcher itself has.
+# Cross-compiles the launcher for the five platforms we publish. The launcher is plain Go with no C
+# in it — its window is the desktop application's (shell/), not its own — so every platform is built
+# from this one machine, inside the Go container: the host needs Docker and nothing else.
 #
-# What this does not build is the window. The window is the operating system's own web view, which
-# means cgo, and cgo means a compiler and that platform's headers: a macOS build has to be made on
-# macOS and a Windows build on Windows. That is what the release workflow's matrix is for. A binary
-# built here behaves as the launcher did before there was a window — it opens the app in a
-# Chromium-family browser in application mode, or in the default browser — which is also exactly
-# what the published Linux binaries do, and for a reason the README gives.
-#
-# To build the windowed launcher for the machine you are on, on macOS or Windows:
-#
-#   go build -trimpath -o daedalus-desktop .
+# These are the launcher alone. The desktop application around it (the installers, the window) is
+# built by shell/build.sh, and for a release by the workflow.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -28,17 +20,14 @@ docker run --rm \
   -e HOME=/tmp -e GOENV=/tmp/goenv -e GOFLAGS=-mod=mod -e GOCACHE=/tmp/gocache -e GOMODCACHE=/tmp/gomod \
   -e CGO_ENABLED=0 -e VERSION="$VERSION" \
   "$GO_IMAGE" sh -euc '
-    # On Linux the build constraint on the window excludes it, so the tagged and untagged commands
-    # compile the same code: one pass is what this checks, and the window is checked on a macOS and
-    # a Windows runner by the release workflow.
-    go vet -tags nowebview ./...
-    go test -tags nowebview ./...
+    go vet ./...
+    go test ./...
     for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
       goos="${target%/*}"; goarch="${target#*/}"
       out="dist/daedalus-desktop-$goos-$goarch"
       case "$goos" in windows) out="$out.exe";; esac
       echo "building $out"
-      GOOS="$goos" GOARCH="$goarch" go build -tags nowebview -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$out" .
+      GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$out" .
     done
   '
 

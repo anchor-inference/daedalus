@@ -1,8 +1,16 @@
 # Daedalus on your own machine
 
-`daedalus-desktop` is one small program — `Daedalus.app` on macOS — that turns a folder into a
-running Daedalus. It fetches the two repositories, asks the handful of questions the installation
-needs on a page of its own, writes the environment files, and then runs the agent one of two ways.
+**Daedalus** is a desktop application for Windows, macOS and Linux: install it like any other, open
+it from the Start menu, Launchpad or the application menu, and it sets itself up in its own window —
+it fetches the two repositories, asks the handful of questions the installation needs, writes the
+environment files — and then runs the agent one of two ways and shows the app in that same window.
+
+It is two programs in one installation. The **application** (`Daedalus.exe`, `Daedalus.app`,
+`daedalus`; Electron, in `shell/`) is the window, the menu entry, the icon and the notifications.
+The **launcher** beside it (`daedalus-desktop`; Go, in this folder) is the engine: the setup, the
+runtime, the agent's supervisor, the update manager. The application starts the launcher as a
+background process of its own — no console window on any system — and shows what it serves; the
+launcher is also the command line, for everything below that a terminal does.
 
 **The first run asks which**, and the choice is written next to the data and never asked again
 (`--mode docker` / `--mode native`, or `DAEDALUS_MODE`, answers it from a script):
@@ -21,20 +29,58 @@ Neither is the "real" one. Docker buys a wall; native buys weight and speed, and
 [Native mode](#native-mode) says exactly what the wall was doing and what still stands without it.
 Nothing is ever installed system-wide either way, and Docker is never installed for you.
 
-On macOS and Windows it opens a window: the system's own web view, which shows the launcher's page
-while the stack comes up and the app itself once it answers. On Linux it opens a browser window with
-nothing around it — no tabs, no address bar — and falls back to the default browser. [The window](#the-window)
-says why the three are not the same.
+Everything is shown in the application's own window — the launcher's setup and progress pages
+first, the app once it answers — and nothing in the browser. A link in the app that leaves this
+machine opens in your browser; everything on this machine stays in the window.
+[The window](#the-window) has the rest.
 
-It is about 8 MB without the window and 10–12 MB with it, twice that as the universal macOS build.
-In Docker mode everything that runs is in containers; in native mode the launcher downloads what it
-needs into a runtime folder in the user's cache location (outside `data/`) and runs it from there.
+The application is about 100 MB to download (Electron's own Chromium is most of it). In Docker mode
+everything that runs is in containers; in native mode the launcher downloads what it needs into a
+runtime folder in the user's cache location and runs it from there.
 
 ## Get it
 
-One line on macOS and Linux — it takes the newest `desktop-v*` release, checks the release's
-signature by the project's key and the download against its `SHA256SUMS`, and unpacks it into
-`./Daedalus`:
+From the [releases page](https://github.com/anchor-inference/daedalus/releases) (the tags beginning
+with `desktop-v`):
+
+| Machine | File | How |
+|---|---|---|
+| Windows 10 and 11, x86-64 | `Daedalus-Setup-x64.exe` | Run it: Next, Install, Finish. It installs for you only, into `%LOCALAPPDATA%\Programs\Daedalus`, with no administrator; Daedalus is in the Start menu and on the desktop, and *Run Daedalus* on the last page opens it. |
+| macOS 12 and later, Apple Silicon and Intel | `Daedalus-macOS.dmg` | Open it and drag **Daedalus** onto **Applications**. |
+| Debian, Ubuntu and their relatives | `Daedalus-linux-amd64.deb`, `Daedalus-linux-arm64.deb` | `sudo apt install ./Daedalus-linux-amd64.deb`, or open it with the software centre. Daedalus is in the application menu, and `daedalus` on the PATH. |
+| Any other Linux | `Daedalus-linux-x86_64.AppImage`, `Daedalus-linux-arm64.AppImage` | Make it executable (`chmod +x`, or *Properties → Allow executing*) and open it. |
+
+**Neither the Windows installer nor the macOS application carries a paid code signature** — there
+is no Authenticode certificate and no Developer ID — so each system warns once:
+
+- **Windows**: SmartScreen says *Windows protected your PC*. Choose **More info → Run anyway**. Only
+  the installer asks; the installed application opens normally.
+- **macOS**: the application is signed ad-hoc, and macOS refuses the first opening of a copy that
+  came through a browser ("Apple could not verify…"); since macOS 15 the right-click *Open* no longer
+  gets past it. Open it once, then **System Settings → Privacy & Security → Open Anyway**. Or in
+  Terminal: `xattr -dr com.apple.quarantine /Applications/Daedalus.app`. Only the first opening
+  asks.
+- **Linux** asks nothing. An AppImage on Ubuntu 24.04 and later runs without Chromium's sandbox,
+  because the system forbids the namespaces it needs to an AppImage; the `.deb` keeps the sandbox
+  (it installs the AppArmor profile that allows them).
+
+**Checking what you downloaded.** Every release lists every file in `SHA256SUMS`, signed by the
+project's release key; the application and the launcher check that signature on every update they
+install. The installer you downloaded yourself is checked by you, once: [SIGNING.md](SIGNING.md)
+shows how. The key's fingerprint must read
+
+```
+f75fa5a293fdd55b36c794f4787f7af8646e4dac95e19d74e6288e55c357c285
+```
+
+the SHA-256 of the key line `RWTfU1OT+iSFoaxGzNfGzkwHdVs2o8WmnCzBUo/LBUw2L4ssGN4xYx/2` (minisign key id
+`A18524FA935353DF`), published here and in every release's notes.
+
+### From a terminal
+
+One line on macOS and Linux installs the same application into a folder of your choosing — no
+browser, no administrator — after checking the release's signature and the download against
+`SHA256SUMS`, and unpacks it into `./Daedalus`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/anchor-inference/daedalus/main/desktop/install.sh | sh
@@ -46,49 +92,36 @@ On Windows, the same in PowerShell (run on Windows by the release workflow's tes
 irm https://raw.githubusercontent.com/anchor-inference/daedalus/main/desktop/install.ps1 | iex
 ```
 
-Both print the release key's fingerprint before they install anything. It must read
+Both print the release key's fingerprint before they install anything. `DAEDALUS_DIR=/somewhere/else`
+puts it elsewhere. Run over an installation that already has data, neither script replaces anything
+itself: the launcher's `upgrade` does it — the installed one, or for a launcher older than that
+command the one just downloaded — after a yes and with the data protected first (a kept copy of the
+data folder on Linux with ext4, a checked backup elsewhere), and it rolls back on failure.
+[UPDATES.md](UPDATES.md) has the whole of it.
 
+The archives they fetch — `daedalus-desktop-windows-amd64.zip`, `Daedalus-macOS.zip`,
+`daedalus-desktop-linux-<arch>.tar.gz` — are on the releases page too, and are the same application
+unpacked. On macOS unzip with Finder or `ditto -x -k`, not with `unzip`, which drops the bundle's
+symlinks and leaves an app macOS calls damaged.
+
+### From an installation made before the application
+
+Launchers before the application kept the data in `data/` beside themselves. Such an installation
+upgrades into the application the usual way (its `upgrade`, or the one-liner over its folder), and
+the first start of the application moves `data/` into the per-user folder below — a rename, nothing
+copied, refused while anything still uses it. A `DATA-MOVED.txt` in the old folder says where it
+went.
+
+Installed fresh with an installer, the application starts with an empty data folder. To bring an
+older installation's data in, close Daedalus and run, from a terminal,
+
+```sh
+daedalus-desktop import /path/to/the/old/folder        # the folder with data/ in it, or data/ itself
 ```
-f75fa5a293fdd55b36c794f4787f7af8646e4dac95e19d74e6288e55c357c285
-```
 
-the SHA-256 of the key line `RWTfU1OT+iSFoaxGzNfGzkwHdVs2o8WmnCzBUo/LBUw2L4ssGN4xYx/2` (minisign key id
-`A18524FA935353DF`), published here and in every release's notes; a script that prints anything else
-is not the project's. [SIGNING.md](SIGNING.md) has the rest.
-
-`DAEDALUS_DIR=/somewhere/else` puts it elsewhere. Run over an installation that already has data,
-neither script replaces anything itself: the launcher's `upgrade` does it — the installed one, or for
-a launcher older than that command the one just downloaded — after a yes and with the data protected
-first (a kept copy of the data folder on Linux with ext4, a checked backup elsewhere), and it rolls
-back on failure. [UPDATES.md](UPDATES.md) has the whole of it.
-Or take the archive by hand from the
-[releases page](https://github.com/anchor-inference/daedalus/releases) (the tags beginning with
-`desktop-v`):
-
-| Machine | File | What is in it |
-|---|---|---|
-| macOS, both kinds | `Daedalus-macOS.zip` | `Daedalus.app` — one universal build for Apple Silicon and Intel, with the window |
-| Linux x86-64 | `daedalus-desktop-linux-amd64.tar.gz` | `daedalus-desktop`, already executable; opens a browser window |
-| Linux ARM64 | `daedalus-desktop-linux-arm64.tar.gz` | `daedalus-desktop`, already executable; opens a browser window |
-| Windows x86-64 | `daedalus-desktop-windows-amd64.zip` | `daedalus-desktop.exe`, with the window |
-
-Unpack it into a folder of its own — the installation is made **inside that folder**, so deleting
-the folder deletes the installation.
-
-On **macOS**, double-click `Daedalus`. When the release was built with the signing secrets in place
-the app is signed and notarized and simply opens. When it was not, it is signed ad-hoc, and macOS
-refuses a copy that arrived through a browser with "Apple could not verify…". Since macOS 15 the
-right-click *Open* no longer gets past it. Either open it once, then *System Settings → Privacy &
-Security → Open Anyway*, or remove the quarantine in Terminal:
-`xattr -dr com.apple.quarantine /path/to/Daedalus.app`. A copy fetched by the one-liner above never
-asks at all — the quarantine attribute that makes Gatekeeper ask is set by the browser, and `curl`
-does not set it. Unzip with Finder or
-`ditto -x -k`, not with `unzip`: an app bundle carries symlinks and the signature's own extended
-attributes, and `unzip` drops both, which leaves an app macOS calls damaged.
-
-On **Windows**, unpack with `Expand-Archive daedalus-desktop-windows-amd64.zip -DestinationPath
-Daedalus` in PowerShell and run `daedalus-desktop.exe` from the folder you want the installation to
-live in. The executable is not signed, so SmartScreen warns once: *More info → Run anyway*.
+(`& "$env:LOCALAPPDATA\Programs\Daedalus\daedalus-desktop.exe" import C:\path\to\old\folder` on
+Windows, `/Applications/Daedalus.app/Contents/MacOS/daedalus-desktop import …` on macOS). It is the
+same move, and refuses the same way.
 
 ## What happens on the first run
 
@@ -102,7 +135,7 @@ live in. The executable is not signed, so SmartScreen warns once: *More info →
    `git` running inside the agent's own image in Docker mode, and with the runtime's own git in
    native mode. Each checkout is a real local history with
    no remote — an update is the next commit on top of it.
-3. A page opens at `http://127.0.0.1:8770` — in the launcher's own window where there is one — with
+3. The application's window shows the launcher's page (`http://127.0.0.1:8770`, or any free port) with
    the whole of the setup on it: how it runs, one model provider key, and a daily spending cap that
    already has a figure in it. Telegram is behind a disclosure and stays optional — without it you
    use the app in that window. The page is in English or Russian; the switch is in its corner and
@@ -128,8 +161,8 @@ an agent you cannot see is one you cannot stop. A run in flight is not lost — 
 the bot 25 seconds to drain, the run is snapshotted, and it picks up where it left off on the next
 start.
 
-Starting the launcher a second time against the same folder does not start a second one. It brings
-the first to the front, hands it the link it was opened with if it was opened with one, and exits.
+Opening the application a second time does not start a second one. It brings the first window to
+the front, hands it the link it was opened with if it was opened with one, and exits.
 
 ## The pages
 
@@ -166,24 +199,30 @@ invented installation and checks there that a language switch loses nothing that
 
 ## The folder
 
-Everything the installation owns is in one folder — the one you unpacked into. On macOS the data
-sits **beside** the app, not inside it, because the bundle is replaced by the next download:
+What the installation owns is one folder per user, apart from the program — the installers replace
+the program, and nothing they do touches this folder:
+
+| | The data folder |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Daedalus\data` |
+| macOS | `~/Library/Application Support/Daedalus/data` |
+| Linux | `~/.local/share/daedalus/data` (`$XDG_DATA_HOME/daedalus/data`) |
+
+Not Documents: on Windows that is very often a OneDrive folder, and a folder of git checkouts and a
+live SQLite database under a sync client is one whose files are locked and rewritten behind the
+agent's back. `--data DIR` names another folder for a terminal command.
 
 ```
-Daedalus/
-  Daedalus.app            or daedalus-desktop / daedalus-desktop.exe elsewhere
-  data/
-    daedalus/               the bot checkout; deploy/compose.yaml runs from here
-    protocore-exp/          the core checkout
-    daedalus-secrets/
-      keyproxy.env          provider keys (0600) — outside every folder the agent can read
-      ssh/                  keys and config for hosts the agent may reach; may stay empty
-    .env                    what compose interpolates and the agent container reads
-    compose.desktop.yaml    the launcher's override: the published image, Telegram made optional
-    window.json             where the window was and how big, restored on the next start
-    launcher.json           the running launcher's port and token (0600) — how a second launch finds it
-    scheme.txt              which executable daedalus:// links are registered to
-    browser-profile/        only when the app is shown in a browser window rather than the launcher's own
+data/
+  daedalus/               the bot checkout; deploy/compose.yaml runs from here
+  protocore-exp/          the core checkout
+  daedalus-secrets/
+    keyproxy.env          provider keys (0600) — outside every folder the agent can read
+    ssh/                  keys and config for hosts the agent may reach; may stay empty
+  .env                    what compose interpolates and the agent container reads
+  compose.desktop.yaml    the launcher's override: the published image, Telegram made optional
+  launcher.json           the running launcher's port and token (0600) — how a second start finds it
+  scheme.txt              which executable daedalus:// links are registered to, for a launcher on its own
 ```
 
 In **native mode** the same folder also holds the data a container would have kept in volumes:
@@ -198,7 +237,7 @@ platform):
     state/                  the database, the sessions, the pairing links, the known-good history
     workspaces/             one per session
 
-  <runtime>/                ~/.cache/daedalus/<key> on Linux; Application Support on macOS; %LOCALAPPDATA% on Windows
+  <runtime>/                ~/.cache/daedalus/<key> on Linux; …/Daedalus/Runtime beside the data elsewhere
     uv/uv                   the installer for everything below it
     python/                 the CPython uv manages, for this installation only
     envs/<digest>/          the environment the agent runs in, one per lock file of the checkout
@@ -208,28 +247,28 @@ platform):
     cache/                  uv's wheel cache; safe to delete, and the next sync refills it
     installed/              which version and which hash each tool was unpacked from
 
-  <local state>/            ~/.local/state/daedalus/<key> on Linux, beside the runtime elsewhere
-    logs/                   the supervisor's, the key proxy's and the terminal daemon's output
+  <local state>/            ~/.local/state/daedalus/<key> on Linux, …/Daedalus/State beside the data elsewhere
+    logs/                   launcher.log (the launcher under the application), upgrade.log, and the
+                            supervisor's, the key proxy's and the terminal daemon's output
     pids/                   the records of running children
     ptyd/run/  ptyd/state/  the terminal daemon's endpoint and token (sealed), its journal of agent writes
     browserd/               the browser daemon's endpoint and the agent's browser profiles (sealed)
     supervisor.sock         the supervisor's socket
 ```
 
-`data/` is next to the `.app` when the launcher runs from a bundle, and next to the working
-directory otherwise — a plain executable run from a terminal makes `./data` where you are, as
-before. `--data DIR` overrides both. (Finder starts a bundled program with `/` as its working
-directory, which is why the bundle does not follow that rule.)
+The window's own state — its caches, where it was, its log `logs/shell.log` — is Electron's, in
+`%LOCALAPPDATA%\Daedalus\Shell`, `~/Library/Application Support/Daedalus/Shell` and
+`~/.config/Daedalus`.
 
 This is the layout a server install has, which is why the repository's compose file runs against it
 unchanged. Provider keys are deliberately not in `.env`: that file is mounted into the agent
 container, and the key proxy's file is not.
 
-To move an installation, move the whole folder. To use a fork, set `DAEDALUS_GIT_REMOTE` and
-`DAEDALUS_CORE_GIT_REMOTE` before the first run: the image is pulled from the fork owner's namespace
-as well, so a fork's code never runs upstream's image. A fork that publishes no image has nothing to
-pull, and the first start builds it locally instead. Both remotes must be GitHub repositories — the
-checkouts are fetched from `codeload.github.com`, not cloned.
+To use a fork, set `DAEDALUS_GIT_REMOTE` and `DAEDALUS_CORE_GIT_REMOTE` before the first run: the
+image is pulled from the fork owner's namespace as well, so a fork's code never runs upstream's
+image. A fork that publishes no image has nothing to pull, and the first start builds it locally
+instead. Both remotes must be GitHub repositories — the checkouts are fetched from
+`codeload.github.com`, not cloned.
 
 ### The launcher runs the Python from the published branch, so releases go core first
 
@@ -306,73 +345,65 @@ added.
 
 ## The window
 
-What shows the app is decided when the launcher starts, by what the machine can actually do, and
-never by a setting. Three steps, and none of them is a hard failure:
+The window is the application's: Electron, with its own Chromium, the same on all three systems —
+which is what Discord, VS Code and the other chat applications do, and why it is the size it is.
+Nothing depends on a web view the system may or may not have (WebView2, WebKitGTK), and nothing is
+ever shown in your browser: the launcher's pages and the app are on loopback and stay in the window;
+a link that leaves this machine opens in your browser; a page cannot open files, custom schemes or
+anything else through the system.
 
-1. **The launcher's own window** — the operating system's web view: WKWebView on macOS, WebView2 on
-   Windows. Nothing is bundled to provide it and nothing is downloaded; the window is about 2–4 MB
-   of binary. The title is *Daedalus*, and the size and position it was left at are remembered in
-   `data/window.json` and restored on the next start.
-2. **A Chromium-family browser in application mode** — `--app=<url>` in Chrome, Edge, Brave or
-   Chromium, which is a window with the page in it and no tabs, address bar or bookmarks. It gets a
-   profile of its own in `data/browser-profile`, so it is separate from your browsing and keeps its
-   own session. The browsers are looked for on `PATH` and in the places their installers put them,
-   because a program started from Finder or Explorer inherits a `PATH` with none of them in it.
-3. **The default browser** — a tab, which is what the launcher has always done.
+The window remembers its size and place, and opens on a screen that is still there. Closing it quits
+Daedalus: in native mode the launcher stops the agent first, as below; in Docker mode the containers
+keep running. The menu is the standard one on macOS — without an Edit menu ⌘C and ⌘V would do
+nothing — and hidden on Windows and Linux (Alt shows it), with the same edit, zoom and reload
+commands and their shortcuts.
 
-**Windows** needs the WebView2 runtime for step 1. Windows 11 has it, and so does any machine whose
-Edge is current; the launcher asks the registry before it tries, and quietly takes step 2 when the
-answer is no. Microsoft's Evergreen bootstrapper installs it in a minute if you would rather have
-the window.
+A page in the window can do two things a browser cannot, through the application: choose a folder on
+the machine (a project's root, with the system's own dialog), and know it is in the desktop
+application. The launcher's status page uses the second for its **Install and restart** button.
 
-**Linux does not get step 1 at all**, and that is deliberate. `webview_go` links GTK and WebKitGTK at
-load time, so a binary built with it does not start on a machine without those libraries — it does
-not fall back, and it does not warn; it fails to start. One binary that runs on every Linux is worth
-more than a window of our own, so the published Linux builds begin at step 2. If you want the
-window on Linux, you have the source: install `libgtk-3-dev` and `libwebkit2gtk-4.0-dev` and run
-`go build` without `-tags nowebview` — and then that binary needs those libraries wherever it runs.
+**No console window, anywhere.** On Windows the launcher is a console program (so that it is also the
+command line), and the application starts it with its console hidden; every program it starts in
+turn — git, uv, the supervisor, the daemons — shares that hidden console or gets a hidden one of its
+own. Its output goes to `launcher.log` in the local state's `logs/`. What you need to see is in the
+window: the progress, the failures, and if the launcher cannot start at all, a page saying why with
+a button to its log.
 
-Whatever is showing it, closing it leaves the stack running.
-
-### The menu bar, and the keyboard
-
-On macOS the launcher installs the ordinary application, Edit and Window menus when it makes its
-window. This is not decoration. A Mac application without a menu bar has no Edit menu, and without
-an Edit menu ⌘C, ⌘V, ⌘X, ⌘A and ⌘Z do nothing anywhere in it: the key equivalent on a menu item is
-what sends `copy:` and the rest down the responder chain, and with no item carrying it the
-keystroke is never dispatched. It looks as though the window is eating the shortcuts. It is not:
-nothing is delivering them. The menus carry the standard selectors and nothing of our own, and the
-web view — which is the first responder — does the work. ⌘Q quits, ⌘W closes, ⌘M minimises.
-
-Windows needs none of it: WebView2 hosts the same edit commands Edge does and handles Ctrl+C,
-Ctrl+V, Ctrl+X, Ctrl+A and Ctrl+Z inside the page itself.
+`daedalus-desktop` started on its own — from a terminal with no command, or by an older shortcut —
+opens the application beside it instead of starting a second launcher. Run it with a command for the
+command line. A launcher built from source, with no application beside it, shows its pages in a
+browser window with nothing around it (`--app` in Chrome, Edge, Brave or Chromium) or in the
+default browser, as the launcher always did before there was an application.
 
 ### Links
 
 `daedalus://open/<session-id>` opens that conversation, from anywhere the desktop can follow a link.
-The launcher registers the scheme once per executable, with no installer and no administrator:
+The application is registered for the scheme by its installers and by itself, with no
+administrator:
 
 | | How |
 |---|---|
-| macOS | `CFBundleURLTypes` in the bundle's `Info.plist`, read by Launch Services when it first sees the app |
-| Windows | a key under `HKCU\Software\Classes\daedalus`, written on a first start |
-| Linux | `~/.local/share/applications/daedalus-desktop.desktop` with `MimeType=x-scheme-handler/daedalus`, which also gives the launcher its name and icon in the desktop's menu |
+| macOS | `CFBundleURLTypes` in the application's `Info.plist`, read by Launch Services when it first sees the app |
+| Windows | `HKCU\Software\Classes\daedalus`, written by the application when it starts; the uninstaller removes it when it still points at this installation |
+| Linux | `MimeType=x-scheme-handler/daedalus` in the `.deb`'s `/usr/share/applications/daedalus.desktop` |
 
-A link handed to a launcher that is already running goes to that one; it never starts a second.
+A link handed to an application that is already running goes to that one; it never starts a second.
 
 ### Notifications
 
-The launcher listens to the app's event stream (`/api/events`, as a `launcher` client) and raises a
-desktop notification for each one the app's router marks for the desktop — `osascript` on macOS, a
-toast through PowerShell on Windows, `notify-send` on Linux. The router decides, not the launcher: it
+The launcher listens to the app's event stream (`/api/events`, as a `launcher` client) and the
+application raises a desktop notification for each one the app's router marks for the desktop —
+as Daedalus, with its icon, and a click brings the window forward on the conversation it is about.
+A launcher on its own uses what the system has instead: `osascript` on macOS, a toast through
+PowerShell on Windows, `notify-send` on Linux. The router decides, not the launcher: it
 knows whether the app is in front of the operator, their quiet hours and what already reached their
 phone. Nothing is bundled for it; a machine without `notify-send` says so once in the launcher's log
 and is not asked again.
 
-A click opens what the notification is about where the platform tells anyone about it: on Windows
-the toast follows its `daedalus://open/<session>` link, and on Linux the launcher waits for the click
-(at most ten minutes, at most eight notifications at once) and shows the address. On macOS a
-notification raised by `osascript` carries no link, so a click brings nothing forward.
+For a launcher on its own, a click opens what the notification is about where the platform tells
+anyone about it: on Windows the toast follows its `daedalus://open/<session>` link, and on Linux the
+launcher waits for the click (at most ten minutes, at most eight notifications at once) and shows
+the address. On macOS a notification raised by `osascript` carries no link.
 
 After a reconnect the app replays what the launcher missed; anything more than two minutes old is
 folded into one line ("3 notifications while the launcher was away"). The stream is authorised with
@@ -384,7 +415,7 @@ nothing else changes.
 
 | Command | What it does |
 |---|---|
-| `daedalus-desktop` | set up if needed, start the stack, open the app |
+| `daedalus-desktop` | open the application beside it; a launcher on its own sets up if needed, starts the stack and opens the app |
 | `daedalus-desktop setup` | ask the questions again and rewrite the configuration |
 | `daedalus-desktop status` | what is configured, what is running |
 | `daedalus-desktop stop` | stop the containers; they stay down until started again |
@@ -392,12 +423,18 @@ nothing else changes.
 | `daedalus-desktop update` | move both checkouts to what is published and restart, after a checked backup of the data; a failed start puts the data back. Native mode only for now; see [UPDATES.md](UPDATES.md) |
 | `daedalus-desktop check-update` | say whether a newer launcher release is published; installs nothing |
 | `daedalus-desktop upgrade [--yes]` | move to a newer launcher release: asks, stops the stack, backs up and verifies the data, swaps the launcher, updates and starts, and rolls both back on failure. Native mode only for now; see [UPDATES.md](UPDATES.md) |
-| `daedalus-desktop open` | open the app in the browser |
+| `daedalus-desktop open` | open the app (in the browser, for a launcher on its own) |
 | `daedalus-desktop pair` | print a fresh pairing link for signing in to the app |
-| `daedalus-desktop uninstall [--keep-data]` | remove the containers, networks and volumes (Docker mode; see [Uninstalling](#uninstalling)) |
+| `daedalus-desktop uninstall [--keep-data \| --remove-data]` | remove the containers, networks and volumes (Docker mode) or the runtime and local state (native); `--remove-data` deletes the data folder too. The uninstallers run it; see [Uninstalling](#uninstalling) |
+| `daedalus-desktop import DIR` | move an older installation's data folder into the per-user one; with Daedalus closed |
 
-Flags: `--data DIR` (default `./data`), `--port N` for the launcher's own page (default 8770),
-`--setup` to ask the questions again on a start, `--version`.
+The launcher is in the application's folder: `%LOCALAPPDATA%\Programs\Daedalus\daedalus-desktop.exe`
+on Windows, `/Applications/Daedalus.app/Contents/MacOS/daedalus-desktop` on macOS,
+`/opt/Daedalus/daedalus-desktop` from the `.deb`.
+
+Flags: `--data DIR` (default: [the per-user folder](#the-folder)), `--port N` for the launcher's own
+page (default 8770, any free one when that is taken), `--setup` to ask the questions again on a
+start, `--version`.
 
 On the setup page, **a field left empty keeps whatever is already in force** — re-running setup to
 change the daily cap does not blank the provider keys, and the public address set by hand in
@@ -671,15 +708,24 @@ first time, and everything after it is the same.
 
 ## Uninstalling
 
-**Run `daedalus-desktop uninstall`, then delete the folder.** The folder holds what the installation
-owns — the checkouts, the database, the sessions, the workspaces, the keys, and beside the data folder
-`.daedalus-update/`, the copies of the data an update kept. No package manager was run, no PATH was
-changed, nothing was installed system-wide.
+| | How | Your data |
+|---|---|---|
+| Windows | **Settings → Apps → Daedalus → Uninstall** (or *Uninstall Daedalus* in its folder) | It asks *Delete your Daedalus data as well?*, **No** by default. A silent uninstall (`/S`) keeps it; `/S --remove-data` deletes it. |
+| macOS | Drag **Daedalus** from Applications to the Bin | Kept. |
+| Linux, `.deb` | `sudo apt remove daedalus` | Kept. |
+| Linux, AppImage | Delete the file | Kept. |
 
-In native mode two things of the installation's live outside the folder, because neither may be part
-of what an update copies and switches: the downloaded runtime (the interpreter, the environments, the
-tools) and this machine's local state (the logs, the terminal and browser daemons' endpoints, the
-browser profiles with their logins). `uninstall` removes both; by hand they are
+The Windows uninstaller closes Daedalus the way you would — the window first, so the launcher stops
+the agent — and runs `daedalus-desktop uninstall` before it removes the program: in Docker mode that
+removes the containers and networks (the volumes too when you delete the data), in native mode it
+stops whatever of the installation still runs (and removes the downloaded runtime and the local
+state when you delete the data). It removes the `daedalus://` registration when that still points at
+this installation.
+
+To remove the data by hand afterwards, on any system: run `daedalus-desktop uninstall --remove-data`
+before removing the application, or delete the per-user folder ([The folder](#the-folder)) and the
+`.daedalus-update/` beside it — the copies of the data an update kept — and, in native mode, the
+runtime and local state folders:
 
 | | Runtime | Local state |
 |---|---|---|
@@ -688,81 +734,46 @@ browser profiles with their logins). `uninstall` removes both; by hand they are
 | Windows | `%LOCALAPPDATA%\Daedalus\Runtime\<name>-<hash>` | `%LOCALAPPDATA%\Daedalus\State\<name>-<hash>` |
 
 where `<name>-<hash>` is the data folder's name and a hash of its path, so two installations on one
-machine never share them.
+machine never share them. Docker's images are removed with `docker image prune -a`.
 
-Three more things live outside it, all of them small, all of them optional to clean up:
-
-| | Where | Remove it with |
-|---|---|---|
-| Docker images and volumes (Docker mode only) | Docker's own storage | `daedalus-desktop uninstall` before deleting the folder — it takes the containers, networks and volumes; then `docker image prune -a` for the images |
-| the `daedalus://` link registration | `~/.local/share/applications/daedalus-desktop.desktop` on Linux, `HKCU\Software\Classes\daedalus` on Windows, Launch Services on macOS (which forgets a bundle that is gone) | delete the file or the key; on macOS nothing to do |
-| a browser profile, if the app was shown in one | `data/browser-profile/` | inside the folder already |
-
-Your projects are **not** in the folder: a project is a folder of your own that the installation only
-ever pointed at, and nothing here deletes one. What an agent wrote inside it stays there — the files
-it was asked to make, and the five directories listed under [Projects](#projects) — so a project
-folder you are finished with is cleaned up by deleting those, in the folder itself.
+Your projects are **not** in the data folder: a project is a folder of your own that the installation
+only ever pointed at, and nothing here deletes one. What an agent wrote inside it stays there — the
+files it was asked to make, and the five directories listed under [Projects](#projects) — so a
+project folder you are finished with is cleaned up by deleting those, in the folder itself.
 
 ## Building it yourself
 
-`./build.sh` cross-compiles all five binaries into `dist/` inside the Go container, so the only
-dependency is Docker here as well:
+`./build.sh` cross-compiles the launcher for all five platforms into `dist/` inside the Go container
+— it is plain Go, with no C in it — so the only dependency is Docker here as well:
 
 ```bash
 cd desktop
 ./build.sh            # GO_IMAGE=golang:1.23 by default; VERSION= to stamp a version
 ```
 
-Those are `nowebview` builds — the browser fallback, no window. The window is cgo, and cgo is not
-cross-compiled: a windowed macOS build is made on macOS and a windowed Windows build on Windows,
-which is what the release workflow's matrix of native runners does. To build the windowed launcher
-for the machine you are on, `go build -trimpath -o daedalus-desktop .`.
+The application is built with electron-builder from `shell/` (`electron-builder.yml` is the whole
+configuration: the installers, the archives, the icon, the protocol). `shell/build.sh linux` builds
+the `.deb`, the AppImage and the unpacked folder on a Linux machine; `shell/build.sh windows` builds
+the installer under Wine in a container. Both stage the launcher, browserd and the Mini App from this
+tree first and leave ptyd out (it needs Zig; host terminals are then unavailable). The macOS
+application needs a Mac. The release workflow builds all of it, ptyd included, and tests each
+installer on its own system before anything is published.
 
-`./package-macos.sh VERSION AMD64 ARM64 OUTPUT_DIR` turns the two macOS binaries into
-`Daedalus.app` inside `Daedalus-macOS.zip` — one universal executable made with `lipo`, the
-`Info.plist`, an `AppIcon.icns` built from `docs/brand/avatar-bot.png`, a signature, and the zip
-made with `ditto -c -k --keepParent`. It needs macOS: `lipo`, `sips`, `iconutil`, `codesign` and
-`notarytool` are all Apple's. Without the signing secrets in the environment it signs ad-hoc and
-says so, which is also what happens in CI when the secrets are not set.
+To try the application against a launcher you built, `DAEDALUS_ENGINE=/path/to/daedalus-desktop npm
+start` in `shell/`.
 
-The module has one dependency outside the standard library — `github.com/webview/webview_go`, the
-web view, pinned to a commit because the project publishes no tags. Tests, for both builds:
+The module has one dependency outside the standard library — `golang.org/x/sys`. Tests:
 
 ```bash
 docker run --rm -v "$PWD":/src -w /src -e GOFLAGS=-mod=mod -e GOCACHE=/tmp/gocache -e GOMODCACHE=/tmp/gomod golang:1.23 \
-  sh -c 'go vet ./... && go test ./... && go vet -tags nowebview ./... && go test -tags nowebview ./...'
+  sh -c 'go vet ./... && go test ./...'
+(cd shell && npm ci && npm test)
 ```
-
-On Linux both of those are the same build, since the window is not compiled in there; the cgo build
-is exercised by the release workflow on macOS and Windows runners.
 
 ## Signing releases
 
-A release signed with a Developer ID certificate and notarized by Apple opens with a double-click
-and no questions; without the secrets below the same release is signed ad-hoc, which is fine for
-anyone installing with the one-liner and one right-click → *Open* for anyone who downloaded it in a
-browser. **A missing secret never fails the release** — the workflow signs ad-hoc, says so in the
-job log, and says so in the release notes.
-
-Five repository secrets, all five needed before signing is attempted:
-
-| Secret | What it is | Where it comes from |
-|---|---|---|
-| `APPLE_CERTIFICATE_P12` | base64 of a **Developer ID Application** certificate exported as `.p12` | Apple Developer account → *Certificates, Identifiers & Profiles* → *Certificates* → **+** → *Developer ID Application*. Upload a CSR made by Keychain Access (*Certificate Assistant → Request a Certificate From a Certificate Authority*), download the `.cer`, open it (it lands in the login keychain), then right-click the **private key** under *My Certificates* → *Export* to get the `.p12`. Requires the Apple Developer Program. |
-| `APPLE_CERTIFICATE_PASSWORD` | the password that export asked for | you choose it during the export |
-| `APPLE_ID` | the Apple account the app is notarized under | the account that owns the certificate |
-| `APPLE_TEAM_ID` | ten characters, e.g. `A1B2C3D4E5` | [developer.apple.com/account](https://developer.apple.com/account) → *Membership details* → *Team ID* |
-| `APPLE_APP_PASSWORD` | an **app-specific** password, not the account password | [appleid.apple.com](https://appleid.apple.com) → *Sign-In and Security* → *App-Specific Passwords* → **+** |
-
-The certificate is put into the secret base64-encoded, because a repository secret holds text:
-
-```bash
-base64 -i DeveloperID.p12 | tr -d '\n' | pbcopy    # macOS
-base64 -w0 DeveloperID.p12                         # Linux
-```
-
-What the workflow then does on the macOS runner: imports the certificate into a temporary keychain
-it deletes afterwards, signs the executable and the bundle with `--options runtime --timestamp` and
-the (deliberately empty) entitlements in `macos/entitlements.plist` — the hardened runtime is what
-notarization requires — submits the zip with `xcrun notarytool submit --wait`, staples the ticket to
-the bundle so the first launch needs no network, and zips it again.
+Releases are signed with the project's minisign key, on the operator's machine, after the workflow
+has built them into a draft: [SIGNING.md](SIGNING.md). There is no operating-system code signing —
+no Authenticode certificate for Windows and no Developer ID for macOS; the macOS application is
+signed ad-hoc, which is what lets Apple Silicon run it at all. [Get it](#get-it) says what each
+system asks on the first opening because of that.

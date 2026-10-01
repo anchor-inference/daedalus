@@ -435,6 +435,28 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		go func() { _ = s.app.Apply(ctx) }()
 	case "open":
 		go func() { _, _ = s.app.Open(ctx) }()
+	case "upgrade":
+		// Installing a newer release replaces this launcher, so it cannot run inside it: the shell
+		// closes the launcher and runs `upgrade` itself, showing what it says (shell.go). Without a
+		// shell the terminal is the only place it can run, and the page names the command instead.
+		s.app.mu.Lock()
+		offer := s.app.offer
+		s.app.mu.Unlock()
+		switch {
+		case shell == nil:
+			refuseAction(w, errors.New("close the launcher and run the upgrade command in a terminal"))
+			return
+		case offer == nil:
+			refuseAction(w, errors.New("there is no newer release to install"))
+			return
+		case s.app.Mode() == ModeDocker:
+			refuseAction(w, errDockerNotCovered)
+			return
+		case offer.Package != "":
+			refuseAction(w, errors.New("this copy is installed by a package; install the new release's file instead"))
+			return
+		}
+		shell.emit(shellEvent{Event: "upgrade", Data: s.app.paths.Data})
 	case "extra/node", "extra/browser", "extra/speech":
 		// The optional pieces of the runtime, fetched when something needs them rather than on
 		// every install. Native only: in Docker mode the browser comes with the :browser image.

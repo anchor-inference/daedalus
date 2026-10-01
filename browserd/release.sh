@@ -4,8 +4,8 @@
 #   browserd/release.sh <goos> <goarch> <output>
 #
 # browserd is plain Go with no C in it, so every platform is cross-compiled from any machine with the
-# Go of go.mod, a Mac's included; only the Mac bundle's signing needs a Mac, and that happens in
-# desktop/package-macos.sh.
+# Go of go.mod, a Mac's included; only the Mac application's signing needs a Mac, and electron-builder
+# does it in the release workflow.
 #
 # The version is the same digest of the daemon's sources the image stamps (src-<12 hex>): its own
 # module and the shared packages of ptyd it builds against, hashed as deploy/Dockerfile hashes them,

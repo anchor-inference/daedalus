@@ -59,10 +59,12 @@ installers**: a release that is published before it is signed is one nobody can 
 launcher that looked at it meanwhile has said so. So the first release carrying the key — the
 preview — is signed before it is published, like every release after it.
 
-1. **Tag.** Pushing `desktop-vX.Y.Z` runs the workflow (`desktop.yml`): it builds the archives and
-   `SHA256SUMS` into a **draft** release, and signs nothing. It refuses to touch a release that is
-   already published: new archives under a signature over the old `SHA256SUMS` would be refused
-   everywhere, and replacing both is a new release.
+1. **Tag.** Pushing `desktop-vX.Y.Z` runs the workflow (`desktop.yml`): it builds the installers
+   (`Daedalus-Setup-x64.exe`, `Daedalus-macOS.dmg`, the `.deb` and AppImage files), the archives the
+   launcher's `upgrade` installs from, and `SHA256SUMS` over all of them into a **draft** release,
+   and signs nothing. It refuses to touch a release that is already published: new files under a
+   signature over the old `SHA256SUMS` would be refused everywhere, and replacing both is a new
+   release.
 2. **Sign, on the operator's machine** — with `gh` signed in and `minisign` installed:
 
    ```sh
@@ -79,17 +81,15 @@ preview — is signed before it is published, like every release after it.
    and never leaves the machine.
 3. **Publish**: `gh release edit desktop-vX.Y.Z --draft=false`, or `--publish` in step 2.
 
-**After any re-run of the workflow over the draft, sign again.** A re-run rebuilds the archives —
+**After any re-run of the workflow over the draft, sign again.** A re-run rebuilds the files —
 builds are not byte-for-byte reproducible — and replaces them and `SHA256SUMS`; a signature over the
 old checksums would make every launcher refuse the release, so the workflow deletes
 `SHA256SUMS.sig` when it replaces files and says so in its log. Step 2 then has to be done again.
 
-The macOS and Windows tests (`window` in the workflow) do not hold back the build. While they are
-red, publish the Linux archives alone: before step 2, delete the macOS and Windows archives from the
-draft and replace its `SHA256SUMS` with only the lines of the files left
-(`grep linux SHA256SUMS > SHA256SUMS.linux && mv SHA256SUMS.linux SHA256SUMS`, then
-`gh release upload desktop-vX.Y.Z SHA256SUMS --clobber`): step 2 signs what `SHA256SUMS` names, and
-refuses a list that names a file the draft does not have.
+The draft is made only when every system's packages were built and their installer passed its
+own test on that system's runner (install, start until the window shows the launcher's page, close,
+uninstall) and the launcher's tests passed on macOS and Windows. A red job means no draft: fix it and
+tag again.
 
 `-l` matters: minisign's default signature is over a BLAKE2b hash of the message, which neither the
 launcher nor OpenSSL checks; the legacy signature is plain Ed25519 over the message itself.
@@ -160,7 +160,13 @@ openssl pkeyutl -verify -pubin -keyform DER -inkey key.der -rawin -in message -s
 ```
 
 Both print a success line only for a signature over exactly this tag and these checksums. Then
-check the downloaded archive against `SHA256SUMS` (`sha256sum -c --ignore-missing SHA256SUMS`).
+check the downloaded file against `SHA256SUMS` (`sha256sum -c --ignore-missing SHA256SUMS`; on
+Windows `(Get-FileHash Daedalus-Setup-x64.exe).Hash` compared with its line, case aside). This is the
+only check an installer you downloaded in a browser gets: the installers themselves verify nothing,
+and they carry no code signature — there is no Authenticode certificate and no Developer ID — so
+SmartScreen and Gatekeeper warn on the first start. The application checks every release after that
+itself: its updates go through the launcher's `upgrade`, which refuses a release this key did not
+sign.
 
 ## Rotation and loss
 

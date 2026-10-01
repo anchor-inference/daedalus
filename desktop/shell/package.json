@@ -1,0 +1,20 @@
+{
+  "name": "daedalus",
+  "productName": "Daedalus",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Daedalus on your own machine",
+  "author": "Daedalus",
+  "license": "UNLICENSED",
+  "homepage": "https://github.com/anchor-inference/daedalus",
+  "main": "main.js",
+  "scripts": {
+    "test": "node --test test/policy.test.js",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3"
+  },
+  "desktopName": "daedalus.desktop"
+}

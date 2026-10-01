@@ -450,6 +450,12 @@ func (u *Upgrader) begin(ctx context.Context) error {
 			}
 		}
 		root, item = installRoot(exe)
+		// A copy the operator cannot replace — an AppImage, or files a package manager put in a
+		// folder only the administrator may write — is refused before anything is asked or written,
+		// with what to do instead.
+		if why := notSelfReplaceable(root, os.Getenv); why != "" {
+			return errors.New(why)
+		}
 	}
 	if isInside(u.paths.Data, filepath.Join(root, item)) {
 		return fmt.Errorf("the data folder %s is inside what an upgrade replaces", u.paths.Data)
@@ -902,6 +908,7 @@ func (u *Upgrader) finish(ctx context.Context) error {
 	}
 	markWorkFinished(journal)
 	u.cleanUpAfter(journal)
+	noteInstalledVersion(journal.Root, journal.To)
 	u.say("")
 	u.say("Upgraded to %s.", journal.To)
 	u.say("As for the data, %s; the previous launcher's files are in %s.", keptDescription(u.paths, journal), filepath.Join(journal.Work, "old"))

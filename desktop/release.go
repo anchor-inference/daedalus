@@ -42,7 +42,8 @@ var (
 // releaseBodyLimit caps the release listing; thirty releases are a few hundred kilobytes.
 const releaseBodyLimit = 8 << 20
 
-// assetLimit caps a downloaded release archive. The archives are tens of megabytes.
+// assetLimit caps a downloaded release archive. Since the archives carry the desktop application they
+// are 100–250 MB (the universal macOS bundle is the largest); the cap is twice the largest with room.
 const assetLimit = 512 << 20
 
 // Release is one published launcher release, as much of it as the upgrade needs.
@@ -243,6 +244,49 @@ type Offer struct {
 	// notification and the app to show: this launcher's own path and data folder, quoted for the
 	// shell of this system.
 	Command string `json:"command,omitempty"`
+	// Package is set when this copy cannot replace itself (notSelfReplaceable): "appimage" or
+	// "package". The page then says to install the release's own file instead.
+	Package string `json:"package,omitempty"`
+}
+
+// installationKind says how this copy of the launcher moves to a newer release: "" when upgrade
+// can replace it in place (an installation in the operator's own folder — the per-user Windows
+// install, /Applications, a folder unpacked by hand), "appimage" for an AppImage, and "package" for
+// files a package manager installed where only the administrator may write.
+func installationKind() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	root, _ := installRoot(exe)
+	switch {
+	case os.Getenv("APPIMAGE") != "":
+		return "appimage"
+	case notSelfReplaceable(root, os.Getenv) != "":
+		return "package"
+	}
+	return ""
+}
+
+// notSelfReplaceable says why upgrade cannot replace the launcher's files in root, or "" when it
+// can. An AppImage runs out of a read-only image mounted for the length of the run; a folder this
+// user cannot write is a system-wide install (the .deb puts the application in /opt/Daedalus), and
+// the release for those is its own file, installed the way the first one was.
+func notSelfReplaceable(root string, getenv func(string) string) string {
+	if getenv("APPIMAGE") != "" {
+		return "this copy of Daedalus runs from an AppImage, which cannot replace itself from inside: download the new release's " +
+			"AppImage and put it where this one is (" + getenv("APPIMAGE") + "). Nothing was changed"
+	}
+	probe, err := os.MkdirTemp(root, ".daedalus-write-check-")
+	if err != nil {
+		return "the launcher's folder " + root + " is not yours to write (" + err.Error() + "): this copy was installed by the system's " +
+			"package manager or for every user, so the new release is installed the same way — on Debian and Ubuntu its .deb. Nothing was changed"
+	}
+	_ = os.Remove(probe)
+	return ""
 }
 
 // upgradeCommandLine is `<this launcher> upgrade --data <data>` as it is typed on this system.
@@ -358,6 +402,11 @@ func UpgradeNotification(lang Lang, offer Offer) Notification {
 	if offer.Command != "" {
 		body += "\n" + offer.Command
 	}
+	if shell != nil {
+		// Under the desktop application the card in its window has the button; a command line in a
+		// notification is for a terminal nobody opened.
+		body = fmt.Sprintf(Translate(lang, "upgrade.notify.body.shell"), strings.TrimPrefix(offer.From, releaseTagPrefix))
+	}
 	return Notification{
 		Title: fmt.Sprintf(Translate(lang, "upgrade.notify.title"), strings.TrimPrefix(offer.To, releaseTagPrefix)),
 		Body:  body,
@@ -387,6 +436,7 @@ func (a *App) CheckReleases(ctx context.Context, show func(Notification) error) 
 		}
 		if offer != nil {
 			offer.Command = upgradeCommandLine(a.paths)
+			offer.Package = installationKind()
 		}
 		a.mu.Lock()
 		same := offer != nil && a.offer != nil && a.offer.To == offer.To

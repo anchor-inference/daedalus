@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,10 @@ type App struct {
 	// and only how it does them differs.
 	mode   Mode
 	native *Native
+
+	// show puts an address in the desktop application's window. It is set under the shell
+	// (shell.go), where opening a browser is the one thing the launcher must not do.
+	show func(url string)
 
 	mu      sync.Mutex
 	lines   []string
@@ -487,14 +492,93 @@ func (a *App) update(ctx context.Context) error {
 
 // Uninstall removes the containers and networks. The volumes — the database, the workspaces, the
 // agent's memory — go with them unless the operator asked to keep the data.
-func (a *App) Uninstall(ctx context.Context, keepData bool) error {
+func (a *App) Uninstall(ctx context.Context, keepData, removeData bool) error {
+	// The desktop application's uninstaller runs this the moment it has closed the application,
+	// whose launcher is still stopping the agent: it is given that long to let go of the
+	// installation, and nothing is removed under it.
+	lock, err := waitForLock(ctx, a.paths, "uninstall", time.Minute)
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
 	id, err := a.begin("uninstall")
 	if err != nil {
 		return err
 	}
-	err = a.uninstall(ctx, keepData)
+	// An installation whose setup never finished has no mode, and nothing of it ever ran: no
+	// containers to remove and no runtime beyond what a first start may have begun to download.
+	if a.mode == ModeUnset {
+		err = removeLocal(a.paths, a.log)
+	} else {
+		err = a.uninstall(ctx, keepData)
+	}
+	if removeData {
+		// Asked for by the operator in the uninstaller, so done even when the step before could
+		// not reach Docker: the volumes are then named as left behind, the folder still goes.
+		lock.Release()
+		if removed := removeDataFolder(a.paths, a.log); removed != nil {
+			err = errors.Join(err, removed)
+		}
+	}
 	a.end(id, err)
 	return err
+}
+
+// removeLocal removes the downloaded runtime and this machine's local state of an installation.
+func removeLocal(p Paths, log func(string, ...any)) error {
+	for _, dir := range []string{p.Runtime, p.Local} {
+		if !exists(dir) {
+			continue
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+		log("removed %s", dir)
+	}
+	return nil
+}
+
+// waitForLock takes the installation lock, waiting up to limit for whoever holds it to let go.
+func waitForLock(ctx context.Context, p Paths, kind string, limit time.Duration) (*InstallLock, error) {
+	deadline := time.Now().Add(limit)
+	for {
+		lock, err := AcquireLock(p, kind)
+		if err == nil || !errors.Is(err, errLocked) || time.Now().After(deadline) {
+			return lock, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
+// removeDataFolder deletes the data folder and the copies of it updates kept beside it. It is the
+// uninstaller's "delete my data too", and nothing else asks for it. A folder that does not look like
+// an installation is refused rather than deleted: --data can name any folder at all, and this is
+// the one place a mistyped one would cost everything in it.
+func removeDataFolder(p Paths, log func(string, ...any)) error {
+	if !exists(p.Data) {
+		return nil
+	}
+	if !looksLikeData(p.Data) && !exists(p.Secrets) {
+		return fmt.Errorf("%s does not look like a Daedalus data folder; it is not deleted", p.Data)
+	}
+	if err := os.RemoveAll(p.Data); err != nil {
+		return err
+	}
+	log("deleted %s", p.Data)
+	if control := fenceControlPath(p.Data); exists(control) {
+		if err := os.RemoveAll(control); err != nil {
+			return err
+		}
+		log("deleted %s", control)
+		// .daedalus-update itself, when this was the only data folder beside it; a sibling's
+		// control folder keeps it, and Remove refuses a folder that is not empty.
+		_ = os.Remove(filepath.Dir(control))
+	}
+	return nil
 }
 
 func (a *App) uninstall(ctx context.Context, keepData bool) error {
@@ -516,6 +600,13 @@ func (a *App) uninstall(ctx context.Context, keepData bool) error {
 		}
 		a.log("the runtime is gone; %s still holds the checkouts, the state and your keys — delete it by hand when you are done with it", a.paths.Data)
 		a.noteKeptCopies()
+		return nil
+	}
+	// Compose names its project "daedalus" whatever the folder, so a `down` here reaches whatever
+	// runs under that name on this machine's Docker. An installation whose setup never wrote its
+	// configuration never started anything there, and must not take down what something else did.
+	if !a.paths.Configured() {
+		a.log("this installation never started anything in Docker; nothing to remove there")
 		return nil
 	}
 	if err := CheckDocker(ctx); err != nil {
@@ -555,6 +646,10 @@ func (a *App) noteKeptCopies() {
 // be had.
 func (a *App) Open(ctx context.Context) (string, error) {
 	url := a.OpenURL(ctx)
+	if a.show != nil {
+		a.show(url)
+		return url, nil
+	}
 	return url, OpenBrowser(ctx, url)
 }
 
@@ -630,6 +725,7 @@ func (a *App) Pair(ctx context.Context) (string, error) {
 // Status is what the status command prints and what the page renders.
 type Status struct {
 	Data       string `json:"data"`
+	Logs       string `json:"logs"` // the local state's logs/, where the launcher and the stack write
 	Mode       string `json:"mode"`
 	ModeDetail string `json:"mode_detail"`
 	Ports      string `json:"ports"`
@@ -672,6 +768,7 @@ func (a *App) Status(ctx context.Context) Status {
 	a.mu.Lock()
 	status := Status{
 		Data:       a.paths.Data,
+		Logs:       a.paths.RuntimeLogs,
 		Mode:       string(a.mode),
 		ModeDetail: a.mode.Describe(),
 		Configured: a.paths.Configured(),

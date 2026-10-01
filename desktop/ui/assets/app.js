@@ -199,15 +199,25 @@ function drawStatus(status) {
     // card with a blank strip at the bottom where the button had been.
     el("change-actions").hidden = !change.pending;
   }
-  // A newer launcher release. The page only tells: installing it is `daedalus-desktop upgrade` with
-  // the launcher closed, which asks, backs up and checks the backup first.
+  // A newer launcher release. Installing it replaces the launcher, so it never runs inside it: in the
+  // desktop application the button hands it to the shell, which closes the launcher and runs
+  // `upgrade` (it backs up and checks the backup first); on its own the page names the command for a
+  // terminal; and a copy a package installed is pointed at the release's own file.
   const offer = status.upgrade;
   if (el("upgrade")) {
     el("upgrade").hidden = !offer;
     if (offer) {
+      // Docker mode is refused by upgrade with nothing changed (UPDATES.md), so it gets no button.
+      const inShell = Boolean(window.daedalus?.shell) && status.mode !== "docker";
+      const body = offer.package ? "upgrade.card.body.package" : inShell ? "upgrade.card.body.shell" : "upgrade.card.body";
       el("upgrade-title").textContent = T("upgrade.card.title").replace("%s", String(offer.to).replace(/^desktop-v/, ""));
-      el("upgrade-body").textContent = T("upgrade.card.body").replace("%s", String(offer.from).replace(/^desktop-v/, ""));
+      el("upgrade-body").textContent = T(body).replace("%s", String(offer.from).replace(/^desktop-v/, ""));
       if (offer.command) el("upgrade-command").textContent = offer.command;
+      el("upgrade-command-line").hidden = Boolean(offer.package) || inShell;
+      el("upgrade-actions").hidden = !(offer.package || inShell);
+      el("upgrade-install").hidden = Boolean(offer.package) || !inShell;
+      el("upgrade-release").hidden = !offer.package;
+      if (offer.url) el("upgrade-release").href = offer.url;
     }
   }
   // What the data folder's switches kept, and anything about them that needs the operator. The

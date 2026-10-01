@@ -10,14 +10,14 @@ import (
 )
 
 // A link like daedalus://open/<session-id> opens that conversation in the app, from anywhere the
-// operating system can follow a link: a message, a notification, a page, a terminal. The launcher
-// is what the system hands the link to, and what the launcher does with it is turn it into an
-// address on this machine and show it — in its own window when it has one, or in a browser.
+// operating system can follow a link: a message, a notification, a page, a terminal. The desktop
+// application is what the system hands the link to; it passes the link to this launcher, which
+// turns it into an address on this machine and has the application's window show it.
 //
-// The scheme is registered differently on each platform and only once. macOS reads it out of the
-// application bundle (CFBundleURLTypes, written by package-macos.sh), so nothing is done there at
-// run time. Windows and Linux are registered by the launcher itself on a first start, because there
-// is no installer to do it.
+// The application is registered for the scheme by its installers and by itself (the bundle's
+// CFBundleURLTypes, the .deb's desktop entry, and Electron's own registration under HKCU on
+// Windows). RegisterScheme below is for a launcher with no application beside it — a build from
+// source — which registers itself on a first start.
 const linkScheme = "daedalus"
 
 // IsDeepLink reports whether an argument is one of our links rather than a command.

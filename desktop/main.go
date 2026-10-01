@@ -40,7 +40,11 @@ func followFile(path string) error {
 // version is stamped at build time; a plain `go build` leaves it as it is.
 var version = "dev"
 
-const usage = `daedalus-desktop — run Daedalus on this machine with Docker
+const usage = `daedalus-desktop — the engine of the Daedalus desktop application
+
+The application (Daedalus.exe, Daedalus.app, daedalus) starts this program itself; run it from a
+terminal for the commands below. With no command and the application beside it, it opens the
+application.
 
 usage: daedalus-desktop [flags] [command]
 
@@ -69,7 +73,11 @@ commands:
               Native mode only for now: Docker mode is refused (desktop/UPDATES.md)
   open        open the app in the browser
   pair        print a fresh pairing link for signing in to the app
-  uninstall   remove the containers, networks and volumes
+  uninstall   remove the containers, networks and volumes (Docker), or the downloaded
+              runtime and this machine's local state (native); --keep-data keeps all of it,
+              --remove-data deletes the data folder too
+  import DIR  move the data folder of an earlier installation (one kept beside an older
+              launcher) into the per-user folder this one uses; run it with Daedalus closed
   install X   native mode only: fetch a runtime extra — "node" for the skills that
               shell out to npx and for rebuilding the app, "browser" for the Chromium
               the agent's browser and the browser skills drive, "speech" for the engine that runs a
@@ -83,8 +91,10 @@ conversation. A launcher that is already running is brought to the front and han
 second one never starts.
 
 flags:
-  --data DIR  where the checkouts, the keys and the environment live
-              (default: ./data, or data/ beside the app when run from Daedalus.app)
+  --data DIR  where the checkouts, the keys and the environment live (default: the
+              per-user folder — %LOCALAPPDATA%\Daedalus\data, ~/Library/Application
+              Support/Daedalus/data, ~/.local/share/daedalus/data — or an older
+              installation's data/ beside this executable until a start moves it there)
   --mode M    docker or native. Docker puts the agent in a container; native runs it on
               this machine out of a portable runtime the launcher downloads — lighter and
               faster, with no container boundary. Asked once on the first run and
@@ -92,6 +102,8 @@ flags:
   --port N    the port the launcher's own page listens on (default: 8770)
   --setup     ask the setup questions even though the configuration exists
   --keep-data uninstall: keep the volumes and the data folder
+  --remove-data  uninstall: delete the data folder as well — the conversations, the keys,
+              the checkouts; what the desktop application's uninstaller runs when asked to
   -f          logs: follow
   --version   print the version and exit
   --yes       upgrade: do not ask (the data is still protected, and the rollback still happens)
@@ -103,6 +115,8 @@ func main() {
 		return
 	}
 	if err := run(os.Args[1:]); err != nil {
+		// Under the shell nobody reads standard error: the window says why instead.
+		shell.emit(shellEvent{Event: "fatal", Message: err.Error(), Log: shellLog()})
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
@@ -136,6 +150,14 @@ type options struct {
 	apply bool
 	// verbose makes `update status` list what it otherwise only counts.
 	verbose bool
+
+	// shell: started by the desktop application's shell, which shows everything (shell.go).
+	shell bool
+	// removeData makes uninstall delete the data folder as well; only the uninstaller asks for it.
+	removeData bool
+	// fromApp: an upgrade the application started and then closed for (shell.go). Its output goes
+	// to upgrade.log, and the application is opened again when it ends, however it ended.
+	fromApp bool
 }
 
 func run(argv []string) error {
@@ -151,6 +173,14 @@ func run(argv []string) error {
 		fmt.Println(version)
 		return nil
 	}
+	if opts.shell {
+		if opts.command != "" && opts.command != "start" {
+			return fmt.Errorf("--shell starts the application; %s is a command for a terminal", opts.command)
+		}
+		shell = &shellLink{out: os.Stdout}
+	} else if handOverToShell(opts) {
+		return nil
+	}
 	paths, err := NewPaths(opts.data)
 	if err != nil {
 		return err
@@ -160,7 +190,44 @@ func run(argv []string) error {
 	// that a Ctrl+C does — otherwise the launcher dies and leaves an agent running behind it.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// An ordinary start of an installation an older launcher kept beside itself moves its data to
+	// the per-user folder, once (relocate.go). Only a start does: every other command works on the
+	// folder where it is, so nothing typed in a terminal moves anything as a side effect.
+	var moved []string
+	note := func(format string, args ...any) { moved = append(moved, fmt.Sprintf(format, args...)) }
+	if opts.data == "" && (opts.command == "" || opts.command == "start") {
+		if target, ok := relocatableFromHere(paths.Data); ok {
+			if relocated, err := relocateData(ctx, paths.Data, target, note); err != nil {
+				note("the data folder stays at %s: %v", paths.Data, err)
+			} else {
+				paths = relocated
+			}
+		}
+	}
+	if shell != nil {
+		var quit context.CancelFunc
+		ctx, quit = context.WithCancel(ctx)
+		defer quit()
+		if file, err := openShellLog(paths); err == nil {
+			os.Stdout, os.Stderr = file, file
+			shell.log = file.Name()
+		}
+		shellQuit = quit
+	}
+	if opts.fromApp {
+		if opts.command != "upgrade" {
+			return errors.New("--from-app is for the upgrade the application starts")
+		}
+		if file, err := openLocalLog(paths, "upgrade.log"); err == nil {
+			os.Stdout, os.Stderr = file, file
+			fmt.Printf("\n%s upgrade started by the application\n", time.Now().UTC().Format(time.RFC3339))
+		}
+		defer reopenApplication()
+	}
 	app := NewApp(paths)
+	for _, line := range moved {
+		app.log("%s", line)
+	}
 	mode, err := ResolveMode(paths, opts.mode)
 	if err != nil {
 		return err
@@ -252,7 +319,15 @@ func run(argv []string) error {
 	case "restart":
 		return app.Restart(ctx)
 	case "uninstall":
-		return app.Uninstall(ctx, opts.keepData)
+		if opts.removeData && opts.keepData {
+			return errors.New("--keep-data and --remove-data say opposite things")
+		}
+		return app.Uninstall(ctx, opts.keepData, opts.removeData)
+	case "import":
+		if opts.extra == "" {
+			return errors.New("import takes the data folder of an earlier installation")
+		}
+		return importCommand(ctx, app, opts)
 	default:
 		return fmt.Errorf("no such command: %s\n\n%s", opts.command, usage)
 	}
@@ -267,6 +342,12 @@ func startCommand(ctx context.Context, app *App, opts options) error {
 	// two windows on one app and two answers on one port are all the same mistake, so the second
 	// hands its link to the first, asks it to come to the front, and stops.
 	if FocusRunning(ctx, app.paths, opts.link) {
+		if shell != nil {
+			// Under the shell, a launcher already running on this installation is one started from a
+			// terminal or by an older installation's shortcut; its window is not this one, and two
+			// windows on one installation are what the single start exists to prevent.
+			return fmt.Errorf("Daedalus is already running on %s, started outside this window; close it there first", app.paths.Data)
+		}
 		fmt.Println("Daedalus is already running here; it has been brought to the front.")
 		return nil
 	}
@@ -287,18 +368,37 @@ func startCommand(ctx context.Context, app *App, opts options) error {
 	if err := migrateLegacyRuntime(ctx, app.paths, app.log); err != nil {
 		return fmt.Errorf("moving the runtime out of the data folder: %w", err)
 	}
-	// Links are registered with the desktop on a first start, since a folder with an executable in
-	// it has no installer to do it. Nothing depends on it working.
-	if err := RegisterScheme(app.paths); err != nil {
-		fmt.Fprintln(os.Stderr, "daedalus:// links are not registered with this desktop:", err.Error())
+	// Links are registered with the desktop on a first start when there is no application to do it:
+	// the installers and the shell register daedalus:// for the shell, and a launcher started under
+	// it or beside it must not point the links back at itself. Nothing depends on it working.
+	if shell == nil {
+		if exe, err := os.Executable(); err == nil && shellExecutable(exe) == "" {
+			if err := RegisterScheme(app.paths); err != nil {
+				fmt.Fprintln(os.Stderr, "daedalus:// links are not registered with this desktop:", err.Error())
+			}
+		}
 	}
 	server := NewServer(app, opts.port)
-	if err := server.Start(); err != nil {
+	if err := server.Start(); err != nil && opts.port == defaultPort {
+		// The usual port is taken — another installation's launcher, most often. Nothing finds this
+		// page by its port (a second start reads launcher.json, the shell is told the address), so
+		// any free one serves as well.
+		fmt.Fprintln(os.Stderr, err.Error())
+		server = NewServer(app, 0)
+		err = server.Start()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			server = nil
+		}
+	} else if err != nil {
 		// A page that cannot listen is not a reason to refuse to start the stack.
 		fmt.Fprintln(os.Stderr, err.Error())
 		server = nil
 	}
 	if server == nil {
+		if shell != nil {
+			return errors.New("the launcher's page could not listen on any port of this machine")
+		}
 		if !app.paths.Configured() || opts.setup {
 			return errors.New("the setup page needs a free port: pass --port")
 		}
@@ -315,8 +415,19 @@ func startCommand(ctx context.Context, app *App, opts options) error {
 	defer server.Stop(context.Background())
 	// The surface is made after the page is listening, because the first thing it shows is that
 	// page: the status, the buttons, and on a first start the questions.
-	surface := OpenSurface(app.paths, server.URL())
+	announceLastUpgrade(app)
+	surface := OpenSurface(app.paths, server.URL(), shell)
 	server.OnFocus(surface.Focus)
+	if shell != nil {
+		app.show = func(url string) { surface.Show(ctx, url) }
+		go shell.listen(os.Stdin, func(link string) {
+			target := ""
+			if IsDeepLink(link) {
+				target = DeepLinkTarget(link, AppURL(APIPort(app.paths), app.Lang()))
+			}
+			surface.Focus(ctx, target)
+		}, shellQuit)
+	}
 	go bringUp(ctx, app, server, surface, opts)
 	surface.Run(ctx)
 	// Native mode does not leave an agent behind a closed launcher: it is a process of this one's,
@@ -403,6 +514,11 @@ func watch(ctx context.Context, app *App, surface *Surface) {
 	off := false
 	open := func(link string) { surface.Focus(ctx, link) }
 	show := func(n Notification) error {
+		if shell != nil {
+			// The shell shows it as the application itself, and a click comes back to its window.
+			shell.emit(shellEvent{Event: "notify", Title: n.Title, Body: n.Body, URL: notificationTarget(app, n)})
+			return nil
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		if off {
@@ -469,6 +585,12 @@ func parseArgs(argv []string) (options, error) {
 			opts.setup = true
 		case "--keep-data":
 			opts.keepData = true
+		case "--remove-data":
+			opts.removeData = true
+		case "--shell":
+			opts.shell = true
+		case "--from-app":
+			opts.fromApp = true
 		case "--apply":
 			opts.apply = true
 		case "-v", "--verbose":
@@ -540,7 +662,7 @@ func parseArgs(argv []string) (options, error) {
 				opts.extra = arg
 				continue
 			}
-			if opts.command == "install" && opts.extra == "" {
+			if (opts.command == "install" || opts.command == "import") && opts.extra == "" {
 				// The one command that takes an argument of its own: which extra to fetch.
 				opts.extra = arg
 				continue

@@ -2,6 +2,24 @@
 
 Notable changes, newest first. The repository's `main` is the released version.
 
+## 2026-10-01
+
+- **Daedalus installs and opens like any desktop application.** Windows has an installer
+  (`Daedalus-Setup-x64.exe`: Next, Install, Finish; per user, no administrator; Start menu and desktop
+  shortcuts; an entry in Apps & features whose uninstaller asks before it deletes any data), macOS a
+  `.dmg` to drag into Applications, Linux a `.deb` with a menu entry and an AppImage. The window is the
+  application's own (Electron), on all three systems: the launcher's setup and progress pages and the
+  app are shown in it, never in the browser, and on Windows no console window appears behind it — the
+  launcher now runs as the application's background process and writes to `launcher.log`.
+- **The data lives in the per-user folder**, not beside the program: `%LOCALAPPDATA%\Daedalus\data`,
+  `~/Library/Application Support/Daedalus/data`, `~/.local/share/daedalus/data`. An installation that
+  kept `data/` beside an older launcher is moved there by its first start, once, by a rename that is
+  refused while anything uses the folder; `daedalus-desktop import` brings one in from elsewhere.
+- **A newer release is installed from the application's window** (*Install and restart*), through the
+  launcher's own `upgrade`: the release's signature is checked, the data is protected first, and the
+  data and the previous version come back if the new one does not start. The release archives are the
+  unpacked application, so every older launcher upgrades into it the way it always upgraded.
+
 ## 2026-09-19
 
 - **A session can pick its reasoning effort.** The composer has a chip that opens a slider

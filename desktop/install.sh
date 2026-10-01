@@ -1,14 +1,19 @@
 #!/bin/sh
-# Installs the Daedalus desktop launcher into a folder of its own:
+# Installs the Daedalus desktop application into a folder of its own, from a terminal:
 #
 #   curl -fsSL https://raw.githubusercontent.com/anchor-inference/daedalus/main/desktop/install.sh | sh
 #
+# The installers on the releases page (the .dmg, the .deb, the AppImage) are the ordinary way; this
+# is the one that needs no browser and no administrator, and the one an older installation from an
+# archive is upgraded with.
+#
 # It takes the newest desktop-v* release, downloads the archive for this machine, checks it against
-# the release's SHA256SUMS, and unpacks it into ./Daedalus (or $DAEDALUS_DIR). The launcher then makes
-# what the installation owns - the checkouts, the keys, the database - inside that same folder, and,
-# natively, the downloaded runtime and this machine's local state (logs, the browser profiles)
-# outside it: under ~/.cache and ~/.local/state on Linux, ~/Library/Application Support on macOS.
-# `daedalus-desktop uninstall` removes those two; removing the folder then removes the rest.
+# the release's SHA256SUMS, and unpacks it into ./Daedalus (or $DAEDALUS_DIR). The application keeps
+# what the installation owns - the checkouts, the keys, the database - in the per-user folder
+# (~/.local/share/daedalus/data on Linux, ~/Library/Application Support/Daedalus/data on macOS), and,
+# natively, the downloaded runtime and this machine's local state beside it or under ~/.cache and
+# ~/.local/state. An installation from before that kept data/ inside this folder is moved there by
+# the first start.
 #
 # Run it again over an installation that already has data and it never replaces anything itself.
 # A launcher that has `daedalus-desktop upgrade` is handed over to. One too old for that (v0.12.0
@@ -109,19 +114,30 @@ mkdir -p "$dir"
 target="$(cd "$dir" && pwd)"
 if [ "$platform" = "macos" ]; then
   launcher="$target/Daedalus.app/Contents/MacOS/daedalus-desktop"
+  standard="$HOME/Library/Application Support/Daedalus/data"
 else
   launcher="$target/daedalus-desktop"
+  standard="${XDG_DATA_HOME:-$HOME/.local/share}/daedalus/data"
+fi
+
+# The data folder of the installation in this folder: data/ beside it when an older launcher kept it
+# there and no start has moved it yet, otherwise the per-user folder once it holds an installation.
+data=""
+if [ -d "$target/data" ]; then
+  data="$target/data"
+elif [ -e "$standard/.env" ] || [ -e "$standard/mode" ]; then
+  data="$standard"
 fi
 
 # An installation with data is upgraded by its own launcher when that launcher knows how: it asks,
 # protects the data (a kept copy or a checked backup), and rolls back on failure. The question needs a terminal,
 # and under `curl | sh` standard input is the script, so it is asked on /dev/tty.
-if [ -d "$target/data" ] && [ -x "$launcher" ] && "$launcher" --help 2>/dev/null | grep -q '^  upgrade '; then
+if [ -n "$data" ] && [ -x "$launcher" ] && "$launcher" --help 2>/dev/null | grep -q '^  upgrade '; then
   say "An installation with data is already in ${target}; handing over to its launcher's upgrade."
   if (exec </dev/tty) 2>/dev/null; then
-    exec "$launcher" upgrade --data "$target/data" </dev/tty
+    exec "$launcher" upgrade --data "$data" </dev/tty
   fi
-  fail "Run this in a terminal:  '$launcher' upgrade --data '$target/data'"
+  fail "Run this in a terminal:  '$launcher' upgrade --data '$data'"
 fi
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
@@ -267,8 +283,16 @@ fi
 if [ -e "$launcher" ]; then
   kept="$target/.daedalus-upgrade/installer-$(date -u +%Y%m%dT%H%M%SZ)"
   mkdir -p "$kept"
-  for item in Daedalus.app daedalus-desktop ptyd browserd miniapp-dist; do
-    if [ -e "$target/$item" ]; then mv "$target/$item" "$kept/"; fi
+  # Whatever the new archive brings is moved aside where it already stands: the launcher and its
+  # daemons, and since the application came with it, the application's own files too.
+  if [ "$platform" = "macos" ]; then
+    items="Daedalus.app"
+  else
+    items="$(tar -tzf "$work/$asset" | sed 's|^\./||; s|/.*||' | sort -u)"
+  fi
+  for item in $items daedalus-desktop ptyd browserd miniapp-dist; do
+    case "$item" in "" | data | .daedalus-upgrade) continue ;; esac
+    if [ -e "$target/$item" ] && [ ! -e "$kept/$item" ]; then mv "$target/$item" "$kept/"; fi
   done
   say "The previous launcher's files are in ${kept}."
 fi
@@ -280,15 +304,18 @@ if [ "$platform" = "macos" ]; then
   say ""
   say "Installed $tag into $target."
   say "Open it:  open '$target/Daedalus.app'"
-  say "Or double-click Daedalus in that folder. Docker Desktop must be installed and running."
+  say "Or double-click Daedalus in that folder."
 else
   tar -xzf "$work/$asset" -C "$target"
   chmod +x "$target/daedalus-desktop"
   if [ -f "$target/ptyd" ]; then chmod +x "$target/ptyd"; fi
   say ""
   say "Installed $tag into $target."
-  say "Run it:  cd '$target' && ./daedalus-desktop"
-  say "Docker Engine with the compose plugin must be installed and running."
+  if [ -f "$target/daedalus" ]; then
+    say "Open it:  '$target/daedalus'"
+  else
+    say "Run it:  '$target/daedalus-desktop'"
+  fi
 fi
-say "The launcher makes the checkouts, the keys and the data inside that folder, and natively keeps its"
-say "downloaded runtime and local state outside it; \`daedalus-desktop uninstall\` removes those."
+say "Its data lives in ${standard}; \`daedalus-desktop uninstall\` removes the downloaded runtime and the"
+say "local state it keeps beside that, and deleting both folders then removes the rest."
