@@ -1,7 +1,12 @@
-# Installs the Daedalus desktop launcher on Windows into a folder of its own - the same steps as
-# install.sh, which covers macOS and Linux:
+# Installs the Daedalus desktop application on Windows into a folder of its own, from PowerShell -
+# the same steps as install.sh, which covers macOS and Linux:
 #
 #   irm https://raw.githubusercontent.com/anchor-inference/daedalus/main/desktop/install.ps1 | iex
+#
+# Daedalus-Setup-x64.exe from the releases page is the ordinary way to install it; this is for an
+# installation in a folder of the operator's choosing, and for upgrading one an older archive made.
+# The application keeps its data in %LOCALAPPDATA%\Daedalus\data either way; an older installation
+# that kept data\ inside its folder is moved there by its first start.
 #
 # It takes the newest desktop-vX.Y.Z release, downloads daedalus-desktop-windows-amd64.zip, checks it
 # against the release's SHA256SUMS, refuses an archive with a path that would land outside the
@@ -172,6 +177,17 @@ function Install-Daedalus {
     $target = (Resolve-Path $dir).Path
     $launcher = Join-Path $target 'daedalus-desktop.exe'
     $data = Join-Path $target 'data'
+    # The per-user folder the application keeps its data in once an older installation's data\ has
+    # been moved out of this folder.
+    $standard = Join-Path $env:LOCALAPPDATA 'Daedalus\data'
+    $moved = (-not (Test-Path $data)) -and ((Test-Path (Join-Path $standard '.env')) -or (Test-Path (Join-Path $standard 'mode')))
+    if ($moved -and (Test-Path $launcher)) {
+        $help = & $launcher --help 2>$null | Out-String
+        if ($help -match '(?m)^  upgrade ') {
+            Write-Host "An installation with data in $standard runs from $target; handing over to its launcher's upgrade."
+            return (Run-Launcher $launcher @('upgrade', '--data', $standard))
+        }
+    }
 
     if ((Test-Path $data) -and (Test-Path $launcher)) {
         $help = & $launcher --help 2>$null | Out-String
@@ -262,9 +278,13 @@ function Install-Daedalus {
         if (Test-Path $launcher) {
             $kept = Join-Path $target (".daedalus-upgrade\installer-" + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'))
             New-Item -ItemType Directory -Force -Path $kept | Out-Null
-            foreach ($item in 'daedalus-desktop.exe', 'ptyd.exe', 'browserd.exe', 'miniapp-dist') {
+            # Whatever the new archive brings is moved aside where it already stands: the launcher and its
+            # daemons, and since the application came with it, the application's own files too.
+            $items = @(Get-ChildItem -Path $staged | ForEach-Object { $_.Name }) + @('daedalus-desktop.exe', 'ptyd.exe', 'browserd.exe', 'miniapp-dist')
+            foreach ($item in ($items | Select-Object -Unique)) {
+                if ($item -eq 'data' -or $item -eq '.daedalus-upgrade') { continue }
                 $path = Join-Path $target $item
-                if (Test-Path $path) { Move-Item -Path $path -Destination $kept }
+                if ((Test-Path $path) -and -not (Test-Path (Join-Path $kept $item))) { Move-Item -Path $path -Destination $kept }
             }
             Write-Host "The previous launcher's files are in $kept."
         }
@@ -275,10 +295,15 @@ function Install-Daedalus {
 
     Write-Host ''
     Write-Host "Installed $tag into $target."
-    Write-Host "Run it:  & '$launcher'"
+    $application = Join-Path $target 'Daedalus.exe'
+    if (Test-Path $application) {
+        Write-Host "Open it:  & '$application'  (or double-click Daedalus.exe in that folder)"
+    } else {
+        Write-Host "Run it:  & '$launcher'"
+    }
     Write-Host 'The executable is not signed, so SmartScreen warns once: More info, then Run anyway.'
-    Write-Host 'The launcher makes the checkouts, the keys and the data inside that folder, and keeps its downloaded'
-    Write-Host 'runtime and local state in %LOCALAPPDATA%\Daedalus; `daedalus-desktop.exe uninstall` removes those.'
+    Write-Host 'Its data, the downloaded runtime and the local state live in %LOCALAPPDATA%\Daedalus;'
+    Write-Host '`daedalus-desktop.exe uninstall` removes the runtime and the local state.'
         return 0
 }
 

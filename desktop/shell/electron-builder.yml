@@ -1,0 +1,136 @@
+# The installers and the update archives of the desktop application, one configuration for the
+# three systems. The launcher (daedalus-desktop), its two daemons and the built Mini App are not
+# compiled here: the release workflow (and build.sh for a local build) puts them in stage/ first,
+# per system and architecture, and they are copied in beside the shell's own executable — where
+# the shell starts the launcher from, and where the launcher looks for its daemons.
+appId: io.github.anchor-inference.daedalus
+productName: Daedalus
+copyright: Daedalus
+directories:
+  output: dist
+  buildResources: build
+files:
+  - main.js
+  - policy.js
+  - preload.js
+  - pages/**
+  - package.json
+# The archive the launcher's own `upgrade` installs from is the unpacked application, so nothing
+# may be packed away in a form it cannot swap item by item, and nothing is fetched at run time.
+asar: true
+electronLanguages: [en-US, ru]
+protocols:
+  - name: Daedalus
+    schemes: [daedalus]
+
+win:
+  icon: build/icon.png
+  executableName: Daedalus
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: dir
+      arch: [x64]
+  extraFiles:
+    - from: stage/win-${arch}
+      to: .
+    - from: stage/miniapp-dist
+      to: miniapp-dist
+  # No code signing: there is no certificate (SmartScreen warns once, README says how to pass it).
+  # rcedit still runs, so the executable carries the icon and the version.
+  signAndEditExecutable: true
+
+# The Windows installer: one window, Next and Finish, for this user only. Per-user is what keeps the
+# launcher's own upgrade working — it replaces the application's files in place, and
+# %LOCALAPPDATA%\Programs\Daedalus is the operator's to write without asking an administrator.
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Daedalus
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+  multiLanguageInstaller: true
+  displayLanguageSelector: false
+  installerLanguages: [en_US, ru_RU]
+  include: build/installer.nsh
+  artifactName: Daedalus-Setup-${arch}.${ext}
+  uninstallDisplayName: Daedalus
+
+mac:
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: [universal]
+    - target: dir
+      arch: [universal]
+  # Ad-hoc: there is no Developer ID (README says how to open it the first time). Hardened runtime
+  # with an ad-hoc signature would refuse Electron's own frameworks, signed by another team.
+  identity: "-"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  extraFiles:
+    - from: stage/mac-${arch}
+      to: MacOS
+  extraResources:
+    - from: stage/miniapp-dist
+      to: miniapp-dist
+  # The launcher and its daemons are one universal binary each already (lipo in the workflow), so
+  # the two halves of the application carry the same file and nothing is merged.
+  x64ArchFiles: "Contents/MacOS/{daedalus-desktop,ptyd,browserd}"
+
+dmg:
+  artifactName: Daedalus-macOS.dmg
+  title: Daedalus
+
+linux:
+  icon: build/icon.png
+  executableName: daedalus
+  # A placeholder address: the package format requires a maintainer, and nobody is reached at it.
+  maintainer: Daedalus <daedalus@localhost>
+  syncDesktopName: true
+  category: Development
+  synopsis: Daedalus on your own machine
+  description: The Daedalus agent and its app, on this machine, in a window of their own.
+  desktop:
+    entry:
+      Name: Daedalus
+  target:
+    - target: deb
+      arch: [x64, arm64]
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: dir
+      arch: [x64, arm64]
+  extraFiles:
+    - from: stage/linux-${arch}
+      to: .
+    - from: stage/miniapp-dist
+      to: miniapp-dist
+
+deb:
+  artifactName: Daedalus-linux-${arch}.deb
+  # electron-builder's list, and what Chromium loads at start that the list leaves out: without
+  # ALSA and GBM the window does not open at all (Ubuntu 24.04 renamed ALSA's package).
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+    - libasound2t64 | libasound2
+    - libgbm1
+    - libdrm2
+  packageCategory: devel
+  priority: optional
+
+appImage:
+  artifactName: Daedalus-linux-${arch}.AppImage

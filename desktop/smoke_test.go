@@ -155,6 +155,18 @@ func (s *smoke) publish(tag string) {
 	add("browserd", []byte("fixture browserd "+tag+"\n"), 0o755)
 	tw.WriteHeader(&tar.Header{Name: "miniapp-dist/", Mode: 0o755, Typeflag: tar.TypeDir})
 	add("miniapp-dist/index.html", []byte("<p>"+tag+"</p>\n"), 0o644)
+	if tag != "desktop-v0.12.0" {
+		// Since the desktop application came with the launcher, an archive is the whole unpacked
+		// application: its executable and its folders beside the launcher, all swapped as one and
+		// all put back by a rollback. A stand-in for each is enough for the swap to be the real one.
+		add("daedalus", []byte("#!/bin/sh\necho fixture application "+tag+"\n"), 0o755)
+		add("chrome-sandbox", []byte("fixture sandbox "+tag+"\n"), 0o755)
+		for _, dir := range []string{"resources/", "locales/"} {
+			tw.WriteHeader(&tar.Header{Name: dir, Mode: 0o755, Typeflag: tar.TypeDir})
+		}
+		add("resources/app.asar", []byte("fixture asar "+tag+"\n"), 0o644)
+		add("locales/en-US.pak", []byte("fixture locale "+tag+"\n"), 0o644)
+	}
 	tw.Close()
 	zw.Close()
 	sum := sha256.Sum256(buf.Bytes())

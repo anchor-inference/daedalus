@@ -26,7 +26,11 @@
     <section class="card decide rise" id="upgrade" role="status" hidden style="--i: 1">
       <h2 id="upgrade-title"></h2>
       <p id="upgrade-body"></p>
-      <p><code id="upgrade-command">daedalus-desktop upgrade</code></p>
+      <p id="upgrade-command-line"><code id="upgrade-command">daedalus-desktop upgrade</code></p>
+      <div class="actions" id="upgrade-actions" hidden>
+        <button type="button" class="primary" id="upgrade-install" data-action="upgrade">{{.T "upgrade.card.install"}}</button>
+        <a id="upgrade-release" href="#" target="_blank" rel="noopener" hidden>{{.T "upgrade.card.release"}}</a>
+      </div>
     </section>
 
     <section class="card rise" id="switches" role="status" hidden style="--i: 1">
@@ -66,7 +70,7 @@
       <summary>{{.T "status.log"}}</summary>
       <div class="body">
         <pre class="log" id="log">{{.T "status.log.empty"}}</pre>
-        <p class="note">{{if .Native}}{{.T "status.logs.files"}} <code>{{.Status.Data}}/runtime/logs/</code> · {{.T "status.tile.ports"}}: <span id="ports">…</span>{{else}}{{.T "status.logs.command"}} <code>daedalus-desktop logs -f</code>{{end}}</p>
+        <p class="note">{{if .Native}}{{.T "status.logs.files"}} <code>{{.Status.Logs}}</code> · {{.T "status.tile.ports"}}: <span id="ports">…</span>{{else}}{{.T "status.logs.command"}} <code>daedalus-desktop logs -f</code>{{end}}</p>
       </div>
     </details>
   </div>

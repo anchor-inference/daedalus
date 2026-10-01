@@ -1,0 +1,7 @@
+node_modules/
+dist*/
+stage/
+# electron-builder's own resources (the installer's script) live here, though the repository ignores
+# build/ everywhere else; the icon is copied in from docs/brand when the application is built.
+!/build/
+build/icon.png

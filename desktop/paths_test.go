@@ -3,24 +3,113 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
-// The data folder of a bundled launcher belongs beside the .app — the folder the operator dropped
-// the app into — and nowhere else. Inside the bundle it would be lost with the next download, and
-// relative it would land in the root of the disk, because Finder starts a bundled program with "/"
-// as its working directory.
-func TestTheBundleKeepsItsDataBesideTheApp(t *testing.T) {
-	exe := filepath.Join("/Users/someone/Daedalus/Daedalus.app/Contents/MacOS/daedalus-desktop")
-	if got, want := DefaultDataDir(exe), filepath.Join("/Users/someone/Daedalus/data"); got != want {
-		t.Fatalf("the data folder would be %s, want %s", got, want)
+// useStandardIn points the per-user data folder of this platform into a temporary folder, through
+// the variable the platform takes it from, and returns where it now is.
+func useStandardIn(t *testing.T, home string) string {
+	t.Helper()
+	switch runtime.GOOS {
+	case "windows":
+		t.Setenv("LOCALAPPDATA", home)
+	case "darwin":
+		t.Setenv("HOME", home)
+	default:
+		t.Setenv("XDG_DATA_HOME", home)
 	}
-	if app, ok := bundleRoot(exe); !ok || app != filepath.FromSlash("/Users/someone/Daedalus/Daedalus.app") {
-		t.Fatalf("the bundle is %q (%v)", app, ok)
+	standard, err := standardDataDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isInside(standard, home) {
+		t.Fatalf("the standard folder %s is not under %s", standard, home)
+	}
+	return standard
+}
+
+func mark(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("API_PORT=1\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestAPlainExecutableKeepsItsDataWhereItIsRun(t *testing.T) {
+// The data belongs in the per-user folder, wherever the executable is and whatever the working
+// directory: an installed application lives where an installer replaces it, and the working
+// directory of a program started from a menu is anyone's guess.
+func TestTheDataLivesInThePerUserFolder(t *testing.T) {
+	standard := useStandardIn(t, t.TempDir())
+	for _, exe := range []string{
+		filepath.Join(t.TempDir(), "daedalus-desktop"),
+		filepath.Join(t.TempDir(), "Daedalus.app", "Contents", "MacOS", "daedalus-desktop"),
+		"",
+	} {
+		if got := DefaultDataDir(exe); got != standard {
+			t.Fatalf("%s: the data folder would be %s, want %s", exe, got, standard)
+		}
+	}
+}
+
+// An installation an older launcher kept beside itself — data/ next to the executable, or next to
+// Daedalus.app — is the one used until a start moves it; once the per-user folder holds an
+// installation, that one wins.
+func TestAnOlderInstallationBesideTheExecutableIsFoundUntilItMoves(t *testing.T) {
+	standard := useStandardIn(t, t.TempDir())
+	folder := t.TempDir()
+	plain := filepath.Join(folder, "daedalus-desktop")
+	mark(t, filepath.Join(folder, "data"))
+	if got := DefaultDataDir(plain); got != filepath.Join(folder, "data") {
+		t.Fatalf("the data folder would be %s, want the one beside the executable", got)
+	}
+	if got, ok := relocatableFromHere(filepath.Join(folder, "data")); ok || got != "" {
+		// relocatableFromHere asks about this test binary, which has no data beside it.
+		t.Fatalf("a folder beside another executable was offered for a move: %s", got)
+	}
+
+	bundled := t.TempDir()
+	exe := filepath.Join(bundled, "Daedalus.app", "Contents", "MacOS", "daedalus-desktop")
+	mark(t, filepath.Join(bundled, "data"))
+	if got := DefaultDataDir(exe); got != filepath.Join(bundled, "data") {
+		t.Fatalf("a bundle's data would be %s, want the one beside the .app", got)
+	}
+	if app, ok := bundleRoot(exe); !ok || app != filepath.Join(bundled, "Daedalus.app") {
+		t.Fatalf("the bundle is %q (%v)", app, ok)
+	}
+
+	mark(t, standard)
+	if got := DefaultDataDir(plain); got != standard {
+		t.Fatalf("with an installation in the per-user folder the data folder would be %s", got)
+	}
+}
+
+// A first start makes the secrets and host terminal folders before its questions are answered; a
+// folder with only those in it is not an installation, and an older one beside the executable still
+// wins over it.
+func TestAnEmptySkeletonIsNotAnInstallation(t *testing.T) {
+	standard := useStandardIn(t, t.TempDir())
+	skeleton, err := NewPaths(standard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := skeleton.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	if looksLikeData(standard) {
+		t.Fatal("the skeleton a first start makes was taken for an installation")
+	}
+	folder := t.TempDir()
+	mark(t, filepath.Join(folder, "data"))
+	if got := DefaultDataDir(filepath.Join(folder, "daedalus-desktop")); got != filepath.Join(folder, "data") {
+		t.Fatalf("the data folder would be %s", got)
+	}
+}
+
+func TestAPlainExecutableHasNoBundle(t *testing.T) {
 	for _, exe := range []string{
 		"/Users/someone/Daedalus/daedalus-desktop",
 		"/home/someone/daedalus/daedalus-desktop-linux-amd64",
@@ -30,9 +119,6 @@ func TestAPlainExecutableKeepsItsDataWhereItIsRun(t *testing.T) {
 		"/Users/someone/Daedalus.app/daedalus-desktop",
 		"",
 	} {
-		if got := DefaultDataDir(exe); got != "data" {
-			t.Fatalf("%s: the data folder would be %s, want data", exe, got)
-		}
 		if _, ok := bundleRoot(exe); ok {
 			t.Fatalf("%s is not a bundle", exe)
 		}

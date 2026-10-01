@@ -80,8 +80,8 @@ type Paths struct {
 	Workspaces    string
 }
 
-// NewPaths resolves the data directory: --data when given, otherwise the default the executable's
-// own location implies, so the launcher can be dropped into any folder and run from there.
+// NewPaths resolves the data directory: --data when given, otherwise the per-user folder
+// DefaultDataDir names (relocate.go).
 func NewPaths(dataDir string) (Paths, error) {
 	if dataDir == "" {
 		exe, err := os.Executable()
@@ -170,19 +170,6 @@ func bundleRoot(exe string) (string, bool) {
 		return "", false
 	}
 	return app, true
-}
-
-// DefaultDataDir is where everything the installation owns goes when --data does not say. From a
-// bundle it is next to the .app — the folder the operator dropped the app into, which is the "one
-// folder" the whole installation is. It is deliberately not inside the bundle, which the next
-// download replaces, and deliberately not relative: Finder starts a bundled program with "/" as its
-// working directory, so a relative default would try to write into the root of the disk. Started
-// from a terminal as a plain executable it stays relative, so the folder follows the shell.
-func DefaultDataDir(exe string) string {
-	if app, ok := bundleRoot(exe); ok {
-		return filepath.Join(filepath.Dir(app), "data")
-	}
-	return "data"
 }
 
 // Bundled reports whether this process is the executable inside a .app — which is also to say that

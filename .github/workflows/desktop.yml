@@ -1,31 +1,30 @@
-# The desktop launcher, released on a desktop-v* tag as one archive per platform.
+# The desktop application: built and tested on every change to it, released on a desktop-v* tag.
 #
-# Archives and not bare binaries: a browser download carries no execute bit, so a raw Mach-O or ELF
-# file is not something a person can double-click, and on macOS Finder opens it in a text editor
-# instead. The macOS archive holds an application bundle, signed and — when the secrets are there —
-# notarized, so that opening it is the ordinary thing it looks like.
+# What is built, for each system, is the application (desktop/shell, Electron: the window, the
+# menu entry, the icon) with the launcher beside it (desktop/, Go: the setup, the runtime, the
+# update manager), the launcher's two daemons and the built Mini App — and from that one build both
+# the installer an operator runs and the archive the launcher's own `upgrade` installs from:
 #
-# The builds are on native runners and not cross-compiled from one, because the window is the
-# operating system's own web view and reaching it means cgo. The exception is Linux, which is built
-# with `-tags nowebview` and no cgo at all: a Linux binary linked against WebKitGTK cannot start on
-# a machine without it, so the Linux archives keep the browser fallback and keep running everywhere.
-# That is also why both Linux architectures still come off one runner.
+#   Windows  Daedalus-Setup-x64.exe (one window, per user, no administrator), and
+#            daedalus-desktop-windows-amd64.zip, the same files unpacked;
+#   macOS    Daedalus-macOS.dmg (drag to Applications), and Daedalus-macOS.zip, the same bundle;
+#   Linux    Daedalus-linux-<arch>.deb and Daedalus-linux-<arch>.AppImage, and
+#            daedalus-desktop-linux-<arch>.tar.gz, the same files unpacked.
 #
-# Each archive also carries ptyd, the terminal daemon a native installation runs for its host
-# terminals. It is Go with a C library linked in (the screen emulator, which Zig builds), so it is
-# built by ptyd/release.sh rather than by `go build` alone: Linux and Windows cross-compiled from one
-# Linux runner with the pinned Zig as the C compiler (Linux fully static against musl, so it starts
-# on any distribution), the Mac on the Mac runner with Apple's compiler.
+# The archives keep the names every launcher since v0.10 looks for, so an installation from any
+# of them upgrades into the application. Every file goes into SHA256SUMS, and the operator's one
+# signature over it (desktop/SIGNING.md) covers installers and archives alike.
 #
-# And browserd, the browser daemon a native installation runs for the agent's browser. It is plain
-# Go, so browserd/release.sh cross-compiles all six from the Linux runner; the Mac's two slices are
-# joined and signed in the bundle beside ptyd's.
+# The launcher is plain Go and cross-compiled for every system from one Linux runner. ptyd is Go with
+# a C library (the screen emulator, built with the pinned Zig): Linux and Windows cross-compiled on
+# the Linux runner, the Mac on the Mac runner. browserd is plain Go. The application is packaged on
+# each system's own runner — rcedit, NSIS, hdiutil and codesign want their own systems — and its
+# installer is installed, started and removed there before anything is published.
 name: desktop
 
-# `test` and `window` run on every change to the launcher, not only on a tag: `window` is the only
-# place the macOS and Windows halves are compiled at all, and a first compile that happens during a
-# release is a compile that has nowhere to go but the release. The two jobs that publish are held
-# back to the tag by the `if` on each of them.
+# Everything up to the installers' own tests runs on every change to the application, not only on a
+# tag: a first install that happens during a release is an install that has nowhere to go but the
+# release. Only the last job publishes, and only on a tag.
 on:
   push:
     tags: ["desktop-v*"]
@@ -38,10 +37,13 @@ on:
 permissions:
   contents: write
 
+env:
+  # A tag is the version; any other build is 0.0.0 and the launcher's dev-<commit>, which never
+  # asks for updates.
+  IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/desktop-v') }}
+
 jobs:
-  # The tests, on the runner that has nothing to install. On Linux the window's build constraint
-  # (`!nowebview && (darwin || windows)`) excludes it, so both commands here compile the same code
-  # twice: nothing on this runner can see a mistake in window.go.
+  # The launcher's tests, and the shell's, on the runner that has nothing to install.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -49,24 +51,28 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
+      - run: test -z "$(gofmt -l .)"
+        working-directory: desktop
       - run: go vet ./...
         working-directory: desktop
       - run: go test ./...
         working-directory: desktop
-      - run: go vet -tags nowebview ./...
-        working-directory: desktop
-      - run: go test -tags nowebview ./...
-        working-directory: desktop
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: The shell's own tests
+        working-directory: desktop/shell
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
 
-  # So the window is compiled where it exists, before the tag is built. Without this a syntax error
-  # in window.go passes `test` and surfaces in `binaries`, which is after the tag has been pushed.
-  #
-  # And the tests, on the two systems the Linux runner cannot stand in for. There the data is
-  # protected by the verified backup, not by the Linux writer fence, and that path — the backup, its
-  # check, the rollback, the bridge from an old launcher — is the only protection those installations
-  # have; this is where it runs on the real systems. On Windows the tests also run install.ps1 once,
-  # under Windows PowerShell, against a release served on loopback (installer_ps_run_test.go).
-  window:
+  # And on the two systems the Linux runner cannot stand in for. There the data is protected by the
+  # verified backup, not by the Linux writer fence, and that path — the backup, its check, the
+  # rollback, the bridge from an old launcher, the move of an older installation's data into the
+  # per-user folder — is the only protection those installations have; this is where it runs on the
+  # real systems. On Windows the tests also run install.ps1 once, under Windows PowerShell, against a
+  # release served on loopback (installer_ps_run_test.go).
+  platforms:
     strategy:
       fail-fast: false
       matrix:
@@ -77,13 +83,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
-      - run: go build ./...
-        working-directory: desktop
       - run: go vet ./...
         working-directory: desktop
       - run: go test ./...
-        working-directory: desktop
-      - run: go test -tags nowebview ./...
         working-directory: desktop
 
   # The daemon's tests on each system it ships for. Linux and the Mac build the emulator and test with
@@ -126,13 +128,12 @@ jobs:
 
   ptyd:
     needs: [ptyd-test]
-    if: startsWith(github.ref, 'refs/tags/desktop-v')
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: ubuntu-latest
-            targets: "linux/amd64 linux/arm64 windows/amd64 windows/arm64"
+            targets: "linux/amd64 linux/arm64 windows/amd64"
           - runner: macos-latest
             targets: "darwin/amd64 darwin/arm64"
     runs-on: ${{ matrix.runner }}
@@ -160,11 +161,11 @@ jobs:
         with:
           name: ptyd-${{ runner.os }}
           path: ptyd-dist
-          retention-days: 1
+          retention-days: 3
 
-  # The browser daemon: its tests on every change, and on a tag its six release builds. The tests
-  # that drive a real Chromium are skipped here (they need BROWSERD_TEST_CHROMIUM); its Windows and
-  # macOS halves are vetted, which is where a platform file that does not compile shows first.
+  # The browser daemon: its tests, and its release builds. The tests that drive a real Chromium are
+  # skipped here (they need BROWSERD_TEST_CHROMIUM); its Windows and macOS halves are vetted, which is
+  # where a platform file that does not compile shows first.
   browserd:
     runs-on: ubuntu-latest
     defaults:
@@ -185,10 +186,9 @@ jobs:
           GOOS=windows go vet ./...
           GOOS=darwin go vet ./...
       - name: Build
-        if: startsWith(github.ref, 'refs/tags/desktop-v')
         run: |
           mkdir -p ../browserd-dist
-          for t in linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64; do
+          for t in linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64; do
             goos=${t%/*} goarch=${t#*/}
             out="$PWD/../browserd-dist/browserd-$goos-$goarch"
             case "$goos" in windows) out="$out.exe";; esac
@@ -196,233 +196,338 @@ jobs:
           done
           ls -l ../browserd-dist
       - uses: actions/upload-artifact@v4
-        if: startsWith(github.ref, 'refs/tags/desktop-v')
         with:
           name: browserd
           path: browserd-dist
-          retention-days: 1
+          retention-days: 3
 
-  # Not held back by `window`: its macOS and Windows tests are the first to run on those systems,
-  # and while they are red a release may still ship the Linux archives alone. What `window` finds
-  # is read before the Mac and Windows archives are published, not as a gate on building them.
-  binaries:
+  # The launcher, for every system, from here: no C in it.
+  engine:
     needs: [test]
-    if: startsWith(github.ref, 'refs/tags/desktop-v')
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Both Mac slices come off the Apple Silicon runner and are joined into one universal
-          # executable by the packaging job. The Intel slice is a cross-compile on the same machine:
-          # Apple's toolchain builds x86_64 from arm64 with one flag, and the Intel runners spend
-          # hours in a queue when they exist at all.
-          - runner: macos-latest
-            goos: darwin
-            goarch: arm64
-          - runner: macos-latest
-            goos: darwin
-            goarch: amd64
-            arch_flags: "-arch x86_64"
-          # The Windows runner has the compiler cgo needs; WebView2 is the user's to have, and the
-          # launcher asks the registry for it before it tries to open a window.
-          - runner: windows-latest
-            goos: windows
-            goarch: amd64
-          - runner: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            tags: nowebview
-            cgo: "0"
-          - runner: ubuntu-latest
-            goos: linux
-            goarch: arm64
-            tags: nowebview
-            cgo: "0"
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Build
+        working-directory: desktop
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          if [ "$IS_RELEASE" = true ]; then version="$GITHUB_REF_NAME"; else version="dev-${GITHUB_SHA::12}"; fi
+          mkdir -p dist
+          for t in linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64; do
+            goos=${t%/*} goarch=${t#*/}
+            out="dist/daedalus-desktop-$goos-$goarch"
+            case "$goos" in windows) out="$out.exe";; esac
+            GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "-s -w -X main.version=$version" -o "$out" .
+          done
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine
+          path: desktop/dist
+          retention-days: 3
+
+  # The app itself, built once and put in every package. A native installation has no image to bake
+  # it into and may have no node to build it with, so without this the launcher would fetch a Node
+  # toolchain on a first run just to produce a few megabytes of static files.
+  miniapp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build
+        working-directory: miniapp
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          du -sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: miniapp-dist
+          path: miniapp/dist
+          retention-days: 3
+
+  # Windows: the installer, and the archive of the same files. Then the installer is run the way an
+  # operator would, silently: installed, started until the window shows the launcher's page,
+  # closed with nothing left running, and uninstalled twice — keeping the data, then deleting it.
+  app-windows:
+    needs: [engine, ptyd, browserd, miniapp]
+    runs-on: windows-latest
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.23"
-
-      - name: Build
-        working-directory: desktop
-        env:
-          VERSION: ${{ github.ref_name }}
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: ${{ matrix.cgo || '1' }}
-          TAGS: ${{ matrix.tags }}
-          CGO_CFLAGS: ${{ matrix.arch_flags }}
-          CGO_LDFLAGS: ${{ matrix.arch_flags }}
-        run: |
-          mkdir -p dist/bin
-          out="dist/bin/daedalus-desktop-$GOOS-$GOARCH"
-          case "$GOOS" in windows) out="$out.exe";; esac
-          echo "building $out"
-          go build -tags "$TAGS" -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$out" .
-          ls -l "$out"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: desktop-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: desktop/dist/bin
-          retention-days: 1
-
-  # The bundle is built on macOS because only macOS has lipo, sips, iconutil, codesign and
-  # notarytool. It is the last job, so it is also the one that publishes: the checksums have to
-  # cover every archive, including its own.
-  package:
-    needs: [binaries, ptyd, browserd]
-    if: startsWith(github.ref, 'refs/tags/desktop-v')
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
       - uses: actions/download-artifact@v4
-        with:
-          pattern: desktop-*
-          merge-multiple: true
-          path: desktop/dist/bin
-
+        with: { name: engine, path: dl/engine }
       - uses: actions/download-artifact@v4
-        with:
-          pattern: ptyd-*
-          merge-multiple: true
-          path: desktop/dist/ptyd
-
+        with: { name: ptyd-Linux, path: dl/ptyd }
       - uses: actions/download-artifact@v4
-        with:
-          name: browserd
-          path: desktop/dist/browserd
-
-      # The app itself, built once and put in every archive. A native installation has no image to
-      # bake it into and may have no node to build it with, so without this the launcher would fetch
-      # a Node toolchain on a first run just to produce 1.7 MB of static files.
+        with: { name: browserd, path: dl/browserd }
+      - uses: actions/download-artifact@v4
+        with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Build the Mini App
+      - name: Package
+        working-directory: desktop/shell
         run: |
-          cd miniapp
+          if [ "$IS_RELEASE" = true ]; then version="${GITHUB_REF_NAME#desktop-v}"; else version=0.0.0; fi
+          mkdir -p stage/win-x64
+          cp ../../dl/engine/daedalus-desktop-windows-amd64.exe stage/win-x64/daedalus-desktop.exe
+          cp ../../dl/ptyd/ptyd-windows-amd64.exe stage/win-x64/ptyd.exe
+          cp ../../dl/browserd/browserd-windows-amd64.exe stage/win-x64/browserd.exe
+          cp ../../docs/brand/avatar-bot.png build/icon.png
           npm ci --no-audit --no-fund
-          npm run build
-          du -sh dist
+          npx electron-builder --win nsis dir --x64 -c.extraMetadata.version="$version" --publish never
+          # The archive the launcher's upgrade installs from: the unpacked application, its items at the
+          # top level, names with forward slashes.
+          (cd dist/win-unpacked && 7z a -tzip -bd ../daedalus-desktop-windows-amd64.zip . >/dev/null)
+          mkdir -p ../../out && mv dist/Daedalus-Setup-x64.exe dist/daedalus-desktop-windows-amd64.zip ../../out/
+          ls -l ../../out
+      - name: Install, start, close, uninstall
+        shell: powershell
+        run: desktop/shell/test/windows-smoke.ps1 -Installer out/Daedalus-Setup-x64.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-windows
+          path: out
+          retention-days: 3
 
-      - name: Pack Linux and Windows
-        working-directory: desktop
+  # Linux: the .deb and the AppImage for both architectures, and the archives of the same files. The
+  # x86-64 .deb is then installed on this runner, started under a virtual display until its window
+  # shows the launcher's page, closed, and removed — the user's data staying.
+  app-linux:
+    needs: [engine, ptyd, browserd, miniapp]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: engine, path: dl/engine }
+      - uses: actions/download-artifact@v4
+        with: { name: ptyd-Linux, path: dl/ptyd }
+      - uses: actions/download-artifact@v4
+        with: { name: browserd, path: dl/browserd }
+      - uses: actions/download-artifact@v4
+        with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Package
+        working-directory: desktop/shell
         run: |
-          mkdir -p dist/archives stage
-          # The tarball keeps the executable's mode, which is the whole point of shipping one: the
-          # file comes out of it runnable, with nothing to chmod first. An artifact does not keep
-          # that mode, so it is set again here.
-          # ptyd and browserd go beside the launcher, where it looks for them.
-          cp -R ../miniapp/dist stage/miniapp-dist
-          for arch in amd64 arm64; do
-            cp "dist/bin/daedalus-desktop-linux-$arch" stage/daedalus-desktop
-            cp "dist/ptyd/ptyd-linux-$arch" stage/ptyd
-            cp "dist/browserd/browserd-linux-$arch" stage/browserd
-            chmod +x stage/daedalus-desktop stage/ptyd stage/browserd
-            tar -czf "dist/archives/daedalus-desktop-linux-$arch.tar.gz" -C stage daedalus-desktop ptyd browserd miniapp-dist
-            rm stage/daedalus-desktop stage/ptyd stage/browserd
+          if [ "$IS_RELEASE" = true ]; then version="${GITHUB_REF_NAME#desktop-v}"; else version=0.0.0; fi
+          for pair in amd64:x64 arm64:arm64; do
+            goarch=${pair%:*} arch=${pair#*:}
+            mkdir -p "stage/linux-$arch"
+            cp "../../dl/engine/daedalus-desktop-linux-$goarch" "stage/linux-$arch/daedalus-desktop"
+            cp "../../dl/ptyd/ptyd-linux-$goarch" "stage/linux-$arch/ptyd"
+            cp "../../dl/browserd/browserd-linux-$goarch" "stage/linux-$arch/browserd"
+            # An artifact does not keep the execute bit; the packages and the archives must.
+            chmod +x "stage/linux-$arch"/*
           done
-          cp dist/bin/daedalus-desktop-windows-amd64.exe stage/daedalus-desktop.exe
-          cp dist/ptyd/ptyd-windows-amd64.exe stage/ptyd.exe
-          cp dist/browserd/browserd-windows-amd64.exe stage/browserd.exe
-          (cd stage && zip -qr ../dist/archives/daedalus-desktop-windows-amd64.zip daedalus-desktop.exe ptyd.exe browserd.exe miniapp-dist)
-          rm -rf stage
-          ls -l dist/archives
-
-      - name: Build, sign and notarize Daedalus.app
-        working-directory: desktop
-        env:
-          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          cp ../../docs/brand/avatar-bot.png build/icon.png
+          npm ci --no-audit --no-fund
+          npx electron-builder --linux deb AppImage dir --x64 --arm64 -c.extraMetadata.version="$version" --publish never
+          mkdir -p ../../out
+          # The archives the launcher's upgrade installs from: the unpacked application, its items at the
+          # top level.
+          for pair in amd64:linux-unpacked arm64:linux-arm64-unpacked; do
+            goarch=${pair%:*} dir=dist/${pair#*:}
+            (cd "$dir" && tar -czf "../../../../out/daedalus-desktop-linux-$goarch.tar.gz" $(ls -A))
+          done
+          mv dist/*.deb dist/*.AppImage ../../out/
+          ls -l ../../out
+      - name: The AppImage carries the launcher
         run: |
-          chmod +x dist/bin/daedalus-desktop-darwin-* dist/ptyd/ptyd-darwin-* dist/browserd/browserd-darwin-*
-          export PTYD_AMD64=dist/ptyd/ptyd-darwin-amd64 PTYD_ARM64=dist/ptyd/ptyd-darwin-arm64
-          export BROWSERD_AMD64=dist/browserd/browserd-darwin-amd64 BROWSERD_ARM64=dist/browserd/browserd-darwin-arm64
-          MINIAPP_DIST=../miniapp/dist ./package-macos.sh "${{ github.ref_name }}" \
-            dist/bin/daedalus-desktop-darwin-amd64 \
-            dist/bin/daedalus-desktop-darwin-arm64 \
-            dist/app
-          mv dist/app/Daedalus-macOS.zip dist/archives/
+          cd "$RUNNER_TEMP"
+          appimage="$GITHUB_WORKSPACE/out/$(cd "$GITHUB_WORKSPACE/out" && ls Daedalus-linux-*x86_64*.AppImage)"
+          "$appimage" --appimage-extract >/dev/null
+          squashfs-root/daedalus-desktop --version
+          test -f squashfs-root/miniapp-dist/index.html
+      - name: Install, start, close, remove
+        run: |
+          deb="$GITHUB_WORKSPACE/out/$(cd out && ls Daedalus-linux-*amd64*.deb)"
+          sudo desktop/shell/test/linux-smoke.sh install "$deb"
+          desktop/shell/test/linux-smoke.sh run
+          sudo desktop/shell/test/linux-smoke.sh remove "$HOME/.local/share/daedalus/data"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-linux
+          path: out
+          retention-days: 3
+
+  # macOS: one universal application, ad-hoc signed (there is no Developer ID; README says how to
+  # open it the first time), in a .dmg to drag into Applications and in the zip the launcher's upgrade
+  # installs from. The .dmg is then mounted and its application checked and started.
+  app-macos:
+    needs: [engine, ptyd, browserd, miniapp]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: engine, path: dl/engine }
+      - uses: actions/download-artifact@v4
+        with: { name: ptyd-macOS, path: dl/ptyd }
+      - uses: actions/download-artifact@v4
+        with: { name: browserd, path: dl/browserd }
+      - uses: actions/download-artifact@v4
+        with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Package
+        working-directory: desktop/shell
+        run: |
+          if [ "$IS_RELEASE" = true ]; then version="${GITHUB_REF_NAME#desktop-v}"; else version=0.0.0; fi
+          # The launcher and its daemons as one universal binary each, the same file in both halves of
+          # the application, so the universal merge has nothing of theirs to join.
+          mkdir -p stage/mac-universal
+          lipo -create ../../dl/engine/daedalus-desktop-darwin-amd64 ../../dl/engine/daedalus-desktop-darwin-arm64 -output stage/mac-universal/daedalus-desktop
+          lipo -create ../../dl/ptyd/ptyd-darwin-amd64 ../../dl/ptyd/ptyd-darwin-arm64 -output stage/mac-universal/ptyd
+          lipo -create ../../dl/browserd/browserd-darwin-amd64 ../../dl/browserd/browserd-darwin-arm64 -output stage/mac-universal/browserd
+          chmod +x stage/mac-universal/*
+          cp -R stage/mac-universal stage/mac-x64
+          cp -R stage/mac-universal stage/mac-arm64
+          cp ../../docs/brand/avatar-bot.png build/icon.png
+          npm ci --no-audit --no-fund
+          npx electron-builder --mac dmg dir --universal -c.extraMetadata.version="$version" --publish never
+          mkdir -p ../../out
+          # ditto, not zip: the bundle carries symlinks and the signature's extended attributes, and
+          # the launcher's upgrade unpacks it as the bundle it was.
+          ditto -c -k --keepParent dist/mac-universal/Daedalus.app ../../out/Daedalus-macOS.zip
+          mv dist/Daedalus-macOS.dmg ../../out/
+          ls -l ../../out
+      - name: Mount the .dmg and check what is in it
+        run: |
+          mount="$RUNNER_TEMP/dmg"
+          hdiutil attach out/Daedalus-macOS.dmg -nobrowse -readonly -mountpoint "$mount"
+          test -d "$mount/Daedalus.app"
+          test -L "$mount/Applications"
+          codesign --verify --deep --strict "$mount/Daedalus.app"
+          lipo -archs "$mount/Daedalus.app/Contents/MacOS/Daedalus"
+          lipo -archs "$mount/Daedalus.app/Contents/MacOS/daedalus-desktop"
+          "$mount/Daedalus.app/Contents/MacOS/daedalus-desktop" --version
+          test -f "$mount/Daedalus.app/Contents/Resources/miniapp-dist/index.html"
+          plutil -extract CFBundleURLTypes xml1 -o - "$mount/Daedalus.app/Contents/Info.plist" | grep -q '<string>daedalus</string>'
+          ditto "$mount/Daedalus.app" "$RUNNER_TEMP/Daedalus.app"
+          hdiutil detach "$mount"
+      - name: Start it until its window shows the launcher's page
+        run: |
+          DAEDALUS_UPDATE_CHECK=off "$RUNNER_TEMP/Daedalus.app/Contents/MacOS/Daedalus" --remote-debugging-port=9334 >"$RUNNER_TEMP/app.log" 2>&1 &
+          page=""
+          for _ in $(seq 1 90); do
+            page=$(curl -fsS http://127.0.0.1:9334/json/list 2>/dev/null | grep -o '"url": *"http://127.0.0.1:[0-9]*/[^"]*"' | head -1 || true)
+            [ -n "$page" ] && break
+            sleep 1
+          done
+          [ -n "$page" ] || { cat "$RUNNER_TEMP/app.log"; exit 1; }
+          echo "the window shows $page"
+          test -f "$HOME/Library/Application Support/Daedalus/data/launcher.json"
+          osascript -e 'quit app "Daedalus"' || kill %1
+          for _ in $(seq 1 60); do pgrep -qf 'Daedalus.app/Contents/MacOS/daedalus-desktop' || break; sleep 1; done
+          ! pgrep -qf 'Daedalus.app/Contents/MacOS/daedalus-desktop'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-macos
+          path: out
+          retention-days: 3
+
+  # On a tag: every installer and archive, their checksums, the notes, into a draft release.
+  release:
+    needs: [app-windows, app-linux, app-macos, platforms]
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: app-*
+          merge-multiple: true
+          path: dist/files
 
       - name: Checksums
-        working-directory: desktop
         run: |
-          cd dist/archives
+          cd dist/files
           # Written outside the folder first: a checksum file cannot cover itself, and a glob that
           # expanded after the redirect had made it would try.
-          shasum -a 256 ./* | sed 's| \./| |' > ../SHA256SUMS
+          sha256sum ./* | sed 's| \./| |' > ../SHA256SUMS
           mv ../SHA256SUMS SHA256SUMS
           cat SHA256SUMS
 
       - name: Release notes
-        working-directory: desktop
         run: |
-          if [ "$(cat dist/app/signing.txt)" = "developer-id" ]; then
-            mac_open='Double-click **Daedalus** in the folder. The app is signed and notarized, so it opens like any other application.'
-          else
-            mac_open='Double-click **Daedalus** in the folder. This build is signed ad-hoc rather than with a Developer ID certificate, so macOS refuses a copy that came through a browser ("Apple could not verify…"), and since macOS 15 a right-click **Open** no longer gets past it. Open it once, then **System Settings → Privacy & Security → Open Anyway**; or in Terminal run `xattr -dr com.apple.quarantine Daedalus.app` in the folder. Only the first launch asks. A copy installed with the one-liner below never asks at all.'
-          fi
           cat > dist/notes.md <<NOTES
-          Daedalus on your own machine: one folder, Docker, and this launcher. It clones the two
-          repositories, asks for the keys on a page of its own, starts the stack and opens the app —
-          on macOS and Windows in a window of its own, on Linux in a browser window with nothing
-          around it. **Docker Desktop (macOS, Windows) or Docker Engine with the compose plugin
-          (Linux) has to be installed and running** — the launcher never installs it for you.
+          Daedalus on your own machine, as an application of its own: install it, open it from the Start
+          menu, Launchpad or the application menu, and it sets itself up in its own window — the mode, the
+          keys, the first start — and then shows the app there. Native mode needs nothing else; Docker mode
+          needs Docker Desktop (macOS, Windows) or Docker Engine with the compose plugin (Linux), which the
+          application never installs for you.
 
-          ### Install it in one line — macOS and Linux
+          ### Install it
+
+          | Machine | File | Then |
+          |---|---|---|
+          | Windows 10 and 11, x86-64 | \`Daedalus-Setup-x64.exe\` | Run it: Next, Install, Finish. It installs for you only, in \`%LOCALAPPDATA%\\\\Programs\\\\Daedalus\`, with no administrator, and puts Daedalus in the Start menu and on the desktop. The installer is not code-signed, so SmartScreen warns once: **More info → Run anyway**. Uninstall it from **Settings → Apps**; it asks whether to delete your data too, and keeps it unless you say so. |
+          | macOS 12 and later, Apple Silicon and Intel | \`Daedalus-macOS.dmg\` | Open it and drag **Daedalus** onto **Applications**. The application is signed ad-hoc, not with a Developer ID, so macOS refuses the first opening ("Apple could not verify…"): open it once, then **System Settings → Privacy & Security → Open Anyway**; or in Terminal \`xattr -dr com.apple.quarantine /Applications/Daedalus.app\`. Only the first opening asks. |
+          | Debian, Ubuntu and their relatives, x86-64 | \`Daedalus-linux-amd64.deb\` | \`sudo apt install ./Daedalus-linux-amd64.deb\`, or open it with your software centre. Daedalus appears in the application menu. \`sudo apt remove daedalus\` removes it and leaves your data. |
+          | Debian, Ubuntu and their relatives, ARM64 | \`Daedalus-linux-arm64.deb\` | The same. |
+          | Any Linux, x86-64 | \`Daedalus-linux-x86_64.AppImage\` | Make it executable (\`chmod +x\`, or Properties → Allow executing) and open it. |
+          | Any Linux, ARM64 | \`Daedalus-linux-arm64.AppImage\` | The same. |
+
+          Your data — the conversations, the settings, the keys, the checkouts — lives in a folder of your
+          own that no installer or update touches: \`%LOCALAPPDATA%\\\\Daedalus\\\\data\` on Windows,
+          \`~/Library/Application Support/Daedalus/data\` on macOS, \`~/.local/share/daedalus/data\` on Linux.
+          An installation from an earlier archive that kept \`data/\` beside the launcher is moved there by its
+          first start, and \`daedalus-desktop import <folder>\` brings one in from anywhere else.
+
+          ### Updating
+
+          The application says when a newer release is out, in its own window and in a notification. On
+          Windows, on macOS and from the archives, **Install and restart** installs it: the data is protected
+          first (a kept whole copy on Linux with ext4, a checked backup elsewhere), the new version is put in
+          place, started and checked, and if it does not come up the data and the previous version are put
+          back. The .deb and the AppImage are updated by installing the new release's file the same way.
+
+          ### The archives
+
+          \`daedalus-desktop-windows-amd64.zip\`, \`Daedalus-macOS.zip\` and \`daedalus-desktop-linux-*.tar.gz\`
+          are the same applications unpacked. Every launcher from v0.10 on upgrades from them
+          (\`daedalus-desktop upgrade\`), and they are what the one-line installers fetch:
 
           \`\`\`sh
           curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/desktop/install.sh | sh
           \`\`\`
 
-          It picks the right archive, checks it against the checksums below, and unpacks it into
-          \`./Daedalus\`.
+          \`\`\`powershell
+          irm https://raw.githubusercontent.com/${{ github.repository }}/main/desktop/install.ps1 | iex
+          \`\`\`
 
-          ### Or download it
-
-          | Machine | File | Then |
-          |---|---|---|
-          | macOS (Apple Silicon and Intel) | \`Daedalus-macOS.zip\` | Unzip it into a folder of its own. $mac_open |
-          | Linux x86-64 | \`daedalus-desktop-linux-amd64.tar.gz\` | \`tar -xzf\` it into an empty folder and run \`./daedalus-desktop\`. |
-          | Linux ARM64 | \`daedalus-desktop-linux-arm64.tar.gz\` | \`tar -xzf\` it into an empty folder and run \`./daedalus-desktop\`. |
-          | Windows x86-64 | \`daedalus-desktop-windows-amd64.zip\` | \`Expand-Archive daedalus-desktop-windows-amd64.zip -DestinationPath Daedalus\` in PowerShell, then run \`daedalus-desktop.exe\`. The executable is unsigned, so SmartScreen warns once: **More info → Run anyway**. The window needs the WebView2 runtime, which Windows 11 and any machine with a current Edge already has; without it the launcher opens a browser instead. |
-
-          The launcher makes the checkouts, the keys and the database inside the folder you put it in,
-          and natively keeps its downloaded runtime and local state outside it;
-          \`daedalus-desktop uninstall\` removes those, and deleting the folder then removes the rest.
-
-          \`SHA256SUMS\` covers every archive here, and \`SHA256SUMS.sig\` signs it together with this
-          release's tag, by the project's release key — minisign key id \`A18524FA935353DF\`, key line
-          \`RWTfU1OT+iSFoaxGzNfGzkwHdVs2o8WmnCzBUo/LBUw2L4ssGN4xYx/2\`, whose SHA-256 (what the
-          installers print as its fingerprint) is
-          \`f75fa5a293fdd55b36c794f4787f7af8646e4dac95e19d74e6288e55c357c285\`. The launcher and the
-          installers refuse a release that is not signed by it; desktop/SIGNING.md shows how to check
-          the signature by hand. [desktop/README.md](https://github.com/${{ github.repository }}/blob/main/desktop/README.md) has the folder layout, the disk the images take, and every command.
+          \`SHA256SUMS\` covers every file here, installers and archives alike, and \`SHA256SUMS.sig\` signs it
+          together with this release's tag, by the project's release key — minisign key id
+          \`A18524FA935353DF\`, key line \`RWTfU1OT+iSFoaxGzNfGzkwHdVs2o8WmnCzBUo/LBUw2L4ssGN4xYx/2\`, whose
+          SHA-256 (what the installers print as its fingerprint) is
+          \`f75fa5a293fdd55b36c794f4787f7af8646e4dac95e19d74e6288e55c357c285\`. The application, the launcher
+          and the one-line installers refuse a release that is not signed by it; to check an installer you
+          downloaded yourself, desktop/SIGNING.md shows how. [desktop/README.md](https://github.com/${{ github.repository }}/blob/main/desktop/README.md)
+          has the folders, the disk the runtime takes, and every command.
           NOTES
           cat dist/notes.md
 
       - name: Attach them to the release
-        if: startsWith(github.ref, 'refs/tags/')
-        working-directory: desktop
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Always a draft. A launcher refuses a release without SHA256SUMS.sig by the project's key,
           # and that key is on the operator's machine only, so the release is signed there
           # (desktop/sign-release.sh) and published from there. A release already published is
-          # never touched: new archives under a signature over the old SHA256SUMS would be refused
-          # by every launcher, and replacing both is a new release, not a re-run.
+          # never touched: new files under a signature over the old SHA256SUMS would be refused by
+          # every launcher, and replacing both is a new release, not a re-run.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" != "true" ]; then
               echo "$GITHUB_REF_NAME is already published; its files are not replaced" >&2
@@ -432,11 +537,11 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" --notes-file dist/notes.md
           fi
-          # A re-run over a draft that was already signed replaces the archives and SHA256SUMS; the
-          # old signature would then cover checksums that are gone, and every launcher refuses the
+          # A re-run over a draft that was already signed replaces the files and SHA256SUMS; the old
+          # signature would then cover checksums that are gone, and every launcher refuses the
           # release. It goes with them, and the draft has to be signed again (desktop/SIGNING.md).
           if gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | grep -qx 'SHA256SUMS.sig'; then
             gh release delete-asset "$GITHUB_REF_NAME" SHA256SUMS.sig --yes
             echo "::warning::SHA256SUMS.sig was removed from the draft $GITHUB_REF_NAME: sign it again with desktop/sign-release.sh"
           fi
-          gh release upload "$GITHUB_REF_NAME" dist/archives/* --clobber
+          gh release upload "$GITHUB_REF_NAME" dist/files/* --clobber

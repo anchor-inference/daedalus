@@ -19,7 +19,7 @@ promise it yet and is refused by all three.
 
 | What | Version | Moved by |
 |---|---|---|
-| the launcher (`daedalus-desktop`, `ptyd`, `browserd`, the Mini App build) | the `desktop-vX.Y.Z` release it came from | `install.sh` / `install.ps1` on a fresh folder; `daedalus-desktop upgrade` (or the installers' bridge) afterwards |
+| the application (the Electron window, `Daedalus.exe`/`Daedalus.app`/`daedalus`) and the launcher beside it (`daedalus-desktop`, `ptyd`, `browserd`, the Mini App build) | the `desktop-vX.Y.Z` release it came from | an installer (`Daedalus-Setup-x64.exe`, the `.dmg`, the `.deb`, the AppImage) or `install.sh` / `install.ps1` on a fresh machine; `daedalus-desktop upgrade` (the application's **Install and restart**, or the installers' bridge) afterwards |
 | the code the stack runs (the two checkouts, and in Docker mode the images) | the tip of `main` and `:latest` when fetched (`repos.go`, `docker.go`) | the first start; `daedalus-desktop update`; the last step of an upgrade |
 
 A release does **not** pin what the stack runs: every installation moves to the newest `main`
@@ -51,13 +51,93 @@ treated as irreversible: the only way back is the data as it was before.
   - a **card on the launcher's status page**, rendered and read back in a headless Chromium
     (`DAEDALUS_BROWSER_TEST=1`);
   - a line in the launcher's log and `upgrade` (with `command`) in `/api/status`.
-- There is still no **button**: the upgrade replaces the launcher and restarts the app, so it runs
-  in a terminal with the launcher closed. From Finder or the Start menu with no terminal there is no
-  path yet.
+- In the desktop application the card has an **Install and restart** button
+  ([below](#from-the-application)); without the application the upgrade runs in a terminal with the
+  launcher closed, as the card says.
 - It is never installed by the check. `daedalus-desktop check-update` does the same check once,
   in a terminal. A dev build never checks; `DAEDALUS_UPDATE_CHECK=off` turns it off.
 - `DAEDALUS_RELEASES_API` points it at another repository's API (or a fixture). Addresses must be
   `https`, or `http` to loopback.
+
+## The desktop application
+
+Since the application, a release's archive is the whole application unpacked — the Electron
+executable and its folders, with the launcher, its daemons and the Mini App beside it — under the
+names every launcher since v0.10 looks for (`daedalus-desktop-windows-amd64.zip`,
+`Daedalus-macOS.zip`, `daedalus-desktop-linux-<arch>.tar.gz`). Nothing about `upgrade` changed for
+it: the archive's top-level items are swapped in as before, now a few dozen of them instead of
+four, and a rollback moves the ones that were new to `rejected/` as it always did. So an
+installation from any older archive upgrades into the application with its own `upgrade` or the
+installers' bridge, and the per-user Windows install (`%LOCALAPPDATA%\Programs\Daedalus`) and
+`/Applications/Daedalus.app` are upgraded in place the same way: both are folders the operator may
+write.
+
+The installers (`Daedalus-Setup-x64.exe`, `Daedalus-macOS.dmg`, the `.deb` and the AppImage) are for
+the first install. They are listed in `SHA256SUMS` and covered by the one signature with everything
+else, but they check nothing themselves — the operator checks the one they downloaded
+([SIGNING.md](SIGNING.md)) — and the application never runs one to update itself: every update it
+installs goes through `upgrade`, which refuses a release the project's key did not sign and protects
+the data first. electron-updater was not used for that reason: its check is a hash in a file the
+release would publish unsigned, its Windows check wants an Authenticode certificate there is none
+of, and it would replace the application with neither the data protected nor a way back.
+
+### From the application
+
+The card's **Install and restart** posts `/api/action/upgrade`; the launcher, which cannot replace
+itself while it runs, tells the application (`{"event":"upgrade"}`, shell.go). The application stops
+the launcher the way closing the window does — the agent stopped, the installation lock let go —
+starts `daedalus-desktop upgrade --yes --from-app --data <data>` on its own, with no window and no
+console, and exits. The upgrade is then exactly the one above, with its output in the local state's
+`logs/upgrade.log`; when it ends — committed, rolled back or refused — it opens the application again
+from the installation folder, which is the new version or the one put back, and that start says once
+how the upgrade ended (the page's log and a notification). Docker mode is refused as everywhere, and
+the card offers no button there.
+
+The application does not stay open during the swap on purpose: on Windows a running Electron holds
+files in `resources\` and `locales\` open without the sharing a rename needs, and a swap that fails
+half-way is a rollback for nothing.
+
+### A copy that cannot replace itself
+
+The `.deb` installs into `/opt/Daedalus`, which only the administrator may write, and an AppImage
+runs from a read-only image. `upgrade` refuses both before it asks or writes anything, and says to
+install the new release's own file the way the first one was installed; the card says the same and
+links the release. Installing a new `.deb` (or replacing the AppImage) replaces the application and
+the launcher, and nothing else: the data, the checkouts and what the stack runs stay as they were
+until the next `update`, which protects the data as always.
+
+### Where the data lives, and the move to it
+
+The data folder is the per-user one (`%LOCALAPPDATA%\Daedalus\data`,
+`~/Library/Application Support/Daedalus/data`, `~/.local/share/daedalus/data`), not `data/` beside the
+launcher: the folder the launcher is in is the one an installer or an upgrade replaces. A launcher
+started without `--data` uses the per-user folder once it holds an installation, otherwise `data/`
+beside its executable (or beside `Daedalus.app`) if that holds one, otherwise the per-user folder.
+
+The first **ordinary start** of an installation found beside the executable moves it to the per-user
+folder (`relocate.go`); no other command moves anything, so `upgrade --data …`, the bridge and an
+`update` from a terminal all work on the folder where it is, and an upgrade's `--finish` (always
+given `--data`) never moves it mid-upgrade. The move:
+
+- refuses, changing nothing, while an upgrade or update is unresolved or a switch did not finish (the
+  journal in the old control folder), while a launcher runs on the folder, while the installation
+  lock is held, while anything answers on the app's port, while a recorded child of the installation
+  still runs (they are stopped first, as before an upgrade), and while any process has a file open in
+  it;
+- is one `rename` of the data folder, never a copy: a copy is a second installation the moment either
+  half starts. Another disk, or a folder something holds open, is a refusal, and the installation
+  keeps running from where it is — the launcher's log says why;
+- carries the local state (logs, terminal logs, the browser logins) to the new folder's key and
+  removes the old runtime, which is a cache keyed to the old path (its venvs hold that path);
+- leaves the update control folder beside the old data folder, where the records in it — written
+  against the old path — stay true. The copies of the data kept there are the operator's to delete;
+  `DATA-MOVED.txt` in the old folder says where the data went and where the kept copies are.
+
+On Windows the lock file inside the folder is open, and a folder with an open file cannot be renamed,
+so the lock is let go just before the rename; everything that could take it has been refused by then.
+
+`daedalus-desktop import <folder>` is the same move for an installation anywhere else — an older
+archive unpacked into some folder, while the application was installed fresh by an installer.
 
 ## One at a time: the installation lock
 
@@ -277,7 +357,8 @@ pull over a rolled-back image (pinned image tags do that).
   keys; tested with GitHub's order, sorted keys, and three awks);
 - download the archive and `SHA256SUMS` and compare;
 - **fresh folder**: unpack into `./Daedalus` (`DAEDALUS_DIR`);
-- **installation with data, launcher has `upgrade`**: hand over to it and change nothing;
+- **installation with data, launcher has `upgrade`**: hand over to it and change nothing — the data
+  beside the launcher, or in the per-user folder once a start has moved it there;
 - **installation with data, launcher predates `upgrade`**: the bridge, above;
 - they never replace a file of an installation with data themselves, and never kill a running
   launcher (they refuse instead).
@@ -464,10 +545,10 @@ machine or user account with nothing else of Daedalus on it, with network access
 
 ## Left to do (no-go for users until done)
 
-- Real macOS and Windows machines (above). The launcher's tests are set to run on both in CI
-  (`desktop.yml`, the `window` job), `install.ps1` among them under Windows PowerShell — not yet run
-  there; here it runs under PowerShell 7 on Linux, and the Windows test binary passes under Wine. What none of that
-  covers: Gatekeeper and the bundle swap, the rename of a running `.exe`, and a real stack on either.
-- The app's notification centre was not rendered with the new entry; there is no upgrade button and
-  no path without a terminal.
+- Real macOS and Windows machines (above). The launcher's tests run on both in CI (`desktop.yml`,
+  the `platforms` job), `install.ps1` among them under Windows PowerShell; each installer is
+  installed, started and removed on its own runner. What none of that covers: Gatekeeper and the
+  bundle swap, an `upgrade` from the application on Windows end to end (the rename of a running
+  Electron's files is avoided by closing it, not proven), and a real stack on either.
+- The app's notification centre was not rendered with the new entry.
 - Docker mode.
