@@ -106,6 +106,88 @@ func Start(opts Options, handler func(cdp.Event)) (*Process, error) {
 	return p, nil
 }
 
+// StartError is why a browser that was started never gave its first answer: it exited, or it ran on
+// without a word for the whole budget. Either way its stderr is carried, because that is where
+// Chromium says what went wrong: a bare "deadline exceeded" could not tell a browser that had died
+// from one still paging itself in from a slow disk.
+type StartError struct {
+	Method string
+	// Exited is true when the main process had ended; ExitCode is then its code (-1 for a signal).
+	Exited   bool
+	ExitCode int
+	Pid      int
+	Waited   time.Duration
+	// Stderr is the last few lines the browser wrote.
+	Stderr string
+}
+
+func (e *StartError) Error() string {
+	var s string
+	if e.Exited {
+		s = fmt.Sprintf("Chromium exited with code %d before it answered %s", e.ExitCode, e.Method)
+	} else {
+		s = fmt.Sprintf("Chromium (pid %d) did not answer %s on its pipe within %s", e.Pid, e.Method, e.Waited.Round(time.Millisecond))
+	}
+	if e.Stderr == "" {
+		return s + "; it wrote nothing to stderr"
+	}
+	return s + "; its stderr ends: " + e.Stderr
+}
+
+// FirstAnswer sends the browser its first command and waits at most budget for the reply. It ends
+// early when the main process exits, so a browser that could not start is reported at once and in
+// its own words, not after the budget as a timeout. An exit is noticed through the process as well
+// as the pipe because a helper that inherited the pipe would keep it open after the browser died.
+// A cancelled ctx is the caller giving up, returned as it is.
+func (p *Process) FirstAnswer(ctx context.Context, budget time.Duration, method string, result any) error {
+	begin := time.Now()
+	callCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	go func() {
+		select {
+		case <-p.done:
+			cancel()
+		case <-callCtx.Done():
+		}
+	}()
+	err := p.Conn.Call(callCtx, "", method, nil, result)
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return err
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		// The pipe ended or the process did: the exit status and the rest of stderr arrive a moment
+		// after the pipe closes, once the process is reaped.
+		select {
+		case <-p.done:
+		case <-time.After(2 * time.Second):
+		}
+	}
+	se := &StartError{Method: method, Pid: p.Pid, Waited: time.Since(begin), ExitCode: p.ExitCode()}
+	select {
+	case <-p.done:
+		se.Exited = true
+	default:
+	}
+	se.Stderr = lastLines(p.Stderr(), 6, 1500)
+	return se
+}
+
+// lastLines is the end of s: its last n lines, and of those at most max bytes.
+func lastLines(s string, n, max int) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	s = strings.Join(lines, "\n")
+	if len(s) > max {
+		s = strings.ToValidUTF8("…"+s[len(s)-max:], "")
+	}
+	return s
+}
+
 // Done is closed when the browser's main process has exited.
 func (p *Process) Done() <-chan struct{} { return p.done }
 

@@ -49,6 +49,15 @@ const (
 	// ControlWait is how long an agent's call waits for a human to give control back.
 	ControlWait    = 20 * time.Second
 	MaxControlWait = time.Minute
+	// ChromiumStart is how long a started browser has to give its first answer on the pipe. A warm
+	// start answers in a fifth of a second, but the first start on a machine pages the 250 MB binary
+	// in from disk, and on slow storage that is the whole cost: throttled to 100 reads a second, one
+	// cold start took 18 s and two at once 36 s, while warm ones under the same throttle took 0.15 s.
+	// A fresh CI runner has such a disk: there the one test that starts a single browser took 4 to
+	// 12 s where it takes 1.5 s on a warm machine, and once two first starts at the same moment were
+	// both still silent at 20 s, the fixed budget this replaces. It stays under the 45 s the host
+	// gives browser.open, so the daemon's account of a browser that is really stuck arrives first.
+	ChromiumStart = 40 * time.Second
 )
 
 // Config is everything `browserd serve` runs with.
@@ -89,6 +98,8 @@ type Chromium struct {
 	Args []string
 	// NoSandbox passes --no-sandbox. Only the operator's file can say so, and daemon.info reports it.
 	NoSandbox bool
+	// StartTimeout replaces ChromiumStart when it is not zero; only a test sets it.
+	StartTimeout time.Duration
 }
 
 // DefaultLimits are the contract's defaults.
