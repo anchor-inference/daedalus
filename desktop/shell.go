@@ -207,22 +207,29 @@ func handOverToShell(opts options) bool {
 	return true
 }
 
-// reopenApplication starts the application again after an upgrade it closed itself for: the new
-// version when the upgrade committed, the one from before when it was rolled back — whichever is
-// beside this executable now. That start says how the upgrade went (announceLastUpgrade).
-func reopenApplication() {
+// applicationReopener returns what starts the application again after an upgrade it closed itself
+// for: the new version when the upgrade committed, the one from before when it was rolled back —
+// whichever stands at the application's path by then. That start says how the upgrade went
+// (announceLastUpgrade).
+//
+// The path is taken now, before anything moves. Asked afterwards, the running executable is the
+// old one in the upgrade's old/ folder — Linux names a moved executable by where it went — and the
+// application found beside it would be the version just replaced.
+func applicationReopener() func() {
 	exe, err := os.Executable()
 	if err != nil {
-		return
+		return func() {}
 	}
 	target := shellExecutable(exe)
 	if target == "" {
-		return
+		return func() {}
 	}
-	cmd := exec.Command(target)
-	cmd.Dir = filepath.Dir(target)
-	if err := cmd.Start(); err == nil {
-		_ = cmd.Process.Release()
+	return func() {
+		cmd := exec.Command(target)
+		cmd.Dir = filepath.Dir(target)
+		if err := cmd.Start(); err == nil {
+			_ = cmd.Process.Release()
+		}
 	}
 }
 

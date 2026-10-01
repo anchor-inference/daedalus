@@ -222,7 +222,7 @@ func run(argv []string) error {
 			os.Stdout, os.Stderr = file, file
 			fmt.Printf("\n%s upgrade started by the application\n", time.Now().UTC().Format(time.RFC3339))
 		}
-		defer reopenApplication()
+		defer applicationReopener()()
 	}
 	app := NewApp(paths)
 	for _, line := range moved {
@@ -456,6 +456,12 @@ func printNativeLogs(paths Paths, follow bool) error {
 // in whatever is showing it. It reports nothing back — every failure it meets is already on the
 // launcher's page, which is what the operator is looking at.
 func bringUp(ctx context.Context, app *App, server *Server, surface *Surface, opts options) {
+	// A newer launcher is announced from the start, and only announced: installing it is the
+	// operator's (upgrade.go). From the start and not once the stack is up, because a stack that
+	// does not come up is the installation a newer release may be what fixes. The app shows it too,
+	// in its own notification centre (daedalus/extensions/launcher_updates.py).
+	show := desktopNotifier(ctx, app, surface)
+	go app.CheckReleases(ctx, show)
 	// showing records that the launcher's page is already in front of the operator, so it is not
 	// opened a second time in another tab. A window is already showing it.
 	showing := surface.Windowed()
@@ -503,13 +509,14 @@ func bringUp(ctx context.Context, app *App, server *Server, surface *Surface, op
 		}
 		fmt.Printf("The launcher is at %s — leave it running for the buttons, or close it with Ctrl+C: %s.\n", server.URL(), after)
 	}
-	watch(ctx, app, surface)
+	watch(ctx, app, show)
 }
 
-// watch tells the desktop when the installation has something for the operator. A machine with no
-// way to show a notification says so once and is not asked again. A click the launcher is told
-// about (Linux) brings the surface forward on the thing the notification is about.
-func watch(ctx context.Context, app *App, surface *Surface) {
+// desktopNotifier is how the launcher tells the desktop that the installation has something for
+// the operator. A machine with no way to show a notification says so once and is not asked again.
+// A click the launcher is told about (Linux) brings the surface forward on the thing the
+// notification is about.
+func desktopNotifier(ctx context.Context, app *App, surface *Surface) func(Notification) error {
 	var mu sync.Mutex
 	off := false
 	open := func(link string) { surface.Focus(ctx, link) }
@@ -531,10 +538,11 @@ func watch(ctx context.Context, app *App, surface *Surface) {
 		}
 		return nil
 	}
-	// A newer launcher is announced the same way, and only announced: installing it is the
-	// operator's `daedalus-desktop upgrade`, which backs the data up first (upgrade.go). The app
-	// shows it too, in its own notification centre (daedalus/extensions/launcher_updates.py).
-	go app.CheckReleases(ctx, show)
+	return show
+}
+
+// watch passes on what the app's router marks for the desktop, for as long as the launcher runs.
+func watch(ctx context.Context, app *App, show func(Notification) error) {
 	app.Watch(ctx, func(n Notification) { _ = show(n) })
 }
 
