@@ -21,3 +21,8 @@ ptyd/** -text
 # Signed fixtures are bytes, not text: a Windows checkout turning their line ends into CRLF changed
 # the message a signature covers, and the signature no longer verified.
 desktop/testdata/** -text
+
+# The README's pictures are three quarters of the published tree, and a native installation downloads
+# that tree as an archive on its first run: 84 MB, minutes on a home connection, for files nothing at
+# runtime reads. GitHub still shows them in the README; only the archive leaves them out.
+docs/screenshots/** export-ignore
