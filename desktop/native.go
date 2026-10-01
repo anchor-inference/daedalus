@@ -294,11 +294,14 @@ type Native struct {
 	// bootID counts (ready.go). An ordinary start also takes an older app's answer without one.
 	strictHealth bool
 
-	// What the progress page is told: which piece of a start this is, and how far through the one
-	// download whose size is known in advance. Both are optional — the command line has no page to
-	// draw and passes neither.
-	stage      func(Stage)
-	downloaded func(done, total int64)
+	// What the progress page is told: which piece of a start this is, and what inside it is moving.
+	// Both are optional — the command line has no page to draw and passes neither.
+	stage    func(Stage)
+	activity reporter
+
+	// seed is what the installation carries of its release (seed.go), opened on the first Ensure.
+	seed       *Seed
+	seedOpened bool
 }
 
 func NewNative(p Paths, log func(string, ...any)) *Native {
@@ -307,8 +310,8 @@ func NewNative(p Paths, log func(string, ...any)) *Native {
 
 // OnProgress is how the launcher's page follows a start. Without it nothing here changes: the
 // reports are made through these two and both are checked before they are called.
-func (n *Native) OnProgress(stage func(Stage), downloaded func(done, total int64)) {
-	n.stage, n.downloaded = stage, downloaded
+func (n *Native) OnProgress(stage func(Stage), activity func(Activity)) {
+	n.stage, n.activity = stage, activity
 }
 
 func (n *Native) enter(stage Stage) {
@@ -317,10 +320,13 @@ func (n *Native) enter(stage Stage) {
 	}
 }
 
-func (n *Native) progress(done, total int64) {
-	if n.downloaded != nil {
-		n.downloaded(done, total)
+// openSeed opens what the installation carries once per launcher: it does not change under a
+// running one, and an upgrade that brings a new seed restarts the launcher.
+func (n *Native) openSeed() *Seed {
+	if !n.seedOpened {
+		n.seed, n.seedOpened = OpenSeed(n.log), true
 	}
+	return n.seed
 }
 
 // venvPython is the interpreter everything native runs through: the supervisor, the key proxy and
@@ -350,6 +356,7 @@ func (n *Native) Ensure(ctx context.Context) error {
 		return err
 	}
 	n.enter(StageRuntime)
+	seed := n.openSeed()
 	uv, err := pick(uvDownloads, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return fmt.Errorf("uv: %w", err)
@@ -358,42 +365,30 @@ func (n *Native) Ensure(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("ripgrep: %w", err)
 	}
-	// What is still to be fetched, before anything is fetched. The archives are pinned, so their
-	// sizes are known here rather than guessed from a Content-Length that may not arrive — and a
-	// warm start, which downloads nothing, reports a total of zero and gets no bar at all.
-	var downloaded, total int64
-	for _, d := range []download{uv, rg} {
-		if !n.paths.installed(d) {
-			total += d.size
-		}
-	}
-	if git, err := pick(gitDownloads, runtime.GOOS, runtime.GOARCH); err == nil && !n.paths.installed(git) {
-		total += git.size
-	}
-	n.progress(0, total)
-	got, err := installTool(ctx, n.paths, uv, n.paths.RuntimeUV, n.log)
+	// Each archive reports itself as it goes — its own bytes against its own pinned size, read from
+	// the network or from the installation's copy — so the page's bar is about the one thing that is
+	// moving rather than a total the copy taken from the installation would make jump.
+	var downloaded int64
+	got, err := installToolFrom(ctx, n.paths, uv, n.paths.RuntimeUV, n.log, n.activity, seed)
 	if err != nil {
 		return err
 	}
 	downloaded += got
-	n.progress(downloaded, total)
-	got, err = installTool(ctx, n.paths, rg, n.paths.RuntimeBin, n.log)
+	got, err = installToolFrom(ctx, n.paths, rg, n.paths.RuntimeBin, n.log, n.activity, seed)
 	if err != nil {
 		return err
 	}
 	downloaded += got
-	n.progress(downloaded, total)
-	gitPath, got, err := EnsureGit(ctx, n.paths, n.log)
+	gitPath, got, err := ensureGitFrom(ctx, n.paths, n.log, n.activity, seed)
 	if err != nil {
 		return err
 	}
 	n.git, downloaded = gitPath, downloaded+got
-	n.progress(downloaded, total)
 	if err := n.ensurePython(ctx); err != nil {
 		return err
 	}
 	n.enter(StageCheckouts)
-	if err := EnsureRepos(ctx, n.paths, n.gitRunner(), n.log); err != nil {
+	if err := ensureReposFrom(ctx, n.paths, n.gitRunner(), n.log, n.activity, seed); err != nil {
 		return err
 	}
 	n.enter(StageEnvironment)
@@ -411,15 +406,40 @@ func (n *Native) Ensure(ctx context.Context) error {
 
 // ensurePython asks uv for a managed CPython inside the runtime folder. uv checks its own downloads
 // against the hashes python-build-standalone publishes, so there is no second table here; what this
-// controls is where it lands, which is the folder the installation owns and nothing else.
+// controls is where it lands, which is the folder the installation owns and nothing else. When the
+// installation carries the interpreter (seed.go), uv is pointed at that copy as its mirror and
+// installs it without the network — and checks it against the same built-in hash.
 func (n *Native) ensurePython(ctx context.Context) error {
 	if _, err := os.Stat(n.paths.stamp("python")); err == nil {
 		return nil
 	}
-	n.log("installing python %s", pythonVersion)
-	cmd := exec.CommandContext(ctx, uvBinary(n.paths), "python", "install", pythonVersion)
-	cmd.Env = n.runtimeEnv()
-	if out, err := runCmd(cmd); err != nil {
+	env := n.runtimeEnv()
+	d, pinned := pythonDownloads[platformKey(runtime.GOOS, runtime.GOARCH)]
+	mirror, carried := "", false
+	if pinned {
+		mirror, carried = n.openSeed().pythonMirror(d, n.log)
+	}
+	install := func(env []string) (string, error) {
+		cmd := exec.CommandContext(ctx, uvBinary(n.paths), "python", "install", pythonVersion)
+		cmd.Env = env
+		return n.runUV(cmd, Activity{Kind: "python", Name: "python " + pythonVersion})
+	}
+	var out string
+	var err error
+	if carried {
+		n.log("installing python %s from the copy that came with the installation", pythonVersion)
+		out, err = install(append(env, "UV_PYTHON_INSTALL_MIRROR="+mirror))
+		if err != nil {
+			// The copy is the pinned one, so this is uv wanting a different build than the table
+			// names — a uv raised without the table. The network still has it.
+			n.log("uv did not take python from the installation's copy (%s); downloading it", lastLine(out))
+		}
+	}
+	if !carried || err != nil {
+		n.log("installing python %s", pythonVersion)
+		out, err = install(env)
+	}
+	if err != nil {
 		return fmt.Errorf("python %s could not be installed: %s", pythonVersion, strings.TrimSpace(out))
 	}
 	return os.WriteFile(n.paths.stamp("python"), []byte(pythonVersion+"\n"), 0o644)
@@ -428,6 +448,11 @@ func (n *Native) ensurePython(ctx context.Context) error {
 // syncVenv builds the environment the app runs in, from the checkout's own lock file. It is skipped
 // when the environment already matches what the checkout declares — the same stamp the supervisor
 // uses, so the two never sync over each other.
+//
+// With the installation's package cache laid out (seed.go) the build is tried offline first: every
+// package of the release's lock is in it, so asking PyPI for anything would only be waiting on the
+// network. A checkout whose lock is not the release's — moved on by an update — or a cache that turns
+// out to miss something is built online, from the same cache, which then fetches only what it lacks.
 func (n *Native) syncVenv(ctx context.Context) error {
 	if !exists(n.paths.Bot) {
 		return errors.New("the checkout is missing; the runtime cannot be built from it")
@@ -438,11 +463,32 @@ func (n *Native) syncVenv(ctx context.Context) error {
 		pruneEnvs(n.paths, n.log)
 		return nil
 	}
-	n.log("building the environment (this is the long part of a first run, and quick when the next version's was prepared)")
-	cmd := exec.CommandContext(ctx, uvBinary(n.paths), "sync", "--frozen", "--inexact")
-	cmd.Dir = n.paths.Bot
-	cmd.Env = n.runtimeEnv()
-	if out, err := runCmd(cmd); err != nil {
+	seed := n.openSeed()
+	offline := false
+	if seedWheels(n.paths, seed, n.log, n.activity) {
+		wheels, _ := seed.wheels()
+		digest, err := dependencyDigest(n.paths.Bot)
+		offline = err == nil && wheels.Lock == digest
+	}
+	sync := func(extra ...string) (string, error) {
+		cmd := exec.CommandContext(ctx, uvBinary(n.paths), append([]string{"sync", "--frozen", "--inexact"}, extra...)...)
+		cmd.Dir = n.paths.Bot
+		cmd.Env = n.runtimeEnv()
+		return n.runUV(cmd, Activity{Kind: "packages", Name: "packages", Unit: unitPackages})
+	}
+	var out string
+	var err error
+	if offline {
+		n.log("building the environment from the packages that came with the installation")
+		if out, err = sync("--offline"); err != nil {
+			n.log("the installation's packages were not enough (%s); building online", lastLine(out))
+		}
+	}
+	if !offline || err != nil {
+		n.log("building the environment (this is the long part of a first run, and quick when the next version's was prepared)")
+		out, err = sync()
+	}
+	if err != nil {
 		return fmt.Errorf("the environment could not be built: %s", strings.TrimSpace(out))
 	}
 	if err := n.stampVenv(); err != nil {
@@ -450,6 +496,42 @@ func (n *Native) syncVenv(ctx context.Context) error {
 	}
 	pruneEnvs(n.paths, n.log)
 	return nil
+}
+
+// runUV runs uv and turns what it prints into the page's progress: each line it writes is a line of
+// the launcher's commentary, so the live line under the stage list is uv's own, and the packages it
+// starts and finishes fetching or building are counted. uv draws its progress bars only on a
+// terminal, and a launcher under the application has none; these lines are what it says instead.
+func (n *Native) runUV(cmd *exec.Cmd, activity Activity) (string, error) {
+	cmd.Env = append(cmd.Env, "UV_NO_PROGRESS=1", "NO_COLOR=1")
+	report := n.activity
+	report.report(activity)
+	return runStreaming(cmd, func(line string) {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			return
+		}
+		// One "+ package==version" line per package arrives at the end, all at once: counted, not
+		// printed, or they would push everything that said something out of the page's log.
+		if strings.HasPrefix(trimmed, "+ ") || strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "~ ") {
+			return
+		}
+		n.log("uv: %s", trimmed)
+		switch {
+		case strings.HasPrefix(trimmed, "Downloading "), strings.HasPrefix(trimmed, "Building "):
+			activity.Total++
+		case strings.HasPrefix(trimmed, "Downloaded "), strings.HasPrefix(trimmed, "Built "):
+			activity.Done++
+		}
+		activity.Name = trimmed
+		report.report(activity)
+	})
+}
+
+// lastLine is the last thing a program said, for a log line that has room for one.
+func lastLine(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 // prepareEnv builds the environment a checkout at project would run in — a staged release, say —
@@ -583,15 +665,25 @@ func (n *Native) searchPath() string {
 // two variables that keep uv inside the installation's own folder rather than in the user's cache
 // and home directory.
 func (n *Native) runtimeEnv() []string {
-	env := pythonUTF8(environWithout("PATH", "VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR"))
-	return append(env,
+	env := pythonUTF8(environWithout(append([]string{"PATH", "VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_MIRROR", "UV_OFFLINE"}, uvStaysHome...)...))
+	return append(append(env,
 		"PATH="+n.searchPath(),
 		"UV_PROJECT_ENVIRONMENT="+n.paths.RuntimeVenv,
 		"UV_PYTHON_INSTALL_DIR="+n.paths.RuntimePython,
 		"UV_CACHE_DIR="+filepath.Join(n.paths.Runtime, "cache"),
 		"UV_PYTHON="+pythonVersion,
 		"GIT_TERMINAL_PROMPT=0",
-	)
+	), uvStaysHomeEnv()...)
+}
+
+// uvStaysHome are the names that keep `uv python install` inside the runtime folder. Left to itself it
+// also puts a python3.12 executable into ~/.local/bin and, on Windows, registers the interpreter in
+// the user's registry (PEP 514) — both outside anything the installation owns, both still there after
+// it is removed, and the second pointing every later installation's tools at this one's interpreter.
+var uvStaysHome = []string{"UV_PYTHON_INSTALL_BIN", "UV_PYTHON_INSTALL_REGISTRY"}
+
+func uvStaysHomeEnv() []string {
+	return []string{"UV_PYTHON_INSTALL_BIN=0", "UV_PYTHON_INSTALL_REGISTRY=0"}
 }
 
 // pythonUTF8 puts a Python child in UTF-8 mode: its own output, the files it opens without naming an
@@ -798,8 +890,8 @@ func (n *Native) Start(ctx context.Context) error {
 // childBase is the environment the supervisor and the key proxy start from — and through the
 // supervisor the bot and every Python it runs — all in UTF-8 mode (pythonUTF8).
 func (n *Native) childBase() []string {
-	base := pythonUTF8(environWithout("PATH", "VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR", "PYTHONPATH"))
-	return append(base, "PATH="+n.searchPath(), "UV_PYTHON_INSTALL_DIR="+n.paths.RuntimePython, "UV_CACHE_DIR="+filepath.Join(n.paths.Runtime, "cache"), "UV_PYTHON="+pythonVersion)
+	base := pythonUTF8(environWithout(append([]string{"PATH", "VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR", "PYTHONPATH"}, uvStaysHome...)...))
+	return append(append(base, "PATH="+n.searchPath(), "UV_PYTHON_INSTALL_DIR="+n.paths.RuntimePython, "UV_CACHE_DIR="+filepath.Join(n.paths.Runtime, "cache"), "UV_PYTHON="+pythonVersion), uvStaysHomeEnv()...)
 }
 
 // expectation is what this start's health check accepts (ready.go): the answer carrying this

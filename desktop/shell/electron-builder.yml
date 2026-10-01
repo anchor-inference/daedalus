@@ -2,7 +2,8 @@
 # three systems. The launcher (daedalus-desktop), its two daemons and the built Mini App are not
 # compiled here: the release workflow (and build.sh for a local build) puts them in stage/ first,
 # per system and architecture, and they are copied in beside the shell's own executable — where
-# the shell starts the launcher from, and where the launcher looks for its daemons.
+# the shell starts the launcher from, and where the launcher looks for its daemons. So is the seed
+# (desktop/seed.go): the release's code, runtime and packages, which make a first run local.
 appId: io.github.anchor-inference.daedalus
 productName: Daedalus
 copyright: Daedalus
@@ -36,6 +37,8 @@ win:
       to: .
     - from: stage/miniapp-dist
       to: miniapp-dist
+    - from: stage/seed-win-${arch}
+      to: seed
   # No code signing: there is no certificate (SmartScreen warns once, README says how to pass it).
   # rcedit still runs, so the executable carries the icon and the version.
   signAndEditExecutable: true
@@ -81,6 +84,9 @@ mac:
   extraResources:
     - from: stage/miniapp-dist
       to: miniapp-dist
+    # Both Macs' parts of the seed, the same folder in both halves of the universal application.
+    - from: stage/seed-mac
+      to: seed
   # The launcher and its daemons are one universal binary each already (lipo in the workflow), so
   # the two halves of the application carry the same file and nothing is merged.
   x64ArchFiles: "Contents/MacOS/{daedalus-desktop,ptyd,browserd}"
@@ -109,6 +115,8 @@ linux:
       to: .
     - from: stage/miniapp-dist
       to: miniapp-dist
+    - from: stage/seed-linux-${arch}
+      to: seed
 
 deb:
   artifactName: Daedalus-linux-${arch}.deb

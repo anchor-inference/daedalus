@@ -23,12 +23,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // download is one archive the runtime is made of.
@@ -64,6 +66,12 @@ const (
 	// The tag the MinGit archives hang off; it spells the same release differently from the file names.
 	minGitTag     = "v2.55.0.windows.5"
 	pythonVersion = "3.12"
+	// The build of pythonVersion that uv uvVersion installs, and the python-build-standalone release
+	// it comes from. They move with uv: a new uv may pick a newer patch, and the table below must then
+	// name the file it picks, or the copy carried in the installation is passed over and the
+	// interpreter downloaded as before (`make-seed` checks the two agree when it builds a release).
+	pythonBuild   = "3.12.14"
+	pythonRelease = "20260901"
 )
 
 // uvDownloads: https://github.com/astral-sh/uv/releases/download/<version>/sha256.sum
@@ -154,6 +162,38 @@ var gitDownloads = map[string]download{
 	},
 }
 
+// pythonDownloads are the interpreters uv installs, pinned here only so that the copy a release
+// carries can be checked before uv is pointed at it. uv still fetches and checks its own when there is
+// no such copy — it has these hashes built in — so this table is the release's half of the bargain,
+// not a second source of truth. The URLs are the publisher's own; uv mirrors them under another host.
+//
+// Hashes: https://github.com/astral-sh/python-build-standalone/releases/download/<release>/SHA256SUMS.
+var pythonDownloads = map[string]download{
+	"linux/amd64":   pythonArchive("x86_64-unknown-linux-gnu", "72748da13197c1fb161e3afeef20a6a385ff24f2165e6e2758e47008e7faba4c", 34143368),
+	"linux/arm64":   pythonArchive("aarch64-unknown-linux-gnu", "577b4bec0793ad1ff0cbff9adbd0df078eddde38a4c41bf5d83ad381a85ee39d", 29199399),
+	"darwin/amd64":  pythonArchive("x86_64-apple-darwin", "65b195c9cedc1fef6767f044f9822069adbd1bd9204d424ece4628776fdc04bb", 24686153),
+	"darwin/arm64":  pythonArchive("aarch64-apple-darwin", "81a359f1cfadd4da11766534c5913791cea55f26e1bb902cacd2a531bb1e4b2b", 24981445),
+	"windows/amd64": pythonArchive("x86_64-pc-windows-msvc", "7c45c9622400d578709a9b2cddbe8124cc21d382409d9f13406d706d28e31b14", 21980728),
+	"windows/arm64": pythonArchive("aarch64-pc-windows-msvc", "72f4713d056a17961bdba7b43be82a878035040fa1eee30cfd5e43b91a2852d9", 20725445),
+}
+
+// pythonArchive is one row of pythonDownloads: the stripped install-only build, which is the one uv
+// installs.
+func pythonArchive(triple, sum string, size int64) download {
+	file := "cpython-" + pythonBuild + "+" + pythonRelease + "-" + triple + "-install_only_stripped.tar.gz"
+	return download{
+		name: "python", version: pythonBuild, kind: "tar.gz", sha256: sum, size: size,
+		url: "https://github.com/astral-sh/python-build-standalone/releases/download/" + pythonRelease + "/" + strings.ReplaceAll(file, "+", "%2B"),
+	}
+}
+
+// pythonFile is the archive's file name as uv looks for it under a mirror: the release, then the
+// name with its plus sign as it is, not as the URL escapes it.
+func pythonFile(d download) string {
+	file, _ := url.PathUnescape(path.Base(d.url))
+	return file
+}
+
 // nodeDownloads is an extra, not part of a first run: four skills shell out to npx and the Mini App
 // can be rebuilt with it, and an installation that does neither never pays for it.
 // Hashes: https://nodejs.org/dist/v<version>/SHASUMS256.txt.
@@ -241,6 +281,12 @@ func refuseUnlessHTTPS(host string) func(*http.Request, []*http.Request) error {
 // archive is held in memory and checked before a single byte of it is written anywhere: a runtime
 // half-written from a download that turned out to be something else is worse than no runtime.
 func fetchVerified(ctx context.Context, d download) ([]byte, error) {
+	return fetchVerifiedReporting(ctx, d, nil)
+}
+
+// fetchVerifiedReporting is fetchVerified with the page told how far the download has got. The size
+// is the pinned one, known before the first byte arrives.
+func fetchVerifiedReporting(ctx context.Context, d download, report reporter) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, d.url, nil)
 	if err != nil {
 		return nil, err
@@ -253,16 +299,32 @@ func fetchVerified(ctx context.Context, d download) ([]byte, error) {
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s: HTTP %d", d.url, response.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, downloadLimit))
+	total := d.size
+	if total <= 0 && response.ContentLength > 0 {
+		total = response.ContentLength
+	}
+	body, err := io.ReadAll(newCountingReader(io.LimitReader(response.Body, downloadLimit), Activity{Kind: "download", Name: d.label(), Total: total}, report))
 	if err != nil {
 		return nil, err
 	}
-	sum := sha256.Sum256(body)
-	if got := hex.EncodeToString(sum[:]); got != d.sha256 {
-		return nil, fmt.Errorf("%s is not what was pinned: sha256 %s, expected %s", d.url, got, d.sha256)
+	if err := d.verify(body); err != nil {
+		return nil, fmt.Errorf("%s %w", d.url, err)
 	}
 	return body, nil
 }
+
+// verify checks an archive against the pinned hash, wherever it came from: the network or the copy a
+// release carries in the installation.
+func (d download) verify(body []byte) error {
+	sum := sha256.Sum256(body)
+	if got := hex.EncodeToString(sum[:]); got != d.sha256 {
+		return fmt.Errorf("is not what was pinned: sha256 %s, expected %s", got, d.sha256)
+	}
+	return nil
+}
+
+// label is how a tool is named on the page and in the log.
+func (d download) label() string { return d.name + " " + d.version }
 
 // stripName drops the leading segments that belong to the archive and returns the name the entry
 // has inside the tree. An entry with fewer segments than the archive wraps is the wrapper itself.
@@ -309,21 +371,29 @@ func (d download) executable(name string) bool {
 // directory on the way is made one segment at a time without following a symbolic link — the same
 // care the repository tarballs are unpacked with, for the same reason.
 func unpackInto(d download, body []byte, dir string) error {
+	return unpackIntoReporting(d, body, dir, nil)
+}
+
+// unpackIntoReporting is unpackInto with the page told how far it has got. MinGit is thousands of
+// small files, and on Windows writing them is a step of its own that the page has to show moving.
+func unpackIntoReporting(d download, body []byte, dir string, report reporter) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	switch d.kind {
 	case "tar.gz":
-		return unpackTarInto(d, body, dir)
+		return unpackTarInto(d, body, dir, report)
 	case "zip":
-		return unpackZipInto(d, body, dir)
+		return unpackZipInto(d, body, dir, report)
 	default:
 		return fmt.Errorf("unknown archive kind %q", d.kind)
 	}
 }
 
-func unpackTarInto(d download, body []byte, dir string) error {
-	zipped, err := gzip.NewReader(bytes.NewReader(body))
+func unpackTarInto(d download, body []byte, dir string, report reporter) error {
+	// A gzip stream has no table of contents, so how far through it is measured by how much of the
+	// compressed archive has been read — which is honest, and needs no second pass over it.
+	zipped, err := gzip.NewReader(newCountingReader(bytes.NewReader(body), Activity{Kind: "unpack", Name: d.label(), Total: int64(len(body))}, report))
 	if err != nil {
 		return err
 	}
@@ -353,12 +423,23 @@ func unpackTarInto(d download, body []byte, dir string) error {
 	}
 }
 
-func unpackZipInto(d download, body []byte, dir string) error {
+func unpackZipInto(d download, body []byte, dir string, report reporter) error {
 	archive, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
 	if err != nil {
 		return err
 	}
+	// A zip knows its entries up front, so here the count is of the compressed bytes behind each
+	// entry: the same unit as a tar's, and the bar does not race through a thousand empty folders.
+	progress := Activity{Kind: "unpack", Name: d.label(), Total: int64(len(body)), Unit: unitBytes}
+	report.report(progress)
+	last := time.Now()
+	defer func() { progress.Done = progress.Total; report.report(progress) }()
 	for _, entry := range archive.File {
+		progress.Done += int64(entry.CompressedSize64)
+		if time.Since(last) >= progressEvery {
+			last = time.Now()
+			report.report(progress)
+		}
 		name := stripName(entry.Name, d.strip)
 		// Regular files only, as on the tar path: a zip symlink entry holds its target as content,
 		// so writing it out makes a file full of a path where a link was meant.
@@ -437,21 +518,37 @@ func (p Paths) writeStamp(d download) error {
 // total, which is mostly the uv-managed CPython and `uv sync` and is several times larger. The
 // README's figure is measured on the folder afterwards, not on this.
 func installTool(ctx context.Context, p Paths, d download, dir string, log func(string, ...any)) (int64, error) {
+	return installToolFrom(ctx, p, d, dir, log, nil, nil)
+}
+
+// installToolFrom is installTool with the page told what is happening and, when the installation
+// carries the archive itself (seed.go), the archive taken from there instead of the network. A
+// carried archive is checked against the same pinned hash a download is: it came inside a signed
+// release, and it is still not unpacked on that alone.
+func installToolFrom(ctx context.Context, p Paths, d download, dir string, log func(string, ...any), report reporter, seed *Seed) (int64, error) {
 	if p.installed(d) {
 		return 0, nil
 	}
-	log("downloading %s %s (%.1f MB)", d.name, d.version, float64(d.size)/1e6)
-	body, err := fetchVerified(ctx, d)
-	if err != nil {
-		return 0, err
+	var body []byte
+	var fetched int64
+	if archive, ok := seed.runtimeArchive(d, report, log); ok {
+		log("%s %s comes with the installation (%.1f MB)", d.name, d.version, float64(d.size)/1e6)
+		body = archive
+	} else {
+		log("downloading %s %s (%.1f MB)", d.name, d.version, float64(d.size)/1e6)
+		archive, err := fetchVerifiedReporting(ctx, d, report)
+		if err != nil {
+			return 0, err
+		}
+		body, fetched = archive, int64(len(archive))
 	}
-	if err := unpackInto(d, body, dir); err != nil {
+	if err := unpackIntoReporting(d, body, dir, report); err != nil {
 		return 0, err
 	}
 	if err := p.writeStamp(d); err != nil {
 		return 0, err
 	}
-	return int64(len(body)), nil
+	return fetched, nil
 }
 
 // systemGit is the git already on this machine, or an empty string. macOS keeps it inside the
@@ -490,6 +587,10 @@ func commandRuns(name string, args ...string) error {
 // EnsureGit resolves the git this installation uses: MinGit under the runtime folder on Windows,
 // the machine's own everywhere else.
 func EnsureGit(ctx context.Context, p Paths, log func(string, ...any)) (string, int64, error) {
+	return ensureGitFrom(ctx, p, log, nil, nil)
+}
+
+func ensureGitFrom(ctx context.Context, p Paths, log func(string, ...any), report reporter, seed *Seed) (string, int64, error) {
 	if runtime.GOOS != "windows" {
 		if found := systemGit(runtime.GOOS, exec.LookPath, commandRuns); found != "" {
 			return found, 0, nil
@@ -500,7 +601,7 @@ func EnsureGit(ctx context.Context, p Paths, log func(string, ...any)) (string, 
 	if err != nil {
 		return "", 0, fmt.Errorf("git: %w", err)
 	}
-	bytes, err := installTool(ctx, p, d, p.RuntimeGit, log)
+	bytes, err := installToolFrom(ctx, p, d, p.RuntimeGit, log, report, seed)
 	if err != nil {
 		return "", 0, err
 	}

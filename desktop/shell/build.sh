@@ -7,7 +7,9 @@
 # It stages what the application carries beside the shell — the launcher and browserd built from
 # this tree (CGO off, so from any machine), the Mini App built from miniapp/ — and runs
 # electron-builder. ptyd is left out: it needs Zig, and the application runs without it (host
-# terminals are then unavailable). The release workflow stages every piece; this is for a quick look.
+# terminals are then unavailable). So is the seed unless SEED= names a folder made by
+# `daedalus-desktop make-seed`: without one the first run downloads, as a launcher built from source
+# does. The release workflow stages every piece; this is for a quick look.
 # macOS needs a Mac (the .dmg and the signature are Apple's tools); the workflow builds it.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -16,13 +18,16 @@ target="${1:-linux}"
 version="${VERSION:-0.0.0}"
 
 case "$target" in
-  linux) goos=linux; stage="$here/stage/linux-x64"; exe="" ;;
-  windows) goos=windows; stage="$here/stage/win-x64"; exe=".exe" ;;
+  linux) goos=linux; stage="$here/stage/linux-x64"; seed="$here/stage/seed-linux-x64"; seedplatform=linux-amd64; exe="" ;;
+  windows) goos=windows; stage="$here/stage/win-x64"; seed="$here/stage/seed-win-x64"; seedplatform=windows-amd64; exe=".exe" ;;
   *) echo "usage: build.sh linux|windows" >&2; exit 2 ;;
 esac
 
-rm -rf "$stage" "$here/stage/miniapp-dist"
-mkdir -p "$stage"
+rm -rf "$stage" "$seed" "$here/stage/miniapp-dist"
+mkdir -p "$stage" "$seed"
+if [ -n "${SEED:-}" ]; then
+  cp -R "$SEED/manifest.json" "$SEED/code" "$SEED/$seedplatform" "$seed/"
+fi
 (cd "$root/desktop" && CGO_ENABLED=0 GOOS=$goos GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=desktop-v$version" -o "$stage/daedalus-desktop$exe" .)
 (cd "$root/browserd" && CGO_ENABLED=0 GOOS=$goos GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "$stage/browserd$exe" ./cmd/browserd)
 (cd "$root/miniapp" && npm ci --no-audit --no-fund && npm run build)

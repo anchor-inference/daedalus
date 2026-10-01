@@ -161,6 +161,11 @@ type options struct {
 }
 
 func run(argv []string) error {
+	// The release workflow's step, not an operator's command: it builds the seed a release carries
+	// (seed_make.go) and touches no installation.
+	if len(argv) > 0 && argv[0] == "make-seed" {
+		return makeSeedCommand(context.Background(), argv[1:])
+	}
 	opts, err := parseArgs(argv)
 	if err != nil {
 		return err
