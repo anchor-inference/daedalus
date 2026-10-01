@@ -121,7 +121,11 @@ func NewRegistry(stateDir, ptydPath string, pub Publisher, log *slog.Logger) (*R
 	r := &Registry{stateDir: stateDir, ptyd: ptydPath, pub: pub, log: log, Grace: config.LaunchGrace,
 		launches: map[string]*Launch{}, replies: map[string]*held{}}
 	for _, dir := range []string{r.launchesDir(), r.dialsDir(), r.binDir()} {
-		if err := os.RemoveAll(dir); err != nil {
+		empty := os.RemoveAll
+		if dir == r.binDir() {
+			empty = clearBinDir // on Windows the hook command may be this very daemon's executable
+		}
+		if err := empty(dir); err != nil {
 			return nil, err
 		}
 		if err := os.MkdirAll(dir, 0o700); err != nil {
