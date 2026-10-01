@@ -21,6 +21,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.processes import end_tree
 from daedalus.tools import search_hint
 from daedalus.tools._common import FRAME_CHARS, clip, error, ok, services_for, tool_config
 
@@ -360,7 +361,7 @@ async def exec_command(
         if proc.returncode is None:
             # A timeout, a cancelled run or a failed write: the process group never outlives the call.
             try:
-                os.killpg(proc.pid, 9)
+                end_tree(proc.pid, hard=True)
             except ProcessLookupError:
                 pass
             await proc.wait()
@@ -491,14 +492,14 @@ async def job_kill(context: ToolContext, job_id: str) -> ToolResult:
         return error(context, f"no job {job_id!r}")
     if job.running:
         try:
-            os.killpg(job.process.pid, 15)
+            end_tree(job.process.pid, hard=False)
         except ProcessLookupError:
             pass
         try:
             await asyncio.wait_for(job.process.wait(), timeout=5)
         except TimeoutError:
             try:
-                os.killpg(job.process.pid, 9)
+                end_tree(job.process.pid, hard=True)
             except ProcessLookupError:
                 pass
             await job.process.wait()

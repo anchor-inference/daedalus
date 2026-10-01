@@ -18,15 +18,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from collections.abc import Callable, Sequence
 from typing import Any
 
 from protocore.contracts.hooks import HookActionKind, HookResult, HookSpec, IHookManager
 from protocore.contracts.types import HookEvent
 
+from daedalus.processes import end_tree
 from daedalus.security.redact import Redactor
-from daedalus.tools.shell import shell_environment
+from daedalus.tools.shell import shell_argv, shell_environment
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class DaedalusHookManager(IHookManager):
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
-                "bash", "-lc", script, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                *shell_argv(script), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
                 env=shell_environment(str(payload.get("session_id") or "hook")), start_new_session=True,
             )
             out, _ = await asyncio.wait_for(proc.communicate(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")), timeout=timeout)
@@ -63,7 +63,7 @@ class DaedalusHookManager(IHookManager):
             logger.warning("hook script timed out after %.0fs: %s", timeout, script[:80])
             if proc is not None and proc.returncode is None:
                 try:
-                    os.killpg(proc.pid, 9)
+                    end_tree(proc.pid, hard=True)
                 except ProcessLookupError:
                     pass
                 await proc.wait()

@@ -81,6 +81,7 @@ from daedalus.host.skills import DirectorySkillStore
 from daedalus.host.transcript_view import TranscriptViewBuilder, message_view
 from daedalus.host.worktrees import append_exclude, exclude_lines
 from daedalus.mcp.manager import McpManager, blocked_for, mcp_tool_prefix
+from daedalus.processes import end_tree
 from daedalus.providers.chain import build_chain
 from daedalus.providers.registry import ProviderRegistry
 from daedalus.security import redact
@@ -1380,7 +1381,7 @@ class SessionManager:
             return False
         if job.process.returncode is None:
             try:
-                os.killpg(job.process.pid, 15)
+                end_tree(job.process.pid, hard=False)
             except ProcessLookupError:
                 pass
             await job.process.wait()
@@ -1424,7 +1425,7 @@ class SessionManager:
             process = getattr(job, "process", None)
             if process is not None and process.returncode is None:
                 try:
-                    os.killpg(process.pid, 9)
+                    end_tree(process.pid, hard=True)
                 except (ProcessLookupError, PermissionError):
                     pass
         runs = await self.db.fetchall("SELECT id FROM runs WHERE session_id = ?", (session_id,))
@@ -2366,7 +2367,7 @@ class SessionManager:
             self_rebuild=hooks.get("self_rebuild"),
             self_rollback=hooks.get("self_rollback"),
             progress=_bind(hooks.get("progress"), state.session.id),
-            writable=[q for p in (state.session.metadata.get("worktrees") or []) if str(p).startswith("/") for q in worktree_writable_paths(Path(str(p)))],
+            writable=[q for p in (state.session.metadata.get("worktrees") or []) if Path(str(p)).is_absolute() for q in worktree_writable_paths(Path(str(p)))],
             # The walls are what the sandbox binds writable and what ``resolve`` holds every path to:
             # every local folder of the project to read, the ones not marked read-only to write, or
             # the session's own directory alone when it has one.

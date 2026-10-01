@@ -22,6 +22,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.processes import end_tree
 from daedalus.security import redact
 from daedalus.tools import search_hint
 from daedalus.tools._common import FRAME_CHARS, clip, error, ok, services_for, tool_config
@@ -407,7 +408,7 @@ async def verify(context: ToolContext, criterion: str, command: str, cwd: str | 
     except TimeoutError:
         timed_out = True
         try:
-            os.killpg(proc.pid, 9)
+            end_tree(proc.pid, hard=True)
         except ProcessLookupError:
             pass
         except PermissionError:

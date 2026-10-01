@@ -15,7 +15,6 @@ import os
 import re
 import secrets
 import shutil
-import signal
 import subprocess
 import threading
 import time
@@ -84,6 +83,7 @@ from daedalus.host.prompts import DEFAULT_RULES, without_turn_context
 from daedalus.host.services import SCRATCH_DIR_NAME
 from daedalus.host.session_runner import TENANT, Attachment, clip_title
 from daedalus.host.transcript_view import full_tool_result, message_view
+from daedalus.processes import end_tree
 from daedalus.providers.llamacpp import discover_llamacpp
 from daedalus.providers.openai_compat import UsageRecord
 from daedalus.search.service import ConversationSearch, SearchBusy
@@ -1098,7 +1098,7 @@ def _end_search(process: subprocess.Popen[str]) -> None:
     subprocess a session of its own precisely so that the whole of it can be ended here.
     """
     try:
-        os.killpg(process.pid, signal.SIGKILL)
+        end_tree(process.pid, hard=True)
     except (OSError, ValueError):
         pass
     process.kill()
@@ -5851,6 +5851,26 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     return api
 
 
+class _AppServer(uvicorn.Server):
+    """uvicorn, with the stop signal it takes for itself handed on to the application as well.
+
+    While it serves, uvicorn replaces the SIGINT, SIGTERM and (on Windows) SIGBREAK handlers with its
+    own and gives the signal back only once it has finished serving. On Linux the application heard
+    the signal anyway, through the event loop's wakeup descriptor. On Windows its handler is a plain
+    ``signal.signal`` one, which uvicorn's replaced: the launcher's CTRL_BREAK reached uvicorn alone,
+    uvicorn waited for the open event streams to end — the app keeps one open for as long as it is
+    looked at — and the bot was killed 25 seconds later, which its next start counted as a crash.
+    """
+
+    def __init__(self, config: uvicorn.Config, on_exit: Callable[[], None]) -> None:
+        super().__init__(config)
+        self._on_exit = on_exit
+
+    def handle_exit(self, sig: int, frame: Any) -> None:
+        super().handle_exit(sig, frame)
+        self._on_exit()
+
+
 async def install(app: Application) -> list[asyncio.Task[None]]:
     token = await app.db.kv_get("api_token")
     if not token:
@@ -5860,7 +5880,8 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     # uvicorn's own 20 s WebSocket pings stay on: they are what notices a phone that dropped off the
     # network while a terminal was open. The size cap is the largest frame a terminal socket takes.
     config = uvicorn.Config(api, host=app.settings.api_host, port=app.settings.api_port, log_level="warning", access_log=False, ws_max_size=TERMINAL_WS_MAX_BYTES)
-    server = uvicorn.Server(config)
+    loop = asyncio.get_running_loop()
+    server = _AppServer(config, lambda: loop.call_soon_threadsafe(app.stopping.set))
     app.extensions["api_token"] = token
     base = app.settings.miniapp_public_url or f"http://127.0.0.1:{app.settings.api_port}"
     # An installation with no other way in gets one at start: a link in a file only the operator can

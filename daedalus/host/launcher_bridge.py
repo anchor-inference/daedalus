@@ -44,6 +44,8 @@ from pathlib import Path
 
 import httpx
 
+from daedalus.processes import pid_alive
+
 logger = logging.getLogger(__name__)
 
 HEADER = "X-Daedalus-Desktop"
@@ -119,6 +121,10 @@ def read(state_dir: Path) -> Launcher | None:
 
 def _alive(pid: int) -> bool:
     """Whether the process that wrote the file is still there. Signal 0 asks without sending one."""
+    if os.name == "nt":
+        # Signal 0 is CTRL_C_EVENT there: the probe failed for every launcher, so a running one
+        # read as gone and the app could never ask it to install a component or restart.
+        return pid_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

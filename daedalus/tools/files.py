@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import difflib
-import os
 import shlex
 from pathlib import Path
 from typing import Any
@@ -14,9 +13,10 @@ from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
 from daedalus.host.services import PathOutsideProject
+from daedalus.processes import end_tree
 from daedalus.tools import search_hint
 from daedalus.tools._common import FRAME_CHARS, clip, error, ok, output_limit, refuse_protected, services_for
-from daedalus.tools.shell import shell_environment
+from daedalus.tools.shell import shell_argv, shell_environment
 
 _MAX_LINE_CHARS = 2000
 #: How far into a file to look for a NUL before calling it binary. A text file
@@ -330,12 +330,12 @@ async def diagnostics(services: Any, target: Path) -> str:
             outcome = await services.exec_backend.run(command, cwd=None, env=None, timeout=DIAGNOSTICS_TIMEOUT)
             code, out = outcome.exit_code, outcome.output
         else:
-            proc = await asyncio.create_subprocess_exec("bash", "-lc", command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=shell_environment(services.session_id), start_new_session=True)
+            proc = await asyncio.create_subprocess_exec(*shell_argv(command), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=shell_environment(services.session_id), start_new_session=True)
             try:
                 raw, _ = await asyncio.wait_for(proc.communicate(), timeout=DIAGNOSTICS_TIMEOUT)
             except TimeoutError:
                 try:
-                    os.killpg(proc.pid, 9)
+                    end_tree(proc.pid, hard=True)
                 except ProcessLookupError:
                     pass
                 await proc.wait()

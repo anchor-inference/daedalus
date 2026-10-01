@@ -497,7 +497,7 @@ def _own_workspace(orch: Orchestrators, session_id: str, path: str) -> LocalFold
     orchestrator keeps what the operator attached before handles existed, which no project folder holds."""
     state = orch.manager.live_state(session_id)
     services = orch.manager.locator_services(session_id)
-    if state is None or services is None or not path.startswith("/"):
+    if state is None or services is None or not os.path.isabs(path):
         return None
     own = Path(os.path.realpath(state.workspace))
     wanted = Path(os.path.realpath(path))

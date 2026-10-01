@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from daedalus.terminals import wire
 from daedalus.terminals.client import Channel, PtydClient, Unavailable
+from daedalus.terminals.endpoint import absolute_on
 from daedalus.terminals.model import (
     Conflict,
     EnvUnavailable,
@@ -286,7 +287,7 @@ class SideChannels:
 
     async def _roots(self, env: str) -> tuple[str, ...]:
         rows = await self.db.fetchall("SELECT path FROM project_folders WHERE env = ?", (env,))
-        roots = {str(r["path"]) for r in rows if str(r["path"]).startswith("/")}
+        roots = {str(r["path"]) for r in rows if absolute_on(env, str(r["path"]))}
         for paths in self._extra_roots.get(env, {}).values():
             roots.update(paths)
         return tuple(sorted(roots))

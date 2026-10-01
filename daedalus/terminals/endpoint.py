@@ -103,6 +103,19 @@ def read_endpoint(run_dir: Path, *, label: str = "terminal service", lock: str =
     raise EndpointMissing("unreachable", f"{run_dir / ENDPOINT_FILE} holds {text[:80]!r}, which is not an endpoint")
 
 
+def absolute_on(env: str, path: str) -> bool:
+    """Whether ``path`` is a full path on the machine a terminal environment runs on.
+
+    A container is Linux and takes a POSIX path. The host is the operator's own machine, which on
+    Windows names its folders ``C:\\Users\\...``: taking only a leading slash for absolute refused
+    every host terminal the app opened there ("a working directory is an absolute path") and left
+    the host's project folders out of the roots the daemon's side channels may read.
+    """
+    if path.startswith("/"):
+        return True
+    return env == "host" and PureWindowsPath(path).is_absolute()
+
+
 def owned_by_root(run_dir: Path) -> str:
     """A note for an empty directory that root owns while this process is not root's only user.
 

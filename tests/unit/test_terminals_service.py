@@ -15,7 +15,17 @@ import pytest
 
 from daedalus.config import TerminalsConfig
 from daedalus.stores.database import Database
-from daedalus.terminals.model import EnvUnavailable, NotFound, Origin, OverCap, Owner, TerminalSpec, Unsupported
+from daedalus.terminals.endpoint import absolute_on
+from daedalus.terminals.model import (
+    EnvUnavailable,
+    InvalidRequest,
+    NotFound,
+    Origin,
+    OverCap,
+    Owner,
+    TerminalSpec,
+    Unsupported,
+)
 from daedalus.terminals.service import Terminals
 from daedalus.terminals.wire import encode_frame
 from tests.support.fake_ptyd import FakePtyd
@@ -510,3 +520,20 @@ async def test_a_daemon_that_reports_no_process_of_its_own_adds_nothing(service:
 
 async def _profiles(service: Terminals) -> int:
     return len(service.costs.profiles())
+
+
+async def test_a_host_terminal_takes_a_windows_folder_and_a_container_does_not(db: Database, run_dir: Path, owners: FakeOwners, cfg: TerminalsConfig, daemon: FakePtyd) -> None:
+    # The host of a native Windows installation names its folders C:\...; a leading slash was the
+    # only absolute path this took, so the app's "On the host" opened nothing there.
+    service = Terminals(db, run_dirs={"container": None, "host": run_dir}, config=lambda: cfg, owners=owners, bus=FakeBus(), public_host="192.0.2.1", port_ranges={"host": "8120-8139"})  # type: ignore[arg-type]
+    await service.start()
+    try:
+        assert await service.wait_available("host")
+        view = await service.create(TerminalSpec(env="host", owner=Owner("free"), cwd="C:\\Users\\operator"))
+        assert view["env"] == "host"
+        with pytest.raises(InvalidRequest, match="absolute path"):
+            await service.create(TerminalSpec(env="host", owner=Owner("free"), cwd="Users\\operator"))
+    finally:
+        await service.close()
+    assert absolute_on("container", "/tmp") and not absolute_on("container", "C:\\Users\\operator")
+    assert absolute_on("host", "/home/operator") and absolute_on("host", "D:\\work") and not absolute_on("host", "work")

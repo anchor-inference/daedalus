@@ -1,0 +1,48 @@
+# The bot as a native installation runs it, on the systems whose Python the Linux tests cannot stand
+# in for. The first Windows release could not start at all — an attribute of `signal` that Windows
+# does not have ended every start before the app answered — and could not stop cleanly once that was
+# fixed, and nothing ran the bot on Windows before the operator did. This starts it the way the
+# supervisor does, waits for it to answer with the boot id it was given, holds the app's event stream
+# open, and stops it the way the launcher does (scripts/native_smoke.py). The tests that pretend to
+# be Windows on Linux (tests/unit/test_processes.py) run here on the real thing as well.
+name: native
+
+on:
+  push:
+    branches: [main]
+    paths: ["daedalus/**", "launcher/**", "scripts/native_smoke.py", "tests/unit/test_processes.py", "pyproject.toml", "uv.lock", ".github/workflows/native.yml"]
+  pull_request:
+    paths: ["daedalus/**", "launcher/**", "scripts/native_smoke.py", "tests/unit/test_processes.py", "pyproject.toml", "uv.lock", ".github/workflows/native.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: daedalus
+    steps:
+      # The core is a path dependency at ../protocore-exp, so both checkouts sit side by side.
+      - uses: actions/checkout@v4
+        with:
+          path: daedalus
+      - uses: actions/checkout@v4
+        with:
+          repository: anchor-inference/protocore-exp
+          path: protocore-exp
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --extra dev
+      - run: uv run --frozen python -m daedalus check
+        env:
+          STATE_DIR: ${{ runner.temp }}/state
+          WORKSPACES_DIR: ${{ runner.temp }}/workspaces
+      - run: uv run --frozen python scripts/native_smoke.py
+      - run: uv run --frozen pytest -q tests/smoke tests/unit/test_processes.py

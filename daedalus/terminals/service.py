@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 from daedalus import load as load_math
 from daedalus.terminals import wire
 from daedalus.terminals.client import Channel, PtydClient, Unavailable
-from daedalus.terminals.endpoint import remember_hook_port, remember_state_dir
+from daedalus.terminals.endpoint import absolute_on, remember_hook_port, remember_state_dir
 from daedalus.terminals.model import (
     ENVS,
     STATUSES,
@@ -70,6 +70,7 @@ logger = logging.getLogger(__name__)
 
 TerminalView = dict[str, Any]
 """A terminal as the API and other subsystems see it; the shape is documented in the API docs."""
+
 
 RECONNECT_FIRST = 0.5
 RECONNECT_MAX = 10.0
@@ -699,7 +700,7 @@ class Terminals(SideChannels):
         self._client(spec.env)
         if not await self.owners.exists(spec.owner):
             raise NotFound(f"no {spec.owner.kind} {spec.owner.id}")
-        if spec.cwd is not None and not spec.cwd.startswith("/"):
+        if spec.cwd is not None and not absolute_on(spec.env, spec.cwd):
             raise InvalidRequest("a working directory is an absolute path")
         if not (20 <= spec.cols <= 500 and 4 <= spec.rows <= 300):
             raise InvalidRequest("a terminal is 20×4 to 500×300")
@@ -824,7 +825,7 @@ class Terminals(SideChannels):
             env=row["env"],
             owner=owner,
             project_id=row["project_id"],
-            cwd=row["cwd"] if row["cwd"].startswith("/") else None,
+            cwd=row["cwd"] if absolute_on(row["env"], row["cwd"]) else None,
             argv=json.loads(row["argv_json"] or "[]") or None,
             title=row["title"],
             sandbox=bool(row["sandbox"]) if sandbox is None else sandbox,

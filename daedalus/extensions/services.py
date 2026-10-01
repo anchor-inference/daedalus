@@ -21,7 +21,6 @@ import asyncio
 import logging
 import os
 import secrets
-import signal
 import socket
 import subprocess
 from datetime import UTC, datetime
@@ -29,6 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.notifications import Draft
+from daedalus.processes import end_tree, pid_alive
 from daedalus.tools.shell import sandbox_argv, shell_environment
 
 if TYPE_CHECKING:
@@ -55,21 +55,13 @@ def parse_range(text: str) -> tuple[int, int]:
     return a, b
 
 
-def pid_alive(pid: int | None) -> bool:
-    """True when the process exists and is not a zombie left for the supervisor."""
-    if not pid:
-        return False
-    try:
-        with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
-            fields = fh.read().rsplit(")", 1)[-1].split()
-        return bool(fields) and fields[0] != "Z"
-    except OSError:
-        return False
-
-
 def port_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # On POSIX the option only lets the probe bind over connections in TIME_WAIT. On Windows it
+        # lets a socket bind over one that is listening, so every port read as free there and a
+        # second service was handed the port a first one was serving on.
+        if os.name != "nt":
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("0.0.0.0", port))
             return True
@@ -273,7 +265,7 @@ class Services:
 
     async def _terminate(self, pid: int) -> None:
         try:
-            os.killpg(pid, signal.SIGTERM)
+            end_tree(pid, hard=False)
         except ProcessLookupError:
             return
         except PermissionError:
@@ -283,7 +275,7 @@ class Services:
             await asyncio.sleep(0.2)
         if pid_alive(pid):
             try:
-                os.killpg(pid, signal.SIGKILL)
+                end_tree(pid, hard=True)
             except (ProcessLookupError, PermissionError):
                 pass
         proc = next((p for p in self._procs.values() if p.pid == pid), None)
