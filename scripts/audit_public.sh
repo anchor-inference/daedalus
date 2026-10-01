@@ -228,10 +228,19 @@ self_check() {
 Co-authored-by: someone <someone@example.invalid>
 Generated with a tool: see the session log at https://example.invalid/session_01"
   )
-  # The kinds the fixture carries, read from the fixture itself rather than from a list written
-  # here: the catalog is the spec, so there is no second copy of it to fall out of step with the
-  # files the check just wrote. Taken before the fixture is removed.
-  kinds=$(cd "$fixture" && ls config-*.env | sort)
+  # The expected carriers are an independent contract. A catalog made only from files that
+  # happened to be written cannot notice a kind whose writer was removed.
+  local expected_kinds missing_carriers
+  expected_kinds=$(printf '%s\n' config-ghp.env config-npm.env config-pat.env config-sk.env | sort)
+  kinds=$(cd "$fixture" && for file in config-*.env; do
+    [ -f "$file" ] && printf '%s\n' "$file"
+  done | sort)
+  missing_carriers=$(comm -23 <(printf '%s\n' "$expected_kinds") <(printf '%s\n' "$kinds"))
+  if [ -n "$missing_carriers" ]; then
+    echo "SELF-CHECK FAILED: fixture carrier missing: $(printf '%s' "$missing_carriers" | tr '\n' ' ')"
+    rm -rf "$fixture"
+    return 1
+  fi
   status=0
   bash "$SELF" "$fixture" > "$fixture/out.txt" 2>&1 || status=$?
   local report
