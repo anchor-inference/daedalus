@@ -371,7 +371,7 @@ jobs:
           if [ "$(cat dist/app/signing.txt)" = "developer-id" ]; then
             mac_open='Double-click **Daedalus** in the folder. The app is signed and notarized, so it opens like any other application.'
           else
-            mac_open='Double-click **Daedalus** in the folder. This build is signed ad-hoc rather than with a Developer ID certificate, so the first time you open a copy that came through a browser, macOS asks: right-click the app, choose **Open**, then **Open** again. Only the first launch asks. A copy installed with the one-liner below never asks at all.'
+            mac_open='Double-click **Daedalus** in the folder. This build is signed ad-hoc rather than with a Developer ID certificate, so macOS refuses a copy that came through a browser ("Apple could not verify…"), and since macOS 15 a right-click **Open** no longer gets past it. Open it once, then **System Settings → Privacy & Security → Open Anyway**; or in Terminal run `xattr -dr com.apple.quarantine Daedalus.app` in the folder. Only the first launch asks. A copy installed with the one-liner below never asks at all.'
           fi
           cat > dist/notes.md <<NOTES
           Daedalus on your own machine: one folder, Docker, and this launcher. It clones the two

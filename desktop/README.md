@@ -40,7 +40,7 @@ signature by the project's key and the download against its `SHA256SUMS`, and un
 curl -fsSL https://raw.githubusercontent.com/anchor-inference/daedalus/main/desktop/install.sh | sh
 ```
 
-On Windows, the same in PowerShell (not yet run on a real Windows machine):
+On Windows, the same in PowerShell (run on Windows by the release workflow's tests):
 
 ```powershell
 irm https://raw.githubusercontent.com/anchor-inference/daedalus/main/desktop/install.ps1 | iex
@@ -77,9 +77,12 @@ the folder deletes the installation.
 
 On **macOS**, double-click `Daedalus`. When the release was built with the signing secrets in place
 the app is signed and notarized and simply opens. When it was not, it is signed ad-hoc, and macOS
-asks once about a copy that arrived through a browser: right-click the app, choose *Open*, then
-*Open* again. A copy fetched by the one-liner above never asks at all — the quarantine attribute
-that makes Gatekeeper ask is set by the browser, and `curl` does not set it. Unzip with Finder or
+refuses a copy that arrived through a browser with "Apple could not verify…". Since macOS 15 the
+right-click *Open* no longer gets past it. Either open it once, then *System Settings → Privacy &
+Security → Open Anyway*, or remove the quarantine in Terminal:
+`xattr -dr com.apple.quarantine /path/to/Daedalus.app`. A copy fetched by the one-liner above never
+asks at all — the quarantine attribute that makes Gatekeeper ask is set by the browser, and `curl`
+does not set it. Unzip with Finder or
 `ditto -x -k`, not with `unzip`: an app bundle carries symlinks and the signature's own extended
 attributes, and `unzip` drops both, which leaves an app macOS calls damaged.
 
