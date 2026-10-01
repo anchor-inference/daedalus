@@ -306,8 +306,8 @@ func TestTheCacheArchiveStaysInsideTheCache(t *testing.T) {
 
 // A mirror is a file URL uv can read: absolute, and with a space escaped rather than ending it.
 func TestTheMirrorIsAFileURL(t *testing.T) {
-	got := fileURL("/home/some one/seed/linux-amd64/python")
-	if got != "file:///home/some%20one/seed/linux-amd64/python" {
+	got := fileURL("/home/someone/My Seeds/linux-amd64/python")
+	if got != "file:///home/someone/My%20Seeds/linux-amd64/python" {
 		t.Fatalf("the mirror is %q", got)
 	}
 }
