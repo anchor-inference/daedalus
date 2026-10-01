@@ -192,7 +192,7 @@ audit() {
 # it had checked itself.
 
 self_check() {
-  local fixture status
+  local fixture status kinds file
   fixture=$(mktemp -d)
   (
     cd "$fixture"
@@ -207,13 +207,19 @@ self_check() {
     # written down, for the same reason the account name above is read from the environment: the
     # file that guards against a value has no business carrying it. None of these is real; each is
     # a repeated byte behind the prefix that gives it its shape.
+    #
+    # One kind per FILE, and not one file carrying all four. With them in one file the arm below
+    # asked only whether the report named that file, and the report went on naming it as long as
+    # any single alternative still matched a line inside it: cutting `github_pat_` out of the rule
+    # left the other three lines matching, `config.env` was named, and the self-check was green
+    # over a rule that had stopped matching a whole kind. Measured -- the surviving substitution is
+    # what put the kinds in separate files. Now each file carries one kind, so the report names a
+    # file only while the alternative that matches it is in the rule, and the arm fails by name.
     filler=$(printf 'A%.0s' $(seq 1 40))
-    {
-      printf '%s_%s\n' ghp "$filler"
-      printf '%s-%s\n' sk "$filler"
-      printf '%s_%s\n' github_pat "$filler"
-      printf '%s:%s\n' 1234567 "$filler"
-    } > config.env
+    printf '%s_%s\n' ghp "$filler"        > config-ghp.env
+    printf '%s-%s\n' sk "$filler"         > config-sk.env
+    printf '%s_%s\n' github_pat "$filler" > config-pat.env
+    printf '%s:%s\n' 1234567 "$filler"    > config-npm.env
     printf 'the console answers at http://%s.%s.9.9:8080 and the proxy at http://%s.%s.0.9:9000\n' \
       192 168 10 10 > notes/network.md
     git add -A
@@ -222,6 +228,19 @@ self_check() {
 Co-authored-by: someone <someone@example.invalid>
 Generated with a tool: see the session log at https://example.invalid/session_01"
   )
+  # The expected carriers are an independent contract. A catalog made only from files that
+  # happened to be written cannot notice a kind whose writer was removed.
+  local expected_kinds missing_carriers
+  expected_kinds=$(printf '%s\n' config-ghp.env config-npm.env config-pat.env config-sk.env | sort)
+  kinds=$(cd "$fixture" && for file in config-*.env; do
+    [ -f "$file" ] && printf '%s\n' "$file"
+  done | sort)
+  missing_carriers=$(comm -23 <(printf '%s\n' "$expected_kinds") <(printf '%s\n' "$kinds"))
+  if [ -n "$missing_carriers" ]; then
+    echo "SELF-CHECK FAILED: fixture carrier missing: $(printf '%s' "$missing_carriers" | tr '\n' ' ')"
+    rm -rf "$fixture"
+    return 1
+  fi
   status=0
   bash "$SELF" "$fixture" > "$fixture/out.txt" 2>&1 || status=$?
   local report
@@ -236,13 +255,29 @@ Generated with a tool: see the session log at https://example.invalid/session_01
     echo "SELF-CHECK FAILED: the committed binary was not named"; printf '%s\n' "$report"; return 1; }
   printf '%s' "$report" | grep -q "notes/build.md" || {
     echo "SELF-CHECK FAILED: the machine path was not named"; printf '%s\n' "$report"; return 1; }
-  printf '%s' "$report" | grep -q "config.env" || {
-    echo "SELF-CHECK FAILED: the provider token was not named"; printf '%s\n' "$report"; return 1; }
+  # One assertion per kind, each naming the file that carries it. A single assertion over all four
+  # kinds in one file answered "the provider token was named" while a kind had stopped being
+  # matched, so the name that must appear in the failure is the one that went missing.
+  local missing="" named=""
+  while read -r file; do
+    [ -n "$file" ] || continue
+    if printf '%s' "$report" | grep -q "$file"; then
+      named="$named $file"
+    else
+      missing="$missing $file"
+    fi
+  done <<< "$kinds"
+  if [ -n "$missing" ]; then
+    echo "SELF-CHECK FAILED: the audit did not name the kinds these files carry:$missing -- the alternative that matches each is not in the rule, and nothing in the run says so"
+    printf '%s\n' "$report"
+    return 1
+  fi
+  echo "self-check: the kinds the report names, one per file:$named"
   printf '%s' "$report" | grep -q "notes/network.md" || {
     echo "SELF-CHECK FAILED: the internal address was not named"; printf '%s\n' "$report"; return 1; }
   printf '%s' "$report" | grep -q "someone@example.invalid" || {
     echo "SELF-CHECK FAILED: the tooling trailer was not named"; printf '%s\n' "$report"; return 1; }
-  echo "self-check: the audit refuses a committed binary and a machine path, a provider token, an internal address and a tooling trailer"
+  echo "self-check: the audit refuses a committed binary and a machine path, each provider token kind by the file that carries it, an internal address and a tooling trailer"
 
   local out
   out=$(bash "$SELF" "$ROOT" 2>&1) || {
