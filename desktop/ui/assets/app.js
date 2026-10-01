@@ -181,18 +181,20 @@ function drawActivity(activity) {
   let count = "";
   if (activity.unit === "bytes" && activity.total > 0) {
     const percent = Math.min(100, Math.floor((activity.done / activity.total) * 100));
-    count = megabytes(activity.done) + " / " + size(activity.total) + " · " + T("progress.percent").replace("%s", percent);
+    count = megabytes(activity.done) + " / " + T("switch.size.mb").replace("%s", megabytes(activity.total)) + " · " + T("progress.percent").replace("%s", percent);
   } else if (activity.unit === "bytes" && activity.done > 0) {
-    count = size(activity.done);
+    count = T("switch.size.mb").replace("%s", megabytes(activity.done));
   } else if (activity.unit === "packages" && activity.total > 0) {
     count = T("activity.packages.count").replace("%s", activity.done).replace("%s", activity.total);
   }
   el("activity-count").textContent = count;
 }
 
-// megabytes is a byte count as the number alone, to sit before "/ 17.6 MB".
+// megabytes is a byte count in decimal megabytes, the number alone: the launcher's log names every
+// archive in the same unit ("downloading git 2.55.0.5 (39.0 MB)"), and the line under it must not
+// say 37 of the same thing.
 function megabytes(bytes) {
-  const value = bytes / (1 << 20);
+  const value = bytes / 1e6;
   return (value < 10 ? value.toFixed(1) : Math.round(value).toString()).replace(".", document.documentElement.lang === "ru" ? "," : ".");
 }
 
