@@ -419,3 +419,19 @@ func readJob(t *testing.T, url string) Job {
 	}
 	return job
 }
+
+// The page's Start ends in the app when it succeeds, and stays on the launcher's page when it fails.
+func TestAStartFromThePageOpensTheApp(t *testing.T) {
+	server := &Server{}
+	var shown []string
+	server.OnFocus(func(_ context.Context, url string) { shown = append(shown, url) })
+	open := func(context.Context) string { return "http://127.0.0.1:8765/api/auth/pair?code=x" }
+	server.startFromPage(context.Background(), func(context.Context) error { return errors.New("did not come up") }, open)
+	if len(shown) != 0 {
+		t.Fatalf("a failed start opened %v", shown)
+	}
+	server.startFromPage(context.Background(), func(context.Context) error { return nil }, open)
+	if len(shown) != 1 || shown[0] != open(context.Background()) {
+		t.Fatalf("a start that succeeded showed %v, not the app", shown)
+	}
+}

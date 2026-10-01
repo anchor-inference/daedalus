@@ -107,6 +107,9 @@ func FindOrphans(p Paths) []Orphan {
 			_ = os.Remove(file)
 			continue
 		}
+		if _, ours := liveChildren.Load(record.PID); ours {
+			continue // a child this launcher is running and keeping alive, not an orphan
+		}
 		// Identity, not just a live pid: the same start time and the same program. A pid that now
 		// names another process is someone else's, and is left alone.
 		marker, markerOK := processStartMarker(record.PID)

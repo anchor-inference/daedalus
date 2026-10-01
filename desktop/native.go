@@ -84,6 +84,13 @@ func rotateLog(path string, limit int64, keep int) error {
 	return os.Rename(path, path+".1")
 }
 
+// liveChildren holds the pid of every child a Process of this launcher is running right now. Their
+// records are in the same folder as a dead launcher's, and nothing in a record tells the two apart:
+// a Start made while the children were up — the page's button after a start that timed out — found
+// its own supervisor, key proxy and browser daemon there, stopped them as "left running by a
+// launcher that did not stop it", and the loops that keep them alive started them straight again.
+var liveChildren sync.Map
+
 // Process is one long-lived child the launcher keeps alive: the supervisor, and the key proxy
 // beside it. Everything about it is decided before it starts, so the supervising goroutine has one
 // job — start it, wait for it, start it again — and can be tested against a child that is a shell.
@@ -190,9 +197,11 @@ func (pr *Process) runOnce(ctx context.Context) error {
 	pr.starts++
 	pr.mu.Unlock()
 	pr.logf("%s started pid=%d", pr.Name, cmd.Process.Pid)
+	liveChildren.Store(cmd.Process.Pid, struct{}{})
 	writeChildRecord(pr.PidFile, ChildRecord{Name: pr.Name, PID: cmd.Process.Pid, Program: childProgram(pr.Argv), Started: time.Now().UTC(), IsolatedConsole: runtime.GOOS == "windows"})
 	err := cmd.Wait()
 	removeChildRecord(pr.PidFile, cmd.Process.Pid)
+	liveChildren.Delete(cmd.Process.Pid)
 	if logFile != nil {
 		logFile.Close()
 	}

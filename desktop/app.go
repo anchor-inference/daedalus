@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -141,6 +142,32 @@ func (a *App) log(format string, args ...any) {
 	if len(a.lines) > logLimit {
 		a.lines = a.lines[len(a.lines)-logLimit:]
 	}
+	a.keepLine(line)
+}
+
+// launcherLog is the launcher's own commentary on disk, beside the children's logs. Started from the
+// desktop, what it printed went to a console window or to nowhere at all: once that was closed, a
+// start that failed left the supervisor's and the daemons' logs and nothing of what the launcher had
+// seen — which start it was, what it stopped, how long it waited for the app.
+const launcherLog = "launcher.log"
+
+// keepLine appends one line to the launcher's log. Called with a.mu held, which also keeps two
+// lines of this process from interleaving; a failure to write is not worth failing anything for.
+func (a *App) keepLine(line string) {
+	if a.paths.RuntimeLogs == "" {
+		return
+	}
+	path := filepath.Join(a.paths.RuntimeLogs, launcherLog)
+	if err := os.MkdirAll(a.paths.RuntimeLogs, 0o755); err != nil {
+		return
+	}
+	_ = rotateLog(path, logLimitBytes, logKeep)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	_, _ = fmt.Fprintf(file, "%s pid=%d %s\n", time.Now().UTC().Format(time.RFC3339Nano), os.Getpid(), line)
 }
 
 // begin claims the launcher for one action. Two starts at once — one from the terminal, one from an

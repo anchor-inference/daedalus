@@ -426,7 +426,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	job := ""
 	switch action {
 	case "start":
-		go func() { _ = s.app.Start(ctx) }()
+		go s.startFromPage(ctx, s.app.Start, s.app.OpenURL)
 	case "stop":
 		go func() { _ = s.app.Stop(ctx) }()
 	case "update":
@@ -477,6 +477,17 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(map[string]any{"started": true, "job": job})
+}
+
+// startFromPage is the page's Start button, which ends where a first start does: in the app. It
+// used to end on the launcher's status page with a link — after a start that had timed out and was
+// tried again, the operator was left looking at the launcher, the pairing link the app had just
+// written was never opened, and the app, when they found it, asked them to sign in.
+func (s *Server) startFromPage(ctx context.Context, start func(context.Context) error, open func(context.Context) string) {
+	if start(ctx) != nil || s.focus == nil {
+		return
+	}
+	s.focus(ctx, open(ctx))
 }
 
 // handleJob answers what became of one action. A read, like the status beside it: it says whether

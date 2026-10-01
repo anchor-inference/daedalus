@@ -84,3 +84,52 @@ func firstWord(line string) string {
 	}
 	return line
 }
+
+// A Start made while this launcher's own children are running — the page's button after a start
+// that timed out — must not take them for a dead launcher's and stop them: the loops keeping them
+// alive started them straight again, and the supervisor's bot was cut off mid-boot.
+func TestAChildThisLauncherRunsIsNotAnOrphan(t *testing.T) {
+	argv := []string{"sh", "-c", "sleep 60"}
+	if runtime.GOOS == "windows" {
+		argv = []string{"ping", "-n", "60", "127.0.0.1"}
+	}
+	p := fixtureData(t)
+	record := filepath.Join(pidsDir(p), "supervisor.json")
+	pr := &Process{
+		Name:    "fake supervisor",
+		Argv:    argv,
+		LogPath: filepath.Join(t.TempDir(), "child.log"),
+		Log:     func(string, ...any) {},
+		PidFile: record,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pr.Start(ctx)
+	defer func() {
+		// ping answers a console break with its statistics and carries on, so the polite stop
+		// would wait out its forty seconds: the child is killed once the loop has been told to stop.
+		pr.mu.Lock()
+		cmd := pr.cmd
+		pr.mu.Unlock()
+		quick, done := context.WithTimeout(ctx, time.Second)
+		defer done()
+		pr.Stop(quick)
+		killGroup(cmd)
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for !exists(record) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !exists(record) {
+		t.Fatal("the child left no record")
+	}
+	if orphans := FindOrphans(p); len(orphans) != 0 {
+		t.Fatalf("this launcher's own child was taken for an orphan: %+v", orphans)
+	}
+	if err := StopOrphans(ctx, p, t.Logf); err != nil {
+		t.Fatal(err)
+	}
+	if !pr.Running() || pr.Starts() != 1 || !exists(record) {
+		t.Fatalf("the child was disturbed: running=%v starts=%d record=%v", pr.Running(), pr.Starts(), exists(record))
+	}
+}
