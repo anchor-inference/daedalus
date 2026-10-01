@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# A first run from the seed the package carries (desktop/seed.go), on a throwaway machine (the
-# release workflow's runner): the launcher, started the way the application starts it, brings a
+# A first run from the seed the package carries (desktop/seed.go), on a throwaway Linux or Mac (the
+# release workflow's runner; Windows has firstrun-smoke.ps1): the launcher, started the way the application starts it, brings a
 # native installation up in a folder of its own, and the run must take everything — the code, uv,
 # ripgrep, the interpreter, every package — from the installation rather than from the network.
 #

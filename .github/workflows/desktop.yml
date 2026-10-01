@@ -333,7 +333,9 @@ jobs:
         shell: powershell
         run: desktop/shell/test/windows-smoke.ps1 -Installer out/Daedalus-Setup-x64.exe
       - name: A first run from the seed, with nothing downloaded
-        run: desktop/shell/test/firstrun-smoke.sh "$PWD/desktop/shell/dist/win-unpacked/daedalus-desktop.exe" "$RUNNER_TEMP/firstrun"
+        shell: powershell
+        timeout-minutes: 20
+        run: desktop/shell/test/firstrun-smoke.ps1 -Launcher desktop/shell/dist/win-unpacked/daedalus-desktop.exe -Root "$env:RUNNER_TEMP\firstrun"
       - uses: actions/upload-artifact@v4
         with:
           name: app-windows
@@ -397,6 +399,7 @@ jobs:
           test -f squashfs-root/seed/manifest.json
           test -f squashfs-root/seed/linux-amd64/wheels.tar.gz
       - name: Install, start, close, remove
+        timeout-minutes: 30
         run: |
           deb="$GITHUB_WORKSPACE/out/$(cd out && ls Daedalus-linux-*amd64*.deb)"
           sudo desktop/shell/test/linux-smoke.sh install "$deb"
@@ -519,6 +522,7 @@ jobs:
           for _ in $(seq 1 60); do pgrep -qf 'Daedalus.app/Contents/MacOS/daedalus-desktop' || break; sleep 1; done
           ! pgrep -qf 'Daedalus.app/Contents/MacOS/daedalus-desktop'
       - name: A first run from the seed, with nothing downloaded
+        timeout-minutes: 20
         run: desktop/shell/test/firstrun-smoke.sh "$RUNNER_TEMP/Daedalus.app/Contents/MacOS/daedalus-desktop" "$RUNNER_TEMP/firstrun"
       - uses: actions/upload-artifact@v4
         with:

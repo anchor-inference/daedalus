@@ -553,8 +553,8 @@ no new way in; even so, the launcher checks everything it takes from it — the 
 interpreter against the pinned hashes, the code and the package cache against the seed's manifest —
 and downloads whatever is missing or does not match instead. The interpreter is installed by uv from
 the seed as a mirror, and uv checks it against its own hash as well. The environment is built offline
-from the package cache; a package the cache does not have (cbor2 has no wheel for an Intel Mac, so one
-builds it) sends the build online, from the same cache.
+from the package cache; a package the cache does not have (cbor2 and cryptography publish no wheel for an
+Intel Mac, so one builds them, as it always did) sends the build online, from the same cache.
 
 The checkouts a seed makes are the release's commit, not `main`: **Update** moves them to `main`
 whenever it is pressed, exactly as before, and a new release's package cache is laid over the old one
