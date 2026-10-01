@@ -179,7 +179,9 @@ function Install-Daedalus {
     $data = Join-Path $target 'data'
     # The per-user folder the application keeps its data in once an older installation's data\ has
     # been moved out of this folder.
-    $standard = Join-Path $env:LOCALAPPDATA 'Daedalus\data'
+    # The folder Windows calls %LOCALAPPDATA%, asked of .NET: the variable is unset when this runs
+    # under pwsh on Linux or macOS (the tests do), and Join-Path refused a null path there.
+    $standard = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Daedalus\data'
     $moved = (-not (Test-Path $data)) -and ((Test-Path (Join-Path $standard '.env')) -or (Test-Path (Join-Path $standard 'mode')))
     if ($moved -and (Test-Path $launcher)) {
         $help = & $launcher --help 2>$null | Out-String
