@@ -318,6 +318,21 @@ button[disabled] { opacity: 0.45; cursor: default; transform: none; }
   min-height: 20px;
   overflow-wrap: anywhere;
 }
+/* The one piece of work inside the step — an archive, the packages — with its own figures: the
+   figures are tabular so that a count going up does not make the line shiver. */
+.doing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  justify-content: space-between;
+  color: var(--text);
+  font-size: 13px;
+  margin-top: 6px;
+}
+.doing .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* "Still working": only shown once nothing has moved for a few seconds, which is when a busy step
+   and a stuck one look alike. */
+.beat { color: var(--muted); font-size: 13px; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .trouble { border-color: rgba(240, 180, 41, 0.4); }
 .trouble h2 { font-size: 17px; }
 /* On this card the sentence is the explanation, not a caption under one: it reads at the size of

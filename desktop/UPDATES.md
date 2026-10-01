@@ -20,13 +20,13 @@ promise it yet and is refused by all three.
 | What | Version | Moved by |
 |---|---|---|
 | the application (the Electron window, `Daedalus.exe`/`Daedalus.app`/`daedalus`) and the launcher beside it (`daedalus-desktop`, `ptyd`, `browserd`, the Mini App build) | the `desktop-vX.Y.Z` release it came from | an installer (`Daedalus-Setup-x64.exe`, the `.dmg`, the `.deb`, the AppImage) or `install.sh` / `install.ps1` on a fresh machine; `daedalus-desktop upgrade` (the application's **Install and restart**, or the installers' bridge) afterwards |
-| the code the stack runs (the two checkouts, and in Docker mode the images) | the tip of `main` and `:latest` when fetched (`repos.go`, `docker.go`) | the first start; `daedalus-desktop update`; the last step of an upgrade |
+| the code the stack runs (the two checkouts, and in Docker mode the images) | on the first start, the release's own commit from the seed it carries (`seed.go`) — the tip of `main` for a launcher without one; afterwards the tip of `main` and `:latest` when fetched (`repos.go`, `docker.go`) | the first start; `daedalus-desktop update`; the last step of an upgrade |
 
-A release does **not** pin what the stack runs: every installation moves to the newest `main`
-whenever `update` runs, and an upgrade ends by doing the same. Pinning a release to its own commit
-and image would be a separate change; nothing below depends on it, and if it lands an upgrade simply
-moves the checkouts to what the new launcher pins. The release signature (SIGNING.md) covers the
-launcher's own files and never these checkouts, which are fetched over TLS and signed by nobody.
+A release pins only where a first run starts: the seed in every package holds both checkouts at
+the release's commit, and the runtime and the packages for it, so a first run downloads nothing.
+After that every installation moves to the newest `main` whenever `update` runs, and an upgrade ends
+by doing the same. The release signature (SIGNING.md) covers the seed with the rest of the package;
+the checkouts `update` fetches are fetched over TLS and signed by nobody.
 
 The app's database migrations run on the start that follows a change of the checkouts. They are
 treated as irreversible: the only way back is the data as it was before.
@@ -66,7 +66,11 @@ executable and its folders, with the launcher, its daemons and the Mini App besi
 names every launcher since v0.10 looks for (`daedalus-desktop-windows-amd64.zip`,
 `Daedalus-macOS.zip`, `daedalus-desktop-linux-<arch>.tar.gz`). Nothing about `upgrade` changed for
 it: the archive's top-level items are swapped in as before, now a few dozen of them instead of
-four, and a rollback moves the ones that were new to `rejected/` as it always did. So an
+four, and a rollback moves the ones that were new to `rejected/` as it always did. One of them is
+the seed (`seed/`, a hundred-odd megabytes of archives a first run unpacks): it is swapped like the
+rest, which makes the launcher's part of the backup an upgrade takes that much larger — a few
+seconds more to write and read back — and a new release's package cache is laid over the old one on
+the start that follows. So an
 installation from any older archive upgrades into the application with its own `upgrade` or the
 installers' bridge, and the per-user Windows install (`%LOCALAPPDATA%\Programs\Daedalus`) and
 `/Applications/Daedalus.app` are upgraded in place the same way: both are folders the operator may

@@ -13,7 +13,9 @@
 #
 # The archives keep the names every launcher since v0.10 looks for, so an installation from any
 # of them upgrades into the application. Every file goes into SHA256SUMS, and the operator's one
-# signature over it (desktop/SIGNING.md) covers installers and archives alike.
+# signature over it (desktop/SIGNING.md) covers installers and archives alike — and with them the
+# seed each one carries (desktop/seed.go): the code at the release's commit, the pinned runtime and
+# uv's packages for its lock, so that a first run downloads none of it.
 #
 # The launcher is plain Go and cross-compiled for every system from one Linux runner. ptyd is Go with
 # a C library (the screen emulator, built with the pinned Zig): Linux and Windows cross-compiled on
@@ -230,6 +232,40 @@ jobs:
           path: desktop/dist
           retention-days: 3
 
+  # The seed: what a first run used to download, made once here for every system and put in each
+  # package. The code is this commit's tree as git archive makes it — the tree codeload serves, the
+  # export-ignore rules and all — and the core's main as it is now; the runtime archives are fetched
+  # through the launcher's own pinned table and refused on a wrong hash; the package caches are
+  # filled from the lock with every wheel checked against it. make-seed ends with a first run on this
+  # runner from its own output, offline, and each system's package job does one more on its own.
+  seed:
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Build
+        run: |
+          mkdir -p seed-src
+          git archive --format=tar.gz --prefix="daedalus-$GITHUB_SHA/" -o seed-src/daedalus.tar.gz "$GITHUB_SHA"
+          git clone --quiet --depth 1 https://github.com/anchor-inference/protocore-exp seed-src/core
+          core=$(git -C seed-src/core rev-parse HEAD)
+          git -C seed-src/core archive --format=tar.gz --prefix="protocore-exp-$core/" -o "$PWD/seed-src/protocore-exp.tar.gz" HEAD
+          cd desktop
+          go run . make-seed --out "$GITHUB_WORKSPACE/seed" \
+            --platforms windows/amd64,darwin/arm64,darwin/amd64,linux/amd64,linux/arm64 \
+            --code ../seed-src/daedalus.tar.gz --code-commit "$GITHUB_SHA" \
+            --core ../seed-src/protocore-exp.tar.gz --core-commit "$core"
+          du -sh ../seed/*
+          cat ../seed/manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seed
+          path: seed
+          retention-days: 3
+
   # The app itself, built once and put in every package. A native installation has no image to bake
   # it into and may have no node to build it with, so without this the launcher would fetch a Node
   # toolchain on a first run just to produce a few megabytes of static files.
@@ -256,7 +292,7 @@ jobs:
   # operator would, silently: installed, started until the window shows the launcher's page,
   # closed with nothing left running, and uninstalled twice — keeping the data, then deleting it.
   app-windows:
-    needs: [engine, ptyd, browserd, miniapp]
+    needs: [engine, ptyd, browserd, miniapp, seed]
     runs-on: windows-latest
     defaults:
       run:
@@ -271,6 +307,8 @@ jobs:
         with: { name: browserd, path: dl/browserd }
       - uses: actions/download-artifact@v4
         with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
+      - uses: actions/download-artifact@v4
+        with: { name: seed, path: dl/seed }
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -278,7 +316,8 @@ jobs:
         working-directory: desktop/shell
         run: |
           if [ "$IS_RELEASE" = true ]; then version="${GITHUB_REF_NAME#desktop-v}"; else version=0.0.0; fi
-          mkdir -p stage/win-x64
+          mkdir -p stage/win-x64 stage/seed-win-x64
+          cp -R ../../dl/seed/manifest.json ../../dl/seed/code ../../dl/seed/windows-amd64 stage/seed-win-x64/
           cp ../../dl/engine/daedalus-desktop-windows-amd64.exe stage/win-x64/daedalus-desktop.exe
           cp ../../dl/ptyd/ptyd-windows-amd64.exe stage/win-x64/ptyd.exe
           cp ../../dl/browserd/browserd-windows-amd64.exe stage/win-x64/browserd.exe
@@ -293,6 +332,10 @@ jobs:
       - name: Install, start, close, uninstall
         shell: powershell
         run: desktop/shell/test/windows-smoke.ps1 -Installer out/Daedalus-Setup-x64.exe
+      - name: A first run from the seed, with nothing downloaded
+        shell: powershell
+        timeout-minutes: 20
+        run: desktop/shell/test/firstrun-smoke.ps1 -Launcher desktop/shell/dist/win-unpacked/daedalus-desktop.exe -Root "$env:RUNNER_TEMP\firstrun"
       - uses: actions/upload-artifact@v4
         with:
           name: app-windows
@@ -303,7 +346,7 @@ jobs:
   # x86-64 .deb is then installed on this runner, started under a virtual display until its window
   # shows the launcher's page, closed, and removed — the user's data staying.
   app-linux:
-    needs: [engine, ptyd, browserd, miniapp]
+    needs: [engine, ptyd, browserd, miniapp, seed]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -315,6 +358,8 @@ jobs:
         with: { name: browserd, path: dl/browserd }
       - uses: actions/download-artifact@v4
         with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
+      - uses: actions/download-artifact@v4
+        with: { name: seed, path: dl/seed }
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -324,7 +369,8 @@ jobs:
           if [ "$IS_RELEASE" = true ]; then version="${GITHUB_REF_NAME#desktop-v}"; else version=0.0.0; fi
           for pair in amd64:x64 arm64:arm64; do
             goarch=${pair%:*} arch=${pair#*:}
-            mkdir -p "stage/linux-$arch"
+            mkdir -p "stage/linux-$arch" "stage/seed-linux-$arch"
+            cp -R ../../dl/seed/manifest.json ../../dl/seed/code "../../dl/seed/linux-$goarch" "stage/seed-linux-$arch/"
             cp "../../dl/engine/daedalus-desktop-linux-$goarch" "stage/linux-$arch/daedalus-desktop"
             cp "../../dl/ptyd/ptyd-linux-$goarch" "stage/linux-$arch/ptyd"
             cp "../../dl/browserd/browserd-linux-$goarch" "stage/linux-$arch/browserd"
@@ -350,10 +396,14 @@ jobs:
           "$appimage" --appimage-extract >/dev/null
           squashfs-root/daedalus-desktop --version
           test -f squashfs-root/miniapp-dist/index.html
+          test -f squashfs-root/seed/manifest.json
+          test -f squashfs-root/seed/linux-amd64/wheels.tar.gz
       - name: Install, start, close, remove
+        timeout-minutes: 30
         run: |
           deb="$GITHUB_WORKSPACE/out/$(cd out && ls Daedalus-linux-*amd64*.deb)"
           sudo desktop/shell/test/linux-smoke.sh install "$deb"
+          desktop/shell/test/firstrun-smoke.sh /opt/Daedalus/daedalus-desktop "$RUNNER_TEMP/firstrun"
           desktop/shell/test/linux-smoke.sh run
           sudo desktop/shell/test/linux-smoke.sh remove "$HOME/.local/share/daedalus/data"
       - uses: actions/upload-artifact@v4
@@ -366,7 +416,7 @@ jobs:
   # open it the first time), in a .dmg to drag into Applications and in the zip the launcher's upgrade
   # installs from. The .dmg is then mounted and its application checked and started.
   app-macos:
-    needs: [engine, ptyd, browserd, miniapp]
+    needs: [engine, ptyd, browserd, miniapp, seed]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -378,6 +428,8 @@ jobs:
         with: { name: browserd, path: dl/browserd }
       - uses: actions/download-artifact@v4
         with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
+      - uses: actions/download-artifact@v4
+        with: { name: seed, path: dl/seed }
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -400,6 +452,9 @@ jobs:
           chmod +x stage/mac-universal/*
           cp -R stage/mac-universal stage/mac-x64
           cp -R stage/mac-universal stage/mac-arm64
+          # Both Macs' seeds, the same folder in both halves of the universal application.
+          mkdir -p stage/seed-mac
+          cp -R ../../dl/seed/manifest.json ../../dl/seed/code ../../dl/seed/darwin-arm64 ../../dl/seed/darwin-amd64 stage/seed-mac/
           cp ../../docs/brand/avatar-bot.png build/icon.png
           npm ci --no-audit --no-fund
           # A Developer ID when all five secrets are there: electron-builder signs with it, with the
@@ -446,6 +501,8 @@ jobs:
           lipo -archs "$mount/Daedalus.app/Contents/MacOS/daedalus-desktop"
           "$mount/Daedalus.app/Contents/MacOS/daedalus-desktop" --version
           test -f "$mount/Daedalus.app/Contents/Resources/miniapp-dist/index.html"
+          test -f "$mount/Daedalus.app/Contents/Resources/seed/manifest.json"
+          test -f "$mount/Daedalus.app/Contents/Resources/seed/darwin-arm64/wheels.tar.gz"
           plutil -extract CFBundleURLTypes xml1 -o - "$mount/Daedalus.app/Contents/Info.plist" | grep -q '<string>daedalus</string>'
           ditto "$mount/Daedalus.app" "$RUNNER_TEMP/Daedalus.app"
           hdiutil detach "$mount"
@@ -464,6 +521,9 @@ jobs:
           osascript -e 'quit app "Daedalus"' || kill %1
           for _ in $(seq 1 60); do pgrep -qf 'Daedalus.app/Contents/MacOS/daedalus-desktop' || break; sleep 1; done
           ! pgrep -qf 'Daedalus.app/Contents/MacOS/daedalus-desktop'
+      - name: A first run from the seed, with nothing downloaded
+        timeout-minutes: 20
+        run: desktop/shell/test/firstrun-smoke.sh "$RUNNER_TEMP/Daedalus.app/Contents/MacOS/daedalus-desktop" "$RUNNER_TEMP/firstrun"
       - uses: actions/upload-artifact@v4
         with:
           name: app-macos

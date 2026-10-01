@@ -41,12 +41,14 @@ type App struct {
 	jobOrder []string
 	jobSeq   int
 
-	// Where a start has got to, and — while something with a known size is being downloaded — how
-	// far through it is. Both are for the progress page: the log says what is happening, these say
-	// how much of it is left.
-	stage     Stage
-	stageDone int64
-	stageSize int64
+	// Where a start has got to, what inside that stage is moving, and when either last moved. All of
+	// it is for the progress page: the log says what is happening, the activity how much of it is
+	// left, and the two times let the page say "still working" when nothing has said anything for a
+	// while — a step that is busy and silent looked exactly like a hung one.
+	stage    Stage
+	activity *Activity
+	stageAt  time.Time
+	movedAt  time.Time
 
 	// startedAt is when the stack was last brought up, and paired records that a link which signs
 	// the operator in has already been handed to a browser since. Both exist so that the launcher
@@ -92,24 +94,25 @@ const jobLimit = 32
 func NewApp(p Paths) *App {
 	app := &App{paths: p, mode: StoredMode(p), jobs: map[string]*Job{}}
 	app.native = NewNative(p, app.log)
-	app.native.OnProgress(app.enter, app.downloaded)
+	app.native.OnProgress(app.enter, app.report)
 	return app
 }
 
-// enter records which piece of a start the launcher has reached. Any progress already counted
-// belongs to the piece that is over, so it goes with it.
+// enter records which piece of a start the launcher has reached. Any activity already shown belongs
+// to the piece that is over, so it goes with it.
 func (a *App) enter(stage Stage) {
 	a.mu.Lock()
-	a.stage, a.stageDone, a.stageSize = stage, 0, 0
+	now := time.Now()
+	a.stage, a.activity, a.stageAt, a.movedAt = stage, nil, now, now
 	a.mu.Unlock()
 }
 
-// downloaded records how much of a download of a known size is done. Only the runtime has one: an
-// image pull reports its own progress to a terminal nobody is reading, and an honest bar that does
-// not know is better than a made-up one that does.
-func (a *App) downloaded(done, total int64) {
+// report records what inside the current stage is moving. An image pull is not reported: it tells its
+// progress to a terminal nobody is reading, and an honest line that does not know is better than a
+// made-up bar that does.
+func (a *App) report(activity Activity) {
 	a.mu.Lock()
-	a.stageDone, a.stageSize = done, total
+	a.activity, a.movedAt = &activity, time.Now()
 	a.mu.Unlock()
 }
 
@@ -142,6 +145,7 @@ func (a *App) log(format string, args ...any) {
 	fmt.Println(line)
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.movedAt = time.Now()
 	a.lines = append(a.lines, time.Now().Format("15:04:05")+"  "+line)
 	if len(a.lines) > logLimit {
 		a.lines = a.lines[len(a.lines)-logLimit:]
@@ -199,7 +203,7 @@ func (a *App) end(id string, err error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.busy = ""
-	a.stage, a.stageDone, a.stageSize = StageIdle, 0, 0
+	a.stage, a.activity = StageIdle, nil
 	if err != nil {
 		a.failure = err.Error()
 	}
@@ -248,7 +252,7 @@ func (a *App) start(ctx context.Context) error {
 		return err
 	}
 	a.enter(StageCheckouts)
-	if err := EnsureRepos(ctx, a.paths, dockerGit(a.paths), a.log); err != nil {
+	if err := ensureReposFrom(ctx, a.paths, dockerGit(a.paths), a.log, a.report, a.native.openSeed()); err != nil {
 		return err
 	}
 	if err := WriteOverride(a.paths); err != nil {
@@ -775,6 +779,12 @@ type Status struct {
 	Steps []string `json:"steps"`
 	Done  int64    `json:"done"`
 	Size  int64    `json:"size"`
+	// Activity is what inside the stage is moving (progress.go), Elapsed how long the stage has been
+	// running and Quiet how long since anything — a line of the log, a byte of a download — moved,
+	// both in whole seconds. The page says "still working" from the last two.
+	Activity *Activity `json:"activity,omitempty"`
+	Elapsed  int64     `json:"elapsed"`
+	Quiet    int64     `json:"quiet"`
 
 	// Change is the agent's own code: a commit waiting for a restart, or what became of the last
 	// one. Empty unless the stack is running, because the container is what holds the answer.
@@ -806,9 +816,18 @@ func (a *App) Status(ctx context.Context) Status {
 		FailureKey: FailureKey(a.failure),
 		Log:        append(make([]string, 0, len(a.lines)), a.lines...),
 		Stage:      string(a.stage),
-		Done:       a.stageDone,
-		Size:       a.stageSize,
 		Upgrade:    a.offer,
+	}
+	if a.activity != nil {
+		activity := *a.activity
+		status.Activity = &activity
+		if activity.Unit == unitBytes {
+			status.Done, status.Size = activity.Done, activity.Total
+		}
+	}
+	if a.stage != StageIdle {
+		status.Elapsed = int64(time.Since(a.stageAt) / time.Second)
+		status.Quiet = int64(time.Since(a.movedAt) / time.Second)
 	}
 	status.Steps = Stages(a.mode)
 	a.mu.Unlock()

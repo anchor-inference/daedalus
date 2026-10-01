@@ -121,6 +121,7 @@ function drawProgress(status) {
   if (ready) {
     track.classList.add("done");
   } else if (status.size > 0) {
+    // The bar is the activity's own: one archive at a time, against its own size.
     track.classList.add("determinate");
     track.firstElementChild.style.width = Math.min(100, Math.round((status.done / status.size) * 100)) + "%";
   } else {
@@ -157,7 +158,51 @@ function drawProgress(status) {
         : T("progress.working");
   el("livelog").textContent = ready ? "" : (status.log || []).slice(-1)[0] || "";
   el("livelog").title = el("livelog").textContent;
+  drawActivity(ready || idle ? null : status.activity);
+  // The heartbeat: a step that has said nothing for a few seconds says it is still working and for
+  // how long. Silence was the whole of what made a long download look like a hang.
+  const quiet = !ready && !idle && status.stage && status.quiet >= heartbeatAfter;
+  el("heartbeat").hidden = !quiet;
+  if (quiet) el("heartbeat").textContent = T("progress.heartbeat").replace("%s", duration(status.elapsed));
   if (ready) setTimeout(() => (location.href = "/status"), 900);
+}
+
+// heartbeatAfter is how many seconds of nothing moving it takes for the page to say it is still
+// working. Less, and it flickers between two lines of a busy log; more, and it is late.
+const heartbeatAfter = 3;
+
+// drawActivity is the line for the one thing moving inside the step: what it is, and its figures —
+// bytes against the pinned size and a percentage when the size is known, the count alone when it is
+// not, and for the environment uv's own packages started and finished.
+function drawActivity(activity) {
+  el("activity").hidden = !activity;
+  if (!activity) return;
+  el("activity-what").textContent = T("activity." + activity.kind).replace("%s", activity.name || "");
+  let count = "";
+  if (activity.unit === "bytes" && activity.total > 0) {
+    const percent = Math.min(100, Math.floor((activity.done / activity.total) * 100));
+    count = megabytes(activity.done) + " / " + T("switch.size.mb").replace("%s", megabytes(activity.total)) + " · " + T("progress.percent").replace("%s", percent);
+  } else if (activity.unit === "bytes" && activity.done > 0) {
+    count = T("switch.size.mb").replace("%s", megabytes(activity.done));
+  } else if (activity.unit === "packages" && activity.total > 0) {
+    count = T("activity.packages.count").replace("%s", activity.done).replace("%s", activity.total);
+  }
+  el("activity-count").textContent = count;
+}
+
+// megabytes is a byte count in decimal megabytes, the number alone: the launcher's log names every
+// archive in the same unit ("downloading git 2.55.0.5 (39.0 MB)"), and the line under it must not
+// say 37 of the same thing.
+function megabytes(bytes) {
+  const value = bytes / 1e6;
+  return (value < 10 ? value.toFixed(1) : Math.round(value).toString()).replace(".", document.documentElement.lang === "ru" ? "," : ".");
+}
+
+// duration is a number of seconds as the page says it: "47 s", "2 min 05 s".
+function duration(seconds) {
+  const s = Math.max(0, Math.floor(seconds || 0));
+  if (s < 60) return T("duration.s").replace("%s", s);
+  return T("duration.ms").replace("%s", Math.floor(s / 60)).replace("%s", String(s % 60).padStart(2, "0"));
 }
 
 // ---- the status page ---------------------------------------------------------------------------

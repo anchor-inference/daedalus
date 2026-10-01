@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -274,6 +276,58 @@ func composeStream(ctx context.Context, p Paths, telegram bool, args ...string) 
 // stderr and the useful part of a failure is usually there.
 func runDocker(ctx context.Context, args ...string) (string, error) {
 	return runCmd(dockerCmd(ctx, args...))
+}
+
+// runStreaming is runCmd with every line handed to onLine as it is written, for a program whose
+// output is the only sign that it is still working. A carriage return ends a line too: a program that
+// redraws one line in place would otherwise be heard only when it finished.
+func runStreaming(cmd *exec.Cmd, onLine func(string)) (string, error) {
+	name := cmd.Args[0]
+	args := cmd.Args[1:]
+	reader, writer := io.Pipe()
+	var buf bytes.Buffer
+	cmd.Stdout = io.MultiWriter(&buf, writer)
+	cmd.Stderr = cmd.Stdout
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		scanner := bufio.NewScanner(reader)
+		scanner.Buffer(make([]byte, 64<<10), 1<<20)
+		scanner.Split(scanLinesOrReturns)
+		for scanner.Scan() {
+			onLine(scanner.Text())
+		}
+		// A line longer than the buffer stops the scanner; the rest is drained so the program is
+		// never blocked writing to a pipe nobody reads.
+		_, _ = io.Copy(io.Discard, reader)
+	}()
+	err := cmd.Run()
+	writer.Close()
+	<-done
+	if err != nil {
+		return buf.String(), fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(buf.String()))
+	}
+	return buf.String(), nil
+}
+
+// scanLinesOrReturns splits on \n, \r\n and a bare \r.
+func scanLinesOrReturns(data []byte, atEOF bool) (int, []byte, error) {
+	for i, b := range data {
+		if b == '\n' || b == '\r' {
+			end := i + 1
+			if b == '\r' && i+1 < len(data) && data[i+1] == '\n' {
+				end = i + 2
+			} else if b == '\r' && i+1 == len(data) && !atEOF {
+				// A \r at the end of what has arrived may be the first half of a \r\n.
+				return 0, nil, nil
+			}
+			return end, data[:i], nil
+		}
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 func runCmd(cmd *exec.Cmd) (string, error) {

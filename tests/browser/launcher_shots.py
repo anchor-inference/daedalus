@@ -42,13 +42,23 @@ TELEGRAM_BOT_TOKEN=not-a-token
 TELEGRAM_OWNER_ID=1
 """
 
+# A first run from the seed the application carries: nothing downloaded, everything taken from the
+# installation and checked.
 LOG = [
-    "10:24:01  downloading uv 0.4.18 (17.2 MB)",
-    "10:24:06  downloading ripgrep 14.1.0 (2.5 MB)",
-    "10:24:09  installing python 3.12.6",
-    "10:24:44  fetching daedalus",
-    "10:25:02  fetching protocore-exp",
-    "10:25:19  building the environment (this is the long part of a first run)",
+    "10:24:01  uv 0.12.15 comes with the installation (17.6 MB)",
+    "10:24:01  rg 15.2.0 comes with the installation (1.8 MB)",
+    "10:24:02  git 2.55.0.5 comes with the installation (39.0 MB)",
+    "10:24:03  installing python 3.12 from the copy that came with the installation",
+    "10:24:05  daedalus comes with the installation (commit 0123456789ab)",
+    "10:24:13  protocore-exp comes with the installation (commit ba9876543210)",
+    "10:24:14  building the environment from the packages that came with the installation",
+    "10:24:15  uv: Building daedalus @ file:///home/someone/.local/share/daedalus/data/daedalus",
+]
+
+# A launcher with no seed, on a slow line: the download it is in the middle of.
+DOWNLOAD_LOG = [
+    "10:24:01  downloading uv 0.12.15 (17.6 MB)",
+    "10:24:06  downloading git 2.55.0.5 (39.0 MB)",
 ]
 
 STAGES = ["runtime", "checkouts", "environment", "start"]
@@ -74,6 +84,8 @@ def status(**over: object) -> dict:
         "steps": STAGES,
         "done": 0,
         "size": 0,
+        "elapsed": 0,
+        "quiet": 0,
         "docker_missing": False,
     }
     base.update(over)
@@ -83,13 +95,34 @@ def status(**over: object) -> dict:
 # The three answers the pages are shown, one per picture.
 SHOTS = {
     "setup": ("/setup", status(configured=False, repos=False)),
+    # The environment, built from the seed: uv's own count, and the heartbeat once nothing has
+    # moved for a few seconds.
     "progress": (
         "/progress",
-        status(busy="start", stage="environment", log=LOG, running=0),
+        status(
+            busy="start",
+            stage="environment",
+            log=LOG,
+            running=0,
+            activity={"kind": "packages", "name": "Building daedalus", "done": 1, "total": 2, "unit": "packages"},
+            elapsed=14,
+            quiet=5,
+        ),
     ),
+    # One archive of a first run with no seed: its megabytes against its pinned size.
     "download": (
         "/progress",
-        status(busy="start", stage="runtime", done=41_000_000, size=115_000_000, log=LOG[:1], running=0),
+        status(
+            busy="start",
+            stage="runtime",
+            done=16_900_000,
+            size=38_989_688,
+            log=DOWNLOAD_LOG,
+            running=0,
+            activity={"kind": "download", "name": "git 2.55.0.5", "done": 16_900_000, "total": 38_989_688, "unit": "bytes"},
+            elapsed=31,
+            quiet=0,
+        ),
     ),
     "status": (
         "/status",

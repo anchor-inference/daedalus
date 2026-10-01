@@ -2,8 +2,9 @@
 
 **Daedalus** is a desktop application for Windows, macOS and Linux: install it like any other, open
 it from the Start menu, Launchpad or the application menu, and it sets itself up in its own window —
-it fetches the two repositories, asks the handful of questions the installation needs, writes the
-environment files — and then runs the agent one of two ways and shows the app in that same window.
+it lays out the two repositories it came with, asks the handful of questions the installation needs,
+writes the environment files — and then runs the agent one of two ways and shows the app in that same
+window.
 
 It is two programs in one installation. The **application** (`Daedalus.exe`, `Daedalus.app`,
 `daedalus`; Electron, in `shell/`) is the window, the menu entry, the icon and the notifications.
@@ -19,9 +20,9 @@ launcher is also the command line, for everything below that a terminal does.
 |---|---|---|
 | **What it needs** | nothing | Docker Desktop (macOS, Windows) or Docker Engine with the compose plugin |
 | **What runs the agent** | a process under the launcher, out of a private folder of pinned, checksummed binaries | a container from one published image, with its own filesystem and its own network |
-| **First run downloads** | **103 MB** measured on Linux x86-64; ~96 MB on macOS (CPython is half the size there), ~148 MB on Windows (MinGit) | **114 MB** to pull the runtime image — 478 MB once unpacked — plus Docker itself, which is a ~600 MB application with a multi-gigabyte VM disk behind it |
+| **First run downloads** | **nothing**: the code, the runtime and every package come inside the application ([the seed](#the-seed)); a launcher without one, built from source, downloads 103 MB on Linux x86-64, ~96 MB on macOS, ~148 MB on Windows | **114 MB** to pull the runtime image — 478 MB once unpacked — plus Docker itself, which is a ~600 MB application with a multi-gigabyte VM disk behind it |
 | **On disk** | 245 MB of runtime in the user's cache folder (73 MB of it a wheel cache you can delete), 390 MB for the whole installation | 478 MB of image, plus the volumes |
-| **Start to app** | 26 s from an empty folder, **4.3 s** warm | the image pull, then seconds; Docker Desktop itself must be up first |
+| **Start to app** | **24 s** from an empty folder on a Windows 11 desktop, whatever the line (37–126 s when it downloaded), **4.3 s** warm | the image pull, then seconds; Docker Desktop itself must be up first |
 | **Browser** | `daedalus-desktop install browser` — both Chromium builds into the runtime's `browsers/` ([the agent's browser](#the-agents-browser)) | `COMPOSE_PROFILES=browser`: the `browser` service from the `:browser` tag of the same image, sharing every layer below the last |
 | **Isolation** | **no container boundary** — `Exec` runs as you, behind the policy rules ([the isolation, honestly](#the-isolation-honestly)) | a command that goes wrong stops at the container's edge |
 
@@ -34,9 +35,11 @@ first, the app once it answers — and nothing in the browser. A link in the app
 machine opens in your browser; everything on this machine stays in the window.
 [The window](#the-window) has the rest.
 
-The application is about 100 MB to download (Electron's own Chromium is most of it). In Docker mode
-everything that runs is in containers; in native mode the launcher downloads what it needs into a
-runtime folder in the user's cache location and runs it from there.
+The application is about 230 MB to download on Windows and Linux and 400 MB on macOS: Electron's own
+Chromium, and [the seed](#the-seed) — the code, the runtime and the packages a first run would
+otherwise download (about 115 MB for one system; the Mac carries both of its own). In Docker mode
+everything that runs is in containers; in native mode the launcher lays the runtime out into a folder
+in the user's cache location and runs it from there.
 
 ## Get it
 
@@ -131,9 +134,10 @@ same move, and refuses the same way.
    looked for in the places the installers put it — a program started from Finder inherits a PATH
    with none of them in it — and without it the launcher says what to install and waits there. In
    native mode nothing is checked, because nothing is expected.
-2. The two repositories are fetched into the folder as GitHub tarballs and committed there — with
-   `git` running inside the agent's own image in Docker mode, and with the runtime's own git in
-   native mode. Each checkout is a real local history with
+2. The two repositories are unpacked into the folder from the copy the application carries — the
+   tree of the release's own commit ([the seed](#the-seed)) — or, by a launcher with no such copy,
+   fetched as GitHub tarballs of `main`, and committed there — with `git` running inside the agent's
+   own image in Docker mode, and with the runtime's own git in native mode. Each checkout is a real local history with
    no remote — an update is the next commit on top of it.
 3. The application's window shows the launcher's page (`http://127.0.0.1:8770`, or any free port) with
    the whole of the setup on it: how it runs, one model provider key, and a daily spending cap that
@@ -143,8 +147,9 @@ same move, and refuses the same way.
 4. **Docker:** the image is pulled (or built, if there is no published image for your platform),
    the stack comes up, and the same window moves to the app. One image, two containers from it: the
    agent, and the key proxy that holds the provider keys.
-   **Native:** the runtime is downloaded and checked, the environment is built from the checkout's
-   own lock file, and the launcher starts the supervisor and the key proxy as its own child
+   **Native:** the runtime is taken from the seed and checked (downloaded where there is none), the
+   environment is built from the checkout's own lock file out of the packages the seed carries,
+   offline, and the launcher starts the supervisor and the key proxy as its own child
    processes. Same two programs, same key file, no container between them and the machine.
 5. **The app asks for a model, and that is the last step.** A key is an address; which model runs on
    it — and what it costs — is yours to pick, so the installation ships with none. The app opens on
@@ -174,9 +179,12 @@ The launcher serves three pages of its own, on the loopback address and nowhere 
   opening this page again to change one value cannot blank the others; emptying one on purpose is
   the tick under it.
 - **The wait** (`/progress`) — where a start has got to: the steps of the mode you are in, ticked off
-  as they pass, and one line of the launcher's own commentary under them. The bar is indeterminate
-  until something knows a size and determinate once it does — the runtime archives are pinned, so
-  their sizes are known before the first byte is fetched. A failure becomes one calm card with the
+  as they pass; under them the one thing that is moving — an archive downloaded or unpacked with its
+  megabytes, its total and a percentage, uv's own lines while the environment is built — and one line
+  of the launcher's own commentary. The bar is the moving thing's: determinate whenever its size is
+  known (the runtime archives are pinned, so their sizes are known before the first byte), and
+  indeterminate otherwise. When nothing has moved for three seconds the page says *Still working* and
+  for how long, so a long step never looks like a hung one. A failure becomes one calm card with the
   button that tries again.
 - **The status** (`/status`) — what is running, the buttons the command line has, and the log behind
   a summary.
@@ -278,6 +286,10 @@ the tree the launcher was built from. So a launcher built from a branch whose Py
 published yet pairs with code that does not have that branch's fixes, and the two disagree silently:
 the launcher passes `KEYPROXY_HOST=127.0.0.1` and a proxy that predates that variable binds every
 interface anyway.
+
+A first run from the seed is the exception: its checkouts are the commit the launcher was built
+from, and the core's `main` of the same moment, so the two agree from the start. The next update moves
+them to `main` like any other.
 
 Release in the order **core → checkout → launcher**: publish the Python to the branch the launcher
 fetches first, and cut the `desktop-v*` tag afterwards. Where the two must be able to disagree —
@@ -497,14 +509,20 @@ was. What that changes, in both directions.
 ### What is downloaded, and where
 
 Everything goes into the runtime folder and nowhere else. No package manager is run, no PATH is
-changed, nothing is installed system-wide. Every version is pinned in `desktop/runtime.go` next to
-the SHA-256 the publisher published, and **a download whose hash does not match is not used**: it is
-refused by name and the start fails saying so.
+changed, nothing is installed system-wide — uv is told not to put a `python3.12` into `~/.local/bin`
+and not to register the interpreter in the Windows registry, both of which a plain
+`uv python install` does. Every version is pinned in `desktop/runtime.go` next to the SHA-256 the
+publisher published, and **a download whose hash does not match is not used**: it is refused by name
+and the start fails saying so.
+
+With the application, nothing in the table below is downloaded on a first run: it comes with the
+application, in [the seed](#the-seed). The table is what a launcher without a seed fetches, and what
+the seed was made of.
 
 | | Version | Download | On disk | Where it comes from |
 |---|---|---|---|---|
 | `uv` | 0.12.15 | 19.4 MB (Linux x86-64) | 50 MB | astral-sh/uv release, `sha256.sum` |
-| CPython | 3.12 | ~32 MB | 103 MB | python-build-standalone, fetched **by uv**, which checks its own downloads — which is why there is no second hash for it here |
+| CPython | 3.12.14 | ~32 MB | 103 MB | python-build-standalone, fetched **by uv**, which checks its own downloads; the build is pinned in `runtime.go` too, for checking the seed's copy before uv is pointed at it |
 | `rg` | 15.2.0 | 2.3 MB | 5 MB | BurntSushi/ripgrep release, its own `.sha256` |
 | `git` | — | — | — | the machine's own, everywhere but Windows |
 | MinGit | 2.55.0.5 | 39 MB | ~120 MB | git-for-windows release; **Windows only** |
@@ -515,6 +533,48 @@ seconds.** On disk that is 245 MB of runtime (73 MB of it uv's wheel cache, dele
 time) and 390 MB for the whole installation including both checkouts. A warm start — everything
 already downloaded — is **4.3 seconds** from launching the binary to `/app/` answering 200. macOS is
 smaller (CPython is about half the size there) and Windows larger by MinGit.
+
+### The seed
+
+Every package — the Windows installer, the `.dmg`, the `.deb`, the AppImage and the archives `upgrade`
+installs from — carries a `seed` folder beside the launcher (`Contents/Resources/seed` in the Mac
+application) with what a first run would otherwise download:
+
+| | Windows x86-64 | What it is |
+|---|---|---|
+| `code/` | 13.7 MB | both checkouts at the release's commit: `git archive` of the release's own commit and of the core's `main` when the release was built — the tree codeload serves, `export-ignore` and all |
+| `<system>/runtime/` | 58 MB | uv, ripgrep and (Windows) MinGit, the publishers' own archives |
+| `<system>/python/` | 22 MB | the interpreter uv installs, laid out as a uv mirror |
+| `<system>/wheels.tar.gz` | 26 MB | uv's cache holding every package of the release's `uv.lock`, for every variant of the system (C library, macOS version) |
+
+The release workflow makes it once, with `daedalus-desktop make-seed`, through the same pinned table
+the launcher downloads with, and refuses a release whose seed cannot build the environment offline on
+the runner; each system's package job then runs a first run from its own package and fails if
+anything was downloaded. It is inside the files `SHA256SUMS` lists and the release key signs, so it is
+no new way in; even so, the launcher checks everything it takes from it — the runtime archives and the
+interpreter against the pinned hashes, the code and the package cache against the seed's manifest —
+and downloads whatever is missing or does not match instead. The interpreter is installed by uv from
+the seed as a mirror, and uv checks it against its own hash as well. The environment is built offline
+from the package cache; a package the cache does not have (cbor2 and cryptography publish no wheel for an
+Intel Mac, so one builds them, as it always did) sends the build online, from the same cache.
+
+The checkouts a seed makes are the release's commit, not `main`: **Update** moves them to `main`
+whenever it is pressed, exactly as before, and a new release's package cache is laid over the old one
+on the start after the upgrade. A fork named by `DAEDALUS_GIT_REMOTE` is never given the release's code.
+
+Measured on a Windows 11 desktop (i9-10900F), from an empty folder to the app answering, with the
+same harness both ways (`--shell`, as the application starts it):
+
+| | runtime | checkouts | environment | start | total |
+|---|---|---|---|---|---|
+| downloading, evening line (GitHub at ~330 KB/s) | 14 s | 43 s | 61 s | 8 s | **126 s** |
+| downloading, the same line at night | 14 s | 11 s | 5 s | 7 s | **37 s** |
+| from the seed, twice | 3–5 s | 7–9 s | 4–5 s | 8 s | **24 s** |
+
+Most of the checkouts' seven seconds is git committing the tree; the start is the app's own boot. The
+figure with the seed does not move with the line, because nothing is fetched. Every package is larger
+by the seed: the Windows installer is 232 MB (113 MB without), the `.deb` 214 MB (108 MB), the `.dmg`
+402 MB (261 MB).
 
 Optional, fetched only when something asks for them — `daedalus-desktop install node` /
 `daedalus-desktop install browser`, or the buttons on the launcher's page:

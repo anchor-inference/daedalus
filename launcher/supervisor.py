@@ -541,18 +541,22 @@ def build_app_if_missing(repo: Path) -> None:
     """A fresh checkout has no built app: the bundle is not in git, and a rebuild builds it on the candidate.
 
     The first start of an installation — a clone the desktop launcher or a setup script just made —
-    would otherwise serve 404 at /app until the first merged pull request. Where there is a Node the
-    app is built once here, in the tree about to run; where there is not — the runtime image, which
-    carries no toolchain — the copy built into the image is put in its place. Either way a failure is
-    logged and the bot still starts (the API and Telegram work without the app)."""
+    would otherwise serve 404 at /app until the first merged pull request. A built copy handed over
+    with the installation (the image's, or the one a desktop release carries beside its launcher) is
+    put in its place; where there is none and there is a Node, the app is built once here, in the
+    tree about to run. Either way a failure is logged and the bot still starts (the API and Telegram
+    work without the app).
+
+    The copy comes first because it is the same app, built by the release from the same commit, in a
+    second instead of the minutes `npm ci` takes on a first run. And npm is run by the path `which`
+    found: on Windows that is npm.cmd, and asking CreateProcess for a bare "npm" raised
+    FileNotFoundError out of this function, so a desktop machine with Node installed restarted the
+    supervisor forever and never served the app."""
     miniapp = repo / "miniapp"
     if (miniapp / "dist" / "index.html").is_file() or not (miniapp / "package.json").exists():
         return
-    if not shutil.which("npm"):
-        if not (BAKED_APP / "index.html").is_file():
-            log("no built app in the checkout, no npm to build one and none baked into the image; /app answers 503")
-            return
-        log("no built app in the checkout; installing the one built into the image")
+    if (BAKED_APP / "index.html").is_file():
+        log("no built app in the checkout; installing the one that came with the installation")
         try:
             shutil.copytree(BAKED_APP, miniapp / "dist", dirs_exist_ok=True)
             log("app installed")
@@ -561,14 +565,20 @@ def build_app_if_missing(repo: Path) -> None:
         finally:
             restore_owner(repo)
         return
+    npm = shutil.which("npm")
+    if not npm:
+        log("no built app in the checkout, no npm to build one and none came with the installation; /app answers 503")
+        return
     log("no built app in the checkout; building it before the first start")
     try:
-        for step in (["npm", "ci", "--no-audit", "--no-fund"], ["npm", "run", "build"]):
+        for step in ([npm, "ci", "--no-audit", "--no-fund"], [npm, "run", "build"]):
             code, out = run(step, cwd=miniapp, timeout=1200)
             if code != 0:
                 log(f"app build failed ({' '.join(step)}): {out[-800:]}")
                 return
         log("app built")
+    except OSError as exc:
+        log(f"app build failed: {exc}")
     finally:
         restore_owner(repo)
 

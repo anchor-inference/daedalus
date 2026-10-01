@@ -65,7 +65,20 @@ var messages = map[Lang]map[string]string{
 		"progress.error.details": "What happened",
 		"progress.error.raw":     "Something went wrong that the launcher does not recognise. The program said:",
 
-		"step.runtime":     "Downloading the runtime",
+		// The line under the steps for the one thing that is moving, and the heartbeat under it.
+		"activity.download":       "Downloading %s",
+		"activity.bundled":        "Taking %s from the installation",
+		"activity.unpack":         "Unpacking %s",
+		"activity.wheels":         "Laying out the packages that came with the installation",
+		"activity.python":         "Installing Python",
+		"activity.packages":       "Installing the packages",
+		"activity.packages.count": "%s of %s fetched or built",
+		"progress.percent":        "%s%",
+		"progress.heartbeat":      "Still working — %s",
+		"duration.s":              "%s s",
+		"duration.ms":             "%s min %s s",
+
+		"step.runtime":     "Setting up the runtime",
 		"step.images":      "Fetching the images",
 		"step.checkouts":   "Getting the code",
 		"step.environment": "Building the environment",
@@ -74,7 +87,7 @@ var messages = map[Lang]map[string]string{
 		// The one line that moves while a start runs. It says what the launcher is at in the
 		// operator's language; the machine's own commentary stays under it, where it reads as the
 		// log it is.
-		"live.runtime":     "Downloading the tools it runs on. This happens once.",
+		"live.runtime":     "Setting up the tools it runs on. This happens once.",
 		"live.images":      "Fetching the container images — the long part of a first run.",
 		"live.checkouts":   "Getting the agent's own code.",
 		"live.environment": "Building the environment. The longest step, and only the first time.",
@@ -222,15 +235,27 @@ var messages = map[Lang]map[string]string{
 		"progress.error.details": "Что случилось",
 		"progress.error.raw":     "Что-то пошло не так, и лаунчер не знает, что именно. Программа сообщила:",
 
-		"step.runtime":     "Загрузка среды",
+		"activity.download":       "Загрузка: %s",
+		"activity.bundled":        "Берём из установленного пакета: %s",
+		"activity.unpack":         "Распаковка: %s",
+		"activity.wheels":         "Раскладываем пакеты, пришедшие с установкой",
+		"activity.python":         "Устанавливаем Python",
+		"activity.packages":       "Устанавливаем пакеты",
+		"activity.packages.count": "%s из %s загружено или собрано",
+		"progress.percent":        "%s %",
+		"progress.heartbeat":      "Всё ещё работаем — %s",
+		"duration.s":              "%s с",
+		"duration.ms":             "%s мин %s с",
+
+		"step.runtime":     "Подготовка среды",
 		"step.images":      "Загрузка образов",
-		"step.checkouts":   "Загрузка кода",
+		"step.checkouts":   "Получение кода",
 		"step.environment": "Сборка окружения",
 		"step.start":       "Запуск",
 
-		"live.runtime":     "Загружаем то, на чём он работает. Это бывает один раз.",
+		"live.runtime":     "Готовим то, на чём он работает. Это бывает один раз.",
 		"live.images":      "Загружаем образы контейнеров — самая долгая часть первого запуска.",
-		"live.checkouts":   "Загружаем код самого агента.",
+		"live.checkouts":   "Получаем код самого агента.",
 		"live.environment": "Собираем окружение. Самый долгий шаг, и только в первый раз.",
 		"live.start":       "Поднимаем всё остальное.",
 

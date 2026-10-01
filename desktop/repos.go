@@ -83,6 +83,13 @@ func tarballURL(remote string) string {
 // fetchTarball downloads the whole archive before anything is written: a download that fails
 // halfway must leave the checkout it was going to replace exactly as it was.
 func fetchTarball(ctx context.Context, url string) ([]byte, error) {
+	return fetchTarballReporting(ctx, url, "", nil)
+}
+
+// fetchTarballReporting is fetchTarball with the page told how much has arrived. codeload streams
+// the archive as it makes it and sends no length, so this is a count without a total: the page shows
+// the megabytes going up rather than a bar it would have to invent.
+func fetchTarballReporting(ctx context.Context, url, name string, report reporter) ([]byte, error) {
 	if url == "" {
 		return nil, errors.New("the checkouts are fetched as GitHub tarballs; DAEDALUS_GIT_REMOTE and DAEDALUS_CORE_GIT_REMOTE must name a github.com/owner/repo")
 	}
@@ -103,17 +110,25 @@ func fetchTarball(ctx context.Context, url string) ([]byte, error) {
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s: HTTP %d", url, response.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(response.Body, tarballLimit))
+	total := response.ContentLength
+	if total < 0 {
+		total = 0
+	}
+	return io.ReadAll(newCountingReader(io.LimitReader(response.Body, tarballLimit), Activity{Kind: "download", Name: name, Total: total}, report))
 }
 
 // unpackTarball writes the archive into dir, dropping the single folder GitHub wraps a tree in.
 // Files already there are overwritten and everything else in dir is left alone, so a checkout keeps
 // its .git, its .env and whatever the agent built in it.
 func unpackTarball(archive []byte, dir string) error {
+	return unpackTarballReporting(archive, dir, "", nil)
+}
+
+func unpackTarballReporting(archive []byte, dir, name string, report reporter) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	zipped, err := gzip.NewReader(bytes.NewReader(archive))
+	zipped, err := gzip.NewReader(newCountingReader(bytes.NewReader(archive), Activity{Kind: "unpack", Name: name, Total: int64(len(archive))}, report))
 	if err != nil {
 		return err
 	}
@@ -324,6 +339,15 @@ func repos(p Paths) []repo {
 // EnsureRepos makes what is missing. An existing checkout is left as it is — it may hold the
 // agent's own work in progress — and is only moved by Update.
 func EnsureRepos(ctx context.Context, p Paths, git gitRunner, log func(string, ...any)) error {
+	return ensureReposFrom(ctx, p, git, log, nil, nil)
+}
+
+// ensureReposFrom is EnsureRepos with the page told what is happening, and with the release's own
+// copy of the code (seed.go) used instead of the network when the installation carries one. That copy
+// is the tree codeload gives for the release's commit — the same git archive, the same export-ignore —
+// so a first run from it is the first run a download would have made, only of the release's commit
+// rather than of whatever main holds today; the next update moves it on as it moves any checkout.
+func ensureReposFrom(ctx context.Context, p Paths, git gitRunner, log func(string, ...any), report reporter, seed *Seed) error {
 	if err := p.EnsureDirs(); err != nil {
 		return err
 	}
@@ -331,25 +355,49 @@ func EnsureRepos(ctx context.Context, p Paths, git gitRunner, log func(string, .
 		if exists(r.dir) {
 			continue
 		}
-		log("fetching %s", r.name)
-		archive, err := fetchTarball(ctx, tarballURL(r.remote))
-		if err != nil {
-			return err
+		var archive []byte
+		message := "the published " + branch
+		if carried, ok := seed.repo(r.name, r.remote); ok {
+			log("%s comes with the installation (commit %s)", r.name, shortCommit(carried.Commit))
+			body, err := seed.read(carried, r.name, report)
+			if err != nil {
+				log("the installation's copy of %s is not usable (%v); downloading it instead", r.name, err)
+			} else {
+				archive = body
+				message = "the release's " + r.name + " at " + carried.Commit
+			}
+		}
+		if archive == nil {
+			log("fetching %s", r.name)
+			body, err := fetchTarballReporting(ctx, tarballURL(r.remote), r.name, report)
+			if err != nil {
+				return err
+			}
+			archive = body
+			log("fetched %s (%.1f MB)", r.name, float64(len(body))/1e6)
 		}
 		if err := os.MkdirAll(r.dir, 0o755); err != nil {
 			return err
 		}
-		if err := unpackTarball(archive, r.dir); err != nil {
+		if err := unpackTarballReporting(archive, r.dir, r.name, report); err != nil {
 			return err
 		}
 		if _, err := git(ctx, r.name, "init", "-q", "-b", branch); err != nil {
 			return err
 		}
-		if err := commitAll(ctx, git, r.name, "the published "+branch); err != nil {
+		if err := commitAll(ctx, git, r.name, message); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// shortCommit is a commit as the log shows one.
+func shortCommit(commit string) string {
+	if len(commit) > 12 {
+		return commit[:12]
+	}
+	return commit
 }
 
 // UpdateRepos moves both checkouts to what is published, as a commit on top of what they hold. The

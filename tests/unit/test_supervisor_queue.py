@@ -81,7 +81,7 @@ def test_a_checkout_without_a_built_app_gets_one_before_the_first_start(tmp_path
 
     def fake_run(step: list[str], cwd: Path, timeout: int = 0) -> tuple[int, str]:
         ran.append(step)
-        if step[:2] == ["npm", "run"]:
+        if step[:2] == ["/usr/bin/npm", "run"]:
             (cwd / "dist").mkdir(exist_ok=True)
             (cwd / "dist" / "index.html").write_text("<!doctype html>")
         return 0, ""
@@ -92,7 +92,45 @@ def test_a_checkout_without_a_built_app_gets_one_before_the_first_start(tmp_path
     # that spawn real programs then failed, depending only on the order the files ran in).
     monkeypatch.setattr(sup.shutil, "which", lambda name, *args, **kwargs: "/usr/bin/npm")
     sup.restore_owner = lambda repo: None
+    monkeypatch.setattr(sup, "BAKED_APP", tmp_path / "no-copy-here")
     sup.build_app_if_missing(repo)
-    assert [s[:2] for s in ran] == [["npm", "ci"], ["npm", "run"]]
+    # npm by the path `which` found: on Windows that is npm.cmd, which a bare "npm" never reaches.
+    assert [s[:2] for s in ran] == [["/usr/bin/npm", "ci"], ["/usr/bin/npm", "run"]]
     sup.build_app_if_missing(repo)  # already built: nothing runs
     assert len(ran) == 2
+
+
+def test_the_app_that_came_with_the_installation_is_used_before_building_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The release's own build is the same app in a second; npm ci on a first run is minutes."""
+    sup = _load(tmp_path)
+    repo = tmp_path / "bot"
+    (repo / "miniapp").mkdir(parents=True)
+    (repo / "miniapp" / "package.json").write_text("{}")
+    baked = tmp_path / "miniapp-dist"
+    baked.mkdir()
+    (baked / "index.html").write_text("<!doctype html>")
+    ran: list[list[str]] = []
+    sup.run = lambda step, cwd, timeout=0: (ran.append(step), (0, ""))[1]
+    monkeypatch.setattr(sup.shutil, "which", lambda name, *args, **kwargs: "/usr/bin/npm")
+    monkeypatch.setattr(sup, "BAKED_APP", baked)
+    sup.restore_owner = lambda repo: None
+    sup.build_app_if_missing(repo)
+    assert ran == []
+    assert (repo / "miniapp" / "dist" / "index.html").read_text() == "<!doctype html>"
+
+
+def test_an_npm_that_cannot_be_started_does_not_stop_the_supervisor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """What Windows did with a bare "npm": FileNotFoundError, every start, and no app ever served."""
+    sup = _load(tmp_path)
+    repo = tmp_path / "bot"
+    (repo / "miniapp").mkdir(parents=True)
+    (repo / "miniapp" / "package.json").write_text("{}")
+
+    def missing(step: list[str], cwd: Path, timeout: int = 0) -> tuple[int, str]:
+        raise FileNotFoundError(2, "The system cannot find the file specified")
+
+    sup.run = missing
+    monkeypatch.setattr(sup.shutil, "which", lambda name, *args, **kwargs: "C:/node/npm.cmd")
+    monkeypatch.setattr(sup, "BAKED_APP", tmp_path / "no-copy-here")
+    sup.restore_owner = lambda repo: None
+    sup.build_app_if_missing(repo)  # logged, not raised

@@ -21,7 +21,7 @@ import (
 // Every pinned build has to be complete: a table entry with no hash, no size or a hash of the wrong
 // shape is a download nobody checked, and it must fail here rather than on an operator's machine.
 func TestEveryPinnedBuildCarriesItsHash(t *testing.T) {
-	tables := map[string]map[string]download{"uv": uvDownloads, "ripgrep": ripgrepDownloads, "git": gitDownloads, "node": nodeDownloads}
+	tables := map[string]map[string]download{"uv": uvDownloads, "ripgrep": ripgrepDownloads, "git": gitDownloads, "node": nodeDownloads, "python": pythonDownloads}
 	for name, table := range tables {
 		for platform, d := range table {
 			if len(d.sha256) != 64 {
@@ -56,6 +56,17 @@ func TestEveryShippedPlatformHasAFirstRun(t *testing.T) {
 		}
 		if _, err := pick(ripgrepDownloads, goos, goarch); err != nil {
 			t.Errorf("%s has no ripgrep: %v", platform, err)
+		}
+		// Not downloaded by the launcher — uv fetches its own — but the copy a release carries is
+		// checked against it, and make-seed refuses a platform it has no row for.
+		if _, err := pick(pythonDownloads, goos, goarch); err != nil {
+			t.Errorf("%s has no pinned interpreter: %v", platform, err)
+		}
+		if _, ok := wheelPlatforms[platform]; !ok {
+			t.Errorf("%s has no wheel platforms to fill a seed's package cache for", platform)
+		}
+		if _, ok := pythonKeys[platform]; !ok {
+			t.Errorf("%s has no name for uv's interpreter list", platform)
 		}
 	}
 	// git is downloaded on Windows only; everywhere else it is the machine's own.
