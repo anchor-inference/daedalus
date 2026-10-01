@@ -43,7 +43,7 @@ def test_the_public_audit_refuses_a_committed_binary_and_a_machine_path() -> Non
     done = subprocess.run(["bash", str(script), "--self-check"], capture_output=True, text=True)
     assert done.returncode == 0, done.stdout + done.stderr
     for arm in (
-        "refuses a committed binary and a machine path, a provider token, an internal address and a tooling trailer",
+        "refuses a committed binary and a machine path, each provider token kind by the file that carries it, an internal address and a tooling trailer",
         "passes this tree",
         "refuses a pattern that survives only in history",
         "refuses a fault that lives only in the working tree",
@@ -53,3 +53,5 @@ def test_the_public_audit_refuses_a_committed_binary_and_a_machine_path() -> Non
         "refuses to call a section clean when its reader failed",
     ):
         assert arm in done.stdout, f"self-check arm missing: {arm}\n{done.stdout}"
+    for kind in ("config-ghp.env", "config-sk.env", "config-pat.env", "config-npm.env"):
+        assert kind in done.stdout, f"the self-check did not name the kind {kind}\n{done.stdout}"
