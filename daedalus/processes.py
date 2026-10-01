@@ -78,7 +78,7 @@ def pid_alive(pid: int | None) -> bool:
 
 def _windows_alive(pid: int) -> bool:
     import ctypes  # Lazy: only Windows reaches here, and the module is not free to import
-    from ctypes import wintypes
+    from ctypes import wintypes  # Lazy: as above
 
     process_query_limited_information = 0x1000
     still_active = 259
