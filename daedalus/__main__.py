@@ -276,7 +276,10 @@ def _install_task_dump() -> None:
                 sys.stderr.write("".join(traceback.format_stack(f, limit=1)))
         sys.stderr.flush()
 
-    signal.signal(signal.SIGUSR1, dump)
+    # Windows has no SIGUSR1: asking for it there ended every native start before the first line of
+    # the app, three times, and the launcher reported only that the app never answered.
+    if hasattr(signal, "SIGUSR1"):
+        signal.signal(signal.SIGUSR1, dump)
 
 
 def main(argv: list[str] | None = None) -> int:
