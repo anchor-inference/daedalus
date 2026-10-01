@@ -122,6 +122,7 @@ class Faults:
     fail_at_start: bool = False
     no_2004: bool = False
     slow_ready_ms: int = 0
+    hold_first_connection: bool = False
 
     @classmethod
     def from_env(cls, value: str | None = None) -> Faults:

@@ -80,6 +80,15 @@ SKILLS_DIR = "skills"
 SKILL_FILE = f"{SKILLS_DIR}/{SKILL_NAME}/SKILL.md"
 CONNECT_S = 60.0
 """How long the host keeps asking the TUI's server for its health while the TUI starts."""
+PROBE_S = 2.0
+"""How long one health request may go unanswered before it is given up and asked again on a fresh
+connection. The TUI accepts connections a moment before its server can answer them, and the first
+one accepted in that moment is never answered (measured on 1.18.34, three starts out of three: held
+past 120 s while the next one, a second later, was answered at once; a 1.18.23 launch stalled the
+same way). Waiting on it without a bound left the member never ready."""
+SETUP_S = 30.0
+"""How long the steps after the health check (the event stream, the session, showing it in the TUI)
+may take together, so a server that stops answering fails the launch by name instead of silently."""
 TIMEOUT_SLACK_MS = 60_000
 PERMISSIONS = {
     "ask": {"edit": "ask", "bash": "ask", "webfetch": "ask"},
@@ -308,7 +317,7 @@ class OpenCodeAdapter:
         deadline = loop.time() + CONNECT_S
         while True:
             try:
-                if (await self._http(term, state, "GET", "/global/health")).status == 200:
+                if (await asyncio.wait_for(self._http(term, state, "GET", "/global/health"), PROBE_S)).status == 200:
                     break
             except asyncio.CancelledError:
                 raise
@@ -316,28 +325,41 @@ class OpenCodeAdapter:
                 if loop.time() >= deadline:
                     raise ConnectionError(f"no answer on port {server.port} within {CONNECT_S:g} s: {exc}") from None
             await asyncio.sleep(0.2)
-        stream = await EventStream.open(lambda: term.dial(f"tcp:127.0.0.1:{server.port}"), "/event", headers=self._auth(server))
+        step = "opening the event stream"
+        try:
+            async with asyncio.timeout(SETUP_S):
+                stream = await EventStream.open(lambda: term.dial(f"tcp:127.0.0.1:{server.port}"), "/event", headers=self._auth(server))
+        except TimeoutError:
+            raise ConnectionError(f"no answer within {SETUP_S:g} s while {step}") from None
         try:
             events = stream.events()
-            first = await anext(events, None)
-            if not isinstance(first, dict) or first.get("type") != "server.connected":
-                raise ConnectionError(f"the event stream began with {first!r}")
-            if server.resume:
-                answer = await self._http(term, state, "GET", f"/session/{server.resume}")
-                if answer.status != 200:
-                    raise ConnectionError(f"session {server.resume} was not found ({answer.status})")
-                state.session = server.resume
-            else:
-                body: dict[str, Any] = {"title": server.title or "staff"}
-                provider, model = split_model(server.model)
-                if provider:
-                    body["model"] = {"providerID": provider, "id": model}
-                answer = await self._http(term, state, "POST", "/session", body)
-                if answer.status != 200:
-                    raise ConnectionError(f"no session was made ({answer.status}): {answer.body[:200]!r}")
-                state.session = str((answer.json() or {}).get("id") or "")
-            self._live[state.session] = term
-            await self._http(term, state, "POST", "/tui/select-session", {"sessionID": state.session})
+            try:
+                async with asyncio.timeout(SETUP_S):
+                    step = "waiting for the event stream's first event"
+                    first = await anext(events, None)
+                    if not isinstance(first, dict) or first.get("type") != "server.connected":
+                        raise ConnectionError(f"the event stream began with {first!r}")
+                    if server.resume:
+                        step = "reading the session to take up"
+                        answer = await self._http(term, state, "GET", f"/session/{server.resume}")
+                        if answer.status != 200:
+                            raise ConnectionError(f"session {server.resume} was not found ({answer.status})")
+                        state.session = server.resume
+                    else:
+                        step = "making the session"
+                        body: dict[str, Any] = {"title": server.title or "staff"}
+                        provider, model = split_model(server.model)
+                        if provider:
+                            body["model"] = {"providerID": provider, "id": model}
+                        answer = await self._http(term, state, "POST", "/session", body)
+                        if answer.status != 200:
+                            raise ConnectionError(f"no session was made ({answer.status}): {answer.body[:200]!r}")
+                        state.session = str((answer.json() or {}).get("id") or "")
+                    self._live[state.session] = term
+                    step = "showing the session in the TUI"
+                    await self._http(term, state, "POST", "/tui/select-session", {"sessionID": state.session})
+            except TimeoutError:
+                raise ConnectionError(f"no answer within {SETUP_S:g} s while {step}") from None
             state.connected.set()
             state.queue.put_nowait(StaffEvent(EventKind.TRANSCRIPT, _now(), {"ref": state.session, "session_ref": state.session}))
             state.queue.put_nowait(StaffEvent(EventKind.READY, _now(), {"session": state.session}))

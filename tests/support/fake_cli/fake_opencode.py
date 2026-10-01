@@ -7,6 +7,9 @@ What it imitates:
   port already taken prints the error on screen and exits 1, which the adapter must answer by trying
   the next port. ``OPENCODE_SERVER_PASSWORD`` turns on basic authentication (user ``opencode``);
   without it the server answers anyone on loopback, as the real one did in the probe.
+  ``FAKE_CLI_FAULTS=hold_first_connection`` holds the first connection it accepts open and never
+  answers it, as the real TUI does with the one accepted in the moment before its server can answer
+  (measured: unanswered past 120 s, the next one answered at once).
 - Routes: ``GET /global/health``, ``GET /event`` (server-sent events, ``server.connected`` first),
   ``GET|POST /session``, ``GET /session/:id``, ``GET /session/:id/message``,
   ``POST /session/:id/prompt_async``, ``POST /session/:id/abort``, ``POST /tui/append-prompt``,
@@ -104,6 +107,7 @@ class FakeOpenCode(FakeAgent):
         self.mcp: McpClient | None = None
         self.last_esc = 0.0
         self.current_message: dict[str, Any] | None = None
+        self.held_first = False
         self.ids_by_text: dict[str, list[str]] = {}
         """``messageID`` a client chose for a prompt, by its text: the user message takes that id."""
         if args.get("--session"):
@@ -350,6 +354,13 @@ class FakeOpenCode(FakeAgent):
     # -- the HTTP server ---------------------------------------------------------------------------------
 
     async def http(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        if self.faults.hold_first_connection and not self.held_first:
+            self.held_first = True
+            self.log("connection_held")
+            with contextlib.suppress(Exception):
+                await reader.read()  # until the client gives up on it
+            writer.close()
+            return
         try:
             line = (await reader.readline()).decode("latin-1").strip()
             if not line:

@@ -196,6 +196,16 @@ async def test_an_opencode_session_from_its_start_to_its_release(settings: Setti
         assert [t.text for t in live_turns if t.role == "assistant"] == ["the menu is written"]
 
 
+async def test_a_first_connection_the_tui_never_answers_is_given_up_and_the_member_starts(settings: Settings, db: Database) -> None:
+    # The real TUI accepts a connection before its server can answer and never answers that one;
+    # the host's health check waited on it without a bound, and the member was never ready.
+    async with stand(settings, db, extra_env={"FAKE_CLI_FAULTS": "hold_first_connection"}, **opencode()) as s:
+        ada = await started(s, "echo:started after all")
+        await s.status_event(ada, "turn_done_unseen")
+        assert len(log(s, "connection_held")) == 1
+        assert [m.state for m in await s.manager.staff.messages(ada.id)] == ["acknowledged"]
+
+
 async def test_a_permission_is_answered_through_the_server(settings: Settings, db: Database) -> None:
     async with stand(settings, db, **opencode()) as s:
         ada = await started(s, "perm:npm install grammy")
