@@ -177,8 +177,11 @@ processes each hold "the" lock.
   old checkout) is accepted without it only by an **ordinary** start, and only if the port was free
   when that start began and the supervisor it started is alive — nothing is committed on that. A
   health check with nothing expected on the port refuses outright.
-- **Port.** A native start refuses when something it did not start already answers on the app's
-  port.
+- **Port.** A native start never shares the app's port. Another program holding it is left alone
+  and the installation moves to a free port, written to `data/.env` and said in the log
+  ([README.md](README.md#the-ports-choose-themselves)); the health check then expects this start's
+  boot id on the new port. A bot of this installation's own — one answering with the boot id last
+  recorded in the local state folder (`boot-id`) — keeps the port, and the start refuses.
 - **A rollback never restores under a running stack.** Its stop is the full one: this launcher's
   own processes, then every process the records confirm (the stack a `--finish` that died had
   brought up included), then the app's port must be quiet. If something still answers there that
@@ -191,7 +194,8 @@ processes each hold "the" lock.
   `stop`, upgrade or update stops every child whose pid, program *and* start time still match, whole
   process group, and waits until they are gone. A pid now used by another process is left alone and
   its record dropped; one that cannot be confirmed is left alone and the command refuses. Not seen:
-  a bot whose supervisor died first (it is in a session of its own); the port check catches it.
+  a bot whose supervisor died first (it is in a session of its own); the port check catches it, by
+  the boot id it answers with.
 
 ## Upgrading: `daedalus-desktop upgrade`
 
@@ -495,7 +499,10 @@ was.
   live processes (this test binary re-run as a helper): the lock held by another process and freed by
   its SIGKILL, two upgrades at once, `update` refused while a launcher holds the installation, health
   accepting only this start's boot id, a foreign 200 without one after the port check (the race),
-  an orphaned stack found and stopped, a port something else holds, a reused pid never killed.
+  an orphaned stack found and stopped, a reused pid never killed. `ports_test.go` holds the default
+  ports with listeners of its own: a first setup and a start move off them with the other program
+  untouched and the app coming up on the new port, a bot of this installation's own keeps its port
+  and the start refuses, and a moved port stays put across restarts.
 - Go smoke (`DAEDALUS_SMOKE=1 go test -tags nowebview -run TestSmoke -v .`, Linux): the v0.12.0
   launcher built from its tag and two new ones as separate processes, releases from an httptest
   server on loopback, `install.sh`: the bridge and its byte-for-byte rollback; **two upgrades

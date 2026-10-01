@@ -167,7 +167,47 @@ the bot 25 seconds to drain, the run is snapshotted, and it picks up where it le
 start.
 
 Opening the application a second time does not start a second one. It brings the first window to
-the front, hands it the link it was opened with if it was opened with one, and exits.
+the front, hands it the link it was opened with if it was opened with one, and exits. It finds the
+first by `data/launcher.json` — the port that launcher's page really got and the token it minted —
+and never by a fixed port.
+
+### The ports choose themselves
+
+Nothing on this machine has to be cleared out of the way for Daedalus. The window is told the
+app's address by the launcher, a `daedalus://` link is resolved against the installation's own
+settings, and the agent reads its ports from the environment the launcher gives it — so a port that
+another program (an older Daedalus, a dev server, anything) already holds is moved off, not fought
+over:
+
+| | default | in |
+|---|---|---|
+| the app and its API (`API_PORT`) | 8765 | both modes |
+| the key proxy (`KEYPROXY_PORT`) | 3201 | native |
+| the supervisor (`DAEDALUS_SUPERVISOR_PORT`), where it listens on TCP | 8769 | native, Windows |
+| the agent's services (`SERVICES_PORT_RANGE`) | 8100–8119 | both modes |
+| servers in a container terminal (`TERMINALS_PORT_RANGE`) | 8120–8139 | Docker |
+| the launcher's own page | 8770 | both modes |
+
+- **A first setup** writes the defaults where they are free and a free port near each one where
+  they are not (or one the system hands out, when nothing near is free). A range moves as one
+  block to a block that is wholly free.
+- **Every start** checks the ports in `data/.env` again before anything listens. One that something
+  else has taken since moves the same way, is written back, and the launcher's log says which port
+  moved, from where, to where and why. The other program is never stopped or signalled.
+- **A port is kept once chosen.** The default coming free again does not move the installation
+  back: the browser keeps what the app stores per address, and moving it for nothing would cost the
+  window its drafts and settings. A port you write into `data/.env` by hand is yours, and is kept
+  for as long as it is free.
+- **What is the installation's own is not "something else".** Natively, what a launcher that died
+  left running is stopped first; a bot whose supervisor died first is recognised by the boot id it
+  answers with, keeps its port, and the start refuses as it always did — moving away from it would
+  put two bots on one database. In Docker mode a port the project's own running containers publish
+  is theirs; if compose cannot say what it runs, the ports are left as they are.
+- **The services' range natively** moves only when nothing in it is left: the agent skips a port
+  that is taken anyway, and a service left running from an earlier start keeps its address.
+- **The launcher's page** does not need a record at all: when 8770 is taken it listens wherever the
+  system lets it, and the window, a second start (`launcher.json`) and the agent's own sealed ports
+  all read where it ended up.
 
 ## The pages
 
@@ -227,7 +267,8 @@ data/
   daedalus-secrets/
     keyproxy.env          provider keys (0600) — outside every folder the agent can read
     ssh/                  keys and config for hosts the agent may reach; may stay empty
-  .env                    what compose interpolates and the agent container reads
+  .env                    what compose interpolates and the agent container reads; the ports the
+                          installation chose for itself are kept here
   compose.desktop.yaml    the launcher's override: the published image, Telegram made optional
   launcher.json           the running launcher's port and token (0600) — how a second start finds it
   scheme.txt              which executable daedalus:// links are registered to, for a launcher on its own
@@ -716,7 +757,8 @@ Implemented and cross-compiled, with the path and argument logic under tests of 
 run on a real Windows machine** — see [what is not yet proven](#what-is-not-yet-proven).
 MinGit is unpacked into the runtime's `git/` with no installer and no PATH change. It ships `sh.exe`
 (a dash), **not** bash: `Exec` runs `sh -c` there, so a command written with bash arrays or `[[ ]]`
-will not run. The supervisor listens on `127.0.0.1:8769` instead of a socket file — which is a port
+will not run. The supervisor listens on a loopback port (`127.0.0.1:8769`, or a free one near it —
+[the ports choose themselves](#the-ports-choose-themselves)) instead of a socket file — which is a port
 any process on the machine can reach, where the socket file has an owner; it is the platform's
 limitation, not a choice, and it is stated here rather than hidden.
 

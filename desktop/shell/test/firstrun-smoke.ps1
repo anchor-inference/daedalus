@@ -6,7 +6,9 @@
 #   powershell -File firstrun-smoke.ps1 -Launcher dist\win-unpacked\daedalus-desktop.exe -Root C:\somewhere
 #
 # Root holds the data, the runtime and the state; nothing outside it is written: uv is told not to put
-# python on PATH or in the registry, and the update check is off.
+# python on PATH or in the registry, and the update check is off. The app's port is held by another
+# program for the whole run, so the start has to move off it (desktop/ports.go) and the app must
+# answer wherever the launcher wrote it went, with that program left alone.
 param(
     [Parameter(Mandatory = $true)][string]$Launcher,
     [Parameter(Mandatory = $true)][string]$Root,
@@ -34,6 +36,16 @@ USD_PER_DAY=20
 "@ | Set-Content -Encoding ascii (Join-Path $data '.env')
 'KEYPROXY_USD_PER_DAY=20' | Set-Content -Encoding ascii (Join-Path $data 'daedalus-secrets\keyproxy.env')
 
+# Not Daedalus: a listener of this script's own on the port the env file names for the app.
+$foreign = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, $ApiPort)
+$foreign.Start()
+$envFile = Join-Path $data '.env'
+function Current-ApiPort {
+    $found = Select-String -Path $envFile -Pattern '^API_PORT=(\d+)' | Select-Object -Last 1
+    if ($found) { return [int]$found.Matches[0].Groups[1].Value }
+    return $ApiPort
+}
+
 $psi = New-Object Diagnostics.ProcessStartInfo
 $psi.FileName = (Resolve-Path $Launcher).Path
 $psi.Arguments = "--shell --data `"$data`" --port $Port --mode native start"
@@ -58,8 +70,9 @@ while ($clock.Elapsed.TotalSeconds -lt $TimeoutSec) {
         if ($status.stage -ne $stage) { Write-Host ('{0,5:N0}s stage "{1}"' -f $clock.Elapsed.TotalSeconds, $status.stage); $stage = $status.stage }
         if ($status.failure -and -not $status.busy) { $failure = $status.failure; break }
     } catch {}
+    $moved = Current-ApiPort
     try {
-        if ((Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 "http://127.0.0.1:$ApiPort/app/").StatusCode -eq 200) { $ready = $clock.Elapsed.TotalSeconds; break }
+        if ($moved -ne $ApiPort -and (Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 "http://127.0.0.1:$moved/app/").StatusCode -eq 200) { $ready = $clock.Elapsed.TotalSeconds; break }
     } catch {}
     if ($process.HasExited) { $failure = "the launcher exited with $($process.ExitCode)"; break }
     Start-Sleep -Milliseconds 500
@@ -83,7 +96,12 @@ if (-not $ready) {
     if ($failure) { Fail "the start failed: $failure" }
     Fail "the app never answered in $TimeoutSec s"
 }
-Write-Host ('the app answered after {0:N0}s' -f $ready)
+Write-Host ('the app answered after {0:N0}s on port {1}, moved off {2}' -f $ready, $moved, $ApiPort)
+# The other program's listener is still this script's, untouched: it still holds the port.
+$probe = New-Object Net.Sockets.TcpClient
+try { $probe.Connect('127.0.0.1', $ApiPort) } catch { Fail "the program that held $ApiPort no longer listens" } finally { $probe.Close() }
+$foreign.Stop()
+if ($text -notmatch [regex]::Escape("the app's port $ApiPort is taken by another program; it moves to $moved")) { Show-Logs; Fail 'the log never says the app moved' }
 
 foreach ($expected in 'uv .* comes with the installation', 'rg .* comes with the installation', 'git .* comes with the installation',
     'daedalus comes with the installation', 'protocore-exp comes with the installation',

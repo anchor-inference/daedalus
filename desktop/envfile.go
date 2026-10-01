@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"runtime"
 	"strings"
 )
 
@@ -135,10 +136,9 @@ func envUpdates(p Paths, s Setup, current map[string]string, searxngSecret, home
 		// The public address is not on the setup page: an operator who set one by hand keeps it,
 		// and passkeys are enrolled against that host, so blanking it would invalidate them.
 		{"MINIAPP_PUBLIC_URL", current["MINIAPP_PUBLIC_URL"]},
-		// The ports are written once and then left to the operator. Nothing on the setup page asks
-		// about them, and rewriting them on every save would take back a change made by hand in the
-		// file — which in native mode is the only way to move them, since there is no container
-		// publishing a port that could be remapped instead.
+		// The ports are written once and then kept: rewriting them on every save would take back a
+		// change made by hand in the file. A first setup chooses free ones (WriteSetup), and a start
+		// moves one only when another program has taken it since (ports.go).
 		{"API_PORT", firstSet(current["API_PORT"], "8765")},
 		{"SERVICES_PORT_RANGE", firstSet(current["SERVICES_PORT_RANGE"], "8100-8119")},
 		{"SERVICES_PUBLIC_HOST", firstSet(current["SERVICES_PUBLIC_HOST"], "127.0.0.1")},
@@ -150,6 +150,24 @@ func envUpdates(p Paths, s Setup, current map[string]string, searxngSecret, home
 		{"DAEDALUS_SSH_DIR", p.SSH},
 		{"DAEDALUS_HARNESS_HOME", home},
 	}
+}
+
+// withValues is updates with each of values in place of the entry of the same key, and appended
+// when there is none.
+func withValues(updates, values []envVar) []envVar {
+	out := append([]envVar(nil), updates...)
+	for _, value := range values {
+		found := false
+		for i := range out {
+			if out[i].Key == value.Key {
+				out[i].Value, found = value.Value, true
+			}
+		}
+		if !found {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 // firstSet is the first value that was written down: what a previous run left, else the default a
@@ -178,6 +196,11 @@ func keyproxyUpdates(s Setup, current map[string]string) []envVar {
 // a key the form did not carry, keeps a public address set by hand, and keeps the SearXNG secret
 // stable across runs.
 func WriteSetup(p Paths, s Setup, mode Mode) error {
+	return writeSetup(p, s, mode, func(string, ...any) {})
+}
+
+// writeSetup is WriteSetup saying in log which ports a first setup could not have at their defaults.
+func writeSetup(p Paths, s Setup, mode Mode, log func(string, ...any)) error {
 	if err := p.EnsureDirs(); err != nil {
 		return err
 	}
@@ -193,7 +216,19 @@ func WriteSetup(p Paths, s Setup, mode Mode) error {
 			return err
 		}
 	}
-	if err := os.WriteFile(p.Env, []byte(mergeEnv(readFile(p.Env), envUpdates(p, s, current, secret, home))), 0o600); err != nil {
+	updates := envUpdates(p, s, current, secret, home)
+	if strings.TrimSpace(current["API_PORT"]) == "" {
+		// A first setup: nothing of this installation runs yet, so whatever holds a default port is
+		// another program, and the installation starts out on ports that are free.
+		roles, probe := portRoles(mode, supervisorOverTCP(p, runtime.GOOS)), machineProbe(nil)
+		warmRoles(probe, current, roles)
+		ports, moves := planPorts(current, roles, probe, true)
+		updates = withValues(updates, ports)
+		for _, move := range moves {
+			log("%s", move)
+		}
+	}
+	if err := os.WriteFile(p.Env, []byte(mergeEnv(readFile(p.Env), updates)), 0o600); err != nil {
 		return err
 	}
 	keys := readEnv(readFile(p.KeyproxyEnv))

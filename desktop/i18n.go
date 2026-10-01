@@ -97,7 +97,7 @@ var messages = map[Lang]map[string]string{
 		// the program itself said is kept on the page, behind "What happened".
 		"trouble.network": "This machine could not reach the internet. Check the connection — a VPN or a company proxy is the usual reason — and try again.",
 		"trouble.docker":  "Docker is not answering. Start Docker Desktop, wait until it says it is running, and try again. Or set this up to run on this machine instead.",
-		"trouble.port":    "A port Daedalus needs is taken by something else on this machine. Close whatever is using it, or set a different port in the configuration, and try again.",
+		"trouble.port":    "Another program took a port Daedalus needs just as it was starting. Start again: the launcher checks its ports at every start and moves off the ones something else holds.",
 		"trouble.disk":    "This machine has run out of disk space. Free some up and try again — a first start needs a couple of gigabytes.",
 
 		"status.title":           "Daedalus",
@@ -261,7 +261,7 @@ var messages = map[Lang]map[string]string{
 
 		"trouble.network": "С этого компьютера не получилось выйти в интернет. Проверьте соединение — чаще всего мешает VPN или корпоративный прокси — и попробуйте снова.",
 		"trouble.docker":  "Docker не отвечает. Запустите Docker Desktop, дождитесь, пока он скажет, что работает, и попробуйте снова. Или выберите запуск прямо на этом компьютере.",
-		"trouble.port":    "Порт, который нужен Daedalus, занят другой программой. Закройте её или укажите другой порт в настройках и попробуйте снова.",
+		"trouble.port":    "Другая программа заняла нужный Daedalus порт прямо во время запуска. Запустите снова: при каждом запуске лаунчер проверяет свои порты и уходит с тех, что заняты чужими.",
 		"trouble.disk":    "На диске закончилось место. Освободите его и попробуйте снова — первому запуску нужна пара гигабайт.",
 
 		"status.title":           "Daedalus",

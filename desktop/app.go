@@ -258,6 +258,9 @@ func (a *App) start(ctx context.Context) error {
 	if err := WriteOverride(a.paths); err != nil {
 		return err
 	}
+	if err := a.settleDockerPorts(ctx); err != nil {
+		return err
+	}
 	if err := SyncBotEnv(a.paths, a.Mode()); err != nil {
 		return err
 	}
@@ -290,6 +293,22 @@ func (a *App) start(ctx context.Context) error {
 	a.log("the app is up at %s", AppURL(APIPort(a.paths), a.Lang()))
 	a.mountProjects(ctx) // projects: folders the container cannot see yet (desktop/projects.go)
 	return nil
+}
+
+// settleDockerPorts is ports.go's check for what compose publishes: the app's port and the
+// services' and terminals' ranges. A port the project's own running containers publish is theirs —
+// Docker mode leaves the stack running behind a closed launcher, so a start often finds it up —
+// and anything else holding one is another program, which compose would otherwise fail on with
+// "port is already allocated" and nothing to say which. When compose cannot say what it runs, the
+// ports are left as they are rather than moved away from containers that may be this stack's.
+func (a *App) settleDockerPorts(ctx context.Context) error {
+	out, err := composeQuiet(ctx, a.paths, true, "ps", "--format", "json")
+	if err != nil {
+		a.log("the ports are left as they are: compose could not say which of them this installation's containers hold (%v)", err)
+		return nil
+	}
+	published := publishedPorts(out)
+	return settlePorts(a.paths, ModeDocker, func(_ string, port int) bool { return published[port] }, a.log)
 }
 
 // startNative is the same sequence without a container in it: the runtime instead of the images,

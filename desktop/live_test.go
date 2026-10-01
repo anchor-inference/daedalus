@@ -311,21 +311,6 @@ func TestAStackACrashedLauncherLeftIsFoundAndStopped(t *testing.T) {
 	}
 }
 
-func TestANativeStartRefusesAPortSomethingElseHolds(t *testing.T) {
-	p, _ := NewPaths(filepath.Join(t.TempDir(), "data"))
-	port := freePort(t)
-	_, line := helper(t, "serve", "HELPER_PORT="+port)
-	if line != "serving" {
-		t.Fatalf("helper: %q", line)
-	}
-	os.MkdirAll(p.Data, 0o755)
-	os.WriteFile(p.Env, []byte("API_PORT="+port+"\n"), 0o600)
-	_, _, err := NewNative(p, func(string, ...any) {}).clearTheWay(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "already answers") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
 func TestAReusedPidIsNeverKilled(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("sleep")

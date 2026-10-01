@@ -103,6 +103,7 @@ func (a *App) Watch(ctx context.Context, show func(Notification)) {
 	}
 	w := &watcher{
 		base:   "http://127.0.0.1:" + APIPort(a.paths),
+		rebase: func() string { return "http://127.0.0.1:" + APIPort(a.paths) },
 		token:  token,
 		client: fmt.Sprintf("launcher-%d", os.Getpid()),
 		lang:   a.Lang(),
@@ -116,7 +117,11 @@ func (a *App) Watch(ctx context.Context, show func(Notification)) {
 // runs it: frames are read on another goroutine and handed over on a channel, so the fold timer, the
 // cursor and the memory of what was shown need no lock.
 type watcher struct {
-	base   string
+	base string
+	// rebase reads the address again before each connection: a restart from the launcher's page
+	// may have moved the app to another port (ports.go), and a watcher that kept the first one
+	// would knock on a door nobody answers for as long as the launcher runs. Nil keeps base.
+	rebase func() string
 	token  string
 	client string
 	lang   Lang
@@ -146,6 +151,9 @@ func (w *watcher) run(ctx context.Context) {
 	}
 	reported := ""
 	for {
+		if w.rebase != nil {
+			w.base = w.rebase()
+		}
 		greeted, err := w.connect(ctx)
 		if ctx.Err() != nil {
 			return

@@ -394,6 +394,8 @@ func startCommand(ctx context.Context, app *App, opts options) error {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
 			server = nil
+		} else {
+			app.log("the launcher's page port %d is taken by another program; the page is at %s instead", defaultPort, server.URL())
 		}
 	} else if err != nil {
 		// A page that cannot listen is not a reason to refuse to start the stack.

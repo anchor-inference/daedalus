@@ -850,6 +850,7 @@ func (n *Native) Start(ctx context.Context) error {
 	}
 	if n.supervisor == nil {
 		n.bootID = newBootID()
+		writeBootRecord(n.paths, n.bootID)
 		n.supervisor = &Process{
 			Name:    "supervisor",
 			Argv:    []string{n.venvPython(), filepath.Join(n.paths.Bot, "launcher", "supervisor.py")},
@@ -905,19 +906,30 @@ func (n *Native) expectation(portWasFree bool) bootExpectation {
 	return bootExpectation{id: n.bootID, legacy: !n.strictHealth, portWasFree: portWasFree, alive: alive}
 }
 
-// clearTheWay is the first step of a start: what a launcher that died left running is stopped, and
+// clearTheWay is the first step of a start: what a launcher that died left running is stopped, the
+// ports another program holds are left to it and this installation moves off them (ports.go), and
 // then the app's port has to be free — or an answer on it after the start would not be this start's.
 // A supervisor this launcher already runs is the one exception: Start is idempotent.
 func (n *Native) clearTheWay(ctx context.Context) (string, bool, error) {
 	if err := StopOrphans(ctx, n.paths, n.log); err != nil {
 		return "", false, err
 	}
-	port := APIPort(n.paths)
 	if n.supervisor != nil {
-		return port, true, nil
+		return APIPort(n.paths), true, nil
 	}
+	ours := func(key string, port int) bool {
+		return key == "API_PORT" && answersWithOurBoot(n.paths, port)
+	}
+	if err := settlePorts(n.paths, ModeNative, ours, n.log); err != nil {
+		return "", false, err
+	}
+	port := APIPort(n.paths)
 	if portAnswers(port) {
-		return port, false, fmt.Errorf("something this launcher did not start already answers on the app's port %s; stop it (or change API_PORT) and start again", port)
+		// Every port another program held has been moved off, so what answers here is a bot this
+		// installation started — one whose supervisor died first, which no record names and so no
+		// stop reached — or something that took the port in the moment since the check. Starting
+		// beside the first would put two bots on one database.
+		return port, false, fmt.Errorf("a Daedalus this installation started earlier still answers on the app's port %s, and no record of it is left to stop it by; end that process and start again", port)
 	}
 	return port, true, nil
 }
