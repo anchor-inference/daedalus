@@ -353,3 +353,58 @@ def test_opencode_usage_view_reads_the_three_windows() -> None:
     assert [w["name"] for w in view["windows"]] == ["5 h", "weekly", "monthly"]
     assert view["windows"][0]["used_percent"] == 12.5 and view["windows"][0]["resets_at"].startswith("2026-09-11")
     assert view["limit_reached"] is True
+
+
+async def _through_proxy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, method: str, path: str, **kwargs: Any) -> httpx.Request:
+    seen: list[httpx.Request] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"data": []})
+
+    monkeypatch.setattr(proxy, "CLAUDE_AUTH", claude_mod.ClaudeAuth(tmp_path / "no-claude.json"))
+    monkeypatch.setattr(proxy, "CODEX_AUTH", subs.CodexAuth(tmp_path / "no-codex.json"))
+    monkeypatch.setattr(proxy, "GROK_AUTH", subs.GrokAuth(tmp_path / "no-grok.json"))
+    app = proxy.make_app()
+    await app["client"].aclose()
+    app["client"] = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    async with TestClient(TestServer(app)) as client:
+        assert (await client.request(method, path, **kwargs)).status == 200
+    return seen[0]
+
+
+async def test_anthropic_key_goes_in_x_api_key_and_the_version_header_is_added(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.delenv("KEYPROXY_AUTH_ANTHROPIC", raising=False)
+    sent = await _through_proxy(monkeypatch, tmp_path, "GET", "/anthropic/models", headers={"authorization": "Bearer caller-token"})
+    assert str(sent.url) == "https://api.anthropic.com/v1/models"
+    assert sent.headers["x-api-key"] == "sk-ant-test"
+    assert "authorization" not in sent.headers  # the caller's own credential never travels on
+    assert sent.headers["anthropic-version"] == "2023-06-01"
+
+
+async def test_a_caller_chosen_anthropic_version_is_kept(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    sent = await _through_proxy(monkeypatch, tmp_path, "GET", "/anthropic/models", headers={"Anthropic-Version": "2099-01-01"})
+    assert sent.headers["anthropic-version"] == "2099-01-01"
+
+
+def test_anthropic_auth_scheme_defaults_to_x_api_key_and_can_be_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("KEYPROXY_AUTH_ANTHROPIC", raising=False)
+    assert proxy.auth_scheme("anthropic") == "x-api-key"
+    assert proxy.auth_scheme("openai") == proxy.BEARER
+    monkeypatch.setenv("KEYPROXY_AUTH_ANTHROPIC", "bearer")
+    assert proxy.auth_scheme("anthropic") == proxy.BEARER
+
+
+def test_key_status_lists_anthropic_and_a_keyless_local_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("KEYPROXY_KEY_LOCAL", raising=False)
+    assert proxy.key_status()["anthropic"] == {"configured": False, "kind": proxy.API_KEY}
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("KEYPROXY_UPSTREAM_LOCAL", "http://127.0.0.1:11434/v1")
+    status = proxy.key_status()
+    assert status["anthropic"]["configured"] is True
+    assert status["local"] == {"configured": True, "kind": proxy.ENDPOINT}
+    monkeypatch.setenv("KEYPROXY_KEY_LOCAL", "k")
+    assert proxy.key_status()["local"]["kind"] == proxy.API_KEY

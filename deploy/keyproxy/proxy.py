@@ -7,8 +7,10 @@ the daily-budget flag exists on the shared state volume, calls to model upstream
 refused here — below the agent, where a self-modification cannot reach.
 
 Upstreams: ``deepseek`` → https://api.deepseek.com, ``openrouter`` → https://openrouter.ai/api/v1,
-``openai`` → https://api.openai.com/v1, ``opencode`` → https://opencode.ai/zen/go/v1 (OpenCode Go). Keys:
-``DEEPSEEK_API_KEY``, ``OPENROUTER_API_KEY``, ``OPENAI_API_KEY``, ``OPENCODE_API_KEY``. Extra upstreams: ``KEYPROXY_UPSTREAM_<NAME>=https://host/base`` with
+``openai`` → https://api.openai.com/v1, ``anthropic`` → https://api.anthropic.com/v1 (its OpenAI-compatible
+chat and models endpoints; the key goes in ``x-api-key`` and the ``anthropic-version`` header is added when the
+caller sent none), ``opencode`` → https://opencode.ai/zen/go/v1 (OpenCode Go). Keys: ``DEEPSEEK_API_KEY``,
+``OPENROUTER_API_KEY``, ``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``, ``OPENCODE_API_KEY``. Extra upstreams: ``KEYPROXY_UPSTREAM_<NAME>=https://host/base`` with
 ``KEYPROXY_KEY_<NAME>=…`` and, for an API that does not take ``Authorization: Bearer``,
 ``KEYPROXY_AUTH_<NAME>=<header name>`` (``X-API-KEY`` for Serper, ``x-api-key`` for Exa…);
 the key is sent as that header's value.
@@ -66,8 +68,14 @@ DEFAULT_UPSTREAMS = {
     "deepseek": ("https://api.deepseek.com", "DEEPSEEK_API_KEY"),
     "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
     "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY"),
+    "anthropic": ("https://api.anthropic.com/v1", "ANTHROPIC_API_KEY"),
     "opencode": ("https://opencode.ai/zen/go/v1", "OPENCODE_API_KEY"),
 }
+DEFAULT_AUTH_SCHEMES = {"anthropic": "x-api-key"}
+"""Upstreams whose key is not an ``Authorization: Bearer`` one; ``KEYPROXY_AUTH_<NAME>`` still overrides."""
+ANTHROPIC_VERSION = "2023-06-01"
+"""Anthropic refuses a request without this header, ``/models`` included, and a client written for
+the OpenAI shape never sends it."""
 BUDGET_FLAG = Path(os.environ.get("KEYPROXY_BUDGET_FLAG", "/srv/state/BUDGET_EXCEEDED"))
 BUDGET_DB = Path(os.environ.get("KEYPROXY_BUDGET_DB", "/srv/state/daedalus.sqlite"))
 BUDGET_USD_PER_DAY = float(os.environ.get("KEYPROXY_USD_PER_DAY", "0") or 0)
@@ -184,7 +192,7 @@ async def handle_keys(request: web.Request) -> web.Response:
 
 def auth_scheme(name: str) -> str:
     """How an upstream takes its key: ``bearer`` (``Authorization: Bearer <key>``) or the name of a header that carries the bare key."""
-    scheme = os.environ.get(f"KEYPROXY_AUTH_{name.upper()}", "").strip()
+    scheme = os.environ.get(f"KEYPROXY_AUTH_{name.upper()}", "").strip() or DEFAULT_AUTH_SCHEMES.get(name, "")
     return scheme if scheme and scheme.lower() != BEARER else BEARER
 
 
@@ -591,6 +599,8 @@ async def handle(request: web.Request) -> web.StreamResponse:
             return web.json_response({"error": {"message": "daily budget exceeded; refused by the key proxy", "type": "budget_exceeded"}}, status=402)
         if key:
             inject_key(headers, name, key)
+        if name == "anthropic" and "anthropic-version" not in {h.lower() for h in headers}:
+            headers["anthropic-version"] = ANTHROPIC_VERSION
     body = await request.read()
     if name == "grok":
         # The CLI chat proxy routes on this header. The JSON model is not what it documents

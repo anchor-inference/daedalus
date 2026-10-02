@@ -1750,6 +1750,8 @@ class RuntimeConfig(BaseModel):
             "codex": ProviderConfig(kind="openai_compat", base_url=keyproxy_base() + "/codex/v1", timeout_seconds=900.0, pricing={"gpt": {"input": 0.0, "output": 0.0, "cache_hit": 0.0}}),
             "claude": ProviderConfig(kind="openai_compat", base_url=keyproxy_base() + "/claude/v1", timeout_seconds=900.0, pricing={"claude": {"input": 0.0, "output": 0.0, "cache_hit": 0.0}}),
             "opencode": ProviderConfig(kind="opencode", base_url=keyproxy_base() + "/opencode", timeout_seconds=900.0, pricing=OPENCODE_GO_PRICING),
+            "openai": ProviderConfig(kind="openai_compat", base_url=keyproxy_base() + "/openai"),
+            "anthropic": ProviderConfig(kind="openai_compat", base_url=keyproxy_base() + "/anthropic"),
         }
     )
     prompt: PromptConfig = Field(default_factory=PromptConfig)
@@ -1885,6 +1887,11 @@ class RuntimeConfig(BaseModel):
             # A seed adds presets to a config written before that seed existed. A file created now
             # is not one of those: every seed counts as applied, so a fresh install stays empty.
             config = cls(seeded=list(SEEDS))
+            # What the setup wizard wrote to the environment is not an upgrade seed: it applies to a
+            # new file too, which is the file the wizard's first run creates.
+            raw = config.model_dump(mode="json")
+            if _seed_from_setup(raw):
+                config = cls.model_validate(raw)
             config.save(path)
             return config
         with path.open("rb") as fh:
@@ -1986,8 +1993,10 @@ def _seed_presets(raw: dict[str, Any]) -> bool:
     return True
 
 
-SEEDS = ("claude-subscription",)
-"""Every seed a config can have had applied, in the order they were introduced."""
+SEEDS = ("claude-subscription", "openai-anthropic-keys")
+"""Every seed a config can have had applied, in the order they were introduced. The seeds that follow
+the setup wizard's environment (``voice-cloud``, ``local-model:<id>``) are not listed: a new file
+should get them, because the wizard's answers are about this installation."""
 
 
 def _seed_claude_subscription(raw: dict[str, Any]) -> bool:
@@ -2023,6 +2032,78 @@ def _seed_claude_subscription(raw: dict[str, Any]) -> bool:
             if pid not in presets:
                 presets[pid] = spec
                 changed = True
+    return changed
+
+
+def _seed_openai_anthropic_keys(raw: dict[str, Any]) -> bool:
+    """Add the ``openai`` and ``anthropic`` providers, whose keys the key proxy holds, once.
+
+    A provider here is only an address on the proxy: it is usable the moment a key is written to the
+    proxy's environment, and shows "no key" until then. Once, like the Claude seed, so a provider the
+    operator deletes stays deleted.
+    """
+    seeded = raw.setdefault("seeded", [])
+    if not isinstance(seeded, list):
+        seeded = raw["seeded"] = []
+    if "openai-anthropic-keys" in seeded:
+        return False
+    seeded.append("openai-anthropic-keys")
+    providers = raw.setdefault("providers", {})
+    if isinstance(providers, dict):
+        for name in ("openai", "anthropic"):
+            providers.setdefault(name, {"kind": "openai_compat", "base_url": keyproxy_base() + "/" + name})
+    return True
+
+
+def _seed_from_setup(raw: dict[str, Any]) -> bool:
+    """Apply the first-run wizard's answers, which the launcher writes to the app's environment.
+
+    ``DAEDALUS_LOCAL_MODEL``: a model served by the endpoint the wizard registered with the key proxy
+    as ``local``. ``DAEDALUS_VOICE``: ``cloud`` transcribes through the ``openai`` provider; ``local``
+    needs nothing here (the launcher installs the speech extra and the Voice page's own model is used
+    when no endpoint is configured), and ``off`` is the empty default.
+
+    Each answer is applied once and recorded in ``seeded``: deleting the preset or clearing the ASR
+    provider afterwards sticks, while choosing another model in a later setup run adds that one.
+    """
+    changed = False
+    seeded = raw.setdefault("seeded", [])
+    if not isinstance(seeded, list):
+        seeded = raw["seeded"] = []
+    model = os.environ.get("DAEDALUS_LOCAL_MODEL", "").strip()
+    marker = f"local-model:{model}"
+    if model and marker not in seeded:
+        seeded.append(marker)
+        changed = True
+        providers = raw.setdefault("providers", {})
+        presets = raw.setdefault("presets", {})
+        if isinstance(providers, dict):
+            local = providers.get("local")
+            if local is None:
+                local = providers["local"] = {"kind": "openai_compat", "name": "Local endpoint", "base_url": keyproxy_base() + "/local", "timeout_seconds": 600.0, "pricing": {}}
+            # A model on the operator's own machine costs nothing; priced per model id because a
+            # later setup run may add another, and a provider that already exists keeps its own table.
+            if isinstance(local, dict) and isinstance(local.get("pricing"), dict):
+                local["pricing"].setdefault(model, {"input": 0.0, "output": 0.0, "cache_hit": 0.0})
+        if isinstance(presets, dict):
+            pid = preset_id_for("local", model)
+            if pid not in presets:
+                # 32k, not the 128k default: a local server usually loads a small context, and a run
+                # compacts against this number.
+                presets[pid] = {"provider": "local", "model": model, "label": f"{model} (local)", "thinking": False, "context_window": 32_000}
+            chosen = raw.get("model")
+            if not isinstance(chosen, dict):
+                chosen = raw["model"] = {}
+            if not chosen.get("preset"):
+                chosen["preset"] = pid
+    if os.environ.get("DAEDALUS_VOICE", "").strip().lower() == "cloud" and "voice-cloud" not in seeded:
+        seeded.append("voice-cloud")
+        changed = True
+        asr = raw.get("asr")
+        if not isinstance(asr, dict):
+            asr = raw["asr"] = {}
+        if not asr.get("provider") and not asr.get("url"):
+            asr["provider"] = "openai"
     return changed
 
 
@@ -2097,6 +2178,8 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _migrate_inbox_retention(raw) or changed
     changed = _migrate_keyproxy_base(raw) or changed
     changed = _seed_claude_subscription(raw) or changed
+    changed = _seed_openai_anthropic_keys(raw) or changed
+    changed = _seed_from_setup(raw) or changed
     changed = _migrate_web_search(raw) or changed
     for provider in (raw.get("providers") or {}).values():
         pricing = provider.get("pricing") if isinstance(provider, dict) else None

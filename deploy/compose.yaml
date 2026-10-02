@@ -348,6 +348,10 @@ services:
       - ${DAEDALUS_HARNESS_HOME:-~}/.codex:/home/keyproxy/.codex
       - ${DAEDALUS_HARNESS_HOME:-~}/.grok:/home/keyproxy/.grok
       - ${DAEDALUS_HARNESS_HOME:-~}/.claude:/home/keyproxy/.claude
+    # A model server the operator runs on this machine (Ollama, LM Studio) listens on the host's
+    # loopback, which from in here is the container itself. The setup wizard writes such an endpoint
+    # as host.docker.internal; this makes that name resolve to the Docker host.
+    extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [keys]
 
   # The only container that can talk to Docker. It rebuilds and replaces the agent container when
