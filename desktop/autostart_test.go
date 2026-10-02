@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -65,7 +66,9 @@ func TestAutostartLinuxRoundTrip(t *testing.T) {
 			t.Errorf("missing %q in\n%s", want, data)
 		}
 	}
-	if info, _ := os.Stat(path); info.Mode().Perm() != 0o644 {
+	// Windows has no Unix permission bits to speak of; the Linux writer is tested there through
+	// its goos parameter and only the bits are out of reach.
+	if info, _ := os.Stat(path); runtime.GOOS != "windows" && info.Mode().Perm() != 0o644 {
 		t.Errorf("mode %v", info.Mode())
 	}
 	if err := a.Disable(); err != nil {
