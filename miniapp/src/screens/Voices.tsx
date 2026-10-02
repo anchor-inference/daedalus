@@ -17,7 +17,7 @@ import { plural, t } from "../i18n";
 import { mergeTtsView } from "../ttsview";
 import type { TtsView } from "../ttsview";
 import { errorText, haptic } from "../ui";
-import { Dropdown, Switch } from "../components";
+import { Dropdown, Switch } from "../ui/index";
 import { NumInput, Row } from "../settingsrow";
 
 const name = (code: string) => t(`lang.of.${code}`);

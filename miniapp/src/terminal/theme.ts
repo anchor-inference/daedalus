@@ -15,7 +15,7 @@ const ANSI_NAMES = [
   "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite",
 ] as const;
 
-/** The dark palette from `styles.css`, used for any token that cannot be read. */
+/** The dark palette from `ui/tokens.css`, used for any token that cannot be read. */
 export const FALLBACK = {
   background: "#09090b",
   foreground: "#ededef",

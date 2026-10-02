@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, SessionToolGroup, Settings, ToolGroupCatalogue, ToolGroupLoad } from "./api";
 import { plural, t } from "./i18n";
 import { errorText, fmtTok } from "./ui";
-import { Dropdown } from "./components";
+import { Dropdown } from "./ui/components";
 import { LOADS, groupAbout, groupName, loadWord, stateChip, usageLine, usageShare } from "./toolgroups";
 
 /** The three modes side by side: a session's Details, where a group is opened one at a time. */

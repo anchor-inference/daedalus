@@ -13,7 +13,7 @@ import { Icon, type IconName } from "./icons";
 import { canonical, navigate, pathFor, sessionPath } from "./router";
 import { invalidate, peek, prime, useQuery } from "./store";
 import { SUMMARY_KEY, streamUp, useStreamUp } from "./events";
-import { toast } from "./dialogs";
+import { toast } from "./ui/dialogs";
 import { t } from "./i18n";
 import { errorText } from "./ui";
 

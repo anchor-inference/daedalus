@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Switch } from "./components";
+import { Switch } from "./ui/components";
 import { Row } from "./settingsrow";
 import { api } from "./api";
 import { modelSize } from "./format";

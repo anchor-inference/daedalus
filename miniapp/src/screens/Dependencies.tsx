@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { Sheet } from "../dialogs";
+import { Sheet } from "../ui/dialogs";
 import { Icon } from "../icons";
 import { plural, t } from "../i18n";
 import { errorText } from "../ui";
-import { Dropdown } from "../components";
+import { Dropdown } from "../ui/index";
 import { Row } from "../settingsrow";
 import { DependencyProgress, type Progress } from "./dependencyprogress";
 import "./dependencies.css";

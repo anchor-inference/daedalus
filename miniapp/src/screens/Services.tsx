@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { ServiceView } from "../api";
-import { ServiceRow, Skeleton } from "../components";
-import { Sheet } from "../dialogs";
+import { ServiceRow, Skeleton } from "../ui/components";
+import { Sheet } from "../ui/dialogs";
 import { relTime } from "../format";
-import { PageHeader, screenTitle } from "../shell";
+import { PageHeader, screenTitle } from "../ui/index";
 import { invalidate, useQuery } from "../store";
 import { plural, t } from "../i18n";
 

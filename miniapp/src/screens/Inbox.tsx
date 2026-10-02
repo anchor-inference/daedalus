@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { api, Notification, NotificationPage, NotificationSummary, Proposal } from "../api";
-import { Skeleton } from "../components";
-import { OverflowMenu, Sheet, deleteWithUndo } from "../dialogs";
+import { Skeleton } from "../ui/index";
+import { OverflowMenu, Sheet, deleteWithUndo } from "../ui/dialogs";
 import { absTime, relTime } from "../format";
 import { Icon } from "../icons";
 import { navigate, pathFor } from "../router";
-import { PageHeader, screenTitle } from "../shell";
+import { PageHeader, screenTitle, useMedia } from "../ui/index";
 import { hold, invalidate, prime, release, useQuery } from "../store";
 import { SUMMARY_KEY } from "../events";
 import { useProjects } from "../projects";
@@ -21,6 +21,7 @@ type Filter = "all" | "unseen" | "problems" | "projects";
  * buttons; the change proposals waiting for a decision; then everything else, by day or by project.
  */
 export function InboxScreen({ toast, onOpen }: { toast: (t: string) => void; onOpen: (id: string) => void }) {
+  const split = useMedia("(min-width: 1280px)");
   const [filter, setFilter] = useState<Filter>("all");
   const view = filter === "projects" ? "all" : filter;
   const key = listKey(view, null, 200);
@@ -95,9 +96,7 @@ export function InboxScreen({ toast, onOpen }: { toast: (t: string) => void; onO
     );
   }
 
-  const row = (entry: Notification) => (
-    <NotificationRow key={entry.id} entry={entry} names={names} card expanded={open === entry.id} onActivate={() => toggle(entry)}>
-      {open === entry.id && (
+  const detail = (entry: Notification) => (
         <div className="inbox-body" onClick={(e) => e.stopPropagation()}>
           {entry.body && <pre className="inbox-text">{entry.body}</pre>}
           <ActionButtons entry={entry} />
@@ -119,7 +118,12 @@ export function InboxScreen({ toast, onOpen }: { toast: (t: string) => void; onO
             />
           </div>
         </div>
-      )}
+  );
+  const selected = entries.find((entry) => entry.id === open);
+
+  const row = (entry: Notification) => (
+    <NotificationRow key={entry.id} entry={entry} names={names} card expanded={open === entry.id} onActivate={() => toggle(entry)}>
+      {open === entry.id && !split && detail(entry)}
     </NotificationRow>
   );
 
@@ -137,7 +141,8 @@ export function InboxScreen({ toast, onOpen }: { toast: (t: string) => void; onO
           <button className="chip select" aria-pressed={filter === "projects"} onClick={() => setFilter("projects")}>{t("centre.projects")}</button>
         </div>
       </PageHeader>
-      <div className="screen narrow">
+      <div className={`inbox-layout ${split ? "split" : ""}`}>
+      <div className="screen narrow inbox-list">
         <PushNudge />
         <NeedsYou names={names} card />
         {pending.length > 0 && filter !== "problems" && (
@@ -156,6 +161,10 @@ export function InboxScreen({ toast, onOpen }: { toast: (t: string) => void; onO
           </div>
         )}
         <NotificationList groups={groups} row={row} />
+      </div>
+      {split && <aside className="inbox-detail" aria-label={t("nav.inbox")}>
+        {selected ? <><div className="inbox-detail-head"><h2>{selected.title}</h2><button className="iconbtn" aria-label={t("common.close")} onClick={() => setOpen(null)}><Icon name="close" /></button></div>{detail(selected)}</> : <div className="empty calm">{t("inbox.select")}</div>}
+      </aside>}
       </div>
     </>
   );

@@ -1,9 +1,10 @@
+import { usePetPreference } from "../ui/pet";
 // Appearance is this browser's look: the named themes, then the few adjustments that are not a new theme.
 
 import { useState } from "react";
 import { FONT_CATALOG, FONT_ROLES, FontRole, THEMES, ThemeId, fontUrlAllowed, readPrefs, resolvedTheme, resetColors, updatePrefs, type ColorKey, type Column, type Leading, type Prefs, type ProseStep, type Radius, type Scale } from "../appearance";
 import { t } from "../i18n";
-import { Dropdown, Segmented, Switch } from "../components";
+import { Dropdown, Segmented, Switch } from "../ui/index";
 import { Row } from "../settingsrow";
 
 function usePrefs(): [Prefs, (patch: Partial<Prefs>) => void, (next: Prefs) => void] {
@@ -21,6 +22,7 @@ function urlOf(prefs: Prefs, role: FontRole): string {
 
 export function AppearancePanel() {
   const [prefs, update, replace] = usePrefs();
+  const [pet, setPet] = usePetPreference();
   const [role, setRole] = useState<FontRole>("prose");
   const [query, setQuery] = useState("");
   const [url, setUrl] = useState("");
@@ -49,6 +51,7 @@ export function AppearancePanel() {
   return (
     <>
       <p className="sub">{t("theme.lead")}</p>
+      {window.daedalus?.pet && <div className="card"><Row title={t("pet.title")} desc={t("pet.hint")}><Switch checked={pet} onChange={setPet} label={t("pet.title")} /></Row></div>}
       <div className="settings-themes" role="listbox" aria-label={t("settings.sec.appearance")}>
         {THEMES.map((item) => (
           <button key={item.id} type="button" className={resolved.id === item.id ? "on" : ""} aria-pressed={resolved.id === item.id} onClick={() => update({ follow: false, theme: item.id })}>

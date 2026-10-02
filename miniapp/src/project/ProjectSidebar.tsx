@@ -10,7 +10,6 @@ import { Bell } from "../bell";
 import { plural, t } from "../i18n";
 import { EnvPill } from "../envpill";
 import { Icon, type IconName } from "../icons";
-import { PaneHandle, type PaneDrag } from "../layout";
 import { FoldButton } from "../sidebar";
 import { relTime } from "../format";
 import { ORCHESTRATION, navigate, projectHome, projectPagePath, projectSessionPath, projectStaffPath } from "../router";
@@ -29,7 +28,6 @@ export type ProjectSidebarProps = {
   /** The terminal the Terminals page shows, from its route. */
   terminal: string | null;
   onToggle: () => void;
-  drag: PaneDrag;
   toast: (text: string) => void;
   /** Room at the top for the entry pinned above every project: the main orchestrator's. */
   pinned?: ReactNode;
@@ -134,7 +132,6 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
         <FocusRow icon="journal" label={t("focus.page.journal")} href={projectPagePath(p.projectId, "journal")} current={here("journal")} />
         <FocusRow icon="folder" label={t("focus.page.folders")} href={projectPagePath(p.projectId, "folders")} current={here("folders")} meta={project ? String(project.folders.length) : ""} />
       </div>
-      <PaneHandle side="right" drag={p.drag} />
       {hiring && team && <StaffSheet team={team} onClose={() => setHiring(false)} onDone={() => invalidate(staffKey(p.projectId).split("?")[0])} toast={p.toast} />}
     </nav>
   );

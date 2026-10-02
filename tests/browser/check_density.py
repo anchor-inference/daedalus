@@ -51,7 +51,7 @@ READ = """
   const icons = all('.chat-head .iconbtn', '.pagehead .iconbtn').filter((el) => el.getBoundingClientRect().width > 0);
   return {
     body: px(document.body, 'fontSize'),
-    left: box(one('.sidebar', '.rail')),
+    left: box(one('.desktop-column')),
     list: box(one('.session-list-pane')),
     aside: box(one('.session-aside')),
     panel: box(one('.panel')),
@@ -123,7 +123,7 @@ def measure_agents(browser, width: int, height: int, mobile: bool) -> dict:  # t
 # The width of what stands left of the conversation: the rail, plus the sidebar when it is open.
 LEFT = """() => {
   const w = (s) => { const el = document.querySelector(s); return el ? Math.round(el.getBoundingClientRect().width) : 0; };
-  return { rail: w('.rail'), sidebar: w('nav.sidebar'), main: Math.round(document.querySelector('.main').getBoundingClientRect().left) };
+  return { rail: w('.desktop-column'), sidebar: w('nav.sidebar'), main: Math.round(document.querySelector('.main').getBoundingClientRect().left) };
 }"""
 
 
@@ -249,8 +249,8 @@ def judge(m: dict) -> list[str]:
     if m["body"] != 14:
         problems.append(f"{m['vw']}: body is {m['body']}px, not 14")
     if not phone:
-        if not m["left"] or m["left"]["w"] != 272:
-            problems.append(f"{m['vw']}: the left column is {m['left']}, not 272 wide")
+        if not m["left"] or m["left"]["w"] != 324:
+            problems.append(f"{m['vw']}: the left column is {m['left']}, not 324 wide")
         if m["list"]:
             problems.append(f"{m['vw']}: a second list column is still there ({m['list']})")
     for h in m["rowSingle"]:
@@ -315,20 +315,20 @@ def judge(m: dict) -> list[str]:
 
 def judge_sidebar(s: dict) -> list[str]:
     problems: list[str] = []
-    # Open: the 52 px rail and the 272 px column beside it. Folded: the rail alone, which is the folded
-    # form now (it replaced the 48 px strip), and the conversation starts where the rail ends.
-    want = {"open": (52, 272, 324), "collapsed": (52, 0, 52), "collapsedAfterReload": (52, 0, 52), "reopened": (52, 272, 324)}
+    # A 52 px icon rail stands beside the contextual list, whose boundary reserves one pixel.
+    # Folding retains a 52 px icon column; the conversation starts at its edge.
+    want = {"open": (324, 271, 324), "collapsed": (52, 0, 52), "collapsedAfterReload": (52, 0, 52), "reopened": (324, 271, 324)}
     for key, (rail, sidebar, main) in want.items():
         got = s[key]
         if (got["rail"], got["sidebar"], got["main"]) != (rail, sidebar, main):
             problems.append(f"{key}: rail/sidebar/conversation start {got['rail']}/{got['sidebar']}/{got['main']}, not {rail}/{sidebar}/{main}")
-    if s["menuItems"] < 11:
+    if s["menuItems"] != 6:
         problems.append(f"the menu has {s['menuItems']} items")
     if not s["menuLang"]:
         problems.append("the menu has no language switch")
     # The menu opens from the rail's foot, beside the rail rather than over it.
-    if not 52 <= s["menuBox"]["x"] <= 64 or s["menuBox"]["bottom"] > 16 or s["menuBox"]["w"] != 300:
-        problems.append(f"the menu is not anchored bottom-left beside the rail at 300 wide: {s['menuBox']}")
+    if not 324 <= s["menuBox"]["x"] <= 336 or s["menuBox"]["bottom"] < 8 or s["menuBox"]["w"] != 300:
+        problems.append(f"the secondary menu is not beside the unified column at 300 wide: {s['menuBox']}")
     if s["menuRow"] != 36:
         problems.append(f"a menu row is {s['menuRow']}px")
     for key in ("menuFocusInside", "arrowMoves", "menuClosed", "focusBack", "shortcutOpens", "gKeyNavigates"):

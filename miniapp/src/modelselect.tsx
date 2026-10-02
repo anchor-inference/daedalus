@@ -1,3 +1,4 @@
+import { ControlTrigger } from "./ui/control-trigger";
 // The model, chosen from inside the composer. The button names the model in use with a glyph for
 // its speed; the list opens upward from it (a sheet on a phone) with the global default, every
 // preset, and a field for a model the presets do not name. While another model stands in for the
@@ -5,7 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api, ModelFallback, Preset } from "./api";
-import { Popover, Sheet } from "./dialogs";
+import { Popover, Sheet } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { shortModel, tokens } from "./format";
 import { readCustomModel, rememberCustomModel } from "./composer";
@@ -77,14 +78,14 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
   const list = <ModelList cat={cat} failed={failed} model={model} fallback={fallback} onPick={pick} />;
   return (
     <>
-      <button ref={trigger} type="button" className={`model-select ${fallback ? "attn" : ""} ${open ? "on" : ""}`} onClick={() => onOpenChange(!open)} title={title} aria-label={t("session.model.for")} aria-haspopup="menu" aria-expanded={open}>
+      <ControlTrigger ref={trigger} type="button" className={`model-select ${fallback ? "attn" : ""} ${open ? "on" : ""}`} onClick={() => onOpenChange(!open)} title={title} aria-label={t("session.model.for")} aria-haspopup="menu" aria-expanded={open}>
         {fallback ? <span className="model-dot" aria-hidden /> : <Icon name="model" size={14} />}
         {/* The effort is its own span so a long model name is what gives way: in one span the
             ellipsis ate the effort first and the pill read "DeepSeek Flash · l…". */}
         <span className={`model-label truncate ${fallback ? "model-fallback" : ""}`}>{label}</span>
         {onChooseEffort && thinking && <span className="model-effort">· {t(`add.effort.${effort || "medium"}`)}</span>}
-        <Icon name="chevron" size={12} />
-      </button>
+
+      </ControlTrigger>
       {open && sheet && (
         <Sheet title={t("composer.settings")} onClose={() => onOpenChange(false)} className="model-sheet">
           {onChooseEffort && <EffortOptions effort={effort} thinking={thinking} onChoose={onChooseEffort} />}
@@ -101,10 +102,12 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
 }
 
 function ModelList({ cat, failed, model, fallback, onPick }: { cat: Catalogue | null; failed: string | null; model: string; fallback: ModelFallback | null; onPick: (c: ModelChoice) => void }) {
+  const [query, setQuery] = useState("");
   const [custom, setCustom] = useState(() => readCustomModel());
   if (failed) return <div className="sub model-row-note">{failed}</div>;
   if (!cat) return <div className="sub model-row-note">{t("common.loading")}</div>;
   const entries = Object.entries(cat.presets);
+  const matched = entries.filter(([id, p]) => `${id} ${p.label} ${p.provider} ${p.model}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   // The way back from a fallback: the configured model, named first, as the preset it is or as itself.
   const configured = fallback ? (entries.find(([id, p]) => isCurrent(id, p, fallback.from)) ?? null) : null;
   const useCustom = () => {
@@ -124,6 +127,7 @@ function ModelList({ cat, failed, model, fallback, onPick }: { cat: Catalogue | 
         <span className="model-legend"><span className="model-kind thinking" aria-hidden>✦</span> {t("composer.model.thinking")}</span>
         <span className="model-legend"><span className="model-kind fast" aria-hidden>⚡</span> {t("composer.model.fast")}</span>
       </div>
+      <input className="field model-search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("composer.model.search")} aria-label={t("composer.model.search")} />
       {fallback && (
         <>
           <div className="model-row-note sub attn">{t("composer.model.configured", { model: fallback.from })}</div>
@@ -136,10 +140,13 @@ function ModelList({ cat, failed, model, fallback, onPick }: { cat: Catalogue | 
       )}
       <button type="button" role="menuitem" className="model-row" onClick={() => onPick({ clear: true })}>
         <Icon name="model" size={16} />
-        <span className="grow truncate">{t("session.model.global")}</span>
-        <span className="sub truncate">{cat.global}</span>
+        <span className="model-text grow">
+          <span>{t("session.model.global")}</span>
+          <span className="sub">{cat.global}</span>
+        </span>
       </button>
-      {entries.map(([id, p]) => {
+      {matched.length === 0 && <div className="model-row-note sub" role="status">{t("shell.search.nomatch")}</div>}
+      {matched.map(([id, p]) => {
         const current = isCurrent(id, p, model);
         return (
           <button key={id} type="button" role="menuitem" className={`model-row ${current ? "on" : ""}`} onClick={() => onPick({ preset: id })} aria-current={current ? "true" : undefined}>

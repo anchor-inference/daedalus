@@ -3,7 +3,7 @@
 // becomes a page of the project's focus mode later, so it takes the project by id and nothing else.
 
 import { useState } from "react";
-import { Skeleton } from "../components";
+import { Skeleton } from "../ui/components";
 import { Icon } from "../icons";
 import { navigate, pathFor, projectPagePath } from "../router";
 import { PageHeader } from "../shell";

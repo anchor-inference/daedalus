@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Notification } from "./api";
-import { useLayer } from "./dialogs";
+import { useLayer } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { navigate, pathFor } from "./router";
 import { useProjects } from "./projects";

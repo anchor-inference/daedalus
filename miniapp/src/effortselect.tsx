@@ -1,6 +1,7 @@
+import { ControlTrigger } from "./ui/control-trigger";
 // Named choices keep a discrete setting understandable without dragging an unlabeled track.
 import { useId, useRef, useState } from "react";
-import { Popover } from "./dialogs";
+import { Popover } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { t } from "./i18n";
 import { REASONING_EFFORTS, effortIndex } from "./models";
@@ -41,10 +42,10 @@ export function EffortSelect({ effort, thinking, onChoose }: EffortSelectProps) 
   const [open, setOpen] = useState(false);
   const current = REASONING_EFFORTS[effortIndex(effort)];
   return <>
-    <button ref={trigger} type="button" className={`effort-select ${open ? "on" : ""}`} onClick={() => setOpen(!open)}
+    <ControlTrigger ref={trigger} type="button" className={`effort-select ${open ? "on" : ""}`} onClick={() => setOpen(!open)}
       title={t("composer.effort")} aria-label={t("composer.effort")} aria-haspopup="dialog" aria-expanded={open}>
-      <span className="truncate">{thinking ? t(`add.effort.${current}`) : t("add.effort.off")}</span><Icon name="chevron" size={12} />
-    </button>
+      <span className="truncate">{thinking ? t(`add.effort.${current}`) : t("add.effort.off")}</span>
+    </ControlTrigger>
     {open && <Popover anchor={trigger.current} onClose={() => setOpen(false)} className="effort-menu" align="right" label={t("composer.effort")}>
       <EffortOptions effort={effort} thinking={thinking} onChoose={(value) => { onChoose(value); setOpen(false); }} />
     </Popover>}

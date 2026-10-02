@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
-import css from "../styles.css?raw";
+import css from "../ui/tokens.css?raw";
 import { attachTheme, FALLBACK, terminalTheme, withAlpha } from "./theme";
 
 /** The custom properties a CSS block declares, by name. */

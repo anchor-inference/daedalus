@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { api } from "./api";
-import { copyText, fmtInt } from "./components";
+import { copyText, fmtInt } from "./ui/components";
 import { t } from "./i18n";
 import type { ToolItem } from "./turns";
 import { errorText } from "./ui";

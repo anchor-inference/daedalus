@@ -1,7 +1,7 @@
 // Small UI helpers shared by the screens: Telegram bridge, confirmations, formatting.
 
 import { ApiError, telegram } from "./api";
-import { confirmDialog } from "./dialogs";
+import { confirmDialog } from "./ui/dialogs";
 import { asSentence, bytes, tokens } from "./format";
 import { t } from "./i18n";
 

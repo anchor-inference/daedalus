@@ -3,8 +3,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, SessionFolder } from "./api";
-import { Switch, copyText } from "./components";
-import { OverflowMenu } from "./dialogs";
+import { Switch, copyText } from "./ui/components";
+import { OverflowMenu } from "./ui/dialogs";
 import { fileIcon } from "./artifact";
 import { folderBase, folderName } from "./folders";
 import { EnvPill } from "./envpill";
@@ -186,13 +186,13 @@ export function Explorer({ base: sessionBase, root, upload: canUpload = false, f
       {query && search.note && <div className="explorer-note" role="status">{search.note}</div>}
       {(query ? search.busy : !tree[""]?.entries && tree[""]?.loading) && <FileSkeleton />}
       <div className="explorer-tree" role="tree" aria-label={t("panel.tab.files")} ref={list} onKeyDown={onKey}>
-        {rows.map((row, i) => <div key={`${row.path}:${row.line ?? ""}`} role="treeitem" aria-level={row.depth + 1} aria-expanded={row.dir ? row.open : undefined} aria-selected={i === index} aria-busy={row.loading} tabIndex={i === index ? 0 : -1} className={`filerow tree-row ${row.hidden || row.ignored ? "dim" : ""} ${i === index ? "selected" : ""} ${row.snippet !== undefined ? "grep-row" : ""}`} data-path={row.path} style={{ paddingLeft: 8 + row.depth * 16 }} onFocus={() => { setSelected(row.path); setSelectedLine(row.line); }} onClick={() => open(row)} onContextMenu={(e) => { e.preventDefault(); e.currentTarget.querySelector<HTMLButtonElement>(".explorer-actions button")?.click(); }}>
+        {rows.map((row, i) => <div key={`${row.path}:${row.line ?? ""}`} role="treeitem" aria-level={row.depth + 1} aria-expanded={row.dir ? row.open : undefined} aria-selected={i === index} aria-busy={row.loading} tabIndex={i === index ? 0 : -1} className={`filerow tree-row ${row.hidden || row.ignored ? "dim" : ""} ${i === index ? "selected" : ""} ${row.snippet !== undefined ? "grep-row" : ""}`} data-path={row.path} style={{ paddingLeft: 8 + row.depth * 16 }} onFocus={() => { setSelected(row.path); setSelectedLine(row.line); }} onClick={() => open(row)}>
           <span className="tree-chevron" aria-hidden>{row.dir ? row.loading ? "…" : row.open ? "⌄" : "›" : ""}</span>
           <Icon name={row.dir ? "folder" : fileIcon(row.name)} size={16} />
           <span className="grow truncate"><span className="title">{row.name}{row.line ? `:${row.line}` : ""}</span>{row.snippet !== undefined && <span className="grep-snippet">{row.snippet}</span>}</span>
           {athome && written.includes(row.path) && <span className="written-badge" title={t("explorer.written")} aria-label={t("explorer.written")}>●</span>}
           {!row.dir && <span className="file-size">{fmtBytes(row.size)}</span>}
-          <span className="explorer-actions"><OverflowMenu small items={row.dir ? [{ label: t("panel.tab.files"), icon: "folder", onSelect: () => open(row) }, { label: t("explorer.copy"), icon: "copy", onSelect: () => void copyText(row.path).then((ok) => toast?.(t(ok ? "common.copied" : "svc.copyfail"))) }] : [
+          <span className="explorer-actions"><OverflowMenu contextSelector=".filerow" small items={row.dir ? [{ label: t("panel.tab.files"), icon: "folder", onSelect: () => open(row) }, { label: t("explorer.copy"), icon: "copy", onSelect: () => void copyText(row.path).then((ok) => toast?.(t(ok ? "common.copied" : "svc.copyfail"))) }] : [
             { label: t("preview.open"), icon: "eye", onSelect: () => open(row) },
             { label: t("explorer.copy"), icon: "copy", onSelect: () => void copyText(row.path).then((ok) => toast?.(t(ok ? "common.copied" : "svc.copyfail"))) },
             { label: t("common.download"), icon: "download", onSelect: () => { const a = document.createElement("a"); a.href = downloadHref(base, row.path); a.download = row.path.split("/").pop()!; a.click(); } },

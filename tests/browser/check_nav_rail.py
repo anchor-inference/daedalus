@@ -34,12 +34,12 @@ BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "b4k3ry20f0c5"
 
-ORDER = ["home", "agents", "orchestration", "terminals", "board", "inbox", "services", "menu", "settings", "account"]
+ORDER = ["home", "agents", "orchestration", "inbox", "board", "changes", "terminals", "voice", "schedules", "menu", "settings"]
 WORDS = {
     "en": {"home": "Home", "agents": "Agents", "orchestration": "Orchestration", "terminals": "Terminals", "board": "Board", "inbox": "Inbox",
-           "services": "Services", "menu": "Menu", "settings": "Settings", "account": "Account", "toggle": "Toggle sidebar", "unfold": "Chats", "unfold.projects": "Projects", "more": "More"},
+           "changes": "Changes", "voice": "Voice", "schedules": "Schedules", "services": "Services", "menu": "Menu", "settings": "Settings", "account": "Account", "toggle": "Toggle sidebar", "unfold": "Chats", "unfold.projects": "Projects", "more": "More"},
     "ru": {"home": "Главная", "agents": "Агенты", "orchestration": "Оркестрация", "terminals": "Терминалы", "board": "Доска", "inbox": "Входящие",
-           "services": "Сервисы", "menu": "Меню", "settings": "Настройки", "account": "Аккаунт", "toggle": "Показать боковую панель", "unfold": "Чаты", "unfold.projects": "Проекты", "more": "Ещё"},
+           "changes": "Изменения", "voice": "Голос", "schedules": "Расписания", "services": "Сервисы", "menu": "Меню", "settings": "Настройки", "account": "Аккаунт", "toggle": "Показать боковую панель", "unfold": "Чаты", "unfold.projects": "Проекты", "more": "Ещё"},
 }
 # The unseen notifications the bell and the Inbox count, and what waits in orchestration: Bakery's one
 # request and the main chat's own confirmation (the mirrored questions are Bakery's, counted there).
@@ -98,17 +98,15 @@ def desktop(page: Page, lang: str) -> None:
     rail = page.locator("nav.rail")
     expect(rail).to_be_visible()
 
-    # The items, top to bottom, each named in its tooltip; the rail is narrow and icons only.
+    # Expanded navigation names its destinations, in one column shared with the session list.
     expect(rail.locator("[data-rail]")).to_have_count(len(ORDER))
     assert rail.locator("[data-rail]").evaluate_all("els => els.map(e => e.dataset.rail)") == ORDER
-    box = rail.bounding_box()
-    assert box and 48 <= box["width"] <= 56, f"{lang}: the rail is {box and box['width']} px wide"
-    tops = [rail.locator(f"[data-rail='{k}']").bounding_box()["y"] for k in ORDER]  # type: ignore[index]
-    assert tops == sorted(tops), f"{lang}: the items are not top to bottom: {tops}"
+    box = page.locator(".desktop-column").bounding_box()
+    assert box and box["width"] == 324, f"{lang}: the rail and contextual column do not fit their declared widths"
     for key in ORDER:
-        said = tip(page, key)
         want = words[key] if key != "inbox" else f"{words['inbox']} · {UNSEEN}"
-        assert said.startswith(want), f"{lang}: the tooltip of {key} says {said!r}, not {want!r}"
+        said = rail.locator(f"[data-rail='{key}']").get_attribute("aria-label") or ""
+        assert said.startswith(want), f"{lang}: {key} is not named: {said!r}"
 
     # The badges: the Inbox's unseen count in red, and the quiet count of what waits in orchestration.
     expect(rail.locator("[data-rail='inbox'] .rail-badge")).to_have_text(str(UNSEEN))
@@ -137,7 +135,7 @@ def desktop(page: Page, lang: str) -> None:
     page.wait_for_url("**/app/agents")
     expect(page.locator("nav.sidebar:not(.orch-sidebar)")).to_be_visible()
     assert page.evaluate("localStorage.getItem('daedalus.mode')") == "agents"
-    for key, path in (("board", "/app/board"), ("inbox", "/app/inbox"), ("services", "/app/services")):
+    for key, path in (("board", "/app/board"), ("inbox", "/app/inbox"), ("schedules", "/app/schedules")):
         rail.locator(f"[data-rail='{key}']").click()
         page.wait_for_url(f"**{path}")
         expect(rail.locator(f"[data-rail='{key}']")).to_have_class(re.compile(r"\bon\b"))
@@ -167,7 +165,7 @@ def desktop(page: Page, lang: str) -> None:
     page.locator("nav.sidebar .sidebar-fold").click()
     expect(page.locator("nav.sidebar")).to_have_count(0)
     expect(rail).to_be_visible()
-    assert round(page.locator(".main").bounding_box()["x"]) == round(rail.bounding_box()["width"])  # type: ignore[index]
+    assert round(page.locator(".main").bounding_box()["x"]) == round(page.locator(".desktop-column").bounding_box()["width"])  # type: ignore[index]
     home = rail.locator("[data-rail='home']")
     expect(home).to_have_attribute("aria-label", words["toggle"])
     expect(home).to_have_attribute("aria-expanded", "false")

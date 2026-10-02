@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { Skeleton } from "../components";
+import { Skeleton } from "../ui/index";
 import { absTime, clock, dayLabel, int, planName, tokens, untilShort, usd } from "../format";
-import { PageHeader, screenTitle } from "../shell";
+import { PageHeader, screenTitle } from "../ui/index";
 import { useQuery } from "../store";
 import { plural, t } from "../i18n";
 

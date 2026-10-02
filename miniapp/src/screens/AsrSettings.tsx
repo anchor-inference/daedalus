@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import type { Settings } from "../api";
 import { t } from "../i18n";
-import { Dropdown, Switch } from "../components";
+import { Dropdown, Switch } from "../ui/index";
 import { Row, TextBlock } from "../settingsrow";
 import { SpeechModel, fetchSttView } from "../sttview";
 import { CLOUD, transcriberChoices } from "../asrchoices";

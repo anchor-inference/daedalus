@@ -1,10 +1,11 @@
+import { ControlTrigger } from "./ui/control-trigger";
 // How the agent works in this session, chosen from the chip beside the model: the mode (the plain
 // agent or one of the configured modes) and, apart from it, the YAGNI switch. The chip stays on a
 // phone while a run is on — the model chip gives way there, this one does not — so it says only what
 // fits: the mode's name, and the word YAGNI while the switch is on.
 
 import { useEffect, useRef, useState } from "react";
-import { Popover, Sheet } from "./dialogs";
+import { Popover, Sheet } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { DICT, t } from "./i18n";
 
@@ -83,11 +84,11 @@ export function ModeSelect({ mode, modes, yagni, onChooseMode, onYagni, sheet }:
   );
   return (
     <>
-      <button ref={trigger} type="button" className={`composer-mode ${on ? "yagni" : ""} ${open ? "on" : ""}`} onClick={() => setOpen(!open)} title={chip.title} aria-label={`${t("composer.mode.for")}: ${chip.title}`} aria-haspopup="menu" aria-expanded={open}>
+      <ControlTrigger ref={trigger} type="button" className={`composer-mode ${on ? "yagni" : ""} ${open ? "on" : ""}`} onClick={() => setOpen(!open)} title={chip.title} aria-label={`${t("composer.mode.for")}: ${chip.title}`} aria-haspopup="menu" aria-expanded={open}>
         <span className="truncate">{chip.label}</span>
         {on && <span className="mode-yagni">{t("composer.yagni")}</span>}
-        <Icon name="chevron" size={12} />
-      </button>
+
+      </ControlTrigger>
       {open && sheet && (
         <Sheet title={t("composer.mode.for")} onClose={() => setOpen(false)} className="mode-sheet">
           {list}

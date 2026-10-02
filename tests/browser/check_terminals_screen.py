@@ -325,13 +325,9 @@ def navigation(browser, problems: list[str]) -> None:  # type: ignore[no-untyped
         problems.append(f"g t went to {page.url}")
     page.goto(f"{BASE}/inbox?token=t&scheme=dark&lang=en")
     page.wait_for_selector(".rail [data-rail='menu']", timeout=10000)
-    page.locator(".rail [data-rail='menu']").click()
-    item = page.locator(".navmenu[role='menu'] >> text=Terminals")
-    if not item.count():
-        problems.append("the menu has no Terminals item")
-    else:
-        item.first.click()
-        page.wait_for_url("**/app/terminals", timeout=5000)
+    # A daily destination has one place: the rail; the secondary menu must not duplicate it.
+    page.locator(".rail [data-rail='terminals']").click()
+    page.wait_for_url("**/app/terminals", timeout=5000)
     # The palette offers the running terminals and a new one; they are read from the listing already made.
     page.wait_for_selector(".term-card", timeout=10000)
     page.keyboard.press("Control+k")

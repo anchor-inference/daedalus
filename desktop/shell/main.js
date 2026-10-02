@@ -44,6 +44,7 @@ const engineName = isWindows ? 'daedalus-desktop.exe' : 'daedalus-desktop';
 const engineExe = process.env.DAEDALUS_ENGINE || path.join(path.dirname(process.execPath), engineName);
 
 let win = null;
+let hideCompanion = null;
 let engine = null;
 let quitting = false;
 let upgrading = false;
@@ -112,6 +113,7 @@ function start() {
     const result = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
     return result.canceled || result.filePaths.length === 0 ? '' : result.filePaths[0];
   });
+  hideCompanion = require('./pet-window')(() => win, showWindow, app.getLocale());
   createWindow();
   win.loadFile(path.join(__dirname, 'pages', 'starting.html'), { query: { text: strings.starting } });
   startEngine();
@@ -319,6 +321,7 @@ function createWindow() {
   win.once('ready-to-show', () => win.show());
   guard(win.webContents);
   win.on('close', saveWindowState);
+  win.on('closed', () => { win = null; hideCompanion?.(); });
 }
 
 // guard keeps every page in this window on this machine. The launcher's pages and the app are on

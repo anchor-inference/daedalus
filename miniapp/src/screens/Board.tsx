@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { api, Project, SessionList, SessionSummary } from "../api";
-import { Skeleton, copyText } from "../components";
-import { OverflowMenu, Sheet } from "../dialogs";
+import { Skeleton, copyText } from "../ui/components";
+import { OverflowMenu, Sheet } from "../ui/dialogs";
 import { absTime, relTime } from "../format";
 import { useEdgeFade } from "../edgefade";
 import { Icon } from "../icons";
 import { navigate, pathFor, projectPagePath } from "../router";
-import { PageHeader, screenTitle } from "../shell";
+import { PageHeader, screenTitle } from "../ui/index";
 import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 // `t` is also the name every task on this screen goes by, so the translator is imported twice: the

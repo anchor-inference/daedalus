@@ -14,5 +14,5 @@ export default defineConfig({
   },
   // The stylesheet is read as text by density.test.ts; without this the test runner hands every
   // CSS import over as an empty string and a guard over an empty file passes everything.
-  test: { css: { include: [/styles\.css/] } },
+  test: { css: { include: [/\.css/] } },
 });

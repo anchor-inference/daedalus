@@ -4,11 +4,11 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon, IconName } from "./icons";
-import { Sheet } from "./dialogs";
+import { Sheet } from "./ui/dialogs";
 import { Screen, navigate, pathFor } from "./router";
 import { SelfDevMode, screenTag, visibleScreens } from "./capabilities";
 import { plural, t } from "./i18n";
-import { LangPicker } from "./components";
+import { LangPicker } from "./ui/components";
 import { insideTerminal } from "./terminal/keys";
 import { modeHome } from "./mode";
 

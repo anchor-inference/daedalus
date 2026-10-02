@@ -170,7 +170,7 @@ export function PaneHandle({ side, drag }: { side: "left" | "right"; drag: PaneD
 const SIDEBAR = "daedalus.sidebar";
 
 /** Below this the column would take a third of the window, so folded is the default there: the rail alone is left. */
-export const SIDEBAR_COLUMN_MIN = 1280;
+export const SIDEBAR_COLUMN_MIN = 1100;
 
 /** Whether the sidebar is folded: what the operator chose, or, having chosen nothing, what the window allows. */
 export function sidebarCollapsed(stored: string | null, viewportWidth: number): boolean {

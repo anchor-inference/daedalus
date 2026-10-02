@@ -14,6 +14,8 @@ files:
   - main.js
   - policy.js
   - preload.js
+  - pet-window.js
+  - pet/**
   - pages/**
   - package.json
 # The archive the launcher's own `upgrade` installs from is the unpacked application, so nothing

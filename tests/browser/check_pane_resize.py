@@ -172,7 +172,7 @@ def run() -> int:
         page.wait_for_selector(".panel.shown", timeout=15000)
         page.wait_for_timeout(1200)
 
-        sidebar = drag(page, "sidebar", "nav.sidebar > .pane-handle", "nav.sidebar", 1)
+        sidebar = drag(page, "sidebar", ".desktop-column > .pane-handle", ".desktop-column", 1)
         panel = drag(page, "panel", ".panel > .pane-handle", ".panel", -1)
         print("sidebar", json.dumps(sidebar))
         print("panel", json.dumps(panel))
@@ -181,7 +181,7 @@ def run() -> int:
         page.reload()
         page.wait_for_selector(".panel.shown", timeout=15000)
         page.wait_for_timeout(800)
-        kept = {"sidebar": round(width(page, "nav.sidebar"), 1), "panel": round(width(page, ".panel"), 1)}
+        kept = {"sidebar": round(width(page, ".desktop-column"), 1), "panel": round(width(page, ".panel"), 1)}
         print("after reload", kept)
         browser.close()
     if ASSERT:

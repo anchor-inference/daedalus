@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import { Sheet } from "../dialogs";
+import { Sheet } from "../ui/dialogs";
 import { Icon } from "../icons";
 import { confirmAsync, errorText } from "../ui";
 import { t } from "../i18n";

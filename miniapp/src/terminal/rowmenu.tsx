@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import { api, type TerminalView } from "../api";
-import { OverflowMenu, Sheet, type MenuItem } from "../dialogs";
+import { OverflowMenu, Sheet, type MenuItem } from "../ui/dialogs";
 import { t } from "../i18n";
 import { invalidate } from "../store";
 import { errorText } from "../ui";
@@ -55,7 +55,7 @@ export function TerminalRowMenu({ row, toast, onRemoved }: { row: TerminalView; 
   // Beside the row's own link or button, never inside it: a press on the menu is not a press on the row.
   return (
     <span className="term-row-menu" data-terminal-menu={row.id} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-      <OverflowMenu small className="quiet" label={t("term.row.menu", { title: shown })} items={items} />
+      <OverflowMenu contextSelector=".focus-term-row, .phone-term-row" small className="quiet" label={t("term.row.menu", { title: shown })} items={items} />
       {renaming && (
         <Sheet title={t("term.rename")} onClose={() => setRenaming(false)} size="narrow">
           <form className="term-rename" onSubmit={(e) => { e.preventDefault(); void rename(); }}>

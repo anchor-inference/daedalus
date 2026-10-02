@@ -14,7 +14,7 @@ import { NewAgentSheet, SessionsScreen } from "./Sessions";
 import { Icon } from "../icons";
 import { navigate, pathFor, sessionPath, useRoute } from "../router";
 import { invalidate, useQuery } from "../store";
-import { useMedia } from "../shell";
+import { useMedia } from "../ui/index";
 import { enterSends, errorText } from "../ui";
 import { t } from "../i18n";
 

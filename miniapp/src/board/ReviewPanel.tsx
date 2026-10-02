@@ -6,8 +6,8 @@
 
 import { useState } from "react";
 import { api } from "../api";
-import { Skeleton } from "../components";
-import { Sheet } from "../dialogs";
+import { Skeleton } from "../ui/components";
+import { Sheet } from "../ui/dialogs";
 import { relTime } from "../format";
 import { Icon } from "../icons";
 import { plural, t } from "../i18n";

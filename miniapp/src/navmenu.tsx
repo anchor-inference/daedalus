@@ -1,13 +1,12 @@
-// The menu: every destination, its count, the language and Settings, in a panel that opens upward
-// from the bottom-left corner over whatever is on the screen. It replaces the column of
-// destinations that used to stand beside the sessions and cost the conversation its width.
+// Secondary destinations open beside their button. Primary destinations already have their own
+// place in the desktop column and are not repeated here.
 
-import { useEffect, useRef } from "react";
-import { LangPicker } from "./components";
-import { Overlay, useLayer } from "./dialogs";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { LangPicker } from "./ui/components";
+import { Overlay, useLayer } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { t } from "./i18n";
-import { menuSections, moveIndex } from "./navigation";
+import { DESKTOP_PLACES, menuSections, moveIndex } from "./navigation";
 import { Screen, pathFor } from "./router";
 import { SelfDevMode, screenTag } from "./capabilities";
 import { Counts, ICONS, countFor, go, screenTitle } from "./shell";
@@ -16,6 +15,21 @@ const BETA: Screen[] = ["voice"];
 
 export function NavMenu({ screen, counts, selfdev, onClose, opener }: { screen: Screen; counts: Counts; selfdev: SelfDevMode; onClose: () => void; opener?: HTMLElement | null }) {
   const panel = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left:8, top:8 });
+  useLayoutEffect(() => {
+    const place = () => {
+      if (!panel.current || !opener) return;
+      const column = opener.closest(".desktop-column")?.getBoundingClientRect();
+      const anchor = opener.getBoundingClientRect();
+      const menu = panel.current.getBoundingClientRect();
+      setPosition({ left:Math.min((column?.right ?? anchor.right) + 6, window.innerWidth - menu.width - 8), top:Math.max(8, Math.min(anchor.top, window.innerHeight - menu.height - 8)) });
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    if (panel.current) observer.observe(panel.current);
+    window.addEventListener("resize", place);
+    return () => { observer.disconnect(); window.removeEventListener("resize", place); };
+  }, [opener]);
   useLayer(onClose);
   // The first item takes focus on open; when the menu closes focus goes back to the button that
   // opened it, or to wherever it was for a keyboard shortcut. The callback's identity changes on
@@ -62,8 +76,8 @@ export function NavMenu({ screen, counts, selfdev, onClose, opener }: { screen: 
   return (
     <Overlay>
       <div className="navmenu-backdrop" onClick={onClose} />
-      <div ref={panel} className="navmenu" role="menu" aria-label={t("nav.menu")} onKeyDown={onKey}>
-        {menuSections(selfdev).map((g) => (
+      <div ref={panel} className="navmenu" style={{ ...position, bottom:"auto" }} role="menu" aria-label={t("nav.menu")} onKeyDown={onKey}>
+        {menuSections(selfdev).map((g) => ({ ...g, items:g.items.filter((s) => s !== "agents" && !DESKTOP_PLACES.includes(s)) })).filter((g) => g.items.length > 0).map((g) => (
           <div key={g.key} className="navmenu-section" role="group" aria-label={t(`nav.group.${g.key}`)}>
             <div className="navmenu-label">{t(`nav.group.${g.key}`)}</div>
             {g.items.map((s) => item(s))}
@@ -74,7 +88,6 @@ export function NavMenu({ screen, counts, selfdev, onClose, opener }: { screen: 
             <span><Icon name="globe" size={18} /> {t("lang.menu")}</span>
             <LangPicker />
           </div>
-          {item("settings", "⌘,")}
           <a role="menuitem" href={pathFor("settings", "about")} className="navmenu-item" onClick={(e) => { go(e, pathFor("settings", "about")); if (e.defaultPrevented) onClose(); }}>
             <Icon name="question" size={18} />
             <span className="truncate">{t("settings.sec.about")}</span>

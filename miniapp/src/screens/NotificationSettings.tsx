@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, telegram } from "../api";
 import type { NotificationPreferences, NotificationPreferencesView, NotifyCell, NotifyChannel, Project } from "../api";
-import { Switch, timeAgo } from "../components";
+import { Switch, timeAgo } from "../ui/components";
 import { NumInput, Row } from "../settingsrow";
 import { clock, shortDateTime } from "../format";
 import { plural, t } from "../i18n";
@@ -17,7 +17,7 @@ import { CELLS, CHANNELS, MUTE_ENDS, joinQuietHours, muteState, muteUntil, nextC
 import { currentEndpoint, type PushDevice } from "../push";
 import { setPopupsShown, usePopupsShown } from "../popups";
 import { PushCard } from "../pushui";
-import { useMedia } from "../shell";
+import { useMedia } from "../ui/index";
 import { invalidate, useQuery } from "../store";
 import { errorText } from "../ui";
 

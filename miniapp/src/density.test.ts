@@ -14,7 +14,10 @@
 
 /// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
-import css from "./styles.css?raw";
+import legacy from "./ui/styles.css?raw";
+import tokens from "./ui/tokens.css?raw";
+import desktop from "./ui/desktop.css?raw";
+const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop;
 
 type Rule = { selector: string; media: string; body: string };
 

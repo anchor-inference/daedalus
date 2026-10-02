@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import type { MediaItem, MediaPresentation } from "./api";
 import { api } from "./api";
-import { Overlay, useLayer } from "./dialogs";
+import { Overlay, useLayer } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { t } from "./i18n";
 export { mediaCopyText, splitMediaAnswer } from "./mediaformat";

@@ -4,7 +4,7 @@
 
 import { lazy, Suspense } from "react";
 import { SessionScreen, retried } from "../chunks";
-import { Skeleton } from "../components";
+import { Skeleton } from "../ui/components";
 import { t } from "../i18n";
 import { ORCHESTRATION, ORCHESTRATION_LIST, back as goBack, navigate, projectHome, projectPagePath, useRoute } from "../router";
 import { useProject } from "./data";

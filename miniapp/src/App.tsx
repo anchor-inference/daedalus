@@ -1,7 +1,8 @@
+import { useDesktopPet } from "./ui/pet";
 import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, SessionList, SessionSummary, telegram, TerminalList } from "./api";
-import { StatusLabel } from "./components";
-import { ConfirmHost, Sheet, ToastHost, toast as showToast } from "./dialogs";
+import { StatusLabel } from "./ui/components";
+import { ConfirmHost, Sheet, ToastHost, toast as showToast } from "./ui/dialogs";
 import type { AuthConfig } from "./screens/Login";
 import type { OnboardingState } from "./screens/AddModel";
 import * as passkeys from "./passkeys";
@@ -10,7 +11,7 @@ import { Counts, MoreSheet, Palette, PaletteItem, TabBar, go, screenTitle, useMe
 import { Sidebar, useSidebar } from "./sidebar";
 import { NavMenu } from "./navmenu";
 import { shortcutFor } from "./navigation";
-import { clampWidth, pixelDrag, readSidebar, rememberSidebar, usePaneWidth } from "./layout";
+import { PaneHandle, clampWidth, pixelDrag, readSidebar, rememberSidebar, usePaneWidth } from "./layout";
 import { Capabilities, SelfDevMode, visibleScreens } from "./capabilities";
 import { ProjectSwitcher, rememberProject, storedProject, useProjects } from "./projects";
 import { projectPath } from "./folders";
@@ -207,6 +208,7 @@ export function App() {
       .catch(() => setOnboarding({ has_model: true } as OnboardingState)); // an older bot has no such route: let the app through
   }, [authed]);
   const notifications = useSummary(!!authed);
+  useDesktopPet(!!authed, notifications.needs_you > 0);
   useAppBadge(notifications.unseen);
   const projects = useProjects();
   const projectList = projects.data ?? [];
@@ -569,7 +571,7 @@ export function App() {
   return (
     <div ref={shell} className={`app ${projectBar ? "project-phone" : ""} ${route.screen === "settings" ? "settings-open" : ""}`} style={wide ? { ["--sidebar-w" as string]: `${folded ? 0 : sidebarWidth}px` } : undefined}>
       {wide && (
-        <Rail
+        <div className={`desktop-column ${folded ? "folded" : ""}`}><Rail
           screen={route.screen}
           detail={route.detail}
           mode={mode}
@@ -581,8 +583,9 @@ export function App() {
           menuOpen={menu}
           onMenu={() => setMenu((m) => !m)}
           menuButton={menuButton}
+          onSearch={() => setPalette(true)}
         />
-      )}
+        <div className="desktop-context">
       {wide && !folded && focusProject && (
         <ErrorBoundary key={focusProject}>
         <Suspense fallback={<nav className="sidebar project-sidebar" />}>
@@ -591,25 +594,25 @@ export function App() {
             view={focusView(route.page, route.inner)}
             terminal={route.page === "terminals" ? route.query.get("t") : null}
             onToggle={toggleSidebar}
-            drag={sidebarDrag}
-            toast={showToast}
+              toast={showToast}
             pinned={pinned}
           />
         </Suspense>
         </ErrorBoundary>
       )}
-      {wide && !folded && !focusProject && mode === "orchestration" && <OrchestrationSidebar onMain={mainChat} onToggle={toggleSidebar} drag={sidebarDrag} />}
+      {wide && !folded && !focusProject && mode === "orchestration" && <OrchestrationSidebar onMain={mainChat} onToggle={toggleSidebar} />}
       {wide && !folded && !focusProject && mode === "agents" && (
         <Sidebar
           session={sessionId}
           onToggle={toggleSidebar}
-          drag={sidebarDrag}
           projects={agentProjects}
           project={project}
           onProjects={() => setSwitching(true)}
           onOpen={open}
           toast={showToast}
         />
+      )}
+        </div>{!folded && <PaneHandle side="right" drag={sidebarDrag} />}</div>
       )}
       {wide && menu && <NavMenu screen={route.screen} counts={counts} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} />}
       <div ref={main} className={`main ${sessionId || focusChat || terminalOpen ? "chat-open" : ""}`}>

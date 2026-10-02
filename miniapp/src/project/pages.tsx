@@ -5,8 +5,8 @@
 
 import { useEffect, useState } from "react";
 import { api, type BriefSection, type JournalEntry, type Project } from "../api";
-import { Skeleton } from "../components";
-import { Sheet } from "../dialogs";
+import { Skeleton } from "../ui/components";
+import { Sheet } from "../ui/dialogs";
 import { absTime, relTime } from "../format";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";

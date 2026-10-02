@@ -19,7 +19,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 HERE = Path(__file__).parent
-HARNESS = (HERE / "harness.html").resolve()  # loads ../../miniapp/src/styles.css, the shipped stylesheet
+HARNESS = (HERE / "harness.html").resolve()  # loads ../../miniapp/src/ui/styles.css, the shipped stylesheet
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 VIEWPORTS = [
     ("phone-portrait", 390, 844, 0),

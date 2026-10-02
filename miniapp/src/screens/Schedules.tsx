@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { api, Schedule } from "../api";
-import { Pill, Skeleton } from "../components";
-import { OverflowMenu, Sheet } from "../dialogs";
+import { Pill, Skeleton } from "../ui/components";
+import { OverflowMenu, Sheet } from "../ui/dialogs";
 import { absTime, cronFor, describeCron, describeSchedule, relTime, untilShort } from "../format";
 import { Icon } from "../icons";
 import { navigate, pathFor } from "../router";
-import { PageHeader, screenTitle } from "../shell";
+import { PageHeader, screenTitle } from "../ui/index";
 import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { t } from "../i18n";

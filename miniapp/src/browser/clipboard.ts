@@ -9,7 +9,7 @@
 // and fills it when the answer comes; where that is refused, the text is written plainly, and where
 // that is refused too, a toast offers a button whose own tap writes it.
 
-import { toast } from "../dialogs";
+import { toast } from "../ui/dialogs";
 import { plural, t } from "../i18n";
 import { CopyError, type Copied, type LiveView } from "./live";
 

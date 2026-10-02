@@ -10,7 +10,7 @@ import { CopyError, type Copied, type LiveView } from "./live";
 import type { InputMessage } from "./protocol";
 
 const toasts = vi.hoisted(() => [] as { text: string; action?: { label: string; run: () => void } }[]);
-vi.mock("../dialogs", () => ({
+vi.mock("../ui/dialogs", () => ({
   toast: (text: string, opts: { action?: { label: string; run: () => void } } = {}) => {
     toasts.push({ text, action: opts.action });
     return toasts.length;

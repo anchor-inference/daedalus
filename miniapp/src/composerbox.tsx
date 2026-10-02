@@ -3,7 +3,7 @@
 
 import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, AsrStatus, ModelFallback, Question, SlashCommand } from "./api";
-import { Popover } from "./dialogs";
+import { Popover } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { fileGlyph, previewKind, canPreview } from "./preview";
 import { enterSends, errorText, fmtBytes, fmtTok, haptic } from "./ui";
@@ -30,7 +30,7 @@ import {
   readDraft,
   writeDraft,
 } from "./composer";
-import { fmtInt } from "./components";
+import { fmtInt } from "./ui/components";
 import { t } from "./i18n";
 import { insideTerminal } from "./terminal/keys";
 

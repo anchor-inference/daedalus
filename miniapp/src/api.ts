@@ -30,6 +30,9 @@ declare global {
     };
     /** What the desktop window binds into the page. Absent in a browser and inside Telegram. */
     daedalus?: {
+      pet?: (enabled: boolean) => Promise<boolean>;
+      petState?: (state: { state: string; reduced: boolean }) => void;
+      onPetHidden?: (callback: () => void) => () => void;
       /** Open the platform's folder chooser; resolves to the path, or null when the operator cancelled. */
       pickFolder?: () => Promise<string | null>;
       /** Set by the desktop launcher's own window, so the page can say which kind of window it is in. */

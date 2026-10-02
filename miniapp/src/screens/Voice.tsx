@@ -22,12 +22,12 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { retried } from "../chunks";
 import { api } from "../api";
-import { Dropdown, StatusLabel, timeAgo } from "../components";
+import { Dropdown, StatusLabel, timeAgo } from "../ui/components";
 import { Row } from "../settingsrow";
 import { t, useLang } from "../i18n";
 import { Icon } from "../icons";
 import { pathFor, sessionPath } from "../router";
-import { PageHeader, go, screenTitle } from "../shell";
+import { PageHeader, go, screenTitle } from "../ui/index";
 import { useQuery } from "../store";
 import { errorText, haptic } from "../ui";
 import { localListenSupported } from "../stt";

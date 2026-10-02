@@ -1,7 +1,9 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { ContextMenuHost } from "./ui/context-menu";
 import { App } from "./App";
-import "./styles.css";
+import "./ui/styles.css";
+import "./ui/desktop.css";
 
 // Installable as an app: the service worker keeps the shell and the hashed assets; nothing of the API is cached.
 if ("serviceWorker" in navigator && window.location.protocol === "https:") {
@@ -15,6 +17,7 @@ const render = () =>
   root.render(
     <React.StrictMode>
       <App />
+      <ContextMenuHost />
     </React.StrictMode>,
   );
 

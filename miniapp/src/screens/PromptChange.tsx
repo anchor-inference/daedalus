@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { Sheet } from "../dialogs";
+import { Sheet } from "../ui/dialogs";
 import { Icon } from "../icons";
 import { t } from "../i18n";
 import { duration } from "../format";

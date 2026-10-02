@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { BrowserActionRow, BrowserDraft, BrowserFrame, BrowserGroup } from "../api";
-import { OverflowMenu, Popover, type MenuItem } from "../dialogs";
+import { OverflowMenu, Popover, type MenuItem } from "../ui/dialogs";
 import { clock } from "../format";
 import { plural, t } from "../i18n";
 import { Icon, type IconName } from "../icons";

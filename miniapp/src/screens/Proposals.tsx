@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { api, Proposal } from "../api";
-import { Pill, Skeleton } from "../components";
-import { Sheet } from "../dialogs";
+import { Pill, Skeleton } from "../ui/components";
+import { Sheet } from "../ui/dialogs";
 import { absTime, relTime } from "../format";
 import { navigate, pathFor } from "../router";
-import { PageHeader, screenTitle } from "../shell";
+import { PageHeader, screenTitle } from "../ui/index";
 import { invalidate, useQuery } from "../store";
 import { errorText } from "../ui";
 import { plural, t } from "../i18n";

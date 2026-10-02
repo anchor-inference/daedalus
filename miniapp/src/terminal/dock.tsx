@@ -10,7 +10,7 @@
 import { CSSProperties, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, TerminalCreate, TerminalEnv, TerminalEnvName, TerminalList, TerminalView as TerminalRow } from "../api";
-import { confirmDialog, MenuItem, OverflowMenu, Sheet } from "../dialogs";
+import { confirmDialog, MenuItem, OverflowMenu, Sheet } from "../ui/dialogs";
 import { plural, t } from "../i18n";
 import { EnvPill } from "../envpill";
 import { Icon } from "../icons";
