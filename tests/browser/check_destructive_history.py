@@ -39,15 +39,16 @@ def run() -> None:
             page.reload()
             page.wait_for_selector(".composer")
             expect(page.locator(".answer")).to_have_count(0)
-            page.locator(".composer .model-select" if width < 600 else ".composer .effort-select").click()
+            # Effort is a branch of the model menu at every width.
+            page.locator(".composer .model-select").click()
+            page.locator(".effort-entry").click()
             page.locator('.effort-option input[value="off"]').click()
-            if width < 600:
-                expect(page.locator('.effort-option input[value="off"]')).to_be_checked()
             page.wait_for_timeout(200)
             assert HOST.thinking is False
             page.reload()
             page.wait_for_selector(".composer")
-            page.locator(".composer .model-select" if width < 600 else ".composer .effort-select").click()
+            page.locator(".composer .model-select").click()
+            page.locator(".effort-entry").click()
             expect(page.locator('.effort-option input[value="off"]')).to_be_checked()
             print(f"{width}: destructive retry/revert, reload, reasoning off passed")
             context.close()

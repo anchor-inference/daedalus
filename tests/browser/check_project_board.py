@@ -161,6 +161,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
         "assignee_staff_id": "st-lev",
         "depends_on": ["t-checkout"],
         "priority": 2,
+        "resume_from": None,
     }, made
     expect(page.locator(".toast")).to_contain_text(words["queued"])
     expect(cols.locator(".pboard-col.queue .pcard", has_text="Delivery zones")).to_be_visible()

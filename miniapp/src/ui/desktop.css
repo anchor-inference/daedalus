@@ -109,10 +109,12 @@
 .composer-tools:has(.roundbtn.primary:not(:disabled)) .mic { display:none; }
 .start-composer { max-width:680px; min-width:0; align-self:center; }
 .start-hero { width:100%; min-width:0; }
+/* A narrow composer keeps the phone rules this sheet would otherwise undo, loading after them: the
+   mode chip keeps its whole name and the model pill, with room inside it, is what gives way. */
 @container (max-width:560px) {
   .composer-row { gap:var(--space-1); }
-  .composer-row .model-select { max-width:180px; }
-  .composer-row .composer-mode { max-width:32%; padding-inline:var(--space-2); }
+  .composer-row .model-select { max-width:none; padding-inline:var(--space-2); }
+  .composer-row .composer-mode { flex:none; max-width:45%; padding-inline:var(--space-2); }
 }
 
 .effort-branch:has(.floating[data-side="left"]) .effort-entry > .ic:last-child { transform:rotate(90deg); }
