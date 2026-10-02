@@ -1,0 +1,113 @@
+/* Hero: one big Daedalus on an almost empty dark stage; the step frame floats beside him. Wide
+   windows put the frame on the right and him on the left; tall ones put him on top. The frame's
+   size depends on the window only, never on the step, so the handover always lands on the same box. */
+:root {
+  --t-step: 1000;
+  --frame-w: min(540px, calc(52vw - 24px));
+  --frame-h: min(560px, calc(100dvh - 96px));
+  --dock-r: max(24px, 5vw);
+}
+/* the canvas is transparent: the stage light is a plain gradient, free for the GPU */
+body {
+  background:
+    radial-gradient(46% 62% at 28% 56%, rgba(94, 226, 196, .09), transparent 70%),
+    radial-gradient(70% 50% at 28% 100%, rgba(184, 134, 75, .07), transparent 70%),
+    #060708;
+}
+.dock { position: fixed; z-index: 3; right: var(--dock-r); top: 50%; transform: translateY(-50%); }
+.guide-zone { left: 0; top: 0; bottom: 0; right: calc(var(--dock-r) + var(--frame-w) * var(--z, 1)); }
+
+.frame {
+  background: linear-gradient(180deg, rgba(15, 19, 20, .9), rgba(9, 11, 12, .92));
+  border: 1px solid rgba(94, 226, 196, .16);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, .55),
+    0 0 60px -14px rgba(94, 226, 196, .22),
+    0 40px 90px -24px rgba(0, 0, 0, .9),
+    inset 0 1px 0 rgba(190, 255, 236, .07);
+}
+.frame.nope { animation: nope .42s var(--ease); }
+.frame::after {
+  content: ''; position: absolute; left: 14%; right: 14%; top: -1px; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(127, 240, 214, .6), transparent);
+}
+.f-count { color: var(--accent); }
+.progress li.now { background: var(--accent); box-shadow: 0 0 10px var(--glow); }
+.progress li.done { background: var(--bronze); }
+.s-title { font-weight: 640; }
+.badge { background: var(--accent); color: var(--on-accent); }
+.badge.soft { background: rgba(184, 134, 75, .14); color: var(--bronze-2); border-color: rgba(184, 134, 75, .3); }
+.welcome-row .tag { color: var(--bronze-2); border-color: rgba(184, 134, 75, .3); background: rgba(184, 134, 75, .1); }
+.s-welcome .hero-slot { display: none; }
+.s-welcome { gap: 14px; }
+.launch-slot { display: none; }
+/* the step is carried by the guide: scene.js animates it from and to his hands; when motion is
+   reduced the shared cross-fade applies untouched */
+.step { will-change: transform, opacity; }
+
+.vignette {
+  position: fixed; inset: 0; z-index: 1; pointer-events: none;
+  background: radial-gradient(120% 90% at 30% 55%, transparent 60%, rgba(0, 0, 0, .5));
+}
+.handoff .dock { transition: opacity .8s var(--ease), transform .9s var(--ease-emph); opacity: 0; transform: translateY(-50%) scale(.96); }
+
+@media (max-aspect-ratio: 1/1), (max-width: 720px) {
+  :root {
+    --frame-w: min(560px, calc(100vw - 32px));
+    --frame-h: min(560px, calc(100dvh - 268px));
+  }
+  body { background:
+    radial-gradient(60% 40% at 50% 24%, rgba(94, 226, 196, .09), transparent 70%), #060708; }
+  .dock { right: auto; left: 50%; top: auto; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); }
+  .handoff .dock { transform: translateX(-50%) scale(.96); }
+  /* centred over the card: the bubble narrows to the room beside his head instead */
+  .guide-zone { left: 0; right: 0; top: 44px; bottom: calc(var(--frame-h) + 24px); }
+  .brand { top: 16px; left: 16px; }
+}
+/* Large monitors: the whole wizard and the corner chrome grow with the window, so the card keeps
+   its weight next to the guide instead of shrinking to a postcard on a 4K screen. */
+:root { --z: 1; }
+@media (min-width: 1700px) and (min-height: 1000px) { :root { --z: 1.2; } }
+@media (min-width: 2300px) and (min-height: 1300px) { :root { --z: 1.5; } }
+@media (min-width: 3400px) and (min-height: 1900px) { :root { --z: 1.9; } }
+[data-wizard], .brand, .lang-box, .bubble { zoom: var(--z); }
+
+/* The guide's bubble: soft glass with a mint edge, hung beside his head with a small tail that
+   points at it, never in the page's corners. scene.js places it every frame. */
+.bubble {
+  max-width: min(230px, 46vw); padding: 10px 14px; border-radius: 16px;
+  background: rgba(14, 22, 21, .78); color: var(--ink);
+  border: 1px solid rgba(94, 226, 196, .38);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .35), 0 12px 36px -10px rgba(0, 0, 0, .7), 0 0 26px -8px rgba(94, 226, 196, .35);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  font: 560 14px/1.35 var(--font);
+  transform-origin: var(--ox, 0) var(--ty, 50%);
+}
+.bubble::after {
+  content: ''; position: absolute; bottom: auto; top: calc(var(--ty, 50%) - 6px); left: -7px;
+  width: 12px; height: 12px; border-radius: 2px; background: rgba(18, 28, 27, .95);
+  border: 1px solid rgba(94, 226, 196, .38); border-width: 0 0 1px 1px; transform: rotate(45deg);
+}
+.bubble.l::after { left: auto; right: -7px; border-width: 1px 1px 0 0; }
+.bubble.on { animation: b-in .42s var(--ease-emph) both; }
+.bubble.out { animation: b-out .2s var(--ease-in) both; }
+@keyframes b-in { from { opacity: 0; scale: .86; translate: -6px 0; } }
+.bubble.l.on { animation-name: b-in-l; }
+@keyframes b-in-l { from { opacity: 0; scale: .86; translate: 6px 0; } }
+@keyframes b-out { to { opacity: 0; scale: .9; } }
+.bubble .dots { display: inline-flex; gap: 4px; padding: 4px 2px; vertical-align: middle; }
+.bubble .dots b { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: dot 1s ease-in-out infinite; }
+.bubble .dots b:nth-child(2) { animation-delay: .15s; }
+.bubble .dots b:nth-child(3) { animation-delay: .3s; }
+@keyframes dot { 0%, 100% { opacity: .3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .bubble.on, .bubble.out, .bubble .dots b { animation: none; } }
+.reduce .bubble.on, .reduce .bubble.out, .reduce .bubble .dots b { animation: none; }
+
+/* No WebGL here, or the stage failed: the same page with a still picture of him in his place. */
+.no-gl #gl, .no-gl .bubble { display: none; }
+.no-gl .guide-zone {
+  visibility: visible; background: url(still.webp) 50% 55% / contain no-repeat;
+  -webkit-mask-image: radial-gradient(closest-side, #000 72%, transparent); mask-image: radial-gradient(closest-side, #000 72%, transparent);
+}
+/* the launcher's latest line under the bar while the start runs: proof that it is moving */
+.launch-live { margin: 0; min-height: 1.5em; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px/1.5 'Geist Mono', ui-monospace, monospace; color: var(--faint); }

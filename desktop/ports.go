@@ -173,7 +173,10 @@ func planPorts(settings map[string]string, roles []portRole, probe portProbe, fr
 				blocked++
 			}
 		}
-		if blocked == 0 || (role.spare && !fresh && blocked < current[i].width()) {
+		// A port the operator fixed in the setup is kept even when something else holds it: they
+		// asked for one address, and the start that follows says the port is taken rather than
+		// quietly moving the app somewhere their bookmarks do not point.
+		if blocked == 0 || (role.spare && !fresh && blocked < current[i].width()) || (written[i] && fixedPort(settings, role.key)) {
 			kept[i] = true
 			placed = append(placed, current[i])
 			continue
@@ -204,6 +207,17 @@ func planPorts(settings map[string]string, roles []portRole, probe portProbe, fr
 		values[i] = envVar{role.key, chosen.String()}
 	}
 	return values, moves
+}
+
+// fixedPort reports whether the setup fixed a role's port (DAEDALUS_FIXED_PORTS, a comma list of
+// env keys); every other port chooses itself.
+func fixedPort(settings map[string]string, key string) bool {
+	for _, name := range strings.Split(settings["DAEDALUS_FIXED_PORTS"], ",") {
+		if strings.TrimSpace(name) == key {
+			return true
+		}
+	}
+	return false
 }
 
 // nearbySearch is how far past the current port the plan looks before it asks the system instead.

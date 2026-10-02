@@ -64,6 +64,7 @@
         <span class="busy" id="busy"></span>
       </div>
       {{if .Native}}<p class="note">{{.T "status.native.note"}}</p>{{end}}
+      <p class="note"><label><input type="checkbox" id="autostart"{{if .Autostart}} checked{{end}} /> {{.T "status.autostart"}}</label></p>
     </section>
 
     <details class="panel rise" style="--i: 6">

@@ -139,11 +139,11 @@ same move, and refuses the same way.
    fetched as GitHub tarballs of `main`, and committed there — with `git` running inside the agent's
    own image in Docker mode, and with the runtime's own git in native mode. Each checkout is a real local history with
    no remote — an update is the next commit on top of it.
-3. The application's window shows the launcher's page (`http://127.0.0.1:8770`, or any free port) with
-   the whole of the setup on it: how it runs, one model provider key, and a daily spending cap that
-   already has a figure in it. Telegram is behind a disclosure and stays optional — without it you
-   use the app in that window. The page is in English or Russian; the switch is in its corner and
-   the choice is remembered.
+3. The application's window shows the launcher's page (`http://127.0.0.1:8770`, or any free port):
+   a short wizard with Daedalus beside it — how it runs, a model, a daily spending limit, Telegram
+   (optional; without it you use the app in that window), the advanced settings, a summary, and the
+   start itself. The page is in English or Russian; the switch is in its corner and the choice is
+   remembered.
 4. **Docker:** the image is pulled (or built, if there is no published image for your platform),
    the stack comes up, and the same window moves to the app. One image, two containers from it: the
    agent, and the key proxy that holds the provider keys.
@@ -213,11 +213,39 @@ over:
 
 The launcher serves three pages of its own, on the loopback address and nowhere else.
 
-- **The questions** (`/setup`) — three cards: how it runs, a provider key, a day's spending. What is
-  not a question is behind a disclosure: the difference between the two modes, what happens if you
-  skip the key, and the four Telegram values. An empty field means *leave what is there alone*, so
-  opening this page again to change one value cannot blank the others; emptying one on purpose is
-  the tick under it.
+- **The questions** (`/setup`) — a wizard of eight steps, every answer of which the launcher acts
+  on:
+  - *How it runs* — on this machine or in a container, with a badge that says whether Docker answers
+    here.
+  - *Model* — one of three: an API key (DeepSeek, OpenRouter, OpenCode, OpenAI, Anthropic; written
+    to `daedalus-secrets/keyproxy.env`, which only the key proxy reads), a CLI you are already signed
+    in to (Codex, Claude Code, Grok — found the way the app finds them: the CLI's own status command,
+    else the login file the key proxy serves it from), or a local / OpenAI-compatible server. For
+    the last, the launcher itself asks the address you typed for its models — no redirect followed,
+    nothing else asked — and the one you pick becomes the app's default model through the key proxy
+    (`KEYPROXY_UPSTREAM_LOCAL` and `KEYPROXY_KEY_LOCAL` for the proxy, `DAEDALUS_LOCAL_MODEL` for the
+    app). In Docker mode a loopback address is written as `host.docker.internal`, which is where the
+    proxy's container finds your machine.
+  - *Spending* — US dollars a day, enforced by the supervisor and by the proxy.
+  - *Telegram* — the bot token, your id, the API id and hash; skippable.
+  - *Advanced* — the language; the ports, chosen automatically, with the app's port shown and
+    fixable (a fixed port is named in `DAEDALUS_FIXED_PORTS` and a start stops rather than moving
+    it); the data folder, shown read-only — it is chosen when the launcher starts (`--data`), and an
+    existing one is brought into a new folder with `daedalus-desktop import`; start at login, per
+    user (a `~/.config/autostart` entry on Linux, a LaunchAgent on macOS, the `Run` key on Windows),
+    which the status page turns off again; the browser component (the `browser` extra natively, the
+    browser image's compose profile in a container); and voice (off; local, the `speech` extra; or
+    cloud, through your OpenAI key).
+  - *Summary* — every line goes back to its step. *Start* follows the launcher's own start and its
+    *Open* button opens the app in the window.
+
+  Opened again (*Change the configuration*), the wizard starts from what is in force. A stored
+  secret is shown as its last four characters and kept unless something is typed over it.
+
+  The stage is three.js (MIT, `ui/assets/setup/vendor/Three-LICENSE.txt`) and the type is Geist
+  (SIL OFL 1.1, `ui/assets/setup/fonts/Geist-OFL.txt`), both carried in the launcher: the page
+  loads nothing from the network. Without WebGL the same wizard runs over a still picture, and a
+  system set to reduce motion gets cross-fades instead of the acts.
 - **The wait** (`/progress`) — where a start has got to: the steps of the mode you are in, ticked off
   as they pass; under them the one thing that is moving — an archive downloaded or unpacked with its
   megabytes, its total and a percentage, uv's own lines while the environment is built — and one line
@@ -491,7 +519,8 @@ start, `--version`.
 
 On the setup page, **a field left empty keeps whatever is already in force** — re-running setup to
 change the daily cap does not blank the provider keys, and the public address set by hand in
-`data/.env` is never touched. A value is removed only by ticking *remove* beside it.
+`data/.env` is never touched. A key is removed by deleting its line from
+`data/daedalus-secrets/keyproxy.env`.
 
 ## Signing in
 

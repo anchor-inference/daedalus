@@ -57,6 +57,22 @@ run)
   landed=$(curl -fsSL -o /dev/null -w '%{url_effective}' "$url") || fail "$url does not answer"
   curl -fsSL "$url" | grep -q 'data-page="\(setup\|progress\|status\)"' || fail "$landed is not one of the launcher's pages"
   echo "the launcher answers it with $landed"
+  case "$landed" in
+  */setup)
+    # The wizard is served whole from the launcher — the stage, three.js, the fonts, the still for a
+    # machine without WebGL — and its form answers with its own token: a post it refuses (a limit of
+    # zero) proves the path without starting a second first run here.
+    base=${landed%/setup}
+    for asset in setup/boot.js setup/wizard.js setup/scene.js setup/vendor/three.module.min.js setup/fonts/geist-latin.woff2 setup/still.webp; do
+      curl -fsS -o /dev/null "$base/assets/$asset" || fail "the setup page's $asset is not served"
+    done
+    token=$(curl -fsS "$landed" | sed -n 's/.*<meta name="csrf" content="\([0-9a-f]*\)".*/\1/p' | head -1)
+    [ -n "$token" ] || fail "the setup page carries no token"
+    refused=$(curl -sS -o /dev/null -w '%{http_code}' -H "X-Daedalus-Desktop: $token" --data "csrf=$token&usd_per_day=0" "$landed")
+    [ "$refused" = 400 ] || fail "the setup form answered $refused to a limit of zero, not 400"
+    echo "the wizard's assets are served and its form checks what it is sent"
+    ;;
+  esac
   test -f "$data/launcher.json" || fail "no launcher.json in $data: the data is not in the per-user folder"
   ps -eo pid,args | grep -v grep | grep -q '/opt/Daedalus/daedalus-desktop --shell' || fail "the launcher is not running under the application"
   # Closed the way a desktop closes it: SIGTERM to the application's main process.

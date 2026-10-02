@@ -53,9 +53,8 @@ async function switchLang(lang) {
   for (const field of document.querySelectorAll("input[name]")) {
     typed.set(name(field), field.type === "checkbox" || field.type === "radio" ? field.checked : field.value);
   }
-  // What was open and which provider was showing are part of where the operator was, too.
+  // What was open is part of where the operator was, too.
   const opened = [...document.querySelectorAll("details")].map((one) => one.open);
-  const provider = document.querySelector('.seg button[aria-pressed="true"]')?.dataset.provider;
   const answer = await fetch(location.pathname + location.search, { headers: { "Accept-Language": lang } });
   const fresh = new DOMParser().parseFromString(await answer.text(), "text/html");
   document.querySelector("main").replaceWith(fresh.querySelector("main"));
@@ -73,36 +72,12 @@ async function switchLang(lang) {
     else field.value = typed.get(key);
   }
   document.querySelectorAll("details").forEach((one, i) => (one.open = opened[i] ?? false));
-  if (page === "setup") setupPanels(provider);
 }
 
 document.addEventListener("click", (event) => {
   const lang = event.target.closest(".langs button");
   if (lang) switchLang(lang.dataset.lang);
 });
-
-// ---- the first page ----------------------------------------------------------------------------
-
-// One provider key is asked for at a time. All three fields are in the form and all three are
-// posted: an untouched field carries what is already on file, and the launcher reads an empty one
-// as "leave it alone", so showing one panel changes nothing about what is written.
-function showProvider(name) {
-  document.querySelectorAll(".seg button[data-provider]").forEach((button) => {
-    const chosen = button.dataset.provider === name;
-    button.setAttribute("aria-pressed", String(chosen));
-    document.querySelector(`[data-panel="${button.dataset.provider}"]`).hidden = !chosen;
-  });
-}
-
-function setupPanels(provider) {
-  document.querySelectorAll(".seg button[data-provider]").forEach((button) => {
-    button.addEventListener("click", () => showProvider(button.dataset.provider));
-  });
-  if (provider) showProvider(provider);
-  // The language the form was filled in is the language the installation keeps.
-  const field = el("lang-field");
-  if (field) field.value = document.body.dataset.lang;
-}
 
 // ---- the waiting page --------------------------------------------------------------------------
 
@@ -383,7 +358,26 @@ document.addEventListener("click", async (event) => {
   refresh();
 });
 
-if (page === "setup") setupPanels();
+// ---- start at login, the way back from the setup's switch ------------------------------------
+
+document.addEventListener("change", async (event) => {
+  const box = event.target.closest("#autostart");
+  if (!box) return;
+  box.disabled = true;
+  const answer = await fetch("/api/autostart", {
+    method: "POST",
+    headers: { "X-Daedalus-Desktop": token, "Content-Type": "application/json" },
+    body: JSON.stringify({ on: box.checked }),
+  }).catch(() => null);
+  if (!answer || !answer.ok) {
+    // The switch shows what is on the machine, not what was asked for.
+    box.checked = !box.checked;
+    const why = answer ? (await answer.json().catch(() => ({}))).error || "" : "";
+    showAlert(T("status.autostart.failed"), why);
+  }
+  box.disabled = false;
+});
+
 if (page === "status" || page === "progress") {
   refresh();
   setInterval(refresh, page === "progress" ? 1000 : 2000);

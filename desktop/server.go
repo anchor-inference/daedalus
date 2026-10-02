@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,8 +40,12 @@ type Server struct {
 	// opened with. It is set by whoever owns the window; without one it opens the app in a browser.
 	focus func(ctx context.Context, url string)
 
-	once  sync.Once
-	saved chan struct{} // closed when the setup form has been written
+	once    sync.Once
+	saved   chan struct{} // closed when the setup form has been written
+	waiting atomic.Bool   // something is blocked in WaitForSetup, so a post starts the stack there
+
+	helpers setupHelpers
+	after   afterSetup
 }
 
 const defaultPort = 8770
@@ -52,7 +57,7 @@ const csrfHeader = "X-Daedalus-Desktop"
 
 func NewServer(app *App, port int) *Server {
 	token, err := randomSecret()
-	return &Server{app: app, port: port, saved: make(chan struct{}), csrf: token, csrfErr: err}
+	return &Server{app: app, port: port, saved: make(chan struct{}), csrf: token, csrfErr: err, helpers: newSetupHelpers()}
 }
 
 // URL is where the operator reaches the launcher page.
@@ -79,6 +84,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/progress", s.handleProgress)
 	mux.HandleFunc("/status", s.handleStatusPage)
 	mux.HandleFunc("/api/lang", s.handleLang)
+	mux.HandleFunc("/api/setup/detect", s.handleSetupDetect)
+	mux.HandleFunc("/api/setup/endpoint", s.handleSetupEndpoint)
+	mux.HandleFunc("/api/autostart", s.handleAutostart)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/action/", s.handleAction)
 	mux.HandleFunc("/api/jobs/", s.handleJob)
@@ -147,6 +155,8 @@ func (s *Server) handleFocus(w http.ResponseWriter, r *http.Request) {
 
 // WaitForSetup blocks until the form has been submitted, or the context ends.
 func (s *Server) WaitForSetup(ctx context.Context) error {
+	s.waiting.Store(true)
+	defer s.waiting.Store(false)
 	select {
 	case <-s.saved:
 		return nil
@@ -220,6 +230,12 @@ type pageData struct {
 	// Steps is the start, drawn out, with the stage each one belongs to. The page renders it from
 	// here rather than from the script, so it reads correctly before anything has answered.
 	Steps []stepLine
+
+	// Boot and Words are the wizard's: what it opens with, and its lines in both languages.
+	Boot  template.JS
+	Words template.JS
+	// Autostart is whether the installation starts at login, for the status page's switch.
+	Autostart bool
 }
 
 // stepLine is one row of the progress page's list.
@@ -289,54 +305,59 @@ func (s *Server) handleLang(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"saved":true}`))
 }
 
+// handleSetup serves the wizard and takes its answers. The page posts with fetch and the token in
+// the header as well as in the form, and is answered in JSON: it stays on its own last step, which
+// follows the start from the status, instead of being sent somewhere by a redirect.
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if !s.hasToken(r.PostFormValue("csrf")) {
-			refuse(w)
-			return
-		}
-		if lang := r.PostFormValue("lang"); lang != "" {
-			// The language travels with the form as well as with the switch, so a first run that
-			// was answered in Russian and never touched the switch is remembered as Russian.
-			if err := StoreLang(s.app.paths, ParseLang(lang)); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-		// The mode is stored beside the configuration rather than in it: it decides how the
-		// launcher starts things, which is the launcher's business and not the agent's.
-		if mode, err := ParseMode(r.PostFormValue("mode")); err == nil && mode != ModeUnset {
-			if err := StoreMode(s.app.paths, mode); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			s.app.SetMode(mode)
-		}
-		setup := Setup{
-			DeepseekKey:   r.PostFormValue("deepseek"),
-			OpenrouterKey: r.PostFormValue("openrouter"),
-			OpencodeKey:   r.PostFormValue("opencode"),
-			BotToken:      r.PostFormValue("bot_token"),
-			OwnerID:       r.PostFormValue("owner_id"),
-			APIID:         r.PostFormValue("api_id"),
-			APIHash:       r.PostFormValue("api_hash"),
-			USDPerDay:     r.PostFormValue("usd_per_day"),
-			Clear:         clearedFields(r.PostForm["clear"]),
-		}
-		if err := writeSetup(s.app.paths, setup, s.app.Mode(), s.app.log); err != nil {
+	if r.Method != http.MethodPost {
+		s.render(w, r, "setup.html", s.app.Status(r.Context()))
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !s.hasToken(r.PostFormValue("csrf")) {
+		refuse(w)
+		return
+	}
+	setup, answers, refused := parseSetupForm(r.PostForm)
+	if refused != nil {
+		writeJSON(w, http.StatusBadRequest, refused)
+		return
+	}
+	if lang := r.PostFormValue("lang"); lang != "" {
+		// The language travels with the form as well as with the switch, so a first run that
+		// was answered in Russian and never touched the switch is remembered as Russian.
+		if err := StoreLang(s.app.paths, ParseLang(lang)); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		s.app.log("configuration written to %s", s.app.paths.Env)
-		s.once.Do(func() { close(s.saved) })
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+	}
+	// The mode is stored beside the configuration rather than in it: it decides how the
+	// launcher starts things, which is the launcher's business and not the agent's.
+	if mode, err := ParseMode(r.PostFormValue("mode")); err == nil && mode != ModeUnset {
+		if err := StoreMode(s.app.paths, mode); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.app.SetMode(mode)
+	}
+	if err := writeSetup(s.app.paths, setup, s.app.Mode(), s.app.log); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.render(w, r, "setup.html", s.app.Status(r.Context()))
+	s.app.log("configuration written to %s", s.app.paths.Env)
+	s.applyLogin(answers["login"])
+	s.after.set(wantedExtras(setup, s.app.Native(), s.app.paths), r.PostFormValue("handoff") == "1")
+	if s.waiting.Load() {
+		s.once.Do(func() { close(s.saved) })
+	} else if r.PostFormValue("start") == "1" {
+		// Changed from a running launcher: nothing is waiting for the answers, so the start that
+		// puts them in force is this one's to make.
+		go s.reconfigure(context.Background())
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"saved": true})
 }
 
 // clearedFields turns the ticked "remove" boxes into the set WriteSetup reads. An untouched field
@@ -368,6 +389,13 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, sta
 	}
 	// Docker's absence is only news to an installation that means to use it.
 	data.DockerMissing = status.Docker == "" && !s.app.Native()
+	switch name {
+	case "setup.html":
+		data.Boot = bootJSON(s.setupBoot(r.Context(), lang, status, data.Suggested))
+		data.Words = template.JS(HeroWordsJSON())
+	case "status.html":
+		data.Autostart, _ = s.helpers.autostart.Enabled()
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := uiTemplates.ExecuteTemplate(w, name, data); err != nil {
 		fmt.Println("the page could not be rendered:", err)

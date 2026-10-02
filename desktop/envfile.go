@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -26,12 +27,33 @@ type Setup struct {
 	DeepseekKey   string
 	OpenrouterKey string
 	OpencodeKey   string
+	OpenaiKey     string
+	AnthropicKey  string
 	BotToken      string
 	OwnerID       string
 	APIID         string
 	APIHash       string
 	USDPerDay     string
-	Clear         map[string]bool
+
+	// The local or OpenAI-compatible endpoint. The address and its key go to the key proxy as an
+	// upstream of their own, like every other credential, and the app is told only the model: its
+	// provider entry points at the proxy (daedalus/config.py), so the agent never holds the key.
+	LocalURL   string
+	LocalKey   string
+	LocalModel string
+
+	// Voice is off, local or cloud; the app reads it at start (daedalus/config.py), and local is
+	// the speech extra the launcher installs after the start.
+	Voice string
+	// Browser asks for the headless browser: the browser extra natively, the browser image's
+	// compose profile in a container. Nil leaves what is there alone.
+	Browser *bool
+	// AppPort fixes the app's port when set; empty hands it back to the automatic choice.
+	// FixPort says the form had an answer for it at all.
+	AppPort string
+	FixPort bool
+
+	Clear map[string]bool
 }
 
 // Telegram reports whether the Telegram side of the stack should run. Without a token the bot is
@@ -132,6 +154,8 @@ func envUpdates(p Paths, s Setup, current map[string]string, searxngSecret, home
 		{"TELEGRAM_API_ID", answer("TELEGRAM_API_ID", "api_id", s.APIID)},
 		{"TELEGRAM_API_HASH", answer("TELEGRAM_API_HASH", "api_hash", s.APIHash)},
 		{"USD_PER_DAY", dailyCap(s.USDPerDay, current["USD_PER_DAY"])},
+		{"DAEDALUS_LOCAL_MODEL", answer("DAEDALUS_LOCAL_MODEL", "local_model", s.LocalModel)},
+		{"DAEDALUS_VOICE", firstSet(clean(s.Voice), firstSet(current["DAEDALUS_VOICE"], "off"))},
 		{"SEARXNG_SECRET", searxngSecret},
 		// The public address is not on the setup page: an operator who set one by hand keeps it,
 		// and passkeys are enrolled against that host, so blanking it would invalidate them.
@@ -188,8 +212,47 @@ func keyproxyUpdates(s Setup, current map[string]string) []envVar {
 		{"DEEPSEEK_API_KEY", answer("DEEPSEEK_API_KEY", "deepseek", s.DeepseekKey)},
 		{"OPENROUTER_API_KEY", answer("OPENROUTER_API_KEY", "openrouter", s.OpenrouterKey)},
 		{"OPENCODE_API_KEY", answer("OPENCODE_API_KEY", "opencode", s.OpencodeKey)},
+		{"OPENAI_API_KEY", answer("OPENAI_API_KEY", "openai", s.OpenaiKey)},
+		{"ANTHROPIC_API_KEY", answer("ANTHROPIC_API_KEY", "anthropic", s.AnthropicKey)},
+		{"KEYPROXY_UPSTREAM_LOCAL", answer("KEYPROXY_UPSTREAM_LOCAL", "local_url", s.LocalURL)},
+		{"KEYPROXY_KEY_LOCAL", answer("KEYPROXY_KEY_LOCAL", "local_key", s.LocalKey)},
 		{"KEYPROXY_USD_PER_DAY", dailyCap(s.USDPerDay, current["KEYPROXY_USD_PER_DAY"])},
 	}
+}
+
+// containerReachable is the endpoint's address as the key proxy's container reaches it. Typed on
+// this machine, 127.0.0.1 and localhost mean the operator's own computer, and inside a container
+// they mean the container: the compose file gives the proxy host.docker.internal for this.
+func containerReachable(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	switch u.Hostname() {
+	case "127.0.0.1", "localhost", "::1":
+		host := "host.docker.internal"
+		if port := u.Port(); port != "" {
+			host += ":" + port
+		}
+		u.Host = host
+		return u.String()
+	}
+	return raw
+}
+
+// withProfile is a COMPOSE_PROFILES list with name added or taken out, the others kept in order.
+func withProfile(list, name string, on bool) string {
+	var out []string
+	for _, item := range strings.Split(list, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" && item != name {
+			out = append(out, item)
+		}
+	}
+	if on {
+		out = append(out, name)
+	}
+	return strings.Join(out, ",")
 }
 
 // WriteSetup writes both env files. The existing values are read first, so re-running setup keeps
@@ -216,10 +279,26 @@ func writeSetup(p Paths, s Setup, mode Mode, log func(string, ...any)) error {
 			return err
 		}
 	}
+	fresh := strings.TrimSpace(current["API_PORT"]) == ""
 	updates := envUpdates(p, s, current, secret, home)
-	if strings.TrimSpace(current["API_PORT"]) == "" {
+	if s.Browser != nil && mode == ModeDocker {
+		updates = withValues(updates, []envVar{{"COMPOSE_PROFILES", withProfile(current["COMPOSE_PROFILES"], "browser", *s.Browser)}})
+	}
+	if s.FixPort {
+		// A fixed port is written as the app's port and named in DAEDALUS_FIXED_PORTS, which is
+		// what keeps a start from moving it (ports.go). An empty answer hands it back.
+		fixed := ""
+		if port := clean(s.AppPort); port != "" {
+			current["API_PORT"], fixed = port, "API_PORT"
+			updates = withValues(updates, []envVar{{"API_PORT", port}})
+		}
+		current["DAEDALUS_FIXED_PORTS"] = fixed
+		updates = withValues(updates, []envVar{{"DAEDALUS_FIXED_PORTS", fixed}})
+	}
+	if fresh {
 		// A first setup: nothing of this installation runs yet, so whatever holds a default port is
-		// another program, and the installation starts out on ports that are free.
+		// another program, and the installation starts out on ports that are free — all but one the
+		// operator fixed, which the plan keeps where they put it.
 		roles, probe := portRoles(mode, supervisorOverTCP(p, runtime.GOOS)), machineProbe(nil)
 		warmRoles(probe, current, roles)
 		ports, moves := planPorts(current, roles, probe, true)
@@ -232,6 +311,9 @@ func writeSetup(p Paths, s Setup, mode Mode, log func(string, ...any)) error {
 		return err
 	}
 	keys := readEnv(readFile(p.KeyproxyEnv))
+	if mode == ModeDocker && clean(s.LocalURL) != "" {
+		s.LocalURL = containerReachable(clean(s.LocalURL))
+	}
 	if err := os.WriteFile(p.KeyproxyEnv, []byte(mergeEnv(readFile(p.KeyproxyEnv), keyproxyUpdates(s, keys))), 0o600); err != nil {
 		return err
 	}
@@ -266,11 +348,19 @@ func CurrentSetup(p Paths) Setup {
 		DeepseekKey:   keys["DEEPSEEK_API_KEY"],
 		OpenrouterKey: keys["OPENROUTER_API_KEY"],
 		OpencodeKey:   keys["OPENCODE_API_KEY"],
+		OpenaiKey:     keys["OPENAI_API_KEY"],
+		AnthropicKey:  keys["ANTHROPIC_API_KEY"],
 		BotToken:      env["TELEGRAM_BOT_TOKEN"],
 		OwnerID:       env["OWNER_USER_ID"],
 		APIID:         env["TELEGRAM_API_ID"],
 		APIHash:       env["TELEGRAM_API_HASH"],
 		USDPerDay:     env["USD_PER_DAY"],
+		LocalURL:      keys["KEYPROXY_UPSTREAM_LOCAL"],
+		LocalKey:      keys["KEYPROXY_KEY_LOCAL"],
+		LocalModel:    env["DAEDALUS_LOCAL_MODEL"],
+		Voice:         env["DAEDALUS_VOICE"],
+		AppPort:       env["API_PORT"],
+		FixPort:       strings.Contains(","+env["DAEDALUS_FIXED_PORTS"]+",", ",API_PORT,"),
 	}
 }
 

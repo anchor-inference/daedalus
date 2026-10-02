@@ -501,14 +501,22 @@ func bringUp(ctx context.Context, app *App, server *Server, surface *Surface, op
 		fmt.Printf("The launcher is at %s — it says what went wrong, and starts the stack once that is fixed.\n", server.URL())
 		return
 	}
+	server.AfterStart(ctx)
 	url := app.OpenURL(ctx)
 	if opts.link != "" {
 		// Opened by following a link, what the operator asked for is the thing at the end of it,
 		// not the app's front page.
 		url = DeepLinkTarget(opts.link, AppURL(APIPort(app.paths), app.Lang()))
 	}
-	fmt.Println("opening", url)
-	surface.Show(ctx, url)
+	if server.HandsOff() {
+		// The setup wizard is on screen and finishes the start itself: it shows the agent waking
+		// and opens the app from its own button (POST /api/action/open). Moving the window now
+		// would cut that last step off under the operator's eyes.
+		fmt.Println("the setup page opens", url)
+	} else {
+		fmt.Println("opening", url)
+		surface.Show(ctx, url)
+	}
 	if !surface.Windowed() {
 		after := "the stack keeps running"
 		if app.Native() {

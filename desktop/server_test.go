@@ -37,14 +37,14 @@ func TestTheSetupPageAsksAndWrites(t *testing.T) {
 	}
 
 	page := get(t, client, server.URL()+"setup")
-	for _, want := range []string{"DeepSeek", messages[LangEN]["setup.cap.field"], messages[LangEN]["setup.submit"], "/assets/style.css"} {
+	for _, want := range []string{`data-page="setup"`, "/assets/setup/wizard.js", "/assets/setup/boot.js", `id="setup-boot"`, `"lang":"en"`} {
 		if !strings.Contains(page, want) {
-			t.Fatalf("the setup page does not mention %q", want)
+			t.Fatalf("the setup page does not carry %q", want)
 		}
 	}
-	// The same page in the other language, and not a word of the first one left in it.
+	// The wizard carries both languages and opens in the browser's.
 	russian := get(t, client, server.URL()+"setup", "Accept-Language", "ru-RU,ru;q=0.9")
-	if !strings.Contains(russian, messages[LangRU]["setup.submit"]) || strings.Contains(russian, messages[LangEN]["setup.submit"]) {
+	if !strings.Contains(russian, `"lang":"ru"`) || !strings.Contains(russian, `<html lang="ru">`) {
 		t.Fatal("the setup page does not answer a Russian browser in Russian")
 	}
 
@@ -57,11 +57,8 @@ func TestTheSetupPageAsksAndWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	posted.Body.Close()
-	if posted.StatusCode != http.StatusSeeOther {
+	if posted.StatusCode != http.StatusOK {
 		t.Fatalf("the form answered %d", posted.StatusCode)
-	}
-	if err := server.WaitForSetup(context.Background()); err != nil {
-		t.Fatal(err)
 	}
 	if got := CurrentSetup(paths); got.DeepseekKey != "sk-page" || got.USDPerDay != "11" {
 		t.Fatalf("the form was not written: %+v", got)

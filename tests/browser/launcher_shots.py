@@ -223,36 +223,34 @@ def serve(binary: Path, data: Path, port: int) -> subprocess.Popen:
 
 
 def check_language_switch(browser, port: int, data: Path) -> None:
-    """Switching languages on /setup keeps every answer, the mode radios included.
+    """Switching languages in the wizard keeps every answer, the mode included.
 
-    The switch re-fetches the page in the other language and carries the typed values across, and
-    the fresh page brings the machine's *suggested* mode back with it. A restore that skipped the
-    radios therefore threw away the one answer on the page that decides how the agent runs — while
-    the operator was reading the words and not the tiles.
+    The wizard changes language in place, so nothing should be lost; this holds it to that,
+    because the page it replaced re-fetched itself and once threw the mode away.
     """
     (data / "lang").write_text("en\n")
     context = browser.new_context(viewport={"width": 1440, "height": 900})
     page = context.new_page()
     try:
-        page.goto(f"http://127.0.0.1:{port}/setup", wait_until="load")
-        suggested = page.eval_on_selector("input[name=mode]:checked", "el => el.value")
+        page.route("**/api/lang", lambda r: r.fulfill(status=200, content_type="application/json", body='{"saved":true}'))
+        page.goto(f"http://127.0.0.1:{port}/setup?motion=0", wait_until="load")
+        page.wait_for_function("() => window.Wizard && !window.Wizard.busy()")
+        page.click(".f-foot [data-act=next]")
+        page.wait_for_function("() => document.querySelector('[data-wizard]').dataset.step === 'runs' && !window.Wizard.busy()")
+        suggested = page.evaluate("() => window.Wizard.state.mode")
         other = "docker" if suggested == "native" else "native"
-        # The radio itself is under the tile's artwork, which is what an operator clicks too.
-        page.click(f"label.mode:has(input[name=mode][value={other}])")
-        page.fill("input[name=deepseek]", "typed-not-a-key")
-        page.check("#clear-deepseek", force=True)
-        page.click(".langs button[data-lang=ru]")
-        page.wait_for_function("() => document.body.dataset.lang === 'ru'")
-        page.wait_for_timeout(200)
-        after = page.eval_on_selector("input[name=mode]:checked", "el => el.value")
-        key = page.eval_on_selector("input[name=deepseek]", "el => el.value")
-        clear = page.eval_on_selector("#clear-deepseek", "el => el.checked")
+        page.click(f"label.opt[data-k=mode-{other}]")
+        page.click(".f-foot [data-act=next]")
+        page.wait_for_function("() => document.querySelector('[data-wizard]').dataset.step === 'model' && !window.Wizard.busy()")
+        page.fill("#f-keys\\.deepseek", "typed-not-a-key")
+        page.click("[data-slot=lang] [data-lang=ru]")
+        page.wait_for_function("() => document.documentElement.lang === 'ru'")
+        after = page.evaluate("() => window.Wizard.state.mode")
+        key = page.eval_on_selector("#f-keys\\.deepseek", "el => el.value")
         if after != other:
             raise SystemExit(f"the language switch lost the mode: chose {other}, kept {after}")
         if key != "typed-not-a-key":
             raise SystemExit("the language switch lost what was typed into a key field")
-        if not clear:
-            raise SystemExit("the language switch lost a checkbox")
         print(f"language switch keeps the answers (mode={after})")
     finally:
         context.close()
