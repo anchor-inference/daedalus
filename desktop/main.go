@@ -433,6 +433,19 @@ func startCommand(ctx context.Context, app *App, opts options) error {
 				target = DeepLinkTarget(link, AppURL(APIPort(app.paths), app.Lang()))
 			}
 			surface.Focus(ctx, target)
+		}, func() {
+			// The window's app lost its session — a month went by, the link the start offered was
+			// spent, or the app's address changed — and its login screen asks for a link or a
+			// code the desktop application shows nowhere. The launcher can mint one, so it does,
+			// and the window goes straight through it instead of asking the operator for it.
+			go func() {
+				url, err := app.Pair(ctx)
+				if err != nil {
+					shell.emit(shellEvent{Event: "sign-in-failed", Message: err.Error()})
+					return
+				}
+				surface.Show(ctx, url)
+			}()
 		}, shellQuit)
 	}
 	go bringUp(ctx, app, server, surface, opts)

@@ -354,6 +354,15 @@ export const DICT: Record<string, Record<Lang, string>> = {
   },
   "login.pairing.placeholder": { en: "Paste the link or code", ru: "Вставьте ссылку или код" },
   "login.busy": { en: "Signing in…", ru: "Входим…" },
+  "login.desktop": { en: "Sign in", ru: "Войти" },
+  "login.desktop.hint": {
+    en: "The launcher on this computer signs the app in: no code is needed.",
+    ru: "Вход выполняет лаунчер на этом компьютере — код не нужен.",
+  },
+  "login.desktop.failed": {
+    en: "The launcher could not sign the app in.",
+    ru: "Лаунчеру не удалось выполнить вход.",
+  },
   "login.install": {
     en: "Install the site as an app from your browser's menu to open it like any other app.",
     ru: "Установите сайт как приложение из меню браузера — он будет открываться как обычное приложение.",

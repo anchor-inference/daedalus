@@ -38,6 +38,7 @@ import (
 // Commands, shell to launcher:
 //
 //	{"command":"focus","link":L}   the app was opened again, with the daedalus:// link L when there was one
+//	{"command":"sign-in"}          the app in the window is on its login screen: mint a link that signs it in
 //	{"command":"quit"}             the window was closed: stop, as Ctrl+C would
 //
 // The end of standard input is a quit as well. A shell that crashed or was killed by an uninstaller
@@ -107,7 +108,7 @@ func (l *shellLink) emit(event shellEvent) {
 }
 
 // listen reads the shell's commands until its input ends, and quits then.
-func (l *shellLink) listen(in io.Reader, focus func(link string), quit func()) {
+func (l *shellLink) listen(in io.Reader, focus func(link string), signIn func(), quit func()) {
 	scanner := bufio.NewScanner(in)
 	for scanner.Scan() {
 		var command shellCommand
@@ -117,6 +118,8 @@ func (l *shellLink) listen(in io.Reader, focus func(link string), quit func()) {
 		switch command.Command {
 		case "focus":
 			focus(command.Link)
+		case "sign-in":
+			signIn()
 		case "quit":
 			quit()
 			return

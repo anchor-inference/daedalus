@@ -48,12 +48,17 @@ func TestTheShellsCommandsAreHeardAndItsGoingAwayIsAQuit(t *testing.T) {
 	var links []string
 	quits := 0
 	link.listen(strings.NewReader(`{"command":"focus","link":"daedalus://open/abc"}`+"\nnot json\n"+`{"command":"quit"}`+"\n"+`{"command":"focus"}`+"\n"),
-		func(l string) { links = append(links, l) }, func() { quits++ })
+		func(l string) { links = append(links, l) }, func() {}, func() { quits++ })
 	if len(links) != 1 || links[0] != "daedalus://open/abc" || quits != 1 {
 		t.Fatalf("links %v, quits %d", links, quits)
 	}
+	signIns := 0
+	link.listen(strings.NewReader(`{"command":"sign-in"}`+"\n"), func(string) {}, func() { signIns++ }, func() {})
+	if signIns != 1 {
+		t.Fatal("the window asked to be signed in and the launcher did not hear it")
+	}
 	quits = 0
-	link.listen(strings.NewReader(""), func(string) {}, func() { quits++ })
+	link.listen(strings.NewReader(""), func(string) {}, func() {}, func() { quits++ })
 	if quits != 1 {
 		t.Fatal("the end of the shell's input did not stop the launcher")
 	}

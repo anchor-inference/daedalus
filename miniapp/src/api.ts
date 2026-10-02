@@ -35,6 +35,10 @@ declare global {
       onPetHidden?: (callback: () => void) => () => void;
       /** Open the platform's folder chooser; resolves to the path, or null when the operator cancelled. */
       pickFolder?: () => Promise<string | null>;
+      /** Ask the launcher for a link that signs this window in; the window then navigates through it. */
+      signIn?: () => void;
+      /** Hear why the launcher could not mint that link. Returns the unsubscribe. */
+      onSignInFailed?: (callback: (message: string) => void) => () => void;
       /** Set by the desktop launcher's own window, so the page can say which kind of window it is in. */
       window?: boolean;
     };

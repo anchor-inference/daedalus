@@ -189,6 +189,9 @@ function handle(event) {
     case 'upgrade':
       upgrade(event.data);
       break;
+    case 'sign-in-failed':
+      if (win && !win.isDestroyed()) win.webContents.send('daedalus:sign-in-failed', event.message || '');
+      break;
     case 'fatal':
       lastFatal = event;
       fatal(event.message, event.log);
@@ -223,6 +226,11 @@ function fromOwnPage(event) {
 
 ipcMain.on('daedalus:open-log', (event, file) => {
   if (fromOwnPage(event) && typeof file === 'string' && file) shell.showItemInFolder(file);
+});
+// Only the app itself, on loopback, may ask to be signed in: the link the launcher mints opens a
+// session, and a page from anywhere else has no business holding one.
+ipcMain.on('daedalus:sign-in', (event) => {
+  if (event.senderFrame && policy.isInternal(event.senderFrame.url)) send({ command: 'sign-in' });
 });
 ipcMain.on('daedalus:retry', (event) => {
   if (!fromOwnPage(event)) return;
