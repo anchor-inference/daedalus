@@ -135,7 +135,39 @@ def bwrap_status() -> str:
     return _bwrap_state
 
 
-async def sandbox_argv(command: str, exec_config: Any, *, writable: Sequence[Path]) -> tuple[list[str], bool]:
+def operator_git_dirs(checkouts: Sequence[Path] | None = None) -> list[Path]:
+    """The git directories of the operator's checkouts, which no sandboxed command may write.
+
+    ``checkouts`` defaults to the two this installation runs from, as the environment names them. A
+    checkout whose ``.git`` is a file (itself a worktree) has two directories to seal: its own and
+    the common one its ``commondir`` names.
+    """
+    if checkouts is None:
+        checkouts = [Path(os.environ.get("BOT_REPO_DIR", "/srv/daedalus")), Path(os.environ.get("CORE_REPO_DIR", "/srv/protocore-exp"))]
+    found: list[Path] = []
+    for checkout in checkouts:
+        dotgit = checkout / ".git"
+        if dotgit.is_dir():
+            found.append(dotgit)
+            continue
+        try:
+            text = dotgit.read_text(encoding="utf-8") if dotgit.is_file() else ""
+        except OSError:
+            text = ""
+        if not text.startswith("gitdir:"):
+            continue
+        gitdir = Path(text.split(":", 1)[1].strip())
+        found.append(gitdir)
+        try:
+            common = (gitdir / "commondir").read_text(encoding="utf-8").strip()
+        except OSError:
+            common = ""
+        if common:
+            found.append(Path(os.path.normpath(gitdir / common)))
+    return [path for path in dict.fromkeys(found) if path.is_dir()]
+
+
+async def sandbox_argv(command: str, exec_config: Any, *, writable: Sequence[Path], sealed: Sequence[Path] | None = None) -> tuple[list[str], bool]:
     """The argv to run ``command`` with: plain bash, or bash inside bubblewrap when the sandbox is on.
 
     The sandbox binds the whole filesystem read-only, makes ``writable`` (the session's writable
@@ -145,6 +177,13 @@ async def sandbox_argv(command: str, exec_config: Any, *, writable: Sequence[Pat
 
     The session's workspace is not bound on its own account: a workspace in a folder marked
     read-only must stay read-only here too, and whether it is writable is the walls' answer.
+
+    The operator's checkouts' git directories (``sealed``, by default :func:`operator_git_dirs`) are
+    bound read-only last, over whatever the writable binds opened, so no wall, opened worktree or
+    configured extra path can make them writable. A session once rewrote a worktree's ``commondir``
+    inside the operator's ``.git`` through exactly such a bind, and every ``git fetch`` in the
+    checkout failed until the entries were removed by hand. Self-development's worktrees belong to a
+    repository of the agent's own, so nothing a session legitimately does needs these directories.
     """
     global _warned_missing_bwrap
     plain = shell_argv(command)
@@ -169,6 +208,9 @@ async def sandbox_argv(command: str, exec_config: Any, *, writable: Sequence[Pat
             continue
         bound.add(str(path))
         argv += ["--bind", str(path), str(path)]
+    for path in operator_git_dirs() if sealed is None else sealed:
+        if not path.is_symlink() and path.is_dir():
+            argv += ["--ro-bind", str(path), str(path)]
     return argv + shell_argv(command), True
 
 

@@ -99,8 +99,12 @@ async def test_the_worktree_is_cut_from_the_running_branch_not_a_remote(local: t
     selfdev, repo = local
     worktree = await selfdev.workspace("bot", "greeting")
     assert (worktree / "daedalus" / "app.py").is_file()
-    assert await selfdev.base_ref(selfdev.repo("bot")) == "main"
+    # The running branch as the agent's own repository last fetched it from the checkout.
+    assert await selfdev.base_ref(selfdev.repo("bot")) == "checkout/main"
     assert _git(worktree, "rev-parse", "HEAD").strip() == _git(repo, "rev-parse", "main").strip()
+    # And the worktree belongs to that repository: the checkout's .git did not gain an entry for it.
+    assert not (repo / ".git" / "worktrees").exists()
+    assert selfdev.repo("bot").repository in Path(_git(worktree, "rev-parse", "--absolute-git-dir").strip()).parents
 
 
 # -- the gates ----------------------------------------------------------------------------
@@ -153,7 +157,9 @@ async def test_a_checked_change_lands_on_the_branch_and_asks_for_a_restart(local
     assert pending["commit"] == commit and pending["summary"] == "A warmer greeting for the operator"
     assert pending["needs_image"] is False and pending["session_id"] == "s1"
     # The worktree and the branch stay: the agent's local git is its own record of the work.
-    assert worktree.is_dir() and "agent/greeting" in _git(repo, "branch", "--list", "agent/greeting")
+    assert worktree.is_dir() and "agent/greeting" in _git(selfdev.repo("bot").repository, "branch", "--list", "agent/greeting")
+    # The record is the agent's repository; the checkout received the commits and nothing else.
+    assert not _git(repo, "branch", "--list", "agent/*").strip()
 
 
 async def test_a_change_to_the_image_says_a_restart_cannot_deliver_it(local: tuple[SelfDevelopment, Path], db: Database) -> None:

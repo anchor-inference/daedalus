@@ -7,7 +7,8 @@ or **deny**. A denial is final. An *ask* is a denial you can lift: the refusal c
 
 The built-in rules are in the repository (`daedalus/host/policy.py`), so they change only through a
 reviewed change: fork bombs, `mkfs`/`shutdown`, `dd` onto a raw device, a recursive delete or `chmod`
-of a system path, writing into one, pushing from the operator's checkouts. Your own rules in
+of a system path, writing into one, pushing from the operator's checkouts or running any git there
+that would change them (a worktree, a branch, a commit, a fetch). Your own rules in
 `config.toml` can add denials and questions and can never lift a built-in one.
 
 Two more exist **only on a native install**, where the agent is a process of your own user rather

@@ -267,14 +267,17 @@ def _without_redirects(words: list[str]) -> list[str]:
     return out
 
 
-def _git_subcommand(words: list[str]) -> tuple[str, str | None]:
-    """``(subcommand, -C path)`` of a git invocation, skipping the options that take a value."""
+def _git_call(words: list[str]) -> tuple[str, str | None, list[str]]:
+    """``(subcommand, repository path, the subcommand's own arguments)`` of a git invocation.
+
+    The repository path is what ``-C``, ``--git-dir`` or ``--work-tree`` name, in either spelling;
+    ``None`` when the command acts on the directory it runs in."""
     at = None
     i = 1
     while i < len(words):
         w = words[i]
         if w in GIT_OPTIONS_WITH_VALUE and i + 1 < len(words):
-            if w == "-C":
+            if w in ("-C", "--git-dir", "--work-tree"):
                 at = words[i + 1]
             i += 2
             continue
@@ -286,8 +289,66 @@ def _git_subcommand(words: list[str]) -> tuple[str, str | None]:
         if w.startswith("-"):
             i += 1
             continue
-        return w, at
-    return "", at
+        return w, at, words[i + 1 :]
+    return "", at, []
+
+
+def _git_subcommand(words: list[str]) -> tuple[str, str | None]:
+    """``(subcommand, -C path)`` of a git invocation, skipping the options that take a value."""
+    sub, at, _args = _git_call(words)
+    return sub, at
+
+
+def _linked_git_dir(path: str) -> str:
+    """The git directory a linked worktree at ``path`` keeps its metadata in, or "": a worktree cut
+    from a checkout writes into that checkout's ``.git`` wherever the worktree itself lives."""
+    try:
+        text = (Path(path) / ".git").read_text(encoding="utf-8") if (Path(path) / ".git").is_file() else ""
+    except OSError:
+        return ""
+    return text.split(":", 1)[1].strip() if text.startswith("gitdir:") else ""
+
+
+GIT_READS = {
+    "status", "log", "diff", "show", "rev-parse", "ls-files", "ls-tree", "cat-file", "blame", "grep", "describe",
+    "shortlog", "rev-list", "merge-base", "for-each-ref", "show-ref", "name-rev", "check-ignore", "var", "help",
+    "version", "whatchanged", "cherry", "range-diff", "annotate", "count-objects", "verify-commit", "verify-tag",
+}
+"""Git subcommands that only read the repository they are pointed at."""
+GIT_LISTING_FORMS = {
+    "branch": {"--list", "-l", "-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--show-current", "--contains", "--merged", "--no-merged", "--points-at", "--format", "--sort", "--no-color", "--color"},
+    "tag": {"-l", "--list", "-n", "--contains", "--merged", "--no-merged", "--points-at", "--format", "--sort"},
+    "remote": {"-v", "--verbose", "get-url", "show"},
+    "worktree": {"list"},
+    "stash": {"list", "show"},
+    "config": {"--get", "--get-all", "--get-regexp", "--list", "-l", "--show-origin", "--show-scope", "--null", "-z", "--name-only", "--local", "--global", "--system", "--worktree", "--file", "-f", "--type", "--bool", "--int", "--path", "--default"},
+    "reflog": {"show"},
+    "notes": {"list", "show"},
+}
+"""Subcommands that read in one form and write in another, with the words of their reading forms.
+A call made only of these words (and, for ``config``, the one name it reads) lists; any other word
+makes it a write: a branch created, a remote added, a worktree cut."""
+
+
+def _git_writes(sub: str, args: list[str]) -> bool:
+    """Whether this git call may change the repository it acts on. Unknown subcommands are writes."""
+    if sub in GIT_READS:
+        return False
+    listing = GIT_LISTING_FORMS.get(sub)
+    if listing is None:
+        return True
+    words = [a.split("=", 1)[0] for a in args]
+    if sub == "config":
+        reads = any(w in ("--get", "--get-all", "--get-regexp", "--list", "-l") for w in words)
+        return not reads or any(w.startswith("-") and w not in listing for w in words)
+    if sub in ("branch", "tag"):
+        # A plain word names a branch or a tag to create, unless a listing option takes it as its value.
+        flags = [w for w in words if w.startswith("-")]
+        plain = [w for w in words if not w.startswith("-")]
+        return any(f not in listing for f in flags) or bool(plain and not ({"--list", "-l", "--contains", "--merged", "--no-merged", "--points-at", "--format", "--sort"} & set(flags)))
+    if not words:
+        return sub == "stash"  # a bare ``git stash`` stashes; every other bare form here lists
+    return words[0] not in listing or any(w.startswith("-") and w not in listing for w in words[1:])
 
 
 def _written_paths(head: str, words: list[str]) -> list[str]:
@@ -732,7 +793,14 @@ class Policy:
             if (host := self._host_paths(path_operands(words), base=where, variables=variables)) is not None:
                 escalate(host.action, host.reason, host.rule)
             if head == "git":
-                sub, at = _git_subcommand(words)
+                sub, at, git_args = _git_call(words)
+                acting_on = [real_path(expand_home(_substitute(at, variables), self.home), where)] if at else [where] if where else []
+                acting_on += [real_path(variables[name], where) for name in ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE") if variables.get(name)]
+                acting_on += [linked for path in acting_on if (linked := _linked_git_dir(path))]
+                if sub and sub != "push" and any(real_under(path, checkouts) for path in acting_on) and _git_writes(sub, git_args):
+                    # A worktree cut in the checkout writes its metadata into the checkout's .git, where a
+                    # session once redirected it to a directory of its own and broke git for the operator.
+                    escalate(DENY, f"git {sub} would change the operator's checkout; its .git is the operator's — self-development works in the repository SelfWorkspace gives", "git.operator_repo")
                 if sub == "push":
                     if any(w in ("-f", "--force") for w in words) and "--force-with-lease" not in words:
                         escalate(ASK, "a forced push (use --force-with-lease, or ask)", "git.force_push")
@@ -831,6 +899,7 @@ class Policy:
             ("shell.protected_write", "Exec", DENY, "a redirect, copy, move, link, download, extraction or in-place edit onto a protected path or the operator's checkouts"),
             ("git.force_push", "Exec", ASK, "git push --force without --force-with-lease"),
             ("git.operator_push", "Exec", DENY, "git push from the operator's checkouts"),
+            ("git.operator_repo", "Exec", DENY, "a git command that changes the operator's checkouts: a worktree, a branch, a commit, a fetch, a config write"),
             ("egress.allowlist", "Exec, WebFetch, BrowserOpen, BrowserNavigate", ASK, "a host outside the egress allowlist (when one is configured)"),
             ("browser.scheme", "BrowserOpen, BrowserNavigate", DENY, "an address that is not an http or https page: file:, data:, blob:, javascript:, chrome:"),
             ("browser.sensitive", "BrowserAct", ASK, "an action that changes the world: a sign-in submitted, a purchase, a message sent, a deletion, terms accepted, a file uploaded, a form sent to another site"),

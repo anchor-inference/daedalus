@@ -27,8 +27,19 @@ different thing: they bring the stack back up on whatever the checkout holds, wi
 are how you start over, not how you apply a change. A change that fails is taken back out of the checkout and the app says why. A
 change that passes the checks but cannot stay up — three starts dying within ten minutes — puts the last
 known-good commit back by itself, and the app says that too; the commit is still in the checkout's
-history, on the branch the agent committed it to. A change to the `Dockerfile` or the system packages is
+history, and on the agent's branch in its own repository. A change to the `Dockerfile` or the system packages is
 applied as far as a restart can take it and says plainly that the rest needs a new image.
+
+**Where the worktrees come from.** Not from your checkout. The agent has a repository of its own beside
+its worktrees (`/srv/worktrees/repositories/bot.git` and `core.git` in a container), filled once by
+fetching from your checkout — a read — and fetching from the checkout's `origin` after that. Its
+worktrees, branches and commits live there, so nothing a session does writes your checkout's `.git`: the
+sandbox binds that directory read-only over everything else it opens, and the policy refuses any git
+command that would change the checkout. The one write into your checkout is `SelfApply` in local mode,
+made by the app itself, which fetches the agent's branch and fast-forwards yours onto it. Worktrees cut
+the old way, from the checkout, are moved into the agent's repository on the next start with their
+branches and uncommitted edits intact; the entries they leave in your checkout's `.git/worktrees` are
+removed by `git worktree prune` run on the machine, where their container paths do not exist.
 
 The same gates decide in both modes: a changed host module needs a passing `Verify` receipt that covers
 the bytes in the branch, an `execution_path` that names the code running it, and a summary that says what

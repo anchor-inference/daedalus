@@ -74,3 +74,21 @@ def test_reaping_touches_only_zombies_of_this_process(monkeypatch: pytest.Monkey
 
 async def _noop() -> None:
     await asyncio.sleep(0)
+
+
+def test_a_candidate_whose_entry_the_host_pruned_is_made_again(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`git worktree prune` on the machine removes the checkout's entry for the candidate, whose path
+    exists only in the container; the candidate's own `.git` then names nothing. Reusing it failed every
+    preflight from then on."""
+    import subprocess
+
+    sup = _load()
+    repo = tmp_path / "daedalus"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@localhost", "commit", "-q", "--allow-empty", "-m", "x"], check=True)
+    monkeypatch.setattr(sup, "CANDIDATE", tmp_path / "preflight")
+    assert sup.prepare_candidate(repo, "main")[0]
+    subprocess.run(["rm", "-rf", str(repo / ".git" / "worktrees")], check=True)
+    ok, out = sup.prepare_candidate(repo, "main")
+    assert ok, out
+    assert subprocess.run(["git", "-C", str(tmp_path / "preflight" / "daedalus"), "rev-parse", "HEAD"], capture_output=True).returncode == 0
