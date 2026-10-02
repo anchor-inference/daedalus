@@ -64,6 +64,7 @@ audit() {
 
   echo "== history (all blobs)"
   local history_hits history_report walked unreadable commit_list enum_rc shallow duplicate_ids
+  local witness_list witness_rc witnessed
   # Captured, then tested -- never tested by the pipeline's status. Under pipefail the status of
   # `cmd | while ...; done | grep ...` is the status of the loop's LAST iteration, so a pattern
   # present in an older commit and absent from the newest one printed its line here and answered
@@ -71,8 +72,13 @@ audit() {
   # The walk that reads is also the walk that counts. A finding proves only that the reader reached
   # the commit the finding is in, so a walk cut short after it prints the same line and answers the
   # same way; the number of commits visited is the only part of the answer that does not depend on
-  # where the finding sits. It is taken inside the substitution that does the grepping, because a
-  # count read from a second, untruncated enumeration would agree with itself and prove nothing.
+  # where the finding sits. It is taken inside the substitution that does the grepping, because
+  # reading the same enumeration twice gives the same number twice and proves nothing -- the
+  # second number has to come from a DIFFERENT command over the same refs, or a cut applied to
+  # the first one moves it too. Measured on the tree this guard was written against: `git rev-list
+  # --all` and `git log --all --format=%H` both answer 369 commits for the ledger, 3 for a
+  # three-commit fixture and 1324 for this project's own source, so on a healthy checkout the two
+  # agree, and a `--max-count=1` inserted where the list is produced moves only the first.
   # The enumeration's own status is taken where the list is produced. `< <(git rev-list --all)`
   # hides it and `$(... || true)` below hides it again, so an enumeration that failed printed the
   # same two words as one that found nothing: "clean" over a section that never ran. A list that
@@ -88,6 +94,14 @@ audit() {
   # rather than quietly deduplicated, because a substituted list is not a repository to be tidied.
   # `git rev-list` never repeats an id, so this cannot fire on a healthy tree.
   duplicate_ids=$(sort "$commit_list" | uniq -d)
+  # The second number, from a command the cut above does not reach. `--no-show-signature` keeps a
+  # repository whose config asks for signed-commit decoration from adding lines that are not
+  # commits; the count is of distinct ids, the same thing the walk counts.
+  witness_list=$(mktemp)
+  witness_rc=0
+  git -c log.showSignature=false log --all --no-show-signature --format=%H > "$witness_list" || witness_rc=$?
+  witnessed=$(sort -u "$witness_list" | wc -l | tr -d ' ')
+  rm -f "$witness_list"
   history_report=$(
     walked=0
     unreadable=0
@@ -111,6 +125,11 @@ audit() {
   history_hits=$(printf '%s\n' "$history_report" | grep -v '^walked [0-9][0-9]*$' |
     grep -v '^unreadable [0-9][0-9]*$' | grep -EvI "$PATTERN_EXEMPT" | grep -vi "$OWN_TRAILER" || true)
   echo "history: ${walked:-0} commit(s) walked"
+  # Printed on its own line, and not folded into the line above: two arms of the self-check assert
+  # that line word for word, and a guard that has to edit the text another arm reads is a guard
+  # that will be turned off. This is the number the verdict is compared against, so a reader can
+  # see the comparison was made rather than take it on trust.
+  if [ "$witness_rc" -eq 0 ]; then echo "history: ${witnessed:-0} commit(s) named by a second enumeration"; fi
   # A walk cannot tell a cut from a small repository: `--max-count=1` and a one-commit
   # repository print the same line and answer the same way, and nothing inside the walk
   # separates them. The commit-object store does not either, and it was tried and rejected:
@@ -131,6 +150,12 @@ audit() {
     failed=1
   elif [ "$enum_rc" -ne 0 ] || [ "${unreadable:-0}" -ne 0 ]; then
     echo "history: the reader could not answer -- enumeration exit $enum_rc, ${unreadable:-0} commit(s) unreadable"
+    failed=1
+  elif [ "$witness_rc" -ne 0 ]; then
+    echo "history: the second enumeration could not answer (exit $witness_rc), so there is nothing to compare the walk against -- this section certifies nothing"
+    failed=1
+  elif [ "${witnessed:-x}" != "${walked:-0}" ]; then
+    echo "history: the walk visited ${walked:-0} commit(s) and a second enumeration of the same refs named ${witnessed:-?} -- a walk that visited fewer commits than the checkout has certifies nothing"
     failed=1
   elif [ -n "$history_hits" ]; then printf '%s\n' "$history_hits"; failed=1
   else echo "history: clean over the ${walked:-0} commit(s) this checkout has"; fi
@@ -516,6 +541,82 @@ Generated with a tool: see the session log at https://example.invalid/session_01
     printf '%s\n' "$report6"
     return 1; }
   echo "self-check: the count the history section prints counts distinct commits, not lines"
+
+  # A walk cut short prints a smaller number and otherwise looks like a small repository, so the
+  # number has to be compared against something the cut does not reach. The fixture is three
+  # commits with the credential in the oldest one and nothing in the tree, so the newest commit is
+  # clean and a walk of one commit finds nothing. Copy A carries one substitution -- the
+  # enumeration is cut to `--max-count=1` -- and must be refused by the comparison. Copy B carries
+  # that substitution AND the comparison branch cut out, and the same fixture is then passed:
+  # that is what makes the refusal in A a reading of the branch and not an accident of the
+  # fixture. Both copies are compared with the original first, so a substitution that did not
+  # land fails this arm instead of passing it.
+  local cutwalk status7 report7 cutboth status8 report8
+  cutwalk=$(mktemp -d)
+  mkdir -p "$cutwalk/tool" "$cutwalk/origin"
+  cp "$SELF" "$cutwalk/tool/audit.sh"
+  sed -i.bak 's#^  git rev-list --all > "\$commit_list" || enum_rc=\$?#  git rev-list --all --max-count=1 > "$commit_list" || enum_rc=$?#' "$cutwalk/tool/audit.sh"
+  if cmp -s "$SELF" "$cutwalk/tool/audit.sh"; then
+    echo "SELF-CHECK FAILED: the walk could not be cut to one commit, so this arm measured nothing"
+    rm -rf "$cutwalk"
+    return 1
+  fi
+  (
+    cd "$cutwalk/origin"
+    git init -q .
+    git config user.email a@b.c
+    git config user.name a
+    printf 'a key %s_%s\n' ghp "$(printf 'D%.0s' $(seq 1 40))" > gone.txt
+    git add -A
+    git commit -qm "a credential that will not stay"
+    git rm -q gone.txt
+    git commit -qm "and is gone from the tree"
+    printf 'a note\n' > note.md
+    git add -A
+    git commit -qm "a third commit"
+  )
+  status7=0
+  bash "$cutwalk/tool/audit.sh" "$cutwalk/origin" > "$cutwalk/out.txt" 2>&1 || status7=$?
+  report7=$(cat "$cutwalk/out.txt")
+  if [ "$status7" -eq 0 ]; then
+    echo "SELF-CHECK FAILED: the audit passed a history it walked one commit of"
+    printf '%s\n' "$report7"
+    rm -rf "$cutwalk"
+    return 1
+  fi
+  printf '%s' "$report7" | grep -q "a second enumeration of the same refs named" || {
+    echo "SELF-CHECK FAILED: a cut walk was refused, but not by the comparison against the second enumeration"
+    printf '%s\n' "$report7"
+    rm -rf "$cutwalk"
+    return 1; }
+  echo "self-check: a walk cut short is refused by the number a second enumeration names"
+
+  cutboth=$(mktemp -d)
+  mkdir -p "$cutboth/tool"
+  cp "$cutwalk/tool/audit.sh" "$cutboth/tool/audit.sh"
+  # The same fixture, not a fresh one: the two copies must be measured on the same three commits.
+  mv "$cutwalk/origin" "$cutboth/origin"
+  rm -rf "$cutwalk"
+  sed -i.bak 's#^  elif \[ "\${witnessed:-x}" != "\${walked:-0}" \]; then#  elif false; then#' "$cutboth/tool/audit.sh"
+  if cmp -s "$cutboth/tool/audit.sh.bak" "$cutboth/tool/audit.sh"; then
+    echo "SELF-CHECK FAILED: the comparison against the second enumeration could not be cut out, so this arm measured nothing"
+    rm -rf "$cutboth"
+    return 1
+  fi
+  status8=0
+  bash "$cutboth/tool/audit.sh" "$cutboth/origin" > "$cutboth/out.txt" 2>&1 || status8=$?
+  report8=$(cat "$cutboth/out.txt")
+  rm -rf "$cutboth"
+  if [ "$status8" -ne 0 ]; then
+    echo "SELF-CHECK FAILED: with the comparison cut out, the cut walk was still refused"
+    printf '%s\n' "$report8"
+    return 1
+  fi
+  printf '%s' "$report8" | grep -q "^history: clean over the 1 commit(s) this checkout has$" || {
+    echo "SELF-CHECK FAILED: the copy without the comparison did not answer clean over the one commit it walked"
+    printf '%s\n' "$report8"
+    return 1; }
+  echo "self-check: with the comparison cut out, the same cut walk is passed -- the arm is the line"
 
   # A reader that breaks is not a reader that found nothing. Here the enumeration exits non-zero
   # without printing anything, so the section never ran; "clean" would be a sentence about nothing,
