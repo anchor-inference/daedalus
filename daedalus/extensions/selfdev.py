@@ -41,6 +41,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 REPOS = ("bot", "core")
+REPOSITORIES = "repositories"
+"""The directory beside the worktrees that holds the agent's own repositories, ``<name>.git``."""
 RECEIPT_COMMAND_CHARS = 160
 
 PENDING_FILE = "pending.json"
@@ -57,6 +59,17 @@ class RepoSpec:
     name: str
     checkout: Path
     worktrees: Path
+    repository: Path
+    """The git repository the worktrees belong to: the agent's own, never the checkout's.
+
+    Worktrees used to be cut from the operator's checkout, which put their metadata — HEAD, index,
+    ``commondir`` — inside the checkout's ``.git`` and handed it to the session as writable. A session
+    rewrote ``commondir`` there to a private directory of its own; on the machine that path did not
+    exist, and every ``git fetch`` and ``git worktree add`` in the operator's checkout failed until the
+    entries were removed by hand. A repository of the agent's own, beside its worktrees, keeps
+    everything a session can write out of the checkout altogether. It is a full copy rather than one
+    borrowing the checkout's objects through ``alternates``: a ``git gc`` in the checkout would then
+    delete objects this repository still needs, and the coupling is what the separation is for."""
 
 
 _PRIVATE_LINES = re.compile(r"(?im)^\s*(session|run|operator|owner|claude-session|co-authored-by|generated[- ]with|signed-off-by)\s*:.*(?:\n|$)")
@@ -462,9 +475,10 @@ class SelfDevelopment:
         self.repos = {
             # Beside the state directory rather than in it: the state directory is sealed against the
             # agent, and a worktree is the one place the agent must be able to write (see Settings.worktrees_dir).
-            "bot": RepoSpec("bot", s.bot_repo_dir, s.worktrees_dir / "bot"),
-            "core": RepoSpec("core", s.core_repo_dir, s.worktrees_dir / "core"),
+            "bot": RepoSpec("bot", s.bot_repo_dir, s.worktrees_dir / "bot", s.worktrees_dir / REPOSITORIES / "bot.git"),
+            "core": RepoSpec("core", s.core_repo_dir, s.worktrees_dir / "core", s.worktrees_dir / REPOSITORIES / "core.git"),
         }
+        self._repository_locks = {name: asyncio.Lock() for name in self.repos}
         self.selfdev_dir = s.state_dir / "selfdev"
         self._reason_waits: dict[tuple[int, int], str] = {}  # (chat_id, thread_id) -> proposal id
         self._background: set[asyncio.Task[None]] = set()
@@ -482,7 +496,52 @@ class SelfDevelopment:
         return env
 
     async def git(self, repo: RepoSpec, *args: str, cwd: Path | None = None) -> str:
-        return await run_git(["-C", str(cwd or repo.checkout), *args], env=self._git_env())
+        """``git`` in ``cwd``, which defaults to the agent's own repository, never to the checkout: a
+        caller that means the operator's checkout says so, and only reads it or, in local mode,
+        fast-forwards its branch."""
+        return await run_git(["-C", str(cwd or repo.repository), *args], env=self._git_env())
+
+    async def repository(self, repo: RepoSpec) -> Path:
+        """The agent's own repository for ``repo``, created on first use and its remotes kept current.
+
+        Created bare and filled by fetching from the checkout, which is a read: the checkout's
+        ``.git`` is never written, the objects arrive without a download, and the first fetch from
+        GitHub after it is incremental. ``origin`` follows whatever the checkout's ``origin`` is now, so
+        a repository that moved is followed without a migration; ``checkout`` is where a local
+        installation's running branch is read from.
+        """
+        async with self._repository_locks[repo.name]:
+            path = repo.repository
+            if not (path / "HEAD").is_file():
+                partial = path.with_name(path.name + ".partial")
+                # A start that died half-way leaves a partial copy; it is the agent's own and nothing in it is work.
+                shutil.rmtree(partial, ignore_errors=True)
+                partial.parent.mkdir(parents=True, exist_ok=True)
+                await run_git(["init", "-q", "--bare", str(partial)], env=self._git_env())
+                await run_git(["-C", str(partial), "config", "user.name", "daedalus"], env=self._git_env())
+                await run_git(["-C", str(partial), "config", "user.email", "daedalus@localhost"], env=self._git_env())
+                await run_git(["-C", str(partial), "fetch", "-q", "--no-tags", str(repo.checkout), "+refs/remotes/origin/*:refs/remotes/origin/*"], env=self._git_env())
+                partial.rename(path)
+            await self.git(repo, "config", "remote.checkout.url", str(repo.checkout))
+            await self.git(repo, "config", "--replace-all", "remote.checkout.fetch", "+refs/heads/*:refs/remotes/checkout/*")
+            await self.git(repo, "config", "--add", "remote.checkout.fetch", "+HEAD:refs/remotes/checkout/HEAD")
+            await self.git(repo, "config", "remote.checkout.tagOpt", "--no-tags")
+            try:
+                origin = (await self.git(repo, "remote", "get-url", "origin", cwd=repo.checkout)).strip()
+            except GitError:
+                origin = ""
+            if origin:
+                await self.git(repo, "config", "remote.origin.url", origin)
+                await self.git(repo, "config", "--replace-all", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+            try:
+                await self.git(repo, "fetch", "-q", "checkout")
+            except GitError:
+                # With a remote the checkout is only a convenience — origin is where a worktree starts
+                # from — so a checkout git cannot read must not stop the agent's work.
+                if self.mode != "server":
+                    raise
+                logger.warning("could not read the %s checkout; working from origin alone", repo.name, exc_info=True)
+            return path
 
     async def gh(self, *args: str, cwd: Path) -> str:
         """``gh`` when it is installed, the REST API when it is not.
@@ -519,8 +578,9 @@ class SelfDevelopment:
         """
         if self.mode == "server":
             return "origin/main"
-        name = (await self.git(repo, "rev-parse", "--abbrev-ref", "HEAD")).strip()
-        return name if name and name != "HEAD" else (await self.git(repo, "rev-parse", "HEAD")).strip()
+        name = (await self.git(repo, "rev-parse", "--abbrev-ref", "HEAD", cwd=repo.checkout)).strip()
+        # Read in the agent's repository, where the last fetch from the checkout put it.
+        return f"checkout/{name}" if name and name != "HEAD" else "checkout/HEAD"
 
     async def workspace(self, repo_name: str, branch: str) -> Path:
         """Create (or reuse) a worktree for ``agent/<branch>`` off the branch point this mode uses."""
@@ -531,6 +591,7 @@ class SelfDevelopment:
         if target.exists():
             return target
         repo.worktrees.mkdir(parents=True, exist_ok=True)
+        await self.repository(repo)
         if self.mode == "server":
             await self.git(repo, "fetch", "--prune", "origin")
         base = await self.base_ref(repo)
@@ -539,9 +600,98 @@ class SelfDevelopment:
         except GitError:
             await self.git(repo, "worktree", "prune")
             await self.git(repo, "worktree", "add", "-B", full_branch, str(target), base)
-        await self.git(repo, "config", "user.name", "daedalus", cwd=target)
-        await self.git(repo, "config", "user.email", "daedalus@localhost", cwd=target)
         return target
+
+    async def adopt_worktrees(self) -> list[str]:
+        """Move worktrees cut from the operator's checkout into the agent's own repository.
+
+        Worktrees made before the agent had a repository of its own name the checkout's
+        ``.git/worktrees/<name>`` as their git directory. Each one is attached to the agent's repository
+        on the same branch, without touching a file of its working tree: the branch comes from the
+        checkout's ``agent/`` refs (fetched, which only reads the checkout), or from the remote's copy,
+        or — when neither survived — from the base, so that whatever was never committed shows up as
+        changes to commit rather than being lost. The checkout's own leftover entries are not removed
+        here: that is a write into the operator's ``.git``, which the host does with
+        ``git worktree prune``. Answers the names it adopted; a worktree it cannot adopt is logged and
+        left exactly as it was.
+        """
+        adopted: list[str] = []
+        for repo in self.repos.values():
+            if not repo.worktrees.is_dir() or (repo.name == "core" and repo.checkout == self.repos["bot"].checkout):
+                continue
+            strays = [d for d in sorted(repo.worktrees.iterdir()) if d.is_dir() and not self._belongs(repo, d)]
+            if not strays:
+                continue
+            try:
+                await self.repository(repo)
+            except GitError as exc:
+                logger.warning("the %s repository could not be created, so no worktree was adopted: %s", repo.name, exc)
+                continue
+            for worktree in strays:
+                try:
+                    await self._adopt(repo, worktree)
+                    adopted.append(f"{repo.name}/{worktree.name}")
+                except (GitError, OSError) as exc:
+                    logger.warning("worktree %s was not adopted: %s", worktree, exc)
+        return adopted
+
+    @staticmethod
+    def _gitdir_of(worktree: Path) -> Path | None:
+        try:
+            text = (worktree / ".git").read_text(encoding="utf-8")
+        except OSError:
+            return None
+        return Path(text.split(":", 1)[1].strip()) if text.startswith("gitdir:") else None
+
+    def _belongs(self, repo: RepoSpec, worktree: Path) -> bool:
+        gitdir = self._gitdir_of(worktree)
+        return gitdir is not None and repo.repository in gitdir.parents
+
+    async def _ref(self, repo: RepoSpec, name: str) -> str:
+        try:
+            return (await self.git(repo, "rev-parse", "--verify", "-q", f"{name}^{{commit}}")).strip()
+        except GitError:
+            return ""
+
+    async def _adopt(self, repo: RepoSpec, worktree: Path) -> None:
+        old = self._gitdir_of(worktree)
+        branch = f"agent/{worktree.name}"
+        recorded = ""
+        if old is not None:
+            try:
+                head = (old / "HEAD").read_text(encoding="utf-8").strip()
+            except OSError:
+                head = ""
+            if head.startswith("ref: refs/heads/"):
+                branch = head.removeprefix("ref: refs/heads/")
+            elif head:
+                recorded = head
+        start = ""
+        for candidate in (f"refs/heads/{branch}", f"refs/remotes/checkout/{branch}", f"refs/remotes/origin/{branch}", recorded):
+            if candidate and (start := await self._ref(repo, candidate)):
+                break
+        if not start:
+            start = await self._ref(repo, await self.base_ref(repo))
+        if not start:
+            raise GitError(f"no commit to put {branch} on")
+        if not await self._ref(repo, f"refs/heads/{branch}"):
+            await self.git(repo, "branch", branch, start)
+        # git adds a worktree only into an empty directory, so the metadata is made beside it and
+        # pointed at the existing one; the working tree's files are never rewritten.
+        staging = repo.repository.parent / "adopting" / worktree.name
+        shutil.rmtree(staging, ignore_errors=True)
+        staging.parent.mkdir(parents=True, exist_ok=True)
+        await self.git(repo, "worktree", "add", "-q", "--no-checkout", "--force", str(staging), branch)
+        admin = self._gitdir_of(staging)
+        if admin is None:
+            raise GitError(f"git made no worktree metadata for {worktree}")
+        (admin / "gitdir").write_text(f"{worktree / '.git'}\n", encoding="utf-8")
+        (worktree / ".git").write_text(f"gitdir: {admin}\n", encoding="utf-8")
+        shutil.rmtree(staging, ignore_errors=True)
+        # The index starts empty with --no-checkout; reading it from the branch makes every file the
+        # agent changed and never committed show as a change again.
+        await self.git(repo, "reset", "-q", cwd=worktree)
+        logger.info("adopted worktree %s into %s on %s", worktree, repo.repository, branch)
 
     @staticmethod
     def slug_of(branch: str) -> str:
@@ -691,6 +841,7 @@ class SelfDevelopment:
         size_gate(added_total, new_modules, summary)
         commit = (await self.git(spec, "rev-parse", "HEAD", cwd=worktree)).strip()
         await self._fast_forward(spec, head_branch, base)
+        base = base.removeprefix("checkout/")
         needs_image = any(f in IMAGE_FILES for f in changed_files) or any(f.startswith("launcher/") for f in changed_files)
         line = _one_line(summary)
         self._write_pending({"repo": repo, "commit": commit, "branch": head_branch, "summary": line, "files": changed_files[:40], "needs_image": needs_image, "session_id": session_id, "at": datetime.now(UTC).isoformat()})
@@ -711,14 +862,23 @@ class SelfDevelopment:
         operator's own commit, an earlier apply — the agent's branch is rebased onto it once and the
         merge is tried again, because a merge commit here buys nothing and reads as noise in a history
         whose whole purpose is to be readable by hand.
+
+        The commits live in the agent's own repository, so the checkout fetches them from there first.
+        This is the one write self-development makes to the checkout, made by this process and not by
+        a session, and only in local mode, where the checkout's branch is where a change lands.
         """
         try:
-            await self.git(spec, "merge", "--ff-only", branch)
+            await self._land(spec, branch)
             return
         except GitError:
             logger.warning("the checkout moved since the branch was cut; rebasing %s onto %s", branch, base)
+        await self.git(spec, "fetch", "-q", "checkout")
         await self.git(spec, "rebase", base, branch, cwd=spec.worktrees / self.slug_of(branch))
-        await self.git(spec, "merge", "--ff-only", branch)
+        await self._land(spec, branch)
+
+    async def _land(self, spec: RepoSpec, branch: str) -> None:
+        await self.git(spec, "fetch", "-q", "--no-tags", str(spec.repository), f"refs/heads/{branch}", cwd=spec.checkout)
+        await self.git(spec, "merge", "--ff-only", "FETCH_HEAD", cwd=spec.checkout)
 
     def _write_pending(self, record: dict[str, Any]) -> None:
         self.selfdev_dir.mkdir(parents=True, exist_ok=True)
@@ -745,7 +905,7 @@ class SelfDevelopment:
         spec = self.repo(str(pending.get("repo") or "bot"))
         commit = str(pending.get("commit") or "")
         try:
-            running = (await self.git(spec, "rev-parse", "HEAD")).strip()
+            running = (await self.git(spec, "rev-parse", "HEAD", cwd=spec.checkout)).strip()
         except GitError:
             return
         result = self.last_change() or {}
@@ -1060,7 +1220,16 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
             return await selfdev.panic()
 
         front.operator_hooks.update({"rebuild": op_rebuild, "rollback": op_rollback, "panic": op_panic})
-    return []
+    # In the background: the first start copies the checkout's objects into the agent's repository, which
+    # takes as long as the repository is large, and nothing else at start waits on it.
+    async def adopt() -> None:
+        try:
+            if adopted := await selfdev.adopt_worktrees():
+                logger.info("worktrees moved into the agent's own repository: %s", ", ".join(adopted))
+        except Exception:  # noqa: BLE001 — a worktree left where it was is not a reason to lose the start
+            logger.exception("adopting the self-development worktrees failed")
+
+    return [asyncio.create_task(adopt(), name="selfdev-adopt-worktrees")]
 
 
 __all__ = ["GitError", "SelfDevelopment", "install"]

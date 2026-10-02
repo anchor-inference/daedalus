@@ -508,6 +508,11 @@ def prepare_candidate(repo: Path, ref: str = "origin/main") -> tuple[bool, str]:
     """
     target = candidate_dir(repo)
     CANDIDATE.mkdir(parents=True, exist_ok=True)
+    if (target / ".git").is_file() and git(target, "rev-parse", "--git-dir")[0] != 0:
+        # The checkout's entry for the candidate is gone: a `git worktree prune` on the machine removes
+        # every entry whose path exists only inside the container. The candidate is rebuilt from
+        # scratch, warm caches included, rather than failing every preflight from then on.
+        shutil.rmtree(target, ignore_errors=True)
     if not (target / ".git").exists():
         git(repo, "worktree", "prune")
         code, out = git(repo, "worktree", "add", "--detach", "--force", str(target), ref)

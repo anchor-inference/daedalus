@@ -15,7 +15,10 @@
 #   ../protocore-exp      -> /srv/protocore-exp the core repository
 #   daedalus-state        -> /srv/state         database, blobs, secrets, known-good history
 #   daedalus-workspaces   -> /srv/workspaces    per-session working directories
-#   daedalus-worktrees    -> /srv/worktrees     the worktrees self-development cuts off the two repositories
+#   daedalus-worktrees    -> /srv/worktrees     self-development's worktrees and the agent's own repositories
+#     they belong to (repositories/bot.git, core.git), copied from the checkouts once and fetched from their
+#     origin after that. Not cut from the checkouts: a worktree's metadata lives in its repository's .git,
+#     and the checkouts' .git is the operator's, which the sandbox binds read-only for every command.
 #     Beside the state volume rather than inside it: the state directory is sealed against the agent and a
 #     worktree is where the agent's own changes are written.
 #   daedalus-venv         -> /srv/venv          the virtualenv, seeded from the image on first start
