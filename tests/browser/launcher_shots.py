@@ -243,10 +243,17 @@ def check_language_switch(browser, port: int, data: Path) -> None:
         page.click(".f-foot [data-act=next]")
         page.wait_for_function("() => document.querySelector('[data-wizard]').dataset.step === 'model' && !window.Wizard.busy()")
         page.fill("#f-keys\\.deepseek", "typed-not-a-key")
+        # A subscription plan is a provider of its own, and its key must survive the switch too.
+        page.click("label.prov[data-k=prov-kimi_coding]")
+        page.fill("#f-keys\\.kimi_coding", "typed-membership-key")
         page.click("[data-slot=lang] [data-lang=ru]")
         page.wait_for_function("() => document.documentElement.lang === 'ru'")
         after = page.evaluate("() => window.Wizard.state.mode")
-        key = page.eval_on_selector("#f-keys\\.deepseek", "el => el.value")
+        key = page.evaluate("() => window.Wizard.state.keys.deepseek")
+        provider = page.evaluate("() => window.Wizard.state.provider")
+        subscription = page.eval_on_selector("#f-keys\\.kimi_coding", "el => el.value")
+        if provider != "kimi_coding" or subscription != "typed-membership-key":
+            raise SystemExit("the language switch lost the subscription provider or its key")
         if after != other:
             raise SystemExit(f"the language switch lost the mode: chose {other}, kept {after}")
         if key != "typed-not-a-key":
