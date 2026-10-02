@@ -55,7 +55,7 @@ async function switchLang(lang) {
   }
   // What was open and which provider was showing are part of where the operator was, too.
   const opened = [...document.querySelectorAll("details")].map((one) => one.open);
-  const provider = document.querySelector('.seg button[aria-pressed="true"]')?.dataset.provider;
+  const provider = el("provider-choice")?.value;
   const answer = await fetch(location.pathname + location.search, { headers: { "Accept-Language": lang } });
   const fresh = new DOMParser().parseFromString(await answer.text(), "text/html");
   document.querySelector("main").replaceWith(fresh.querySelector("main"));
@@ -83,22 +83,22 @@ document.addEventListener("click", (event) => {
 
 // ---- the first page ----------------------------------------------------------------------------
 
-// One provider key is asked for at a time. All three fields are in the form and all three are
+// One provider key is asked for at a time. All fields are in the form and all are
 // posted: an untouched field carries what is already on file, and the launcher reads an empty one
 // as "leave it alone", so showing one panel changes nothing about what is written.
 function showProvider(name) {
-  document.querySelectorAll(".seg button[data-provider]").forEach((button) => {
-    const chosen = button.dataset.provider === name;
-    button.setAttribute("aria-pressed", String(chosen));
-    document.querySelector(`[data-panel="${button.dataset.provider}"]`).hidden = !chosen;
+  document.querySelectorAll("[data-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.panel !== name;
   });
 }
 
 function setupPanels(provider) {
-  document.querySelectorAll(".seg button[data-provider]").forEach((button) => {
-    button.addEventListener("click", () => showProvider(button.dataset.provider));
-  });
-  if (provider) showProvider(provider);
+  const choice = el("provider-choice");
+  if (choice) {
+    choice.addEventListener("change", () => showProvider(choice.value));
+    if (provider && choice.querySelector(`option[value="${provider}"]`)) choice.value = provider;
+    showProvider(choice.value);
+  }
   // The language the form was filled in is the language the installation keeps.
   const field = el("lang-field");
   if (field) field.value = document.body.dataset.lang;

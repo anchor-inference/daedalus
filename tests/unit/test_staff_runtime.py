@@ -520,6 +520,112 @@ async def test_a_task_started_again_links_the_session_that_ended(settings: Setti
         await manager.close()
 
 
+async def test_cli_resume_lists_archived_staff_and_uses_the_selected_conversation(settings: Settings, db: Database, tmp_path: Path) -> None:
+    manager, team, _runtime, project = await fake_team(settings, db, tmp_path, capacity=Capacity())
+    runtime = FakeStaffRuntime(kind="cursor")
+    team.runtimes["cursor"] = runtime
+    try:
+        first = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
+        task_id = await board_task(manager, project, "Menu")
+        assert (await team.assign(first, task_id))["state"] == "started"
+        original = await team.live_of(first)
+        assert original is not None and original.cli_session_id
+        await manager.staff.end_session(original.id, "terminal closed")
+        await manager.db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = ?", (task_id,))
+        await manager.staff.archive(first.id)
+        again = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
+        history = await team.resume_sessions(again, task_id=task_id)
+        assert [(row["id"], row["owner_name"], row["can_resume"]) for row in history] == [(original.id, "Ada", True)]
+        assert (await team.assign(again, task_id, resume_from=original.id))["state"] == "started"
+        assert runtime.resumed[-1][1] == original.id
+        resumed = await team.live_of(again)
+        assert resumed is not None and resumed.session.predecessor_id == original.id
+        assert not next(row for row in await team.resume_sessions(again, task_id=task_id) if row["id"] == original.id)["can_resume"]
+    finally:
+        await manager.close()
+
+
+async def test_cli_resume_rejects_another_folder_or_harness(settings: Settings, db: Database, tmp_path: Path) -> None:
+    manager, team, _runtime, project = await fake_team(settings, db, tmp_path, capacity=Capacity())
+    team.runtimes["cursor"] = FakeStaffRuntime(kind="cursor")
+    team.runtimes["claude"] = FakeStaffRuntime(kind="claude")
+    try:
+        cursor = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
+        task_id = await board_task(manager, project, "Menu")
+        await team.assign(cursor, task_id)
+        original = await team.live_of(cursor)
+        assert original is not None
+        await manager.staff.end_session(original.id, "terminal closed")
+        await manager.db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = ?", (task_id,))
+        claude = await manager.staff.hire(project.id, name="Ben", harness="claude", isolation="shared")
+        with pytest.raises(StaffError, match="selected harness"):
+            await team.assign(claude, task_id, resume_from=original.id)
+        other = tmp_path / "other"
+        other.mkdir()
+        folder = await manager.projects.add_folder(project.id, str(other))
+        await manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (folder.id, task_id))
+        elsewhere = await manager.staff.hire(project.id, name="Cleo", harness="cursor", isolation="shared", folder_id=folder.id)
+        with pytest.raises(StaffError, match="another folder path"):
+            await team.assign(elsewhere, task_id, resume_from=original.id)
+    finally:
+        await manager.close()
+
+
+async def test_cli_resume_follows_launch_path_after_folder_is_added_again(settings: Settings, db: Database, tmp_path: Path) -> None:
+    manager, team, _runtime, project = await fake_team(settings, db, tmp_path, capacity=Capacity())
+    runtime = FakeStaffRuntime(kind="cursor")
+    team.runtimes["cursor"] = runtime
+    try:
+        old_folder = project.primary
+        member = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
+        task_id = await board_task(manager, project, "Menu")
+        await team.assign(member, task_id)
+        original = await team.live_of(member)
+        assert original is not None
+        await manager.staff.end_session(original.id, "terminal closed")
+        await manager.staff.archive(member.id)
+        await manager.db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = ?", (task_id,))
+        other = tmp_path / "other"
+        other.mkdir()
+        await manager.projects.add_folder(project.id, str(other))
+        await manager.projects.remove_folder(project.id, old_folder.id)
+        added_again = await manager.projects.add_folder(project.id, str(old_folder.path))
+        assert added_again.id != old_folder.id
+        await manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (added_again.id, task_id))
+        again = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared", folder_id=added_again.id)
+        history = await team.resume_sessions(again, task_id=task_id)
+        assert [row["id"] for row in history if row["can_resume"]] == [original.id]
+        assert (await team.assign(again, task_id, resume_from=original.id))["state"] == "started"
+        assert runtime.resumed[-1][1] == original.id
+    finally:
+        await manager.close()
+
+
+async def test_queued_cli_resume_survives_queue_rebuild(settings: Settings, db: Database, tmp_path: Path) -> None:
+    manager, team, _runtime, project = await fake_team(settings, db, tmp_path, capacity=Capacity())
+    runtime = FakeStaffRuntime(kind="cursor")
+    team.runtimes["cursor"] = runtime
+    try:
+        member = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
+        task_id = await board_task(manager, project, "Menu")
+        await team.assign(member, task_id)
+        first = await team.live_of(member)
+        assert first is not None
+        await manager.staff.end_session(first.id, "terminal closed")
+        await manager.db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = ?", (task_id,))
+        team._capacity = Capacity(running=1, cap=1)
+        queued = await team.assign(member, task_id, resume_from=first.id)
+        assert queued["state"] == "queued"
+        fresh = await team_for(settings, manager, capacity=Capacity())
+        fresh.runtimes["cursor"] = runtime
+        assert await fresh.rebuild() == 1
+        await fresh.queue.pump(project.id)
+        assert runtime.resumed[-1][1] == first.id
+        assert await manager.db.kv_get(fresh._resume_key(member.id, task_id)) is None
+    finally:
+        await manager.close()
+
+
 async def test_a_task_without_its_brief_or_runtime_is_refused(settings: Settings, db: Database, tmp_path: Path) -> None:
     manager, team, runtime, project = await fake_team(settings, db, tmp_path)
     try:

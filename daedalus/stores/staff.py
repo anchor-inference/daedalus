@@ -31,10 +31,10 @@ from daedalus.config import REASONING_EFFORTS, StaffConfig
 from daedalus.host.worktrees import staff_slug
 from daedalus.stores.database import Database
 
-HARNESSES = ("daedalus", "claude", "codex", "grok", "opencode", "pi")
+HARNESSES = ("daedalus", "claude", "codex", "grok", "opencode", "pi", "cursor")
 """Who runs a staff member: Daedalus itself, or one of the command-line agents, by the name of its CLI."""
 CLI_HARNESSES = HARNESSES[1:]
-HARNESS_NAMES = {"daedalus": "Daedalus", "claude": "Claude Code", "codex": "Codex", "grok": "Grok Build", "opencode": "OpenCode", "pi": "pi"}
+HARNESS_NAMES = {"daedalus": "Daedalus", "claude": "Claude Code", "codex": "Codex", "grok": "Grok Build", "opencode": "OpenCode", "pi": "pi", "cursor": "Cursor Agent"}
 ISOLATIONS = ("shared", "worktree", "readonly")
 ENVIRONMENTS = ("container", "host")
 CREATORS = ("operator", "orchestrator")
@@ -215,6 +215,7 @@ class StaffSession:
     end_reason: str
     predecessor_id: str | None
     folder_id: str | None
+    launch_cwd: str | None
     worktree_path: str | None
     branch: str | None
     base_ref: str | None
@@ -244,6 +245,7 @@ class StaffSession:
             "end_reason": self.end_reason,
             "predecessor_id": self.predecessor_id,
             "folder_id": self.folder_id,
+            "launch_cwd": self.launch_cwd,
             "worktree_path": self.worktree_path,
             "branch": self.branch,
             "base_ref": self.base_ref,
@@ -390,6 +392,7 @@ def _session(row: Any) -> StaffSession:
         end_reason=row["end_reason"],
         predecessor_id=row["predecessor_id"],
         folder_id=row["folder_id"],
+        launch_cwd=row["launch_cwd"],
         worktree_path=row["worktree_path"],
         branch=row["branch"],
         base_ref=row["base_ref"],
@@ -829,6 +832,7 @@ class StaffStore:
         kind: str,
         task_id: str | None = None,
         folder_id: str | None = None,
+        launch_cwd: str | None = None,
         worktree_path: str | None = None,
         branch: str | None = None,
         base_ref: str | None = None,
@@ -851,9 +855,9 @@ class StaffStore:
         session_id = f"ss-{uuid.uuid4().hex[:12]}"
         try:
             await self._db.execute(
-                "INSERT INTO staff_sessions(id, staff_id, kind, task_id, status, status_at, last_signal_at, started_at, predecessor_id, folder_id, worktree_path, branch, base_ref, team_token_hash) "
-                "VALUES (?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (session_id, staff_id, kind, task_id, at, at, at, predecessor_id, folder_id, worktree_path, branch, base_ref, team_token_hash),
+                "INSERT INTO staff_sessions(id, staff_id, kind, task_id, status, status_at, last_signal_at, started_at, predecessor_id, folder_id, launch_cwd, worktree_path, branch, base_ref, team_token_hash) "
+                "VALUES (?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (session_id, staff_id, kind, task_id, at, at, at, predecessor_id, folder_id, launch_cwd, worktree_path, branch, base_ref, team_token_hash),
             )
         except sqlite3.IntegrityError as exc:
             if await self.live(staff_id) is not None:
@@ -876,6 +880,36 @@ class StaffStore:
         """The member's sessions, newest first."""
         rows = await self._db.fetchall("SELECT * FROM staff_sessions WHERE staff_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?", (staff_id, max(1, min(int(limit), 500))))
         return [_session(r) for r in rows]
+
+    async def resumable_sessions(self, project_id: str, harness: str, folder_id: str, launch_cwd: str, *, worktree_path: str | None = None, before: str | None = None, limit: int = 50) -> list[tuple[StaffSession, str, str]]:
+        """CLI conversations launched from this folder, including dismissed members' sessions."""
+        folder_match = "(s.launch_cwd = ? OR (s.launch_cwd IS NULL AND s.folder_id = ?)"
+        folder_args: tuple[Any, ...] = (launch_cwd, folder_id)
+        if worktree_path:
+            folder_match += " OR s.worktree_path = ?"
+            folder_args += (worktree_path,)
+        folder_match += ")"
+        cursor = await self._db.fetchone(
+            "SELECT s.started_at, s.rowid FROM staff_sessions s JOIN staff m ON m.id = s.staff_id "
+            "WHERE s.id = ? AND m.project_id = ? AND m.harness = ? AND " + folder_match,
+            (before, project_id, harness, *folder_args),
+        ) if before else None
+        if before and cursor is None:
+            raise StaffError("the session cursor is not in this project, harness and launch folder")
+        where = " AND (s.started_at < ? OR (s.started_at = ? AND s.rowid < ?))" if cursor else ""
+        args: tuple[Any, ...] = (project_id, harness, *folder_args)
+        if cursor:
+            args += (cursor["started_at"], cursor["started_at"], cursor["rowid"])
+        rows = await self._db.fetchall(
+            "SELECT s.*, m.name AS owner_name, COALESCE(t.title, '') AS task_title "
+            "FROM staff_sessions s JOIN staff m ON m.id = s.staff_id "
+            "LEFT JOIN board_tasks t ON t.id = s.task_id "
+            "WHERE m.project_id = ? AND m.harness = ? AND " + folder_match + " "
+            "AND s.kind = 'cli' AND s.cli_session_id IS NOT NULL" + where +
+            " ORDER BY s.started_at DESC, s.rowid DESC LIMIT ?",
+            (*args, max(1, min(int(limit), 100))),
+        )
+        return [(_session(row), row["owner_name"], row["task_title"]) for row in rows]
 
     async def started(self, staff_session_id: str, *, session_id: str | None = None, terminal_id: str | None = None, cli_session_id: str | None = None, transcript_ref: str | None = None) -> StaffSession | None:
         """Record where the runtime put the work: the Daedalus session, or the terminal and the CLI's own session."""

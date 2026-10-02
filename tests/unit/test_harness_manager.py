@@ -21,6 +21,7 @@ import pytest
 
 import daedalus.harness.claude  # noqa: F401 — registers the adapters there are, whichever test ran first
 import daedalus.harness.codex  # noqa: F401
+import daedalus.harness.cursor  # noqa: F401
 import daedalus.harness.opencode  # noqa: F401
 from daedalus.config import HarnessConfig
 from daedalus.harness.contract import CheckResult, CheckStep, EnvironmentPort
@@ -178,7 +179,7 @@ async def test_a_check_finds_each_cli_with_its_version_sign_in_agents_and_models
         (b.home / ".pi" / "agent" / "settings.json").write_text(json.dumps({"defaultProvider": "anthropic"}))
 
         rows = by_harness(await b.manager.check("container"))
-        assert list(rows) == ["claude", "codex", "opencode", "pi", "grok"]
+        assert list(rows) == ["claude", "codex", "opencode", "pi", "grok", "cursor"]
         claude = rows["claude"]
         assert (claude["installed"], claude["installed_version"], claude["latest_version"], claude["logged_in"], claude["login_detail"]) == (True, "2.1.281", "2.1.281", "yes", "claude.ai · max")
         assert claude["agents"] == [{"name": "helper", "source": "user", "description": "Does small things", "model": "haiku"}]
@@ -201,8 +202,9 @@ async def test_a_check_finds_each_cli_with_its_version_sign_in_agents_and_models
         # The pinned Node is not there, so the npm CLIs could not be installed in the container.
         assert b.manager.node_state("container")["installed"] is False
         checks = await b.events("harness.check")
-        assert sorted(e["harness"] for e in checks) == ["claude", "codex", "grok", "opencode", "pi"]
-        assert all(e["ok"] for e in checks)
+        assert sorted(e["harness"] for e in checks) == ["claude", "codex", "cursor", "grok", "opencode", "pi"]
+        assert all(e["ok"] for e in checks if e["harness"] != "cursor")
+        assert not next(e for e in checks if e["harness"] == "cursor")["installed"]
 
         form = await b.manager.catalog_view("container")
         assert (form["claude"]["logged_in"], form["codex"]["logged_in"], form["claude"]["version"]) == (True, False, "2.1.281")

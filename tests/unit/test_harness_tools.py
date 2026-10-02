@@ -126,7 +126,7 @@ def test_the_self_check_picks_the_cheap_model_of_each_family() -> None:
 
 
 def test_every_cli_has_tooling_and_a_way_to_sign_in() -> None:
-    assert list(TOOLING) == ["claude", "codex", "opencode", "pi", "grok"]
+    assert list(TOOLING) == ["claude", "codex", "opencode", "pi", "grok", "cursor"]
     assert all(t.sign_in for t in TOOLING.values())
     # The subscription is the sign-in wherever the CLI asks which one.
     assert tooling("claude").sign_in == ("claude", "auth", "login", "--claudeai")

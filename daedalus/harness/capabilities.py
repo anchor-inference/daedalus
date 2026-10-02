@@ -183,6 +183,23 @@ CAPABILITIES: dict[str, Capabilities] = {
         supported_major=1,
         autoupdate_off=(("GROK_DISABLE_AUTOUPDATER", "1"),),
     ),
+    "cursor": Capabilities(
+        harness="cursor",
+        label="Cursor Agent",
+        status_channel="acp",
+        status_channel_label="ACP events per launch",
+        steer="degrade_to_queue",
+        permissions="structured",
+        questions="structured",
+        team_tools="mcp",
+        first_prompt="channel",
+        interrupt="structured",
+        paste=None,
+        companion=False,
+        pointer_dir_flag="",
+        tested_versions=("2026.10.01", "2026.11.01"),
+        supported_major=2026,
+    ),
 }
 """One entry per command-line harness. Daedalus staff are not here: they run in this process and have
 none of these channels."""
@@ -208,7 +225,12 @@ chooses by. An orchestrator hired a reviewer "read-only" for a check the operato
 well, and a test message the operator then allowed could not be sent: a Codex read-only sandbox has
 neither writes nor a network, which no mode's name says."""
 MODE_MEANINGS["grok"] = {k: v for k, v in MODE_MEANINGS["claude"].items() if k != "manual"}
-RESTRICTIVE_MODES = {"codex": frozenset({"read-only"}), "claude": frozenset({"plan"}), "grok": frozenset({"plan"})}
+MODE_MEANINGS["cursor"] = {
+    "ask": "answers questions without edits or commands",
+    "plan": "plans without edits or commands",
+    "agent": "full tool access in the selected folder; Cursor can edit without asking",
+}
+RESTRICTIVE_MODES = {"codex": frozenset({"read-only"}), "claude": frozenset({"plan"}), "grok": frozenset({"plan"}), "cursor": frozenset({"ask", "plan"})}
 """The modes in which a member cannot change anything: work that the operator allowed to fix things
 cannot be done in them."""
 

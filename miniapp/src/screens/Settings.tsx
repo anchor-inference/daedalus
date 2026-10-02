@@ -33,8 +33,8 @@ import { CompactionModelSelect } from "../compactionmodel";
 import { AsrSettingsCard } from "./AsrSettings";
 
 const DEFAULT_KINDS = ["deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"];
-/** Self-hosted endpoints: temperature is a sampling pin, not a vendor default. */
-const LOCAL_KINDS = new Set(["vllm", "llamacpp", "openai_compat"]);
+/** The generic protocol also serves remote vendors, so temperature is available there too. */
+const TEMPERATURE_KINDS = new Set(["vllm", "llamacpp", "openai_compat"]);
 
 function RulesEditor({ rules, fallback, onSave }: { rules: string; fallback: string; onSave: (rules: string) => void }) {
   const [text, setText] = useState(rules || fallback);
@@ -300,7 +300,7 @@ function ProviderBlock({ id, p, kinds, available, onPatch, onRemove }: {
                 onBlur={() => baseUrl.trim() !== p.base_url && baseUrl.trim() && onPatch(id, { base_url: baseUrl.trim() })}
               />
             </label>
-            {LOCAL_KINDS.has(p.kind) && (
+            {TEMPERATURE_KINDS.has(p.kind) && (
               <label className="mfield">
                 <span>{t("settings.provider.temperature")}</span>
                 <input
@@ -396,7 +396,7 @@ function AddProviderRow({ kinds, onAdd, toast }: { kinds: string[]; onAdd: (id: 
       <div className="mfields">
         <label className="mfield">
           <span>{t("settings.provider.id")}</span>
-          <input className="field" value={id} placeholder="local-vllm" onChange={(e) => setId(e.target.value)} />
+          <input className="field" value={id} placeholder="my-provider" onChange={(e) => setId(e.target.value)} />
         </label>
         <label className="mfield">
           <span>{t("settings.provider.kind")}</span>

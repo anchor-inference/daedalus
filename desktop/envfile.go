@@ -26,6 +26,7 @@ type Setup struct {
 	DeepseekKey   string
 	OpenrouterKey string
 	OpencodeKey   string
+	ProviderKeys  map[string]string
 	BotToken      string
 	OwnerID       string
 	APIID         string
@@ -184,12 +185,23 @@ func firstSet(existing, fallback string) string {
 // never holds a key even when it edits its own code.
 func keyproxyUpdates(s Setup, current map[string]string) []envVar {
 	answer := answered(s, current)
-	return []envVar{
+	updates := []envVar{
 		{"DEEPSEEK_API_KEY", answer("DEEPSEEK_API_KEY", "deepseek", s.DeepseekKey)},
 		{"OPENROUTER_API_KEY", answer("OPENROUTER_API_KEY", "openrouter", s.OpenrouterKey)},
 		{"OPENCODE_API_KEY", answer("OPENCODE_API_KEY", "opencode", s.OpencodeKey)},
-		{"KEYPROXY_USD_PER_DAY", dailyCap(s.USDPerDay, current["KEYPROXY_USD_PER_DAY"])},
 	}
+	for _, provider := range [][2]string{
+		{"openai", "OPENAI_API_KEY"},
+		{"zai", "ZAI_API_KEY"},
+		{"zai_coding", "ZAI_CODING_API_KEY"},
+		{"minimax", "MINIMAX_API_KEY"},
+		{"minimax_plan", "MINIMAX_PLAN_API_KEY"},
+		{"moonshot", "MOONSHOT_API_KEY"},
+		{"kimi_coding", "KIMI_CODING_API_KEY"},
+	} {
+		updates = append(updates, envVar{provider[1], answer(provider[1], provider[0], s.ProviderKeys[provider[0]])})
+	}
+	return append(updates, envVar{"KEYPROXY_USD_PER_DAY", dailyCap(s.USDPerDay, current["KEYPROXY_USD_PER_DAY"])})
 }
 
 // WriteSetup writes both env files. The existing values are read first, so re-running setup keeps
@@ -262,10 +274,28 @@ func SyncBotEnv(p Paths, mode Mode) error {
 func CurrentSetup(p Paths) Setup {
 	env := readEnv(readFile(p.Env))
 	keys := readEnv(readFile(p.KeyproxyEnv))
+	providerKeys := map[string]string{}
+	for _, provider := range [][2]string{
+		{"openai", "OPENAI_API_KEY"},
+		{"zai", "ZAI_API_KEY"},
+		{"zai_coding", "ZAI_CODING_API_KEY"},
+		{"minimax", "MINIMAX_API_KEY"},
+		{"minimax_plan", "MINIMAX_PLAN_API_KEY"},
+		{"moonshot", "MOONSHOT_API_KEY"},
+		{"kimi_coding", "KIMI_CODING_API_KEY"},
+	} {
+		if value := keys[provider[1]]; value != "" {
+			providerKeys[provider[0]] = value
+		}
+	}
+	if len(providerKeys) == 0 {
+		providerKeys = nil
+	}
 	return Setup{
 		DeepseekKey:   keys["DEEPSEEK_API_KEY"],
 		OpenrouterKey: keys["OPENROUTER_API_KEY"],
 		OpencodeKey:   keys["OPENCODE_API_KEY"],
+		ProviderKeys:  providerKeys,
 		BotToken:      env["TELEGRAM_BOT_TOKEN"],
 		OwnerID:       env["OWNER_USER_ID"],
 		APIID:         env["TELEGRAM_API_ID"],

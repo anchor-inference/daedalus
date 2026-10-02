@@ -373,6 +373,7 @@ class AssignBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     task_id: str
+    resume_from: str | None = None
 
 
 class ReleaseBody(BaseModel):
@@ -624,6 +625,7 @@ class BoardUpdateBody(BaseModel):
     title: str | None = None
     acceptance: str | None = None
     assignee_staff_id: str | None = None
+    resume_from: str | None = None
     """A staff member of the task's project; ``""`` takes the task off whoever had it."""
     brief: TaskBrief | None = None
     depends_on: list[str] | None = Field(default=None, max_length=50)
@@ -639,6 +641,7 @@ class ProjectTaskBody(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     brief: TaskBrief = Field(default_factory=TaskBrief)
     assignee_staff_id: str | None = None
+    resume_from: str | None = None
     depends_on: list[str] = Field(default_factory=list, max_length=50)
     priority: int = Field(default=3, ge=1, le=5)
     checklist: list[str] = Field(default_factory=list, max_length=100)
@@ -1695,6 +1698,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         await staff_member(staff_id)
         return [s.view() for s in await manager.staff.sessions(staff_id, limit=limit)]
 
+    @api.get("/api/staff/{staff_id}/resume-sessions")
+    async def staff_resume_sessions(staff_id: str, task_id: str | None = None, before: str | None = None, limit: int = Query(default=50, ge=1, le=100), _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
+        team = team_or_503()
+        member = await staff_member(staff_id)
+        return await team_call(team.resume_sessions(member, task_id=task_id, before=before, limit=limit))  # type: ignore[no-any-return]
+
     @api.get("/api/staff/{staff_id}/messages")
     async def staff_messages(staff_id: str, limit: int = Query(default=20, ge=1, le=200), before: str | None = None, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
         """What was sent to a member, newest first, with each message's delivery state and, for a
@@ -1721,7 +1730,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         """Give a member a task: it starts now, or waits in the project's queue with the reason."""
         team = team_or_503()
         member = await staff_member(staff_id)
-        return await team_call(team.assign(member, body.task_id, by="operator"))  # type: ignore[no-any-return]
+        return await team_call(team.assign(member, body.task_id, by="operator", resume_from=body.resume_from))  # type: ignore[no-any-return]
 
     @api.post("/api/staff/{staff_id}/interrupt")
     async def interrupt_staff(staff_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -4209,7 +4218,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             task["assignee"] = staff.get(task.get("assignee_staff_id") or "")
         return tasks
 
-    async def launch(task: dict[str, Any]) -> dict[str, Any] | None:
+    async def launch(task: dict[str, Any], resume_from: str | None = None) -> dict[str, Any] | None:
         """Hand a newly assigned task to the staff runtime, when one is installed, and say what it did.
 
         The assignment itself is the board's and stands whatever the runtime answers: a runtime that
@@ -4223,7 +4232,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if member is None:
             return None
         try:
-            result = await runtime.assign(member, task, by="operator")
+            result = await runtime.assign(member, task, by="operator", **({"resume_from": resume_from} if resume_from else {}))
         except (ValueError, KeyError) as exc:
             return {"state": "refused", "detail": str(exc)}
         return result if isinstance(result, dict) else {"state": str(result)}
@@ -4250,7 +4259,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(404, "no such project") from None
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        return {**task, "launch": await launch(task)}
+        return {**task, "launch": await launch(task, body.resume_from)}
 
     @api.post("/api/board")
     async def board_add(body: BoardTaskBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -4273,8 +4282,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(404, "no such task") from None
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        assigned = task.get("assignee_staff_id") and task.get("assignee_staff_id") != before.get("assignee_staff_id")
-        return {**task, "launch": await launch(task) if assigned else None}
+        assigned = task.get("assignee_staff_id") and (task.get("assignee_staff_id") != before.get("assignee_staff_id") or body.resume_from)
+        return {**task, "launch": await launch(task, body.resume_from) if assigned else None}
 
     @api.post("/api/board/{task_id}/accept")
     async def board_accept(task_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

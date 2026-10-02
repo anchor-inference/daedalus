@@ -249,7 +249,7 @@ describe("the keys the code asks for", () => {
       ["staff.tab.", ["session", "changes", "notes"]],
       ["staff.mode.", ["feed", "terminal"]],
       ["perm.by.", ["operator", "orchestrator", "terminal"]],
-      ["harness.channel.", ["hooks", "app_server", "sse", "extension", "files"]],
+      ["harness.channel.", ["hooks", "app_server", "sse", "extension", "files", "acp"]],
       // The Harnesses screen names a row's button, its version marker and an operation by code.
       ["harness.state.", ["current", "needsnode", "absent", "install", "signin", "update"]],
       ["harness.mark.", ["unsupported", "unverified", "verified"]],

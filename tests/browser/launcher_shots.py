@@ -241,18 +241,25 @@ def check_language_switch(browser, port: int, data: Path) -> None:
         page.click(f"label.mode:has(input[name=mode][value={other}])")
         page.fill("input[name=deepseek]", "typed-not-a-key")
         page.check("#clear-deepseek", force=True)
+        page.select_option("#provider-choice", "kimi_coding")
+        page.fill("input[name=kimi_coding]", "typed-membership-key")
         page.click(".langs button[data-lang=ru]")
         page.wait_for_function("() => document.body.dataset.lang === 'ru'")
         page.wait_for_timeout(200)
         after = page.eval_on_selector("input[name=mode]:checked", "el => el.value")
         key = page.eval_on_selector("input[name=deepseek]", "el => el.value")
         clear = page.eval_on_selector("#clear-deepseek", "el => el.checked")
+        provider = page.eval_on_selector("#provider-choice", "el => el.value")
+        subscription = page.eval_on_selector("input[name=kimi_coding]", "el => el.value")
+        panel_hidden = page.eval_on_selector('[data-panel="kimi_coding"]', "el => el.hidden")
         if after != other:
             raise SystemExit(f"the language switch lost the mode: chose {other}, kept {after}")
         if key != "typed-not-a-key":
             raise SystemExit("the language switch lost what was typed into a key field")
         if not clear:
             raise SystemExit("the language switch lost a checkbox")
+        if provider != "kimi_coding" or subscription != "typed-membership-key" or panel_hidden:
+            raise SystemExit("the language switch lost the subscription provider or its key")
         print(f"language switch keeps the answers (mode={after})")
     finally:
         context.close()

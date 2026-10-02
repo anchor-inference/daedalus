@@ -67,6 +67,12 @@ DEFAULT_UPSTREAMS = {
     "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
     "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY"),
     "opencode": ("https://opencode.ai/zen/go/v1", "OPENCODE_API_KEY"),
+    "zai": ("https://api.z.ai/api/paas/v4", "ZAI_API_KEY"),
+    "zai_coding": ("https://api.z.ai/api/coding/paas/v4", "ZAI_CODING_API_KEY"),
+    "minimax": ("https://api.minimax.io/v1", "MINIMAX_API_KEY"),
+    "minimax_plan": ("https://api.minimax.io/v1", "MINIMAX_PLAN_API_KEY"),
+    "moonshot": ("https://api.moonshot.ai/v1", "MOONSHOT_API_KEY"),
+    "kimi_coding": ("https://api.kimi.ai/coding/v1", "KIMI_CODING_API_KEY"),
 }
 BUDGET_FLAG = Path(os.environ.get("KEYPROXY_BUDGET_FLAG", "/srv/state/BUDGET_EXCEEDED"))
 BUDGET_DB = Path(os.environ.get("KEYPROXY_BUDGET_DB", "/srv/state/daedalus.sqlite"))

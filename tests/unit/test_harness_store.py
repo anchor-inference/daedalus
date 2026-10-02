@@ -14,6 +14,7 @@ import pytest
 
 import daedalus.harness.claude  # noqa: F401 — registers the adapters there are, whichever test ran first
 import daedalus.harness.codex  # noqa: F401
+import daedalus.harness.cursor  # noqa: F401
 import daedalus.harness.grok  # noqa: F401
 import daedalus.harness.opencode  # noqa: F401
 import daedalus.harness.pi  # noqa: F401
@@ -160,13 +161,13 @@ async def test_the_catalog_lists_every_harness_with_what_is_derived_from_the_cod
     await catalog.store.record_check("container", "claude", install=InstallInfo(True, "/opt/claude/bin/claude", "2.1.281", "native"), login=LoginState("yes"))
     await catalog.store.record_check("container", "opencode", install=InstallInfo(True, "/opt/npm/bin/opencode", "2.0.1", "npm"), login=LoginState("no"))
     entries = {e["harness"]: e for e in await catalog.harnesses("container")}
-    assert list(entries) == ["claude", "codex", "opencode", "pi", "grok"]
+    assert list(entries) == ["claude", "codex", "opencode", "pi", "grok", "cursor"]
     claude = entries["claude"]
     assert (claude["installed"], claude["tested"], claude["supported"], claude["label"], claude["steer"]) == (True, True, True, "Claude Code", "tui_queue")
     assert (entries["opencode"]["tested"], entries["opencode"]["supported"]) == (False, False)
     assert (entries["codex"]["installed"], entries["codex"]["tested"], entries["codex"]["logged_in"]) == (False, False, "unknown")
     # The listing says which can run rather than offering a harness nothing can run.
-    assert [name for name, e in entries.items() if e["adapter"]] == ["claude", "codex", "opencode", "pi", "grok"]
+    assert [name for name, e in entries.items() if e["adapter"]] == ["claude", "codex", "opencode", "pi", "grok", "cursor"]
     assert all(not e["installed"] for e in await catalog.harnesses("host"))
     assert catalog.capabilities("grok").steer == "cancel_and_send"
 

@@ -53,11 +53,24 @@
         <section class="card rise" style="--i: 2">
           <div class="card-head"><span class="step-no">2</span><h2>{{.T "setup.step.key"}}</h2></div>
           <p class="lead">{{.T "setup.key.lead"}}</p>
-          <div class="seg" role="group">
-            <button type="button" data-provider="deepseek" aria-pressed="true">DeepSeek</button>
-            <button type="button" data-provider="openrouter" aria-pressed="false">OpenRouter</button>
-            <button type="button" data-provider="opencode" aria-pressed="false">OpenCode</button>
-          </div>
+          <label class="provider-picker">{{.T "setup.key.choose"}}
+            <select id="provider-choice">
+              <optgroup label="{{.T "setup.key.api"}}">
+                <option value="deepseek">DeepSeek</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="openai">OpenAI API</option>
+                <option value="moonshot">Moonshot AI</option>
+                <option value="minimax">MiniMax API</option>
+                <option value="zai">Z.AI API</option>
+              </optgroup>
+              <optgroup label="{{.T "setup.key.subscription"}}">
+                <option value="opencode">OpenCode Go</option>
+                <option value="zai_coding">Z.AI Coding Plan</option>
+                <option value="minimax_plan">MiniMax Token Plan</option>
+                <option value="kimi_coding">Kimi Code</option>
+              </optgroup>
+            </select>
+          </label>
           <div class="fields grow">
             <div data-panel="deepseek">
               <label>DeepSeek {{.T "setup.key.field"}}
@@ -77,7 +90,36 @@
               </label>
               <span class="drop"><input type="checkbox" name="clear" value="opencode" id="clear-opencode" /><label for="clear-opencode">{{.T "setup.key.remove"}}</label></span>
             </div>
+            <div data-panel="zai" hidden>
+              <label>Z.AI API {{.T "setup.key.field"}}<input type="password" name="zai" value="{{index .Setup.ProviderKeys "zai"}}" autocomplete="off" spellcheck="false" /></label>
+              <span class="drop"><input type="checkbox" name="clear" value="zai" id="clear-zai" /><label for="clear-zai">{{.T "setup.key.remove"}}</label></span>
+            </div>
+            <div data-panel="openai" hidden>
+              <label>OpenAI API {{.T "setup.key.field"}}<input type="password" name="openai" value="{{index .Setup.ProviderKeys "openai"}}" autocomplete="off" spellcheck="false" /></label>
+              <span class="drop"><input type="checkbox" name="clear" value="openai" id="clear-openai" /><label for="clear-openai">{{.T "setup.key.remove"}}</label></span>
+            </div>
+            <div data-panel="zai_coding" hidden>
+              <label>Z.AI Coding Plan {{.T "setup.key.field"}}<input type="password" name="zai_coding" value="{{index .Setup.ProviderKeys "zai_coding"}}" autocomplete="off" spellcheck="false" /></label>
+              <span class="drop"><input type="checkbox" name="clear" value="zai_coding" id="clear-zai-coding" /><label for="clear-zai-coding">{{.T "setup.key.remove"}}</label></span>
+            </div>
+            <div data-panel="minimax" hidden>
+              <label>MiniMax API {{.T "setup.key.field"}}<input type="password" name="minimax" value="{{index .Setup.ProviderKeys "minimax"}}" autocomplete="off" spellcheck="false" /></label>
+              <span class="drop"><input type="checkbox" name="clear" value="minimax" id="clear-minimax" /><label for="clear-minimax">{{.T "setup.key.remove"}}</label></span>
+            </div>
+            <div data-panel="minimax_plan" hidden>
+              <label>MiniMax Token Plan {{.T "setup.key.field"}}<input type="password" name="minimax_plan" value="{{index .Setup.ProviderKeys "minimax_plan"}}" autocomplete="off" spellcheck="false" /></label>
+              <span class="drop"><input type="checkbox" name="clear" value="minimax_plan" id="clear-minimax-plan" /><label for="clear-minimax-plan">{{.T "setup.key.remove"}}</label></span>
+            </div>
+            <div data-panel="moonshot" hidden>
+              <label>Moonshot AI {{.T "setup.key.field"}}<input type="password" name="moonshot" value="{{index .Setup.ProviderKeys "moonshot"}}" autocomplete="off" spellcheck="false" /></label>
+              <span class="drop"><input type="checkbox" name="clear" value="moonshot" id="clear-moonshot" /><label for="clear-moonshot">{{.T "setup.key.remove"}}</label></span>
+            </div>
+            <div data-panel="kimi_coding" hidden>
+              <label>Kimi Code {{.T "setup.key.field"}}<input type="password" name="kimi_coding" value="{{index .Setup.ProviderKeys "kimi_coding"}}" autocomplete="off" spellcheck="false" /></label>
+              <span class="drop"><input type="checkbox" name="clear" value="kimi_coding" id="clear-kimi-coding" /><label for="clear-kimi-coding">{{.T "setup.key.remove"}}</label></span>
+            </div>
           </div>
+          <p class="note">{{.T "setup.key.custom"}}</p>
           <details>
             <summary>{{.T "setup.key.skip"}}</summary>
             <div class="body"><p class="lead">{{.T "setup.key.note"}}</p></div>

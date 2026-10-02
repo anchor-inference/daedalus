@@ -68,7 +68,7 @@ async def test_a_hire_round_trips_with_a_colour_and_a_journal_entry(db: Database
         ({"name": ""}, "needs a name"),
         ({"name": "x" * 33}, "at most 32"),
         ({"name": "two\nlines"}, "one line"),
-        ({"harness": "cursor"}, "runs on"),
+        ({"harness": "unknown"}, "runs on"),
         ({"isolation": "bubble"}, "isolation is"),
         ({"model": "gpt-9"}, "not a model preset"),
         ({"agent": "poet"}, "no persona"),

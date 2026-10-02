@@ -701,6 +701,51 @@ class GrokTooling(Tooling):
         return data if isinstance(data, dict) else {}
 
 
+class CursorTooling(Tooling):
+    harness = "cursor"
+    program = "cursor-agent"
+    installer_url = "https://cursor.com/install"
+    sign_in = ("cursor-agent", "login")
+    modes = ("ask", "plan", "agent")
+    cheap_markers = ("flash", "mini", "fast")
+    latest_from_cli = True
+
+    async def latest(self, env: EnvironmentPort, fetch: Fetch) -> str:
+        # Cursor's updater publishes no check-only command. Its CLI updates itself, so the catalog
+        # can identify the installed version but cannot promise a remote version before updating.
+        return (await self.installed(env)).version
+
+    def own_update(self, latest: str) -> Plan:
+        return Plan(argv=("cursor-agent", "update"), target="")
+
+    async def login_state(self, env: EnvironmentPort) -> LoginState:
+        result = await self.run(env, ["cursor-agent", "status"])
+        line = first_line(result)
+        if result.exit_code == 0 and "Logged in" in line:
+            # Cursor prints an email address here. The harness catalog exposes only the state.
+            return LoginState("yes")
+        if "not logged" in line.lower() or "not authenticated" in line.lower():
+            return LoginState("no")
+        return LoginState("unknown", "Cursor did not report its sign-in state")
+
+    async def catalog(self, env: EnvironmentPort, cwd: str | None) -> Catalog:
+        if cwd is not None:
+            return Catalog()
+        result = await self.run(env, ["cursor-agent", "models"], timeout=LIST_TIMEOUT_S)
+        models = parse_cursor_models(result.stdout) if result.exit_code == 0 else ()
+        return Catalog(models=models, modes=self.modes)
+
+
+def parse_cursor_models(text: str) -> tuple[str, ...]:
+    """The model IDs before `` - `` in Cursor Agent's `models` output."""
+    names = []
+    for line in lines_of(text):
+        name, sep, _ = line.strip().partition(" - ")
+        if sep and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
+            names.append(name)
+    return unique(names)
+
+
 def _grok_source(agent: dict[str, Any]) -> str:
     """Where ``grok inspect`` says an agent comes from: ``{"type": "builtin"}`` in 1.0.41."""
     source = agent.get("source")
@@ -741,7 +786,7 @@ def parse_grok_check(text: str) -> dict[str, Any] | None:
     return data
 
 
-TOOLING: dict[str, Tooling] = {t.harness: t for t in (ClaudeTooling(), CodexTooling(), OpenCodeTooling(), PiTooling(), GrokTooling())}
+TOOLING: dict[str, Tooling] = {t.harness: t for t in (ClaudeTooling(), CodexTooling(), OpenCodeTooling(), PiTooling(), GrokTooling(), CursorTooling())}
 """One per command-line harness, in the capability table's order."""
 
 

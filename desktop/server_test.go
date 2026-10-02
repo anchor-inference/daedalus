@@ -37,7 +37,7 @@ func TestTheSetupPageAsksAndWrites(t *testing.T) {
 	}
 
 	page := get(t, client, server.URL()+"setup")
-	for _, want := range []string{"DeepSeek", messages[LangEN]["setup.cap.field"], messages[LangEN]["setup.submit"], "/assets/style.css"} {
+	for _, want := range []string{"DeepSeek", "Kimi Code", "Z.AI Coding Plan", messages[LangEN]["setup.cap.field"], messages[LangEN]["setup.submit"], "/assets/style.css"} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("the setup page does not mention %q", want)
 		}
@@ -51,7 +51,7 @@ func TestTheSetupPageAsksAndWrites(t *testing.T) {
 	if !strings.Contains(page, server.csrf) {
 		t.Fatal("the form carries no token, so nothing could ever be posted to it")
 	}
-	form := url.Values{"deepseek": {"sk-page"}, "usd_per_day": {"11"}, "bot_token": {""}, "lang": {"ru"}, "csrf": {server.csrf}}
+	form := url.Values{"deepseek": {"sk-page"}, "zai_coding": {"sk-plan"}, "usd_per_day": {"11"}, "bot_token": {""}, "lang": {"ru"}, "csrf": {server.csrf}}
 	posted, err := client.PostForm(server.URL()+"setup", form)
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestTheSetupPageAsksAndWrites(t *testing.T) {
 	if err := server.WaitForSetup(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := CurrentSetup(paths); got.DeepseekKey != "sk-page" || got.USDPerDay != "11" {
+	if got := CurrentSetup(paths); got.DeepseekKey != "sk-page" || got.ProviderKeys["zai_coding"] != "sk-plan" || got.USDPerDay != "11" {
 		t.Fatalf("the form was not written: %+v", got)
 	}
 	// The language the questions were answered in is the installation's from then on.

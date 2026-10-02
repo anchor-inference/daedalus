@@ -320,12 +320,21 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 			DeepseekKey:   r.PostFormValue("deepseek"),
 			OpenrouterKey: r.PostFormValue("openrouter"),
 			OpencodeKey:   r.PostFormValue("opencode"),
-			BotToken:      r.PostFormValue("bot_token"),
-			OwnerID:       r.PostFormValue("owner_id"),
-			APIID:         r.PostFormValue("api_id"),
-			APIHash:       r.PostFormValue("api_hash"),
-			USDPerDay:     r.PostFormValue("usd_per_day"),
-			Clear:         clearedFields(r.PostForm["clear"]),
+			ProviderKeys: map[string]string{
+				"openai":       r.PostFormValue("openai"),
+				"zai":          r.PostFormValue("zai"),
+				"zai_coding":   r.PostFormValue("zai_coding"),
+				"minimax":      r.PostFormValue("minimax"),
+				"minimax_plan": r.PostFormValue("minimax_plan"),
+				"moonshot":     r.PostFormValue("moonshot"),
+				"kimi_coding":  r.PostFormValue("kimi_coding"),
+			},
+			BotToken:  r.PostFormValue("bot_token"),
+			OwnerID:   r.PostFormValue("owner_id"),
+			APIID:     r.PostFormValue("api_id"),
+			APIHash:   r.PostFormValue("api_hash"),
+			USDPerDay: r.PostFormValue("usd_per_day"),
+			Clear:     clearedFields(r.PostForm["clear"]),
 		}
 		if err := writeSetup(s.app.paths, setup, s.app.Mode(), s.app.log); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

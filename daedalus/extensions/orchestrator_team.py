@@ -219,6 +219,11 @@ async def hire(
     details = [_label(member.harness), member.isolation]
     details += [x for x in (member.agent, member.model, member.effort, member.permission_mode) if x]
     told = f"hired {member.name} [{member.id}] ({', '.join(details)}{', one-off' if member.one_off else ''}); Assign gives them a task"
+    if member.harness != "daedalus":
+        prior = [row for row in await team.resume_sessions(member) if row["owner_name"].casefold() == member.name.casefold()][:5]
+        if prior:
+            shown = "; ".join(f"{row['id']} ({row['task_title'] or row['started_at'][:16]})" for row in prior)
+            told += f". Earlier conversations of {member.name} in this launch folder: {shown}. StaffSessions(staff={member.name!r}) pages through all of them; pass task_id for worktree eligibility"
     if member.one_off:
         told += await _who_made_it(orch, project, member, target)
     if member.permission_mode and member.permission_mode in MODE_MEANINGS.get(member.harness, {}):
@@ -434,6 +439,7 @@ async def assign(
     inputs: list[Any] | None = None,
     checks: list[str] | None = None,
     reason: str = "",
+    resume_from: str | None = None,
 ) -> str:
     team = _team(orch)
     board = orch.board
@@ -574,7 +580,7 @@ async def assign(
         await team.note_on_card(task["id"], f"the work passed from {owner.name} to {member.name}: {handover}")  # type: ignore[union-attr]
         await _journal(orch, project, "reassignment", f"Task {task['id']} \"{task['title']}\" passed from {owner.name} to {member.name}: {handover}", {"task_id": task["id"], "from": owner.id, "to": member.id})  # type: ignore[union-attr]
     try:
-        launched = await team.assign(member, task["id"], by="orchestrator")
+        launched = await team.assign(member, task["id"], by="orchestrator", **({"resume_from": resume_from} if resume_from else {}))
     except KeyError as exc:
         raise Refused(f"no task {task['id']} on {project.name}'s board") from exc
     except StaffError as exc:
@@ -932,6 +938,36 @@ async def _reports(orch: Orchestrators, member: Staff, count: int, limit: int) -
     return text
 
 
+async def staff_sessions(
+    orch: Orchestrators,
+    project: Project,
+    session_id: str,
+    *,
+    staff: str,
+    task_id: str | None = None,
+    before: str | None = None,
+    limit: int = 20,
+) -> str:
+    member = await _member(orch, project, staff)
+    if member.harness == "daedalus":
+        raise Refused("StaffSessions resumes command-line harness conversations; Daedalus has its own chat history")
+    try:
+        rows = await _team(orch).resume_sessions(member, task_id=task_id, before=before, limit=max(1, min(int(limit), 50)))
+    except StaffError as exc:
+        raise Refused(str(exc)) from exc
+    if not rows:
+        return f"No recorded {member.harness} conversations in {member.name}'s launch folder."
+    lines = [f"{member.name}'s {member.harness} conversations in this launch folder (newest first):"]
+    for row in rows:
+        state = "ready to resume" if row["can_resume"] else "session is still live" if row["resume_reason"] == "live" else "different launch folder, worktree or branch"
+        lines.append(f"- {row['id']} · {row['started_at'][:16]} · {row['owner_name']} · {row['task_title'] or row['task_id'] or 'untitled'} · {state}")
+    lines.append(f"Next page: StaffSessions(staff={member.name!r}, before={rows[-1]['id']!r}, task_id={task_id!r})")
+    if member.isolation == "worktree" and not task_id:
+        lines.append("Give task_id to check which sessions match that task's worktree and branch.")
+    lines.append("To continue one, use Assign(task_id=..., staff=..., resume_from=<session id>); no session is resumed implicitly.")
+    return "\n".join(lines)
+
+
 async def read_staff(
     orch: Orchestrators,
     project: Project,
@@ -1167,6 +1203,7 @@ OPS: dict[str, Callable[..., Awaitable[str]]] = {
     "assign": assign,
     "tell": tell,
     "read_staff": read_staff,
+    "staff_sessions": staff_sessions,
     "answer": answer,
     "interrupt": interrupt,
     "pause": pause,

@@ -547,7 +547,7 @@ class TeamStub:
             "project": self.project,
             "staff": rows,
             "counts": {"staff": sum(1 for m in self.staff if not m["archived_at"]), "working": working},
-            "choices": {"harnesses": ["daedalus", "claude", "codex", "grok", "opencode", "pi"], "personas": self.personas, "presets": self.presets, "default_preset": self.presets[0]["id"] if self.presets else ""},
+            "choices": {"harnesses": ["daedalus", "claude", "codex", "grok", "opencode", "pi", "cursor"], "personas": self.personas, "presets": self.presets, "default_preset": self.presets[0]["id"] if self.presets else ""},
         }
 
     def answer(self, method: str, path: str, query: str, body: dict | None) -> tuple[int, object] | None:
@@ -594,6 +594,8 @@ class TeamStub:
                 return 200, {"ok": True, "staff": row}
             if path.endswith("/sessions"):
                 return 200, [row["live"]] if row["live"] else []
+            if path.endswith("/resume-sessions"):
+                return 200, []
             return 200, row
         return None
 
@@ -665,7 +667,7 @@ class BoardStub:
         rows.sort(key=lambda t: (self.ORDER.get(t["status"], 9), t["priority"], t["created_at"]))
         counts = {s: sum(1 for t in self.tasks if t["status"] == s) for s in self.ORDER}
         counts["needs_you"] = len(self.needs_you)
-        team = [{k: m[k] for k in ("id", "name", "color", "harness")} for m in self.staff]
+        team = [{**{k: m[k] for k in ("id", "name", "color", "harness")}, "isolation": m.get("isolation", "worktree")} for m in self.staff]
         return {"project": self.project, "tasks": rows, "needs_you": self.needs_you, "counts": counts, "staff": team}
 
     def _assign(self, row: dict, staff_id: str | None) -> None:

@@ -103,8 +103,16 @@ function Step({ n, title, sub, active, done, children }: { n: number; title: str
 /** Step 1: which endpoint the model runs on. */
 function ProviderStep({ state, chosen, onPick }: { state: OnboardingState | null; chosen: string; onPick: (id: string) => void }) {
   const providers = state?.providers ?? [];
-  const ordered = [...providers.filter((p) => p.ready), ...providers.filter((p) => !p.ready)];
+  const [filter, setFilter] = useState("");
+  const query = filter.trim().toLocaleLowerCase();
+  const ordered = [...providers.filter((p) => p.ready), ...providers.filter((p) => !p.ready)]
+    .filter((p) => !query || `${providerName(p.id, p.kind, p.name)} ${p.id}`.toLocaleLowerCase().includes(query));
   return (
+    <>
+    {providers.length > 8 && <label className="mfield" style={{ marginBottom: 12 }}>
+      <span>{t("add.provider.search")}</span>
+      <input className="field" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("add.provider.search")} />
+    </label>}
     <div className="pickgrid">
       {ordered.map((p) => {
         const { pill, tone, note } = keyWords(p);
@@ -125,21 +133,22 @@ function ProviderStep({ state, chosen, onPick }: { state: OnboardingState | null
           </button>
         );
       })}
-      <button className={`pick dashed ${chosen === LLAMACPP ? "on" : ""}`} onClick={() => onPick(LLAMACPP)} aria-pressed={chosen === LLAMACPP}>
+      {(!query || "llama.cpp".includes(query)) && <button className={`pick dashed ${chosen === LLAMACPP ? "on" : ""}`} onClick={() => onPick(LLAMACPP)} aria-pressed={chosen === LLAMACPP}>
         <span className="pick-top">
           <b>{t("add.llamacpp")}</b>
           <span className="pill">{t("add.custom.new")}</span>
         </span>
         <span className="sub">{t("add.llamacpp.sub")}</span>
-      </button>
-      <button className={`pick dashed ${chosen === CUSTOM ? "on" : ""}`} onClick={() => onPick(CUSTOM)} aria-pressed={chosen === CUSTOM}>
+      </button>}
+      {(!query || `${t("add.custom")} OpenAI API`.toLocaleLowerCase().includes(query)) && <button className={`pick dashed ${chosen === CUSTOM ? "on" : ""}`} onClick={() => onPick(CUSTOM)} aria-pressed={chosen === CUSTOM}>
         <span className="pick-top">
           <b>{t("add.custom")}</b>
           <span className="pill">{t("add.custom.new")}</span>
         </span>
         <span className="sub">{t("add.custom.sub")}</span>
-      </button>
+      </button>}
     </div>
+    </>
   );
 }
 

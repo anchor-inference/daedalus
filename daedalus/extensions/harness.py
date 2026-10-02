@@ -18,6 +18,7 @@ from daedalus.harness import (  # noqa: F401 — importing an adapter registers 
     ADAPTERS,
     claude,
     codex,
+    cursor,
     grok,
     opencode,
     pi,

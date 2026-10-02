@@ -112,7 +112,7 @@ export type NeedsYou = {
   session_id: string | null;
 };
 
-export type TeamMember = { id: string; name: string; color: string; harness: Harness };
+export type TeamMember = { id: string; name: string; color: string; harness: Harness; isolation: "shared" | "worktree" };
 
 export type ProjectBoardData = {
   tasks: ProjectTask[];

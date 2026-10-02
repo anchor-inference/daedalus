@@ -3,7 +3,7 @@ import { HARNESSES, HARNESS_BADGES, availability, branchPreview, placeExecutor, 
 
 describe("the executor badge", () => {
   it("gives every executor its own two letters", () => {
-    expect(HARNESSES.map((h) => HARNESS_BADGES[h])).toEqual(["D", "CC", "CX", "GK", "OC", "π"]);
+    expect(HARNESSES.map((h) => HARNESS_BADGES[h])).toEqual(["D", "CC", "CX", "GK", "OC", "π", "CU"]);
     expect(new Set(Object.values(HARNESS_BADGES)).size).toBe(HARNESSES.length);
   });
 });

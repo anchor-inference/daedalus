@@ -472,7 +472,7 @@ class Board:
     async def project_board(self, project_id: str, *, include_done: bool = False) -> dict[str, Any]:
         """A project's board as the app draws it: the tasks with their assignees, "Needs you", and the counts."""
         tasks = await self.list(None, include_done=include_done, project_id=project_id)
-        members = {r["id"]: dict(r) for r in await self.app.db.fetchall("SELECT id, name, color, harness, archived_at FROM staff WHERE project_id = ?", (project_id,))}
+        members = {r["id"]: dict(r) for r in await self.app.db.fetchall("SELECT id, name, color, harness, isolation, archived_at FROM staff WHERE project_id = ?", (project_id,))}
         live = {
             r["staff_id"]: dict(r)
             for r in await self.app.db.fetchall(
@@ -501,7 +501,7 @@ class Board:
         counts_rows = await self.app.db.fetchall("SELECT status, count(*) AS n FROM board_tasks WHERE project_id = ? GROUP BY status", (project_id,))
         counts = {status: 0 for status in STATUSES}
         counts.update({r["status"]: int(r["n"]) for r in counts_rows if r["status"] in counts})
-        team = [{"id": m["id"], "name": m["name"], "color": m["color"], "harness": m["harness"]} for m in members.values() if m["archived_at"] is None]
+        team = [{"id": m["id"], "name": m["name"], "color": m["color"], "harness": m["harness"], "isolation": m["isolation"]} for m in members.values() if m["archived_at"] is None]
         return {"tasks": tasks, "needs_you": needs, "counts": {**counts, "needs_you": len(needs)}, "staff": team}
 
     async def _contracts(self, tasks: list[dict[str, Any]]) -> None:

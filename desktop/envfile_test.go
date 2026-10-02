@@ -81,16 +81,16 @@ func TestEnvUpdatesPointAtTheDataFolderAndLoopback(t *testing.T) {
 
 func TestWriteSetupKeepsProviderKeysOutOfTheCheckout(t *testing.T) {
 	paths := setupTempInstall(t)
-	setup := Setup{DeepseekKey: "sk-deepseek", OpenrouterKey: "sk-router", BotToken: "123:abc", OwnerID: "42", USDPerDay: "7"}
+	setup := Setup{DeepseekKey: "sk-deepseek", OpenrouterKey: "sk-router", ProviderKeys: map[string]string{"kimi_coding": "sk-kimi"}, BotToken: "123:abc", OwnerID: "42", USDPerDay: "7"}
 	if err := WriteSetup(paths, setup, ModeDocker); err != nil {
 		t.Fatal(err)
 	}
 	env := readFile(paths.Env)
-	if strings.Contains(env, "sk-deepseek") || strings.Contains(env, "sk-router") {
+	if strings.Contains(env, "sk-deepseek") || strings.Contains(env, "sk-router") || strings.Contains(env, "sk-kimi") {
 		t.Fatal("a provider key reached .env, which is mounted into the agent container")
 	}
 	keys := readEnv(readFile(paths.KeyproxyEnv))
-	if keys["DEEPSEEK_API_KEY"] != "sk-deepseek" || keys["KEYPROXY_USD_PER_DAY"] != "7" {
+	if keys["DEEPSEEK_API_KEY"] != "sk-deepseek" || keys["KIMI_CODING_API_KEY"] != "sk-kimi" || keys["KEYPROXY_USD_PER_DAY"] != "7" {
 		t.Fatalf("the key proxy's file is wrong: %v", keys)
 	}
 	if info, err := os.Stat(paths.KeyproxyEnv); err != nil {

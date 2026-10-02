@@ -314,7 +314,7 @@ async def project_report(context: ToolContext, text: str, title: str = "", kind:
     name="Hire",
     description=(
         "Add a member to the team. name (unique, it names their branch), role (their lasting area of work), harness "
-        "(daedalus, or a command-line agent: claude, codex, grok, opencode, pi — Harnesses shows what is installed and "
+        "(daedalus, or a command-line agent: claude, codex, cursor, grok, opencode, pi — Harnesses shows what is installed and "
         "what each offers), agent (a persona for daedalus, the CLI's agent otherwise), model (a preset for daedalus, "
         "the CLI's model otherwise), effort, permission_mode (CLI only), env (container or host), folder (their "
         "default folder), isolation (worktree: their own branch, the default in a git folder; shared; readonly), "
@@ -413,7 +413,8 @@ async def dismiss(context: ToolContext, staff: str, release: bool = False, keep_
         "hand the work in. folder, priority (1 first … 5) and depends_on are optional. files: handles (att:…) or "
         "paths in the project's folders; the host copies each where the member can open it before the brief is sent, "
         "and the brief names that copy — never put a path of your own into a brief. It starts now or waits in the "
-        "project's queue; the answer says which and why."
+        "project's queue; the answer says which and why. resume_from is an optional session id from StaffSessions: "
+        "it resumes that CLI conversation only in the same launch folder and worktree branch."
     ),
 )
 async def assign(
@@ -434,12 +435,26 @@ async def assign(
     inputs: list[str] | None = None,
     checks: list[str] | None = None,
     reason: str = "",
+    resume_from: str | None = None,
 ) -> ToolResult:
     return await _call(
         context, "assign", staff=staff, task_id=task_id, title=title, objective=objective, deliverable=deliverable, boundaries=boundaries,
         done_when=done_when, folder=folder, priority=priority, depends_on=depends_on, files=files, new=new,
-        requirements=requirements, inputs=inputs, checks=checks, reason=reason,
+        requirements=requirements, inputs=inputs, checks=checks, reason=reason, resume_from=resume_from,
     )
+
+
+@search_hint("resume past staff chats sessions conversation history продолжить возобновить старый чат сессия сотрудник история беседа")
+@tool(
+    name="StaffSessions",
+    description=(
+        "List recorded CLI conversations for a member's harness in this project's launch folder, including dismissed "
+        "members' sessions. For worktree isolation, pass task_id to identify sessions in that task's exact branch. "
+        "Use a listed session id as Assign(resume_from=...). before pages through older sessions."
+    ),
+)
+async def staff_sessions(context: ToolContext, staff: str, task_id: str | None = None, before: str | None = None, limit: int = 20) -> ToolResult:
+    return await _call(context, "staff_sessions", staff=staff, task_id=task_id, before=before, limit=limit)
 
 
 REQUIREMENT_ITEM: dict[str, Any] = {
@@ -790,7 +805,7 @@ async def unwatch(context: ToolContext, id: str) -> ToolResult:
 
 TOOLS = [
     brief, folders, journal, team, tasks, peek, AskOperator, withdraw_questions, project_report,
-    hire, staff_edit, dismiss, assign, require, accept, decide, tell, read_staff, answer, interrupt, pause, release, harnesses,
+    hire, staff_edit, dismiss, assign, staff_sessions, require, accept, decide, tell, read_staff, answer, interrupt, pause, release, harnesses,
     wake_me, Watch, unwatch,
 ]
 

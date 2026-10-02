@@ -547,6 +547,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "add.llamacpp": { en: "llama.cpp server", ru: "Сервер llama.cpp" },
   "add.llamacpp.sub": { en: "One model on your own server; no key or token charge, with capabilities discovered automatically.", ru: "Одна модель на вашем сервере: без ключа и платы за токены, возможности определяются автоматически." },
   "add.custom": { en: "OpenAI-compatible endpoint", ru: "Совместимый с OpenAI адрес" },
+  "add.provider.search": { en: "Find a provider", ru: "Найти провайдера" },
   "add.custom.new": { en: "new", ru: "новый" },
   "add.custom.sub": { en: "Anything serving /v1/chat/completions: a local vLLM, a machine on the network, another vendor.", ru: "Всё, что отвечает на /v1/chat/completions: локальный vLLM, машина в сети, другой поставщик." },
   "add.custom.name": { en: "Name it", ru: "Название" },
@@ -820,6 +821,12 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "team.count.sessions": { en: "{n} session|{n} sessions", ru: "{n} сессия|{n} сессии|{n} сессий" },
   "team.limit": { en: "concurrency limit {n}", ru: "лимит {n}" },
   "team.hire": { en: "Hire", ru: "Нанять" },
+  "pboard.resume.label": { en: "Continue a CLI conversation", ru: "Продолжить разговор CLI" },
+  "pboard.resume.fresh": { en: "Start a new conversation", ru: "Начать новый разговор" },
+  "pboard.resume.hint": { en: "Only sessions from this launch folder and worktree branch can be continued.", ru: "Продолжить можно только сессию из этой папки запуска и ветки worktree." },
+  "pboard.resume.older": { en: "Show older conversations", ru: "Показать старые разговоры" },
+  "pboard.resume.reason.live": { en: "session is still live", ru: "сессия ещё активна" },
+  "pboard.resume.reason.folder": { en: "different folder or branch", ru: "другая папка или ветка" },
   "team.hire.title": { en: "Hire a staff member", ru: "Нанять сотрудника" },
   "team.hired": { en: "{name} joined the team", ru: "{name} теперь в команде" },
   "team.edit.for": { en: "Edit {name}", ru: "Изменить: {name}" },
@@ -3846,6 +3853,7 @@ Object.assign(DICT, {
   "harness.channel.sse": { en: "its own server: events", ru: "свой сервер: события" },
   "harness.channel.extension": { en: "bridge extension", ru: "расширение-мост" },
   "harness.channel.files": { en: "session files", ru: "файлы сессии" },
+  "harness.channel.acp": { en: "ACP events per launch", ru: "события ACP на каждый запуск" },
 });
 
 // The Harnesses screen: the command-line agents of an environment, their versions, sign-in, agents,

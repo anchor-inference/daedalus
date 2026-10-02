@@ -1200,6 +1200,7 @@ ORCHESTRATOR_ONLY_TOOLS = [
     "Decide",
     "Tell",
     "ReadStaff",
+    "StaffSessions",
     "Answer",
     "Interrupt",
     "Pause",
@@ -1750,6 +1751,13 @@ class RuntimeConfig(BaseModel):
             "codex": ProviderConfig(kind="openai_compat", base_url=keyproxy_base() + "/codex/v1", timeout_seconds=900.0, pricing={"gpt": {"input": 0.0, "output": 0.0, "cache_hit": 0.0}}),
             "claude": ProviderConfig(kind="openai_compat", base_url=keyproxy_base() + "/claude/v1", timeout_seconds=900.0, pricing={"claude": {"input": 0.0, "output": 0.0, "cache_hit": 0.0}}),
             "opencode": ProviderConfig(kind="opencode", base_url=keyproxy_base() + "/opencode", timeout_seconds=900.0, pricing=OPENCODE_GO_PRICING),
+            "openai": ProviderConfig(name="OpenAI API", base_url=keyproxy_base() + "/openai"),
+            "zai": ProviderConfig(name="Z.AI API", base_url=keyproxy_base() + "/zai"),
+            "zai_coding": ProviderConfig(name="Z.AI Coding Plan", base_url=keyproxy_base() + "/zai_coding"),
+            "minimax": ProviderConfig(name="MiniMax API", base_url=keyproxy_base() + "/minimax"),
+            "minimax_plan": ProviderConfig(name="MiniMax Token Plan", base_url=keyproxy_base() + "/minimax_plan"),
+            "moonshot": ProviderConfig(name="Moonshot AI API", base_url=keyproxy_base() + "/moonshot"),
+            "kimi_coding": ProviderConfig(name="Kimi Code", base_url=keyproxy_base() + "/kimi_coding"),
         }
     )
     prompt: PromptConfig = Field(default_factory=PromptConfig)
@@ -1986,7 +1994,7 @@ def _seed_presets(raw: dict[str, Any]) -> bool:
     return True
 
 
-SEEDS = ("claude-subscription",)
+SEEDS = ("claude-subscription", "more-provider-endpoints")
 """Every seed a config can have had applied, in the order they were introduced."""
 
 
@@ -2024,6 +2032,29 @@ def _seed_claude_subscription(raw: dict[str, Any]) -> bool:
                 presets[pid] = spec
                 changed = True
     return changed
+
+
+def _seed_provider_endpoints(raw: dict[str, Any]) -> bool:
+    """Offer the new endpoints once, leaving later operator removals alone."""
+    seeded = raw.setdefault("seeded", [])
+    if not isinstance(seeded, list):
+        seeded = raw["seeded"] = []
+    if "more-provider-endpoints" in seeded:
+        return False
+    seeded.append("more-provider-endpoints")
+    providers = raw.setdefault("providers", {})
+    if isinstance(providers, dict):
+        for provider_id, name in (
+            ("openai", "OpenAI API"),
+            ("zai", "Z.AI API"),
+            ("zai_coding", "Z.AI Coding Plan"),
+            ("minimax", "MiniMax API"),
+            ("minimax_plan", "MiniMax Token Plan"),
+            ("moonshot", "Moonshot AI API"),
+            ("kimi_coding", "Kimi Code"),
+        ):
+            providers.setdefault(provider_id, {"kind": "openai_compat", "name": name, "base_url": keyproxy_base() + "/" + provider_id})
+    return True
 
 
 def _migrate_web_search(raw: dict[str, Any]) -> bool:
@@ -2097,6 +2128,7 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _migrate_inbox_retention(raw) or changed
     changed = _migrate_keyproxy_base(raw) or changed
     changed = _seed_claude_subscription(raw) or changed
+    changed = _seed_provider_endpoints(raw) or changed
     changed = _migrate_web_search(raw) or changed
     for provider in (raw.get("providers") or {}).values():
         pricing = provider.get("pricing") if isinstance(provider, dict) else None

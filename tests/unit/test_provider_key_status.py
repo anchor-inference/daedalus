@@ -53,7 +53,7 @@ proxy = _load("proxy")
 
 def test_key_status_names_every_upstream_and_what_its_credential_is(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """One key set, one CLI logged in: the answer says which, and says "no" about the rest."""
-    for var in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "OPENCODE_API_KEY"):
+    for var in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "OPENCODE_API_KEY", "ZAI_CODING_API_KEY", "KIMI_CODING_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-not-a-real-key-at-all")
     codex = tmp_path / "codex.json"
@@ -65,12 +65,23 @@ def test_key_status_names_every_upstream_and_what_its_credential_is(monkeypatch:
     status = proxy.key_status()
     assert status["openrouter"] == {"configured": True, "kind": "api_key"}
     assert status["deepseek"] == {"configured": False, "kind": "api_key"}
+    assert status["zai_coding"] == {"configured": False, "kind": "api_key"}
+    assert status["kimi_coding"] == {"configured": False, "kind": "api_key"}
     assert status["codex"] == {"configured": True, "kind": "cli_login"}
     assert status["grok"] == {"configured": False, "kind": "cli_login"}
     # Present per `available()` but not there to read: that is not a login, and saying it is sends
     # the operator to a screen where everything looks fine.
     assert status["claude"] == {"configured": False, "kind": "cli_login"}
     assert "sk-not-a-real-key-at-all" not in json.dumps(status), "the answer carries a key"
+
+
+def test_subscription_keys_select_their_own_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ZAI_CODING_API_KEY", "plan-key")
+    monkeypatch.setenv("KIMI_CODING_API_KEY", "membership-key")
+    upstreams = proxy.upstreams()
+    assert upstreams["zai_coding"] == ("https://api.z.ai/api/coding/paas/v4", "plan-key")
+    assert upstreams["kimi_coding"] == ("https://api.kimi.ai/coding/v1", "membership-key")
+    assert proxy.key_status()["zai_coding"] == {"configured": True, "kind": "api_key"}
 
 
 def test_an_extra_upstream_with_no_key_is_an_endpoint_not_a_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:

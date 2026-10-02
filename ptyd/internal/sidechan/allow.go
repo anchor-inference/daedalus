@@ -12,7 +12,7 @@ package sidechan
 // CLIs the harness drives and what their installers and version checks need. Harness adapters add
 // to this list here; a deployment adds to it in the configuration file.
 var DefaultExecAllow = []string{
-	"claude", "codex", "opencode", "pi", "grok",
+	"claude", "codex", "opencode", "pi", "grok", "cursor-agent",
 	"npm", "npx", "node", "git", "uname",
 }
 
@@ -24,6 +24,7 @@ var DefaultDeny = []string{
 	"**/.claude/.credentials.json",
 	"**/.codex/auth.json",
 	"**/.grok/auth.json",
+	"**/.cursor/**",
 	"**/.local/share/opencode/auth.json",
 	"**/.pi/agent/auth.json",
 	"**/.ssh/**",
