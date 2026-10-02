@@ -19,10 +19,9 @@ export function NavMenu({ screen, counts, selfdev, onClose, opener }: { screen: 
   useLayoutEffect(() => {
     const place = () => {
       if (!panel.current || !opener) return;
-      const column = opener.closest(".desktop-column")?.getBoundingClientRect();
       const anchor = opener.getBoundingClientRect();
       const menu = panel.current.getBoundingClientRect();
-      setPosition({ left:Math.min((column?.right ?? anchor.right) + 6, window.innerWidth - menu.width - 8), top:Math.max(8, Math.min(anchor.top, window.innerHeight - menu.height - 8)) });
+      setPosition({ left:Math.max(8, Math.min(anchor.right + 6, window.innerWidth - menu.width - 8)), top:Math.max(8, Math.min(anchor.top, window.innerHeight - menu.height - 8)) });
     };
     place();
     const observer = new ResizeObserver(place);

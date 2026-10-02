@@ -114,7 +114,9 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     # The microphone: the words land after what is typed.
     field = composer.locator("textarea")
     field.fill("Check the price")
-    mic = composer.get_by_role("button", name=words["mic"])
+    expect(composer.locator(".roundbtn.primary")).to_be_visible()
+    composer.locator(".plus").click()
+    mic = page.get_by_role("menuitem", name=words["mic"])
     expect(mic).to_be_visible()
     mic.click()
     page.wait_for_selector(".start-composer .voicebar[data-phase=recording]", timeout=5000)

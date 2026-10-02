@@ -126,7 +126,12 @@ def field(page: Page):  # type: ignore[no-untyped-def]
 
 
 def record(page: Page, seconds: float = 1.3) -> None:
-    page.locator(".composer .mic").click()
+    mic = page.locator(".composer .mic")
+    if mic.is_visible():
+        mic.click()
+    else:
+        page.locator(".composer .plus").click()
+        page.locator(".plus-menu [role=menuitem]").filter(has=page.locator(".ic-mic")).click()
     page.wait_for_selector(".voicebar[data-phase=recording]", timeout=5000)
     page.wait_for_timeout(int(seconds * 1000))
 
@@ -144,7 +149,7 @@ def run(browser) -> list[str]:  # type: ignore[no-untyped-def]
     context = new_context(browser, viewport={"width": 1440, "height": 900})
     page = open_page(context)
     field(page).fill("Look at the logs first.")
-    check(page.locator(".composer .mic").is_visible(), "the microphone is there with text already typed")
+    check(page.locator(".composer .roundbtn.primary").is_visible(), "typed text exposes Send; voice remains in the attachment menu")
     record(page)
     bar = page.locator(".voicebar")
     check(bar.is_visible() and not field(page).is_visible(), "recording, the pill is the bar and the field is out of the way")

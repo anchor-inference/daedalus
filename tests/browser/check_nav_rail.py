@@ -156,6 +156,13 @@ def desktop(page: Page, lang: str) -> None:
     # The menu opens from the rail's foot with everything else.
     rail.locator("[data-rail='menu']").click()
     expect(page.locator(".navmenu[role='menu']")).to_be_visible()
+    menu_box = page.locator(".navmenu").bounding_box()
+    trigger_box = rail.locator("[data-rail='menu']").bounding_box()
+    assert menu_box and trigger_box and abs(menu_box["x"] - trigger_box["x"] - trigger_box["width"] - 6) <= 1, "More must overlay the list beside its own trigger"
+    assert menu_box["y"] >= 8 and menu_box["y"] + menu_box["height"] <= page.viewport_size["height"] - 7
+    field_box = page.locator(".start-composer").bounding_box()
+    main_box = page.locator(".main").bounding_box()
+    assert field_box and main_box and field_box["x"] >= main_box["x"] and field_box["x"] + field_box["width"] <= main_box["x"] + main_box["width"] + 1, "Opening More must not displace the composer"
     page.keyboard.press("Escape")
     expect(page.locator(".navmenu")).to_have_count(0)
     go(page, "/agents", lang)

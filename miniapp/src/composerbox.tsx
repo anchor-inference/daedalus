@@ -486,15 +486,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             <Popover anchor={plusButton.current} onClose={() => setPlusOpen(false)} className="plus-menu" label={t("composer.plus")}>
               <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><Icon name="attach" size={16} />{t("session.attach")}</button>
               {phone && <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); photoInput.current?.click(); }}><Icon name="image" size={16} />{t("composer.photo")}</button>}
+              {props.asr?.configured && <button type="button" role="menuitem" disabled={!note.supported || note.state.phase !== "idle"} onClick={() => { setPlusOpen(false); void note.start(); }}><Icon name="mic" size={16} />{t("session.mic")}</button>}
               <button type="button" role="menuitem" onClick={() => void pasteFromClipboard()}><Icon name="copy" size={16} />{t("composer.paste")}</button>
             </Popover>
           )}
           {props.onChooseMode && props.onYagni
             ? <ModeSelect mode={props.mode ?? ""} modes={props.modes ?? []} yagni={!!props.yagni} onChooseMode={props.onChooseMode} onYagni={props.onYagni} sheet={phone} />
             : <span className="composer-mode">{t("composer.mode.agent")}</span>}
-          {(!phone || status !== "running") && <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={setModelOpen} onChoose={props.onChooseModel} sheet={phone}
-            effort={phone ? props.reasoningEffort : undefined} thinking={props.thinking} onChooseEffort={phone ? props.onChooseEffort : undefined} />}
           <div className="composer-tools">
+            {(!phone || status !== "running") && <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={setModelOpen} onChoose={props.onChooseModel} sheet={phone}
+              effort={phone ? props.reasoningEffort : undefined} thinking={props.thinking} onChooseEffort={phone ? props.onChooseEffort : undefined} />}
             {!phone && props.onChooseEffort && (
               <EffortSelect effort={props.reasoningEffort} thinking={props.thinking} onChoose={props.onChooseEffort} />
             )}

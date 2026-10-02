@@ -39,8 +39,9 @@ def main() -> int:
             page.route("**/api/**", shots.stub)
             page.goto(f"{BASE}/agents?token=t&lang=en")
             page.wait_for_selector(".start-composer")
+            page.locator(".start-composer .plus").click()
             with page.expect_file_chooser() as chooser:
-                page.locator(".start-composer .plus").click()
+                page.locator(".plus-menu [role=menuitem]").first.click()
             chooser.value.set_files([str(note), str(picture)])
             cards = page.locator(".start-composer .attachment")
             try:

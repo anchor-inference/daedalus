@@ -428,15 +428,16 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.wait_for_selector(".composer .model-select", timeout=15000)
     page.locator(".composer .model-select").click()
     page.wait_for_selector(".model-list .model-row", timeout=5000)
-    rows = page.locator(".model-list .model-row").all_inner_texts()
-    print("model rows:", [r.replace("\n", " ") for r in rows])
-    if not any("Claude Opus 5" in r for r in rows) or not any("DeepSeek Flash" in r for r in rows):
-        problems.append("the list does not name the presets")
-    kinds = page.locator(".model-list .model-kind").evaluate_all("(els) => els.map((el) => el.className)")
-    if not any("thinking" in k for k in kinds) or not any("fast" in k for k in kinds):
-        problems.append(f"the presets carry no fast/thinking marker ({kinds})")
+    providers = page.locator(".provider-row")
+    if providers.count() != 3 or page.locator(".model-list .model-row.on").count():
+        problems.append("the first step must list providers rather than every model")
+    page.locator('.provider-row[data-provider="claude"]').click()
     if not page.locator(".model-list .model-row.on", has_text="Claude Opus 5").count():
-        problems.append("the current model is not marked in the list")
+        problems.append("the current model is not marked within its provider")
+    if page.locator(".model-list .model-row", has_text="DeepSeek Flash").count():
+        problems.append("another provider's model leaked into this group")
+    page.locator(".provider-back").click()
+    page.locator('.provider-row[data-provider="local"]').click()
     local = page.locator(".model-list .model-row", has_text="Local model")
     if not local.locator('[title="128,000 token context"]').count() or "128k" not in local.inner_text():
         problems.append("the local preset lost its discovered context window")
@@ -448,6 +449,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.locator(".composer .model-select").click()
     page.wait_for_selector(".model-list")
     before = len(posts("/model"))
+    page.locator('.provider-row[data-provider="deepseek"]').click()
     page.locator(".model-list .model-row", has_text="DeepSeek Flash").click()
     reached(page, "/model", before, "the model pick", problems)
     page.wait_for_timeout(100)

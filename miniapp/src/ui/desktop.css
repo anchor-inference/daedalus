@@ -25,9 +25,6 @@
 .control-trigger:hover { background:var(--surface-3); color:var(--fg); }
 .control-trigger[aria-expanded="true"] { border-color:var(--fg-3); color:var(--fg); }
 .control-trigger:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-.composer-row .control-trigger { border:1px solid var(--line-strong); border-radius:var(--radius-sm); gap:var(--space-2); height:var(--ctl-h); }
-.composer-row .control-trigger > .ic:last-child { display:block; }
-.composer-row > .iconbtn.plus { border:1px solid var(--line-strong); border-radius:var(--radius-sm); }
 .menu.pop { border-radius:var(--radius-md); padding:var(--space-2); }
 .model-row { border-radius:var(--radius-sm); gap:var(--space-2); }
 .model-search { margin:var(--space-1) var(--space-1) var(--space-2); width:calc(100% - var(--space-2)); }
@@ -65,3 +62,41 @@
 
 /* A model identifier distinguishes choices and must remain readable in the picker. */
 .model-row .model-text > .sub { white-space:normal; overflow-wrap:anywhere; }
+.provider-mark { display:grid; place-items:center; flex:none; width:var(--ctl-h); height:var(--ctl-h); border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface-1); color:var(--fg-2); }
+.provider-anthropic, .provider-claude { color:var(--warn); }
+.provider-deepseek, .provider-google, .provider-gemini { color:var(--accent); }
+.provider-openai, .provider-opencode { color:var(--fg); }
+.provider-row { padding-block:var(--space-2); }
+.provider-row > .ic:last-child { transform:rotate(-90deg); color:var(--fg-3); }
+.provider-count { min-width:20px; text-align:right; font-variant-numeric:tabular-nums; }
+.provider-back { margin-bottom:var(--space-1); }
+.provider-back .provider-mark { width:var(--ctl-h-sm); height:var(--ctl-h-sm); }
+.provider-back:focus-visible, .model-row:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+
+/* The field owns the boundary; its toolbar reads as one row rather than separate boxed inputs. */
+.composer-box { padding:var(--space-3); gap:var(--space-2); border-radius:var(--radius-lg); }
+.composer-box textarea { padding:var(--space-1); min-height:40px; }
+.composer-row { gap:var(--space-2); }
+.composer-row > .iconbtn.plus { border:0; border-radius:var(--radius-sm); background:transparent; }
+.composer-tools { min-width:0; flex:1 1 auto; justify-content:flex-end; gap:0; }
+.composer-row .control-trigger { height:var(--ctl-h); min-height:var(--ctl-h); border:0; background:transparent; gap:var(--space-1); padding-inline:var(--space-1); border-radius:var(--radius-sm); }
+.composer-row .control-trigger:hover, .composer-row .control-trigger[aria-expanded="true"] { background:var(--surface-3); }
+.composer-row .model-select { flex:0 1 auto; max-width:240px; color:var(--fg); }
+.composer-row .model-select > .ic { display:none; }
+.composer-row .effort-select > .ic:last-child { margin-left:var(--space-1); }
+.composer-row .model-select:not(:has(+ .effort-select)) > .ic:last-child { display:block; }
+.composer-row .composer-mode { background:var(--surface-2); padding-inline:var(--space-2); flex:0 1 auto; }
+.composer-row .composer-mode > .ic { display:none; }
+.composer-row span.composer-mode { cursor:default; }
+.composer-tools .roundbtn.primary { border-radius:var(--radius-sm); margin-left:var(--space-2); }
+.composer-tools .mic { margin-left:var(--space-2); color:var(--fg-2); }
+/* Idle voice and typed send share the trailing position; Stop remains available during a run. */
+.composer[data-primary="send"] .composer-tools:has(.mic) .roundbtn.primary:disabled { display:none; }
+.composer-tools:has(.roundbtn.primary:not(:disabled)) .mic { display:none; }
+.start-composer { max-width:680px; min-width:0; align-self:center; }
+.start-hero { width:100%; min-width:0; }
+@container (max-width:560px) {
+  .composer-row { gap:var(--space-1); }
+  .composer-row .model-select { max-width:180px; }
+  .composer-row .composer-mode { max-width:32%; padding-inline:var(--space-2); }
+}

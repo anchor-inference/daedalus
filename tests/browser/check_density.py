@@ -327,8 +327,8 @@ def judge_sidebar(s: dict) -> list[str]:
     if not s["menuLang"]:
         problems.append("the menu has no language switch")
     # The menu opens from the rail's foot, beside the rail rather than over it.
-    if not 324 <= s["menuBox"]["x"] <= 336 or s["menuBox"]["bottom"] < 8 or s["menuBox"]["w"] != 300:
-        problems.append(f"the secondary menu is not beside the unified column at 300 wide: {s['menuBox']}")
+    if not 48 <= s["menuBox"]["x"] <= 58 or s["menuBox"]["bottom"] < 8 or s["menuBox"]["w"] != 300:
+        problems.append(f"the secondary menu is not over the list beside its rail trigger at 300 wide: {s['menuBox']}")
     if s["menuRow"] != 36:
         problems.append(f"a menu row is {s['menuRow']}px")
     for key in ("menuFocusInside", "arrowMoves", "menuClosed", "focusBack", "shortcutOpens", "gKeyNavigates"):
