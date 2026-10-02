@@ -101,24 +101,28 @@ export function AppearancePanel() {
 
       <div className="section-title">{t("theme.font")}</div>
       <p className="sub">{t("theme.font.lead")}</p>
-      <div className="card">
+      <div className="card settings-font">
         <Segmented value={role} onChange={setRole} options={FONT_ROLES.map((id) => ({ id, label: t(`theme.font.${id}`) }))} />
-        <h2 className="settings-specimen" style={{ fontFamily: familyOf(prefs, role) ? `"${familyOf(prefs, role)}"` : undefined }}>{t("theme.font.sample")}</h2>
-        <div className="sub">{familyOf(prefs, role) || t("theme.font.system")}{urlOf(prefs, role) ? ` · ${urlOf(prefs, role)}` : ""}</div>
-        <input className="field" value={query} placeholder={t("theme.font.search")} aria-label={t("theme.font.search")} onChange={(e) => setQuery(e.target.value)} />
-        <div className="settings-faces">
-          <button type="button" className={!familyOf(prefs, role) ? "on" : ""} onClick={() => setFace("")}>{t("theme.font.system")}</button>
-          {faces.map((face) => (
-            <button key={face.family} type="button" className={familyOf(prefs, role) === face.family ? "on" : ""} style={{ fontFamily: face.local ? `"${face.family}"` : undefined }} onClick={() => setFace(face.family)}>
-              {face.family}
-              {face.local && <span className="sub"> · {t("theme.font.builtin")}</span>}
-            </button>
-          ))}
-          {needle && !known && (
-            <button type="button" onClick={() => setFace(query.trim())}>{t("theme.font.load", { name: query.trim() })}</button>
-          )}
+        <div className="settings-font-preview">
+          <h2 className="settings-specimen" style={{ fontFamily: familyOf(prefs, role) ? `"${familyOf(prefs, role)}"` : undefined }}>{t("theme.font.sample")}</h2>
+          <div className="sub">{familyOf(prefs, role) || t("theme.font.system")}{urlOf(prefs, role) ? ` · ${urlOf(prefs, role)}` : ""}</div>
         </div>
-        <form onSubmit={(e) => {
+        <div className="settings-font-catalogue">
+          <input className="field" value={query} placeholder={t("theme.font.search")} aria-label={t("theme.font.search")} onChange={(e) => setQuery(e.target.value)} />
+          <div className="settings-faces">
+            <button type="button" className={!familyOf(prefs, role) ? "on" : ""} aria-pressed={!familyOf(prefs, role)} onClick={() => setFace("")}>{t("theme.font.system")}</button>
+            {faces.map((face) => (
+              <button key={face.family} type="button" className={familyOf(prefs, role) === face.family ? "on" : ""} aria-pressed={familyOf(prefs, role) === face.family} style={{ fontFamily: face.local ? `"${face.family}"` : undefined }} onClick={() => setFace(face.family)}>
+                {face.family}
+                {face.local && <span className="sub"> · {t("theme.font.builtin")}</span>}
+              </button>
+            ))}
+            {needle && !known && (
+              <button type="button" onClick={() => setFace(query.trim())}>{t("theme.font.load", { name: query.trim() })}</button>
+            )}
+          </div>
+        </div>
+        <form className="settings-font-url" onSubmit={(e) => {
           e.preventDefault();
           const address = url.trim();
           if (!fontUrlAllowed(address) || !address) { setUrlBad(true); return; }

@@ -72,7 +72,7 @@ export function ToolGroupsSettings({ toast, revision, onSettings }: { toast: (te
             </div>
             <span className="tgroup-use" title={t("tgroup.usage.detail", { sessions: g.usage.sessions, total: data.sessions, runs: g.usage.runs, calls: g.usage.calls })}>
               <span className="tgroup-bar" aria-hidden><span style={{ width: `${Math.min(100, Math.max(share.pct > 0 ? 2 : 0, share.pct))}%` }} /></span>
-              {usageLine(g.usage.sessions, data.sessions, data.days)}
+              <span className="tgroup-use-text">{usageLine(g.usage.sessions, data.sessions, data.days)}</span>
             </span>
             {/* Said only where it is true: a caption on every row saying "(default)" was a line of
                 text on each of a dozen groups to tell the operator nothing had changed. */}
