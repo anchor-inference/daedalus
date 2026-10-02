@@ -6,7 +6,6 @@ import { api, AsrStatus, Preset, Project, Settings } from "../api";
 import { fieldHeight } from "../composer";
 import { AttachmentCard } from "../composerbox";
 import { Popover } from "../ui/dialogs";
-import { EffortSelect } from "../effortselect";
 import { effortBody, effortOf, presetEffort, type Effort } from "../starteffort";
 import { ModelChoice, ModelSelect } from "../modelselect";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "../voicebar";
@@ -263,8 +262,7 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
           </Popover>}
           <div className="composer-tools">
             <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone}
-              effort={phone && shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={phone ? chooseEffort : undefined} />
-            {!phone && <EffortSelect effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChoose={chooseEffort} />}
+              effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} />
             {asr?.configured && <MicButton note={note} />}
             <button type="button" className="roundbtn primary" onClick={() => void send()} disabled={busy || (!draft.trim() && files.length === 0)} aria-label={t("session.send")}><Icon name="up" /></button>
           </div>

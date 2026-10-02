@@ -2653,10 +2653,6 @@ input.field[type="range"] {
 .composer-tools { margin-left:auto; gap:var(--space-1); }
 .composer-tools .roundbtn { margin-left:0; }
 .composer-tools .ctx-ring { display:inline-flex; flex:none; }
-.effort-select { display:inline-flex; align-items:center; gap:var(--space-1); height:var(--ctl-h-sm); max-width:120px; padding:0 var(--space-2); background:var(--surface-2); border:0; border-radius:var(--radius-lg); color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; flex:none; min-width:0; }
-.effort-select:hover, .effort-select.on { color:var(--fg); }
-.effort-select .ic { flex:none; color:var(--fg-3); }
-.menu.pop.effort-menu { width:min(280px, 92vw); }
 .effort-menu .effort-options { margin:0; }
 .composer-place { display:flex; gap:var(--space-2); min-width:0; padding-inline:var(--space-2); }
 .composer-place-chip { display:inline-flex; align-items:center; gap:var(--space-1); min-width:0; color:var(--fg-3); font-size:var(--fs-11); }
@@ -2667,7 +2663,6 @@ input.field[type="range"] {
    the model name is what is cut, never the effort. These sit after the composer's own rules, which
    they would otherwise lose to at equal specificity. */
 @container (max-width: 560px) {
-  .effort-select { max-width:88px; padding-inline:var(--space-1); }
   .composer-row .composer-mode { flex:none; max-width:45%; padding-inline:12px; gap:6px; font-size:var(--fs-12); }
   .composer-row .composer-mode .ic { display:none; }
   .composer-row .model-select { flex:0 1 auto; max-width:none; padding-inline:12px; gap:4px; font-size:var(--fs-12); }
@@ -2716,7 +2711,6 @@ input.field[type="range"] {
 .effort-option { position:relative; }
 .effort-option input { position:absolute; inset:0; width:100%; height:100%; margin:0; opacity:0; cursor:pointer; }
 .effort-option:has(input:focus-visible) { background:var(--surface-3); }
-.composer-steering { padding-inline:var(--space-2); color:var(--accent); font-size:var(--fs-12); }
 .turn-content { display:contents; }
 .turn-content[hidden] { display:none; }
 .loop-turn { border-top:1px solid var(--line-strong); padding-top:var(--space-3); }

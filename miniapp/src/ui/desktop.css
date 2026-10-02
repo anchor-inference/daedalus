@@ -72,6 +72,21 @@
 .provider-back { margin-bottom:var(--space-1); }
 .provider-back .provider-mark { width:var(--ctl-h-sm); height:var(--ctl-h-sm); }
 .provider-back:focus-visible, .model-row:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.model-menu { animation:none; }
+.model-effort { flex:none; color:var(--fg-3); font-size:var(--fs-13); white-space:nowrap; }
+.effort-entry > .ic:last-child { transform:rotate(-90deg); }
+.effort-submenu { padding:var(--space-2); background:var(--surface-2); border:1px solid var(--line-strong); border-radius:var(--radius-md); }
+.effort-submenu.floating { width:300px; max-height:calc(100dvh - 16px); overflow:auto; z-index:var(--z-popover); box-shadow:var(--shadow-pop); }
+.effort-submenu.inline { margin-block:var(--space-1); }
+
+/* Voice and Send exchange the same reserved slot; draft state cannot resize the field. */
+.composer-row { height:var(--composer-toolbar-h); min-height:var(--composer-toolbar-h); }
+.composer-row > .iconbtn.plus, .composer-tools .mic, .composer-tools .roundbtn.primary { width:var(--composer-toolbar-h); height:var(--composer-toolbar-h); }
+.composer-row .composer-mode { height:var(--ctl-h-sm); min-height:var(--ctl-h-sm); border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding-inline:var(--space-2); font-size:var(--fs-12); }
+@media (pointer:coarse) {
+  :root { --composer-toolbar-h:var(--row-h-touch); }
+  .composer-row .composer-mode { height:var(--composer-toolbar-h); min-height:var(--composer-toolbar-h); }
+}
 
 /* The field owns the boundary; its toolbar reads as one row rather than separate boxed inputs. */
 .composer-box { padding:var(--space-3); gap:var(--space-2); border-radius:var(--radius-lg); }
@@ -83,8 +98,7 @@
 .composer-row .control-trigger:hover, .composer-row .control-trigger[aria-expanded="true"] { background:var(--surface-3); }
 .composer-row .model-select { flex:0 1 auto; max-width:240px; color:var(--fg); }
 .composer-row .model-select > .ic { display:none; }
-.composer-row .effort-select > .ic:last-child { margin-left:var(--space-1); }
-.composer-row .model-select:not(:has(+ .effort-select)) > .ic:last-child { display:block; }
+.composer-row .model-select > .ic:last-child { display:block; }
 .composer-row .composer-mode { background:var(--surface-2); padding-inline:var(--space-2); flex:0 1 auto; }
 .composer-row .composer-mode > .ic { display:none; }
 .composer-row span.composer-mode { cursor:default; }
@@ -100,3 +114,7 @@
   .composer-row .model-select { max-width:180px; }
   .composer-row .composer-mode { max-width:32%; padding-inline:var(--space-2); }
 }
+
+.effort-branch:has(.floating[data-side="left"]) .effort-entry > .ic:last-child { transform:rotate(90deg); }
+.effort-branch:has(.inline) .effort-entry > .ic:last-child { transform:none; }
+.effort-submenu .effort-option:has(input:focus-visible) { outline:2px solid var(--accent); outline-offset:-2px; }

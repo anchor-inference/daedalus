@@ -240,9 +240,9 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     # The percentage is written beside the ring: an unlabelled partial circle at rest read as a spinner.
     if page.locator(".composer .ctx-ring .ctx-pct").inner_text().strip() != "21%":
         problems.append("the ring has no percentage beside it")
-    if not page.locator(".composer .effort-select").count():
-        problems.append("the effort selector is not in the pill")
-    if "high" not in page.locator(".composer .effort-select").inner_text().lower():
+    if page.locator(".composer .effort-select").count():
+        problems.append("effort must share the model selector, not a separate composer button")
+    if "high" not in page.locator(".composer .model-effort").inner_text().lower():
         problems.append("the current effort is not on the chip")
 
     page.locator(".composer .plus").click()
@@ -296,11 +296,14 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append("the stored draft was not cleared after sending")
 
     # A run is on: an empty pill is Stop; a written one queues a steer, which becomes a card with a ×.
+    idle_box = page.locator(".composer-box").bounding_box()
     HOST.status = "running"
     page.reload()
     page.wait_for_selector(".composer .roundbtn.primary[data-action='stop']", timeout=15000)
     print("running primary:", primary(page))
     running_box = page.locator(".composer-box").bounding_box()
+    if idle_box and running_box and abs(idle_box["height"] - running_box["height"]) > 1:
+        problems.append("changing Send to Stop resized the composer")
     field(page).click()
     field(page).type("also look at the log")
     if primary(page) != "queue":
@@ -467,12 +470,12 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if page.locator(".model-list").count():
         problems.append("Escape did not close the model list")
 
-    page.locator(".composer .effort-select").click()
+    page.locator(".composer .model-select").click()
+    page.locator(".effort-entry").click()
     page.wait_for_selector(".effort-options", timeout=5000)
     effort_menu = page.locator(".effort-menu").bounding_box()
-    chip = page.locator(".composer .effort-select").bounding_box()
-    if effort_menu and chip and effort_menu["y"] + effort_menu["height"] > chip["y"] + 4:
-        problems.append("the effort menu did not open upward")
+    if not effort_menu or effort_menu["x"] < 8 or effort_menu["x"] + effort_menu["width"] > page.viewport_size["width"] - 7:
+        problems.append("the effort submenu is outside the window")
     before = len(posts("/model"))
     page.locator('.effort-option').filter(has=page.locator('input[value="xhigh"]')).click()
     reached(page, "/model", before, "the effort pick", problems)
@@ -525,6 +528,7 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if pill and pill["height"] > 130:
         problems.append(f"phone: the empty composer is too tall ({pill})")
     before = len(posts("/model"))
+    page.locator(".effort-entry").click()
     page.locator('.sheet .effort-options input[value="low"]').click()
     reached(page, "/model", before, "phone: the effort choice", problems)
     if HOST.effort != "low":

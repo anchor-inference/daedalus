@@ -66,8 +66,9 @@
   --row-h-dense: 32px;  /* explorer tree, palette rows, aside rows */
   --row-h-touch: 44px;  /* phones only: rows and icon buttons */
   --ctl-h: 32px;        /* icon buttons and buttons on a desktop */
+  --composer-toolbar-h: 32px;
   --ctl-h-sm: 28px;     /* small icon buttons, small buttons, filter chips */
-  --ctl-h-lg: 40px;     /* the composer's primary circle */
+  --ctl-h-lg: 40px;     /* large icon buttons and voice actions */
   --icon: 18px; --icon-sm: 16px; --icon-xs: 14px;
   --dot: 6px;           /* the status dot in a session row */
   --avatar: 24px;

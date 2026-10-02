@@ -12,7 +12,7 @@ import { shortModel, tokens } from "./format";
 import { readCustomModel, rememberCustomModel } from "./composer";
 import { DICT, num, t } from "./i18n";
 import { ProviderMark, providerName } from "./ui/provider-mark";
-import { EffortOptions } from "./effortselect";
+import { EffortMenu } from "./effortselect";
 
 export type ModelChoice = { clear: true } | { preset: string } | { provider: string; model: string } | { model: string };
 
@@ -76,7 +76,7 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
   ) : shortModel(model, 22);
   const reason = fallback ? (DICT[`session.model.reason.${fallback.reason}`] ? t(`session.model.reason.${fallback.reason}`) : fallback.reason) : "";
   const title = fallback ? `${t("session.model.fallback.turn", { to: fallback.to, from: fallback.from })} — ${reason}` : t("composer.model.title");
-  const list = <ModelList cat={cat} failed={failed} model={model} fallback={fallback} onPick={pick} />;
+  const list = <ModelList cat={cat} failed={failed} model={model} fallback={fallback} onPick={pick} effort={effort} thinking={thinking} onChooseEffort={onChooseEffort ? (value) => { onChooseEffort(value); onOpenChange(false); } : undefined} sheet={sheet} />;
   return (
     <>
       <ControlTrigger ref={trigger} type="button" className={`model-select ${fallback ? "attn" : ""} ${open ? "on" : ""}`} onClick={() => onOpenChange(!open)} title={title} aria-label={t("session.model.for")} aria-haspopup="menu" aria-expanded={open}>
@@ -84,12 +84,11 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
         {/* The effort is its own span so a long model name is what gives way: in one span the
             ellipsis ate the effort first and the pill read "DeepSeek Flash · l…". */}
         <span className={`model-label truncate ${fallback ? "model-fallback" : ""}`}>{label}</span>
-        {onChooseEffort && thinking && <span className="model-effort">· {t(`add.effort.${effort || "medium"}`)}</span>}
+        {onChooseEffort && <span className="model-effort">{t(thinking ? `add.effort.${effort || "medium"}` : "add.effort.off")}</span>}
 
       </ControlTrigger>
       {open && sheet && (
         <Sheet title={t("composer.settings")} onClose={() => onOpenChange(false)} className="model-sheet">
-          {onChooseEffort && <EffortOptions effort={effort} thinking={thinking} onChoose={onChooseEffort} />}
           {list}
         </Sheet>
       )}
@@ -102,7 +101,7 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
   );
 }
 
-function ModelList({ cat, failed, model, fallback, onPick }: { cat: Catalogue | null; failed: string | null; model: string; fallback: ModelFallback | null; onPick: (c: ModelChoice) => void }) {
+function ModelList({ cat, failed, model, fallback, onPick, effort, thinking, onChooseEffort, sheet }: { cat: Catalogue | null; failed: string | null; model: string; fallback: ModelFallback | null; onPick: (c: ModelChoice) => void; effort?: string; thinking?: boolean; onChooseEffort?: (value: string) => void; sheet: boolean }) {
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState<string | null>(null);
   const [customOpen, setCustomOpen] = useState(false);
@@ -194,6 +193,7 @@ function ModelList({ cat, failed, model, fallback, onPick }: { cat: Catalogue | 
         );
       })}
       <div className="menu-sep" />
+      {onChooseEffort && <EffortMenu effort={effort} thinking={thinking} onChoose={onChooseEffort} inline={sheet} />}
       <button type="button" role="menuitem" className="model-row" aria-expanded={customOpen} onClick={() => setCustomOpen(!customOpen)}><Icon name="pen" size={16} /><span className="grow">{t("composer.model.manual")}</span><Icon name="chevron" size={14} /></button>
       {customOpen && <div className="model-custom">
         <div className="sub">{t("session.model.custom")}</div>

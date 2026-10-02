@@ -8,7 +8,6 @@ import { Icon } from "./icons";
 import { fileGlyph, previewKind, canPreview } from "./preview";
 import { enterSends, errorText, fmtBytes, fmtTok, haptic } from "./ui";
 import { ModelChoice, ModelSelect } from "./modelselect";
-import { EffortSelect } from "./effortselect";
 import { ModeInfo, ModeSelect } from "./modeselect";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "./voicebar";
 import { landWords } from "./voicenote";
@@ -449,7 +448,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       <VoiceNoteFailed note={note} />
       <div className={`composer-box ${voiceBar ? "voicing" : ""}`}>
         {voiceBar && <VoiceBar note={note} />}
-        {status === "running" && !voiceBar && <div className="composer-steering">{t("composer.steering")}</div>}
         {!phone && !voiceBar && place.length > 0 && (
           <div className="composer-place" aria-label={t("composer.place")}>
             {place.map((chip) => <span key={chip.kind} className="composer-place-chip" title={t(`composer.place.${chip.kind}`, { name: chip.name })}>
@@ -495,10 +493,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             : <span className="composer-mode">{t("composer.mode.agent")}</span>}
           <div className="composer-tools">
             {(!phone || status !== "running") && <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={setModelOpen} onChoose={props.onChooseModel} sheet={phone}
-              effort={phone ? props.reasoningEffort : undefined} thinking={props.thinking} onChooseEffort={phone ? props.onChooseEffort : undefined} />}
-            {!phone && props.onChooseEffort && (
-              <EffortSelect effort={props.reasoningEffort} thinking={props.thinking} onChoose={props.onChooseEffort} />
-            )}
+              effort={props.reasoningEffort} thinking={props.thinking} onChooseEffort={props.onChooseEffort} />}
             {pct !== null && ctx && (
               <button type="button" className={`ctx-ring ${pct >= 90 ? "bad" : pct >= 60 ? "attn" : ""}`} onClick={props.onContext} title={t("composer.context", { pct, used: fmtTok(ctx.tokens), window: fmtTok(ctx.window), n: fmtInt(ctx.messages) })} aria-label={t("composer.context.label")}>
                 <Ring pct={pct} />
