@@ -120,7 +120,13 @@ type setupBoot struct {
 
 // setupProviders are the cloud keys the wizard offers, in its order, with the form field each one
 // travels in.
-var setupProviders = []string{"deepseek", "openrouter", "opencode", "openai", "anthropic"}
+var setupProviders = func() []string {
+	ids := []string{"deepseek", "openrouter", "opencode"}
+	for _, provider := range providerKeyVars {
+		ids = append(ids, provider[0])
+	}
+	return ids
+}()
 
 func providerKey(s Setup, id string) string {
 	switch id {
@@ -130,12 +136,8 @@ func providerKey(s Setup, id string) string {
 		return s.OpenrouterKey
 	case "opencode":
 		return s.OpencodeKey
-	case "openai":
-		return s.OpenaiKey
-	case "anthropic":
-		return s.AnthropicKey
 	}
-	return ""
+	return s.ProviderKeys[id]
 }
 
 // hostReachable is the endpoint's address as the operator typed it, undoing the rewrite a Docker
@@ -250,14 +252,18 @@ func parseSetupForm(form url.Values) (Setup, map[string]string, *setupError) {
 		DeepseekKey:   get("deepseek"),
 		OpenrouterKey: get("openrouter"),
 		OpencodeKey:   get("opencode"),
-		OpenaiKey:     get("openai"),
-		AnthropicKey:  get("anthropic"),
+		ProviderKeys:  map[string]string{},
 		BotToken:      get("bot_token"),
 		OwnerID:       get("owner_id"),
 		APIID:         get("api_id"),
 		APIHash:       get("api_hash"),
 		USDPerDay:     strings.ReplaceAll(get("usd_per_day"), ",", "."),
 		Clear:         clearedFields(form["clear"]),
+	}
+	for _, provider := range providerKeyVars {
+		if key := get(provider[0]); key != "" {
+			s.ProviderKeys[provider[0]] = key
+		}
 	}
 	if s.USDPerDay != "" {
 		if v, err := strconv.ParseFloat(s.USDPerDay, 64); err != nil || v < 1 || v > 1000 {

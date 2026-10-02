@@ -27,8 +27,7 @@ type Setup struct {
 	DeepseekKey   string
 	OpenrouterKey string
 	OpencodeKey   string
-	OpenaiKey     string
-	AnthropicKey  string
+	ProviderKeys  map[string]string
 	BotToken      string
 	OwnerID       string
 	APIID         string
@@ -203,21 +202,38 @@ func firstSet(existing, fallback string) string {
 	return fallback
 }
 
+// providerKeyVars are the provider keys beyond the first three, by the provider id the app and the
+// setup form know them as, with the variable the key proxy reads. API and subscription plans of one
+// vendor are separate entries: they are billed and routed differently upstream.
+var providerKeyVars = [][2]string{
+	{"openai", "OPENAI_API_KEY"},
+	{"anthropic", "ANTHROPIC_API_KEY"},
+	{"zai", "ZAI_API_KEY"},
+	{"zai_coding", "ZAI_CODING_API_KEY"},
+	{"minimax", "MINIMAX_API_KEY"},
+	{"minimax_plan", "MINIMAX_PLAN_API_KEY"},
+	{"moonshot", "MOONSHOT_API_KEY"},
+	{"kimi_coding", "KIMI_CODING_API_KEY"},
+}
+
 // keyproxyUpdates is everything the launcher sets in daedalus-secrets/keyproxy.env. Provider keys
 // live only here: the file is outside every mount the agent container gets, so the agent process
 // never holds a key even when it edits its own code.
 func keyproxyUpdates(s Setup, current map[string]string) []envVar {
 	answer := answered(s, current)
-	return []envVar{
+	updates := []envVar{
 		{"DEEPSEEK_API_KEY", answer("DEEPSEEK_API_KEY", "deepseek", s.DeepseekKey)},
 		{"OPENROUTER_API_KEY", answer("OPENROUTER_API_KEY", "openrouter", s.OpenrouterKey)},
 		{"OPENCODE_API_KEY", answer("OPENCODE_API_KEY", "opencode", s.OpencodeKey)},
-		{"OPENAI_API_KEY", answer("OPENAI_API_KEY", "openai", s.OpenaiKey)},
-		{"ANTHROPIC_API_KEY", answer("ANTHROPIC_API_KEY", "anthropic", s.AnthropicKey)},
-		{"KEYPROXY_UPSTREAM_LOCAL", answer("KEYPROXY_UPSTREAM_LOCAL", "local_url", s.LocalURL)},
-		{"KEYPROXY_KEY_LOCAL", answer("KEYPROXY_KEY_LOCAL", "local_key", s.LocalKey)},
-		{"KEYPROXY_USD_PER_DAY", dailyCap(s.USDPerDay, current["KEYPROXY_USD_PER_DAY"])},
 	}
+	for _, provider := range providerKeyVars {
+		updates = append(updates, envVar{provider[1], answer(provider[1], provider[0], s.ProviderKeys[provider[0]])})
+	}
+	updates = append(updates,
+		envVar{"KEYPROXY_UPSTREAM_LOCAL", answer("KEYPROXY_UPSTREAM_LOCAL", "local_url", s.LocalURL)},
+		envVar{"KEYPROXY_KEY_LOCAL", answer("KEYPROXY_KEY_LOCAL", "local_key", s.LocalKey)},
+	)
+	return append(updates, envVar{"KEYPROXY_USD_PER_DAY", dailyCap(s.USDPerDay, current["KEYPROXY_USD_PER_DAY"])})
 }
 
 // containerReachable is the endpoint's address as the key proxy's container reaches it. Typed on
@@ -344,12 +360,20 @@ func SyncBotEnv(p Paths, mode Mode) error {
 func CurrentSetup(p Paths) Setup {
 	env := readEnv(readFile(p.Env))
 	keys := readEnv(readFile(p.KeyproxyEnv))
+	providerKeys := map[string]string{}
+	for _, provider := range providerKeyVars {
+		if value := keys[provider[1]]; value != "" {
+			providerKeys[provider[0]] = value
+		}
+	}
+	if len(providerKeys) == 0 {
+		providerKeys = nil
+	}
 	return Setup{
 		DeepseekKey:   keys["DEEPSEEK_API_KEY"],
 		OpenrouterKey: keys["OPENROUTER_API_KEY"],
 		OpencodeKey:   keys["OPENCODE_API_KEY"],
-		OpenaiKey:     keys["OPENAI_API_KEY"],
-		AnthropicKey:  keys["ANTHROPIC_API_KEY"],
+		ProviderKeys:  providerKeys,
 		BotToken:      env["TELEGRAM_BOT_TOKEN"],
 		OwnerID:       env["OWNER_USER_ID"],
 		APIID:         env["TELEGRAM_API_ID"],

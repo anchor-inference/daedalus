@@ -95,6 +95,7 @@ class Entry:
     """Whether the launch is a terminal session (a command-line member), and so counts against the machine."""
     by: str
     env: str = ""
+    resume_from: str | None = None
     order: int = 0
     since: float = field(default_factory=time.time)
     reason: WaitReason | None = None

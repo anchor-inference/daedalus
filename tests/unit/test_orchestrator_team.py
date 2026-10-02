@@ -329,6 +329,25 @@ async def test_assign_needs_the_whole_contract_and_creates_the_task_as_the_orche
         await r.manager.close()
 
 
+async def test_staff_sessions_tool_finds_a_finished_cli_chat(settings: Settings, db: Database, tmp_path: Path) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        assert "StaffSessions" in {tool.name for tool in r.manager.tools.list_all()}
+        sid = await office(r)
+        r.team.runtimes["cursor"] = FakeStaffRuntime(kind="cursor")
+        member = await r.manager.staff.hire(r.project.id, name="Ada", harness="cursor", isolation="shared")
+        task_id = await board_task(r.manager, r.project, "Menu")
+        task = await r.team.task(task_id)
+        assert task is not None
+        first = await r.team.start(member, task)
+        await r.manager.staff.end_session(first.id, "terminal closed")
+        listed = await r.call(sid, "staff_sessions", staff="Ada", task_id=task_id)
+        assert first.id in listed and "ready to resume" in listed
+        assert "Assign(task_id=..." in listed
+    finally:
+        await r.manager.close()
+
+
 async def test_assignments_past_the_concurrency_wait_in_the_queue(settings: Settings, db: Database, tmp_path: Path) -> None:
     r = await rig(settings, db, tmp_path)
     try:

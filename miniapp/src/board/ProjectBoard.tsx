@@ -48,6 +48,7 @@ import {
 
 type BoardResponse = ProjectBoardData & { project: { id: string; name: string } };
 type Launch = { state: string; position?: number; detail?: string } | null;
+type ResumeSession = { id: string; started_at: string; owner_name: string; task_title: string; can_resume: boolean; resume_reason: string };
 
 const boardKey = (projectId: string) => `/api/projects/${encodeURIComponent(projectId)}/board`;
 
@@ -447,10 +448,45 @@ function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: 
   const [priority, setPriority] = useState(task?.priority ?? 3);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resumeFrom, setResumeFrom] = useState("");
+  const [resumeSessions, setResumeSessions] = useState<ResumeSession[]>([]);
+  const [resumeBefore, setResumeBefore] = useState("");
+  const [resumeMore, setResumeMore] = useState(false);
+  const [resumeError, setResumeError] = useState("");
 
   // Only tasks still open can be waited for; a dependency already listed stays offered so it can be removed.
   const candidates = data.tasks.filter((other) => other.id !== task?.id && ((other.status !== "done" && other.status !== "dropped") || deps.includes(other.id)));
   const team = data.staff;
+  const chosenMember = team.find((member) => member.id === assignee);
+  useEffect(() => {
+    setResumeFrom("");
+    setResumeSessions([]);
+    setResumeBefore("");
+    setResumeMore(false);
+    setResumeError("");
+    if (!chosenMember || chosenMember.harness === "daedalus" || (!task && chosenMember.isolation === "worktree")) return;
+    let current = true;
+    const taskQuery = task ? `task_id=${encodeURIComponent(task.id)}&` : "";
+    const path = `/api/staff/${encodeURIComponent(chosenMember.id)}/resume-sessions?${taskQuery}limit=50`;
+    api.get<ResumeSession[]>(path).then((rows) => {
+      if (!current) return;
+      setResumeSessions(rows);
+      setResumeBefore(rows.at(-1)?.id ?? "");
+      setResumeMore(rows.length === 50);
+    }).catch((error) => { if (current) setResumeError(errorText(error)); });
+    return () => { current = false; };
+  }, [task?.id, chosenMember?.id]);
+  async function olderSessions() {
+    if (!chosenMember || !resumeBefore) return;
+    try {
+      const taskQuery = task ? `task_id=${encodeURIComponent(task.id)}&` : "";
+      const path = `/api/staff/${encodeURIComponent(chosenMember.id)}/resume-sessions?${taskQuery}before=${encodeURIComponent(resumeBefore)}&limit=50`;
+      const rows = await api.get<ResumeSession[]>(path);
+      setResumeSessions((previous) => [...previous, ...rows]);
+      setResumeBefore(rows.at(-1)?.id ?? "");
+      setResumeMore(rows.length === 50);
+    } catch (error) { setResumeError(errorText(error)); }
+  }
   const gone = task?.assignee && !team.some((m) => m.id === task.assignee!.id) ? task.assignee : null;
   const missing = missingBrief(brief);
   const changed = task
@@ -459,7 +495,8 @@ function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: 
       assignee !== (task.assignee_staff_id ?? "") ||
       deps.join(",") !== task.depends_on.join(",") ||
       priority !== task.priority ||
-      note.trim() !== ""
+      note.trim() !== "" ||
+      resumeFrom !== ""
     : title.trim() !== "";
 
   function report(result: { launch?: Launch }) {
@@ -471,7 +508,7 @@ function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: 
     setBusy(true);
     try {
       if (!task) {
-        const made = await api.post<{ launch?: Launch }>(`${boardKey(projectId)}`, { title: title.trim(), brief, assignee_staff_id: assignee || null, depends_on: deps, priority });
+        const made = await api.post<{ launch?: Launch }>(`${boardKey(projectId)}`, { title: title.trim(), brief, assignee_staff_id: assignee || null, depends_on: deps, priority, resume_from: resumeFrom || null });
         report(made);
       } else {
         const body: Record<string, unknown> = {};
@@ -482,6 +519,7 @@ function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: 
         if (deps.join(",") !== task.depends_on.join(",")) body.depends_on = deps;
         if (priority !== task.priority) body.priority = priority;
         if (note.trim()) body.note = note.trim();
+        if (resumeFrom) body.resume_from = resumeFrom;
         report(await api.put<{ launch?: Launch }>(`/api/board/${encodeURIComponent(task.id)}`, body));
       }
       onDone();
@@ -586,6 +624,20 @@ function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: 
       )}
       {assignee && missing.length > 0 && (
         <div className="sub attn">{t("pboard.brief.missing", { parts: missing.map((field) => t(`pboard.brief.${field}`)).join(", ") })}</div>
+      )}
+      {chosenMember && chosenMember.harness !== "daedalus" && (task || chosenMember.isolation !== "worktree") && (
+        <>
+          <label className="field" htmlFor="ptask-resume">{t("pboard.resume.label")}</label>
+          <select id="ptask-resume" className="field" value={resumeFrom} onChange={(event) => setResumeFrom(event.target.value)}>
+            <option value="">{t("pboard.resume.fresh")}</option>
+            {resumeSessions.map((session) => <option key={session.id} value={session.id} disabled={!session.can_resume}>
+              {session.started_at.slice(0, 16).replace("T", " ")} · {session.owner_name} · {session.task_title || session.id} {session.can_resume ? "" : `· ${t(`pboard.resume.reason.${session.resume_reason}`)}`}
+            </option>)}
+          </select>
+          <div className="sub">{t("pboard.resume.hint")}</div>
+          {resumeMore && <button className="linkbtn" type="button" onClick={olderSessions}>{t("pboard.resume.older")}</button>}
+          {resumeError && <div className="sub attn">{resumeError}</div>}
+        </>
       )}
 
       <label className="field">{t("pboard.depends")}</label>

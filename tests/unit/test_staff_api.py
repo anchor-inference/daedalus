@@ -38,7 +38,7 @@ async def test_hire_list_edit_and_dismiss(settings: Settings, config: RuntimeCon
             assert empty["staff"] == [] and empty["counts"] == {"staff": 0, "working": 0}
             assert empty["project"]["concurrency"] == 6 and empty["project"]["local_env"] == "container"
             assert empty["project"]["folders"][0]["is_git"] is True
-            assert empty["choices"]["harnesses"] == ["daedalus", "claude", "codex", "grok", "opencode", "pi"]
+            assert empty["choices"]["harnesses"] == ["daedalus", "claude", "codex", "grok", "opencode", "pi", "cursor"]
             assert [p["id"] for p in empty["choices"]["presets"]] == list(config.presets)
             assert empty["choices"]["personas"] == manager.staff.personas()
 

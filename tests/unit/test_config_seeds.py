@@ -20,6 +20,8 @@ def test_a_fresh_config_is_created_with_no_models_and_every_seed_marked_applied(
     config = RuntimeConfig.load(path)
     assert config.presets == {} and config.model.preset == "" and config.has_model is False
     assert "claude-subscription" in config.seeded
+    assert "more-provider-endpoints" in config.seeded
+    assert {"zai_coding", "minimax_plan", "kimi_coding"} <= set(config.providers)
     # And a restart does not quietly grow a model table behind the operator's back.
     assert RuntimeConfig.load(path).presets == {}
 
@@ -59,13 +61,21 @@ def test_an_existing_config_keeps_its_models_when_the_defaults_stop_shipping_any
             },
             fh,
         )
-    before = path.read_bytes()
     config = RuntimeConfig.load(path)
-    assert path.read_bytes() == before  # nothing to migrate, so the file is not rewritten
+    assert "more-provider-endpoints" in config.seeded
+    assert {"zai_coding", "minimax_plan", "kimi_coding"} <= set(config.providers)
     assert config.has_model is True
     assert config.model.preset == "openrouter.a" and config.model.chain == ["deepseek.b"]
     assert config.preset() == ("openrouter.a", config.presets["openrouter.a"])
     assert config.vision_preset()[0] == "openrouter.a"  # type: ignore[index]
+
+
+def test_a_removed_provider_is_not_restored_on_restart(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    config = RuntimeConfig.load(path)
+    del config.providers["kimi_coding"]
+    config.save(path)
+    assert "kimi_coding" not in RuntimeConfig.load(path).providers
 
 
 def test_a_config_from_before_presets_existed_still_migrates_to_one(tmp_path: Path) -> None:

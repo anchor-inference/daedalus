@@ -4,14 +4,14 @@
 
 import type { ChannelHealth } from "../api";
 
-export const HARNESSES = ["daedalus", "claude", "codex", "grok", "opencode", "pi"] as const;
+export const HARNESSES = ["daedalus", "claude", "codex", "grok", "opencode", "pi", "cursor"] as const;
 export type Harness = (typeof HARNESSES)[number];
 
 /** The two letters on a staff member's badge, the way the team page and the hiring form show an executor. */
-export const HARNESS_BADGES: Record<Harness, string> = { daedalus: "D", claude: "CC", codex: "CX", grok: "GK", opencode: "OC", pi: "π" };
+export const HARNESS_BADGES: Record<Harness, string> = { daedalus: "D", claude: "CC", codex: "CX", grok: "GK", opencode: "OC", pi: "π", cursor: "CU" };
 
 /** Each executor's own name. Product names: the same in every language, so they are not in the dictionary. */
-export const HARNESS_NAMES: Record<Harness, string> = { daedalus: "Daedalus", claude: "Claude Code", codex: "Codex", grok: "Grok Build", opencode: "OpenCode", pi: "pi" };
+export const HARNESS_NAMES: Record<Harness, string> = { daedalus: "Daedalus", claude: "Claude Code", codex: "Codex", grok: "Grok Build", opencode: "OpenCode", pi: "pi", cursor: "Cursor Agent" };
 
 /** Every status a staff member can show: the live session's, or "off" when there is none. */
 export const STAFF_STATUSES = ["off", "starting", "working", "turn_done_unseen", "idle", "question", "permission", "error", "exited", "no_signal"] as const;

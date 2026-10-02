@@ -111,7 +111,8 @@ def test_environment_is_read_in_one_place() -> None:
     # settings come from daedalus.config.Settings; these modules only pass the environment on to child processes.
     # config.py is the one place itself: a handful of defaults depend on what kind of installation this is —
     # a container or the operator's own machine — and that is decided before any configuration is read.
-    allowed = {"daedalus/config.py", "daedalus/tools/shell.py", "daedalus/tools/verify.py", "daedalus/host/gitrun.py", "daedalus/host/checkpoints.py"}
+    # The Cursor bridge copies inherited variables into its child ACP process; it does not read settings.
+    allowed = {"daedalus/config.py", "daedalus/tools/shell.py", "daedalus/tools/verify.py", "daedalus/host/gitrun.py", "daedalus/host/checkpoints.py", "daedalus/harness/cursor_bridge.py"}
     hits = []
     for path, tree in _modules(PKG):
         rel = path.relative_to(ROOT).as_posix()

@@ -43,8 +43,8 @@ def test_the_table_covers_exactly_the_command_line_harnesses_a_staff_member_can_
         assert low[0] == caps.supported_major
     # Only the harnesses whose messages are typed into the TUI say how a paste behaves.
     assert {name for name, caps in CAPABILITIES.items() if caps.paste is not None} == {"claude", "grok"}
-    with pytest.raises(KeyError, match="cursor"):
-        capabilities("cursor")
+    with pytest.raises(KeyError, match="unknown"):
+        capabilities("unknown")
 
 
 def test_steer_that_is_not_native_is_named() -> None:
@@ -159,7 +159,7 @@ def test_the_registry_takes_an_adapter_by_its_harness_name(monkeypatch: pytest.M
         harness.register(Another)
 
     class Stranger(StubAdapter):
-        name = "cursor"
+        name = "unknown"
 
     with pytest.raises(harness.UnknownHarness, match="capability table"):
         harness.register(Stranger)

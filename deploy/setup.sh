@@ -50,11 +50,30 @@ if [ -n "$(current TELEGRAM_BOT_TOKEN "$ENV_FILE")" ]; then
   ask TELEGRAM_API_HASH "Telegram API hash" secret
 fi
 
-say "2/5 Provider keys (stored in $SECRETS_FILE, never inside the checkout). Leave a key empty to skip that provider."
+say "2/5 Provider keys (stored in $SECRETS_FILE, never inside the checkout)."
 say "A key is an address, not a model: you pick the model itself in the app at the end, and it is the only step that cannot be skipped."
-ask DEEPSEEK_API_KEY "DeepSeek API key" secret "$SECRETS_FILE"
-ask OPENROUTER_API_KEY "OpenRouter API key" secret "$SECRETS_FILE"
+say "API: 1 DeepSeek · 2 OpenRouter · 3 OpenAI · 4 Z.AI · 5 MiniMax · 6 Moonshot AI"
+say "Subscription: 7 OpenCode Go · 8 Z.AI Coding Plan · 9 MiniMax Token Plan · 10 Kimi Code"
+say "Enter a number to add or change a key; press Enter when finished."
+while true; do
+  read -r -p "Provider number (Enter to finish): " choice
+  case "$choice" in
+    "") break ;;
+    1) ask DEEPSEEK_API_KEY "DeepSeek API key" secret "$SECRETS_FILE" ;;
+    2) ask OPENROUTER_API_KEY "OpenRouter API key" secret "$SECRETS_FILE" ;;
+    3) ask OPENAI_API_KEY "OpenAI API key" secret "$SECRETS_FILE" ;;
+    4) ask ZAI_API_KEY "Z.AI API key" secret "$SECRETS_FILE" ;;
+    5) ask MINIMAX_API_KEY "MiniMax API key" secret "$SECRETS_FILE" ;;
+    6) ask MOONSHOT_API_KEY "Moonshot AI API key" secret "$SECRETS_FILE" ;;
+    7) ask OPENCODE_API_KEY "OpenCode Go key" secret "$SECRETS_FILE" ;;
+    8) ask ZAI_CODING_API_KEY "Z.AI Coding Plan key" secret "$SECRETS_FILE" ;;
+    9) ask MINIMAX_PLAN_API_KEY "MiniMax Token Plan key" secret "$SECRETS_FILE" ;;
+    10) ask KIMI_CODING_API_KEY "Kimi Code key" secret "$SECRETS_FILE" ;;
+    *) say "Choose 1–10, or Enter to finish." ;;
+  esac
+done
 ask KEYPROXY_USD_PER_DAY "Daily spend cap for the key proxy, USD" "" "$SECRETS_FILE"
+say "Calls with no known model price do not count toward a USD cap; subscriptions also have their own provider quotas."
 
 say "3/5 GitHub and the app"
 ask GITHUB_TOKEN "Fine-grained GitHub token for the two agent repositories (pull requests + contents); empty disables self-development" secret

@@ -10,7 +10,15 @@
     { id: 'openrouter', name: 'OpenRouter', prefix: 'sk-or-' },
     { id: 'opencode', name: 'OpenCode', prefix: '' },
     { id: 'openai', name: 'OpenAI', prefix: 'sk-' },
-    { id: 'anthropic', name: 'Anthropic', prefix: 'sk-ant-' }
+    { id: 'anthropic', name: 'Anthropic', prefix: 'sk-ant-' },
+    // Subscription plans are providers of their own: the plan's key only works on its own endpoint.
+    // No prefix is checked where the vendor's key format is not fixed.
+    { id: 'zai', name: 'Z.AI', prefix: '' },
+    { id: 'zai_coding', name: 'Z.AI Coding', prefix: '' },
+    { id: 'minimax', name: 'MiniMax', prefix: '' },
+    { id: 'minimax_plan', name: 'MiniMax Plan', prefix: '' },
+    { id: 'moonshot', name: 'Moonshot', prefix: 'sk-' },
+    { id: 'kimi_coding', name: 'Kimi Code', prefix: '' }
   ];
   var CLIS = [
     { id: 'codex', name: 'Codex' },
@@ -68,7 +76,7 @@
     docker: !!B.docker,
     kind: B.kind === 'cli' || B.kind === 'local' ? B.kind : 'cloud',
     provider: B.provider || 'deepseek',
-    keys: { deepseek: '', openrouter: '', opencode: '', openai: '', anthropic: '' },
+    keys: PROVIDERS.reduce(function (keys, p) { keys[p.id] = ''; return keys; }, {}),
     // kept: the masks of what is stored, by field. An empty field keeps the stored value.
     kept: B.kept || {},
     cli: B.cli || 'codex',

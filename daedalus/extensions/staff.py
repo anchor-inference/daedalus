@@ -45,7 +45,15 @@ from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.handoff import Delivered, Handoff, box_name
 from daedalus.host.launch_queue import Admission, Entry, LaunchQueue, MachineCapacity, TerminalsCapacity
 from daedalus.host.staff_daedalus import DaedalusStaffRuntime
-from daedalus.host.worktrees import StaffWorktrees, Worktree, WorktreeError, WorktreeRefused
+from daedalus.host.worktrees import (
+    WORKTREES_DIR,
+    StaffWorktrees,
+    Worktree,
+    WorktreeError,
+    WorktreeRefused,
+    branch_name,
+    staff_slug,
+)
 from daedalus.staff_runtime import (
     AskRef,
     BoardTask,
@@ -524,6 +532,8 @@ class Team:
 
     async def _reuses(self, entry: Entry) -> bool:
         """Whether the entry would go into its member's live session as the next message."""
+        if entry.resume_from or await self.manager.db.kv_get(self._resume_key(entry.staff_id, entry.task_id)):
+            return False
         live = await self._live_member(entry.staff_id)
         task = await self.task(entry.task_id)
         if live is None or task is None:
@@ -580,12 +590,15 @@ class Team:
         task = await self.task(entry.task_id)
         if task is None:
             raise StaffError(f"task {entry.task_id} is gone")
-        await self.start(member, task, by=entry.by)
+        source = entry.resume_from or await self.manager.db.kv_get(self._resume_key(entry.staff_id, entry.task_id))
+        await self.start(member, task, by=entry.by, resume_from=source)
+        await self.manager.db.execute("DELETE FROM kv WHERE key = ?", (self._resume_key(entry.staff_id, entry.task_id),))
 
     async def _launch_failed(self, entry: Entry, exc: BaseException) -> None:
         # An assignment that cannot start is taken back rather than retried by every pump: the task
         # stays on the board, unassigned, and the event says why.
         task = await self.task(entry.task_id)
+        await self.manager.db.execute("DELETE FROM kv WHERE key = ?", (self._resume_key(entry.staff_id, entry.task_id),))
         if task is not None and task.assignee_staff_id == entry.staff_id:
             # On the card as well as in the event: the event wakes the orchestrator, the card is where
             # the operator looks when a task they saw assigned is unassigned again.
@@ -594,13 +607,75 @@ class Team:
 
     # -- assigning and starting ---------------------------------------------------------------------
 
-    async def assign(self, member: Staff, task: str | dict[str, Any], *, by: str = "operator") -> dict[str, Any]:
+    @staticmethod
+    def _resume_key(staff_id: str, task_id: str) -> str:
+        return f"staff_resume:{staff_id}:{task_id}"
+
+    async def resume_sessions(self, member: Staff, *, task_id: str | None = None, before: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        """Conversations in the member's launch folder, including those of dismissed namesakes."""
+        if member.harness == "daedalus":
+            return []
+        task = await self.task(task_id) if task_id else None
+        if task_id and (task is None or task.project_id != member.project_id):
+            raise StaffError("the task is not in this project")
+        project = await self.project(member.project_id)
+        folder = self.folder_for(project, member, task)
+        wanted_branch = branch_name(member.name, task.id, task.title) if task and member.isolation == "worktree" else None
+        wanted_worktree = str(folder.path / WORKTREES_DIR / staff_slug(member.name)) if member.isolation == "worktree" else None
+        rows = await self.manager.staff.resumable_sessions(
+            project.id, member.harness, folder.id, str(folder.path),
+            worktree_path=wanted_worktree, before=before, limit=limit,
+        )
+        busy_rows = await self.manager.db.fetchall(
+            "SELECT DISTINCT s.cli_session_id FROM staff_sessions s JOIN staff m ON m.id = s.staff_id "
+            "WHERE m.project_id = ? AND m.harness = ? AND s.ended_at IS NULL AND s.cli_session_id IS NOT NULL",
+            (project.id, member.harness),
+        )
+        busy_refs = {row["cli_session_id"] for row in busy_rows}
+        result = []
+        for session, owner, title in rows:
+            same_folder = member.isolation == "worktree" or not session.launch_cwd or session.launch_cwd == str(folder.path)
+            busy = session.cli_session_id in busy_refs
+            eligible = not busy and same_folder and (session.branch == wanted_branch and session.worktree_path == wanted_worktree if wanted_branch else not session.worktree_path and member.isolation != "worktree")
+            view = session.view()
+            view.update({"owner_name": owner, "task_title": title, "can_resume": eligible,
+                         "resume_reason": "" if eligible else ("live" if busy else "folder")})
+            result.append(view)
+        return result
+
+    async def _resume_source(self, member: Staff, task: BoardTask, folder: ProjectFolder, source_id: str) -> LiveSession:
+        source = await self.manager.staff.session(source_id)
+        owner = await self.manager.staff.get(source.staff_id) if source else None
+        if source is None or owner is None or owner.project_id != member.project_id or owner.harness != member.harness:
+            raise StaffError("the session is not from this project's selected harness")
+        if source.kind != "cli" or not source.cli_session_id or source.live:
+            raise StaffError("the selected CLI session has no ended conversation to resume")
+        busy = await self.manager.db.fetchone(
+            "SELECT s.id FROM staff_sessions s JOIN staff m ON m.id = s.staff_id "
+            "WHERE m.project_id = ? AND m.harness = ? AND s.cli_session_id = ? AND s.ended_at IS NULL LIMIT 1",
+            (member.project_id, member.harness, source.cli_session_id),
+        )
+        if busy:
+            raise StaffBusy("the selected CLI conversation is already open in another session")
+        if not source.launch_cwd and source.folder_id != folder.id:
+            raise StaffError("the selected CLI session belongs to another launch folder")
+        if source.launch_cwd and member.isolation != "worktree" and source.launch_cwd != str(folder.path):
+            raise StaffError("the selected CLI session was launched from another folder path")
+        if member.isolation == "worktree":
+            expected = str(folder.path / WORKTREES_DIR / staff_slug(member.name))
+            if source.worktree_path != expected or source.branch != branch_name(member.name, task.id, task.title):
+                raise StaffError("the selected CLI session belongs to another worktree or branch")
+        elif source.worktree_path:
+            raise StaffError("the selected CLI session belongs to a worktree, not this launch folder")
+        return LiveSession(owner, source)
+
+    async def assign(self, member: Staff, task: str | dict[str, Any], *, by: str = "operator", resume_from: str | None = None) -> dict[str, Any]:
         """Give a member a task (its id, or the board's view of it): it starts now, or waits in the
         project's launch queue. Returns ``{state: started|queued, position, reason, detail, task_id}``;
         a refusal is a :class:`StaffError`, which is a ``ValueError``."""
-        return (await self._assign(member, str(task["id"]) if isinstance(task, dict) else task, by=by)).view()
+        return (await self._assign(member, str(task["id"]) if isinstance(task, dict) else task, by=by, resume_from=resume_from)).view()
 
-    async def _assign(self, member: Staff, task_id: str, *, by: str) -> Assigned:
+    async def _assign(self, member: Staff, task_id: str, *, by: str, resume_from: str | None = None) -> Assigned:
         if not member.active:
             raise StaffError(f"{member.name} has been dismissed")
         task = await self.task(task_id)
@@ -632,6 +707,8 @@ class Team:
         runtime = self.runtime(member)
         project = await self.project(member.project_id)
         folder = self.folder_for(project, member, task)
+        if resume_from:
+            await self._resume_source(member, task, folder, resume_from)
         terminal = member.harness != "daedalus"
         if not terminal and not folder.local(self.manager.projects.local_env):
             # Said before anything is queued: a Daedalus member given a host task from the container
@@ -661,7 +738,12 @@ class Team:
                 raise StaffError(f"task {task.id} carries files, and they cannot reach {member.name}: {exc}") from exc
         if task.assignee_staff_id != member.id:
             await self._set_assignee(task, member.id, actor=by)
-        entry = Entry(project.id, member.id, member.name, task.id, task.priority, terminal, by, env=folder.env)
+        key = self._resume_key(member.id, task.id)
+        if resume_from:
+            await self.manager.db.kv_set(key, resume_from)
+        else:
+            await self.manager.db.execute("DELETE FROM kv WHERE key = ?", (key,))
+        entry = Entry(project.id, member.id, member.name, task.id, task.priority, terminal, by, env=folder.env, resume_from=resume_from)
         admission = await self.queue.request(entry)
         return Assigned(admission, (await self.task(task.id)) or task)
 
@@ -704,15 +786,16 @@ class Team:
         await self.note_on_card(task.id, f"{member.name} no longer works this card: {why}; it is back in todo, unassigned")
         return await self._move_task(task, "todo", actor=by, assignee=None)
 
-    async def start(self, member: Staff, task: BoardTask, *, by: str = "operator") -> LiveSession:
+    async def start(self, member: Staff, task: BoardTask, *, by: str = "operator", resume_from: str | None = None) -> LiveSession:
         """Start a session of ``member`` for ``task`` now; the launch queue calls this once it admits it."""
         runtime = self.runtime(member)
         project = await self.project(member.project_id)
         folder = self.folder_for(project, member, task)
+        source = await self._resume_source(member, task, folder, resume_from) if resume_from else None
         previous = await self.live_of(member)
         if previous is not None:
             previous = await self.settle_stale(previous)
-            if self._continues(previous, folder):
+            if source is None and self._continues(previous, folder):
                 handed = await self._hand_over(previous, task, folder, by=by)
                 if handed is not None:
                     return handed
@@ -723,7 +806,7 @@ class Team:
             # A Daedalus member's next task is a new session, and the idle one it replaces ends
             # here; so is a command-line member's whose session cannot take it (see _continues).
             await self._end(previous, "next task", stop=True)
-        predecessor = next((s for s in await self.manager.staff.sessions(member.id, limit=20) if s.task_id == task.id), None)
+        predecessor = source.session if source else next((s for s in await self.manager.staff.sessions(member.id, limit=20) if s.task_id == task.id), None)
         worktree: Worktree | None = None
         if member.isolation == "worktree":
             # Never the folder itself instead. The start used to ask the stored `is_git`, which is
@@ -743,6 +826,10 @@ class Team:
                 worktree = await self.worktrees.prepare(folder, member.name, task.id, task.title)
             except WorktreeError as exc:
                 raise StaffError(f"no worktree for {member.name} in {folder.path}: {exc}") from exc
+            if source and (str(worktree.path) != source.session.worktree_path or worktree.branch != source.session.branch):
+                raise StaffError("the selected CLI session was launched in another worktree or branch")
+            if source and source.session.launch_cwd and str(worktree.cwd) != source.session.launch_cwd:
+                raise StaffError("the selected CLI session was launched from another worktree folder")
         # Before the session exists: the brief names these copies, so a start whose files cannot be
         # put in place does not start at all.
         delivered = await self.hand_files(member, await self.manager.files.of_task(task.id), folder=folder, cwd=str(worktree.cwd if worktree else folder.path), task_id=task.id, by=by)
@@ -752,6 +839,7 @@ class Team:
             kind="daedalus" if member.harness == "daedalus" else "cli",
             task_id=task.id,
             folder_id=folder.id,
+            launch_cwd=str(worktree.cwd if worktree else folder.path),
             worktree_path=str(worktree.path) if worktree else None,
             branch=worktree.branch if worktree else None,
             base_ref=worktree.base_ref if worktree else None,
@@ -794,7 +882,7 @@ class Team:
             allow_rules=tuple(r["rule"] for r in await self.manager.staff.allow_rules(member.id)),
         )
         try:
-            started = await runtime.start(request)
+            started = await runtime.resume(request, source) if source else await runtime.start(request)
         except Exception as exc:
             await self.manager.staff.end_session(session.id, f"could not start: {exc}"[:500])
             await self.publish("staff.status", {"status": "exited", "previous": "starting", "detail": f"could not start: {exc}"[:500]}, member=member)

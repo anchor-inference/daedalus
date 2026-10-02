@@ -49,13 +49,13 @@ async def test_the_screen_the_form_and_the_refusals(settings: Settings, config: 
         async with _client(settings, config, db, manager, harness) as client:
             assert (await client.get("/api/harnesses")).status_code == 401
             screen = (await client.get("/api/harnesses?env=container", headers=HEADERS)).json()
-            assert [r["harness"] for r in screen["rows"]] == ["claude", "codex", "opencode", "pi", "grok"]
+            assert [r["harness"] for r in screen["rows"]] == ["claude", "codex", "opencode", "pi", "grok", "cursor"]
             assert (screen["env"], screen["environments"], screen["updates"], screen["node"]["pinned"]) == ("container", ["container"], 1, "24.21.0")
             claude = screen["rows"][0]
             assert (claude["installed_version"], claude["latest_version"], claude["update_available"], claude["status_channel_label"]) == ("2.1.281", "2.1.290", True, "hooks per launch")
 
             form = (await client.get("/api/harnesses/catalog?env=container", headers=HEADERS)).json()
-            assert set(form) == {"claude", "codex", "opencode", "pi", "grok"}
+            assert set(form) == {"claude", "codex", "opencode", "pi", "grok", "cursor"}
             assert (form["claude"]["installed"], form["claude"]["logged_in"], form["codex"]["logged_in"], form["pi"]["logged_in"]) == (True, True, False, None)
             assert form["claude"]["modes"][0] == "default" and form["pi"]["installed"] is False
 

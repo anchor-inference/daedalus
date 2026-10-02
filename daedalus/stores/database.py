@@ -17,7 +17,7 @@ from daedalus.config import native_mode
 
 logger = logging.getLogger(__name__)
 
-Migration = str | Callable[["Database"], str]
+Migration = str | Callable[["Database"], str] | tuple[str, bool]
 """A migration is its SQL, or a function that writes the SQL from what the opening database knows
 (the managed workspaces folder, the environment it runs in). A callable keeps a migration that
 needs such a value in its numbered place instead of being special-cased by its index."""
@@ -1649,6 +1649,38 @@ CREATE TABLE open_loops (
 CREATE INDEX open_loops_open ON open_loops(project_id, closed_at);
 """)
 
+# Changing the staff harness constraint requires rebuilding its parent table. Foreign-key checks
+# are restored immediately after the atomic copy; leaving them on during DROP would cascade every
+# member's sessions and task assignments.
+MIGRATIONS.append(("""
+CREATE TABLE staff_rebuilt (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT '',
+    harness TEXT NOT NULL CHECK (harness IN ('daedalus', 'claude', 'codex', 'cursor', 'grok', 'opencode', 'pi')),
+    agent TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    effort TEXT NOT NULL DEFAULT '',
+    permission_mode TEXT NOT NULL DEFAULT '',
+    env TEXT NOT NULL DEFAULT '' CHECK (env IN ('', 'container', 'host')),
+    default_folder_id TEXT REFERENCES project_folders(id) ON DELETE SET NULL,
+    isolation TEXT NOT NULL DEFAULT 'worktree' CHECK (isolation IN ('shared', 'worktree', 'readonly')),
+    instructions TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    one_off INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT NOT NULL CHECK (created_by IN ('operator', 'orchestrator')),
+    created_at TEXT NOT NULL,
+    archived_at TEXT
+);
+INSERT INTO staff_rebuilt SELECT * FROM staff;
+DROP TABLE staff;
+ALTER TABLE staff_rebuilt RENAME TO staff;
+CREATE UNIQUE INDEX staff_name ON staff(project_id, name COLLATE NOCASE) WHERE archived_at IS NULL;
+ALTER TABLE staff_sessions ADD COLUMN launch_cwd TEXT;
+""", True))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
@@ -1778,13 +1810,26 @@ class Database:
                 continue
             if callable(script):
                 script = script(self)
+            foreign_keys_off = isinstance(script, tuple) and script[1]
+            if isinstance(script, tuple):
+                script = script[0]
             # The version is written inside the migration's own transaction. Written after it, a
             # process killed in between would leave the schema at N and the version at N-1, and the
             # next start would run migration N again — on an ALTER TABLE, which is not idempotent,
             # that is an install that cannot open its own database and has no way back.
             version = f"INSERT INTO schema_version(version) VALUES ({index});" if current == 0 and index == 1 else f"UPDATE schema_version SET version = {index};"
             async with self._lock:
-                await self.conn.executescript(f"BEGIN;\n{script}\n{version}\nCOMMIT;")
+                if foreign_keys_off:
+                    await self.conn.execute("PRAGMA foreign_keys=OFF")
+                try:
+                    await self.conn.executescript(f"BEGIN;\n{script}\n{version}\nCOMMIT;")
+                except BaseException:
+                    with suppress(Exception):
+                        await self.conn.execute("ROLLBACK")
+                    raise
+                finally:
+                    if foreign_keys_off:
+                        await self.conn.execute("PRAGMA foreign_keys=ON")
             current = index
 
     async def execute(self, sql: str, params: Sequence[Any] = ()) -> None:
