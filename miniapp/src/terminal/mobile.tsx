@@ -15,7 +15,7 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { TerminalEnvName, TerminalView as TerminalRow } from "../api";
-import { MenuItem, OverflowMenu, toast } from "../dialogs";
+import { MenuItem, OverflowMenu, toast } from "../ui/dialogs";
 import { t } from "../i18n";
 import { EnvPill } from "../envpill";
 import { Icon } from "../icons";

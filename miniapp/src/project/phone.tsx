@@ -8,8 +8,8 @@
 
 import { FormEvent, ReactNode, useMemo, useState } from "react";
 import { api, ApiError, type Ask, type StaffSessionView, type TerminalEnvName, type TerminalView as TerminalRow } from "../api";
-import { Skeleton } from "../components";
-import { MenuItem, OverflowMenu, toast } from "../dialogs";
+import { Skeleton } from "../ui/components";
+import { MenuItem, OverflowMenu, toast } from "../ui/dialogs";
 import { useEvent, useStreamUp } from "../events";
 import { relTime } from "../format";
 import { plural, t } from "../i18n";

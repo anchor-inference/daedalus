@@ -23,7 +23,7 @@ import { modelSize as size } from "../format";
 import { plural, t } from "../i18n";
 import { Row } from "../settingsrow";
 import { pathFor } from "../router";
-import { go } from "../shell";
+import { go } from "../ui/index";
 import { errorText, haptic } from "../ui";
 import type { ComponentEntry, ComponentsView } from "../componentsview";
 import {

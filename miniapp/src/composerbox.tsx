@@ -3,12 +3,11 @@
 
 import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, AsrStatus, ModelFallback, Question, SlashCommand } from "./api";
-import { Popover } from "./dialogs";
+import { Popover } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { fileGlyph, previewKind, canPreview } from "./preview";
 import { enterSends, errorText, fmtBytes, fmtTok, haptic } from "./ui";
 import { ModelChoice, ModelSelect } from "./modelselect";
-import { EffortSelect } from "./effortselect";
 import { ModeInfo, ModeSelect } from "./modeselect";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "./voicebar";
 import { landWords } from "./voicenote";
@@ -30,7 +29,7 @@ import {
   readDraft,
   writeDraft,
 } from "./composer";
-import { fmtInt } from "./components";
+import { fmtInt } from "./ui/components";
 import { t } from "./i18n";
 import { insideTerminal } from "./terminal/keys";
 
@@ -449,7 +448,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       <VoiceNoteFailed note={note} />
       <div className={`composer-box ${voiceBar ? "voicing" : ""}`}>
         {voiceBar && <VoiceBar note={note} />}
-        {status === "running" && !voiceBar && <div className="composer-steering">{t("composer.steering")}</div>}
         {!phone && !voiceBar && place.length > 0 && (
           <div className="composer-place" aria-label={t("composer.place")}>
             {place.map((chip) => <span key={chip.kind} className="composer-place-chip" title={t(`composer.place.${chip.kind}`, { name: chip.name })}>
@@ -486,18 +484,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             <Popover anchor={plusButton.current} onClose={() => setPlusOpen(false)} className="plus-menu" label={t("composer.plus")}>
               <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><Icon name="attach" size={16} />{t("session.attach")}</button>
               {phone && <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); photoInput.current?.click(); }}><Icon name="image" size={16} />{t("composer.photo")}</button>}
+              {props.asr?.configured && <button type="button" role="menuitem" disabled={!note.supported || note.state.phase !== "idle"} onClick={() => { setPlusOpen(false); void note.start(); }}><Icon name="mic" size={16} />{t("session.mic")}</button>}
               <button type="button" role="menuitem" onClick={() => void pasteFromClipboard()}><Icon name="copy" size={16} />{t("composer.paste")}</button>
             </Popover>
           )}
           {props.onChooseMode && props.onYagni
             ? <ModeSelect mode={props.mode ?? ""} modes={props.modes ?? []} yagni={!!props.yagni} onChooseMode={props.onChooseMode} onYagni={props.onYagni} sheet={phone} />
             : <span className="composer-mode">{t("composer.mode.agent")}</span>}
-          {(!phone || status !== "running") && <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={setModelOpen} onChoose={props.onChooseModel} sheet={phone}
-            effort={phone ? props.reasoningEffort : undefined} thinking={props.thinking} onChooseEffort={phone ? props.onChooseEffort : undefined} />}
           <div className="composer-tools">
-            {!phone && props.onChooseEffort && (
-              <EffortSelect effort={props.reasoningEffort} thinking={props.thinking} onChoose={props.onChooseEffort} />
-            )}
+            {(!phone || status !== "running") && <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={setModelOpen} onChoose={props.onChooseModel} sheet={phone}
+              effort={props.reasoningEffort} thinking={props.thinking} onChooseEffort={props.onChooseEffort} />}
             {pct !== null && ctx && (
               <button type="button" className={`ctx-ring ${pct >= 90 ? "bad" : pct >= 60 ? "attn" : ""}`} onClick={props.onContext} title={t("composer.context", { pct, used: fmtTok(ctx.tokens), window: fmtTok(ctx.window), n: fmtInt(ctx.messages) })} aria-label={t("composer.context.label")}>
                 <Ring pct={pct} />

@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { api, MemoryListing, MemoryRecord } from "../api";
-import { ChipRow, Skeleton } from "../components";
-import { Sheet, deleteWithUndo } from "../dialogs";
+import { ChipRow, Skeleton } from "../ui/index";
+import { Sheet, deleteWithUndo } from "../ui/dialogs";
 import { absTime, relTime } from "../format";
 import { Icon } from "../icons";
-import { PageHeader, screenTitle } from "../shell";
+import { PageHeader, screenTitle } from "../ui/index";
 import { hold, prime, release, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { plural, t } from "../i18n";

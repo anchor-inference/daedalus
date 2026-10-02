@@ -5,7 +5,7 @@ import { SIDEBAR_COLUMN_MIN, readSidebar, rememberSidebar, sidebarCollapsed } fr
 
 describe("whether the sidebar is a strip", () => {
   it("follows the window until the operator has chosen", () => {
-    expect(sidebarCollapsed(null, 1100)).toBe(true);
+    expect(sidebarCollapsed(null, 1024)).toBe(true);
     expect(sidebarCollapsed(null, SIDEBAR_COLUMN_MIN - 1)).toBe(true);
     expect(sidebarCollapsed(null, SIDEBAR_COLUMN_MIN)).toBe(false);
     expect(sidebarCollapsed(null, 2560)).toBe(false);
@@ -43,6 +43,6 @@ describe("remembering it", () => {
     vi.stubGlobal("localStorage", { getItem: () => { throw new Error("private"); }, setItem: () => { throw new Error("private"); } });
     expect(() => rememberSidebar(true)).not.toThrow();
     expect(readSidebar(1440)).toBe(false);
-    expect(readSidebar(1100)).toBe(true);
+    expect(readSidebar(1024)).toBe(true);
   });
 });

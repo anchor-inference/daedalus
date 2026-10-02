@@ -16,7 +16,7 @@ import { modelSize as size } from "../format";
 import { plural, t } from "../i18n";
 import { invalidate } from "../store";
 import { errorText, haptic } from "../ui";
-import { Dropdown, Switch } from "../components";
+import { Dropdown, Switch } from "../ui/index";
 import { NumInput, Row } from "../settingsrow";
 import type { SpeechModel, SpeechView } from "../sttview";
 import { fetchSttView, mergeSttView, postSttSelect, sttFrame } from "../sttview";

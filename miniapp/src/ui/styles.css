@@ -1,147 +1,8 @@
-:root {
-  /* Surfaces are ours, not the client theme's: desktop Telegram paints a blue-grey we do not want. */
-  --bg: #0b0b0d;
-  --surface-1: #141416;
-  --surface-2: #1c1c1f;
-  --surface-3: #26262a;
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.14);
-  --fg: var(--tg-theme-text-color, #ededef);
-  --fg-2: #a8a9af;
-  --fg-3: #92939b;
-  --accent: #2dd4bf;
-  --accent-ink: #062e2a;
-  --primary: #ededef;
-  --primary-ink: #0b0b0d;
-  --ok: #5fd68a;
-  --warn: #e8b44c;
-  --bad: #f0625d;
-  --info: #7db4ff;
-  --code: #f5b56e;
-  --code-block: #e8c48a;
-  --surface-4: #303035;
-  --font: -apple-system, "SF Pro Text", Inter, Roboto, "Segoe UI", sans-serif;
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--line-strong);
-  /* The terminal: its own background, a step darker than the page so the pane reads as a surface,
-     and the sixteen ANSI colours programs choose from, tuned to the status colours above. Plain hex
-     only: theme.ts hands these to xterm.js, which cannot read var() or color-mix(). */
-  --term-bg: #09090b;
-  --ansi-0: #1c1c1f; --ansi-1: #f0625d; --ansi-2: #5fd68a; --ansi-3: #e8b44c;
-  --ansi-4: #7db4ff; --ansi-5: #c792ea; --ansi-6: #2dd4bf; --ansi-7: #c8c9ce;
-  --ansi-8: #5c5d66; --ansi-9: #ff8a85; --ansi-10: #8be9a8; --ansi-11: #f5cf7a;
-  --ansi-12: #a6ccff; --ansi-13: #ddb3f5; --ansi-14: #7ee8d9; --ansi-15: #ededef;
-  /* A staff member's colour, one of eight the host hands out by name (daedalus/stores/staff.py). */
-  --staff-blue: #7db4ff; --staff-green: #5fd68a; --staff-amber: #e8b44c; --staff-violet: #c792ea;
-  --staff-rose: #f28bab; --staff-teal: #2dd4bf; --staff-orange: #f59e5b; --staff-slate: #9aa4b5;
-
-  /* ── the scale everything is drawn on ────────────────────────────────────────────────────
-     Type: the UI is 13/14, prose is 15 on a desktop and 16 on a phone; code is 12.5. A rule that
-     wants a size names a step here, never a number — density.test.ts reads this file and refuses
-     a size above 14 outside the answer, the headings and the prose. */
-  --fs-11: 11px;   /* meta-2: timestamps in rows, kbd hints, badge text */
-  --fs-12: 12px;   /* meta: chips, group labels, aside values, table cells, crumbs */
-  --fs-13: 13px;   /* ui: a row's second line, buttons, panel tabs, the composer's footer */
-  --fs-14: 14px;   /* ui-lg: row titles, nav items, headers, step rows, the user's card */
-  --fs-15: 15px;   /* prose on a desktop */
-  --fs-16: 16px;   /* prose on a phone, and any text field on a touch screen (or Safari zooms) */
-  --fs-18: 18px;   /* a sheet's title, the smallest heading in an answer */
-  --fs-20: 20px;   /* the middle heading in an answer */
-  --fs-22: 22px;   /* the top heading in an answer */
-  --fs-mono: 12.5px;
-  --fs-prose: var(--fs-15);
-  --lh-ui: 1.35;
-  --lh-prose: 1.55;
-  /* Space: an 8 px grid with a 4 px half step. */
-  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
-  --space-5: 20px; --space-6: 24px; --space-7: 32px; --space-8: 40px;
-  /* Radius: one family. Pills only for chips and the composer. */
-  --radius-xs: 6px;    /* inline code, kbd, small badges */
-  --radius-sm: 8px;    /* rows, nav items, menu items, icon buttons */
-  --radius-md: 12px;   /* cards, code blocks, sheets on a desktop */
-  --radius-lg: 16px;   /* the user's card, popovers, sheets on a phone */
-  --radius-pill: 999px;
-  /* Rows and controls. A phone gets the touch sizes below. */
-  --row-h: 36px;        /* session rows, nav items, explorer rows, menu items */
-  --row-h-dense: 32px;  /* explorer tree, palette rows, aside rows */
-  --row-h-touch: 44px;  /* phones only: rows and icon buttons */
-  --ctl-h: 32px;        /* icon buttons and buttons on a desktop */
-  --ctl-h-sm: 28px;     /* small icon buttons, small buttons, filter chips */
-  --ctl-h-lg: 40px;     /* the composer's primary circle */
-  --icon: 18px; --icon-sm: 16px; --icon-xs: 14px;
-  --dot: 6px;           /* the status dot in a session row */
-  --avatar: 24px;
-  /* Layout. */
-  --sidebar-w: 272px;   /* dragged between the two below and remembered */
-  --sidebar-w-min: 232px; --sidebar-w-max: 360px;
-  --rail-w: 52px;       /* the rail of icons at the left edge, always there on a desktop */
-  --panel-w: 42%; --panel-w-min: 360px;
-  --pip-w: 240px;       /* the browser's corner preview, 16:10 above a 24 px footer */
-  --reading-w: 760px;   /* prose max width: the answer and the user's card */
-  --chat-w: 920px;      /* the stripe the timeline, the turns and the composer share; it widens below */
-  --head-h: 48px;
-  --page-pad: 14px;     /* a page's side padding; 24 on a desktop, 40 on a wide one */
-  --composer-h: 46px;
-  /* Motion. */
-  --t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms;
-  --ease-out: cubic-bezier(.2, .9, .3, 1); --ease-in: cubic-bezier(.4, 0, 1, 1);
-  /* the names the older rules still use */
-  --radius: var(--radius-md);
-  --r-sm: var(--radius-sm);
-  --r-lg: var(--radius-lg);
-  --tap: var(--row-h-touch);
-  --bg-2: var(--surface-1);
-  --card: var(--surface-1);
-  --card-2: var(--surface-2);
-  --muted: var(--fg-2);
-  --accent-fg: var(--primary-ink);
-}
-/* A thumb, not a pointer: rows and controls grow to the touch size, prose to 16. */
-@media (max-width: 1023px) {
-  :root { --row-h: var(--row-h-touch); --row-h-dense: 40px; --ctl-h: 40px; --ctl-h-sm: 32px; --fs-prose: var(--fs-16); }
-}
-/* A touch tablet is as wide as a desktop and keeps the desktop's rows, but not its controls: a
-   thumb gets the phone's button and chip sizes. At the desktop's 28px a filter chip was the size a
-   mouse wants and too small a target for a finger. */
-@media (pointer: coarse) {
-  :root { --ctl-h: 40px; --ctl-h-sm: 32px; }
-}
-:root[data-tg="1"] { --bg: #000000; }
-:root[data-scheme="light"] {
-  --bg: #f7f7f8;
-  --surface-1: #ffffff;
-  --surface-2: #f1f1f3;
-  --surface-3: #e7e7ea;
-  --surface-4: #dedee2;
-  --line: rgba(0, 0, 0, 0.08);
-  --line-strong: rgba(0, 0, 0, 0.16);
-  --fg: var(--tg-theme-text-color, #141416);
-  --fg-2: #5b5d66;
-  --fg-3: #8e9098;
-  --accent: #0e9f8e;
-  --accent-ink: #ffffff;
-  --primary: #141416;
-  --primary-ink: #ffffff;
-  --ok: #1e9e56;
-  --warn: #b7791f;
-  --bad: #d93b36;
-  --info: #2f6fe0;
-  --code: #7c3f00;
-  --code-block: #3b2a12;
-  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.14), 0 0 0 1px var(--line);
-  /* On a light page "white" (7) and "bright white" (15) are greys, or text in them would vanish. */
-  --term-bg: #fbfbfc;
-  --ansi-0: #141416; --ansi-1: #d93b36; --ansi-2: #1e9e56; --ansi-3: #b7791f;
-  --ansi-4: #2f6fe0; --ansi-5: #9b4dca; --ansi-6: #0e9f8e; --ansi-7: #8e9098;
-  --ansi-8: #5b5d66; --ansi-9: #e0524d; --ansi-10: #25b865; --ansi-11: #c98a26;
-  --ansi-12: #4a84f0; --ansi-13: #b066dd; --ansi-14: #13b3a0; --ansi-15: #b4b5bb;
-  --staff-blue: #2f6fe0; --staff-green: #1e9e56; --staff-amber: #b7791f; --staff-violet: #9b4dca;
-  --staff-rose: #d0456f; --staff-teal: #0e9f8e; --staff-orange: #d46a1c; --staff-slate: #5b667a;
-}
+@import "./tokens.css";
 /* The terminal's typeface, bundled so box drawing and powerline glyphs line up on every machine.
    The file is fetched only when a terminal asks for it (terminal/load.ts), never by the page. */
-@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("./terminal/fonts/JetBrainsMono-Regular.woff2") format("woff2"); }
-@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 700; font-display: swap; src: url("./terminal/fonts/JetBrainsMono-Bold.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("../terminal/fonts/JetBrainsMono-Regular.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 700; font-display: swap; src: url("../terminal/fonts/JetBrainsMono-Bold.woff2") format("woff2"); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 :root[data-motion="reduce"] *, :root[data-motion="reduce"] *::before, :root[data-motion="reduce"] *::after { animation: none !important; transition: none !important; }
@@ -349,7 +210,7 @@ a { color: var(--accent); text-decoration: none; }
 .dialog h3 { margin: 0 0 8px; font-size: var(--fs-16); }
 .dialog-body { color: var(--fg-2); font-size: var(--fs-14); line-height: 1.45; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
-.sheet-backdrop.confirm { align-items: center; justify-content: center; z-index: 40; }
+.sheet-backdrop.confirm { align-items: center; justify-content: center; z-index:var(--z-confirm); }
 .menu-sep { height: 1px; background: var(--line); margin: 4px 0; }
 .menu button { display: flex; align-items: center; gap: 10px; }
 .menu button .ic { color: var(--fg-2); }
@@ -408,7 +269,7 @@ a { color: var(--accent); text-decoration: none; }
 .title-edit { width:100%; font:inherit; font-weight:600; font-size:var(--fs-14); background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:var(--radius-sm); padding:2px 8px; }
 .live-dot { width:7px; height:7px; border-radius:50%; background:var(--info); animation:pulse 1.2s ease-in-out infinite; }
 .head-actions { display:flex; gap:6px; flex:none; }
-.menu { position:absolute; right:10px; top:48px; z-index:38; background:var(--surface-2); border:1px solid var(--line-strong); border-radius:var(--radius-md); padding:4px; min-width:190px; max-width:min(280px,calc(100vw - 16px)); box-shadow:0 12px 30px rgba(0,0,0,.45); display:flex; flex-direction:column; }
+.menu { position:absolute; right:10px; top:48px; z-index:var(--z-menu); background:var(--surface-2); border:1px solid var(--line-strong); border-radius:var(--radius-md); padding:4px; min-width:190px; max-width:min(280px,calc(100vw - 16px)); box-shadow:0 12px 30px rgba(0,0,0,.45); display:flex; flex-direction:column; }
 .menu button { background:none; border:0; color:var(--fg); text-align:left; padding:6px 10px; min-height:var(--row-h); border-radius:var(--radius-sm); font-size:var(--fs-14); cursor:pointer; }
 .menu button:active { background:var(--surface-3); }
 .menu button.danger { color:var(--bad); }
@@ -655,14 +516,14 @@ input.field[readonly] { text-overflow: ellipsis; }
 /* A choice longer than its box ends in an ellipsis. Clipped mid-letter, the voice model's
    "… vllm" read as "vllr", a different word rather than a shortened one. */
 select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
-.toast { position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 45; display: flex; align-items: center; gap: 10px; background: var(--surface-3); color: var(--fg); border: 1px solid var(--line-strong); padding: 8px 10px 8px 16px; border-radius: var(--radius-md); font-size: var(--fs-13); max-width: min(92vw, 460px); box-shadow: var(--shadow-pop); }
+.toast { position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index:var(--z-toast); display: flex; align-items: center; gap: 10px; background: var(--surface-3); color: var(--fg); border: 1px solid var(--line-strong); padding: 8px 10px 8px 16px; border-radius: var(--radius-md); font-size: var(--fs-13); max-width: min(92vw, 460px); box-shadow: var(--shadow-pop); }
 .toast .btn.small { min-height: 30px; padding: 4px 8px; }
 .stat { display: flex; flex-direction: column; gap: 2px; }
 .stat b { font-size: var(--fs-18); font-weight: 600; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
 .summary-inline { margin:4px 0 8px 28px; padding:8px 12px; border:1px solid var(--line); border-radius:var(--radius-md); font-size:var(--fs-14); line-height:1.5; color:var(--muted); max-height:360px; overflow:auto; }
-.sheet-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:30; display:flex; align-items:flex-end; }
+.sheet-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:var(--z-overlay); display:flex; align-items:flex-end; }
 .sheet { width:100%; max-height:88%; background:var(--surface-1); outline:none; border-radius:var(--radius-lg) var(--radius-lg) 0 0; padding:8px 16px calc(16px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; }
 .sheet .grip { width:44px; height:4px; border-radius:2px; background:var(--line); margin:4px auto 10px; }
 .sheet h3 { margin:0 0 10px; font-size:var(--fs-16); }
@@ -867,7 +728,7 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 /* the + and the model list open upward from the pill */
 /* Popovers open upward from the composer. `.menu` itself is `right:10px` for the header overflow;
    without `right:auto` a left-anchored popover is stretched to the window's right edge. */
-.menu.pop { top:auto; right:auto; z-index:35; overflow-y:auto; min-width:200px; width:max-content; max-width:min(340px, 92vw); }
+.menu.pop { top:auto; right:auto; z-index:var(--z-popover); overflow-y:auto; min-width:200px; width:max-content; max-width:min(340px, 92vw); }
 .menu.pop button { display:flex; align-items:center; gap:10px; min-height:var(--row-h); font-size:var(--fs-14); }
 .plus-menu { min-width: 200px; }
 .model-menu { width:min(340px, 92vw); max-height:70vh; overflow-y:auto; }
@@ -1100,7 +961,7 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   /* As tall as the window allows, from its foot to 8 px under the top: capped at 70 % it ended at
      Health on a landscape tablet, with Language, Settings and About below the edge and nothing on
      screen to say the list went on. */
-  .navmenu { display: flex; flex-direction: column; position: fixed; left: calc(var(--rail-w) + 6px); bottom: 8px; z-index: 36; width: 300px; max-height: calc(100dvh - 16px); overflow-y: auto; padding: 6px; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-pop); animation: navmenu-in 160ms var(--ease-out); }
+  .navmenu { display: flex; flex-direction: column; position: fixed; left: calc(var(--rail-w) + 6px); bottom: 8px; z-index:var(--z-navigation); width: 300px; max-height: calc(100dvh - 16px); overflow-y: auto; padding: 6px; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-pop); animation: navmenu-in 160ms var(--ease-out); }
   .navmenu-section { display: flex; flex-direction: column; padding: 2px 0; }
   .navmenu-section + .navmenu-section { border-top: 1px solid var(--line); margin-top: 2px; padding-top: 4px; }
   .navmenu-label { padding: 4px 10px 2px; font-size: var(--fs-11); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-3); }
@@ -1197,7 +1058,8 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .tgroup .settings-row-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; }
 .tgroup-name { font-weight: 600; }
 .tgroup-cost { color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; font-variant-numeric: tabular-nums; }
-.tgroup-use { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
+.tgroup-use { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }
+.tgroup-use-text { min-width: 0; }
 .tgroup-bar { flex: 0 0 56px; height: 4px; border-radius: var(--radius-pill); background: var(--surface-3); overflow: hidden; }
 .tgroup-bar > span { display: block; height: 100%; background: var(--accent); }
 .tgroup-reset-slot { justify-self: end; }
@@ -1358,7 +1220,7 @@ body.resizing iframe { pointer-events: none; }
 .jump-down:hover { background: var(--card-2); }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes sidebar-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
-@keyframes navmenu-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes navmenu-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* ── files the agent looked at or sent, right under the step ───────────────────────────── */
 .tool-attachment { margin: 2px 0 6px 28px; }
@@ -1983,7 +1845,10 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 .settings-disclosure label.field:first-child { margin-top: 4px; }
 .settings-subhead { margin: 18px 0 2px; color: var(--fg-2); font-size: var(--fs-12); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
 /* The compact dropdown (components.tsx): the value and a caret, the list floating over the page. */
-.dropdown { position: relative; display: inline-flex; min-width: 0; max-width: 100%; }
+.dropdown { position: relative; display: inline-flex; min-width: 0; max-width: min(340px, 100%); }
+/* Reserve the control lane independently of how many choices its caption contains. */
+.settings-row-ctl > .dropdown[data-multi] { width: 340px; }
+.settings-row-ctl > .dropdown[data-multi] > .dropdown-btn { width: 100%; justify-content: space-between; }
 .dropdown-btn { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: min(340px, 100%); min-height: var(--ctl-h-sm); padding: 4px 8px 4px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card-2); color: var(--fg); font: inherit; font-size: var(--fs-13); cursor: pointer; }
 .dropdown-btn:hover:not(:disabled) { border-color: var(--line-strong); }
 .dropdown-btn:disabled { opacity: .55; cursor: not-allowed; }
@@ -2012,7 +1877,7 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
   .settings-row:not(.tgroup):has(> .settings-row-ctl > :is(.dropdown, .settings-num, input.field, textarea)) { grid-template-columns: minmax(0, 1fr); }
   .settings-row:not(.tgroup):has(> .settings-row-ctl > :is(.dropdown, .settings-num, input.field, textarea)) > .settings-row-ctl { justify-self: stretch; justify-content: stretch; }
   .settings-row-ctl { flex-wrap: wrap; }
-  .settings-row-ctl > .dropdown { flex: 1 1 100%; }
+  .settings-row-ctl > .dropdown { flex: 1 1 100%; max-width: 100%; }
   .settings-row-ctl > .dropdown > .dropdown-btn { width: 100%; max-width: none; justify-content: space-between; }
   .settings-row-ctl > .dropdown > .dropdown-btn > .dropdown-value { flex: 1; text-align: left; }
   /* The list is as wide as its control, which is as wide as the row: it cannot overhang either edge. */
@@ -2035,8 +1900,21 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 .health-mark.bad { color: var(--bad); }
 .settings-color { display: inline-flex; align-items: center; gap: 8px; }
 .settings-color input { width: 28px; height: 28px; padding: 0; border: 0; background: transparent; }
-.settings-faces { display: flex; flex-direction: column; margin: 4px 0 8px; }
-.settings-faces button { display: flex; align-items: baseline; gap: 8px; min-height: var(--row-h); padding: 0 2px; border: 0; background: transparent; color: var(--fg); text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
+.settings-faces { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); }
+.settings-faces button { display: flex; align-items: baseline; gap: 8px; min-height: var(--row-h); padding: 6px 10px; border: 0; background: transparent; color: var(--fg); text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
+.settings-faces button:hover { background: var(--surface-2); }
+.settings-font { display: flex; flex-direction: column; gap: 16px; }
+.settings-font > .segmented { align-self: flex-start; margin: 0; }
+.settings-font-preview { padding: 16px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+.settings-font-preview h2.settings-specimen { margin: 0 0 8px; }
+.settings-font-catalogue { display: grid; gap: 8px; }
+.settings-font .field { margin: 0; }
+.settings-font-url { display: flex; align-items: center; gap: 10px; padding-top: 16px; border-top: 1px solid var(--line); }
+.settings-font-url .field { flex: 1; min-width: 0; }
+.settings-font-url .btn { flex: none; }
+@media (max-width: 599px) {
+  .settings-font-url { flex-direction: column; align-items: stretch; }
+}
 .settings-faces button.on { background: var(--surface-2); }
 h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500; line-height: 1.35; }
 @media (min-width: 1024px) {
@@ -2543,10 +2421,11 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 .settings-range { display: inline-flex; align-items: center; gap: 10px; }
 .settings-range input[type="range"] { width: 200px; accent-color: var(--accent); }
 
-/* Each card keeps its own height: stretched to the row, a one-button voice beside a long model card
-   ended in a block of empty panel that read as a missing part. */
-.stt-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); align-items: start; gap: 10px; margin-top: 10px; }
+/* Uneven tiles made the catalogue hard to scan. Let the longest description set their height
+   without clipping text, and keep every action at the bottom of its tile. */
+.stt-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); align-items: stretch; grid-auto-rows: 1fr; gap: 10px; margin-top: 10px; }
 .stt-card { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); }
+.stt-card > .btnrow { margin-top: auto; padding-top: 8px; }
 .stt-card.using { background: var(--surface-3); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .stt-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .stt-head b { font-size: var(--fs-14); margin-right: 2px; }
@@ -2593,9 +2472,12 @@ input.field[type="range"] {
 /* The minimum is capped at the column's width and a card may shrink below its content: a card's fix
    command is `white-space: pre`, and with the default `auto` minimum it widened the one phone column
    past the screen, cutting every card's text at the right edge. */
-/* Sized to content for the same reason as the voice cards: a short card stretched to its neighbour
-   was a third empty. */
-.comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); align-items: start; gap: 10px; margin-top: 12px; }
+/* Match catalogue tile sizes so status and capabilities can be compared down the columns. */
+.comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); align-items: stretch; grid-auto-rows: 1fr; gap: 10px; margin-top: 12px; }
+@media (max-width: 599px) {
+  /* A single column does not need matching heights across separate rows. */
+  .comp-grid, .stt-list { grid-auto-rows: auto; }
+}
 /* Tiles on the card's own surface with a hairline, like the rows around them; an installed one is
    marked by its chip, not by a brighter fill that made the grid a patchwork. */
 .comp-card { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: transparent; }
@@ -2792,10 +2674,6 @@ input.field[type="range"] {
 .composer-tools { margin-left:auto; gap:var(--space-1); }
 .composer-tools .roundbtn { margin-left:0; }
 .composer-tools .ctx-ring { display:inline-flex; flex:none; }
-.effort-select { display:inline-flex; align-items:center; gap:var(--space-1); height:var(--ctl-h-sm); max-width:120px; padding:0 var(--space-2); background:var(--surface-2); border:0; border-radius:var(--radius-lg); color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; flex:none; min-width:0; }
-.effort-select:hover, .effort-select.on { color:var(--fg); }
-.effort-select .ic { flex:none; color:var(--fg-3); }
-.menu.pop.effort-menu { width:min(280px, 92vw); }
 .effort-menu .effort-options { margin:0; }
 .composer-place { display:flex; gap:var(--space-2); min-width:0; padding-inline:var(--space-2); }
 .composer-place-chip { display:inline-flex; align-items:center; gap:var(--space-1); min-width:0; color:var(--fg-3); font-size:var(--fs-11); }
@@ -2806,7 +2684,6 @@ input.field[type="range"] {
    the model name is what is cut, never the effort. These sit after the composer's own rules, which
    they would otherwise lose to at equal specificity. */
 @container (max-width: 560px) {
-  .effort-select { max-width:88px; padding-inline:var(--space-1); }
   .composer-row .composer-mode { flex:none; max-width:45%; padding-inline:12px; gap:6px; font-size:var(--fs-12); }
   .composer-row .composer-mode .ic { display:none; }
   .composer-row .model-select { flex:0 1 auto; max-width:none; padding-inline:12px; gap:4px; font-size:var(--fs-12); }
@@ -2855,7 +2732,6 @@ input.field[type="range"] {
 .effort-option { position:relative; }
 .effort-option input { position:absolute; inset:0; width:100%; height:100%; margin:0; opacity:0; cursor:pointer; }
 .effort-option:has(input:focus-visible) { background:var(--surface-3); }
-.composer-steering { padding-inline:var(--space-2); color:var(--accent); font-size:var(--fs-12); }
 .turn-content { display:contents; }
 .turn-content[hidden] { display:none; }
 .loop-turn { border-top:1px solid var(--line-strong); padding-top:var(--space-3); }

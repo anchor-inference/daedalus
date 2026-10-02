@@ -5,7 +5,7 @@ import { type FocusEvent, useEffect, useLayoutEffect, useRef, useState } from "r
 import { api, AsrStatus, Preset, Project, Settings } from "../api";
 import { fieldHeight } from "../composer";
 import { AttachmentCard } from "../composerbox";
-import { EffortSelect } from "../effortselect";
+import { Popover } from "../ui/dialogs";
 import { effortBody, effortOf, presetEffort, type Effort } from "../starteffort";
 import { ModelChoice, ModelSelect } from "../modelselect";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "../voicebar";
@@ -14,7 +14,7 @@ import { NewAgentSheet, SessionsScreen } from "./Sessions";
 import { Icon } from "../icons";
 import { navigate, pathFor, sessionPath, useRoute } from "../router";
 import { invalidate, useQuery } from "../store";
-import { useMedia } from "../shell";
+import { useMedia } from "../ui/index";
 import { enterSends, errorText } from "../ui";
 import { t } from "../i18n";
 
@@ -99,6 +99,8 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
   const { data: asr } = useQuery<AsrStatus>("/api/asr", { staleMs: 60000 });
   const field = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const plusButton = useRef<HTMLButtonElement>(null);
+  const [plusOpen, setPlusOpen] = useState(false);
   const labelOf = (id: string) => {
     const item = presets[id] as Preset | undefined;
     return item ? item.label || `${item.provider}/${item.model}` : id;
@@ -218,7 +220,7 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
   const chooseEffort = (value: string) => setEffort(effortOf(value));
 
   return (
-    <div className="start-composer composer" onDragOver={(event) => { if (event.dataTransfer?.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (!event.dataTransfer?.files.length) return; event.preventDefault(); addFiles(event.dataTransfer.files); }}>
+    <div className="start-composer composer" data-primary="send" onDragOver={(event) => { if (event.dataTransfer?.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (!event.dataTransfer?.files.length) return; event.preventDefault(); addFiles(event.dataTransfer.files); }}>
       <VoiceNoteFailed note={note} />
       <div className={`composer-box ${voiceBar ? "voicing" : ""}`}>
         {voiceBar && <VoiceBar note={note} />}
@@ -253,11 +255,14 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
         />
         <div className="composer-row" hidden={voiceBar}>
           <input ref={fileInput} type="file" multiple hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
-          <button type="button" className="iconbtn flat plus" onClick={() => fileInput.current?.click()} aria-label={t("composer.plus")} title={t("composer.plus")}><Icon name="plus" /></button>
-          <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone}
-            effort={phone && shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={phone ? chooseEffort : undefined} />
+          <button ref={plusButton} type="button" className="iconbtn flat plus" aria-haspopup="menu" aria-expanded={plusOpen} onClick={() => setPlusOpen(!plusOpen)} aria-label={t("composer.plus")} title={t("composer.plus")}><Icon name="plus" /></button>
+          {plusOpen && <Popover anchor={plusButton.current} onClose={() => setPlusOpen(false)} className="plus-menu" label={t("composer.plus")}>
+            <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><Icon name="attach" size={16} />{t("session.attach")}</button>
+            {asr?.configured && <button type="button" role="menuitem" disabled={!note.supported || note.state.phase !== "idle"} onClick={() => { setPlusOpen(false); void note.start(); }}><Icon name="mic" size={16} />{t("session.mic")}</button>}
+          </Popover>}
           <div className="composer-tools">
-            {!phone && <EffortSelect effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChoose={chooseEffort} />}
+            <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone}
+              effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} />
             {asr?.configured && <MicButton note={note} />}
             <button type="button" className="roundbtn primary" onClick={() => void send()} disabled={busy || (!draft.trim() && files.length === 0)} aria-label={t("session.send")}><Icon name="up" /></button>
           </div>

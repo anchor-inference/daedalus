@@ -9,6 +9,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('daedalus', {
   window: true,
   shell: true,
+  pet: (enabled) => ipcRenderer.invoke('daedalus:pet', !!enabled),
+  petState: (state) => ipcRenderer.send('daedalus:pet-state', state),
+  onPetHidden: (callback) => { const listener = () => callback(); ipcRenderer.on('daedalus:pet-hidden', listener); return () => ipcRenderer.removeListener('daedalus:pet-hidden', listener); },
   pickFolder: () => ipcRenderer.invoke('daedalus:pick-folder'),
   openLog: (file) => ipcRenderer.send('daedalus:open-log', String(file || '')),
   retry: () => ipcRenderer.send('daedalus:retry'),

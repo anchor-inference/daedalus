@@ -1,3 +1,6 @@
+import { useRef } from "react";
+import { useContextActions } from "./ui/context-menu";
+import { copyText } from "./ui/components";
 // Orchestration mode's own parts: the left column that lists the main orchestrator and the projects
 // with an orchestrator, and the same list as a page on a phone, where there is no left column. The
 // rules — what belongs to which mode, what the rail's Orchestration item counts — are in mode.ts;
@@ -5,15 +8,14 @@
 
 import type { ProjectFolder, SessionList, SessionSummary } from "./api";
 import { Bell } from "./bell";
-import { Dot } from "./components";
+import { Dot } from "./ui/components";
 import { relTime } from "./format";
 import { plural, t } from "./i18n";
 import { Icon } from "./icons";
-import { PaneHandle, type PaneDrag } from "./layout";
 import { MainEntry } from "./main/MainEntry";
 import { useMain } from "./main/data";
 import { orchestratedProjects, waitingInOrchestration } from "./mode";
-import { ORCHESTRATION, projectHome } from "./router";
+import { ORCHESTRATION, navigate, projectHome } from "./router";
 import { FoldButton } from "./sidebar";
 import { PageHeader, go, useMedia } from "./shell";
 import { useQuery } from "./store";
@@ -45,9 +47,11 @@ function ProjectRow({ project, sessions }: { project: ProjectFolder; sessions: S
     : orchestrator?.status === "running" ? t("orch.row.working")
     : orchestrator?.status === "waiting" ? t("orch.row.waiting")
     : project.last_message_at ? relTime(project.last_message_at) : t("orch.row.idle");
+  const row = useRef<HTMLAnchorElement>(null);
+  useContextActions(row, [{ label:t("focus.entry.open", { name:project.name }), icon:"folder", onSelect:() => navigate(href) }, { label:t("context.copyLink"), icon:"link", onSelect:() => void copyText(new URL(href, location.href).href) }]);
   const meta = [state, plural("team.count.staff", o.staff), o.working > 0 ? plural("team.count.working", o.working) : ""].filter(Boolean).join(" · ");
   return (
-    <a className="orch-row" href={href} onClick={(e) => go(e, href)} title={t("focus.entry.open", { name: project.name })} data-project={project.id}>
+    <a ref={row} className="orch-row" href={href} onClick={(e) => go(e, href)} title={t("focus.entry.open", { name: project.name })} data-project={project.id}>
       <span className="orch-row-icon"><Icon name="conductor" size={15} /></span>
       <span className="orch-row-text">
         <span className="orch-row-name truncate">{project.name}</span>
@@ -81,7 +85,6 @@ export type OrchestrationSidebarProps = {
   /** The main chat is open. */
   onMain: boolean;
   onToggle: () => void;
-  drag: PaneDrag;
 };
 
 /** The left column in orchestration mode. It keeps the Agents column's frame — the brand row with the
@@ -99,7 +102,6 @@ export function OrchestrationSidebar(p: OrchestrationSidebarProps) {
       <div className="sidebar-body orch-body">
         <OrchestrationRows onMain={p.onMain} />
       </div>
-      <PaneHandle side="right" drag={p.drag} />
     </nav>
   );
 }

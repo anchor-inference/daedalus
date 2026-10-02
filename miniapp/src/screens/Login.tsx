@@ -4,7 +4,7 @@ import * as passkeys from "../passkeys";
 import { Icon } from "../icons";
 import { errorText } from "../ui";
 import { t, useLang } from "../i18n";
-import { LangPicker } from "../components";
+import { LangPicker } from "../ui/index";
 
 declare global {
   interface Window {

@@ -7,11 +7,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, TerminalList, TerminalView as TerminalRow } from "../api";
-import { MenuItem, OverflowMenu } from "../dialogs";
+import { MenuItem, OverflowMenu } from "../ui/dialogs";
 import { t } from "../i18n";
 import { Icon } from "../icons";
 import { back, navigate, pathFor, projectPagePath, sessionPath } from "../router";
-import { useMedia } from "../shell";
+import { useMedia } from "../ui/index";
 import { invalidate, useQuery } from "../store";
 import { errorText } from "../ui";
 import { endTerminal } from "../terminal/actions";

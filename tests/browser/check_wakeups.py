@@ -75,6 +75,8 @@ def panel(page: Page, lang: str) -> None:
     expect(sheet).to_have_count(0)
     sent = focus.woken[-1]
     assert set(sent) == {"note", "cron"} and len(sent["cron"].split()) == 5 and sent["cron"].endswith("* * *"), sent
+    # Closing the form precedes the list's refetch; count only after the new row has landed.
+    expect(page.locator(".panel .wakeup-row", has_text=words["note"] + " 2")).to_be_visible()
 
     # Cancelled from its row.
     count = page.locator(".panel .wakeup-row").count()

@@ -4,7 +4,7 @@
 // confirmed, never refused — so the same request goes again with `confirm: true` once they agree.
 
 import { api, ApiError, TerminalCreate, TerminalView } from "../api";
-import { confirmDialog } from "../dialogs";
+import { confirmDialog } from "../ui/dialogs";
 import { t } from "../i18n";
 import { errorText } from "../ui";
 

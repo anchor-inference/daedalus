@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { api, ApiError, type MediaPresentation } from "../api";
-import { timeAgo } from "../components";
+import { timeAgo } from "../ui/components";
 import { Icon, type IconName } from "../icons";
 import { t, useLang } from "../i18n";
 import { renderMarkdown } from "../md";

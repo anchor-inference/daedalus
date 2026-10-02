@@ -1,8 +1,9 @@
+import { useContextActions } from "../ui/context-menu";
 import { Component, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { api, ApiError, AsrStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, MessageView, RunOutcome, SessionDetail, Compacting } from "../api";
-import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../components";
-import { MenuItem, OverflowMenu, Popover, confirmDialog, Overlay } from "../dialogs";
+import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
+import { MenuItem, OverflowMenu, Popover, confirmDialog, Overlay } from "../ui/dialogs";
 import { absDate, clock, commandPreview, duration, plainPreview, shortDateTime } from "../format";
 import { EVIDENCE_EVENT, EvidenceRequest, codeBlock, renderCached, renderMarkdown } from "../md";
 import { confirmAsync, errorText, fmtBytes, haptic } from "../ui";
@@ -27,7 +28,7 @@ import { JobsTab } from "../jobs";
 import { markAnchor, navigate, pathFor, projectHome, projectSessionPath, useAnchor, useRoute } from "../router";
 import { turnFor, withOlder } from "../anchor";
 import { ChatSearch } from "../chatsearch";
-import { useMedia } from "../shell";
+import { useMedia } from "../ui/index";
 import { SCROLL_KEYS, Windowed, keepOpened, openedLine, stillAtEnd, type OpenedLine, type WindowedHandle } from "../virtual";
 import { DICT, plural, t } from "../i18n";
 import { groupDetail, groupName, searchedGroup } from "../toolgroups";
@@ -2011,8 +2012,14 @@ function MessageActions({ text, actions = [], more }: { text: string; actions?: 
     setCopied(await copyText(text));
     window.setTimeout(() => setCopied(false), 1600);
   };
+  const controls = useRef<HTMLDivElement>(null);
+  const context = useRef<HTMLElement>(null);
+  useEffect(() => {
+    context.current = controls.current?.closest<HTMLElement>(".msg-wrap") ?? controls.current?.parentElement?.querySelector<HTMLElement>(".answer") ?? null;
+  });
+  useContextActions(context, [{ label:t("common.copy"), icon:"copy", onSelect:() => void copy() }, ...actions, ...(more ?? [])]);
   return (
-    <div className="msg-actions">
+    <div ref={controls} className="msg-actions">
       <button className="iconbtn small" onClick={copy} aria-label={t(copied ? "common.copied" : "common.copy")} title={t(copied ? "common.copied" : "common.copy")}>
         <Icon name={copied ? "check" : "copy"} size={15} />
         {phone && <span>{t(copied ? "common.copied" : "common.copy")}</span>}

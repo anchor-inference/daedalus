@@ -17,7 +17,7 @@ def run() -> None:
             page = open_page(context, phone=True)
             assert page.locator(".thinking-head").last.get_attribute("aria-expanded") == "false"
             assert page.locator(".activity").count() == 0
-            assert page.locator(".composer-steering").is_visible()
+            assert page.locator(".composer textarea").get_attribute("placeholder") == "Steer the agent…"
             assert page.locator(".composer .model-select").count() == 0
             assert page.locator(".composer .effort-select").count() == 0
             assert page.locator(".head-actions > button[aria-pressed]").count() == 0
@@ -45,6 +45,7 @@ def run() -> None:
             page.locator(".composer textarea").fill("")
             assert page.locator(".composer-box").bounding_box()["height"] <= 130
             page.locator(".composer .model-select").click()
+            page.locator(".effort-entry").click()
             assert page.locator('.sheet input[type="radio"]').count() == 5
             for label in page.locator(".effort-option").all():
                 # Rounded: a row of exactly the touch height at a fractional top measures 43.99997.
@@ -54,7 +55,7 @@ def run() -> None:
             assert HOST.effort == "high"
             if os.environ.get("SHOTS"):
                 page.screenshot(path=f"{os.environ['SHOTS']}/mobile-settings-{width}.png")
-            page.keyboard.press("Escape")
+            assert page.locator(".model-list").count() == 0
             assert page.locator(".model-select").evaluate("el => el === document.activeElement")
             if os.environ.get("SHOTS"):
                 page.screenshot(path=f"{os.environ['SHOTS']}/mobile-chat-{width}.png")

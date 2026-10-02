@@ -1,15 +1,16 @@
+import { useContextActions } from "../ui/context-menu";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, Project, ProjectFolder, SessionList, SessionSummary, Settings } from "../api";
 import { agentFolders, folderName, offersFolderChoice, projectPath, projectReachable } from "../folders";
-import { Avatar, Dot, Skeleton, Status, ToolPicker, fmtInterval, statusWord } from "../components";
-import { OverflowMenu, Sheet, confirmDialog, toast } from "../dialogs";
+import { Avatar, Dot, Skeleton, Status, ToolPicker, fmtInterval, statusWord } from "../ui/components";
+import { OverflowMenu, Sheet, confirmDialog, toast } from "../ui/dialogs";
 import { relTime, shortModel, untilShort } from "../format";
 import { Folder, Row as RowModel, agentName, arrange, folderOpen, rememberFolder } from "../grouping";
 import { Icon } from "../icons";
 import { MoveSessionSheet, ProjectChip, ProjectSettingsSheet, useProjects } from "../projects";
 import { navigate, parse, pathFor } from "../router";
 import { agentsListing } from "../mode";
-import { PageHeader, go, screenTitle } from "../shell";
+import { PageHeader, go, screenTitle } from "../ui/index";
 import { invalidate, useQuery } from "../store";
 import { useStreamUp } from "../events";
 import { WindowedRows } from "../virtual";
@@ -120,7 +121,7 @@ export function SessionsScreen({ onOpen, toast, current, compact, bare, project 
           <div className="empty">
             <b>{inProject ? t("agents.empty.project", { name: inProject.name }) : t("agents.empty")}</b>
             <div>{inProject ? t("agents.empty.project.sub", { root: projectPath(inProject) }) : t("agents.empty.sub")}</div>
-            <button className="btn primary" onClick={() => setCreating(true)}>{t("agents.empty.create")}</button>
+            {!compact && <button className="btn primary" onClick={() => setCreating(true)}>{t("agents.empty.create")}</button>}
           </div>
         )}
         {((results && !pending && folders.shown === 0) || (!searching && data && folders.total > 0 && folders.shown === 0)) && <div className="empty">{t("common.nothing")}</div>}
@@ -217,6 +218,11 @@ export const FolderSection = memo(function FolderSection({ folder, onOpen, curre
     setOpen(next);
     rememberFolder(folder.key, next);
   };
+  useContextActions(section, [
+    { label:t("agents.new"), icon:"plus", onSelect:() => setAdding(true) },
+    { label:t("project.settings.for", { name:folder.name }), icon:"settings", onSelect:editProject },
+    { label:t(showing ? "agents.folder.hide" : "agents.folder.show", { name:folder.name }), onSelect:toggle },
+  ]);
   // The Voice folder is the home of the voice agents, but the word in the list is the mode: the row
   // goes to the voice screen and the chevron beside it — its own button, with its own label — is
   // what opens the list of agents underneath, even when there is only one. Ordinary projects
@@ -462,7 +468,7 @@ function SessionRowMenu({ session, onProject, projectName }: { session: SessionS
     } catch (error) { toast(errorText(error)); }
   }
   return <span className="session-row-menu" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-    <OverflowMenu small className="quiet" label={`${session.title}: ${t("dlg.menu")}`} items={[
+    <OverflowMenu contextSelector="[data-session]" small className="quiet" label={`${session.title}: ${t("dlg.menu")}`} items={[
       { label: t("session.rename"), icon: "pen", onSelect: () => { setTitle(session.title); setEditing(true); } },
       { label: t("session.project.move"), icon: "folder", onSelect: () => setMoving(true) },
       ...(onProject ? [{ label: t("project.settings.for", { name: projectName ?? session.project }), onSelect: onProject }] : []),

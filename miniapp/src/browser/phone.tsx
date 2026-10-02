@@ -14,7 +14,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { BrowserGroup } from "../api";
-import { dismissToast, Popover, toast as statusToast } from "../dialogs";
+import { dismissToast, Popover, toast as statusToast } from "../ui/dialogs";
 import { t } from "../i18n";
 import { Icon } from "../icons";
 import { useLiveSnapshot, useLiveView } from "./data";

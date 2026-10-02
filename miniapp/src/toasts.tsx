@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import type { AppEvent, Notification } from "./api";
-import { toast as statusLine } from "./dialogs";
+import { toast as statusLine } from "./ui/dialogs";
 import { type EventMeta, useEvent } from "./events";
 import { Icon } from "./icons";
 import { setPopupsShown, usePopupsShown } from "./popups";

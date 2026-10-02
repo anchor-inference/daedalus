@@ -17,7 +17,7 @@ import { Icon } from "../icons";
 import { size } from "../loadbar";
 import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
-import { Dropdown, Switch, timeAgo } from "../components";
+import { Dropdown, Switch, timeAgo } from "../ui/components";
 import { Row } from "../settingsrow";
 import { ProcedureEditor } from "../browser/steps";
 

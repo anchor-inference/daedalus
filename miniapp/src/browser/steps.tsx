@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BrowserDraft, BrowserSiteNote, BrowserStep, BrowserWorkflow } from "../api";
-import { Popover } from "../dialogs";
+import { Popover } from "../ui/dialogs";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { confirmAsync, errorText, haptic } from "../ui";

@@ -3,8 +3,8 @@
 
 import { useState } from "react";
 import { api, ShareMode, ShareView } from "./api";
-import { copyText } from "./components";
-import { Sheet } from "./dialogs";
+import { copyText } from "./ui/components";
+import { Sheet } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { t } from "./i18n";
 import { confirmAsync, errorText } from "./ui";

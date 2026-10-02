@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "./api";
 import { snippetParts } from "./anchor";
-import { Popover } from "./dialogs";
+import { Popover } from "./ui/dialogs";
 import { shortDateTime } from "./format";
 import { t } from "./i18n";
 import { Icon } from "./icons";

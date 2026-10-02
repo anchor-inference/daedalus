@@ -2,11 +2,12 @@
 // that says what happens, an overflow menu, and a toast that can undo. Escape closes the top one,
 // focus goes in and comes back to the control that opened it.
 
+import { useContextActions } from "./context-menu";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useMoreBelow } from "./edgefade";
-import { Icon, IconName } from "./icons";
-import { t } from "./i18n";
+import { useMoreBelow } from "../edgefade";
+import { Icon, IconName } from "../icons";
+import { t } from "../i18n";
 
 // ── sheet ────────────────────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,15 @@ export function useLayer(onEscape: () => void) {
   }, []);
 }
 
+function trapDialogTab(e: React.KeyboardEvent<HTMLDivElement>) {
+  if (e.key !== "Tab") return;
+  const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex='0']")).filter((el) => el.getClientRects().length > 0);
+  if (!items.length) { e.preventDefault(); return; }
+  const index = items.indexOf(document.activeElement as HTMLElement);
+  if (e.shiftKey && index <= 0) { e.preventDefault(); items[items.length - 1].focus(); }
+  else if (!e.shiftKey && (index < 0 || index === items.length - 1)) { e.preventDefault(); items[0].focus(); }
+}
+
 export function Sheet({ title, ariaLabel, onClose, children, size, className, head }: { title?: ReactNode; ariaLabel?: string; onClose: () => void; children: ReactNode; size?: "wide" | "narrow" | "full"; className?: string; head?: ReactNode }) {
   const panel = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
@@ -55,7 +65,7 @@ export function Sheet({ title, ariaLabel, onClose, children, size, className, he
   return (
     <Overlay>
       <div className="sheet-backdrop" onClick={(e) => { e.stopPropagation(); onClose(); }}>
-      <div ref={panel} tabIndex={-1} className={`sheet ${size ?? ""} ${className ?? ""}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : ariaLabel}>
+      <div ref={panel} tabIndex={-1} className={`sheet ${size ?? ""} ${className ?? ""}`} onClick={(e) => e.stopPropagation()} onKeyDown={trapDialogTab} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : ariaLabel}>
         <div className="grip" />
         <div className="sheet-head">
           {title && <h3>{title}</h3>}
@@ -175,11 +185,12 @@ function ConfirmDialog({ pending, onDone }: { pending: Pending; onDone: (ok: boo
 export type MenuItem = { label: string; icon?: IconName; danger?: boolean; warn?: boolean; disabled?: boolean; hint?: string; checked?: boolean; onSelect: () => void } | "-";
 
 /** With `trigger`, the button is that content (a title with a chevron) rather than an icon. */
-export function OverflowMenu({ items, label, icon = "more", small, className, trigger: customTrigger }: { items: MenuItem[]; label?: string; icon?: IconName; small?: boolean; className?: string; trigger?: ReactNode }) {
+export function OverflowMenu({ items, label, icon = "more", small, className, trigger: customTrigger, contextSelector }: { contextSelector?: string; items: MenuItem[]; label?: string; icon?: IconName; small?: boolean; className?: string; trigger?: ReactNode }) {
   const name = label ?? t("dlg.menu");
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  useContextActions(trigger, items, contextSelector);
   const [pos, setPos] = useState<{ top?: number; bottom?: number; right?: number; left?: number } | null>(null);
   /** Put the menu against the trigger as it stands now. Called again on the scroll that opened it. */
   const place = useCallback(() => {
@@ -325,11 +336,13 @@ export function Popover({ anchor, onClose, children, className, align = "left", 
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      if (e.key === "Tab") { onClose(); return; }
+      if (e.target instanceof HTMLInputElement && e.target.type !== "radio" && e.key !== "ArrowDown") return;
+      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
       const buttons = Array.from(box.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []);
       if (!buttons.length) return;
       const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
-      const next = e.key === "ArrowDown" ? buttons[(i + 1) % buttons.length] : buttons[(i - 1 + buttons.length) % buttons.length];
+      const next = e.key === "Home" ? buttons[0] : e.key === "End" ? buttons[buttons.length - 1] : e.key === "ArrowDown" ? buttons[(i + 1) % buttons.length] : buttons[(i - 1 + buttons.length) % buttons.length];
       next.focus();
       e.preventDefault();
     };
@@ -348,7 +361,7 @@ export function Popover({ anchor, onClose, children, className, align = "left", 
   // and the arrow keys started from nowhere.
   const placed = pos !== null;
   useEffect(() => {
-    if (placed) box.current?.querySelector<HTMLElement>("input, button:not(:disabled), [role='slider']")?.focus();
+    if (placed) box.current?.querySelector<HTMLElement>(".model-search, [aria-checked='true'], input:checked, button[aria-current='true'], button:not(:disabled), input, [role='slider']")?.focus();
   }, [placed]);
   return createPortal(
     <div ref={box} className={`menu pop ${className ?? ""}`} role="menu" aria-label={label} style={{ position: "fixed", top: pos?.top ?? 8, bottom: "auto", left: pos?.left ?? 8, right: "auto", maxHeight: pos?.maxHeight, visibility: pos ? "visible" : "hidden" }} onClick={(e) => e.stopPropagation()}>

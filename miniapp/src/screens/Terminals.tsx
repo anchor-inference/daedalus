@@ -1,3 +1,4 @@
+import { useContextActions } from "../ui/context-menu";
 // The Terminals screen: every terminal on the machine as a card with the last rows of its screen, by
 // project, with the load bar in the header and a way to open a free one. The cards are read from the
 // host's listing (`?preview=6`), never from a connection: forty cards must not hold forty sockets.
@@ -6,14 +7,14 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useEdgeFade } from "../edgefade";
 import { api, Project, SessionList, TerminalEnv, TerminalEnvName, TerminalList, TerminalLoad, TerminalView as TerminalRow } from "../api";
-import { Skeleton } from "../components";
-import { Sheet } from "../dialogs";
+import { Skeleton } from "../ui/index";
+import { Sheet } from "../ui/dialogs";
 import { primaryFolder } from "../folders";
 import { t } from "../i18n";
 import { Icon } from "../icons";
 import { LoadBar } from "../loadbar";
 import { navigate, pathFor } from "../router";
-import { PageHeader, screenTitle } from "../shell";
+import { PageHeader, screenTitle } from "../ui/index";
 import { invalidate, peek, useQuery } from "../store";
 import { errorText } from "../ui";
 import { createTerminalConfirmed } from "../terminal/actions";
@@ -154,8 +155,14 @@ function TerminalCard({ row, projectName, onRemove }: { row: TerminalRow; projec
   const live = running(row);
   const open = () => navigate(terminalPath(row.id));
   const action = live && row.activity?.action;
+  const card = useRef<HTMLElement>(null);
+  useContextActions(card, [
+    { label:t("term.card.open"), icon:"terminal", onSelect:open },
+    ...(action ? [{ label:action.kind === "answer" ? t("term.card.answer") : action.label, onSelect:() => navigate(action.path) }] : []),
+    ...(!live ? [{ label:t("term.remove"), icon:"trash" as const, onSelect:onRemove }] : []),
+  ]);
   return (
-    <article className={`term-card ${row.env === "host" ? "host" : ""} ${live ? "" : "finished"}`} data-terminal={row.id}>
+    <article ref={card} className={`term-card ${row.env === "host" ? "host" : ""} ${live ? "" : "finished"}`} data-terminal={row.id}>
       <button className="term-card-open" onClick={open} aria-label={t("term.open", { title: row.title })}>
         <div className="term-card-head">
           <span className="term-card-title truncate">{row.title || t("term.untitled")}</span>

@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { api, MessageView, TaskView } from "./api";
-import { timeAgo } from "./components";
+import { timeAgo } from "./ui/components";
 import { codeBlock } from "./md";
 import { Icon } from "./icons";
 import { PanelEntry } from "./panel";

@@ -17,7 +17,7 @@ import { relTime, relTimeLong } from "../format";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { navigate, pathFor } from "../router";
-import { PageHeader, screenTitle, useMedia } from "../shell";
+import { PageHeader, screenTitle, useMedia } from "../ui/index";
 import { invalidate, prime, useQuery } from "../store";
 import { HarnessBadge } from "../team/parts";
 import type { Harness } from "../team/team";

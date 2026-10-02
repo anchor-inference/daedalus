@@ -16,7 +16,7 @@ import type { RefObject } from "react";
 import { plural, t } from "./i18n";
 import { Icon, type IconName } from "./icons";
 import { type Mode, modeHome } from "./mode";
-import { menuSections } from "./navigation";
+import { DESKTOP_PLACES, menuSections } from "./navigation";
 import { type Screen, pathFor } from "./router";
 import { type SelfDevMode, visibleScreens } from "./capabilities";
 import { type Counts, ICONS, countFor, go, screenTitle } from "./shell";
@@ -30,9 +30,10 @@ export const KEYS = { sidebar: MAC ? "⌘ \\" : "Ctrl \\", menu: MAC ? "⌘ ⇧ 
 const ACCOUNT = "security";
 
 /** The destinations under the two modes, in the operator's order. */
-const PLACES: Screen[] = ["terminals", "board", "inbox", "services"];
+const PLACES = DESKTOP_PLACES;
 
 export type RailProps = {
+  onSearch: () => void;
   screen: Screen;
   /** The route's detail: Settings' security section is the account. */
   detail: string | null;
@@ -63,7 +64,8 @@ function Item({ href, icon, label, on, mode = false, badge, quiet, data }: { hre
   const counted = badge ? `${label} · ${badge}` : quiet ? `${label} · ${plural("mode.waiting", quiet)}` : label;
   return (
     <a className={`rail-item ${on ? "on" : ""} ${mode ? "mode" : ""}`} href={href} onClick={(e) => go(e, href)} aria-label={counted} aria-current={on ? "page" : undefined} data-rail={data}>
-      <Icon name={icon} size={20} />
+      <Icon name={icon} size={18} />
+      <span className="rail-label">{label}</span>
       {!!badge && <span className="rail-badge" data-count={badge} aria-hidden>{badge > 99 ? "99+" : badge}</span>}
       {!badge && !!quiet && <span className="rail-badge quiet" data-waiting={quiet} aria-hidden>{quiet > 99 ? "99+" : quiet}</span>}
       <Tip text={counted} />
@@ -91,7 +93,7 @@ export function Rail(p: RailProps) {
     />
   );
   return (
-    <nav className="rail" aria-label={t("rail.label")}>
+    <nav className={`rail ${p.collapsed ? "collapsed" : "expanded"}`} aria-label={t("rail.label")}>
       {p.collapsed ? (
         <button className="rail-item rail-home folded" onClick={p.onToggle} aria-label={t("rail.toggle")} aria-expanded={false} data-rail="home">
           <span className="rail-unfold"><Icon name="columns" size={18} /></span>
@@ -101,24 +103,24 @@ export function Rail(p: RailProps) {
       ) : (
         <a className="rail-item rail-home" href={home} onClick={(e) => go(e, home)} aria-label={t("rail.home")} data-rail="home">
           <img src="/app/icons/icon-192.png" alt="" width={24} height={24} />
+          <span className="rail-label rail-brand">Daedalus</span>
           <Tip text={t("rail.home")} />
         </a>
       )}
-      <div className="rail-gap" />
-      {modeItem("agents")}
-      {modeItem("orchestration")}
+      <button className="rail-item rail-search" onClick={p.onSearch} aria-label={t("shell.search.label")}><Icon name="search" size={18} /><Tip text={t("shell.search.label")} /></button>
+      <div className="rail-modes">{modeItem("agents")}{modeItem("orchestration")}</div>
       <div className="rail-rule" />
-      {visibleScreens(PLACES, p.selfdev).map((s) => (
+      <div className="rail-places">{visibleScreens(PLACES, p.selfdev).map((s) => (
         <Item key={s} data={s} href={pathFor(s)} icon={ICONS[s]} label={screenTitle(s)} on={p.screen === s} badge={countFor(s, p.counts)} />
-      ))}
+      ))}</div>
       <div className="rail-foot">
         <button ref={p.menuButton} className={`rail-item ${p.menuOpen || inMenu ? "on" : ""}`} onClick={p.onMenu} aria-label={t("nav.menu")} aria-haspopup="menu" aria-expanded={p.menuOpen} data-rail="menu">
-          <Icon name="more" size={20} />
+          <Icon name="more" size={18} /><span className="rail-label">{t("nav.more")}</span>
           {(p.counts.changes ?? 0) > 0 && <span className="rail-dot" aria-hidden />}
           <Tip text={t("nav.menu")} keys={KEYS.menu} />
         </button>
         <Item data="settings" href={pathFor("settings")} icon="settings" label={screenTitle("settings")} on={p.screen === "settings" && p.detail !== ACCOUNT} />
-        <Item data="account" href={pathFor("settings", ACCOUNT)} icon="user" label={t("rail.account")} on={p.screen === "settings" && p.detail === ACCOUNT} />
+
       </div>
     </nav>
   );

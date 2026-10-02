@@ -8,7 +8,6 @@ import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { retried } from "./chunks";
 import type { Project } from "./api";
 import { Icon } from "./icons";
-import { PaneHandle, type PaneDrag } from "./layout";
 import { pathFor } from "./router";
 import { go } from "./shell";
 import { t } from "./i18n";
@@ -20,7 +19,6 @@ export type SidebarProps = {
   session: string | null;
   /** Folds the column away; the rail's Home unfolds it. */
   onToggle: () => void;
-  drag: PaneDrag;
   projects: Project[];
   project: string;
   onProjects: () => void;
@@ -53,7 +51,6 @@ export function Sidebar(p: SidebarProps) {
           <SessionsScreen onOpen={p.onOpen} toast={p.toast} current={p.session ?? undefined} compact project={p.project} projects={p.projects} onProjects={p.onProjects} />
         </Suspense>
       </div>
-      <PaneHandle side="right" drag={p.drag} />
     </nav>
   );
 }

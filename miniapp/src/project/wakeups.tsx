@@ -5,8 +5,8 @@
 
 import { useState } from "react";
 import { api, type ProjectWatch, type Wakeup, type WatchList } from "../api";
-import { Skeleton } from "../components";
-import { Sheet } from "../dialogs";
+import { Skeleton } from "../ui/components";
+import { Sheet } from "../ui/dialogs";
 import { absTime, describeCron, relTime, relTimeLong, untilShort } from "../format";
 import { t } from "../i18n";
 import { Icon } from "../icons";

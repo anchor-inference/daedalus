@@ -5,8 +5,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import { Skeleton, copyText } from "../components";
-import { OverflowMenu, Sheet } from "../dialogs";
+import { Skeleton, copyText } from "../ui/components";
+import { OverflowMenu, Sheet } from "../ui/dialogs";
 import { useEvent, useStreamUp } from "../events";
 import { absTime, relTime } from "../format";
 import { Icon } from "../icons";

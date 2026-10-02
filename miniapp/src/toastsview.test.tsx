@@ -7,7 +7,7 @@ import { act } from "react";
 import { createRoot, Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppEvent, Notification } from "./api";
-import { ToastHost } from "./dialogs";
+import { ToastHost } from "./ui/dialogs";
 import { popupsShown, setPopupsShown } from "./popups";
 import { GLANCE_MS, NotificationToasts, TOAST_MS } from "./toasts";
 

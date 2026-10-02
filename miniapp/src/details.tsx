@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, LoopView, ProviderUsage, Schedule, SessionDetail } from "./api";
 import { projectPath } from "./folders";
-import { Dot, ServiceRow, ToolPicker, copyText, fmtInt, fmtUsd, loopLabel, statusWord, timeAgo } from "./components";
+import { Dot, ServiceRow, ToolPicker, copyText, fmtInt, fmtUsd, loopLabel, statusWord, timeAgo } from "./ui/components";
 import { readLayout, writeLayout } from "./layout";
 import { clock, planName, relTimeLong, shortDateTime, untilShort } from "./format";
 import { Icon } from "./icons";

@@ -7,7 +7,7 @@
 // visibility, and when the window gains focus.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { confirmDialog, Popover, toast } from "../dialogs";
+import { confirmDialog, Popover, toast } from "../ui/dialogs";
 import { plural, t } from "../i18n";
 import { Icon, IconName } from "../icons";
 import { connectionText } from "./status";

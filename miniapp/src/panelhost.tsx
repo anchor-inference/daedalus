@@ -4,7 +4,7 @@
 // The state is a value (panel.ts); this file draws it and wires the pointer and the keys.
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Sheet, useLayer } from "./dialogs";
+import { Sheet, useLayer } from "./ui/dialogs";
 import { useEdgeFade, useMoreBelow } from "./edgefade";
 import { Icon, IconName } from "./icons";
 import {

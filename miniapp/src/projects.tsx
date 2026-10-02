@@ -1,3 +1,4 @@
+import { openContextMenu } from "./ui/context-menu";
 // Projects: a named home for agents and their files. The switcher lives in
 // the shell (the sidebar on a desktop, the Agents header on a phone) because a project is a lens
 // over every list of agents, not a destination of its own.
@@ -5,7 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, Project, ProjectDir, ProjectEnvironments } from "./api";
 import { folderName, needsMount, pathProblem, projectPath, projectReachable, reachIsProblem, reachKey } from "./folders";
-import { Sheet } from "./dialogs";
+import { Sheet } from "./ui/dialogs";
 import { EnvPill } from "./envpill";
 import { Icon } from "./icons";
 import { navigate, projectPagePath } from "./router";
@@ -74,7 +75,22 @@ export function ProjectSwitcher({ projects, current, onPick, onClose, toast }: {
         {!current && <Icon name="check" size={16} />}
       </button>
       {projects.map((p) => (
-        <div key={p.id} className={`project-row ${p.id === current ? "on" : ""}`}>
+        <div key={p.id} className={`project-row ${p.id === current ? "on" : ""}`} onKeyDown={(event) => {
+          if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+          event.preventDefault();
+          const rect = event.currentTarget.getBoundingClientRect();
+          event.currentTarget.dispatchEvent(new MouseEvent("contextmenu", { bubbles:true, cancelable:true, clientX:rect.left + 12, clientY:rect.bottom }));
+        }} onContextMenu={(event) => {
+          event.preventDefault(); event.stopPropagation();
+          openContextMenu({ x:event.clientX, y:event.clientY, owner:event.currentTarget.querySelector<HTMLElement>("button")!, items:[
+            { label:p.name, icon:"folder", onSelect:() => pick(p.id) },
+            ...(!p.system && !p.settings.ephemeral ? [
+              { label:t("project.team.for", { name:p.name }), icon:"bots" as const, onSelect:() => { onClose(); navigate(projectPagePath(p.id, "team")); } },
+              { label:t("project.board.for", { name:p.name }), icon:"board" as const, onSelect:() => { onClose(); navigate(projectPagePath(p.id, "board")); } },
+            ] : []),
+            { label:t("project.settings.for", { name:p.name }), icon:"settings", onSelect:() => setEditing(p) },
+          ] });
+        }}>
           <button className="grow project-pick" onClick={() => pick(p.id)}>
             <span className="project-name truncate">
               {p.name}

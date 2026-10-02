@@ -97,24 +97,34 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
 
     # The effort: the preset's own first, then a pick.
     model = composer.locator(".model-select")
-    if phone:
-        expect(model.locator(".model-effort")).to_contain_text(words["high"])
-        model.tap()
-        page.locator(".model-sheet .effort-option input[value='low']").check()
-        expect(model.locator(".model-effort")).to_contain_text(words["low"])
-        page.keyboard.press("Escape")
-        page.wait_for_selector(".model-sheet", state="detached", timeout=3000)
-    else:
-        effort = composer.locator(".effort-select")
-        expect(effort).to_contain_text(words["high"])
-        effort.click()
-        page.locator(".effort-menu .effort-option input[value='low']").click()
-        expect(effort).to_contain_text(words["low"])
+    expect(model.locator(".model-effort")).to_contain_text(words["high"])
+    model.click()
+    page.locator(".effort-entry").click()
+    page.locator(".effort-menu .effort-option input[value='low']").click()
+    expect(model.locator(".model-effort")).to_contain_text(words["low"])
+    expect(page.locator(".model-list")).to_have_count(0)
+
+    # Switching from idle voice to typed Send must reserve exactly the same toolbar geometry.
+    field = composer.locator("textarea")
+    field.fill("")
+    empty_box = composer.locator(".composer-box").bounding_box()
+    empty_row = composer.locator(".composer-row").bounding_box()
+    field.fill("One line")
+    typed_box = composer.locator(".composer-box").bounding_box()
+    typed_row = composer.locator(".composer-row").bounding_box()
+    assert empty_box and typed_box and empty_row and typed_row
+    if abs(empty_box["height"] - typed_box["height"]) > 1 or empty_row["height"] != typed_row["height"]:
+        say(f"typing one line resized the composer: {empty_box} -> {typed_box}")
+    field.fill("One line\nTwo lines\nThree lines\nFour lines")
+    multiline_box = composer.locator(".composer-box").bounding_box()
+    assert multiline_box and multiline_box["height"] > typed_box["height"], "Only multiline text should grow the field"
 
     # The microphone: the words land after what is typed.
     field = composer.locator("textarea")
     field.fill("Check the price")
-    mic = composer.get_by_role("button", name=words["mic"])
+    expect(composer.locator(".roundbtn.primary")).to_be_visible()
+    composer.locator(".plus").click()
+    mic = page.get_by_role("menuitem", name=words["mic"])
     expect(mic).to_be_visible()
     mic.click()
     page.wait_for_selector(".start-composer .voicebar[data-phase=recording]", timeout=5000)

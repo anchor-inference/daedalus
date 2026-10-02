@@ -1,11 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { useEdgeFade } from "./edgefade";
-import { int, relTime, usd } from "./format";
-import { api, LoopView, ServiceView, ShareMode, ToolInfo } from "./api";
-import { Icon } from "./icons";
+import { useEdgeFade } from "../edgefade";
+import { int, relTime, usd } from "../format";
+import { api, LoopView, ServiceView, ShareMode, ToolInfo } from "../api";
+import { Icon } from "../icons";
 import { OverflowMenu, Sheet } from "./dialogs";
-import { confirmAsync, errorText } from "./ui";
-import { LANGS, t, useLang } from "./i18n";
+import { confirmAsync, errorText } from "../ui";
+import { LANGS, t, useLang } from "../i18n";
 
 export type Status = "idle" | "running" | "waiting" | "failed" | "done" | "compacting";
 
@@ -421,6 +421,11 @@ export async function copyText(text: string): Promise<boolean> {
   } catch {
     // No clipboard API (http, Telegram's webview): a hidden field and the old copy command still
     // work there. Where even that is refused the caller says so, and the text stays selectable.
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const editable = previous instanceof HTMLInputElement || previous instanceof HTMLTextAreaElement ? previous : null;
+    const start = editable?.selectionStart, end = editable?.selectionEnd;
+    const selection = window.getSelection();
+    const ranges = selection ? Array.from({ length:selection.rangeCount }, (_, index) => selection.getRangeAt(index).cloneRange()) : [];
     const field = document.createElement("textarea");
     field.value = text;
     field.setAttribute("readonly", "");
@@ -435,6 +440,12 @@ export async function copyText(text: string): Promise<boolean> {
       ok = false;
     }
     field.remove();
+    if (previous?.isConnected) previous.focus({ preventScroll:true });
+    if (editable && start != null && end != null) editable.setSelectionRange(start, end);
+    else if (selection && ranges.length) {
+      selection.removeAllRanges();
+      ranges.forEach((range) => selection.addRange(range));
+    }
     return ok;
   }
 }

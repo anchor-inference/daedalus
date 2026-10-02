@@ -9,7 +9,7 @@ import { agentName, domainOf } from "../browser/model";
 import { t } from "../i18n";
 import { Icon } from "../icons";
 import { back, pathFor, sessionPath } from "../router";
-import { useMedia } from "../shell";
+import { useMedia } from "../ui/index";
 
 export function BrowserFullScreen({ id, toast }: { id: string; toast: (text: string) => void }) {
   const group = useBrowserGroup(id);

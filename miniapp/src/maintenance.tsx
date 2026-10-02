@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
-import { Sheet } from "./dialogs";
+import { Sheet } from "./ui/dialogs";
 import { t } from "./i18n";
 import "./maintenance.css";
 

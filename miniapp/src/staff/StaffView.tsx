@@ -15,7 +15,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { api, type Ask, type HarnessCapabilities, type StaffChanges, type StaffEventRow, type StaffMessage, type StaffSessionView, type StaffTurn, type StandingRule, type TerminalView as TerminalRow } from "../api";
-import { Sheet } from "../dialogs";
+import { Sheet } from "../ui/dialogs";
 import { useMoreBelow } from "../edgefade";
 import { useEvent } from "../events";
 import { relTime, tokens, usd } from "../format";

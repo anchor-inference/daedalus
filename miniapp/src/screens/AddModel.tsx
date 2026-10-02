@@ -13,7 +13,7 @@ import { ReactNode, useEffect, useMemo, useState } from "react";
 import { api, Preset, Settings } from "../api";
 import { Icon } from "../icons";
 import { plural, t, useLang } from "../i18n";
-import { LangPicker, Switch } from "../components";
+import { LangPicker, Switch } from "../ui/index";
 import { errorText, numInput } from "../ui";
 import { BLANK, ModelEntry, Picked, REASONING_EFFORTS, prefilled, presetIdFor, priceFor, retyped } from "../models";
 

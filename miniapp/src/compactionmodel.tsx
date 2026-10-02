@@ -7,7 +7,7 @@
 
 import type { Preset } from "./api";
 import { t } from "./i18n";
-import { Dropdown } from "./components";
+import { Dropdown } from "./ui/components";
 import { Row } from "./settingsrow";
 
 export type CompactionOption = { value: string; label: string; missing?: boolean };

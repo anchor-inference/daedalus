@@ -3,7 +3,7 @@
 // auth header (an <img src> cannot carry one) and shown from a blob URL; the office formats are
 // converted in the browser by libraries loaded only when such a file is opened.
 
-import { Overlay, useLayer } from "./dialogs";
+import { Overlay, useLayer } from "./ui/dialogs";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { Icon } from "./icons";
