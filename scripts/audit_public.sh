@@ -30,8 +30,9 @@ PATTERNS='sk-[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]+|ghp_[A-Za-z0-9]{20,}|[0-9
 # Where this repository legitimately keeps bytes git cannot diff. Anchored at the start of the path,
 # so a binary that merely ends in one of these names does not slip through on the suffix. The
 # screenshots may sit one level down, in a folder named by a language code: the same set in Russian.
-# The terminal's typeface is bundled with the app (its licence sits beside it) and is the one font.
-BINARY_ALLOWED='^docs/(brand|diagrams|screenshots(/[a-z]{2})?)/[^/]+\.(png|jpg|jpeg|webp|gif|svg)$|^miniapp/public/.+\.(png|jpg|ico|webp|svg)$|^miniapp/src/terminal/fonts/[^/]+\.woff2$|^skills/.+\.(png|jpg|jpeg|webp|gif|ttf|otf|woff2?|pdf|tar\.gz|zip)$'
+# The terminal's typeface is bundled with the app (its licence sits beside it); the launcher's setup
+# page bundles its own (Geist, licence beside it) and the still image it shows without WebGL.
+BINARY_ALLOWED='^desktop/ui/assets/setup/(fonts/[^/]+\.woff2|[^/]+\.(webp|png))$|^docs/(brand|diagrams|screenshots(/[a-z]{2})?)/[^/]+\.(png|jpg|jpeg|webp|gif|svg)$|^miniapp/public/.+\.(png|jpg|ico|webp|svg)$|^miniapp/src/terminal/fonts/[^/]+\.woff2$|^skills/.+\.(png|jpg|jpeg|webp|gif|ttf|otf|woff2?|pdf|tar\.gz|zip)$'
 
 # Usernames that appear in documentation and tests on purpose, as examples. Everything else is a real
 # account name and has no business being committed.
