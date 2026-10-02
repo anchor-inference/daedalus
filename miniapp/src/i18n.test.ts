@@ -69,6 +69,8 @@ const SAME_IN_BOTH = [
   "theme.claude",
   // A tool named by its own id and a count: the id is the same in both languages.
   "turn.family.other",
+  // The update dialog's title is the product's name and the release's number.
+  "update.title",
   "usage.col.usd",
 ];
 

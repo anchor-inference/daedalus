@@ -225,3 +225,38 @@ func TestARunningLauncherAnnouncesANewReleaseOnce(t *testing.T) {
 		t.Fatal("the check wrote more than its own note")
 	}
 }
+
+// The app's "check for updates" button and the periodic check are one call, and the status the app
+// reads afterwards says what it found, when, and this launcher's own version.
+func TestACheckOnRequestIsWhatTheStatusSays(t *testing.T) {
+	asset, err := platformAsset(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		t.Skip(err)
+	}
+	t.Setenv("DAEDALUS_UPDATE_CHECK", "")
+	saved := version
+	version = "desktop-v0.12.0"
+	t.Cleanup(func() { version = saved })
+	releaseServer(t, []map[string]any{{"tag_name": "desktop-v0.14.0", "assets": assetsFor(asset, "SHA256SUMS", signatureAsset)}})
+	p, _ := NewPaths(t.TempDir())
+	app := NewApp(p)
+	if got := app.Status(context.Background()); got.UpgradeChecked != "" || got.Upgrade != nil || got.Version != "desktop-v0.12.0" {
+		t.Fatalf("before any check the status reads %+v", got)
+	}
+	offer, err := app.CheckUpgrade(context.Background())
+	if err != nil || offer == nil || offer.To != "desktop-v0.14.0" {
+		t.Fatalf("offer %+v, err %v", offer, err)
+	}
+	got := app.Status(context.Background())
+	if got.Upgrade == nil || got.Upgrade.To != "desktop-v0.14.0" || got.UpgradeChecked == "" || got.UpgradeError != "" {
+		t.Fatalf("after the check the status reads %+v", got)
+	}
+
+	version = "dev"
+	if _, err := app.CheckUpgrade(context.Background()); err == nil {
+		t.Fatal("a dev build checked releases")
+	}
+	if got := app.Status(context.Background()); got.UpgradeError == "" {
+		t.Fatal("a check that could not run left no reason in the status")
+	}
+}

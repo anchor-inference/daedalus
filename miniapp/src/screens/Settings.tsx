@@ -31,6 +31,7 @@ import { EnvironmentsTab } from "./Environments";
 import { ToolGroupsSettings } from "../toolgroupsview";
 import { CompactionModelSelect } from "../compactionmodel";
 import { AsrSettingsCard } from "./AsrSettings";
+import { DesktopAppCard } from "../updatedialog";
 
 const DEFAULT_KINDS = ["deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"];
 /** The generic protocol also serves remote vendors, so temperature is available there too. */
@@ -1321,6 +1322,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
         const value = (text: React.ReactNode, mono = false) => <span className={`settings-value ${mono ? "mono" : ""}`}>{text}</span>;
         return (
           <>
+            <DesktopAppCard toast={toast} />
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.about.runtime")}</div>
               {status ? (

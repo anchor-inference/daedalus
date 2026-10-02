@@ -148,6 +148,75 @@ def session_tool_groups() -> dict[str, object]:
     ]}
 
 
+LAUNCHER_COMMAND = "daedalus-launcher upgrade --stub-command-never-shown"
+"""The command the launcher reports beside an update. The app must never draw it: a harness looks for
+this exact text anywhere on the page."""
+
+
+def launcher_state(*, upgrade: bool = False, package: str = "", installable: bool = True, download: dict | None = None, **over: object) -> dict[str, object]:
+    """``GET /api/system/launcher``: by default a desktop application beside the server, up to date,
+    so every picture and check that does not ask about updates draws the rail as it always has."""
+    offer = {
+        "from": "desktop-v0.15.1", "to": "desktop-v0.15.2", "url": "https://example.invalid/releases/tag/desktop-v0.15.2",
+        "command": LAUNCHER_COMMAND, "package": package,
+    }
+    state: dict[str, object] = {
+        "connected": True, "version": "0.15.1", "upgrade": offer if upgrade else None, "installable": installable,
+        "checked_at": (datetime.now(UTC) - timedelta(minutes=12)).strftime("%Y-%m-%dT%H:%M:%SZ"), "error": "",
+        "download": {"state": "idle", "done": 0, "total": 0, "error": "", "ready": False, **(download or {})},
+    }
+    state.update(over)
+    return state
+
+
+class LauncherStub:
+    """The launcher's update flow for a harness that drives it: an offer, a download that moves a step
+    on every read, and an install that is recorded rather than run.
+
+    ``stage`` starts as ``"offer"``; ``"downloading"``, ``"ready"`` and ``"failed"`` put the flow
+    straight into that state for a picture. ``posts`` lists the writes in the order they came."""
+
+    TOTAL = 222 * (1 << 20)
+
+    def __init__(self, stage: str = "offer", *, steps: int = 3) -> None:
+        self.stage = stage
+        self.steps = steps
+        self.reads = 0
+        self.posts: list[str] = []
+
+    def view(self) -> dict[str, object]:
+        if self.stage == "downloading":
+            done = min(self.TOTAL, (self.reads + 1) * self.TOTAL // (self.steps + 1))
+            return launcher_state(upgrade=True, download={"state": "running", "done": done, "total": self.TOTAL})
+        if self.stage == "ready":
+            return launcher_state(upgrade=True, download={"state": "done", "done": self.TOTAL, "total": self.TOTAL, "ready": True})
+        if self.stage == "failed":
+            return launcher_state(upgrade=True, download={"state": "failed", "error": "the release's checksum did not match"})
+        return launcher_state(upgrade=True)
+
+    def answer(self, method: str, path: str) -> tuple[int, object] | None:
+        if not path.startswith("/api/system/launcher"):
+            return None
+        if method == "GET" and path == "/api/system/launcher":
+            if self.stage == "downloading":
+                self.reads += 1
+                if self.reads > self.steps:
+                    self.stage = "ready"
+            return 200, self.view()
+        if method != "POST":
+            return None
+        action = path.rsplit("/", 1)[-1]
+        self.posts.append(action)
+        if action == "check":
+            return 200, self.view()
+        if action == "download":
+            self.stage, self.reads = "downloading", 0
+            return 200, self.view()
+        if action == "install":
+            return 200, {"started": True}
+        return None
+
+
 GATES: dict[str, object] = {
     # Settings → Tools opens on the tool groups.
     "/api/tool-groups": TOOL_GROUP_CATALOGUE,
@@ -171,6 +240,8 @@ GATES: dict[str, object] = {
     # The rail's account item opens Settings' security section, which lists the passkeys.
     "/api/auth/passkeys": [{"id": 1, "name": "Laptop", "created_at": "2026-09-01T10:00:00Z", "last_used_at": "2026-09-25T08:00:00Z", "transports": ["internal"]}],
     "/api/status": {"ok": True},
+    # The desktop application beside the server, up to date: the rail has no update button.
+    "/api/system/launcher": launcher_state(),
     # The badge on the Inbox entry of the navigation and on the bell.
     "/api/notifications/summary": {"unseen": 0, "needs_you": 0},
     # The centre itself, whichever view the bell's popover or the Inbox asks for: nothing yet.
@@ -355,6 +426,10 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
         # The shared centre is empty, so every entry a harness might answer is one the host no
         # longer has; a harness that invents entries answers this route itself.
         return 404, "application/json", json.dumps({"detail": "no such notification"})
+    if method.upper() == "POST" and path in ("/api/system/launcher/check", "/api/system/launcher/download"):
+        return 200, "application/json", json.dumps(launcher_state())
+    if method.upper() == "POST" and path == "/api/system/launcher/install":
+        return 200, "application/json", json.dumps({"started": True})
     if path in GATES:
         return 200, "application/json", json.dumps(GATES[path])
     parts = path.split("/")

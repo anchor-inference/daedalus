@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -67,6 +68,15 @@ type App struct {
 	// offer is a newer launcher release the check found (release.go), or nil. The launcher only
 	// tells: `daedalus-desktop upgrade` is what installs it, after a yes and a checked backup.
 	offer *Offer
+	// upgradeChecked and upgradeErr are when the release check last answered and what stopped it,
+	// for the app's About page, which says when it last looked and offers to look again.
+	upgradeChecked time.Time
+	upgradeErr     string
+	// release is the published release behind offer, for the download to find its files in;
+	// download and downloaded are that download's state (upgrade_download.go).
+	release    *Release
+	download   Download
+	downloaded atomic.Int64
 }
 
 // logLimit is how much of the running commentary the page keeps. It is a progress view, not a log
@@ -811,6 +821,17 @@ type Status struct {
 
 	// Upgrade is a newer launcher release, when the check found one.
 	Upgrade *Offer `json:"upgrade,omitempty"`
+	// Version is this launcher's own release, which the app shows as the desktop application's.
+	Version string `json:"version"`
+	// UpgradeChecked is when the release check last answered (RFC 3339, empty before the first),
+	// and UpgradeError why the last one could not.
+	UpgradeChecked string `json:"upgrade_checked,omitempty"`
+	UpgradeError   string `json:"upgrade_error,omitempty"`
+	// Installable says the upgrade action can install the offer from here: a window to close and
+	// reopen, a copy that replaces itself, and not Docker mode, which upgrade refuses.
+	Installable bool `json:"installable"`
+	// Download is the release being downloaded for the app's update button, or the last one.
+	Download Download `json:"download"`
 
 	// Switches is what the data folder's fenced switches kept, and anything about them that needs
 	// the operator: a possible late write or loss, a switch that did not finish.
@@ -836,7 +857,13 @@ func (a *App) Status(ctx context.Context) Status {
 		Log:        append(make([]string, 0, len(a.lines)), a.lines...),
 		Stage:      string(a.stage),
 		Upgrade:    a.offer,
+		Version:    version,
 	}
+	if !a.upgradeChecked.IsZero() {
+		status.UpgradeChecked = a.upgradeChecked.UTC().Format(time.RFC3339)
+	}
+	status.UpgradeError = a.upgradeErr
+	status.Installable = shell != nil && a.mode != ModeDocker && a.offer != nil && a.offer.Package == ""
 	if a.activity != nil {
 		activity := *a.activity
 		status.Activity = &activity
@@ -850,6 +877,7 @@ func (a *App) Status(ctx context.Context) Status {
 	}
 	status.Steps = Stages(a.mode)
 	a.mu.Unlock()
+	status.Download = a.downloadState()
 	status.Switches = fenceSummarize(fenceControlPath(a.paths.Data))
 	status.Kept = keptCopies(fenceControlPath(a.paths.Data))
 	if a.Native() {

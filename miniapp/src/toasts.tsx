@@ -378,10 +378,16 @@ function useComposerClearance(stack: React.RefObject<HTMLDivElement | null>, wid
   const measure = useCallback(() => {
     const box = stack.current?.getBoundingClientRect();
     const left = box ? box.left : window.innerWidth - 376;
+    // Where the stack sits when nothing lifts it. A composer counts only when it reaches into that
+    // band: the start screen's composer stands in the middle of the window, and lifting the stack
+    // above it — because it reached the right-hand column at all — left the toasts floating in the
+    // middle of the screen with nothing under them.
+    const floor = window.innerHeight - 16;
+    const ceiling = floor - (box ? box.height : 0);
     let top = Number.POSITIVE_INFINITY;
     for (const el of document.querySelectorAll<HTMLElement>(".composer-box")) {
       const r = el.getBoundingClientRect();
-      if (r.width > 0 && r.right > left) top = Math.min(top, r.top);
+      if (r.width > 0 && r.right > left && r.bottom > ceiling) top = Math.min(top, r.top);
     }
     const next = Number.isFinite(top) ? Math.round(window.innerHeight - top + 12) : null;
     setBottom((cur) => (cur === next ? cur : next));

@@ -20,6 +20,7 @@ import { DESKTOP_PLACES, menuSections } from "./navigation";
 import { type Screen, pathFor } from "./router";
 import { type SelfDevMode, visibleScreens } from "./capabilities";
 import { type Counts, ICONS, countFor, go, screenTitle } from "./shell";
+import { openUpdate, releaseVersion, useUpdates } from "./updates";
 
 /** A Mac says ⌘ where everything else says Ctrl; the shortcut is the same key either way. */
 const MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
@@ -73,6 +74,21 @@ function Item({ href, icon, label, on, mode = false, badge, quiet, data }: { hre
   );
 }
 
+/** A new desktop release, offered where the operator's eye already goes for Settings: blue, so it reads
+ *  as an offer rather than a warning, and absent the rest of the time so the rail does not grow a
+ *  permanent slot for something that happens once a month. */
+function UpdateItem() {
+  const { state } = useUpdates();
+  if (!state?.connected || !state.upgrade) return null;
+  const label = t("update.rail", { version: releaseVersion(state.upgrade.to) });
+  return (
+    <button className="rail-item rail-update" onClick={openUpdate} aria-label={label} data-rail="update">
+      <Icon name="up" size={18} />
+      <Tip text={label} />
+    </button>
+  );
+}
+
 export function Rail(p: RailProps) {
   const home = modeHome(p.mode);
   // A destination the menu alone reaches lights the menu's button, so Changes or Usage answers
@@ -114,6 +130,7 @@ export function Rail(p: RailProps) {
         <Item key={s} data={s} href={pathFor(s)} icon={ICONS[s]} label={screenTitle(s)} on={p.screen === s} badge={countFor(s, p.counts)} />
       ))}</div>
       <div className="rail-foot">
+        <UpdateItem />
         <button ref={p.menuButton} className={`rail-item ${p.menuOpen || inMenu ? "on" : ""}`} onClick={p.onMenu} aria-label={t("nav.menu")} aria-haspopup="menu" aria-expanded={p.menuOpen} data-rail="menu">
           <Icon name="more" size={18} /><span className="rail-label">{t("nav.more")}</span>
           {(p.counts.changes ?? 0) > 0 && <span className="rail-dot" aria-hidden />}

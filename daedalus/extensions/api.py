@@ -61,7 +61,7 @@ from daedalus.config import (
     on_demand_tool_groups_for,
 )
 from daedalus.doctor import DoctorContext, render_text, run_checks, summarize
-from daedalus.extensions import api_browsers, api_files, api_harnesses, api_projects, api_staff
+from daedalus.extensions import api_browsers, api_files, api_harnesses, api_projects, api_staff, launcher_updates
 from daedalus.extensions import commands as slash
 from daedalus.extensions.heartbeat import TEMPLATE as HEARTBEAT_TEMPLATE
 from daedalus.extensions.inbound import PAYLOAD_MAX_CHARS, flatten_payload, verify_signature, webhook_facts
@@ -5165,6 +5165,43 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "notifications": await app.notifications.summary() if app.notifications is not None else {"unseen": 0, "needs_you": 0},
             "heartbeat": heartbeat.status() if heartbeat is not None else None,  # type: ignore[attr-defined]
         }
+
+    @api.get("/api/system/launcher")
+    async def launcher_status(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The desktop launcher beside this process: its version and the newer release it found."""
+        return await launcher_updates.describe(app)
+
+    @api.post("/api/system/launcher/check")
+    async def launcher_check(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Look for a newer release now rather than at the launcher's next half-hourly check."""
+        try:
+            return await launcher_updates.check_now(app)
+        except launcher_bridge.LauncherBusy as exc:
+            raise HTTPException(409, str(exc)) from None
+        except launcher_bridge.LauncherUnavailable as exc:
+            raise HTTPException(503, str(exc)) from None
+
+    @api.post("/api/system/launcher/download")
+    async def launcher_download(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Download and check the offered release while the app stays in use."""
+        try:
+            return await launcher_updates.download_now(app)
+        except launcher_bridge.LauncherBusy as exc:
+            raise HTTPException(409, str(exc)) from None
+        except launcher_bridge.LauncherUnavailable as exc:
+            raise HTTPException(503, str(exc)) from None
+
+    @api.post("/api/system/launcher/install")
+    async def launcher_install(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Install the offered release from the desktop window. The launcher refuses with its reason
+        (no window, Docker mode, a package-managed copy, nothing newer), and that reason is the answer."""
+        try:
+            await launcher_updates.install_now(app)
+        except launcher_bridge.LauncherBusy as exc:
+            raise HTTPException(409, str(exc)) from None
+        except launcher_bridge.LauncherUnavailable as exc:
+            raise HTTPException(503, str(exc)) from None
+        return {"started": True}
 
     def selfdev_on() -> None:
         """The proposals API answers only where changes are proposed at all.

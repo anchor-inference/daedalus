@@ -948,6 +948,10 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   /* What waits in orchestration, seen from Agents: a neutral pill, not the red of an unread badge. */
   .rail-badge.quiet { background: var(--surface-3); color: var(--fg-2); }
   .rail-dot { position: absolute; top: 7px; right: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+  /* A new desktop release: a filled blue circle, the one coloured thing at the rail's foot, so it is
+     seen without being mistaken for the amber of something that went wrong. */
+  .rail-item.rail-update { border-radius: 50%; background: var(--info); color: var(--bg); }
+  .rail-item.rail-update:hover, .rail-item.rail-update:focus-visible { background: color-mix(in srgb, var(--info) 85%, var(--fg)); color: var(--bg); }
   .rail-tip { position: absolute; left: calc(100% + 10px); top: 50%; translate: 0 -50%; display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--fg); color: var(--bg); font-size: var(--fs-12); font-weight: 500; white-space: nowrap; pointer-events: none; opacity: 0; visibility: hidden; z-index: 40; }
   .rail-tip kbd { font: var(--fs-11) var(--mono); opacity: .7; }
   .rail-item:hover .rail-tip, .rail-item:focus-visible .rail-tip { opacity: 1; visibility: visible; }
@@ -4333,3 +4337,18 @@ button.staff-row:hover { background: var(--surface-2); }
 .shared .msg.user .shared-time { text-align: right; }
 .shared-audio { display: block; width: 100%; margin: 6px 0; }
 .shared .inline-media-image video { display: block; width: 100%; height: auto; max-height: min(70dvh, 680px); background: var(--bg); }
+
+/* The desktop update dialog. */
+.update-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; font-size: var(--fs-13); color: var(--fg-2); }
+.update-notes { display: inline-flex; align-items: center; gap: 4px; color: var(--info); text-decoration: none; }
+.update-notes:hover { text-decoration: underline; }
+.sheet-body p.update-text { margin: 0 0 10px; font-size: var(--fs-14); line-height: 1.45; }
+.sheet-body p.update-error { color: var(--bad); }
+.sheet-body p.update-promise { margin: 12px 0 0; font-size: var(--fs-12); color: var(--fg-3); line-height: 1.45; }
+.update-progress { display: flex; align-items: center; gap: 10px; margin: 4px 0 6px; }
+.update-bar { flex: 1; height: 6px; border-radius: 999px; background: var(--line-strong); overflow: hidden; }
+.update-bar i { display: block; height: 100%; border-radius: 999px; background: var(--info); transition: width .4s; }
+.update-bytes { flex: none; font-size: var(--fs-12); color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.update-closing { display: flex; align-items: center; gap: 10px; margin: 4px 0; font-size: var(--fs-14); }
+.update-spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--info); animation: harness-spin 900ms linear infinite; }
+.update-row-actions { display: inline-flex; gap: 6px; }

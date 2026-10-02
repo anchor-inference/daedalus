@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="{{LANG}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Daedalus</title>
+<script id="words" type="application/json">{{WORDS}}</script>
+<style>
+  :root { --bg: #101114; --card: #17181c; --line: #2a2c33; --fg: #e9eaee; --muted: #9a9ca6; --accent: #4f8cff; --ok: #3ecf8e; --bad: #ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; justify-items: center; align-content: start; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: 28px 24px; }
+  main { width: 100%; max-width: 440px; display: grid; gap: 16px; }
+  h1 { margin: 0; font-size: 18px; font-weight: 650; text-wrap: balance; }
+  .lead { margin: 0; color: var(--muted); }
+  ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  li { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+  li .dot { width: 16px; height: 16px; flex: none; border-radius: 50%; border: 2px solid var(--line); }
+  li.done { color: var(--fg); }
+  li.done .dot { border-color: var(--ok); background: var(--ok); }
+  li.now { color: var(--fg); font-weight: 600; }
+  li.now .dot { border-color: var(--accent); border-top-color: transparent; animation: spin 0.9s linear infinite; }
+  li.bad { color: var(--fg); font-weight: 600; }
+  li.bad .dot { border-color: var(--bad); background: var(--bad); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { li.now .dot { animation: none; border-top-color: var(--accent); } }
+  .bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.4s ease; }
+  pre { margin: 0; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font: 12px/1.5 ui-monospace, "Cascadia Mono", Menlo, monospace; white-space: pre-wrap; word-break: break-word; max-height: 9.5em; overflow: auto; }
+  .result { padding: 12px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); }
+  .result.ok { border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); }
+  .result.bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); }
+  .result p { margin: 0; }
+  .result p + p { margin-top: 6px; color: var(--muted); }
+  .result p.why { font: 12px/1.5 ui-monospace, "Cascadia Mono", Menlo, monospace; word-break: break-word; }
+  button { justify-self: end; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 14px; font: inherit; cursor: pointer; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title"></h1>
+  <p class="lead" id="lead"></p>
+  <div class="bar" aria-hidden="true"><i id="bar"></i></div>
+  <ol id="steps"></ol>
+  <div class="result" id="result" role="status" hidden><p id="result-title"></p><p class="why" id="result-why" hidden></p><p id="result-body"></p></div>
+  <pre id="log" aria-label="log" hidden></pre>
+  <button type="button" id="close" hidden></button>
+</main>
+<script src="/assets/upgrade.js"></script>
+</body>
+</html>

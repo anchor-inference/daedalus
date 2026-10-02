@@ -248,7 +248,15 @@ func run(argv []string) error {
 
 	switch opts.command {
 	case "upgrade":
-		return UpgradeCommand(ctx, app, opts)
+		if !opts.fromApp {
+			return UpgradeCommand(ctx, app, opts, nil)
+		}
+		// The app closed for this and the operator is looking at an empty desktop; the window
+		// says what is happening until the app is back.
+		window := openUpgradeWindow(paths, app.Lang())
+		err := UpgradeCommand(ctx, app, opts, window)
+		window.Finish(err)
+		return err
 	case "check-update":
 		return CheckUpdateCommand(ctx, paths)
 	case "update":

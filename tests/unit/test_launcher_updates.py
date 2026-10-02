@@ -22,6 +22,7 @@ import pytest
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions import EXTENSIONS, launcher_updates
 from daedalus.extensions.api import build_app
+from daedalus.host import launcher_bridge
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
 from tests.support.notifications import RecordingNotifications
@@ -32,6 +33,10 @@ class _Launcher:
 
     def __init__(self) -> None:
         self.status: dict[str, Any] = {}
+        self.actions: list[str] = []
+        # What an action does to the status, and the refusal a test wants for one (code, text).
+        self.effects: dict[str, dict[str, Any]] = {}
+        self.refusals: dict[str, tuple[int, str]] = {}
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -41,6 +46,25 @@ class _Launcher:
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(body)
+
+            def do_POST(self) -> None:  # noqa: N802
+                action = self.path.removeprefix("/api/action/")
+                if self.headers.get("X-Daedalus-Desktop") != "t":
+                    self.send_response(403)
+                    self.end_headers()
+                    return
+                outer.actions.append(action)
+                if action in outer.refusals:
+                    code, text = outer.refusals[action]
+                    self.send_response(code)
+                    self.end_headers()
+                    self.wfile.write(text.encode())
+                    return
+                outer.status.update(outer.effects.get(action, {}))
+                self.send_response(202)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"job": ""}')
 
             def log_message(self, *args: Any) -> None:
                 pass
@@ -105,6 +129,55 @@ async def test_nothing_is_announced_without_an_offer_or_a_launcher(launcher: Any
     elsewhere.mkdir(parents=True)
     assert await launcher_updates.check_once(_app(elsewhere)) is None
     assert app.notifications.drafts == []
+
+
+async def test_in_the_desktop_window_the_announcement_points_at_the_button_not_a_command(launcher: Any) -> None:
+    app = _app(launcher.state)
+    command = "daedalus-desktop upgrade --data somewhere"
+    launcher.fake.status = {"installable": True, "upgrade": {"from": "desktop-v0.15.1", "to": "desktop-v0.15.2", "command": command}}
+    assert await launcher_updates.check_once(app) is not None
+    [draft] = app.notifications.drafts
+    assert command not in draft.body and "Settings → About" in draft.body
+    assert draft.link == "/app/settings/about"
+
+
+async def test_the_about_page_reads_checks_downloads_and_installs_through_the_launcher(launcher: Any) -> None:
+    app = _app(launcher.state)
+    launcher.fake.status = {"version": "desktop-v0.15.1", "upgrade_checked": "2026-10-02T17:00:00Z", "download": {"state": "idle"}}
+    about = await launcher_updates.describe(app)
+    assert about == {"connected": True, "version": "0.15.1", "upgrade": None, "installable": False, "checked_at": "2026-10-02T17:00:00Z", "error": "", "download": {"state": "idle", "done": 0, "total": 0, "error": "", "ready": False}}
+
+    offer = {"from": "desktop-v0.15.1", "to": "desktop-v0.15.2", "url": "https://example.invalid/notes", "command": "x", "asset": "a.zip"}
+    launcher.fake.effects["check-upgrade"] = {"upgrade": offer, "installable": True}
+    about = await launcher_updates.check_now(app)
+    assert launcher.fake.actions == ["check-upgrade"]
+    assert about["upgrade"]["to"] == "desktop-v0.15.2" and about["installable"] is True
+
+    launcher.fake.effects["download"] = {"download": {"state": "running", "done": 10, "total": 100}}
+    about = await launcher_updates.download_now(app)
+    assert about["download"] == {"state": "running", "done": 10, "total": 100, "error": "", "ready": False}
+
+    await launcher_updates.install_now(app)
+    assert launcher.fake.actions[-1] == "upgrade"
+    launcher.fake.refusals["upgrade"] = (409, "there is no newer release to install")
+    with pytest.raises(launcher_bridge.LauncherBusy, match="no newer release"):
+        await launcher_updates.install_now(app)
+
+
+async def test_a_launcher_from_before_the_button_installs_in_one_step(launcher: Any) -> None:
+    # 0.15.1 reports neither its version, whether it can install, nor a download.
+    launcher.fake.status = {"upgrade": {"from": "desktop-v0.15.1", "to": "desktop-v0.15.2", "command": "x"}}
+    about = await launcher_updates.describe(_app(launcher.state))
+    assert about["direct"] is True and about["installable"] is True and about["version"] == "0.15.1"
+    launcher.fake.status = {"upgrade": {"from": "desktop-v0.15.1", "to": "desktop-v0.15.2", "package": "appimage"}}
+    assert (await launcher_updates.describe(_app(launcher.state)))["installable"] is False
+
+
+async def test_without_a_launcher_the_about_page_has_nothing_to_check(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    assert await launcher_updates.describe(_app(state)) == {"connected": False}
+    assert await launcher_updates.check_now(_app(state)) == {"connected": False}
 
 
 def test_the_extension_is_installed() -> None:

@@ -270,6 +270,9 @@ type Upgrader struct {
 	inLauncher bool
 	// finishLock is the finish lock an upgrade's first launcher holds and hands to --finish.
 	finishLock *InstallLock
+	// window is the progress window of an upgrade the app started (upgrade_window.go); nil from a
+	// terminal, where the terminal is the window.
+	window *upgradeWindow
 }
 
 // takeLock takes the installation lock for the whole of one operation, or says who has it.
@@ -285,10 +288,19 @@ func (u *Upgrader) takeLock(kind string) (func(), error) {
 	return func() { lock.Release(); u.lock = nil }, nil
 }
 
-func (u *Upgrader) say(format string, args ...any) { fmt.Fprintf(u.out, format+"\n", args...) }
+func (u *Upgrader) say(format string, args ...any) {
+	fmt.Fprintf(u.out, format+"\n", args...)
+	if u.window != nil {
+		fmt.Fprintf(u.window, format+"\n", args...)
+	}
+}
 
-// UpgradeCommand is the entry point from main.
-func UpgradeCommand(ctx context.Context, app *App, opts options) error {
+// step names the step the progress window shows as under way.
+func (u *Upgrader) step(key string) { u.window.Step(key) }
+
+// UpgradeCommand is the entry point from main. window is the progress window of an upgrade the app
+// started, or nil.
+func UpgradeCommand(ctx context.Context, app *App, opts options, window *upgradeWindow) error {
 	ignoreHangup()
 	stack := chooseStack(app)
 	if opts.root != "" {
@@ -303,7 +315,7 @@ func UpgradeCommand(ctx context.Context, app *App, opts options) error {
 		yes: opts.yes, finish: opts.finish, rollback: opts.rollback,
 		bridge: opts.bridge, bridgeRoot: opts.root, bridgeArchive: opts.archive, bridgeSums: opts.sums,
 		stdin: os.Stdin, stdinIsTTY: info != nil && info.Mode()&os.ModeCharDevice != 0,
-	}}
+	}, window: window}
 	return u.Run(ctx)
 }
 
@@ -440,6 +452,12 @@ func (u *Upgrader) begin(ctx context.Context) error {
 		}
 		u.say("Note: %s.", authenticationNote())
 		source = networkSource(offer, release)
+		if staged := stagedSource(u.paths, offer); staged != nil {
+			// Downloaded and checked by the launcher while the app was still open; the checks
+			// below run again on these files before any of them is used.
+			u.say("Using the release downloaded beforehand.")
+			source = *staged
+		}
 		exe := u.opts.executable
 		if exe == "" {
 			if exe, err = os.Executable(); err != nil {
@@ -460,6 +478,7 @@ func (u *Upgrader) begin(ctx context.Context) error {
 	if isInside(u.paths.Data, filepath.Join(root, item)) {
 		return fmt.Errorf("the data folder %s is inside what an upgrade replaces", u.paths.Data)
 	}
+	u.window.SetTarget(source.to)
 	u.say("")
 	u.say("%s is available (this installation's launcher is %s).", source.to, source.from)
 	if source.notes != "" {
@@ -506,6 +525,7 @@ func (u *Upgrader) begin(ctx context.Context) error {
 	}
 
 	// From here on the installation changes, and every failure is rolled back.
+	u.step("replace")
 	u.say("Replacing the launcher's files...")
 	if err := u.swap(journal); err != nil {
 		return u.rollback(ctx, journal, err)
@@ -519,6 +539,7 @@ func (u *Upgrader) begin(ctx context.Context) error {
 	if handoverHook != nil {
 		handoverHook()
 	}
+	u.step("start")
 	u.say("Handing over to %s...", source.to)
 	run := u.opts.runNewBinary
 	if run == nil {
@@ -553,10 +574,12 @@ func (u *Upgrader) prepare(ctx context.Context, journal *Journal, source upgrade
 	if err := os.MkdirAll(filepath.Join(journal.Work, "old"), 0o700); err != nil {
 		return err
 	}
+	u.step("download")
 	archive, sums, err := source.fetch(ctx)
 	if err != nil {
 		return err
 	}
+	u.step("verify")
 	if source.signature != nil {
 		if source.sig, err = source.signature(ctx); err != nil {
 			return err
@@ -579,14 +602,17 @@ func (u *Upgrader) prepare(ctx context.Context, journal *Journal, source upgrade
 		return err
 	}
 
+	u.step("prepare")
 	if err := u.stack.Prepare(ctx); err != nil {
 		return fmt.Errorf("the next version's environment could not be prepared, so nothing was changed: %w", err)
 	}
+	u.step("stop")
 	moved, err := u.quiesce(ctx)
 	if err != nil {
 		return err
 	}
 	journal.RuntimeMovedOut = moved
+	u.step("backup")
 	var present []string
 	for _, name := range items {
 		if _, err := os.Lstat(filepath.Join(root, name)); err == nil {

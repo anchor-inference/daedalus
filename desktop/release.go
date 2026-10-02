@@ -429,24 +429,9 @@ func (a *App) CheckReleases(ctx context.Context, show func(Notification) error) 
 		case <-time.After(wait):
 		}
 		wait = releaseCheckInterval
-		offer, _, err := FindUpgrade(ctx, version)
-		if err != nil {
-			a.log("could not check for a newer launcher: %v", err)
+		offer, err := a.CheckUpgrade(ctx)
+		if err != nil || offer == nil {
 			continue
-		}
-		if offer != nil {
-			offer.Command = upgradeCommandLine(a.paths)
-			offer.Package = installationKind()
-		}
-		a.mu.Lock()
-		same := offer != nil && a.offer != nil && a.offer.To == offer.To
-		a.offer = offer
-		a.mu.Unlock()
-		if offer == nil {
-			continue
-		}
-		if !same {
-			a.log("%s is available (this is %s): close the launcher and run %s — it keeps the data from before first", offer.To, offer.From, offer.Command)
 		}
 		if !notified(a.paths, offer.To) {
 			if err := show(UpgradeNotification(a.Lang(), *offer)); err == nil {
@@ -454,6 +439,40 @@ func (a *App) CheckReleases(ctx context.Context, show func(Notification) error) 
 			}
 		}
 	}
+}
+
+// CheckUpgrade looks for a newer release once and records the answer for the status: the offer,
+// when it looked, and what stopped it. The periodic check and the app's "check for updates" button
+// both come through here, so the two can never disagree about what is out.
+func (a *App) CheckUpgrade(ctx context.Context) (*Offer, error) {
+	if updateCheckOff() || !parseVersion(version).ok {
+		err := errors.New("this build does not check for newer releases")
+		a.mu.Lock()
+		a.upgradeErr = err.Error()
+		a.mu.Unlock()
+		return nil, err
+	}
+	offer, release, err := FindUpgrade(ctx, version)
+	if err != nil {
+		a.log("could not check for a newer launcher: %v", err)
+		a.mu.Lock()
+		a.upgradeErr = err.Error()
+		a.mu.Unlock()
+		return nil, err
+	}
+	if offer != nil {
+		offer.Command = upgradeCommandLine(a.paths)
+		offer.Package = installationKind()
+	}
+	a.mu.Lock()
+	same := offer != nil && a.offer != nil && a.offer.To == offer.To
+	a.offer, a.release = offer, release
+	a.upgradeChecked, a.upgradeErr = time.Now(), ""
+	a.mu.Unlock()
+	if offer != nil && !same {
+		a.log("%s is available (this is %s): close the launcher and run %s — it keeps the data from before first", offer.To, offer.From, offer.Command)
+	}
+	return offer, nil
 }
 
 // CheckUpdateCommand is `daedalus-desktop check-update`: the same check, once, in a terminal. It

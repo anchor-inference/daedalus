@@ -25,6 +25,7 @@ import { insideTerminal } from "./terminal/keys";
 import { startEvents } from "./events";
 import { useSummary } from "./notifications";
 import { NotificationToasts } from "./toasts";
+import { UpdateHost } from "./updatedialog";
 import { listenForOpen, syncPush } from "./push";
 import { focusView, phoneTab } from "./project/focus";
 import { MainEntry } from "./main/MainEntry";
@@ -635,6 +636,7 @@ export function App() {
       {more && <MoreSheet screen={route.screen} counts={counts} selfdev={selfdev} onClose={() => setMore(false)} />}
       {picking && sessionId && <SessionPicker exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
       <NotificationToasts />
+      <UpdateHost />
       <ToastHost />
       <ConfirmHost />
     </div>

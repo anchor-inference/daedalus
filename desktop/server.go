@@ -463,6 +463,19 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		go func() { _ = s.app.Apply(ctx) }()
 	case "open":
 		go func() { _, _ = s.app.Open(ctx) }()
+	case "check-upgrade":
+		// The app's "check for updates": answered once the check has, so the status read right
+		// after it already says what is out. Its failure is in the status, not the answer.
+		check, cancel := context.WithTimeout(ctx, 45*time.Second)
+		_, _ = s.app.CheckUpgrade(check)
+		cancel()
+	case "download":
+		// The first half of an upgrade from the app: the release is fetched and checked while
+		// the app stays in use (upgrade_download.go). The status reports how far it has got.
+		if err := s.app.StartDownload(ctx); err != nil {
+			refuseAction(w, err)
+			return
+		}
 	case "upgrade":
 		// Installing a newer release replaces this launcher, so it cannot run inside it: the shell
 		// closes the launcher and runs `upgrade` itself, showing what it says (shell.go). Without a
