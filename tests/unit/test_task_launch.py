@@ -23,13 +23,12 @@ from daedalus.host.launch_queue import LaunchQueue
 from daedalus.staff_runtime import BoardTask, Started
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.database import Database
-from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.staff import StaffStore
 from tests.support.waiting import until_await
 from tests.unit.test_launch_controls import OPERATOR, launch_fixture
 from tests.unit.test_session_runner import ScriptedProvider, _manager
-from tests.unit.test_staff_runtime import BRIEF, project_with, team_for
+from tests.unit.test_staff_runtime import BRIEF, close_team, project_with, team_for
 
 
 async def queued_fixture(db: Database):
@@ -245,15 +244,10 @@ async def test_actual_native_worker_launch_and_report_preserve_the_full_original
     provider = ScriptedProvider([{"tool": "Report", "args": {"kind": "done", "note": original}},
                                  {"text": "The report is handed in for review."}])
     manager = await _manager(settings, db, provider)
-    executions = ExecutionStore(db)
-    executions.acquire()
     team = await team_for(settings, manager)
+    dispatcher = team.app.extensions["effects"]
+    dispatcher.delivery_ready.clear()
     try:
-        await executions.boot()
-        team.app.executions = executions
-        dispatcher = EffectDispatcher(OutboxStore(db))
-        dispatcher.register("task.launch", TaskLaunchEffect(team.app))
-        team.app.extensions["effects"] = dispatcher
         folder = tmp_path / "research"
         folder.mkdir()
         project = await project_with(manager, folder)
@@ -287,16 +281,15 @@ async def test_actual_native_worker_launch_and_report_preserve_the_full_original
         assert await team.assign(member, task, **args) == receipt
         assert (await db.fetchone("SELECT count(*) FROM staff_sessions WHERE task_id = ?", (task["id"],)))[0] == 1
     finally:
-        team.queue.close()
+        await close_team(manager)
         await manager.close()
-        executions.release()
 
 
 async def test_lost_provider_start_response_keeps_the_worker_owned(settings: Settings, db: Database, tmp_path: Path) -> None:
     manager = await _manager(settings, db, ScriptedProvider([]))
-    executions = ExecutionStore(db)
-    executions.acquire()
     team = await team_for(settings, manager)
+    dispatcher = team.app.extensions["effects"]
+    dispatcher.delivery_ready.clear()
     physical_starts = []
 
     async def start(request):
@@ -304,12 +297,7 @@ async def test_lost_provider_start_response_keeps_the_worker_owned(settings: Set
         raise ConnectionError("the provider started work but its response was lost")
 
     try:
-        await executions.boot()
-        team.app.executions = executions
         team.runtimes["daedalus"] = SimpleNamespace(start=start)
-        dispatcher = EffectDispatcher(OutboxStore(db))
-        dispatcher.register("task.launch", TaskLaunchEffect(team.app))
-        team.app.extensions["effects"] = dispatcher
         folder = tmp_path / "research"
         folder.mkdir()
         project = await project_with(manager, folder)
@@ -333,9 +321,8 @@ async def test_lost_provider_start_response_keeps_the_worker_owned(settings: Set
                               expected_entity_revision=current["entity_revision"])
         assert len(physical_starts) == 1
     finally:
-        team.queue.close()
+        await close_team(manager)
         await manager.close()
-        executions.release()
 
 
 async def test_lifecycle_cancellation_removes_a_pending_launch_before_admission(db: Database) -> None:

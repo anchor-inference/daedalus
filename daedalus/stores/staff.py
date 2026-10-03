@@ -1039,7 +1039,8 @@ class StaffStore:
 
     # -- messages ------------------------------------------------------------------
 
-    async def add_message(self, staff_id: str, text: str, *, origin: str, mode: str, staff_session_id: str | None = None) -> StaffMessage:
+    async def add_message(self, staff_id: str, text: str, *, origin: str, mode: str,
+                          staff_session_id: str | None = None, message_id: str | None = None) -> StaffMessage:
         if origin not in MESSAGE_ORIGINS:
             raise StaffError(f"a message to staff comes from the orchestrator or the operator, not {origin!r}")
         if mode not in MESSAGE_MODES:
@@ -1048,7 +1049,9 @@ class StaffStore:
         if not body:
             raise StaffError("a message needs text")
         at = _now()
-        message = StaffMessage(f"sm-{uuid.uuid4().hex[:12]}", staff_id, staff_session_id, origin, body, mode, "queued", 0, at, at, "")
+        if message_id is not None and not re.fullmatch(r"sm-[0-9a-f]{32}", message_id):
+            raise StaffError("the host message identity is invalid")
+        message = StaffMessage(message_id or f"sm-{uuid.uuid4().hex[:12]}", staff_id, staff_session_id, origin, body, mode, "queued", 0, at, at, "")
         await self._db.execute(
             "INSERT INTO staff_messages(id, staff_id, staff_session_id, origin, text, mode, state, attempts, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?)",
             (message.id, staff_id, staff_session_id, origin, body, mode, at, at),

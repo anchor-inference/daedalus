@@ -25,6 +25,7 @@ from daedalus.harness.selfcheck import session_check
 from daedalus.harness.tools import PiTooling
 from daedalus.stores.database import Database
 from daedalus.stores.harness import HarnessStore
+from tests.support.authorized_launch import operator_assignment
 from tests.support.fake_cli.tui import read_log
 from tests.unit.test_cli_staff_runtime import Stand, eventually, stand
 
@@ -187,7 +188,8 @@ def log(s: Stand, what: str) -> list[dict[str, Any]]:
 async def started(s: Stand, script: str, *, name: str = "Ada") -> Any:
     member = await s.hire(name)
     task_id = await s.task(f"Menu page;{script};")
-    assert (await s.team.assign(member, task_id))["state"] == "started"
+    assigned = await operator_assignment(s.team, member, task_id)
+    assert assigned["state"] == "queued" and assigned["effect_id"]
     return member
 
 

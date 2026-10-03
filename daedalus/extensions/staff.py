@@ -977,7 +977,8 @@ class Team:
 
     # -- control ---------------------------------------------------------------------------------------
 
-    async def tell(self, member: Staff, text: str, *, when: str = "now", by: str = "operator", files: list[StoredFile] | None = None) -> dict[str, Any]:
+    async def tell(self, member: Staff, text: str, *, when: str = "now", by: str = "operator",
+                   files: list[StoredFile] | None = None, message_id: str | None = None) -> dict[str, Any]:
         """Say something to a member's live session; returns the message and its receipt. ``when`` is
         ``now`` (into the running turn), ``after_turn`` or ``interrupt``; ``now`` is the default
         because a message to someone at work is almost always about that work, and one that waited
@@ -996,7 +997,8 @@ class Team:
             text = text.rstrip() + "\n\n" + prompts.STAFF_FILES.format(lines="\n".join(d.line() for d in delivered)).strip()
         if live.session.pause_requested:
             await self.manager.staff.request_pause(live.id, False)
-        message = await self.manager.staff.add_message(member.id, text, origin=by, mode=when, staff_session_id=live.id)
+        message = await self.manager.staff.add_message(member.id, text, origin=by, mode=when,
+                                                       staff_session_id=live.id, message_id=message_id)
         outgoing = OutgoingMessage(message.id, message.text, when, "orchestrator" if by == "orchestrator" else "operator")  # type: ignore[arg-type]
         try:
             receipt = await self.runtime(member).send(live, outgoing)

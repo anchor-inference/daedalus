@@ -784,6 +784,7 @@ class Watch(Tool):
                     "cooldown_minutes": {"type": "number", "description": "Least time between two fires; at least 1, default 10."},
                     "once": {"type": "boolean", "description": "Remove the watch after it fires once."},
                     "note": {"type": "string", "description": "Why you set it, for you and the operator."},
+                    "deadline_at": {"type": "string", "description": "Optional ISO 8601 deadline within one year; the watch stops before a later event."},
                 },
                 required=["when", "then"],
             ),
@@ -798,6 +799,7 @@ class Watch(Tool):
             cooldown_minutes=arguments.get("cooldown_minutes", 10),
             once=bool(arguments.get("once")),
             note=str(arguments.get("note") or ""),
+            deadline_at=arguments.get("deadline_at"),
         )
 
 

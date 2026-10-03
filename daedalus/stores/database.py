@@ -31,6 +31,7 @@ from daedalus.stores.result_anchor_schema import MIGRATION as RESULT_ANCHOR_MIGR
 from daedalus.stores.runtime_observation_schema import MIGRATION as RUNTIME_OBSERVATION_MIGRATION
 from daedalus.stores.runtime_schema import RUNTIME_SCHEMA
 from daedalus.stores.staff_report_schema import MIGRATION as STAFF_REPORT_MIGRATION
+from daedalus.stores.watch_delivery_schema import WATCH_DELIVERY_MIGRATION
 from daedalus.stores.workspace_archive_schema import MIGRATION as WORKSPACE_ARCHIVE_MIGRATION
 
 logger = logging.getLogger(__name__)
@@ -1717,6 +1718,7 @@ MIGRATIONS.append(GRANT_LINEAGE_MIGRATION)
 MIGRATIONS.append(COMPARISON_MIGRATION)
 MIGRATIONS.append(CI_MIGRATION)
 MIGRATIONS.append(ISSUE_SYNC_MIGRATION)
+MIGRATIONS.append(WATCH_DELIVERY_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

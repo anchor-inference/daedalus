@@ -67,7 +67,7 @@ describe("the list behind the line", () => {
     expect(resultKey("report_stuck")).toBe("goal.result.report_stuck");
     expect(resultKey("something_new")).toBe("goal.result.other");
     expect(cardTitle("t1", [goal()])).toBe("Photos");
-    expect(cardTitle("t9", [goal()])).toBe("t9");
+    expect(cardTitle("t9", [goal()])).toBe("");
     expect(cardTitle(null, [goal()])).toBe("");
   });
 });
@@ -89,8 +89,8 @@ describe("what became of the operator's message", () => {
     ]);
     // A receipt says more than "read", so it is not said twice.
     expect(fate.read).toBe(false);
-    // A card the host sent without its title is named by its id rather than by nothing.
-    expect(messageFate({ seq: 23 }, receipts, 30).lines[0]).toMatchObject({ card: "t5", deliveries: [{ name: "Olga", state: "sent" }] });
+    // An absent title is rendered with a localized generic label rather than exposing the host ID.
+    expect(messageFate({ seq: 23 }, receipts, 30).lines[0]).toMatchObject({ card: "", deliveries: [{ name: "Olga", state: "sent" }] });
   });
 
   it("tells confirmed from confirmed in words, opened and only sent", () => {

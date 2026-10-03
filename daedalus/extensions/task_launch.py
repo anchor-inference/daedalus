@@ -10,7 +10,17 @@ from daedalus.extensions.effects import EffectOutcome, EffectResolution
 from daedalus.extensions.launch_controls import launch_attempt
 from daedalus.extensions.orchestrator_domain import dependency_readiness
 from daedalus.host.launch_queue import Entry
-from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope, digest, one
+from daedalus.stores.control import (
+    ControlConflict,
+    ControlDenied,
+    ControlStore,
+    Entity,
+    Principal,
+    Scope,
+    canonical,
+    digest,
+    one,
+)
 from daedalus.stores.executions import ACTIVE
 from daedalus.stores.outbox import Claim, OutboxStore
 
@@ -19,7 +29,8 @@ if TYPE_CHECKING:
 
 
 def task_digest(task: Any) -> str:
-    return digest({field: task[field] for field in ("project_id", "title", "brief_json", "depends_on", "contract_revision", "assignee_staff_id")})
+    return digest({field: task[field] for field in ("project_id", "title", "brief_json", "depends_on",
+                                            "contract_revision", "assignee_staff_id")})
 
 
 def member_digest(member: Any) -> str:
@@ -64,6 +75,7 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
         attempt_id = uuid.uuid5(uuid.NAMESPACE_URL, f"attempt:{action_id}").hex
         target = {"task_id": task_id, "staff_id": staff_id, "resume_from": resume_from,
                   "previous_attempt_id": task["current_attempt_id"], "attempt_id": attempt_id,
+                  "folder_id": task["folder_id"],
                   "task_digest": task_digest(assigned), "member_digest": member_digest(member)}
         await OutboxStore.enqueue(conn, mutation, principal, kind="task.launch", operation="task.launch",
                                   payload=target, task_id=task_id, effects=("execution.start",))
@@ -86,6 +98,19 @@ class TaskLaunchEffect:
         member = await self.app.db.fetchone("SELECT * FROM staff WHERE id = ?", (target["staff_id"],))
         if task is None or member is None or member["archived_at"] or task_digest(task) != target["task_digest"] or member_digest(member) != target["member_digest"]:
             raise ControlDenied("the task contract or worker configuration changed after the launch command")
+        if "folder_id" not in target:
+            raise ControlDenied("the queued launch has no pinned folder")
+        if task["folder_id"] != target["folder_id"]:
+            # The host fills an initially unspecified folder while claiming its own session.
+            # A changed folder before that claim, or a different claimed folder, is stale work.
+            attempt = await self.app.db.fetchone(
+                "SELECT s.folder_id FROM execution_attempts a JOIN staff_sessions s"
+                " ON s.id = a.staff_session_id WHERE a.id = ?", (target["attempt_id"],),
+            )
+            if (target["folder_id"] is not None or task["current_attempt_id"] != target["attempt_id"]
+                    or task["status"] != "doing" or attempt is None
+                    or task["folder_id"] != attempt["folder_id"]):
+                raise ControlDenied("the task folder changed after the launch command")
         if task["current_attempt_id"] not in (target["previous_attempt_id"], target["attempt_id"]):
             raise ControlDenied("another attempt replaced this launch command")
         if task["status"] not in ("todo", "blocked", "doing"):
@@ -135,7 +160,8 @@ class TaskLaunchEffect:
         finally:
             launch_attempt.reset(bound)
         if admission.state == "queued":
-            return EffectOutcome("deferred", admission.detail or "waiting for worker capacity")
+            return EffectOutcome("deferred", canonical({"reason": admission.reason or "capacity",
+                                                       "detail": admission.detail or "waiting for worker capacity"}))
         return EffectOutcome("completed")
 
     async def reconcile(self, claim: Claim) -> EffectResolution | None:

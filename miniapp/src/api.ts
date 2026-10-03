@@ -148,6 +148,7 @@ export const api = {
   put: <T>(path: string, body?: unknown) => call<T>("PUT", path, body),
   patch: <T>(path: string, body?: unknown) => call<T>("PATCH", path, body),
   delete: <T>(path: string) => call<T>("DELETE", path),
+  request: <T>(method: string, path: string, body?: unknown) => call<T>(method, path, body),
   streamUrl: (sessionId: string) => `/api/sessions/${sessionId}/stream`,
   downloadUrl: (sessionId: string, path: string) => {
     const token = storedToken();
@@ -880,6 +881,7 @@ export type OrchestratorSettings = {
 
 export type Project = {
   id: string;
+  entity_revision?: number;
   name: string;
   created_at: string;
   settings: { snapshots: boolean; system?: string; ephemeral?: boolean; default_env?: "container" | "host"; orchestrator?: OrchestratorSettings };

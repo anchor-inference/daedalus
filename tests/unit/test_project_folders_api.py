@@ -7,6 +7,8 @@ the status: a 409 that does not say which agent is in the way leaves the operato
 from __future__ import annotations
 
 import json
+import re
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +25,22 @@ from daedalus.stores.database import Database
 from daedalus.stores.projects import ProjectFolder
 
 HEADERS = {"X-Daedalus-Token": "tok"}
+
+
+async def _write(client: httpx.AsyncClient, method: str, path: str,
+                 body: dict[str, Any] | None = None) -> httpx.Response:
+    """Exercise the command API, then inspect the project projection these behavior tests describe."""
+    project_id = re.search(r"/api/projects/([^/]+)", path).group(1)  # type: ignore[union-attr]
+    projects = (await client.get("/api/projects", headers=HEADERS)).json()
+    current = next((item for item in projects if item["id"] == project_id), None)
+    payload = {**(body or {}), "client_operation_id": f"test-{uuid.uuid4().hex}",
+               "expected_entity_revision": current["entity_revision"] if current else 1}
+    response = await client.request(method, path, headers=HEADERS, json=payload)
+    if response.status_code != 200:
+        return response
+    project = next(item for item in (await client.get("/api/projects", headers=HEADERS)).json()
+                   if item["id"] == project_id)
+    return httpx.Response(200, json=project)
 
 
 def _client(settings: Settings, config: RuntimeConfig, db: Database, manager: SessionManager) -> httpx.AsyncClient:
@@ -85,16 +103,16 @@ async def test_a_host_folder_needs_the_host_bridge(running: Any, tmp_path: Path,
     refused = await client.post("/api/projects", headers=HEADERS, json={"name": "Host", "folders": [{"path": "/somewhere/on/the/host", "env": "host"}]})
     assert refused.status_code == 400 and "host terminal bridge" in refused.json()["detail"]
     project = (await client.post("/api/projects", headers=HEADERS, json={"name": "Bakery", "folders": [{"path": str(site)}]})).json()
-    assert (await client.patch(f"/api/projects/{project['id']}", headers=HEADERS, json={"default_env": "host"})).status_code == 400
+    assert (await _write(client, "PATCH", f"/api/projects/{project['id']}", {"default_env": "host"})).status_code == 400
 
     monkeypatch.setattr(api_projects, "host_bridge", lambda *_: True)
     assert (await client.get("/api/project-environments", headers=HEADERS)).json()["available"] == ["container", "host"]
-    added = await client.post(f"/api/projects/{project['id']}/folders", headers=HEADERS, json={"path": "/somewhere/on/the/host", "env": "host"})
+    added = await _write(client, "POST", f"/api/projects/{project['id']}/folders", {"path": "/somewhere/on/the/host", "env": "host"})
     assert added.status_code == 200, added.text
     host = added.json()["folders"][1]
     # Stored and shown, but only what runs in a host terminal can ever work in it.
     assert host["env"] == "host" and host["reach"] == "terminals" and host["is_git"] is False
-    assert (await client.patch(f"/api/projects/{project['id']}", headers=HEADERS, json={"default_env": "host"})).json()["settings"]["default_env"] == "host"
+    assert (await _write(client, "PATCH", f"/api/projects/{project['id']}", {"default_env": "host"})).json()["settings"]["default_env"] == "host"
 
     refused = await client.post("/api/sessions", headers=HEADERS, json={"title": "x", "project_id": project["id"], "folder_id": host["id"]})
     assert refused.status_code == 409 and "host folder" in refused.json()["detail"]
@@ -105,22 +123,22 @@ async def test_folders_are_added_locked_and_removed_with_a_journal_of_it(running
     site, docs = _dirs(tmp_path, "site", "docs")
     project = (await client.post("/api/projects", headers=HEADERS, json={"name": "Bakery", "folders": [{"path": str(site)}]})).json()
     pid = project["id"]
-    assert (await client.post("/api/projects/nope/folders", headers=HEADERS, json={"path": str(docs)})).status_code == 404
+    assert (await _write(client, "POST", "/api/projects/nope/folders", {"path": str(docs)})).status_code == 404
 
-    added = await client.post(f"/api/projects/{pid}/folders", headers=HEADERS, json={"path": str(docs), "label": "Docs"})
+    added = await _write(client, "POST", f"/api/projects/{pid}/folders", {"path": str(docs), "label": "Docs"})
     assert added.status_code == 200
     docs_id = added.json()["folders"][1]["id"]
     assert added.json()["folders"][1]["reachable"] is True and added.json()["folders"][1]["label"] == "Docs"
 
-    unmounted = await client.post(f"/api/projects/{pid}/folders", headers=HEADERS, json={"path": str(tmp_path / "not-mounted")})
+    unmounted = await _write(client, "POST", f"/api/projects/{pid}/folders", {"path": str(tmp_path / "not-mounted")})
     assert unmounted.status_code == 200 and unmounted.json()["folders"][2]["reachable"] is False
-    nested = await client.post(f"/api/projects/{pid}/folders", headers=HEADERS, json={"path": str(docs / "inner")})
+    nested = await _write(client, "POST", f"/api/projects/{pid}/folders", {"path": str(docs / "inner")})
     assert nested.status_code == 400 and "inside the project" in nested.json()["detail"]
-    relative = await client.post(f"/api/projects/{pid}/folders", headers=HEADERS, json={"path": "docs"})
+    relative = await _write(client, "POST", f"/api/projects/{pid}/folders", {"path": "docs"})
     assert relative.status_code == 400 and "absolute" in relative.json()["detail"]
 
     sid = (await client.post("/api/sessions", headers=HEADERS, json={"title": "Menu", "project_id": pid})).json()["id"]
-    locked = await client.patch(f"/api/projects/{pid}/folders/{docs_id}", headers=HEADERS, json={"readonly": True, "label": "Reference"})
+    locked = await _write(client, "PATCH", f"/api/projects/{pid}/folders/{docs_id}", {"readonly": True, "label": "Reference"})
     assert locked.status_code == 200
     folder = next(f for f in locked.json()["folders"] if f["id"] == docs_id)
     assert folder["readonly"] is True and folder["writable"] is False and folder["label"] == "Reference"
@@ -128,9 +146,9 @@ async def test_folders_are_added_locked_and_removed_with_a_journal_of_it(running
     assert live is not None and live.readonly is True, "a loaded session must see the lock now, not at its next load"
     walls = manager.live_state(sid).services.walls
     assert docs in walls.readable and docs not in walls.writable, "and its walls with it: readable, never writable"
-    assert (await client.patch(f"/api/projects/{pid}/folders/f-nope", headers=HEADERS, json={"readonly": True})).status_code == 404
+    assert (await _write(client, "PATCH", f"/api/projects/{pid}/folders/f-nope", {"readonly": True})).status_code == 404
 
-    removed = await client.delete(f"/api/projects/{pid}/folders/{docs_id}", headers=HEADERS)
+    removed = await _write(client, "DELETE", f"/api/projects/{pid}/folders/{docs_id}")
     assert removed.status_code == 200 and [f["path"] for f in removed.json()["folders"]] == [str(site), str(tmp_path / "not-mounted")]
     assert docs.is_dir(), "forgetting a folder touches nothing on disk"
 
@@ -148,26 +166,26 @@ async def test_a_folder_an_agent_works_in_is_not_taken_from_under_it(running: An
     primary_id, docs_id = (f["id"] for f in project["folders"])
 
     only = (await client.post("/api/projects", headers=HEADERS, json={"name": "Solo", "folders": [{"path": str(tmp_path / "solo")}]})).json()
-    last = await client.delete(f"/api/projects/{only['id']}/folders/{only['folders'][0]['id']}", headers=HEADERS)
+    last = await _write(client, "DELETE", f"/api/projects/{only['id']}/folders/{only['folders'][0]['id']}")
     assert last.status_code == 409 and "only folder" in last.json()["detail"]
 
     in_docs = await client.post("/api/sessions", headers=HEADERS, json={"title": "Writer", "project_id": pid, "folder_id": docs_id})
     assert in_docs.status_code == 200
     detail = (await client.get(f"/api/sessions/{in_docs.json()['id']}", headers=HEADERS)).json()
     assert detail["workspace"] == str(docs)
-    busy = await client.delete(f"/api/projects/{pid}/folders/{docs_id}", headers=HEADERS)
+    busy = await _write(client, "DELETE", f"/api/projects/{pid}/folders/{docs_id}")
     assert busy.status_code == 409 and "Writer works in" in busy.json()["detail"]
 
     # The primary may be demoted while nobody works there by default; not once somebody does.
-    assert (await client.patch(f"/api/projects/{pid}/folders/{docs_id}", headers=HEADERS, json={"position": 0})).status_code == 200
-    assert (await client.patch(f"/api/projects/{pid}/folders/{primary_id}", headers=HEADERS, json={"position": 0})).status_code == 200
+    assert (await _write(client, "PATCH", f"/api/projects/{pid}/folders/{docs_id}", {"position": 0})).status_code == 200
+    assert (await _write(client, "PATCH", f"/api/projects/{pid}/folders/{primary_id}", {"position": 0})).status_code == 200
     await client.post("/api/sessions", headers=HEADERS, json={"title": "Baker", "project_id": pid})
-    moved = await client.patch(f"/api/projects/{pid}/folders/{docs_id}", headers=HEADERS, json={"position": 0})
+    moved = await _write(client, "PATCH", f"/api/projects/{pid}/folders/{docs_id}", {"position": 0})
     assert moved.status_code == 409 and "Baker works in the primary folder" in moved.json()["detail"]
-    primary = await client.delete(f"/api/projects/{pid}/folders/{primary_id}", headers=HEADERS)
+    primary = await _write(client, "DELETE", f"/api/projects/{pid}/folders/{primary_id}")
     assert primary.status_code == 409 and "Baker works in" in primary.json()["detail"]
     # A rename or a lock is not a move and is never refused for that reason.
-    assert (await client.patch(f"/api/projects/{pid}/folders/{primary_id}", headers=HEADERS, json={"label": "Site"})).status_code == 200
+    assert (await _write(client, "PATCH", f"/api/projects/{pid}/folders/{primary_id}", {"label": "Site"})).status_code == 200
 
 
 async def test_an_agent_is_started_in_a_named_folder_or_refused_clearly(running: Any, tmp_path: Path) -> None:
@@ -182,7 +200,7 @@ async def test_an_agent_is_started_in_a_named_folder_or_refused_clearly(running:
     loose = await client.post("/api/sessions", headers=HEADERS, json={"title": "x", "folder_id": gone_id})
     assert loose.status_code == 400
 
-    added = (await client.post(f"/api/projects/{pid}/folders", headers=HEADERS, json={"path": str(docs)})).json()
+    added = (await _write(client, "POST", f"/api/projects/{pid}/folders", {"path": str(docs)})).json()
     docs_id = added["folders"][2]["id"]
     sid = (await client.post("/api/sessions", headers=HEADERS, json={"title": "Writer", "project_id": pid, "folder_id": docs_id})).json()["id"]
     assert (await client.get(f"/api/sessions/{sid}", headers=HEADERS)).json()["workspace"] == str(docs), "a folder added a moment ago is reachable to a new agent"
@@ -195,13 +213,13 @@ async def test_a_chat_project_is_kept_and_its_settings_edited(running: Any, db: 
     listing = {p["id"]: p for p in (await client.get("/api/projects", headers=HEADERS)).json()}
     assert listing[pid]["settings"]["ephemeral"] is True and listing[pid]["sessions"] == [{"id": sid, "title": "Plain", "running": False}]
 
-    assert (await client.patch(f"/api/projects/{pid}", headers=HEADERS, json={"keep": False})).status_code == 422
-    kept = await client.patch(f"/api/projects/{pid}", headers=HEADERS, json={"keep": True, "name": "Plain project", "snapshots": False, "default_env": "container"})
+    assert (await _write(client, "PATCH", f"/api/projects/{pid}", {"keep": False})).status_code == 422
+    kept = await _write(client, "PATCH", f"/api/projects/{pid}", {"keep": True, "name": "Plain project", "snapshots": False, "default_env": "container"})
     assert kept.status_code == 200
     settings = kept.json()["settings"]
     assert settings["ephemeral"] is False and settings["snapshots"] is False and kept.json()["name"] == "Plain project"
     assert "kept" in await _events(db, pid)
-    assert (await client.patch("/api/projects/nope", headers=HEADERS, json={"name": "x"})).status_code == 404
+    assert (await _write(client, "PATCH", "/api/projects/nope", {"name": "x"})).status_code == 404
 
 
 async def test_the_brief_is_the_operators_to_write(running: Any, tmp_path: Path) -> None:

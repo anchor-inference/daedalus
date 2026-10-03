@@ -926,9 +926,12 @@ def _watches(orch: Orchestrators) -> Any:
     return found
 
 
-async def watch(orch: Orchestrators, project: Project, session_id: str, *, when: Any, then: Any, cooldown_minutes: Any = 10, once: bool = False, note: str = "") -> str:
+async def watch(orch: Orchestrators, project: Project, session_id: str, *, when: Any, then: Any,
+                cooldown_minutes: Any = 10, once: bool = False, note: str = "",
+                deadline_at: str | None = None) -> str:
     try:
-        made = await _watches(orch).create(project, when=when, then=then, cooldown_minutes=cooldown_minutes, once=once, note=note, by="orchestrator")
+        made = await _watches(orch).create(project, when=when, then=then, cooldown_minutes=cooldown_minutes,
+                                          once=once, note=note, deadline_at=deadline_at, by="orchestrator")
     except WatchRefused as exc:
         raise Refused(str(exc)) from exc
     view = made.view()

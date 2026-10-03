@@ -295,7 +295,7 @@ function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, to
           <label className="field" htmlFor="watch-terminal">{t("focus.watches.terminal")}</label>
           <select id="watch-terminal" className="field" value={draft.terminal} onChange={(e) => set({ terminal: e.target.value })}>
             <option value="" disabled>{t("focus.watches.pick")}</option>
-            {running.map((term) => <option key={term.id} value={term.id}>{term.title || term.id}</option>)}
+            {running.map((term) => <option key={term.id} value={term.id}>{term.title || t("term.untitled")}</option>)}
             {cli.map((m) => <option key={m.id} value={`staff:${m.name}`}>{t("focus.watches.terminal.of", { name: m.name })}</option>)}
           </select>
           <label className="field" htmlFor="watch-regex">{t("focus.watches.regex")}</label>

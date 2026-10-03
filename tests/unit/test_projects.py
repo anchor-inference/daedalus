@@ -250,8 +250,12 @@ async def test_project_crud_and_a_session_that_works_in_one(settings: Settings, 
             beside = (await client.get(f"/api/sessions/{sid}", headers=HEADERS)).json()["workspace_sessions"]
             assert [u["id"] for u in beside] == [second]
 
-            renamed = await client.patch(f"/api/projects/{project['id']}", headers=HEADERS, json={"name": "Bakery site", "snapshots": True})
-            assert renamed.status_code == 200 and renamed.json()["name"] == "Bakery site" and renamed.json()["settings"]["snapshots"] is True
+            renamed = await client.patch(f"/api/projects/{project['id']}", headers=HEADERS,
+                                         json={"name": "Bakery site", "snapshots": True,
+                                               "expected_entity_revision": project["entity_revision"],
+                                               "client_operation_id": "rename-bakery-site"})
+            listed = (await client.get("/api/projects", headers=HEADERS)).json()[0]
+            assert renamed.status_code == 200 and listed["name"] == "Bakery site" and listed["settings"]["snapshots"] is True
             assert manager.live_state(sid).project.settings.snapshots is True, "a live session must see the change, not the next one to open"
 
             busy = await client.delete(f"/api/projects/{project['id']}", headers=HEADERS)
@@ -709,12 +713,17 @@ async def test_a_project_root_is_immutable_and_a_nonempty_project_cannot_be_remo
             listing = (await client.get("/api/projects", headers=HEADERS)).json()
             assert listing[0]["sessions"] == [{"id": sid, "title": "worker", "running": True}]
 
-            moved = await client.patch(f"/api/projects/{project['id']}", headers=HEADERS, json={"root": str(tmp_path / "elsewhere")})
+            moved = await client.patch(f"/api/projects/{project['id']}", headers=HEADERS,
+                                       json={"root": str(tmp_path / "elsewhere"),
+                                             "expected_entity_revision": project["entity_revision"],
+                                             "client_operation_id": "move-repo-root"})
             assert moved.status_code == 422, "project roots are immutable and no obsolete setting is accepted"
             removed = await client.delete(f"/api/projects/{project['id']}", headers=HEADERS, params={"detach": 1})
             assert removed.status_code == 409 and "works in Repo" in removed.json()["detail"]
             # A rename touches no directory and is not refused.
-            assert (await client.patch(f"/api/projects/{project['id']}", headers=HEADERS, json={"name": "Repo 2"})).status_code == 200
+            assert (await client.patch(f"/api/projects/{project['id']}", headers=HEADERS,
+                                       json={"name": "Repo 2", "expected_entity_revision": project["entity_revision"],
+                                             "client_operation_id": "rename-repo-two"})).status_code == 200
 
             manager.live_state(sid).pending = None
             await manager.delete_session(sid)
@@ -923,7 +932,9 @@ async def test_only_the_operator_writes_what_may_be_granted_without_them(db: Dat
     brief = await store.brief(project.id)
     assert list(brief) == ["goals", "constraints", "preferences", "done_when", "allowed_without_operator", "notes"]
     assert all(section.body == "" for section in brief.values())
-    await store.set_brief(project.id, "goals", "a menu page", "orchestrator")
+    await store.set_brief(project.id, "preferences", "a compact menu", "orchestrator")
+    with pytest.raises(ProjectError, match="impact preview"):
+        await store.set_brief(project.id, "goals", "a menu page", "orchestrator")
     with pytest.raises(ProjectError, match="only the operator"):
         await store.set_brief(project.id, "allowed_without_operator", "anything at all", "orchestrator")
     with pytest.raises(ProjectError, match="only the operator"):
@@ -932,7 +943,8 @@ async def test_only_the_operator_writes_what_may_be_granted_without_them(db: Dat
     with pytest.raises(ProjectError, match="sections"):
         await store.set_brief(project.id, "wishes", "x", "operator")
     brief = await store.brief(project.id)
-    assert (brief["goals"].body, brief["goals"].updated_by) == ("a menu page", "orchestrator")
+    assert (brief["preferences"].body, brief["preferences"].updated_by) == ("a compact menu", "orchestrator")
+    assert brief["goals"].body == ""
     assert (brief["allowed_without_operator"].body, brief["allowed_without_operator"].updated_by) == ("run the test suite", "operator")
 
 

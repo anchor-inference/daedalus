@@ -18,7 +18,7 @@ import pytest
 
 from daedalus.config import Settings, WebhookConfig
 from daedalus.extensions.api import build_app
-from daedalus.extensions.inbound import webhook_facts
+from daedalus.extensions.inbound import Inbound, webhook_facts
 from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.extensions.watches import (
     WHEN_EVENTS,
@@ -30,13 +30,14 @@ from daedalus.extensions.watches import (
     webhook_matches,
 )
 from daedalus.host.events import AppEvent
-from daedalus.staff_runtime import FakeStaffRuntime, ReadPage
+from daedalus.staff_runtime import ReadPage
 from daedalus.stores.database import Database
 from daedalus.terminals.model import InvalidRequest
 from daedalus.tools.orchestrator import WATCH_EVENTS
+from tests.support.authorized_launch import operator_assignment
 from tests.support.waiting import until_await
 from tests.unit.test_orchestrator import Rig, _idle, events, events_messages, rig
-from tests.unit.test_staff_runtime import Capacity, board_task
+from tests.unit.test_staff_runtime import Capacity, ObservedFakeStaffRuntime, board_task, close_team
 from tests.unit.test_wakeme import Notes
 
 
@@ -66,9 +67,30 @@ class FakeTerminals:
         return answer  # type: ignore[no-any-return]
 
 
+class WatchNotes(Notes):
+    """A notification fake whose return value has a matching durable receipt."""
+
+    def __init__(self, db: Database) -> None:
+        super().__init__()
+        self.db = db
+
+    async def post(self, draft: Any) -> dict[str, int]:
+        self.posted.append(draft)
+        at = datetime.now(UTC).isoformat()
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute(
+                "INSERT INTO notifications(at,updated_at,kind,category,title,body,project_id,dedupe_key)"
+                " VALUES (?,?,?,'orchestrator_report',?,?,?,?)",
+                (at, at, draft.kind, draft.title, draft.body, draft.project_id, draft.dedupe_key),
+            )
+            notification_id = int(cursor.lastrowid)
+            await cursor.close()
+        return {"id": notification_id}
+
+
 async def with_watches(r: Rig, clock: Clock | None = None) -> Watches:
     app = r.team.app
-    app.notifications = Notes()
+    app.notifications = WatchNotes(r.manager.db)
     r.team._capacity = Capacity()
     keeper = Watches(app)
     if clock is not None:
@@ -112,6 +134,7 @@ async def test_delivery_cursor_deduplicates_after_cooldown_and_restart(settings:
         assert [(row["status"], row["source_cursor"]) for row in rows] == [("delivered", "bus:123")]
     finally:
         await keeper.close()
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -209,6 +232,7 @@ async def test_setting_a_watch_checks_every_part_and_the_project_limit(settings:
         assert f"[{first.id}] when Ada finishes a turn" in state
     finally:
         await keeper.close()
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -240,9 +264,10 @@ async def test_cooldown_once_and_the_hourly_budget(settings: Settings, db: Datab
         assert len(await fired(r)) == 3
 
         # A tell that makes its member finish again goes round until the hourly budget stops it.
-        r.team.runtimes["daedalus"] = runtime = FakeStaffRuntime(kind="daedalus", page=ReadPage("", None, False))
+        r.team.runtimes["daedalus"] = runtime = ObservedFakeStaffRuntime(kind="daedalus", page=ReadPage("", None, False))
+        r.team.runtimes["daedalus"].manager = r.manager
         task_id = await board_task(r.manager, r.project, "Menu")
-        await r.team.assign(ada, task_id, by="operator")
+        await operator_assignment(r.team, ada, task_id)
         loop = await keeper.create(project, when={"event": "staff_finished", "staff": "Ada"}, then={"action": "tell", "staff": "Ada", "text": "Check it once more"}, cooldown_minutes=1)
         told = 0
         for _ in range(20):
@@ -263,6 +288,7 @@ async def test_cooldown_once_and_the_hourly_budget(settings: Settings, db: Datab
         assert [m.mode for _, m in runtime.sent if m.text == "Next, the prices"] == ["after_turn"]
     finally:
         await keeper.close()
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -275,9 +301,10 @@ async def test_a_silence_fires_once_until_the_member_is_heard_again(settings: Se
     keeper = await with_watches(r, clock)
     try:
         project = await r.orch.enable(r.project.id)
-        r.team.runtimes["daedalus"] = FakeStaffRuntime(kind="daedalus")
+        r.team.runtimes["daedalus"] = ObservedFakeStaffRuntime(kind="daedalus")
+        r.team.runtimes["daedalus"].manager = r.manager
         ada = await r.manager.staff.hire(r.project.id, name="Ada", isolation="shared")
-        await r.team.assign(ada, await board_task(r.manager, r.project, "Menu"), by="operator")
+        await operator_assignment(r.team, ada, await board_task(r.manager, r.project, "Menu"))
         live = await r.team.live_of(ada)
         assert live is not None
         await r.team.ingress.status(live, "working")
@@ -299,6 +326,7 @@ async def test_a_silence_fires_once_until_the_member_is_heard_again(settings: Se
         assert len(await fired(r)) == 2
     finally:
         await keeper.close()
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -335,6 +363,7 @@ async def test_a_new_commit_is_seen_on_the_next_look_and_not_before(settings: Se
             await keeper.create(project, when={"event": "git_commit", "folder": "elsewhere"}, then={"action": "wake"})
     finally:
         await keeper.close()
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -352,7 +381,8 @@ async def test_webhooks_fire_pr_ci_and_pattern_watches_and_can_skip_the_session(
         deploy = await keeper.create(project, when={"event": "webhook", "provider": "github", "regex": "deploy(ed)? to prod"}, then={"action": "wake"})
 
         app = SimpleNamespace(settings=settings, config=r.manager.config, db=db, manager=r.manager, front=None, extensions=r.team.app.extensions, guard=None, notifications=None)
-        app.extensions["inbound"] = SimpleNamespace(record_delivery=_fresh, forget_delivery=_nothing, deliver=_no_session)
+        app.extensions["inbound"] = Inbound(app)
+        session_count = (await db.fetchone("SELECT count(*) FROM sessions"))[0]
         api = build_app(app, "tok")  # type: ignore[arg-type]
 
         async def post(event: str, payload: dict[str, Any], delivery: str) -> httpx.Response:
@@ -374,21 +404,11 @@ async def test_webhooks_fire_pr_ci_and_pattern_watches_and_can_skip_the_session(
             await keeper.on_event(event)
         assert [e.payload["watch_id"] for e in await fired(r)] == [merged.id, red.id, deploy.id]
         assert r.team.app.notifications.posted[-1].level == "urgent"
+        assert (await db.fetchone("SELECT count(*) FROM sessions"))[0] == session_count
     finally:
         await keeper.close()
+        await close_team(r.manager)
         await r.manager.close()
-
-
-async def _fresh(provider: str, delivery_id: str) -> bool:
-    return True
-
-
-async def _nothing(provider: str, delivery_id: str) -> None:
-    return None
-
-
-async def _no_session(**kwargs: Any) -> dict[str, Any]:
-    raise AssertionError("a provider set to deliver events starts no run")
 
 
 # -- terminals -----------------------------------------------------------------------------------------
@@ -403,14 +423,15 @@ async def test_terminal_output_is_waited_for_on_the_daemon_and_the_orchestrators
     try:
         project = await r.orch.enable(r.project.id)
         sid = project.settings.orchestrator.session_id
-        r.team.runtimes["claude"] = FakeStaffRuntime(kind="claude")
+        r.team.runtimes["claude"] = ObservedFakeStaffRuntime(kind="claude")
+        r.team.runtimes["claude"].manager = r.manager
         max_ = await r.manager.staff.hire(r.project.id, name="Max", harness="claude", isolation="shared")
-        await r.team.assign(max_, await board_task(r.manager, r.project, "Tests"), by="operator")
+        await operator_assignment(r.team, max_, await board_task(r.manager, r.project, "Tests"))
         live = await r.team.live_of(max_)
         assert live is not None and live.session.terminal_id
         await db.execute(
-            "INSERT INTO terminals(id, env, project_id, owner_kind, owner_id, title, cwd, created_at, status) VALUES (?, 'container', ?, 'staff', ?, 'claude · Max', '/tmp', ?, 'running')",
-            (live.session.terminal_id, r.project.id, max_.id, clock.now.isoformat()),
+            "UPDATE terminals SET title = 'claude · Max', cwd = '/tmp', created_at = ? WHERE id = ?",
+            (clock.now.isoformat(), live.session.terminal_id),
         )
         with pytest.raises(WatchRefused, match="works without a terminal"):
             await keeper.create(project, when={"event": "terminal_output", "staff": (await r.manager.staff.hire(r.project.id, name="Ada")).name, "regex": "x"}, then={"action": "wake"})
@@ -454,6 +475,7 @@ async def test_terminal_output_is_waited_for_on_the_daemon_and_the_orchestrators
         assert view["stopped"] == "pattern" and "refused its pattern" in view["last_error"]
     finally:
         await keeper.close()
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -478,7 +500,8 @@ async def test_a_watch_wakes_the_orchestrator_once_per_cooldown_and_outlives_a_r
     keeper = await with_watches(r, clock)
     try:
         r.manager.config.orchestrator.batch_seconds = 600
-        r.team.runtimes["daedalus"] = FakeStaffRuntime(kind="daedalus", page=ReadPage("Menu done.", None, False))
+        r.team.runtimes["daedalus"] = ObservedFakeStaffRuntime(kind="daedalus", page=ReadPage("Menu done.", None, False))
+        r.team.runtimes["daedalus"].manager = r.manager
         sid = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
         max_ = await r.manager.staff.hire(r.project.id, name="Max", isolation="shared")
         await r.manager.submit(sid, "Tell me when Max is done")
@@ -486,7 +509,7 @@ async def test_a_watch_wakes_the_orchestrator_once_per_cooldown_and_outlives_a_r
         [made] = keeper.of_project(r.project.id)
         assert made.created_by == "orchestrator" and made.action == {"action": "wake", "note": "review Max's work"}
 
-        await r.team.assign(max_, await board_task(r.manager, r.project, "Menu"), by="operator")
+        await operator_assignment(r.team, max_, await board_task(r.manager, r.project, "Menu"))
         live = await r.team.live_of(max_)
         assert live is not None
 
@@ -520,6 +543,7 @@ async def test_a_watch_wakes_the_orchestrator_once_per_cooldown_and_outlives_a_r
         assert keeper.of_project(r.project.id) == []
     finally:
         await keeper.close()
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -560,6 +584,7 @@ async def test_the_watch_routes(settings: Settings, db: Database, tmp_path: Path
         assert keeper.of_project(r.project.id) == []
     finally:
         await keeper.close()
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -590,4 +615,5 @@ async def test_a_restart_replays_what_it_missed_without_firing_twice(settings: S
         finally:
             await again.close()
     finally:
+        await close_team(r.manager)
         await r.manager.close()

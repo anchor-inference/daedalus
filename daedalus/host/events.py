@@ -374,6 +374,7 @@ class ScheduleFired(TypedDict):
 
 class WatchFired(TypedDict):
     watch_id: str
+    delivery_id: NotRequired[str]
     fire_count: NotRequired[int]
     pattern: NotRequired[dict[str, Any]]
     actor: NotRequired[str]
@@ -405,6 +406,7 @@ class WebhookReceived(TypedDict):
 class ProjectChanged(TypedDict):
     change: NotRequired[str]
     actor: NotRequired[str]
+    receipt_id: NotRequired[str]
 
 
 class DispatchCreated(TypedDict):

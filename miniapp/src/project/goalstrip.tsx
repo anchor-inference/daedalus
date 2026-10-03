@@ -30,7 +30,7 @@ export function GoalStrip({ projectId }: { projectId: string }) {
   const waitsForYou = (state.counts.waiting_for_you ?? 0) > 0;
   const blocked = goalRows(state.goals).find((goal) => goal.blocked || goal.next);
   const blockedReason = blocked?.next ? ("key" in blocked.next ? t(blocked.next.key) : blocked.next.text) : "";
-  const headline = waitsForYou ? t("goal.headline.you") : blocked ? t(blockedReason ? "goal.headline.reason" : "goal.headline.blocked", { title: blocked.title, reason: blockedReason }) : state.goals[0] ? t("goal.headline.work", { title: state.goals[0].title }) : t("goal.headline.quiet");
+  const headline = waitsForYou ? t("goal.headline.you") : blocked ? t(blockedReason ? "goal.headline.reason" : "goal.headline.blocked", { title: blocked.title || t("goal.card.untitled"), reason: blockedReason }) : state.goals[0] ? t("goal.headline.work", { title: state.goals[0].title || t("goal.card.untitled") }) : t("goal.headline.quiet");
   return (
     <div className={`goal-strip ${open ? "open" : ""} ${lineNeedsAttention(state.counts) ? "attn" : ""}`}>
       {open && <GoalList id={listId} state={state} />}
@@ -62,7 +62,7 @@ function GoalList({ id, state }: { id: string; state: FocusState }) {
               return (
                 <li key={goal.id} className={`goal-item ${goal.blocked ? "blocked" : ""}`} data-task={goal.id}>
                   <div className="goal-item-head">
-                    <span className="goal-title">{goal.title}</span>
+                    <span className="goal-title">{goal.title || t("goal.card.untitled")}</span>
                     <span className="goal-status">{t(`board.col.${goal.status}`)}</span>
                   </div>
                   <div className="goal-item-meta">
@@ -86,7 +86,7 @@ function GoalList({ id, state }: { id: string; state: FocusState }) {
               <li key={String(result.id)} className={`goal-item result ${result.cause}`} data-result={String(result.id)}>
                 <div className="goal-item-head">
                   <span className="goal-title">
-                    {t(resultKey(result.cause), { who: result.staff_name || t("goal.result.member"), card: result.title || result.task_id || t("goal.result.nocard") })}
+                    {t(resultKey(result.cause), { who: result.staff_name || t("goal.result.member"), card: result.title || t(result.task_id ? "goal.card.untitled" : "goal.result.nocard") })}
                   </span>
                   <span className="goal-age num">{relTime(result.opened_at)}</span>
                 </div>
@@ -111,7 +111,7 @@ function GoalList({ id, state }: { id: string; state: FocusState }) {
                   <span className="goal-title">{c.text}</span>
                   <span className="goal-age num">{relTime(c.at)}</span>
                 </div>
-                {c.task_id && <div className="goal-item-meta"><span className="goal-owner">→ {cardTitle(c.task_id, state.goals)}</span></div>}
+                {c.task_id && <div className="goal-item-meta"><span className="goal-owner">→ {cardTitle(c.task_id, state.goals) || t("goal.card.untitled")}</span></div>}
               </li>
             ))}
           </ul>

@@ -123,7 +123,7 @@ from daedalus.speech.tts_service import MEDIA_TYPE_HEADER, SEQUENCE_TYPE
 from daedalus.speech.tts_service import frame as speech_frame
 from daedalus.staff_runtime import LiveSession
 from daedalus.stores import pairing, passkeys
-from daedalus.stores.control import Principal
+from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.harness import HarnessStore
 from daedalus.stores.media import MEDIA_TENANT
 from daedalus.stores.projects import Project
@@ -421,6 +421,8 @@ class AskAnswerBody(BaseModel):
 
 
 class TeamReportBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    client_operation_id: str = Field(min_length=1, max_length=160)
     kind: str
     note: str
     artifacts: list[str] | None = None
@@ -1773,7 +1775,17 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     async def team_report(staff_session_id: str, body: TeamReportBody, request: Request) -> dict[str, Any]:
         team, live = await team_live(staff_session_id, request)
         try:
-            told = await team.ingress.report(live, body.kind, body.note, body.artifacts, body.remember, evidence=body.evidence, acknowledged=body.acknowledged, operator_steps=body.operator_steps)
+            told = await team.ingress.report(
+                live, body.kind, body.note, body.artifacts, body.remember, evidence=body.evidence,
+                acknowledged=body.acknowledged, operator_steps=body.operator_steps,
+                call_id="http:" + hashlib.sha256(json.dumps(
+                    [staff_session_id, body.client_operation_id], separators=(",", ":"),
+                ).encode()).hexdigest(),
+            )
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except ControlConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"ok": True, "text": told}

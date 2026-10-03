@@ -3,14 +3,14 @@ import { openContextMenu } from "./ui/context-menu";
 // the shell (the sidebar on a desktop, the Agents header on a phone) because a project is a lens
 // over every list of agents, not a destination of its own.
 
-import { useCallback, useEffect, useState } from "react";
-import { api, Project, ProjectDir, ProjectEnvironments } from "./api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, ApiError, Project, ProjectDir, ProjectEnvironments } from "./api";
 import { folderName, needsMount, pathProblem, projectPath, projectReachable, reachIsProblem, reachKey } from "./folders";
 import { Sheet } from "./ui/dialogs";
 import { EnvPill } from "./envpill";
 import { Icon } from "./icons";
 import { navigate, projectPagePath } from "./router";
-import { invalidate, useQuery } from "./store";
+import { invalidate, useOffline, useQuery } from "./store";
 import { confirmAsync, errorText } from "./ui";
 import { plural, t } from "./i18n";
 import { ProjectExtensions } from "./project/ProjectExtensions";
@@ -45,6 +45,98 @@ export function useProjects() {
 function afterChange(): void {
   invalidate("/api/projects");
   invalidate("/api/sessions");
+}
+
+type ProjectWrite = { method: "PATCH" | "POST" | "DELETE"; path: string; body: Record<string, unknown>; label: string };
+type WriteProject = (method: ProjectWrite["method"], path: string, fields: Record<string, unknown>, label: string, onSuccess?: () => void) => Promise<boolean>;
+
+function savedProjectWrite(projectId: string): ProjectWrite | null {
+  const base = `/api/projects/${encodeURIComponent(projectId)}`;
+  try {
+    const value = JSON.parse(sessionStorage.getItem(`daedalus.project.write.${projectId}`) ?? "null");
+    const suffix = typeof value?.path === "string" && value.path.startsWith(base) ? value.path.slice(base.length) : null;
+    const pathAllowed = suffix === "" || suffix === "/folders" || (typeof suffix === "string" && /^\/folders\/[^/]+$/.test(suffix));
+    return pathAllowed && ["PATCH", "POST", "DELETE"].includes(value.method)
+      && typeof value.body?.client_operation_id === "string" && Number.isInteger(value.body?.expected_entity_revision)
+      && typeof value.label === "string" ? value as ProjectWrite : null;
+  } catch { return null; }
+}
+
+function useProjectWrites(projectId: string, revision: number | undefined, readFailed: boolean, refresh: () => void, toast: (text: string) => void) {
+  const [pending, setPending] = useState<ProjectWrite | null>(() => savedProjectWrite(projectId));
+  const [conflict, setConflict] = useState<number | null>(null);
+  const [requiredRevision, setRequiredRevision] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const completion = useRef<(() => void) | null>(null);
+  const offline = useOffline();
+  const readCurrent = !readFailed && Number.isInteger(revision) && (revision ?? 0) > 0;
+  const ready = !offline && readCurrent && !busy && !pending && conflict === null
+    && (requiredRevision === null || (revision ?? 0) >= requiredRevision);
+
+  function remember(next: ProjectWrite | null) {
+    setPending(next);
+    try {
+      if (next) sessionStorage.setItem(`daedalus.project.write.${projectId}`, JSON.stringify(next));
+      else sessionStorage.removeItem(`daedalus.project.write.${projectId}`);
+    } catch { /* this mounted sheet still retains the exact request */ }
+  }
+
+  async function run(intent: ProjectWrite, onSuccess?: () => void): Promise<boolean> {
+    if (busy || offline || readFailed) return false;
+    setBusy(true);
+    try {
+      const receipt = await api.request<{ receipt_id: string; entity_revision: number }>(intent.method, intent.path, intent.body);
+      if (!receipt || typeof receipt.receipt_id !== "string" || !Number.isInteger(receipt.entity_revision))
+        throw new Error(t("project.write.badReceipt"));
+      remember(null);
+      setConflict(null);
+      setRequiredRevision(receipt.entity_revision);
+      afterChange(); refresh();
+      toast(intent.label);
+      (onSuccess ?? completion.current)?.();
+      completion.current = null;
+      return true;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        remember(null);
+        const detail = error.data.detail;
+        const currentRevision = error.data.current_revision ?? (detail && typeof detail === "object" ? (detail as Record<string, unknown>).current_revision : null);
+        if (Number.isInteger(currentRevision)) setConflict(Number(intent.body.expected_entity_revision));
+        completion.current = null;
+        refresh();
+      } else if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+        remember(null);
+        completion.current = null;
+      }
+      toast(errorText(error));
+      return false;
+    } finally { setBusy(false); }
+  }
+
+  const write: WriteProject = async (method, path, fields, label, onSuccess) => {
+    if (!ready || !revision) return false;
+    const intent: ProjectWrite = { method, path, label,
+      body: { ...fields, expected_entity_revision: revision, client_operation_id: crypto.randomUUID() } };
+    completion.current = onSuccess ?? null;
+    remember(intent);
+    return run(intent, onSuccess);
+  };
+
+  async function reviewConflict() {
+    if (offline || busy) return;
+    setBusy(true);
+    try {
+      const projects = await api.get<Project[]>("/api/projects");
+      const fresh = projects.find((project) => project.id === projectId && Number.isInteger(project.entity_revision));
+      if (!fresh) return;
+      setRequiredRevision(fresh.entity_revision ?? null);
+      setConflict(null);
+      afterChange(); refresh();
+    } catch (error) { toast(errorText(error)); }
+    finally { setBusy(false); }
+  }
+
+  return { write, retry: () => pending ? run(pending) : Promise.resolve(false), reviewConflict, pending, conflict, busy, offline, readCurrent, ready };
 }
 
 /** The control that says which project is in view and opens the list: sidebar, header or palette. */
@@ -131,6 +223,16 @@ export function ProjectSwitcher({ projects, current, onPick, onClose, toast }: {
 }
 
 type Env = "container" | "host";
+
+type SettingsDraft = { name: string; snapshots: boolean; defaultEnv: Env };
+
+function savedSettingsDraft(projectId: string): SettingsDraft | null {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(`daedalus.project.draft.${projectId}`) ?? "null");
+    return typeof value?.name === "string" && typeof value.snapshots === "boolean"
+      && (value.defaultEnv === "container" || value.defaultEnv === "host") ? value as SettingsDraft : null;
+  } catch { return null; }
+}
 
 type DirectoryEntry = { name: string; path: string; readable: boolean; writable: boolean; project_id?: string | null };
 type DirectoryListing = { roots?: DirectoryEntry[]; docker?: boolean; root?: string; path?: string; parents?: { name: string; path: string }[]; entries?: DirectoryEntry[]; truncated?: boolean };
@@ -241,37 +343,24 @@ function DirectoryPicker({ value, onChange, toast }: { value: string; onChange: 
 }
 
 /** One folder of a project: what it is, who can reach it, the read-only switch and the way to forget it. */
-function FolderRow({ project, folder, environments, toast }: { project: Project; folder: ProjectDir; environments?: ProjectEnvironments; toast: (t: string) => void }) {
+function FolderRow({ project, folder, environments, write, canWrite }: { project: Project; folder: ProjectDir; environments?: ProjectEnvironments; write: WriteProject; canWrite: boolean }) {
   const [busy, setBusy] = useState(false);
   const primary = folder.position === 0;
   const only = project.folders.length === 1;
   const key = reachKey(folder, environments);
   const base = `/api/projects/${encodeURIComponent(project.id)}/folders/${encodeURIComponent(folder.id)}`;
   async function lock(readonly: boolean) {
+    if (!canWrite || busy) return;
     setBusy(true);
-    try {
-      await api.patch(base, { readonly });
-      afterChange();
-      toast(t(readonly ? "folder.locked" : "folder.unlocked", { name: folderName(folder) }));
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      setBusy(false);
-    }
+    await write("PATCH", base, { readonly }, t(readonly ? "folder.locked" : "folder.unlocked", { name: folderName(folder) }));
+    setBusy(false);
   }
   async function remove() {
     if (!(await confirmAsync(t("folder.remove.title", { name: folderName(folder) }), { body: t("folder.remove.body", { path: folder.path }), action: t("common.remove") }))) return;
+    if (!canWrite || busy) return;
     setBusy(true);
-    try {
-      await api.delete(base);
-      afterChange();
-      toast(t("folder.removed", { name: folderName(folder) }));
-    } catch (e) {
-      // The refusal names the agents that work there; it is the sentence the operator needs.
-      toast(errorText(e));
-    } finally {
-      setBusy(false);
-    }
+    await write("DELETE", base, {}, t("folder.removed", { name: folderName(folder) }));
+    setBusy(false);
   }
   return (
     <div className="dir-row" data-folder={folder.id}>
@@ -281,13 +370,13 @@ function FolderRow({ project, folder, environments, toast }: { project: Project;
         {primary && <span className="badge" title={t("folder.primary.title")}>{t("folder.primary")}</span>}
         <EnvPill env={folder.env} tiny />
         {folder.is_git && <span className="badge">{t("comp.name.git")}</span>}
-        <button className="iconbtn small" onClick={remove} disabled={busy || only} title={only ? t("folder.remove.last") : t("folder.remove", { name: folderName(folder) })} aria-label={t("folder.remove", { name: folderName(folder) })}>
+        <button className="iconbtn small" onClick={remove} disabled={busy || only || !canWrite} title={only ? t("folder.remove.last") : t("folder.remove", { name: folderName(folder) })} aria-label={t("folder.remove", { name: folderName(folder) })}>
           <Icon name="trash" size={14} />
         </button>
       </div>
       <div className="sub mono dir-path">{folder.path}</div>
       <label className="toggle-row dir-lock">
-        <input type="checkbox" checked={folder.readonly} disabled={busy} onChange={(e) => void lock(e.target.checked)} />
+        <input type="checkbox" checked={folder.readonly} disabled={busy || !canWrite} onChange={(e) => void lock(e.target.checked)} />
         <span>{t("folder.readonly")}</span>
       </label>
       <div className={`sub dir-reach ${reachIsProblem(key) ? "attn" : ""}`}>{t(key)}</div>
@@ -296,7 +385,7 @@ function FolderRow({ project, folder, environments, toast }: { project: Project;
 }
 
 /** Another folder for a project: where it lives, the path, a label, and whether agents may write in it. */
-function AddFolder({ project, environments, onDone, toast }: { project: Project; environments?: ProjectEnvironments; onDone: () => void; toast: (t: string) => void }) {
+function AddFolder({ project, environments, onDone, toast, write, canWrite }: { project: Project; environments?: ProjectEnvironments; onDone: () => void; toast: (t: string) => void; write: WriteProject; canWrite: boolean }) {
   const [env, setEnv] = useState<Env>(environments?.local ?? "container");
   const [path, setPath] = useState("");
   const [label, setLabel] = useState("");
@@ -305,19 +394,11 @@ function AddFolder({ project, environments, onDone, toast }: { project: Project;
   const local = !environments || env === environments.local;
   const problem = pathProblem(path) ? t("project.root.problem") : "";
   async function add() {
-    if (!path.trim() || problem || busy) return;
+    if (!path.trim() || problem || busy || !canWrite) return;
     setBusy(true);
-    try {
-      const updated = await api.post<Project>(`/api/projects/${encodeURIComponent(project.id)}/folders`, { path: path.trim(), label: label.trim(), env, readonly });
-      afterChange();
-      const added = updated.folders[updated.folders.length - 1];
-      toast(t(added && added.reach === "agents" && !added.reachable ? "folder.added.unmounted" : "folder.added", { name: added ? folderName(added) : path.trim() }));
-      onDone();
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      setBusy(false);
-    }
+    await write("POST", `/api/projects/${encodeURIComponent(project.id)}/folders`,
+      { path: path.trim(), label: label.trim(), env, readonly }, t("folder.added", { name: label.trim() || path.trim() }), onDone);
+    setBusy(false);
   }
   return (
     <div className="dir-form">
@@ -334,7 +415,7 @@ function AddFolder({ project, environments, onDone, toast }: { project: Project;
       </label>
       <div className="dir-form-foot">
         <button className="btn ghost" onClick={onDone}>{t("common.cancel")}</button>
-        <button className="btn primary" onClick={add} disabled={busy || !path.trim() || !!problem}>{t("folder.add.action")}</button>
+        <button className="btn primary" onClick={add} disabled={busy || !canWrite || !path.trim() || !!problem}>{t("folder.add.action")}</button>
       </div>
     </div>
   );
@@ -348,45 +429,51 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
   const projects = useProjects();
   const environments = useEnvironments().data;
   const project = projects.data?.find((p) => p.id === opened.id) ?? opened;
-  const [name, setName] = useState(project.name);
-  const [snapshots, setSnapshots] = useState(project.settings.snapshots);
+  const draftKey = `daedalus.project.draft.${project.id}`;
+  const startingDraft = useRef(savedSettingsDraft(opened.id));
+  const [name, setName] = useState(startingDraft.current?.name ?? project.name);
+  const [snapshots, setSnapshots] = useState(startingDraft.current?.snapshots ?? project.settings.snapshots);
   const savedEnv: Env = project.settings.default_env ?? environments?.local ?? "container";
-  const [defaultEnv, setDefaultEnv] = useState<Env>(savedEnv);
+  const [defaultEnv, setDefaultEnv] = useState<Env>(startingDraft.current?.defaultEnv ?? savedEnv);
+  const previousSavedEnv = useRef(savedEnv);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
+  const path = `/api/projects/${encodeURIComponent(project.id)}`;
+  const writes = useProjectWrites(project.id, project.entity_revision, !!projects.error, projects.refresh, toast);
   useEffect(() => {
-    setName(opened.name);
-    setSnapshots(opened.settings.snapshots);
-  }, [opened]);
-  useEffect(() => setDefaultEnv(savedEnv), [savedEnv]);
+    const draft = savedSettingsDraft(opened.id);
+    setName(draft?.name ?? opened.name);
+    setSnapshots(draft?.snapshots ?? opened.settings.snapshots);
+    setDefaultEnv(draft?.defaultEnv ?? savedEnv);
+  }, [opened.id]);
+  useEffect(() => {
+    setDefaultEnv((value) => value === previousSavedEnv.current ? savedEnv : value);
+    previousSavedEnv.current = savedEnv;
+  }, [savedEnv]);
   const dirty = name.trim() !== project.name || snapshots !== project.settings.snapshots || defaultEnv !== savedEnv;
-  async function save() {
-    if (!dirty || !name.trim() || busy) return;
-    setBusy(true);
+  useEffect(() => {
     try {
-      await api.patch(`/api/projects/${encodeURIComponent(project.id)}`, { name: name.trim(), snapshots, ...(defaultEnv !== savedEnv ? { default_env: defaultEnv } : {}) });
-      afterChange();
-      toast(t("common.saved"));
+      if (dirty) sessionStorage.setItem(draftKey, JSON.stringify({ name, snapshots, defaultEnv }));
+      else sessionStorage.removeItem(draftKey);
+    } catch { /* the mounted form still retains its draft */ }
+  }, [draftKey, name, snapshots, defaultEnv, dirty]);
+  async function save() {
+    if (!dirty || !name.trim() || busy || !writes.ready) return;
+    setBusy(true);
+    await writes.write("PATCH", path, { name: name.trim(), snapshots, ...(defaultEnv !== savedEnv ? { default_env: defaultEnv } : {}) }, t("common.saved"), () => {
+      try { sessionStorage.removeItem(draftKey); } catch { /* local state has the confirmed value */ }
       onClose();
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   async function keep() {
+    if (!writes.ready || busy) return;
     setBusy(true);
-    try {
-      await api.patch(`/api/projects/${encodeURIComponent(project.id)}`, { keep: true });
-      afterChange();
-      toast(t("project.kept", { name: project.name }));
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      setBusy(false);
-    }
+    await writes.write("PATCH", path, { keep: true }, t("project.kept", { name: project.name }));
+    setBusy(false);
   }
   async function remove() {
+    if (writes.offline || !writes.readCurrent || writes.pending || writes.busy) return;
     const agents = project.sessions.length;
     const running = project.sessions.filter((s) => s.running);
     const body = running.length
@@ -406,20 +493,23 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
   }
   return (
     <Sheet title={project.name} ariaLabel={t("project.settings.for", { name: project.name })} onClose={onClose} size="narrow">
+      {(writes.offline || !writes.readCurrent) && <div className="result-warning" role="status">{t("project.write.unverified")} <button type="button" className="linkbtn" disabled={writes.offline} onClick={projects.refresh}>{t("common.retry")}</button></div>}
+      {writes.pending && <div className="result-warning" role="status">{t("project.write.pending", { action: writes.pending.label })} <button type="button" className="linkbtn" disabled={writes.offline || !!projects.error || writes.busy} onClick={() => void writes.retry()}>{t("project.write.retry")}</button></div>}
+      {writes.conflict !== null && <div className="result-warning" role="status">{t("project.write.conflict")} <button type="button" className="linkbtn" disabled={writes.offline || writes.busy} onClick={() => void writes.reviewConflict()}>{t("project.write.review")}</button></div>}
       <label className="field" htmlFor="project-rename">{t("common.name")}</label>
       <input id="project-rename" className="field" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
       {project.settings.ephemeral && (
         <div className="project-ephemeral">
           <span className="sub">{t("project.ephemeral")}</span>
-          <button className="btn ghost" onClick={keep} disabled={busy}>{t("project.keep")}</button>
+          <button className="btn ghost" onClick={keep} disabled={busy || !writes.ready}>{t("project.keep")}</button>
         </div>
       )}
       <label className="field">{t("project.folders")}</label>
       <div className="dir-list">
-        {project.folders.map((folder) => <FolderRow key={folder.id} project={project} folder={folder} environments={environments} toast={toast} />)}
+        {project.folders.map((folder) => <FolderRow key={folder.id} project={project} folder={folder} environments={environments} write={writes.write} canWrite={writes.ready} />)}
       </div>
       {adding
-        ? <AddFolder project={project} environments={environments} onDone={() => setAdding(false)} toast={toast} />
+        ? <AddFolder project={project} environments={environments} onDone={() => setAdding(false)} toast={toast} write={writes.write} canWrite={writes.ready} />
         : <button className="btn ghost dir-add-open" onClick={() => setAdding(true)}><Icon name="plus" size={15} /> {t("folder.add")}</button>}
       {environments && environments.available.length > 1 && (
         <>
@@ -446,8 +536,8 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
         </>
       )}
       <div className="sheet-foot">
-        <button className="btn danger" onClick={remove}><Icon name="trash" size={15} /> {t("common.remove")}</button>
-        <button className="btn primary" onClick={save} disabled={!dirty || !name.trim() || busy}>{t("common.save")}</button>
+        <button className="btn danger" onClick={remove} disabled={writes.offline || !writes.readCurrent || !!writes.pending || writes.busy}><Icon name="trash" size={15} /> {t("common.remove")}</button>
+        <button className="btn primary" onClick={save} disabled={!dirty || !name.trim() || busy || !writes.ready}>{t("common.save")}</button>
       </div>
     </Sheet>
   );

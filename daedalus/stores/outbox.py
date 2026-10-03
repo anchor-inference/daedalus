@@ -96,9 +96,34 @@ class OutboxStore:
             return None
         async with self.db.transaction() as conn:
             placeholders = ",".join("?" for _ in kinds)
-            async with conn.execute(f"SELECT * FROM effect_outbox WHERE state = 'pending' AND kind IN ({placeholders}) ORDER BY created_at,id", kinds) as cursor:
+            async with conn.execute(
+                "SELECT e.*,r.scope_id AS receipt_scope_id,t.priority AS task_priority,"
+                "t.project_id AS task_project_id FROM effect_outbox e"
+                " JOIN operation_receipts r ON r.id = e.receipt_id"
+                " LEFT JOIN board_tasks t ON t.id = json_extract(e.payload_json,'$.control.task_id')"
+                f" WHERE e.state = 'pending' AND e.kind IN ({placeholders})", kinds,
+            ) as cursor:
                 rows = await cursor.fetchall()
-            for row in rows:
+            cursor_row = await one(conn, "SELECT value FROM kv WHERE key = 'effect_admission_cursor'")
+            position = json.loads(cursor_row["value"]) if cursor_row else {"project": "", "foreground": 0}
+            foreground = sorted((row for row in rows if row["kind"] != "task.launch"),
+                                key=lambda row: ({"task.stop": 0, "review.merge": 1}.get(row["kind"], 2),
+                                                 row["created_at"], row["id"]))
+            launches = [row for row in rows if row["kind"] == "task.launch"]
+            by_project: dict[str, list[aiosqlite.Row]] = {}
+            for row in launches:
+                project_id = row["task_project_id"] or row["receipt_scope_id"]
+                by_project.setdefault(project_id, []).append(row)
+            projects = sorted(by_project)
+            previous = position.get("project", "")
+            projects = [project for project in projects if project > previous] + [project for project in projects if project <= previous]
+            launch_order = [row for project in projects for row in sorted(
+                by_project[project], key=lambda item: (item["task_priority"] if item["task_priority"] is not None else 9,
+                                                       item["created_at"], item["id"]),
+            )]
+            prefer_foreground = bool(foreground) and (position.get("foreground", 0) < 8 or not launches)
+            ordered = foreground + launch_order if prefer_foreground else launch_order + foreground
+            for row in ordered:
                 if row["id"] in exclude:
                     continue
                 try:
@@ -107,6 +132,14 @@ class OutboxStore:
                     await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ?,completed_at = ? WHERE id = ? AND state = 'pending'", (str(exc), now(), row["id"]))
                     continue
                 await conn.execute("UPDATE effect_outbox SET state = 'claimed',claim_generation = claim_generation + 1,claimed_at = ? WHERE id = ? AND state = 'pending'", (now(), row["id"]))
+                next_position = {
+                    "project": (row["task_project_id"] or row["receipt_scope_id"])
+                    if row["kind"] == "task.launch" else previous,
+                    "foreground": 0 if row["kind"] == "task.launch" else min(8, position.get("foreground", 0) + 1),
+                }
+                await conn.execute("INSERT INTO kv(key,value) VALUES ('effect_admission_cursor',?)"
+                                   " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                                   (canonical(next_position),))
                 claimed = await one(conn, "SELECT * FROM effect_outbox WHERE id = ?", (row["id"],))
                 assert claimed is not None
                 return await self._authorize(conn, claimed)
@@ -172,4 +205,32 @@ class OutboxStore:
         row = await self.db.fetchone("SELECT id,receipt_id,attempt_id,kind,state,claim_generation,created_at,claimed_at,completed_at,error FROM effect_outbox WHERE id = ?", (action_id,))
         if row is None:
             raise KeyError(action_id)
-        return dict(row)
+        view = dict(row)
+        if row["kind"] != "task.launch":
+            return view
+        task = await self.db.fetchone(
+            "SELECT t.id,t.project_id,t.priority FROM effect_outbox e JOIN board_tasks t"
+            " ON t.id = json_extract(e.payload_json,'$.control.task_id') WHERE e.id = ?", (action_id,),
+        )
+        view.update({"task_id": task["id"] if task else None,
+                     "priority": task["priority"] if task else None,
+                     "wait_position": None, "wait_reason": None, "wait_detail": None})
+        if row["state"] != "pending" or task is None:
+            return view
+        pending = await self.db.fetchall(
+            "SELECT e.id,e.created_at,t.priority FROM effect_outbox e JOIN board_tasks t"
+            " ON t.id = json_extract(e.payload_json,'$.control.task_id')"
+            " WHERE e.state = 'pending' AND e.kind = 'task.launch' AND t.project_id = ?",
+            (task["project_id"],),
+        )
+        ordered = sorted(pending, key=lambda item: (item["priority"], item["created_at"], item["id"]))
+        view["wait_position"] = next((index for index, item in enumerate(ordered, 1) if item["id"] == action_id), None)
+        if row["error"]:
+            try:
+                reason = json.loads(row["error"])
+            except (TypeError, ValueError):
+                reason = {"reason": "unknown", "detail": row["error"]}
+            if isinstance(reason, dict):
+                view["wait_reason"] = reason.get("reason")
+                view["wait_detail"] = reason.get("detail")
+        return view

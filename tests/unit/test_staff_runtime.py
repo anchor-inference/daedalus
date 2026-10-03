@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import subprocess
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,16 +17,23 @@ import pytest
 
 from daedalus.config import Settings
 from daedalus.extensions.api import build_app
+from daedalus.extensions.effects import EffectDispatcher
 from daedalus.extensions.notifications import ActionConflict, ActionRequest
+from daedalus.extensions.runtime_observations import observe_exit
 from daedalus.extensions.staff import AlreadyAnswered, Team
+from daedalus.extensions.task_launch import TaskLaunchEffect
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.launch_queue import Entry, LaunchQueue
 from daedalus.host.session_runner import SessionManager
 from daedalus.host.staff_daedalus import DaedalusStaffRuntime
-from daedalus.staff_runtime import FakeStaffRuntime, LiveSession, OutgoingMessage
+from daedalus.staff_runtime import FakeStaffRuntime, LiveSession, OutgoingMessage, Started
+from daedalus.stores.control import ControlConflict
 from daedalus.stores.database import Database
+from daedalus.stores.executions import ExecutionStore
+from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.projects import FolderSpec, Project
 from daedalus.stores.staff import Staff, StaffError
+from tests.support.authorized_launch import operator_assignment, operator_task
 from tests.support.waiting import until_await
 from tests.unit.test_session_runner import ScriptedProvider, _manager
 
@@ -74,13 +83,76 @@ class Capacity:
         return self.down
 
 
+class ObservedFakeStaffRuntime(FakeStaffRuntime):
+    """A fake runtime records an actual host-owned session or terminal binding."""
+
+    manager: SessionManager | None = None
+
+    async def _session(self, req: Any) -> str:
+        assert self.manager is not None
+        state = await self.manager.create_session(
+            "Fixture worker", project_id=req.project.id, folder_id=req.folder.id,
+        )
+        return state.session.id
+
+    async def _terminal(self, req: Any) -> str:
+        assert self.manager is not None
+        terminal_id = f"term-{uuid.uuid4().hex}"
+        await self.manager.db.execute(
+            "INSERT INTO terminals(id,env,project_id,owner_kind,owner_id,cwd,status,created_at,ptyd_instance)"
+            " VALUES (?,?,?,?,?,?,'running',?,?)",
+            (terminal_id, req.env, req.project.id, "staff", req.staff.id, str(req.cwd),
+             datetime.now(UTC).isoformat(), f"fake-{uuid.uuid4().hex}"),
+        )
+        return terminal_id
+
+    async def start(self, req: Any) -> Started:
+        result = await super().start(req)
+        if self.kind == "daedalus":
+            return Started(result.terminal_id, result.cli_session_id, result.transcript_ref,
+                           session_id=await self._session(req))
+        return Started(await self._terminal(req), result.cli_session_id, result.transcript_ref)
+
+    async def resume(self, req: Any, prior: LiveSession) -> Started:
+        result = await super().resume(req, prior)
+        if self.kind == "daedalus":
+            return Started(result.terminal_id, result.cli_session_id, result.transcript_ref,
+                           session_id=await self._session(req))
+        return Started(await self._terminal(req), result.cli_session_id, result.transcript_ref)
+
+
 async def team_for(settings: Settings, manager: SessionManager, *, capacity: Any = None, stagger: int = 0) -> Team:
-    app = SimpleNamespace(manager=manager, extensions={}, settings=settings, notifications=Notes(), db=manager.db)
+    executions = ExecutionStore(manager.db)
+    executions.acquire()
+    await executions.boot()
+    app = SimpleNamespace(manager=manager, extensions={}, settings=settings, notifications=Notes(),
+                          db=manager.db, executions=executions)
     team = Team(app, capacity=capacity)  # type: ignore[arg-type]
     app.extensions["staff"] = team
     team.attach()
+    dispatcher = EffectDispatcher(OutboxStore(manager.db))
+    dispatcher.register("task.launch", TaskLaunchEffect(app))
+    app.extensions["effects"] = dispatcher
+    running = asyncio.create_task(dispatcher.run())
+    dispatcher.enable()
+    _OWNED_TEAMS[manager] = (team, running, executions)
     manager.config.staff.launch_stagger_seconds = stagger
     return team
+
+
+_OWNED_TEAMS: dict[SessionManager, tuple[Team, asyncio.Task[None], ExecutionStore]] = {}
+
+
+async def close_team(manager: SessionManager) -> None:
+    owned = _OWNED_TEAMS.pop(manager, None)
+    if owned is None:
+        return
+    team, running, executions = owned
+    running.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await running
+    team.queue.close()
+    executions.release()
 
 
 async def project_with(manager: SessionManager, folder: Path, *, orchestrator: bool = True, autonomy: str = "normal", concurrency: int = 6) -> Project:
@@ -93,17 +165,28 @@ async def project_with(manager: SessionManager, folder: Path, *, orchestrator: b
 
 
 async def board_task(manager: SessionManager, project: Project, title: str, *, priority: int = 3, brief: dict[str, str] | None = None, status: str = "todo") -> str:
-    task_id = f"t{abs(hash((project.id, title))) % 10**6:06d}"
-    now = datetime.now(UTC).isoformat()
-    await manager.db.execute(
-        "INSERT INTO board_tasks(id, title, status, priority, created_at, updated_at, project_id, brief_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (task_id, title, status, priority, now, now, project.id, json.dumps(BRIEF if brief is None else brief)),
-    )
-    return task_id
+    if status != "todo":
+        raise ValueError("a fixture cannot create a completed task without an exact result")
+    return await operator_task(manager.db, project.id, title, priority=priority,
+                               brief=BRIEF if brief is None else brief)
 
 
 async def events(manager: SessionManager, *types: str, **ids: str) -> list[AppEvent]:
     return await manager.bus.replay(0, EventFilter(types=types, **ids), limit=5000)
+
+
+async def effect_waits(manager: SessionManager, effect_id: str, reason: str) -> dict[str, Any]:
+    observed: dict[str, Any] = {}
+
+    async def waiting() -> bool:
+        view = await OutboxStore(manager.db).view(effect_id)
+        if view["state"] == "pending" and view["wait_reason"] == reason:
+            observed.update(view)
+            return True
+        return False
+
+    await until_await(waiting, f"the effect waited for {reason}")
+    return observed
 
 
 async def status_of(manager: SessionManager, member: Staff) -> str:
@@ -137,8 +220,8 @@ async def test_an_assigned_task_runs_end_to_end_in_its_worktree(settings: Settin
         ada = await manager.staff.hire(project.id, name="Ada", role="Menu page", isolation="worktree")
         task_id = await board_task(manager, project, "Menu page")
 
-        assigned = await team.assign(ada, task_id, by="operator")
-        assert assigned["state"] == "started"
+        assigned = await operator_assignment(team, ada, task_id)
+        assert assigned["state"] == "queued"
         live = await manager.staff.live(ada.id)
         assert live is not None and live.session_id and live.branch and live.branch.startswith("agent/ada/")
         state = await manager.get_state(live.session_id)
@@ -182,12 +265,18 @@ async def test_an_assigned_task_runs_end_to_end_in_its_worktree(settings: Settin
         assert statuses == ["starting", "working", "question", "working", "turn_done_unseen"]
         [report] = await events(manager, "staff.report")
         assert (report.payload["kind"], report.payload["refs"], report.staff_id, report.project_id) == ("done", ["menu.md"], ada.id, project.id)
+        receipt = await manager.db.fetchone(
+            "SELECT id, attempt_id, outcome FROM result_receipts WHERE task_id = ?", (task_id,),
+        )
+        assert receipt is not None and receipt["outcome"] == "complete"
+        assert receipt["attempt_id"] == row["current_attempt_id"]
         moves = [(e.payload["from"], e.payload["to"]) for e in await events(manager, "task.moved")]
-        assert moves == [("todo", "doing"), ("doing", "review")]
+        assert moves == [("todo", "doing")]
         pending = await events(manager, "ask.pending")
         assert pending and all(e.staff_id == ada.id and e.project_id == project.id for e in pending)
         assert (await events(manager, "ask.answered"))[0].payload["via"] == "orchestrator"
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -200,7 +289,7 @@ async def test_a_refused_call_becomes_a_permission_the_orchestrator_grants_from_
         team = await team_for(settings, manager)
         project = await project_with(manager, repo)
         ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
-        await team.assign(ada, await board_task(manager, project, "Menu"))
+        await operator_assignment(team, ada, await board_task(manager, project, "Menu"))
         live = await manager.staff.live(ada.id)
         assert live is not None and live.session_id
 
@@ -230,6 +319,7 @@ async def test_a_refused_call_becomes_a_permission_the_orchestrator_grants_from_
         told = [b.text for m in provider.requests[2].messages for b in m.content_blocks if hasattr(b, "text")]
         assert any("granted request" in t and "Retry the call" in t for t in told)
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -240,7 +330,7 @@ async def test_the_first_answer_wins_between_the_session_and_the_orchestrator(se
         team = await team_for(settings, manager)
         project = await project_with(manager, repository(tmp_path))
         ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
-        await team.assign(ada, await board_task(manager, project, "Oven"))
+        await operator_assignment(team, ada, await board_task(manager, project, "Oven"))
         live = await manager.staff.live(ada.id)
         assert live is not None and live.session_id
         state = await manager.get_state(live.session_id)
@@ -268,6 +358,7 @@ async def test_the_first_answer_wins_between_the_session_and_the_orchestrator(se
         assert payload["source"] == ("user" if winner == "operator" else "orchestrator")
         assert payload["answers"][0]["custom"] == ("the left one" if winner == "operator" else "the right one")
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -297,6 +388,7 @@ async def test_staff_have_their_tools_and_nobody_else_does(settings: Settings, d
         sub = await manager.create_session("sub", project_id=project.id, metadata={"subagent_of": staff.session.id})
         assert {"AskUser", "SpawnAgent", "Report", "AskOrchestrator"} <= manager.blocked_tools_for(sub)
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -306,10 +398,24 @@ async def test_staff_have_their_tools_and_nobody_else_does(settings: Settings, d
 async def fake_team(settings: Settings, db: Database, tmp_path: Path, *, capacity: Any = None, concurrency: int = 6, **project: Any) -> tuple[SessionManager, Team, FakeStaffRuntime, Project]:
     manager = await _manager(settings, db, ScriptedProvider([]))
     team = await team_for(settings, manager, capacity=capacity)
-    runtime = FakeStaffRuntime(kind="daedalus")
+    runtime = ObservedFakeStaffRuntime(kind="daedalus")
+    runtime.manager = manager
     team.runtimes["daedalus"] = runtime
     found = await project_with(manager, repository(tmp_path), concurrency=concurrency, **project)
     return manager, team, runtime, found
+
+
+async def observed_cli_exit(team: Team, live: LiveSession) -> None:
+    """A fake daemon proves the exact terminal instance ended before a new launch."""
+    terminal_id = live.terminal_id
+    assert terminal_id
+    row = await team.app.db.fetchone("SELECT ptyd_instance FROM terminals WHERE id = ?", (terminal_id,))
+    assert row is not None and row["ptyd_instance"]
+    await team.app.db.execute("UPDATE terminals SET status = 'exited' WHERE id = ?", (terminal_id,))
+    await team.app.db.execute("INSERT INTO terminal_exit_observations(terminal_id,runtime_instance,observed_at)"
+                              " VALUES (?,?,?)", (terminal_id, row["ptyd_instance"], datetime.now(UTC).isoformat()))
+    assert await observe_exit(team.app, staff_session_id=live.id, runtime_ref=terminal_id,
+                              observed_status="exited", runtime_instance=row["ptyd_instance"])
 
 
 async def test_a_dirty_worktree_refuses_done_and_a_pause_commits_it(settings: Settings, db: Database, tmp_path: Path) -> None:
@@ -317,7 +423,7 @@ async def test_a_dirty_worktree_refuses_done_and_a_pause_commits_it(settings: Se
     try:
         ada = await manager.staff.hire(project.id, name="Ada", isolation="worktree")
         task_id = await board_task(manager, project, "Menu")
-        await team.assign(ada, task_id)
+        await operator_assignment(team, ada, task_id)
         [req] = runtime.started
         assert req.worktree is not None and req.cwd == req.worktree.cwd and req.team_token and req.first_message_id.startswith("sm-")
         assert "Branch: agent/ada/" in req.first_message and "own git worktree" in req.brief_text
@@ -325,7 +431,7 @@ async def test_a_dirty_worktree_refuses_done_and_a_pause_commits_it(settings: Se
         assert live is not None
         (req.worktree.path / "menu.md").write_text("bread\n")
         with pytest.raises(ValueError, match="uncommitted changes"):
-            await team.ingress.report(live, "done", "finished")
+            await team.ingress.report(live, "done", "finished", call_id="fixture-done")
         assert (await task_row(manager, task_id))["status"] == "doing"
 
         working = await team.pause(ada)
@@ -335,9 +441,11 @@ async def test_a_dirty_worktree_refuses_done_and_a_pause_commits_it(settings: Se
         assert paused["paused"] is True and paused["commit"]
         assert "wip:" in git(req.worktree.path, "log", "-1", "--format=%s")
         assert await status_of(manager, ada) == "idle"
-        told = await team.ingress.report((await team.live_of(ada)) or live, "done", "finished")
+        told = await team.ingress.report((await team.live_of(ada)) or live, "done", "finished",
+                                         call_id="fixture-done")
         assert "in review" in told and (await task_row(manager, task_id))["status"] == "review"
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -348,7 +456,7 @@ async def test_silence_is_watched_only_while_a_turn_runs_on_a_task_still_being_w
     try:
         ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
         task_id = await board_task(manager, project, "Menu")
-        await team.assign(ada, task_id)
+        await operator_assignment(team, ada, task_id)
         live = await team.live_of(ada)
         assert live is not None
         await team.ingress.status(live, "working")
@@ -373,53 +481,33 @@ async def test_silence_is_watched_only_while_a_turn_runs_on_a_task_still_being_w
         await team.tick(later)
         assert await status_of(manager, ada) == "no_signal", "a turn on a task being worked still goes grey"
     finally:
+        await close_team(manager)
         await manager.close()
 
 
-async def test_a_task_handed_in_or_done_frees_its_member_at_once(settings: Settings, db: Database, tmp_path: Path) -> None:
-    """A command-line member whose session still carries a task that is over, with a status its screen
-    last gave, is not busy: the task that waits for it starts as soon as the old one is done or in
-    review. Three members once sat "busy with another task" for an hour, their tasks done and their
-    CLIs idle, while four new tasks waited for them."""
+async def test_a_status_change_cannot_replace_a_running_attempt(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """A board status is not physical exit proof, so it cannot release an owned worker slot."""
     manager, team, _runtime, project = await fake_team(settings, db, tmp_path, capacity=Capacity())
     try:
         cli = FakeStaffRuntime(kind="claude")
         team.runtimes["claude"] = cli
         cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="shared")
-        scouting, next_up, third = [await board_task(manager, project, title) for title in ("Scouting", "Next up", "Third")]
-        assert (await team.assign(cleo, scouting))["state"] == "started"
+        scouting = await board_task(manager, project, "Scouting")
+        assert (await operator_assignment(team, cleo, scouting))["state"] == "queued"
         live = await team.live_of(cleo)
         assert live is not None and live.session.kind == "cli"
         await team.ingress.status(live, "no_signal", detail="read from the screen")
-        waits = await team.assign(cleo, next_up)
-        assert (waits["state"], waits["reason"]) == ("queued", "busy"), "the scouting task is still being worked"
-
         task = await team.task(scouting)
         assert task is not None
         await team._move_task(task, "done", actor="operator")
-
-        async def started(task_id: str) -> bool:
-            return (await task_row(manager, task_id))["status"] == "doing"
-
-        async with asyncio.timeout(10):
-            while not await started(next_up):
-                await asyncio.sleep(0.02)
-        assert [r.task.id for r in cli.started] == [scouting, next_up]
-        after = await manager.staff.live(cleo.id)
-        assert after is not None and after.task_id == next_up and after.status == "starting"
-        assert team.queue.queue(project.id) == []
-
-        # The same when the member hands its task in for review, from a row still grey.
-        await team.ingress.status((await team.live_of(cleo)) or live, "no_signal")
-        assert (await team.assign(cleo, third))["reason"] == "busy"
-        handed = await team.task(next_up)
-        assert handed is not None
-        await team._move_task(handed, "review", actor="staff")
-        async with asyncio.timeout(10):
-            while not await started(third):
-                await asyncio.sleep(0.02)
-        assert [r.task.id for r in cli.started] == [scouting, next_up, third]
+        attempt = await manager.db.fetchone(
+            "SELECT state, provider_session_ref FROM execution_attempts WHERE task_id = ?", (scouting,),
+        )
+        assert attempt is not None and attempt["state"] == "running" and attempt["provider_session_ref"]
+        assert [r.task.id for r in cli.started] == [scouting]
+        assert (await manager.staff.live(cleo.id)).task_id == scouting
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -427,7 +515,7 @@ async def test_silence_goes_grey_and_a_request_left_too_long_goes_to_the_operato
     manager, team, runtime, project = await fake_team(settings, db, tmp_path)
     try:
         ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
-        await team.assign(ada, await board_task(manager, project, "Menu"))
+        await operator_assignment(team, ada, await board_task(manager, project, "Menu"))
         live = await team.live_of(ada)
         assert live is not None
         await team.ingress.status(live, "working")
@@ -454,6 +542,7 @@ async def test_silence_goes_grey_and_a_request_left_too_long_goes_to_the_operato
         assert [e.payload["via"] for e in await events(manager, "ask.answered")] == ["app"]
         assert await status_of(manager, ada) == "working"
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -461,7 +550,7 @@ async def test_autonomy_decides_who_answers(settings: Settings, db: Database, tm
     manager, team, runtime, project = await fake_team(settings, db, tmp_path, autonomy="ask")
     try:
         ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
-        await team.assign(ada, await board_task(manager, project, "Menu"))
+        await operator_assignment(team, ada, await board_task(manager, project, "Menu"))
         live = await team.live_of(ada)
         assert live is not None
         question = await team.ingress.question(live, "team:q", "Which flour?", [])
@@ -480,6 +569,7 @@ async def test_autonomy_decides_who_answers(settings: Settings, db: Database, tm
         await manager.projects.update_orchestrator(project.id, enabled=False)
         assert team.route((await manager.projects.get(project.id)), "question") == "operator"  # type: ignore[arg-type]
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -488,7 +578,7 @@ async def test_a_one_off_goes_with_its_task(settings: Settings, db: Database, tm
     try:
         helper = await manager.staff.hire(project.id, name="Helper", isolation="shared", one_off=True)
         task_id = await board_task(manager, project, "Look it up")
-        await team.assign(helper, task_id)
+        await operator_assignment(team, helper, task_id)
         live = await team.live_of(helper)
         assert live is not None
         await manager.db.execute("UPDATE board_tasks SET status = 'done' WHERE id = ?", (task_id,))
@@ -497,146 +587,191 @@ async def test_a_one_off_goes_with_its_task(settings: Settings, db: Database, tm
         assert member is not None and not member.active
         assert runtime.stopped == [live.id] and await manager.staff.live(helper.id) is None
     finally:
+        await close_team(manager)
         await manager.close()
 
 
-async def test_a_task_started_again_links_the_session_that_ended(settings: Settings, db: Database, tmp_path: Path) -> None:
+async def test_a_crashed_session_requires_physical_exit_proof_before_relaunch(settings: Settings, db: Database, tmp_path: Path) -> None:
     manager, team, runtime, project = await fake_team(settings, db, tmp_path)
     try:
         ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
         task_id = await board_task(manager, project, "Menu")
-        await team.assign(ada, task_id)
+        await operator_assignment(team, ada, task_id)
         first = await team.live_of(ada)
         assert first is not None
         await team.ingress.status(first, "error", detail="the model failed")
         await manager.staff.end_session(first.id, "crashed: the model failed")
         await manager.db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = ?", (task_id,))
-        await team.assign(ada, task_id)
-        second = await team.live_of(ada)
-        assert second is not None and second.session.predecessor_id == first.id
-        assert "ended: crashed: the model failed" in runtime.started[-1].first_message
-        assert runtime.started[-1].predecessor is not None and runtime.started[-1].predecessor.id == first.id
+        with pytest.raises(ControlConflict, match="stop or reconcile the previous execution"):
+            await operator_assignment(team, ada, task_id)
+        assert len(runtime.started) == 1
+        row = await manager.db.fetchone("SELECT state FROM execution_attempts WHERE task_id = ?", (task_id,))
+        assert row is not None and row["state"] == "running"
     finally:
+        await close_team(manager)
         await manager.close()
 
 
 async def test_cli_resume_lists_archived_staff_and_uses_the_selected_conversation(settings: Settings, db: Database, tmp_path: Path) -> None:
     manager, team, _runtime, project = await fake_team(settings, db, tmp_path, capacity=Capacity())
-    runtime = FakeStaffRuntime(kind="cursor")
+    runtime = ObservedFakeStaffRuntime(kind="cursor")
+    runtime.manager = manager
     team.runtimes["cursor"] = runtime
     try:
         first = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
         task_id = await board_task(manager, project, "Menu")
-        assert (await team.assign(first, task_id))["state"] == "started"
+        assert (await operator_assignment(team, first, task_id))["state"] == "queued"
         original = await team.live_of(first)
         assert original is not None and original.cli_session_id
+        await team.ingress.report(original, "done", "first menu finished", call_id="first-menu-result")
+        await observed_cli_exit(team, original)
         await manager.staff.end_session(original.id, "terminal closed")
-        await manager.db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = ?", (task_id,))
         await manager.staff.archive(first.id)
         again = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
-        history = await team.resume_sessions(again, task_id=task_id)
+        next_task = await board_task(manager, project, "Prices")
+        history = await team.resume_sessions(again, task_id=next_task)
         assert [(row["id"], row["owner_name"], row["can_resume"]) for row in history] == [(original.id, "Ada", True)]
-        assert (await team.assign(again, task_id, resume_from=original.id))["state"] == "started"
+        assert (await operator_assignment(team, again, next_task, resume_from=original.id))["state"] == "queued"
         assert runtime.resumed[-1][1] == original.id
         resumed = await team.live_of(again)
         assert resumed is not None and resumed.session.predecessor_id == original.id
-        assert not next(row for row in await team.resume_sessions(again, task_id=task_id) if row["id"] == original.id)["can_resume"]
+        assert resumed.cli_session_id == original.cli_session_id
+        assert resumed.terminal_id != original.terminal_id
+        assert not next(row for row in await team.resume_sessions(again, task_id=next_task) if row["id"] == original.id)["can_resume"]
     finally:
+        await close_team(manager)
         await manager.close()
 
 
 async def test_cli_resume_rejects_another_folder_or_harness(settings: Settings, db: Database, tmp_path: Path) -> None:
     manager, team, _runtime, project = await fake_team(settings, db, tmp_path, capacity=Capacity())
-    team.runtimes["cursor"] = FakeStaffRuntime(kind="cursor")
+    cursor_runtime = ObservedFakeStaffRuntime(kind="cursor")
+    cursor_runtime.manager = manager
+    team.runtimes["cursor"] = cursor_runtime
     team.runtimes["claude"] = FakeStaffRuntime(kind="claude")
     try:
         cursor = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
         task_id = await board_task(manager, project, "Menu")
-        await team.assign(cursor, task_id)
+        await operator_assignment(team, cursor, task_id)
         original = await team.live_of(cursor)
         assert original is not None
+        await team.ingress.report(original, "done", "menu finished", call_id="menu-result")
+        await observed_cli_exit(team, original)
         await manager.staff.end_session(original.id, "terminal closed")
-        await manager.db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = ?", (task_id,))
+        next_task = await board_task(manager, project, "Next menu")
         claude = await manager.staff.hire(project.id, name="Ben", harness="claude", isolation="shared")
-        with pytest.raises(StaffError, match="selected harness"):
-            await team.assign(claude, task_id, resume_from=original.id)
+        with pytest.raises(AssertionError, match="selected harness"):
+            await operator_assignment(team, claude, next_task, resume_from=original.id)
         other = tmp_path / "other"
         other.mkdir()
         folder = await manager.projects.add_folder(project.id, str(other))
-        await manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (folder.id, task_id))
+        await manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (folder.id, next_task))
         elsewhere = await manager.staff.hire(project.id, name="Cleo", harness="cursor", isolation="shared", folder_id=folder.id)
-        with pytest.raises(StaffError, match="another folder path"):
-            await team.assign(elsewhere, task_id, resume_from=original.id)
+        with pytest.raises(AssertionError, match="another folder path"):
+            await operator_assignment(team, elsewhere, next_task, resume_from=original.id)
     finally:
+        await close_team(manager)
         await manager.close()
 
 
 async def test_cli_resume_follows_launch_path_after_folder_is_added_again(settings: Settings, db: Database, tmp_path: Path) -> None:
     manager, team, _runtime, project = await fake_team(settings, db, tmp_path, capacity=Capacity())
-    runtime = FakeStaffRuntime(kind="cursor")
+    runtime = ObservedFakeStaffRuntime(kind="cursor")
+    runtime.manager = manager
     team.runtimes["cursor"] = runtime
     try:
         old_folder = project.primary
         member = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
         task_id = await board_task(manager, project, "Menu")
-        await team.assign(member, task_id)
+        await operator_assignment(team, member, task_id)
         original = await team.live_of(member)
         assert original is not None
+        await team.ingress.report(original, "done", "menu finished", call_id="menu-result")
+        await observed_cli_exit(team, original)
         await manager.staff.end_session(original.id, "terminal closed")
         await manager.staff.archive(member.id)
-        await manager.db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = ?", (task_id,))
         other = tmp_path / "other"
         other.mkdir()
         await manager.projects.add_folder(project.id, str(other))
         await manager.projects.remove_folder(project.id, old_folder.id)
         added_again = await manager.projects.add_folder(project.id, str(old_folder.path))
         assert added_again.id != old_folder.id
-        await manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (added_again.id, task_id))
+        next_task = await board_task(manager, project, "Prices")
+        await manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (added_again.id, next_task))
         again = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared", folder_id=added_again.id)
-        history = await team.resume_sessions(again, task_id=task_id)
+        history = await team.resume_sessions(again, task_id=next_task)
         assert [row["id"] for row in history if row["can_resume"]] == [original.id]
-        assert (await team.assign(again, task_id, resume_from=original.id))["state"] == "started"
+        assert (await operator_assignment(team, again, next_task, resume_from=original.id))["state"] == "queued"
         assert runtime.resumed[-1][1] == original.id
     finally:
+        await close_team(manager)
         await manager.close()
 
 
 async def test_queued_cli_resume_survives_queue_rebuild(settings: Settings, db: Database, tmp_path: Path) -> None:
     manager, team, _runtime, project = await fake_team(settings, db, tmp_path, capacity=Capacity())
-    runtime = FakeStaffRuntime(kind="cursor")
+    runtime = ObservedFakeStaffRuntime(kind="cursor")
+    runtime.manager = manager
     team.runtimes["cursor"] = runtime
     try:
         member = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
         task_id = await board_task(manager, project, "Menu")
-        await team.assign(member, task_id)
+        await operator_assignment(team, member, task_id)
         first = await team.live_of(member)
         assert first is not None
+        await team.ingress.report(first, "done", "first menu finished", call_id="first-menu-result")
+        await observed_cli_exit(team, first)
         await manager.staff.end_session(first.id, "terminal closed")
-        await manager.db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = ?", (task_id,))
+        next_task = await board_task(manager, project, "Prices")
         team._capacity = Capacity(running=1, cap=1)
-        queued = await team.assign(member, task_id, resume_from=first.id)
+        queued = await operator_assignment(team, member, next_task, resume_from=first.id,
+                                           wait_for_admission=False)
         assert queued["state"] == "queued"
-        fresh = await team_for(settings, manager, capacity=Capacity())
-        fresh.runtimes["cursor"] = runtime
-        assert await fresh.rebuild() == 1
-        await fresh.queue.pump(project.id)
+        async def deferred() -> bool:
+            row = await manager.db.fetchone("SELECT state,error FROM effect_outbox WHERE id = ?",
+                                            (queued["effect_id"],))
+            return row is not None and row["state"] == "pending" and bool(row["error"])
+
+        await until_await(deferred, "the durable launch waited for machine capacity")
+        _, prior_dispatch, executions = _OWNED_TEAMS[manager]
+        prior_dispatch.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await prior_dispatch
+        dispatcher = EffectDispatcher(OutboxStore(manager.db))
+        dispatcher.register("task.launch", TaskLaunchEffect(team.app))
+        team.app.extensions["effects"] = dispatcher
+        current_dispatch = asyncio.create_task(dispatcher.run())
+        dispatcher.enable()
+        _OWNED_TEAMS[manager] = (team, current_dispatch, executions)
+        team._capacity = Capacity()
+        dispatcher.notify()
+
+        async def admitted() -> bool:
+            row = await manager.db.fetchone("SELECT state FROM effect_outbox WHERE id = ?",
+                                            (queued["effect_id"],))
+            return row is not None and row["state"] == "completed"
+
+        await until_await(admitted, "the retained command admitted the resumed CLI")
         assert runtime.resumed[-1][1] == first.id
-        assert await manager.db.kv_get(fresh._resume_key(member.id, task_id)) is None
+        assert (await manager.staff.live(member.id)).task_id == next_task
     finally:
+        await close_team(manager)
         await manager.close()
 
 
 async def test_a_task_without_its_brief_or_runtime_is_refused(settings: Settings, db: Database, tmp_path: Path) -> None:
-    manager, team, runtime, project = await fake_team(settings, db, tmp_path)
+    manager, team, runtime, project = await fake_team(settings, db, tmp_path, capacity=Capacity())
     try:
         ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
         thin = await board_task(manager, project, "Thin", brief={"objective": "x"})
-        with pytest.raises(StaffError, match="no deliverable, boundaries, done-when"):
-            await team.assign(ada, thin)
+        with pytest.raises(AssertionError, match="task brief is incomplete"):
+            await operator_assignment(team, ada, thin)
         cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="shared")
-        with pytest.raises(StaffError, match="Claude Code staff cannot be started here yet"):
-            await team.assign(cleo, await board_task(manager, project, "Full"))
+        with pytest.raises(AssertionError, match="Claude Code staff cannot be started here yet"):
+            await operator_assignment(team, cleo, await board_task(manager, project, "Full"))
+        assert await manager.staff.live(cleo.id) is None
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -645,28 +780,43 @@ async def test_the_seventh_waits_for_a_slot_and_the_most_urgent_goes_first(setti
     try:
         members = [await manager.staff.hire(project.id, name=f"Worker {n}", isolation="shared") for n in range(8)]
         for n, member in enumerate(members[:6]):
-            assigned = await team.assign(member, await board_task(manager, project, f"Task {n}"))
-            assert assigned["state"] == "started"
+            assigned = await operator_assignment(team, member, await board_task(manager, project, f"Task {n}"))
+            assert assigned["state"] == "queued"
             live = await team.live_of(member)
             assert live is not None
             await team.ingress.status(live, "working")
-        late = await team.assign(members[6], await board_task(manager, project, "Later", priority=4))
+        late = await operator_assignment(team, members[6], await board_task(manager, project, "Later", priority=4),
+                                         wait_for_admission=False)
         # The board hands its own view of the task; an id does as well.
-        urgent = await team.assign(members[7], {"id": await board_task(manager, project, "Urgent", priority=1)})
-        assert (late["state"], late["reason"]) == ("queued", "project")
-        assert "6 of the project's 6" in late["detail"]
-        assert [q["staff_id"] for q in team.queue.queue(project.id)] == [members[7].id, members[6].id]
-        assert team.queue.waiting_for(members[6].id)[0]["position"] == 2
+        urgent_id = await board_task(manager, project, "Urgent", priority=1)
+        urgent = await operator_assignment(team, members[7], {"id": urgent_id}, wait_for_admission=False)
+
+        async def both_deferred() -> bool:
+            views = [await OutboxStore(manager.db).view(effect_id) for effect_id in
+                     (late["effect_id"], urgent["effect_id"])]
+            return all(view["state"] == "pending" and view["wait_reason"] == "project" for view in views)
+
+        await until_await(both_deferred, "the two launches waited for a project slot")
+        late_view = await OutboxStore(manager.db).view(late["effect_id"])
+        urgent_view = await OutboxStore(manager.db).view(urgent["effect_id"])
+        assert urgent_view["priority"] == 1 and late_view["priority"] == 4
 
         freed = await team.live_of(members[0])
         assert freed is not None
+        await team.ingress.report(freed, "done", "finished", call_id="first-worker-result")
         await team.ingress.status(freed, "turn_done_unseen")
-        await team.queue.pump(project.id)
+        team.app.extensions["effects"].notify()
+
+        async def urgent_started() -> bool:
+            return (await OutboxStore(manager.db).view(urgent["effect_id"]))["state"] == "completed"
+
+        await until_await(urgent_started, "the urgent launch won the released project slot")
         assert await status_of(manager, members[7]) == "starting"
         assert await status_of(manager, members[6]) == "off"
-        assert [q["staff_id"] for q in team.queue.queue(project.id)] == [members[6].id]
-        assert urgent["position"] == 1
+        assert runtime.started[-1].task.id == urgent_id
+        assert len(runtime.started) == 7
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -678,23 +828,30 @@ async def test_command_line_staff_wait_for_the_machine_and_daedalus_staff_do_not
         team.runtimes["claude"] = cli
         cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="shared")
         ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
-        waits = await team.assign(cleo, await board_task(manager, project, "Terminal work"))
-        assert (waits["state"], waits["reason"]) == ("queued", "machine")
-        assert "20 of the machine's 20 terminal sessions" in waits["detail"]
-        goes = await team.assign(ada, await board_task(manager, project, "Daedalus work"))
-        assert goes["state"] == "started" and cli.started == []
+        waits = await operator_assignment(team, cleo, await board_task(manager, project, "Terminal work"),
+                                          wait_for_admission=False)
+        assert waits["state"] == "queued"
+        assert "20 of the machine's 20 terminal sessions" in (
+            await effect_waits(manager, waits["effect_id"], "machine"))["wait_detail"]
+        goes = await operator_assignment(team, ada, await board_task(manager, project, "Daedalus work"))
+        assert goes["state"] == "queued" and cli.started == []
 
         capacity.waiting_now, capacity.running_now = 1, 19
-        await team.queue.pump(project.id)
-        assert team.queue.queue(project.id)[0]["reason"] == "machine", "the service's own line was promised places first"
+        team.app.extensions["effects"].notify()
+        assert (await effect_waits(manager, waits["effect_id"], "machine"))["wait_detail"]
         capacity.waiting_now, capacity.down = 0, "not_running"
-        await team.queue.pump(project.id)
-        assert team.queue.queue(project.id)[0]["reason"] == "terminals"
+        team.app.extensions["effects"].notify()
+        await effect_waits(manager, waits["effect_id"], "terminals")
         capacity.down = None
-        await team.queue.pump(project.id)
+        team.app.extensions["effects"].notify()
+
+        async def cli_started() -> bool:
+            return (await OutboxStore(manager.db).view(waits["effect_id"]))["state"] == "completed"
+
+        await until_await(cli_started, "the CLI launch passed machine admission")
         assert len(cli.started) == 1 and cli.started[0].team_url.endswith(f"/api/team/{cli.started[0].staff_session_id}")
-        assert team.queue.queue(project.id) == []
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -704,12 +861,14 @@ async def test_without_the_terminals_service_command_line_staff_wait_with_the_re
         team.runtimes["codex"] = FakeStaffRuntime(kind="codex")
         assert team.capacity() is None
         max_ = await manager.staff.hire(project.id, name="Max", harness="codex", isolation="shared")
-        waits = await team.assign(max_, await board_task(manager, project, "Terminal work"))
-        assert (waits["state"], waits["reason"]) == ("queued", "terminals")
-        assert "terminals service is not running" in waits["detail"]
-        listed = team.queue.waiting_for(max_.id)
-        assert listed and listed[0]["reason"] == "terminals"
+        waits = await operator_assignment(team, max_, await board_task(manager, project, "Terminal work"),
+                                          wait_for_admission=False)
+        assert waits["state"] == "queued"
+        view = await effect_waits(manager, waits["effect_id"], "terminals")
+        assert "terminals service is not running" in view["wait_detail"]
+        assert view["task_id"] and view["wait_position"] == 1
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -752,17 +911,20 @@ async def test_the_team_server_takes_only_its_own_token(settings: Settings, db: 
         team._capacity = Capacity()
         cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="shared")
         task_id = await board_task(manager, project, "Menu")
-        await team.assign(cleo, task_id)
+        await operator_assignment(team, cleo, task_id)
         [req] = cli.started
         app = SimpleNamespace(settings=settings, config=manager.config, db=db, manager=manager, front=None, extensions={"staff": team}, guard=None)
         api = build_app(app, "tok")  # type: ignore[arg-type]
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:  # type: ignore[arg-type]
             url = f"/api/team/{req.staff_session_id}"
-            wrong = await client.post(f"{url}/report", headers={"X-Daedalus-Team-Token": "not-it"}, json={"kind": "checkpoint", "note": "half"})
+            wrong = await client.post(f"{url}/report", headers={"X-Daedalus-Team-Token": "not-it"},
+                                      json={"kind": "checkpoint", "note": "half", "client_operation_id": "wrong"})
             assert wrong.status_code == 401
-            operator = await client.post(f"{url}/report", headers={"X-Daedalus-Token": "tok"}, json={"kind": "checkpoint", "note": "half"})
+            operator = await client.post(f"{url}/report", headers={"X-Daedalus-Token": "tok"},
+                                         json={"kind": "checkpoint", "note": "half", "client_operation_id": "operator"})
             assert operator.status_code == 401, "the operator's token is not a team token"
-            ok = await client.post(f"{url}/report", headers={"X-Daedalus-Team-Token": req.team_token}, json={"kind": "done", "note": "all"})
+            ok = await client.post(f"{url}/report", headers={"X-Daedalus-Team-Token": req.team_token},
+                                   json={"kind": "done", "note": "all", "client_operation_id": "done"})
             assert ok.status_code == 200 and "in review" in ok.json()["text"]
             asked = await client.post(f"{url}/ask", headers={"X-Daedalus-Team-Token": req.team_token}, json={"question": "Next?", "options": ["a", "b"]})
             assert asked.status_code == 200 and asked.json()["short_id"].startswith("q")
@@ -784,9 +946,11 @@ async def test_the_team_server_takes_only_its_own_token(settings: Settings, db: 
             assert old.status_code == 422, "the old field is gone, not quietly ignored"
             released = await client.post(f"/api/staff/{cleo.id}/release", headers={"X-Daedalus-Token": "tok"}, json={"keep_worktree": True})
             assert released.json() == {"released": True} and cli.stopped
-            gone = await client.post(f"{url}/report", headers={"X-Daedalus-Team-Token": req.team_token}, json={"kind": "checkpoint", "note": "late"})
+            gone = await client.post(f"{url}/report", headers={"X-Daedalus-Team-Token": req.team_token},
+                                     json={"kind": "checkpoint", "note": "late", "client_operation_id": "late"})
             assert gone.status_code == 401
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -795,20 +959,29 @@ async def test_a_restart_offers_assigned_tasks_to_the_queue_again(settings: Sett
     try:
         ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
         bo = await manager.staff.hire(project.id, name="Bo", isolation="shared")
-        await team.assign(ada, await board_task(manager, project, "First"))
+        await operator_assignment(team, ada, await board_task(manager, project, "First"))
         live = await team.live_of(ada)
         assert live is not None
         await team.ingress.status(live, "working")
         waiting = await board_task(manager, project, "Second")
-        assert (await team.assign(bo, waiting))["reason"] == "project"
+        queued = await operator_assignment(team, bo, waiting, wait_for_admission=False)
+        view = await effect_waits(manager, queued["effect_id"], "project")
+        assert view["task_id"] == waiting and view["wait_position"] == 1
 
-        fresh = await team_for(settings, manager)
-        fresh.runtimes["daedalus"] = runtime
-        assert await fresh.rebuild() == 1
-        assert [q["task_id"] for q in fresh.queue.queue(project.id)] == [waiting]
-        await fresh.queue.pump(project.id)
-        assert fresh.queue.queue(project.id)[0]["reason"] == "project"
+        _, prior_dispatch, executions = _OWNED_TEAMS[manager]
+        prior_dispatch.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await prior_dispatch
+        dispatcher = EffectDispatcher(OutboxStore(manager.db))
+        dispatcher.register("task.launch", TaskLaunchEffect(team.app))
+        team.app.extensions["effects"] = dispatcher
+        current_dispatch = asyncio.create_task(dispatcher.run())
+        dispatcher.enable()
+        _OWNED_TEAMS[manager] = (team, current_dispatch, executions)
+        await effect_waits(manager, queued["effect_id"], "project")
+        assert runtime.started[0].task.title == "First" and len(runtime.started) == 1
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -818,7 +991,7 @@ async def test_live_sessions_answer_for_a_member(settings: Settings, db: Databas
         ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
         with pytest.raises(StaffError, match="no live session"):
             await team.tell(ada, "hello")
-        await team.assign(ada, await board_task(manager, project, "Menu"))
+        await operator_assignment(team, ada, await board_task(manager, project, "Menu"))
         live = await team.live_of(ada)
         assert isinstance(live, LiveSession) and live.staff.id == ada.id
         told = await team.tell(ada, "hello", when="after_turn")
@@ -829,6 +1002,7 @@ async def test_live_sessions_answer_for_a_member(settings: Settings, db: Databas
         failed = await team.tell(ada, "again")
         assert (failed["state"], failed["error"]) == ("failed", "the terminal is gone")
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -838,7 +1012,7 @@ async def test_a_notification_answers_a_command_line_request_and_the_router_hold
         cli = FakeStaffRuntime(kind="claude")
         team.runtimes["claude"] = cli
         cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="shared")
-        await team.assign(cleo, await board_task(manager, project, "Menu"))
+        await operator_assignment(team, cleo, await board_task(manager, project, "Menu"))
         live = await team.live_of(cleo)
         assert live is not None
         permission = await team.ingress.permission(live, "hook-42", "Bash", "npm install")
@@ -852,6 +1026,7 @@ async def test_a_notification_answers_a_command_line_request_and_the_router_hold
         resolved = (await events(manager, "permission.resolved"))[-1].payload
         assert (resolved["request_ref"], resolved["via"], resolved["decision"]) == (ref, "push", "allow")
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -903,22 +1078,26 @@ async def test_a_worktree_member_is_refused_a_task_whose_folder_has_no_worktree_
         ada = await manager.staff.hire(project.id, name="Ada", isolation="worktree")
         task_id = await board_task(manager, project, "Tidy the notes")
         await manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (folder_id, task_id))
-        with pytest.raises(StaffError) as refused:
-            await team.assign(ada, task_id)
+        with pytest.raises(AssertionError) as refused:
+            await operator_assignment(team, ada, task_id)
         said = str(refused.value)
         assert "notes is not a git repository" in said and "Ada works in a git worktree of their own" in said
         assert "a folder of the project that is a git repository" in said and "isolation to shared" in said and "read-only" in said
         assert runtime.started == [] and await status_of(manager, ada) == "off"
         row = await task_row(manager, task_id)
-        assert (row["status"], row["assignee_staff_id"]) == ("todo", None)
+        assert (row["status"], row["assignee_staff_id"]) == ("todo", ada.id)
+        assert not await manager.db.fetchall("SELECT id FROM execution_attempts WHERE task_id = ?", (task_id,))
         assert team.queue.queue(project.id) == []
 
         # A member who works in the folder itself takes it, in the folder.
         bo = await manager.staff.hire(project.id, name="Bo", isolation="shared")
-        assert (await team.assign(bo, task_id))["state"] == "started"
+        shared_task = await board_task(manager, project, "Tidy shared notes")
+        await manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (folder_id, shared_task))
+        assert (await operator_assignment(team, bo, shared_task))["state"] == "queued"
         [req] = runtime.started
         assert req.worktree is None and req.cwd == tmp_path / "notes"
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -932,28 +1111,34 @@ async def test_a_queued_start_whose_folder_has_no_worktree_to_give_is_taken_back
         bo = await manager.staff.hire(project.id, name="Bo", isolation="shared")
         ada = await manager.staff.hire(project.id, name="Ada", isolation="worktree")
         first = await board_task(manager, project, "Bake")
-        assert (await team.assign(bo, first))["state"] == "started"
+        assert (await operator_assignment(team, bo, first))["state"] == "queued"
         busy = await team.live_of(bo)
         assert busy is not None
         await team.ingress.status(busy, "working")
         waiting = await board_task(manager, project, "Tidy the notes")
-        assert (await team.assign(ada, waiting))["state"] == "queued"
+        queued = await operator_assignment(team, ada, waiting, wait_for_admission=False)
+        assert queued["state"] == "queued"
         await manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (folder_id, waiting))
 
+        await team.ingress.report(busy, "done", "first task finished", call_id="first-task-result")
         await team.ingress.status(busy, "turn_done_unseen")
-        await team.queue.pump(project.id)
+        team.app.extensions["effects"].notify()
 
-        async def taken_back() -> bool:
-            return (await task_row(manager, waiting))["assignee_staff_id"] is None
+        async def refused() -> bool:
+            row = await manager.db.fetchone("SELECT state FROM effect_outbox WHERE id = ?",
+                                            (queued["effect_id"],))
+            return row is not None and row["state"] == "failed"
 
-        await until_await(taken_back)
+        await until_await(refused, "the queued command rejected the changed folder")
         assert [r.task.id for r in runtime.started] == [first], "nothing started in the plain folder"
         assert await status_of(manager, ada) == "off"
         row = await task_row(manager, waiting)
-        assert row["status"] == "todo" and "Ada could not start: Ada works in a git worktree of their own" in row["notes"]
-        [event] = [e for e in await events(manager, "task.assigned") if e.payload.get("task_id") == waiting and e.payload.get("error")]
-        assert "not a git repository" in event.payload["error"] and "isolation to shared" in event.payload["error"]
+        assert row["status"] == "todo" and row["assignee_staff_id"] == ada.id
+        effect = await OutboxStore(manager.db).view(queued["effect_id"])
+        assert "task folder changed after the launch command" in effect["error"]
+        assert not await manager.db.fetchall("SELECT id FROM execution_attempts WHERE task_id = ?", (waiting,))
     finally:
+        await close_team(manager)
         await manager.close()
 
 
@@ -967,8 +1152,9 @@ async def test_git_is_asked_whether_a_worktree_can_be_made_not_the_stored_flag(s
         await manager.db.execute("UPDATE project_folders SET is_git = 0 WHERE project_id = ?", (project.id,))
         refreshed = await manager.projects.get(project.id)
         assert refreshed is not None and refreshed.primary is not None and not refreshed.primary.is_git
-        assert (await team.assign(ada, await board_task(manager, project, "Menu")))["state"] == "started"
+        assert (await operator_assignment(team, ada, await board_task(manager, project, "Menu")))["state"] == "queued"
         [req] = runtime.started
         assert req.worktree is not None and req.cwd == req.worktree.cwd != refreshed.primary.path
     finally:
+        await close_team(manager)
         await manager.close()

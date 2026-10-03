@@ -233,6 +233,7 @@ class Project:
     setup_by: str = ""
     """``dispatcher`` while the main orchestrator is setting the project up: every request of the
     project is then shown in its chat too. Empty once the setup is over."""
+    entity_revision: int = 1
 
     @property
     def primary(self) -> ProjectFolder:
@@ -257,6 +258,7 @@ class Project:
             "system": self.settings.system,
             "folders": [f.view() for f in self.folders],
             "setup_by": self.setup_by,
+            "entity_revision": self.entity_revision,
         }
 
 
@@ -423,6 +425,7 @@ class ProjectStore:
             settings=ProjectSettings.load(settings, default_env=self.local_env),
             folders=tuple(folders),
             setup_by=str(row["setup_by"] or "") if "setup_by" in row.keys() else "",
+            entity_revision=int(row["entity_revision"]) if "entity_revision" in row.keys() else 1,
         )
 
     async def list(self) -> list[Project]:

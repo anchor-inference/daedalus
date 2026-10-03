@@ -89,7 +89,7 @@ export function goalRow(goal: FocusGoal): GoalRow {
   const next = !words ? null : words === DECISION_NEXT ? { key: "goal.next.decision" } : { text: words };
   return {
     id: goal.task_id,
-    title: goal.title || goal.task_id,
+    title: goal.title,
     status: goal.status,
     owner,
     unowned: !goal.owner,
@@ -118,7 +118,7 @@ export function resultKey(cause: string): string {
 /** The card a commitment or a result names, by its title when the goals know it. */
 export function cardTitle(taskId: string | null | undefined, goals: FocusGoal[]): string {
   if (!taskId) return "";
-  return goals.find((g) => g.task_id === taskId)?.title ?? taskId;
+  return goals.find((g) => g.task_id === taskId)?.title ?? "";
 }
 
 // ── what became of an operator's message ─────────────────────────────────────────────────────
@@ -160,7 +160,7 @@ export function messageFate(
   const own = seq != null ? receipts?.[String(seq)] ?? [] : [];
   const lines: FateLine[] = own.map((r) =>
     r.kind === "requirement"
-      ? { kind: "requirement", label: r.label, card: r.task_title || r.task_id, text: r.text, state: r.state, deliveries: r.deliveries.map((d) => ({ name: d.staff_name, state: deliveryState(d) })) }
+      ? { kind: "requirement", label: r.label, card: r.task_title, text: r.text, state: r.state, deliveries: r.deliveries.map((d) => ({ name: d.staff_name, state: deliveryState(d) })) }
       : { kind: "commitment", text: r.text, kept: r.kept },
   );
   const arrival = message.delivery === "steer" || message.delivery === "drained" ? message.delivery : null;

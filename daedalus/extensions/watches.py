@@ -48,10 +48,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from daedalus.extensions.inbound import _NESTED_QUANTIFIER, search_bounded
-from daedalus.extensions.notifications import Draft
+from daedalus.extensions.watch_delivery import WatchDeliveries
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.gitrun import GitError, run_command
-from daedalus.stores.staff import MESSAGE_MODES, StaffError
+from daedalus.stores.staff import MESSAGE_MODES
 from daedalus.terminals.bridge import HostBridge
 from daedalus.terminals.model import EnvUnavailable, InvalidRequest, TerminalError
 
@@ -133,6 +133,7 @@ class Watch:
     enabled: bool
     state: dict[str, Any] = field(default_factory=dict)
     condition_revision: int = 1
+    deadline_at: str | None = None
 
     @classmethod
     def from_row(cls, row: Any) -> Watch:
@@ -149,6 +150,7 @@ class Watch:
             created_at=str(row["created_at"]), last_fired_at=row["last_fired_at"], fire_count=int(row["fire_count"] or 0),
             enabled=bool(row["enabled"]), state=load(row["state_json"]),
             condition_revision=int(row["condition_revision"]) if "condition_revision" in row.keys() else 1,
+            deadline_at=row["deadline_at"],
         )
 
     @property
@@ -164,6 +166,7 @@ class Watch:
             "created_by": self.created_by, "created_at": self.created_at, "last_fired_at": self.last_fired_at,
             "fire_count": self.fire_count, "enabled": self.enabled, "stopped": str(self.state.get("stopped") or ""),
             "condition_revision": self.condition_revision,
+            "deadline_at": self.deadline_at,
             # ``stopped`` is a code: once · budget · pattern · slow_pattern.
             "last_error": str(self.state.get("last_error") or ""), "describe": describe(self),
         }
@@ -283,6 +286,7 @@ class Watches:
         self._watches: dict[str, Watch] = {}
         self._loaded = False
         self._firing = asyncio.Lock()
+        self.deliveries = WatchDeliveries(app)
         self._followers: dict[str, asyncio.Task[None]] = {}
         self._handler: asyncio.Task[None] | None = None
         self._seq = 0
@@ -319,13 +323,15 @@ class Watches:
 
     async def _save(self, watch: Watch) -> None:
         await self.manager.db.execute(
-            "UPDATE watches SET pattern_json = ?, action_json = ?, cooldown_s = ?, once = ?, note = ?, last_fired_at = ?, fire_count = ?, enabled = ?, state_json = ?, condition_revision = ? WHERE id = ?",
-            (json.dumps(watch.pattern), json.dumps(watch.action), watch.cooldown_s, int(watch.once), watch.note, watch.last_fired_at, watch.fire_count, int(watch.enabled), json.dumps(watch.state), watch.condition_revision, watch.id),
+            "UPDATE watches SET pattern_json = ?, action_json = ?, cooldown_s = ?, once = ?, note = ?, last_fired_at = ?, fire_count = ?, enabled = ?, state_json = ?, condition_revision = ?, deadline_at = ? WHERE id = ?",
+            (json.dumps(watch.pattern), json.dumps(watch.action), watch.cooldown_s, int(watch.once), watch.note, watch.last_fired_at, watch.fire_count, int(watch.enabled), json.dumps(watch.state), watch.condition_revision, watch.deadline_at, watch.id),
         )
 
     # -- setting one -------------------------------------------------------------------------------
 
-    async def create(self, project: Project, *, when: Any, then: Any, cooldown_minutes: Any = 10, once: bool = False, note: str = "", by: str = "orchestrator") -> Watch:
+    async def create(self, project: Project, *, when: Any, then: Any, cooldown_minutes: Any = 10,
+                     once: bool = False, note: str = "", by: str = "orchestrator",
+                     deadline_at: str | None = None) -> Watch:
         if by not in ("orchestrator", "operator"):
             raise WatchRefused("a watch is set by the orchestrator or the operator")
         live = [w for w in self.of_project(project.id, enabled_only=True)]
@@ -337,11 +343,16 @@ class Watches:
         text = " ".join(str(note or "").split())
         if len(text) > NOTE_MAX:
             raise WatchRefused(f"a note is at most {NOTE_MAX} characters")
+        if deadline_at is not None:
+            deadline = _parse(deadline_at)
+            if deadline is None or deadline <= self.clock() or deadline > self.clock() + timedelta(days=365):
+                raise WatchRefused("watch deadline must be within the next year")
+            deadline_at = deadline.isoformat()
         watch_id = "w" + uuid.uuid4().hex[:7]
         now = self.clock().isoformat()
         await self.manager.db.execute(
-            "INSERT INTO watches(id, project_id, pattern_json, action_json, cooldown_s, once, note, created_by, created_at, enabled, state_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '{}')",
-            (watch_id, project.id, json.dumps(pattern), json.dumps(action), cooldown_s, int(bool(once)), text, by, now),
+            "INSERT INTO watches(id, project_id, pattern_json, action_json, cooldown_s, once, note, created_by, created_at, enabled, state_json, deadline_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '{}', ?)",
+            (watch_id, project.id, json.dumps(pattern), json.dumps(action), cooldown_s, int(bool(once)), text, by, now, deadline_at),
         )
         watch = await self._reload(watch_id)
         assert watch is not None
@@ -537,120 +548,67 @@ class Watches:
             return 0.0
         return max(0.0, watch.cooldown_s - (self.clock() - last).total_seconds())
 
-    async def fire(self, watch: Watch, detail: str, *, staff_id: str | None = None, source_cursor: str | None = None) -> bool:
-        """Do what the watch says, within its cooldown and its hourly budget. Whether it fired."""
+    async def fire(self, watch: Watch, detail: str, *, source_cursor: str, staff_id: str | None = None) -> bool:
+        """Reserve one bounded standing-rule intent before invoking its effect."""
         async with self._firing:
             current = self._watches.get(watch.id)
             if current is None or not current.enabled or self.cooling(current) > 0:
                 return False
             watch = current
             now = self.clock()
-            hour_ago = now - timedelta(hours=1)
-            fires = [f for f in watch.state.get("fires", []) if (_parse(f) or now) > hour_ago]
-            if len(fires) >= self.config.max_fires_per_hour:
-                await self._stop(watch, "budget", f"it fired {len(fires)} times within an hour, the most a watch may")
+            if watch.deadline_at and (_parse(watch.deadline_at) or now) <= now:
+                await self._stop(watch, "expired", "its deadline has passed")
                 return False
-            cursor_value = source_cursor or f"unidentified:{uuid.uuid4().hex}"
-            dedup_key = hashlib.sha256(f"{watch.id}:{watch.condition_revision}:{cursor_value}".encode()).hexdigest()
+            hour_ago = now - timedelta(hours=1)
+            counted = await self.manager.db.fetchone(
+                "SELECT COUNT(*) AS n FROM watch_deliveries WHERE watch_id = ? AND created_at > ?"
+                " AND status != 'cancelled'", (watch.id, hour_ago.isoformat()),
+            )
+            fires = int(counted["n"]) if counted else 0
+            if fires >= self.config.max_fires_per_hour:
+                await self._stop(watch, "budget", f"it fired {fires} times within an hour, the most a watch may")
+                return False
+            dedup_key = hashlib.sha256(f"{watch.id}:{watch.condition_revision}:{source_cursor}".encode()).hexdigest()
             delivery_id = uuid.uuid4().hex
             at = now.isoformat()
+            state = dict(watch.state)
+            state["fires"] = [f for f in state.get("fires", []) if (_parse(f) or now) > hour_ago] + [at]
+            if watch.once:
+                state["stopped"] = "once"
+            snapshot = {"action": watch.action, "pattern": watch.pattern,
+                        "note": str(watch.action.get("note") or watch.note),
+                        "created_by": watch.created_by, "fire_count": watch.fire_count + 1}
             async with self.manager.db.transaction() as conn:
+                async with conn.execute("SELECT enabled,condition_revision,deadline_at FROM watches WHERE id = ?",
+                                        (watch.id,)) as cursor:
+                    stored = await cursor.fetchone()
+                if (stored is None or not stored["enabled"] or stored["condition_revision"] != watch.condition_revision
+                        or stored["deadline_at"] != watch.deadline_at):
+                    return False
                 inserted = await conn.execute(
                     "INSERT OR IGNORE INTO watch_deliveries "
-                    "(id, watch_id, condition_revision, source_cursor, dedup_key, status, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
-                    (delivery_id, watch.id, watch.condition_revision, cursor_value, dedup_key, at, at),
+                    "(id, watch_id, condition_revision, source_cursor, dedup_key, status, action_json, detail,"
+                    " staff_id, project_id, deadline_at, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)",
+                    (delivery_id, watch.id, watch.condition_revision, source_cursor, dedup_key,
+                     json.dumps(snapshot), detail[:TEXT_MAX], staff_id, watch.project_id, watch.deadline_at, at, at),
                 )
                 if inserted.rowcount == 0:
                     return False
-                # Reserve the fire before invoking a notification or member. A crash after this point
-                # is an uncertain delivery for review, not permission to send it again on replay.
                 await conn.execute(
-                    "UPDATE watches SET last_fired_at = ?, fire_count = fire_count + 1 WHERE id = ?",
-                    (at, watch.id),
+                    "UPDATE watches SET last_fired_at = ?,fire_count = fire_count + 1,enabled = ?,"
+                    " state_json = ? WHERE id = ? AND condition_revision = ?",
+                    (at, 0 if watch.once else 1, json.dumps(state), watch.id, watch.condition_revision),
                 )
-            fires.append(now.isoformat())
-            watch.state["fires"] = fires
-            watch.last_fired_at = now.isoformat()
+            watch.state = state
+            watch.last_fired_at = at
             watch.fire_count += 1
             if watch.once:
                 watch.enabled = False
-                watch.state["stopped"] = "once"
-            try:
-                error = await self._act(watch, detail)
-            except Exception as exc:  # noqa: BLE001 — an external send may have happened before failure
-                error = f"delivery outcome unknown: {str(exc)[-300:]}"
-                delivery_status = "reconciling"
-            else:
-                delivery_status = "failed" if error else "delivered"
-                if watch.action.get("action") == "wake" and not error:
-                    delivery_status = "pending"  # the bus event itself is this watch's effect
-            await self.manager.db.execute(
-                "UPDATE watch_deliveries SET status = ?, updated_at = ? WHERE id = ?",
-                (delivery_status, self.clock().isoformat(), delivery_id),
-            )
-            if error:
-                watch.state["last_error"] = error[:500]
-            else:
-                watch.state.pop("last_error", None)
-            await self._save(watch)
             if not watch.enabled:
                 self._unfollow(watch.id)
-        try:
-            await self.manager.bus.publish(
-                "watch.fired",
-                {"watch_id": watch.id, "fire_count": watch.fire_count, "pattern": watch.pattern, "action": str(watch.action.get("action")),
-                 "note": str(watch.action.get("note") or watch.note), "detail": detail[:500], "actor": "system", **({"error": error[:300]} if error else {})},
-                project_id=watch.project_id,
-                staff_id=staff_id,
-            )
-        except Exception:  # noqa: BLE001 — the action is done; the event is its record
-            logger.warning("could not publish watch.fired for %s", watch.id, exc_info=True)
-            if watch.action.get("action") == "wake" and not error:
-                await self.manager.db.execute(
-                    "UPDATE watch_deliveries SET status = 'reconciling', updated_at = ? WHERE id = ?",
-                    (self.clock().isoformat(), delivery_id),
-                )
-        else:
-            if watch.action.get("action") == "wake" and not error:
-                await self.manager.db.execute(
-                    "UPDATE watch_deliveries SET status = 'delivered', updated_at = ? WHERE id = ?",
-                    (self.clock().isoformat(), delivery_id),
-                )
-        return True
-
-    async def _act(self, watch: Watch, detail: str) -> str:
-        """The action itself; an error in words, or ``""``. ``wake`` is the ``watch.fired`` event alone."""
-        action = watch.action
-        kind = action.get("action")
-        if kind == "tell":
-            team: Any = self.app.extensions.get("staff")
-            member = await self.manager.staff.get(str(action.get("staff_id") or ""))
-            if team is None or member is None or not member.active:
-                return f"{action.get('staff')} is no longer on the team"
-            try:
-                receipt = await team.tell(member, str(action.get("text") or ""), when=str(action.get("when") or "now"), by=watch.created_by)
-            except StaffError as exc:
-                return str(exc)
-            return str(receipt.get("error") or "") if receipt.get("state") == "failed" else ""
-        if kind == "notify":
-            notifications = self.app.notifications
-            if notifications is None:
-                return "notifications are not available here"
-            project = await self.manager.projects.get(watch.project_id)
-            name = project.name if project is not None else watch.project_id
-            body = str(action.get("text") or "")
-            await notifications.post(Draft(
-                "orchestrator_report",
-                f"{name}: {action.get('title')}",
-                (body + "\n\n" if body else "") + detail,
-                kind="watch",
-                level=action.get("level") or "normal",
-                project_id=watch.project_id,
-                link=f"/app/project/{watch.project_id}/wakeups",
-                source=f"watch:{watch.id}",
-            ))
-        return ""
+            await self.deliveries.deliver(delivery_id)
+            return True
 
     async def _stop(self, watch: Watch, code: str, why: str) -> None:
         """Switch a watch off by itself, and say so where the orchestrator and the operator both look.
@@ -708,6 +666,9 @@ class Watches:
         now = self.clock()
         for watch in [w for w in self._watches.values() if w.enabled]:
             try:
+                if watch.deadline_at and (_parse(watch.deadline_at) or now) <= now:
+                    await self._stop(watch, "expired", "its deadline has passed")
+                    continue
                 if watch.event == "staff_silent":
                     await self._check_silence(watch, now)
                 elif watch.event == "terminal_output" and watch.id not in self._followers:
@@ -902,6 +863,7 @@ class Watches:
     async def loop(self) -> None:
         while True:
             try:
+                await self.deliveries.sweep()
                 await self.tick()
             except Exception:  # noqa: BLE001
                 logger.exception("the watches tick failed")

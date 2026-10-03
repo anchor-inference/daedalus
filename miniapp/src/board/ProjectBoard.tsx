@@ -727,7 +727,7 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
           <select id="ptask-resume" className="field" value={resumeFrom} onChange={(event) => setResumeFrom(event.target.value)}>
             <option value="">{t("pboard.resume.fresh")}</option>
             {resumeSessions.map((session) => <option key={session.id} value={session.id} disabled={!session.can_resume}>
-              {session.started_at.slice(0, 16).replace("T", " ")} · {session.owner_name} · {session.task_title || session.id} {session.can_resume ? "" : `· ${t(`pboard.resume.reason.${session.resume_reason}`)}`}
+              {session.started_at.slice(0, 16).replace("T", " ")} · {session.owner_name} · {session.task_title || t("goal.card.untitled")} {session.can_resume ? "" : `· ${t(`pboard.resume.reason.${session.resume_reason}`)}`}
             </option>)}
           </select>
           <div className="sub">{t("pboard.resume.hint")}</div>

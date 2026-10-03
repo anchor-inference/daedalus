@@ -8,7 +8,7 @@ module may import the HTTP framework; nothing below the extensions may.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -16,9 +16,11 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.extensions import questions, wakeups
+from daedalus.extensions.project_commands import ProjectCommands
 from daedalus.extensions.project_usage import ProjectUsage
 from daedalus.extensions.watches import WatchRefused
 from daedalus.host import prompts
+from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.projects import RULE_KIND, FolderSpec, Project, ProjectError, ProjectFolder, ProjectSettings
 
 if TYPE_CHECKING:
@@ -42,6 +44,7 @@ class WatchBody(BaseModel):
     cooldown_minutes: float = 10
     once: bool = False
     note: str = ""
+    deadline_at: str | None = None
 
 
 class WatchPatch(BaseModel):
@@ -73,6 +76,17 @@ class FolderBody(BaseModel):
     readonly: bool = False
 
 
+class MutationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_entity_revision: int = Field(ge=1)
+    client_operation_id: str = Field(min_length=1, max_length=160)
+
+
+class FolderCommandBody(FolderBody, MutationBody):
+    pass
+
+
 class ProjectBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -83,7 +97,7 @@ class ProjectBody(BaseModel):
     snapshots: bool = False
 
 
-class ProjectPatch(BaseModel):
+class ProjectPatch(MutationBody):
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
@@ -94,7 +108,7 @@ class ProjectPatch(BaseModel):
     project is one made implicitly, and nothing the operator does makes one."""
 
 
-class FolderPatch(BaseModel):
+class FolderPatch(MutationBody):
     model_config = ConfigDict(extra="forbid")
 
     label: str | None = None
@@ -249,15 +263,17 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(400, "a host folder needs the host terminal bridge, which is not installed here; install it, or add the folder to the container")
         raise HTTPException(400, "this installation runs on the host without a container; a folder here is a host folder")
 
-    async def changed(project_id: str, change: str) -> None:
-        """Tell loaded sessions and everyone listening. A folder added, locked or removed changes what
-        a loaded session may read and write, so its services are rebuilt at once, not at its next load."""
-        project = await manager.projects.get(project_id)
-        await manager.reload_project(project, project_id)
-        await manager.bus.publish("project.changed", {"change": change, "actor": "operator"}, project_id=project_id)
+    async def reload_command_project(project_id: str) -> None:
+        await manager.reload_project(await manager.projects.get(project_id), project_id)
 
-    def named(sessions: Sequence[dict[str, str]]) -> str:
-        return ", ".join(s["title"] or s["id"] for s in sessions)
+    def project_commands() -> ProjectCommands:
+        return ProjectCommands(app.db, manager.projects, manager.bus, refuse_env, reload_command_project)
+
+    def conflict(exc: ControlConflict) -> HTTPException:
+        detail: Any = str(exc) if exc.current_revision is None else {
+            "reason": str(exc), "current_revision": exc.current_revision,
+        }
+        return HTTPException(409, detail)
 
     @api.get("/api/projects")
     async def list_projects(_: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
@@ -292,17 +308,21 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return view(project, [])
 
     @api.patch("/api/projects/{project_id}")
-    async def patch_project(project_id: str, body: ProjectPatch, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def patch_project(project_id: str, body: ProjectPatch, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         await existing(project_id)
-        refuse_env(body.default_env)
         try:
-            project = await manager.projects.update(project_id, name=body.name, snapshots=body.snapshots, default_env=body.default_env, ephemeral=False if body.keep else None)
+            response = await project_commands().settings(
+                Principal.operator(who), project_id, client_operation_id=body.client_operation_id,
+                expected_entity_revision=body.expected_entity_revision, name=body.name,
+                snapshots=body.snapshots, default_env=body.default_env, keep=bool(body.keep),
+            )
+        except ControlConflict as exc:
+            raise conflict(exc) from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
         except ProjectError as exc:
             raise HTTPException(400, str(exc)) from exc
-        # Loaded sessions keep their own immutable project value, so refresh their editable label
-        # and snapshot setting after the row changes.
-        await changed(project_id, "kept" if body.keep else "settings")
-        return view(project, await sessions_of(project_id))
+        return response
 
     @api.delete("/api/projects/{project_id}")
     async def delete_project(project_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -330,62 +350,62 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     # -- folders -----------------------------------------------------------------------
 
     @api.post("/api/projects/{project_id}/folders")
-    async def add_folder(project_id: str, body: FolderBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def add_folder(project_id: str, body: FolderCommandBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Another folder for the project. The answer is the whole project, so the new folder's
         ``reach`` and ``reachable`` say at once who can work in it and whether it is mounted yet."""
         await existing(project_id)
-        refuse_env(body.env)
         try:
-            await manager.projects.add_folder(project_id, body.path, label=body.label, env=body.env, readonly=body.readonly)
+            response = await project_commands().add_folder(
+                Principal.operator(who), project_id, client_operation_id=body.client_operation_id,
+                expected_entity_revision=body.expected_entity_revision, path=body.path,
+                label=body.label, env=body.env, readonly=body.readonly,
+            )
+        except ControlConflict as exc:
+            raise conflict(exc) from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
         except ProjectError as exc:
             raise HTTPException(400, str(exc)) from exc
-        await changed(project_id, "folders")
-        return view(await existing(project_id), await sessions_of(project_id))
+        return response
 
     @api.patch("/api/projects/{project_id}/folders/{folder_id}")
-    async def patch_folder(project_id: str, folder_id: str, body: FolderPatch, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        project = await existing(project_id)
-        folder = project.folder(folder_id)
-        if folder is None:
-            raise HTTPException(404, "no such folder in this project")
-        if body.position is not None:
-            # A session that names no folder works in the primary, whichever folder that is. Changing
-            # which one is first would move it into another folder mid-work, silently.
-            becomes_primary = body.position == 0 and folder.position != 0
-            stops_primary = folder.position == 0 and body.position != 0
-            if becomes_primary or stops_primary:
-                working = await manager.projects.sessions_by_default(project_id)
-                if working:
-                    one = len(working) == 1
-                    raise HTTPException(409, f"{named(working)} {'works' if one else 'work'} in the primary folder {project.primary.path}; changing which folder is first would move {'it' if one else 'them'}")
+    async def patch_folder(project_id: str, folder_id: str, body: FolderPatch, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        await existing(project_id)
         try:
-            await manager.projects.update_folder(project_id, folder_id, label=body.label, readonly=body.readonly, position=body.position)
+            response = await project_commands().change_folder(
+                Principal.operator(who), project_id, folder_id, client_operation_id=body.client_operation_id,
+                expected_entity_revision=body.expected_entity_revision, label=body.label,
+                readonly=body.readonly, position=body.position,
+            )
+        except ControlConflict as exc:
+            raise conflict(exc) from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except ProjectError as exc:
+            raise HTTPException(400, str(exc)) from exc
         except KeyError as exc:
             raise HTTPException(404, "no such folder in this project") from exc
-        await changed(project_id, "folders")
-        return view(await existing(project_id), await sessions_of(project_id))
+        return response
 
     @api.delete("/api/projects/{project_id}/folders/{folder_id}")
-    async def remove_folder(project_id: str, folder_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def remove_folder(project_id: str, folder_id: str, body: MutationBody,
+                            who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Forget a folder; nothing on disk is touched. Refused, by name, while a session works in it."""
-        project = await existing(project_id)
-        folder = project.folder(folder_id)
-        if folder is None:
-            raise HTTPException(404, "no such folder in this project")
-        if len(project.folders) == 1:
-            raise HTTPException(409, f"{folder.path} is the only folder of {project.name}; a project needs at least one")
-        working = await manager.projects.sessions_in_folder(project_id, folder_id)
-        if working:
-            one = len(working) == 1
-            raise HTTPException(409, f"{named(working)} {'works' if one else 'work'} in {folder.path}; move or remove {'it' if one else 'them'} first")
+        await existing(project_id)
         try:
-            await manager.projects.remove_folder(project_id, folder_id)
+            response = await project_commands().remove_folder(
+                Principal.operator(who), project_id, folder_id, client_operation_id=body.client_operation_id,
+                expected_entity_revision=body.expected_entity_revision,
+            )
+        except ControlConflict as exc:
+            raise conflict(exc) from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
         except ProjectError as exc:
             raise HTTPException(409, str(exc)) from exc
         except KeyError as exc:
             raise HTTPException(404, "no such folder in this project") from exc
-        await changed(project_id, "folders")
-        return view(await existing(project_id), await sessions_of(project_id))
+        return response
 
     # -- the brief and the journal -----------------------------------------------------
 
@@ -561,8 +581,21 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         """Every watch of the project, switched on or off, oldest first, with what bounds them."""
         await existing(project_id)
         config = manager.config.watches
+        delivery_rows = await manager.db.fetchall(
+            "SELECT id,watch_id,status,receipt_id,last_error,created_at FROM ("
+            " SELECT id,watch_id,status,receipt_id,last_error,created_at,"
+            " ROW_NUMBER() OVER (PARTITION BY watch_id ORDER BY created_at DESC,id DESC) AS rank"
+            " FROM watch_deliveries WHERE project_id = ?) WHERE rank = 1", (project_id,),
+        )
+        latest_delivery: dict[str, dict[str, Any]] = {}
+        for row in delivery_rows:
+            latest_delivery.setdefault(row["watch_id"], {
+                "id": row["id"], "status": row["status"], "receipt_id": row["receipt_id"],
+                "last_error": row["last_error"], "created_at": row["created_at"],
+            })
         return {
-            "watches": [w.view() for w in keeper().of_project(project_id)],
+            "watches": [{**w.view(), "latest_delivery": latest_delivery.get(w.id)}
+                        for w in keeper().of_project(project_id)],
             "max": config.max_per_project,
             "min_cooldown_minutes": max(1, round(config.min_cooldown_seconds / 60)),
             "providers": sorted(manager.config.webhooks),
@@ -572,7 +605,8 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def post_watch(project_id: str, body: WatchBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         project = await existing(project_id)
         try:
-            made = await keeper().create(project, when=body.when, then=body.then, cooldown_minutes=body.cooldown_minutes, once=body.once, note=body.note, by="operator")
+            made = await keeper().create(project, when=body.when, then=body.then, cooldown_minutes=body.cooldown_minutes,
+                                         once=body.once, note=body.note, deadline_at=body.deadline_at, by="operator")
         except WatchRefused as exc:
             raise HTTPException(400, str(exc)) from exc
         return dict(made.view())

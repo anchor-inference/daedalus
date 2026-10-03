@@ -173,7 +173,7 @@ function FateRow({ line }: { line: FateLine }) {
   const replaced = line.state === "superseded" || line.state === "withdrawn";
   return (
     <li className={`fate-line requirement ${replaced ? "replaced" : ""}`} title={line.text}>
-      <span className="fate-what">{t("fate.requirement", { label: line.label, card: line.card })}</span>
+      <span className="fate-what">{t("fate.requirement", { label: line.label, card: line.card || t("goal.card.untitled") })}</span>
       {replaced && <span className="fate-state">{t(`pboard.req.state.${line.state}`)}</span>}
       {!replaced && line.deliveries.length === 0 && <span className="fate-state open">{t("fate.undelivered")}</span>}
       {!replaced && line.deliveries.map((d, i) => (

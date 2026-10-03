@@ -1092,10 +1092,6 @@ class CliStaffRuntime:
         seen = session.calls.get(call_id) if call_id else None
         if tool == "report":
             session.reported = True
-            if seen is not None:
-                if post.reply_id:
-                    await session.term.reply(post.reply_id, seen[1])
-                return
             try:
                 evidence = [e for e in body.get("evidence") or [] if isinstance(e, dict)]
                 acknowledged = [str(a) for a in body.get("acknowledged") or []]
@@ -1105,7 +1101,7 @@ class CliStaffRuntime:
                     operator_steps=body.get("operator_steps") if isinstance(body.get("operator_steps"), dict) else None,
                 )
                 reply: dict[str, Any] = {"text": told}
-            except (ValueError, RuntimeError) as exc:
+            except (PermissionError, ValueError, RuntimeError) as exc:
                 reply = {"text": str(exc), "error": True}
             self._remember_call(session, call_id, ("report", reply))
             await self._apply(session, StaffEvent(EventKind.ACTIVITY, post.at, {"team": "report"}, launch_id=session.launch.launch_id))
