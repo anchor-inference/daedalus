@@ -75,6 +75,22 @@ async def test_projects_rotate_and_stop_cannot_wait_behind_many_launches(db: Dat
     assert third is not None and third.task_id == "a-low"
 
 
+async def test_comparison_stop_precedes_older_merge_and_launch_commands(db: Database, tmp_path: Path) -> None:
+    await task(db, tmp_path, "project", "task", 1)
+    launch = await enqueue(db, "project", "task")
+    merge = await enqueue(db, "project", "task", kind="review.merge")
+    stop = await enqueue(db, "project", "task", kind="comparison.stop")
+    store = OutboxStore(db)
+    claim = await store.claim(("task.launch", "review.merge", "comparison.stop"))
+    assert claim is not None and claim.id == stop
+    assert await store.finish(claim, state="completed")
+    claim = await store.claim(("task.launch", "review.merge", "comparison.stop"))
+    assert claim is not None and claim.id == merge
+    assert await store.finish(claim, state="completed")
+    claim = await store.claim(("task.launch", "review.merge", "comparison.stop"))
+    assert claim is not None and claim.id == launch
+
+
 async def test_deferred_reason_and_position_survive_store_restart(db: Database, tmp_path: Path) -> None:
     await task(db, tmp_path, "project", "low", 4)
     await task(db, tmp_path, "project", "urgent", 1)

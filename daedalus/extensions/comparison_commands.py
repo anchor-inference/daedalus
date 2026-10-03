@@ -12,8 +12,9 @@ from daedalus.extensions.comparisons import (
     comparison_readiness,
     create_group,
 )
-from daedalus.extensions.orchestrator_domain import dependency_readiness
+from daedalus.extensions.orchestrator_domain import dependency_readiness, record_verdict
 from daedalus.extensions.task_launch import member_digest, task_digest
+from daedalus.host.events import AppEvent
 from daedalus.host.inference_admission import HostInferenceAdmission
 from daedalus.host.worktrees import staff_slug
 from daedalus.stores.comparison_funding import ComparisonFunding, physical_exit_in
@@ -22,6 +23,22 @@ from daedalus.stores.outbox import OutboxStore
 
 if TYPE_CHECKING:
     from daedalus.app import Application
+
+
+async def _task_events(conn: Any, bus: Any, principal: Principal, task_id: str,
+                       prior_status: str | None) -> list[AppEvent]:
+    task = await one(conn, "SELECT title,status,project_id,assignee_staff_id FROM board_tasks WHERE id = ?",
+                     (task_id,))
+    assert task is not None
+    payload = {"task_id": task_id, "title": task["title"], "actor": principal.origin_class,
+               "actor_id": principal.actor_id}
+    events = [await bus.persist_in(conn, "task.changed", payload, project_id=task["project_id"],
+                                   staff_id=task["assignee_staff_id"])]
+    if prior_status is not None and prior_status != task["status"]:
+        events.append(await bus.persist_in(conn, "task.moved",
+                                           {**payload, "from": prior_status, "to": task["status"]},
+                                           project_id=task["project_id"], staff_id=task["assignee_staff_id"]))
+    return events
 
 
 async def queue_comparison(
@@ -56,6 +73,8 @@ async def queue_comparison(
     control = ControlStore(app.db)
     funding = ComparisonFunding(app.db)
     admission = HostInferenceAdmission(app.manager)
+    bus = app.manager.bus
+    events: list[AppEvent] = []
     payload = {"contract_revision": contract_revision, "budget_cap_microusd": budget_cap_microusd,
                "alternatives": [{"staff_id": staff_id, "allowance_microusd": allowance}
                                 for staff_id, allowance in zip(staff_ids, allowances, strict=True)]}
@@ -132,14 +151,17 @@ async def queue_comparison(
                             "attempt_id": attempt_id, "effect_id": effect_id,
                             "allowance_microusd": allocation.allowance_microusd,
                             "state": "queued"})
+        events.extend(await _task_events(conn, bus, principal, task_id, current["status"]))
         return {"group_id": group_id, "task_id": task_id, "contract_revision": contract_revision,
                 "budget_cap_microusd": budget_cap_microusd, "state": "queued",
                 "slots": effects, "reserved_microusd": sum(item["reserved_microusd"] for item in reserved)}
 
-    async with team.queue.admission_guard():
+    async with team.queue.admission_guard(), bus.transaction_guard():
         result = await control.mutate(principal, scope, "comparison.launch", client_operation_id,
                                       expected_entity_revision, Entity("task", task_id), payload,
                                       effect, effects=("execution.start",))
+        for event in events:
+            bus.announce_committed(event)
     dispatcher.notify()
     return result
 
@@ -151,8 +173,161 @@ async def comparison_state(app: Application, *, task_id: str, group_id: str) -> 
         group = await one(conn, "SELECT task_id FROM comparison_groups WHERE id = ?", (group_id,))
         if group is None or group["task_id"] != task_id:
             raise KeyError(group_id)
-        return await comparison_readiness(conn, group_id, observed_cost=funding.observed_cost_in,
-                                          physical_exit=physical_exit_in)
+        return await _group_projection(conn, group_id, funding)
+
+
+async def _group_projection(conn: Any, group_id: str, funding: ComparisonFunding) -> dict[str, Any]:
+    state = await comparison_readiness(conn, group_id, observed_cost=funding.observed_cost_in,
+                                       physical_exit=physical_exit_in)
+    async with conn.execute(
+        "SELECT f.id,f.slot,f.staff_id,f.attempt_id,f.state AS funding_state,f.launch_started_at,"
+        " e.id AS launch_effect_id,e.state AS launch_state"
+        " FROM comparison_funding_slots f LEFT JOIN effect_outbox e"
+        " ON e.kind = CASE f.slot WHEN 1 THEN 'comparison.launch.first'"
+        " ELSE 'comparison.launch.second' END"
+        " AND json_extract(e.payload_json,'$.data.group_id') = f.group_id"
+        " WHERE f.group_id = ? ORDER BY f.slot", (group_id,),
+    ) as cursor:
+        rows = await cursor.fetchall()
+    return {**state, "slots": [{"slot_id": row["id"], "slot": row["slot"],
+                                 "staff_id": row["staff_id"], "attempt_id": row["attempt_id"],
+                                 "funding_state": row["funding_state"],
+                                 "launch_started_at": row["launch_started_at"],
+                                 "launch_effect_id": row["launch_effect_id"],
+                                 "launch_state": row["launch_state"]} for row in rows]}
+
+
+async def comparison_history(app: Application, *, task_id: str, limit: int = 20,
+                             before: str | None = None) -> dict[str, Any]:
+    """Read newest durable groups for one task with a stable older-page cursor."""
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise ValueError("comparison history limit must be between 1 and 50")
+    funding = ComparisonFunding(app.db)
+    async with app.db.transaction() as conn:
+        if await one(conn, "SELECT id FROM board_tasks WHERE id = ?", (task_id,)) is None:
+            raise KeyError(task_id)
+        cursor_at = None
+        if before is not None:
+            cursor_at = await one(conn, "SELECT created_at,id FROM comparison_groups"
+                                  " WHERE task_id = ? AND id = ?", (task_id, before))
+            if cursor_at is None:
+                raise KeyError(before)
+        condition = " AND (created_at,id) < (?,?)" if cursor_at is not None else ""
+        args = (task_id, cursor_at["created_at"], cursor_at["id"], limit + 1) if cursor_at else (task_id, limit + 1)
+        async with conn.execute("SELECT id,created_at FROM comparison_groups WHERE task_id = ?" + condition +
+                                " ORDER BY created_at DESC,id DESC LIMIT ?", args) as cursor:
+            rows = await cursor.fetchall()
+        page = rows[:limit]
+        groups = []
+        for row in page:
+            state = await _group_projection(conn, row["id"], funding)
+            groups.append({**state, "created_at": row["created_at"]})
+        return {"task_id": task_id, "groups": groups,
+                "next_before": page[-1]["id"] if len(rows) > limit else None}
+
+
+async def comparison_slot_review(app: Application, *, task_id: str, group_id: str,
+                                 slot: int, principal: Principal) -> dict[str, Any]:
+    """Read the exact contender's current branch and result without changing shared Board state."""
+    if slot not in (1, 2):
+        raise KeyError(slot)
+    member = await app.db.fetchone(
+        "SELECT m.attempt_id FROM comparison_group_attempts m"
+        " JOIN comparison_groups g ON g.id = m.group_id"
+        " WHERE g.id = ? AND g.task_id = ? AND m.slot = ?", (group_id, task_id, slot),
+    )
+    if member is None:
+        raise KeyError(slot)
+    team = app.extensions.get("staff")
+    review = getattr(team, "review", None)
+    if review is None:
+        raise ControlDenied("comparison review service is unavailable")
+    inspected = await review.review(task_id, comparison_attempt_id=member["attempt_id"])
+    state = await comparison_state(app, task_id=task_id, group_id=group_id)
+    alternative = next((item for item in state["alternatives"]
+                        if item["attempt_id"] == member["attempt_id"]), None)
+    blockers = list(inspected["blockers"])
+    if alternative is None or not alternative["physical_exit_verified"]:
+        blockers.append({"code": "exit_unknown", "text": "the worker has no exact observed physical exit"})
+    if alternative is None or alternative["observed_cost_microusd"] is None:
+        blockers.append({"code": "cost_unknown", "text": "the worker's actual cost is unknown"})
+    result_id = inspected["result_id"]
+    result = await app.db.fetchone("SELECT actor_id FROM result_receipts WHERE id = ? AND task_id = ?"
+                                   " AND attempt_id = ?", (result_id, task_id, member["attempt_id"])) if result_id else None
+    artifacts = await app.db.fetchall(
+        "SELECT m.id AS manifest_id,m.artifact_kind,m.artifact_key,m.digest,m.size_bytes,m.file_id"
+        " FROM result_artifacts a JOIN artifact_manifests m ON m.id = a.manifest_id"
+        " WHERE a.result_id = ? ORDER BY m.artifact_key,m.id", (result_id,),
+    ) if result_id else []
+    source_current = bool(inspected["head_sha"] and inspected["base_sha"] and result is not None and
+                          alternative is not None and alternative["physical_exit_verified"] and
+                          alternative["observed_cost_microusd"] is not None and
+                          not any(item["code"] in {"branch", "dirty", "unknown", "moved", "merged",
+                                                       "result_incomplete"} for item in blockers))
+    return {**inspected, "group_id": group_id, "slot": slot, "attempt_id": member["attempt_id"],
+            "blockers": blockers, "can_choose": inspected["can_choose"] and not blockers,
+            "source_current": source_current,
+            "physical_exit_verified": bool(alternative and alternative["physical_exit_verified"]),
+            "observed_cost_microusd": alternative["observed_cost_microusd"] if alternative else None,
+            "self_review_waiver_required": bool(result is not None and result["actor_id"] == principal.actor_id),
+            "artifacts": [dict(row) for row in artifacts]}
+
+
+async def review_comparison_slot(
+    app: Application, *, task_id: str, group_id: str, slot: int, principal: Principal,
+    client_operation_id: str, expected_entity_revision: int, result_id: str,
+    verification: str, accepted: bool, evidence_ids: list[str], reason: str,
+    self_review_waiver_receipt_id: str | None = None,
+) -> dict[str, Any]:
+    """Bind an operator verdict to the host-observed contender head and immutable result."""
+    if principal.origin_class != "operator":
+        raise ControlDenied("comparison review needs an authenticated operator")
+    task = await app.db.fetchone("SELECT project_id FROM board_tasks WHERE id = ?", (task_id,))
+    if task is None or not task["project_id"]:
+        raise KeyError(task_id)
+    request = {"group_id": group_id, "slot": slot, "result_id": result_id,
+               "verification": verification, "accepted": accepted, "evidence_ids": evidence_ids,
+               "reason": reason, "self_review_waiver_receipt_id": self_review_waiver_receipt_id}
+    preflight = None
+    failure = None
+    try:
+        preflight = await comparison_slot_review(app, task_id=task_id, group_id=group_id,
+                                                 slot=slot, principal=principal)
+    except (KeyError, ValueError, ControlDenied) as exc:
+        failure = exc
+    bus = app.manager.bus
+    events: list[AppEvent] = []
+
+    async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
+        if failure is not None:
+            raise failure
+        assert preflight is not None
+        if preflight["result_id"] != result_id or (accepted and not preflight["source_current"]):
+            raise ComparisonRefused("the contender result or source branch is no longer reviewable")
+        binding = await one(conn, "SELECT m.attempt_id,g.task_id,g.contract_revision,g.state"
+                            " FROM comparison_group_attempts m JOIN comparison_groups g ON g.id = m.group_id"
+                            " WHERE g.id = ? AND g.task_id = ? AND m.slot = ?", (group_id, task_id, slot))
+        if (binding is None or binding["attempt_id"] != preflight["attempt_id"] or
+                binding["state"] not in ("planned", "active", "ready")):
+            raise ComparisonRefused("the contender binding changed before review")
+        response = await record_verdict(conn, verdict_id=mutation.object_id, result_id=result_id,
+                                        reviewer_actor_id=principal.actor_id, verification=verification,
+                                        accepted=accepted, head=preflight["head_sha"],
+                                        base=preflight["base_sha"], environment_digest=None,
+                                        evidence_ids=evidence_ids, reason=reason,
+                                        self_review_waiver_receipt_id=self_review_waiver_receipt_id)
+        events.extend(await _task_events(conn, bus, principal, task_id, None))
+        return {**response, "group_id": group_id, "slot": slot, "attempt_id": binding["attempt_id"],
+                "head_sha": preflight["head_sha"], "base_sha": preflight["base_sha"]}
+
+    async with bus.transaction_guard():
+        response = await ControlStore(app.db).mutate(
+            principal, Scope("project", task["project_id"]), "review.verdict", client_operation_id,
+            expected_entity_revision, Entity("task", task_id), request, effect,
+        )
+        for event in events:
+            bus.announce_committed(event)
+    return response
 
 
 async def choose_comparison(
@@ -168,6 +343,8 @@ async def choose_comparison(
     if not task["project_id"]:
         raise ControlConflict("a bounded comparison needs a project task")
     funding = ComparisonFunding(app.db)
+    bus = app.manager.bus
+    events: list[AppEvent] = []
 
     async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
         group = await one(conn, "SELECT task_id FROM comparison_groups WHERE id = ?", (group_id,))
@@ -192,13 +369,18 @@ async def choose_comparison(
             raise ComparisonRefused("both comparison allocations must exist at selection")
         for slot in slots:
             await funding.release_in(conn, slot["id"])
+        events.extend(await _task_events(conn, bus, principal, task_id, current["status"]))
         return selected
 
-    return await ControlStore(app.db).mutate(
-        principal, Scope("project", task["project_id"]), "comparison.choose", client_operation_id,
-        expected_entity_revision, Entity("task", task_id),
-        {"group_id": group_id, "result_id": result_id, "verdict_id": verdict_id}, effect,
-    )
+    async with bus.transaction_guard():
+        response = await ControlStore(app.db).mutate(
+            principal, Scope("project", task["project_id"]), "comparison.choose", client_operation_id,
+            expected_entity_revision, Entity("task", task_id),
+            {"group_id": group_id, "result_id": result_id, "verdict_id": verdict_id}, effect,
+        )
+        for event in events:
+            bus.announce_committed(event)
+    return response
 
 
 async def close_comparison(
@@ -214,6 +396,8 @@ async def close_comparison(
     if not task["project_id"]:
         raise ControlConflict("a bounded comparison needs a project task")
     funding = ComparisonFunding(app.db)
+    bus = app.manager.bus
+    events: list[AppEvent] = []
 
     async def effect(conn: Any, _mutation: Any) -> dict[str, Any]:
         group = await one(conn, "SELECT task_id,state,selected_result_id FROM comparison_groups WHERE id = ?",
@@ -246,14 +430,24 @@ async def close_comparison(
         for slot in slots:
             await funding.release_in(conn, slot["id"])
         await conn.execute("UPDATE comparison_groups SET state = 'blocked' WHERE id = ?", (group_id,))
+        events.extend(await _task_events(conn, bus, principal, task_id, None))
         return {"group_id": group_id, "task_id": task_id, "state": "blocked",
                 "cancelled_launch_ids": [item["id"] for item in effects if item["state"] == "pending"],
                 "released_slot_ids": [slot["id"] for slot in slots]}
 
-    return await ControlStore(app.db).mutate(
-        principal, Scope("project", task["project_id"]), "comparison.close", client_operation_id,
-        expected_entity_revision, Entity("task", task_id), {"group_id": group_id}, effect,
-    )
+    async with bus.transaction_guard():
+        response = await ControlStore(app.db).mutate(
+            principal, Scope("project", task["project_id"]), "comparison.close", client_operation_id,
+            expected_entity_revision, Entity("task", task_id), {"group_id": group_id}, effect,
+        )
+        for event in events:
+            bus.announce_committed(event)
+    if events:
+        team = app.extensions.get("staff")
+        if team is not None:
+            team.queue.pump_soon(task["project_id"])
+    return response
 
 
-__all__ = ["queue_comparison", "comparison_state", "choose_comparison", "close_comparison"]
+__all__ = ["queue_comparison", "comparison_state", "comparison_history",
+           "comparison_slot_review", "review_comparison_slot", "choose_comparison", "close_comparison"]

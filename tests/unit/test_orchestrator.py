@@ -67,7 +67,7 @@ class Rig:
         return found
 
     async def call(self, session_id: str, operation: str, /, *, wait_for_admission: bool = True, **kwargs: Any) -> Any:
-        if operation in ("tasks", "assign") and (operation == "assign" or kwargs.get("op") in
+        if operation in ("tasks", "assign", "require") and (operation in ("assign", "require") or kwargs.get("op") in
                                                    ("create", "update", "move")):
             kwargs.setdefault("client_operation_id", f"fixture:{uuid.uuid4().hex}")
             task_id = kwargs.get("task_id")

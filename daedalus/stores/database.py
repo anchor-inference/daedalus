@@ -17,6 +17,7 @@ from daedalus.config import native_mode
 from daedalus.stores.ci_schema import MIGRATION as CI_MIGRATION
 from daedalus.stores.comparison_funding_schema import MIGRATION as COMPARISON_FUNDING_MIGRATION
 from daedalus.stores.comparison_schema import MIGRATION as COMPARISON_MIGRATION
+from daedalus.stores.contract_change_schema import MIGRATION as CONTRACT_CHANGE_MIGRATION
 from daedalus.stores.control_schema import MIGRATION as CONTROL_MIGRATION
 from daedalus.stores.execution_schema import MIGRATION as EXECUTION_MIGRATION
 from daedalus.stores.extension_schema import EXTENSION_SCHEMA
@@ -1727,6 +1728,7 @@ MIGRATIONS.append(INFERENCE_BUDGET_MIGRATION)
 MIGRATIONS.append(WATCH_AUTHORITY_MIGRATION)
 MIGRATIONS.append(WORKFLOW_SCOPE_MIGRATION)
 MIGRATIONS.append(COMPARISON_FUNDING_MIGRATION)
+MIGRATIONS.append(CONTRACT_CHANGE_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

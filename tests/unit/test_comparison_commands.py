@@ -7,12 +7,22 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
+from fastapi import FastAPI
 
-from daedalus.extensions.comparison_commands import choose_comparison, close_comparison, queue_comparison
+from daedalus.extensions.api_comparisons import install_routes
+from daedalus.extensions.comparison_commands import (
+    choose_comparison,
+    close_comparison,
+    comparison_history,
+    queue_comparison,
+)
 from daedalus.extensions.comparison_launch import ComparisonLaunchEffect
+from daedalus.extensions.comparison_stop import stop_comparison_slot
 from daedalus.extensions.comparisons import ComparisonRefused
 from daedalus.extensions.staff import Team
+from daedalus.host.events import EventBus
 from daedalus.host.launch_queue import LaunchQueue
 from daedalus.providers.pricing import ModelPricing
 from daedalus.stores.control import ControlConflict, Principal
@@ -24,6 +34,7 @@ from daedalus.stores.outbox import OutboxStore
 class PairQueue:
     def __init__(self) -> None:
         self.available = True
+        self.wakes: list[str] = []
 
     @asynccontextmanager
     async def admission_guard(self):
@@ -32,6 +43,9 @@ class PairQueue:
     async def check_pair_capacity_in(self, _conn, _project_id: str, *, count: int) -> bool:
         assert count == 2
         return self.available
+
+    def pump_soon(self, project_id: str) -> None:
+        self.wakes.append(project_id)
 
 
 class Dispatcher:
@@ -65,7 +79,7 @@ async def pair_app(tmp_path: Path):
     endpoint = SimpleNamespace(id="provider", kind="openrouter",
                                pricing={"model": ModelPricing(input=1.0, output=1.0,
                                                                input_limit=1000, limit_source="provider")})
-    manager = SimpleNamespace(db=db,
+    manager = SimpleNamespace(db=db, bus=EventBus(db),
                               config=SimpleNamespace(presets={"standard": SimpleNamespace(max_output_tokens=100)},
                                                      limits=SimpleNamespace(total_since="", usd_total=0,
                                                                             usd_total_per_provider={})),
@@ -103,6 +117,9 @@ async def test_pair_commits_two_funded_intents_and_replays_exact_response(pair_a
     assert await queue_comparison(pair_app, **request()) == result
     assert len(await pair_app.db.fetchall("SELECT id FROM operation_receipts"
                                           " WHERE operation_kind = 'comparison.launch'")) == 1
+    events = await pair_app.db.fetchall("SELECT seq,type FROM app_events ORDER BY seq")
+    assert [row["type"] for row in events] == ["task.changed"]
+    assert pair_app.manager.bus.head == events[-1]["seq"]
     assert pair_app.extensions["effects"].notifications == 2
 
 
@@ -114,6 +131,7 @@ async def test_pair_refusal_rolls_back_group_funding_and_intents(pair_app):
     assert await pair_app.db.fetchall("SELECT id FROM comparison_groups") == []
     assert await pair_app.db.fetchall("SELECT id FROM comparison_funding_slots") == []
     assert await pair_app.db.fetchall("SELECT id FROM effect_outbox WHERE kind LIKE 'comparison.launch.%'") == []
+    assert await pair_app.db.fetchall("SELECT seq FROM app_events") == []
     assert (await pair_app.db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'task1'"))[0] == 1
     assert pair_app.extensions["effects"].notifications == 0
 
@@ -231,6 +249,10 @@ async def test_choose_releases_both_verified_allocations_and_replays(pair_app):
     task = await pair_app.db.fetchone("SELECT current_attempt_id,status,branch,entity_revision"
                                      " FROM board_tasks WHERE id = 'task1'")
     assert tuple(task) == (launched["slots"][0]["attempt_id"], "review", "branch-1", 3)
+    events = await pair_app.db.fetchall("SELECT type,payload_json FROM app_events ORDER BY seq")
+    assert [row["type"] for row in events] == ["task.changed", "task.changed", "task.moved"]
+    assert '"from": "todo"' in events[-1]["payload_json"]
+    assert '"to": "review"' in events[-1]["payload_json"]
 
 
 async def test_close_cancels_only_unclaimed_launches_and_releases_unstarted_pair(pair_app):
@@ -242,15 +264,70 @@ async def test_close_cancels_only_unclaimed_launches_and_releases_unstarted_pair
     assert closed["state"] == "blocked"
     assert closed["cancelled_launch_ids"] == [slot["effect_id"] for slot in launched["slots"]]
     assert await close_comparison(pair_app, **command) == closed
+    assert pair_app.extensions["staff"].queue.wakes == ["project1"]
     assert [row["state"] for row in await pair_app.db.fetchall(
         "SELECT state FROM effect_outbox WHERE kind LIKE 'comparison.launch.%' ORDER BY kind"
     )] == ["cancelled", "cancelled"]
     assert [row["state"] for row in await pair_app.db.fetchall(
         "SELECT state FROM comparison_funding_slots ORDER BY slot"
     )] == ["released", "released"]
+    assert [row["type"] for row in await pair_app.db.fetchall(
+        "SELECT type FROM app_events ORDER BY seq"
+    )] == ["task.changed", "task.changed"]
     await queue_comparison(pair_app, **request() | {"client_operation_id": "compare2",
                                                 "expected_entity_revision": 3})
     assert len(await pair_app.db.fetchall("SELECT id FROM comparison_groups")) == 2
+
+
+async def test_history_pages_latest_state_and_rejects_foreign_cursor(pair_app):
+    first = await queue_comparison(pair_app, **request())
+    await close_comparison(pair_app, task_id="task1", group_id=first["group_id"],
+                           principal=Principal("operator:1", "operator"),
+                           client_operation_id="close1", expected_entity_revision=2)
+    second = await queue_comparison(pair_app, **request() | {"client_operation_id": "compare2",
+                                                  "expected_entity_revision": 3})
+    page = await comparison_history(pair_app, task_id="task1", limit=1)
+    assert [row["group_id"] for row in page["groups"]] == [second["group_id"]]
+    assert page["groups"][0]["state"] == "planned"
+    assert [slot["launch_state"] for slot in page["groups"][0]["slots"]] == ["pending", "pending"]
+    assert [slot["funding_state"] for slot in page["groups"][0]["slots"]] == ["held", "held"]
+    assert page["next_before"] == second["group_id"]
+    older = await comparison_history(pair_app, task_id="task1", limit=1, before=page["next_before"])
+    assert [row["group_id"] for row in older["groups"]] == [first["group_id"]]
+    assert older["groups"][0]["state"] == "blocked"
+    assert [slot["launch_state"] for slot in older["groups"][0]["slots"]] == ["cancelled", "cancelled"]
+    assert older["next_before"] is None
+    with pytest.raises(KeyError):
+        await comparison_history(pair_app, task_id="task1", before="another-task-group")
+
+
+async def test_operator_history_endpoint_paginates_and_validates_cursor(pair_app):
+    first = await queue_comparison(pair_app, **request())
+
+    async def auth():
+        return {"via": "token", "user_id": 1}
+
+    api = FastAPI()
+    install_routes(api, pair_app, auth)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api),
+                                 base_url="http://127.0.0.1") as client:
+        response = await client.get("/api/board/task1/comparisons", params={"limit": 1})
+        assert response.status_code == 200
+        assert response.json()["groups"][0]["group_id"] == first["group_id"]
+        assert (await client.get("/api/board/task1/comparisons", params={"limit": 0})).status_code == 422
+        assert (await client.get("/api/board/task1/comparisons", params={"before": "foreign"})).status_code == 404
+
+
+async def test_event_insert_failure_rolls_back_pair_and_receipt(pair_app):
+    await pair_app.db.execute("CREATE TRIGGER refuse_comparison_event BEFORE INSERT ON app_events"
+                              " BEGIN SELECT RAISE(ABORT,'event refused'); END")
+    with pytest.raises(Exception, match="event refused"):
+        await queue_comparison(pair_app, **request())
+    assert await pair_app.db.fetchall("SELECT id FROM comparison_groups") == []
+    assert await pair_app.db.fetchall("SELECT id FROM comparison_funding_slots") == []
+    assert await pair_app.db.fetchall("SELECT id FROM effect_outbox") == []
+    assert await pair_app.db.fetchall("SELECT id FROM operation_receipts") == []
+    assert pair_app.manager.bus.head == 0
 
 
 async def test_close_keeps_uncertain_launches_and_funding(pair_app):
@@ -266,6 +343,40 @@ async def test_close_keeps_uncertain_launches_and_funding(pair_app):
     )] == ["held", "held"]
     assert (await pair_app.db.fetchone("SELECT state FROM effect_outbox WHERE id = ?",
                                        (launched["slots"][1]["effect_id"],)))[0] == "pending"
+
+
+async def test_slot_stop_cancels_only_its_pending_launch_with_receipt(pair_app):
+    launched = await queue_comparison(pair_app, **request())
+    command = dict(task_id="task1", group_id=launched["group_id"], slot=1,
+                   principal=Principal("operator:1", "operator"),
+                   client_operation_id="stop-one", expected_entity_revision=2, reason="Pause first worker")
+    stopped = await stop_comparison_slot(pair_app, **command)
+    assert stopped["state"] == "cancelled_pending"
+    assert await stop_comparison_slot(pair_app, **command) == stopped
+    assert [row["state"] for row in await pair_app.db.fetchall(
+        "SELECT state FROM effect_outbox WHERE kind LIKE 'comparison.launch.%' ORDER BY kind"
+    )] == ["cancelled", "pending"]
+    assert len(await pair_app.db.fetchall("SELECT id FROM operation_receipts"
+                                          " WHERE operation_kind = 'comparison.stop'")) == 1
+    assert [row["type"] for row in await pair_app.db.fetchall("SELECT type FROM app_events ORDER BY seq")] == [
+        "task.changed", "task.changed",
+    ]
+
+
+async def test_slot_stop_refuses_unbound_uncertain_launch(pair_app):
+    launched = await queue_comparison(pair_app, **request())
+    await pair_app.db.execute("UPDATE effect_outbox SET state = 'unknown' WHERE id = ?",
+                              (launched["slots"][0]["effect_id"],))
+    with pytest.raises(ControlConflict, match="reconciled"):
+        await stop_comparison_slot(pair_app, task_id="task1", group_id=launched["group_id"], slot=1,
+                                   principal=Principal("operator:1", "operator"),
+                                   client_operation_id="stop-uncertain", expected_entity_revision=2,
+                                   reason="Stop first worker")
+    assert await pair_app.db.fetchall("SELECT id FROM operation_receipts"
+                                      " WHERE operation_kind = 'comparison.stop'") == []
+    assert [row["state"] for row in await pair_app.db.fetchall(
+        "SELECT state FROM comparison_funding_slots ORDER BY slot"
+    )] == ["held", "held"]
 
 
 async def test_close_keeps_bound_worker_without_physical_exit(pair_app):

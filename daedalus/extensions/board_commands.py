@@ -11,6 +11,7 @@ import aiosqlite
 from daedalus.extensions.orchestrator_domain import DomainConflict, capture_contract_change, check_planning_capacity
 from daedalus.extensions.task_contract import REQUIREMENT_KINDS, REQUIREMENTS_MAX, check_items
 from daedalus.host.events import AppEvent, EventBus
+from daedalus.stores.comparison_funding import physical_exit_in
 from daedalus.stores.control import ControlConflict, ControlStore, Entity, Mutation, Principal, Scope, now
 from daedalus.stores.database import Database
 
@@ -150,7 +151,7 @@ async def insert_task(
     await conn.execute("INSERT INTO task_contract_versions(task_id,contract_revision,origin_kind,origin_ref,"
                        " snapshot_json,created_at) VALUES (?,1,?,?,?,?)",
                        (task_id, origin_kind, source_session_id or "",
-                        _canonical({"requirements": current_requirements, "checklist": checks,
+                        _canonical({"title": title.strip(), "requirements": current_requirements, "checklist": checks,
                                     "acceptance": acceptance.strip(), "depends_on": dependencies,
                                     "brief": brief, "folder_id": folder_id, "file_ids": current_files}), now()))
     await conn.execute("INSERT INTO workflow_steps(id,task_id,step_kind,state,contract_revision)"
@@ -233,13 +234,14 @@ class BoardCommands:
                      check_ids: list[str] | None = None, uncheck_ids: list[str] | None = None,
                      assignee_staff_id: str | None = None,
                      folder_id: str | None = None, file_ids: list[str] | None = None,
-                     requirements: list[dict[str, str]] | None = None) -> dict[str, Any]:
+                     requirements: list[dict[str, str]] | None = None,
+                     reassignment_reason: str | None = None) -> dict[str, Any]:
         payload = {"title": title, "acceptance": acceptance, "checklist": checklist,
                    "depends_on": depends_on, "priority": priority, "brief": brief,
                    "note": note, "status": status, "check_ids": check_ids,
                    "uncheck_ids": uncheck_ids, "assignee_staff_id": assignee_staff_id,
                    "folder_id": folder_id, "file_ids": file_ids or [],
-                   "requirements": requirements or []}
+                   "requirements": requirements or [], "reassignment_reason": reassignment_reason}
 
         async def effect(conn: aiosqlite.Connection, _: Mutation) -> dict[str, Any]:
             row = await _one(conn, "SELECT * FROM board_tasks WHERE id = ?", (task_id,))
@@ -262,15 +264,41 @@ class BoardCommands:
                         raise DomainConflict("stop or reconcile the current execution before reassigning")
                 if assignee_staff_id:
                     await _assignee(conn, assignee_staff_id, row["project_id"])
+            if reassignment_reason:
+                if (not assignee_staff_id or assignee_staff_id == row["assignee_staff_id"]
+                        or not row["assignee_staff_id"] or len(reassignment_reason.strip()) < 8):
+                    raise DomainConflict("a named owner change and its reason are required for a handover")
+                old_owner = await _one(conn, "SELECT name FROM staff WHERE id = ? AND project_id = ?",
+                                       (row["assignee_staff_id"], row["project_id"]))
+                new_owner = await _one(conn, "SELECT name FROM staff WHERE id = ? AND project_id = ?",
+                                       (assignee_staff_id, row["project_id"]))
+                if old_owner is None or new_owner is None:
+                    raise DomainConflict("the handover owners are outside this project")
+                await conn.execute("INSERT INTO project_journal(project_id,at,author,kind,text,refs_json)"
+                                   " VALUES (?,?,?,'reassignment',?,?)",
+                                   (row["project_id"], now(), "orchestrator",
+                                    f"Task {task_id} \"{row['title']}\" passed from {old_owner['name']} to {new_owner['name']}: "
+                                    f"{reassignment_reason.strip()}",
+                                    _canonical({"task_id": task_id, "actor_id": principal.actor_id,
+                                                "from_staff_id": row["assignee_staff_id"],
+                                                "to_staff_id": assignee_staff_id})))
             semantic = any(value is not None for value in (acceptance, checklist, depends_on, brief, folder_id))
+            semantic = semantic or (title is not None and title.strip() != row["title"])
             semantic = semantic or bool(file_ids or requirements)
+            if semantic and await _one(conn, "SELECT 1 FROM comparison_groups WHERE task_id = ?"
+                                        " AND state IN ('planned','active','ready') LIMIT 1", (task_id,)):
+                raise DomainConflict("close the comparison before revising its contract")
             if semantic and row["status"] in ("review", "done"):
                 raise DomainConflict("return or revise the exact result before changing its contract")
             if semantic and row["current_attempt_id"]:
                 attempt = await _one(conn, "SELECT state FROM execution_attempts WHERE id = ?",
                                      (row["current_attempt_id"],))
-                if attempt is not None and attempt["state"] in ("queued", "starting", "running", "waiting", "recovering"):
+                if attempt is not None and not await physical_exit_in(conn, row["current_attempt_id"]):
                     raise DomainConflict("stop the active attempt before revising its contract")
+            if semantic and await _one(conn, "SELECT 1 FROM effect_outbox WHERE kind = 'task.launch'"
+                                       " AND state IN ('pending','claimed','unknown')"
+                                       " AND json_extract(payload_json,'$.control.task_id') = ? LIMIT 1", (task_id,)):
+                raise DomainConflict("reconcile the pending launch before revising its contract")
             if title is not None and (not title.strip() or len(title) > 200):
                 raise ValueError("task title is invalid")
             if acceptance is not None and len(acceptance) > 2000:
@@ -336,7 +364,8 @@ class BoardCommands:
                            file_ids=file_ids or [], requirements=requirements or [])
             contract_revision = await capture_contract_change(conn, task_id,
                                                               origin_kind=principal.origin_class,
-                                                              origin_ref=principal.actor_id)
+                                                              origin_ref=principal.actor_id,
+                                                              previous_title=row["title"])
             if depends_on is not None and dependencies != json.loads(row["depends_on"] or "[]"):
                 await conn.execute("UPDATE task_dependency_edges SET kind = 'cancelled',resolution_state = 'cancelled'"
                                    " WHERE successor_task_id = ? AND resolution_state != 'cancelled'", (task_id,))

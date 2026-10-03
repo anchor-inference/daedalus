@@ -6,6 +6,7 @@ without the operator hearing of it."""
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -16,14 +17,19 @@ import pytest
 
 from daedalus.config import Settings
 from daedalus.extensions.orchestrator_ops import Refused
+from daedalus.extensions.runtime_observations import admit_native_run, observe_exit
 from daedalus.harness.contract import Catalog
 from daedalus.stores.database import Database
 from daedalus.stores.staff import Staff
+from tests.support.authorized_launch import operator_task
+from tests.support.authorized_results import return_reviewed_result
+from tests.support.authorized_stop import bind_native_run, finish_native_stop, stop_native_task
+from tests.support.waiting import until_await
 from tests.unit.test_board_rounds import task_of
 from tests.unit.test_orchestrator import Rig, events, rig
 from tests.unit.test_orchestrator_team import fake, office
 from tests.unit.test_staff_runtime import Capacity, close_team, task_row
-from tests.unit.test_task_contract import SCRIPT
+from tests.unit.test_task_contract import SCRIPT, apply_requirement
 
 VIDEO = {
     "objective": "Render the 3D video of the product, version H, in English and Russian cuts",
@@ -36,7 +42,22 @@ VIDEO = {
 async def hand_in(r: Rig, who: Staff, note: str = "both cuts rendered") -> None:
     live = await r.team.live_of(who)
     assert live is not None
-    await r.team.ingress.report(live, "done", note, call_id=f"fixture-report:{uuid.uuid4().hex}")
+    _folder, cwd = await r.team.cwd_of(live)
+    (Path(cwd) / "video-h-en.mp4").write_bytes(b"fixture render")
+    source = await r.manager.db.fetchone("SELECT tenant_id FROM sessions WHERE id = ?",
+                                         (live.session.session_id,))
+    assert source is not None
+    run_id = uuid.uuid4().hex
+    at = datetime.now(UTC).isoformat()
+    await r.manager.db.execute("INSERT INTO runs(id,tenant_id,session_id,status,created_at,updated_at)"
+                               " VALUES (?,?,?,'running',?,?)",
+                               (run_id, source["tenant_id"], live.session.session_id, at, at))
+    await admit_native_run(r.team.app, live.id, live.session.session_id, run_id)
+    await r.team.ingress.report(live, "done", note, artifacts=["video-h-en.mp4"],
+                                call_id=f"fixture-report:{uuid.uuid4().hex}")
+    await r.manager.db.execute("UPDATE runs SET status = 'completed' WHERE id = ?", (run_id,))
+    assert await observe_exit(r.team.app, staff_session_id=live.id, runtime_ref=run_id,
+                              observed_status="completed")
     await r.team.ingress.status((await r.team.live_of(who)) or live, "idle")
 
 
@@ -62,15 +83,21 @@ async def test_rework_goes_back_to_who_made_it_and_elsewhere_only_with_a_reason(
         state = await r.orch.project_state(await r.refreshed(), session_id=sid)
         with pytest.raises(Refused, match=f"task {task_id} is Ira's work, and rework goes to whoever made it"):
             await r.call(sid, "assign", staff="Gleb", task_id=task_id, objective="Fix the caption at the start and the labels in the last shot")
+        await return_reviewed_result(r.team, task_id, reason="the caption and labels need another pass")
         said = await r.call(sid, "assign", task_id=task_id, objective="Fix the caption at the start and the labels in the last shot")
-        assert said.startswith(f"Ira started on {task_id}")
+        assert said.startswith(f"Ira will start {task_id}")
+        from tests.unit.test_orchestrator_team import admitted
+
+        await until_await(lambda: admitted(r, task_id), "Ira's return round launched")
         assert "Fix the caption at the start" in runtime.started[-1].first_message
         await hand_in(r, (await r.manager.staff.find(r.project.id, "Ira")))  # type: ignore[arg-type]
 
+        await return_reviewed_result(r.team, task_id, reason="the two cuts need independent inspection")
         said = await r.call(sid, "assign", staff="Gleb", task_id=task_id, objective="Check both cuts frame by frame", reason="Ira is on leave today and the operator wants it before noon")
-        assert said.startswith(f"Gleb started on {task_id}")
+        assert said.startswith(f"Gleb will start {task_id}")
+        await until_await(lambda: admitted(r, task_id), "Gleb's reviewed handover launched")
         notes = (await task_row(r.manager, task_id))["notes"]
-        assert "the work passed from Ira to Gleb: Ira is on leave today and the operator wants it before noon" in notes
+        assert "reassigned from Ira: Ira is on leave today and the operator wants it before noon" in notes
         journal = [(e.kind, e.text) for e in await r.manager.projects.journal(r.project.id, limit=10)]
         assert ("reassignment", f"Task {task_id} \"3D video, version H\" passed from Ira to Gleb: Ira is on leave today and the operator wants it before noon") in journal
         assert "Waiting for your decision" not in state or task_id not in state.split("Waiting for your decision")[0]
@@ -85,6 +112,7 @@ async def test_a_card_nobody_holds_says_whose_it_was_and_a_one_off_hire_names_wh
         fake(r)
         sid = await office(r)
         task_id, ira = await made_by_ira(r, sid)
+        await return_reviewed_result(r.team, task_id, reason="fix the opening captions")
         await r.call(sid, "assign", task_id=task_id, objective="Fix the caption at the start of both cuts")
         await r.call(sid, "release", staff="Ira")
         state = await r.orch.project_state(await r.refreshed(), session_id=sid)
@@ -175,11 +203,12 @@ async def test_work_that_names_a_model_goes_to_a_member_that_runs_it(settings: S
 # -- the card ---------------------------------------------------------------------------------------------------------
 
 
-async def test_a_card_someone_works_on_is_not_taken_to_other_work(settings: Settings, db: Database, tmp_path: Path) -> None:
+async def test_a_card_someone_works_on_is_not_taken_to_other_work(settings: Settings, db: Database,
+                                                                  tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A card a member was at work on was renamed into an unrelated check of a mail service."""
     r = await rig(settings, db, tmp_path)
     try:
-        fake(r)
+        runtime = fake(r)
         sid = await office(r)
         await r.manager.staff.hire(r.project.id, name="Ada", role="Posts", isolation="shared")
         posts = {**SCRIPT, "objective": "Update the local post drafts with the 30-second clips"}
@@ -187,8 +216,24 @@ async def test_a_card_someone_works_on_is_not_taken_to_other_work(settings: Sett
         with pytest.raises(Refused, match=f"task {task_id} is \"Update the post drafts with the short clips\", and Ada is at work on it: .* is other work, which is a card of its own"):
             await r.call(sid, "assign", staff="Ada", task_id=task_id, title="Check the mail relay after its approval", objective="Check the mail relay's settings after its production approval")
         assert (await task_row(r.manager, task_id))["title"] == "Update the post drafts with the short clips"
-        said = await r.call(sid, "assign", staff="Ada", task_id=task_id, title="Update the post drafts with the short and long clips", reason="the operator asked for both clip lengths in the same drafts")
+        with pytest.raises(Refused, match="stop or reconcile the current execution"):
+            await r.call(sid, "assign", staff="Ada", task_id=task_id,
+                         title="Update the post drafts with the short and long clips",
+                         reason="the operator asked for both clip lengths in the same drafts")
+        assert (await task_row(r.manager, task_id))["title"] == "Update the post drafts with the short clips"
+        ada = await r.manager.staff.find(r.project.id, "Ada")
+        assert ada is not None
+        live = await r.team.live_of(ada)
+        assert live is not None
+        await stop_native_task(r.team, task_id, live, monkeypatch)
+        said = await r.call(sid, "assign", staff="Ada", task_id=task_id,
+                            title="Update the post drafts with the short and long clips",
+                            reason="the operator asked for both clip lengths in the same drafts")
         assert "The card was renamed" in said
+        from tests.unit.test_orchestrator_team import admitted
+
+        await until_await(lambda: admitted(r, task_id), "renamed work launched")
+        assert "Update the post drafts with the short and long clips" in runtime.started[-1].first_message
     finally:
         await close_team(r.manager)
         await r.manager.close()
@@ -288,7 +333,9 @@ async def test_twins_already_asked_are_pointed_out_in_the_state_block(settings: 
 # -- what the operator allowed --------------------------------------------------------------------------------------
 
 
-async def test_a_condition_that_narrows_what_the_operator_allowed_needs_a_reason_and_reaches_them(settings: Settings, db: Database, tmp_path: Path) -> None:
+async def test_a_condition_that_narrows_what_the_operator_allowed_needs_a_reason_and_reaches_them(
+    settings: Settings, db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """"If something needs fixing, fix it" became "read-only, no configuration changes, nothing until a
     report and a permission" in the brief, and the operator learnt it only from the result."""
     r = await rig(settings, db, tmp_path)
@@ -303,13 +350,23 @@ async def test_a_condition_that_narrows_what_the_operator_allowed_needs_a_reason
         task_id = task_of(await r.call(sid, "assign", staff="Webops", title="Mail relay after approval", **SCRIPT, requirements=[grant]))
         with pytest.raises(Refused, match="takes its reason"):
             await r.call(sid, "require", task_id=task_id, text="Send no real mail", kind="constraint")
-        said = await r.call(sid, "require", task_id=task_id, text="Send no real mail", kind="constraint", why="a test message would reach real customers")
-        assert said.endswith("the operator is told of the condition you added to what they allowed")
+        webops = await r.manager.staff.find(r.project.id, "Webops")
+        assert webops is not None
+        live = await r.team.live_of(webops)
+        assert live is not None
+        run_id, stops = await bind_native_run(r.team, live, monkeypatch)
+        staged = json.loads(await r.call(sid, "require", task_id=task_id, text="Send no real mail",
+                                         kind="constraint", why="a test message would reach real customers"))
+        assert staged["state"] == "pending_physical_exit"
+        await finish_native_stop(r.team, live, run_id, staged["stop_effect_id"], stops)
+        applied = json.loads(await r.call(sid, "require", op="apply", task_id=task_id,
+                                          intent_id=staged["intent_id"]))
+        assert applied["state"] == "applied"
         posted = r.team.app.notifications.posted[-1]
         assert posted.title.endswith("a condition on what you allowed") and "Send no real mail — a test message would reach real customers" in posted.body
         assert any(e.kind == "narrowing" for e in await r.manager.projects.journal(r.project.id, limit=5))
         # The operator's own condition is theirs to add, and nobody's narrowing.
-        await r.call(sid, "require", task_id=task_id, text="Do not touch DNS", kind="constraint", source="operator")
+        await apply_requirement(r, sid, task_id, text="Do not touch DNS", kind="constraint", source="operator")
     finally:
         await close_team(r.manager)
         await r.manager.close()
@@ -329,12 +386,17 @@ async def test_a_member_restricted_to_reading_is_widened_rather_than_the_operato
         grant = {"text": "Check the relay after its approval and fix what needs fixing", "kind": "scope"}
         with pytest.raises(Refused, match="Luna runs read-only: reads only: no file writes and no network.*StaffEdit\\(staff='Luna', permission_mode=…\\)"):
             await r.call(sid, "assign", staff="Luna", title="Mail relay after approval", **SCRIPT, requirements=[grant])
-        task_id = task_of(await r.call(sid, "assign", staff="Luna", title="Mail relay after approval", **SCRIPT))
-        said = await r.call(sid, "require", task_id=task_id, text="One test message to the operator's own address is allowed", kind="scope", source="operator")
-        assert "Luna runs read-only" in said and "rather than asking the operator to allow it again" in said
+        task_id = await operator_task(db, r.project.id, "Mail relay after approval", brief=SCRIPT)
+        await apply_requirement(r, sid, task_id,
+                                text="One test message to the operator's own address is allowed",
+                                kind="scope", source="operator")
+        with pytest.raises(Refused, match="Luna runs read-only"):
+            await r.call(sid, "assign", staff="Luna", task_id=task_id)
         await r.call(sid, "staff_edit", staff="Luna", permission_mode="workspace-write")
-        await r.call(sid, "release", staff="Luna")
-        assert (await r.call(sid, "assign", task_id=task_id)).startswith(f"Luna started on {task_id}")
+        assert (await r.call(sid, "assign", staff="Luna", task_id=task_id)).startswith(f"Luna will start {task_id}")
+        from tests.unit.test_orchestrator_team import admitted
+
+        await until_await(lambda: admitted(r, task_id), "the widened member launched")
     finally:
         await close_team(r.manager)
         await r.manager.close()

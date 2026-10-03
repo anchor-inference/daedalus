@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import re
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -174,54 +173,6 @@ class Contracts:
         else:
             row = await self.db.fetchone("SELECT * FROM task_requirements WHERE task_id = ? AND id = ?", (task_id, text))
         return _requirement(row) if row is not None else None
-
-    async def add(self, task_id: str, project_id: str, text: str, kind: str, source: str, *, replaces: Requirement | None = None, file_id: str | None = None) -> Requirement:
-        """A new requirement on the card, or the one already there in the same words. ``ValueError``
-        says what is wrong in words the orchestrator can act on."""
-        body = " ".join((text or "").split()) if "\n" not in (text or "") else (text or "").strip()
-        if not body:
-            raise ValueError("a requirement needs its text")
-        if len(body) > REQUIREMENT_MAX_CHARS:
-            raise ValueError(f"a requirement is at most {REQUIREMENT_MAX_CHARS} characters; say it shorter or split it")
-        if kind not in REQUIREMENT_KINDS:
-            raise ValueError(f"kind is one of {', '.join(REQUIREMENT_KINDS)}")
-        active = await self.requirements(task_id)
-        same = next((r for r in active if r.text.casefold() == body.casefold() and r.file_id == file_id), None)
-        if same is not None and replaces is None:
-            return same
-        if len(active) - (1 if replaces is not None else 0) >= REQUIREMENTS_MAX:
-            raise ValueError(f"the card already has {REQUIREMENTS_MAX} requirements in force; merge some of them (Require(replaces=…)) before adding more")
-        now = _now()
-        async with self.db.transaction() as conn:
-            from daedalus.extensions.orchestrator_domain import (
-                capture_contract_change,  # Lazy: the domain imports checklist parsing from this module.
-            )
-
-            cursor = await conn.execute("SELECT COALESCE(MAX(number), 0) + 1 FROM task_requirements WHERE task_id = ?", (task_id,))
-            number = int((await cursor.fetchone())[0])
-            requirement_id = uuid.uuid4().hex[:10]
-            await conn.execute(
-                "INSERT INTO task_requirements(id, task_id, project_id, number, text, kind, source, state, replaces, file_id, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)",
-                (requirement_id, task_id, project_id, number, body, kind, source, replaces.id if replaces is not None else None, file_id, now, now),
-            )
-            if replaces is not None:
-                await conn.execute("UPDATE task_requirements SET state = 'superseded', updated_at = ? WHERE id = ?", (now, replaces.id))
-            await capture_contract_change(conn, task_id, origin_kind="requirement", origin_ref=source)
-            await conn.execute("UPDATE board_tasks SET entity_revision = entity_revision + 1 WHERE id = ?", (task_id,))
-        found = await self.find(task_id, requirement_id)
-        assert found is not None
-        return found
-
-    async def withdraw(self, requirement: Requirement) -> None:
-        from daedalus.extensions.orchestrator_domain import (
-            capture_contract_change,  # Lazy: the domain imports checklist parsing from this module.
-        )
-
-        async with self.db.transaction() as conn:
-            await conn.execute("UPDATE task_requirements SET state = 'withdrawn', updated_at = ? WHERE id = ?", (_now(), requirement.id))
-            await capture_contract_change(conn, requirement.task_id, origin_kind="requirement", origin_ref="withdraw")
-            await conn.execute("UPDATE board_tasks SET entity_revision = entity_revision + 1 WHERE id = ?", (requirement.task_id,))
 
     async def set_evidence(self, requirement: Requirement, evidence: dict[str, Any]) -> None:
         await self.db.execute("UPDATE task_requirements SET evidence_json = ?, updated_at = ? WHERE id = ?", (json.dumps(evidence, ensure_ascii=False), _now(), requirement.id))

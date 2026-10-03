@@ -508,8 +508,10 @@ assign().definition.parameters.properties["requirements"] = {
         "Put a requirement on a card: a condition all of its work must meet — usually the operator's, stated in the "
         "chat (source='operator'), sometimes yours (source='orchestrator'), or from an answer of theirs "
         "(source='answer:<request id>'). kind: quality, scope, constraint, or input with file=<att:…>: a file the work "
-        "starts from, which the member must open before handing in. It is numbered (R1 …) and goes to whoever works "
-        "the card: into the turn they are in now, with a receipt, or with the next brief. replaces=R2 puts it in "
+        "starts from, which the member must open before handing in. It is numbered (R1 …) in the next "
+        "contract. An active worker must first stop with physical exit proof; op='stage' returns a durable "
+        "intent. If stop was unavailable, op='stop' with intent_id retries under current authority; "
+        "op='apply' with intent_id applies it after exact stop proof. Launch again explicitly. replaces=R2 puts it in "
         "place of an older one; withdraw=R2 takes one out. The operator's own requirement is replaced or withdrawn "
         "only with their answer as source — ask them first. What the operator allows for the work ('if something "
         "needs fixing, fix it') is kind='scope' in their words; a constraint of yours that narrows it takes why, "
@@ -526,8 +528,15 @@ async def require(
     withdraw: str | None = None,
     file: str | None = None,
     why: str = "",
+    op: str = "stage",
+    intent_id: str | None = None,
+    client_operation_id: str = "",
+    expected_entity_revision: int | None = None,
 ) -> ToolResult:
-    return await _call(context, "require", task_id=task_id, text=text, kind=kind, source=source, replaces=replaces, withdraw=withdraw, file=file, why=why)
+    return await _call(context, "require", task_id=task_id, text=text, kind=kind, source=source,
+                       replaces=replaces, withdraw=withdraw, file=file, why=why, op=op,
+                       intent_id=intent_id, client_operation_id=client_operation_id,
+                       expected_entity_revision=expected_entity_revision)
 
 
 require().definition.parameters.properties["kind"]["enum"] = ["quality", "scope", "constraint", "input"]

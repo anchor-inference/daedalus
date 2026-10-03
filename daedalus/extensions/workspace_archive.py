@@ -21,6 +21,13 @@ from typing import Any
 
 import aiosqlite
 
+from daedalus.extensions.workspace_files import (
+    FOLDER_ID,
+    WorkspaceFileRefused,
+    capture_selected,
+    stage_selected,
+    validate_selected,
+)
 from daedalus.host.engine_factory import TENANT
 from daedalus.stores.control import ControlConflict, ControlStore, Entity, Principal, Scope, canonical, one
 from daedalus.stores.database import Database
@@ -59,6 +66,8 @@ QUERIES: dict[str, str] = {
     "task_dependency_edges": "SELECT e.* FROM task_dependency_edges e JOIN board_tasks t ON t.id = e.successor_task_id WHERE t.project_id = ? ORDER BY e.id",
     "workflow_steps": "SELECT s.* FROM workflow_steps s JOIN board_tasks t ON t.id = s.task_id WHERE t.project_id = ? ORDER BY s.task_id,s.id",
     "workflow_edges": "SELECT e.* FROM workflow_edges e JOIN board_tasks t ON t.id = e.task_id WHERE t.project_id = ? ORDER BY e.task_id,e.source_step_id,e.target_step_id",
+    "board_workflow_runs": "SELECT * FROM board_workflow_runs WHERE project_id = ? ORDER BY created_at,id",
+    "board_workflow_steps": "SELECT s.* FROM board_workflow_steps s JOIN board_workflow_runs r ON r.id = s.run_id WHERE r.project_id = ? ORDER BY s.run_id,s.node_id",
     "artifact_manifests": "SELECT a.* FROM artifact_manifests a WHERE a.project_id = ? OR a.task_id IN (SELECT id FROM board_tasks WHERE project_id = ?) ORDER BY a.id",
     "result_receipts": "SELECT r.* FROM result_receipts r JOIN board_tasks t ON t.id = r.task_id WHERE t.project_id = ? ORDER BY r.created_at,r.id",
     "result_artifacts": "SELECT ra.* FROM result_artifacts ra JOIN result_receipts r ON r.id = ra.result_id JOIN board_tasks t ON t.id = r.task_id WHERE t.project_id = ? ORDER BY ra.result_id,ra.manifest_id",
@@ -83,7 +92,7 @@ QUERIES: dict[str, str] = {
     "scope_impacts": "SELECT * FROM scope_impacts WHERE project_id = ? ORDER BY created_at,id",
 }
 
-ARCHIVED_ONLY = frozenset({"app_events", "replan_fingerprints", "scope_impacts"})
+ARCHIVED_ONLY = frozenset({"app_events", "replan_fingerprints", "scope_impacts", "board_workflow_runs", "board_workflow_steps"})
 
 # These columns would carry local locations, resumable authority, or mutable runtime state. They are
 # omitted rather than masked inside an otherwise plausible live object.
@@ -151,6 +160,8 @@ class CheckedArchive:
     counts: dict[str, int]
     config_handles: dict[str, Any]
     folder_handles: list[dict[str, Any]]
+    selected_files: list[dict[str, Any]]
+    workspace_blobs: dict[str, bytes]
 
 
 def _sha(data: bytes) -> str:
@@ -164,13 +175,17 @@ def _now() -> str:
 def _archive_bytes(rows: dict[str, list[dict[str, Any]]], blobs: dict[str, bytes], reports: dict[str, bytes],
                    config_handles: dict[str, Any] | None = None, run_blobs: dict[str, bytes] | None = None,
                    folder_handles: list[dict[str, Any]] | None = None,
-                   session_blobs: dict[str, bytes] | None = None) -> bytes:
+                   session_blobs: dict[str, bytes] | None = None,
+                   selected_files: list[dict[str, Any]] | None = None,
+                   workspace_blobs: dict[str, bytes] | None = None) -> bytes:
     payload = canonical({"format": FORMAT_VERSION, "privacy": "operator-private", "source_project_id": rows["projects"][0]["id"],
-                         "config_handles": config_handles or {}, "folder_handles": folder_handles or [], "rows": rows}).encode()
+                         "config_handles": config_handles or {}, "folder_handles": folder_handles or [],
+                         "selected_files": selected_files or [], "rows": rows}).encode()
     entries = {"workspace.json": payload, **{f"files/{key}": value for key, value in blobs.items()},
                **{f"reports/{key}": value for key, value in reports.items()},
                **{f"run-details/{key}": value for key, value in (run_blobs or {}).items()},
-               **{f"session-blobs/{key}": value for key, value in (session_blobs or {}).items()}}
+               **{f"session-blobs/{key}": value for key, value in (session_blobs or {}).items()},
+               **{f"workspace-files/{key}": value for key, value in (workspace_blobs or {}).items()}}
     manifest = {name: {"sha256": _sha(value), "size": len(value)} for name, value in entries.items()}
     entries["manifest.json"] = canonical({"format": FORMAT_VERSION, "entries": manifest}).encode()
     target = io.BytesIO()
@@ -200,7 +215,8 @@ def check_archive(data: bytes) -> CheckedArchive:
                 raise ArchiveRefused("archive manifest is incomplete or unsupported")
             entries = {}
             for name, expected in manifest["entries"].items():
-                if name != "workspace.json" and not re.fullmatch(r"(?:files|reports|run-details|session-blobs)/[0-9a-f]{64}", name):
+                if name != "workspace.json" and not (re.fullmatch(r"(?:files|reports|run-details|session-blobs)/[0-9a-f]{64}", name)
+                                                     or name.startswith("workspace-files/")):
                     raise ArchiveRefused("archive contains an unexpected entry")
                 if not isinstance(expected, dict) or set(expected) != {"sha256", "size"}:
                     raise ArchiveRefused("archive entry checksum is invalid")
@@ -234,13 +250,21 @@ def check_archive(data: bytes) -> CheckedArchive:
         folders = payload.get("folder_handles", [])
         if not isinstance(folders, list) or len(folders) > 100 or any(
             not isinstance(folder, dict) or set(folder) != {"id", "label", "env", "readonly", "is_git", "position"}
-            or not isinstance(folder["id"], str) or not isinstance(folder["label"], str)
+            or not isinstance(folder["id"], str) or FOLDER_ID.fullmatch(folder["id"]) is None
+            or not isinstance(folder["label"], str)
             or folder["env"] not in ("host", "container")
             or not isinstance(folder["readonly"], bool) or not isinstance(folder["is_git"], bool)
             or not isinstance(folder["position"], int)
             for folder in folders
-        ):
+        ) or len({folder["id"] for folder in folders}) != len(folders):
             raise ArchiveRefused("archive contains invalid folder handles")
+        selected_files = payload.get("selected_files", [])
+        workspace_blobs = {name[len("workspace-files/"):]: value for name, value in entries.items()
+                           if name.startswith("workspace-files/")}
+        try:
+            validate_selected(selected_files, workspace_blobs, {folder["id"] for folder in folders})
+        except WorkspaceFileRefused as exc:
+            raise ArchiveRefused(str(exc)) from exc
         if any(not isinstance(items, list) or any(
             not isinstance(item, dict)
             or set(item) & DROP_COLUMNS.get(table, set())
@@ -284,7 +308,8 @@ def check_archive(data: bytes) -> CheckedArchive:
         ):
             raise ArchiveRefused("archive contains unreferenced blob entries")
         return CheckedArchive(_sha(data), payload["source_project_id"], rows, blobs, reports, run_blobs, session_blobs,
-                              {name: len(items) for name, items in rows.items()}, config, folders)
+                              {name: len(items) for name, items in rows.items()}, config, folders,
+                              selected_files, workspace_blobs)
     except (KeyError, TypeError, ValueError) as exc:
         if isinstance(exc, ArchiveRefused):
             raise
@@ -342,16 +367,33 @@ def _embedded_blob_refs(raw: str) -> set[str]:
     return found
 
 
+def _historical_capabilities(rows: list[dict[str, Any]]) -> list[str]:
+    requested: set[str] = set()
+    for row in rows:
+        try:
+            definition = json.loads(row["definition"])
+            nodes = definition.get("nodes", []) if isinstance(definition, dict) else []
+            for node in nodes:
+                for name in node.get("capabilities", []) if isinstance(node, dict) else []:
+                    if isinstance(name, str) and re.fullmatch(r"[a-z][a-z0-9_.:-]{0,119}", name):
+                        requested.add(name)
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return sorted(requested)
+
+
 class WorkspaceArchive:
-    def __init__(self, db: Database, files: FileStore) -> None:
+    def __init__(self, db: Database, files: FileStore, *, restore_root: Path | None = None) -> None:
         self.db = db
         self.files = files
         self.control = ControlStore(db)
+        self.restore_root = restore_root or db.path.parent / "restored-workspaces"
 
-    async def export(self, project_id: str) -> bytes:
+    async def export(self, project_id: str, selected_paths: list[dict[str, str]] | None = None) -> bytes:
         rows: dict[str, list[dict[str, Any]]] = {}
         config: dict[str, Any] = {}
         folders: list[dict[str, Any]] = []
+        local_folders: dict[str, Path] = {}
         async with self.db.transaction() as conn:
             for table, query in QUERIES.items():
                 arguments = (project_id, project_id) if table == "artifact_manifests" else (project_id,)
@@ -383,14 +425,21 @@ class WorkspaceArchive:
                     raise ArchiveRefused("a project file reference is missing")
                 rows["files"].append({key: value for key, value in dict(found).items() if key not in DROP_COLUMNS["files"]})
             cursor = await conn.execute(
-                "SELECT id,label,env,readonly,is_git,position FROM project_folders WHERE project_id = ? ORDER BY position,id",
+                "SELECT id,path,label,env,readonly,is_git,position FROM project_folders WHERE project_id = ? ORDER BY position,id",
                 (project_id,),
             )
-            folders = [{"id": row["id"], "label": row["label"], "env": row["env"],
-                        "readonly": bool(row["readonly"]), "is_git": bool(row["is_git"]),
-                        "position": int(row["position"])} for row in await cursor.fetchall()]
+            for row in await cursor.fetchall():
+                folders.append({"id": row["id"], "label": row["label"], "env": row["env"],
+                                "readonly": bool(row["readonly"]), "is_git": bool(row["is_git"]),
+                                "position": int(row["position"])})
+                if row["env"] == self.db.local_env:
+                    local_folders[row["id"]] = Path(row["path"])
         if not rows["projects"]:
             raise KeyError(project_id)
+        try:
+            selected_files, workspace_blobs = capture_selected(local_folders, selected_paths or [])
+        except WorkspaceFileRefused as exc:
+            raise ArchiveRefused(str(exc)) from exc
         blobs: dict[str, bytes] = {}
         for item in rows["files"]:
             if not await self.files.blobs.exists(FILES_TENANT, item["sha256"]):
@@ -434,9 +483,41 @@ class WorkspaceArchive:
                 if _sha(content) != ref:
                     raise ArchiveRefused("a transcript blob has changed")
                 session_blobs[ref] = content
-        archive = _archive_bytes(rows, blobs, reports, config, run_blobs, folders, session_blobs)
+        archive = _archive_bytes(rows, blobs, reports, config, run_blobs, folders, session_blobs,
+                                 selected_files, workspace_blobs)
         check_archive(archive)
         return archive
+
+    async def export_command(self, principal: Principal, project_id: str, *, selected_paths: list[dict[str, str]],
+                             expected_entity_revision: int, client_operation_id: str) -> dict[str, Any]:
+        if principal.origin_class != "operator":
+            raise PermissionError("only the operator can export a private workspace")
+        scope = Scope("project", project_id)
+        key = (scope.kind, scope.id, principal.actor_id, "workspace.export", client_operation_id)
+        prior = await self.db.fetchone(
+            "SELECT response_json FROM operation_receipts WHERE scope_kind=? AND scope_id=? AND actor_id=?"
+            " AND operation_kind=? AND client_operation_id=?", key,
+        )
+        payload = {"selected_paths": selected_paths}
+        if prior is not None:
+            async def replay(conn: aiosqlite.Connection, mutation: Any) -> dict[str, Any]:
+                raise AssertionError("a durable export receipt must replay before its effect")
+            return await self.control.mutate(principal, scope, "workspace.export", client_operation_id,
+                                             expected_entity_revision, Entity("project", project_id), payload, replay)
+        data = await self.export(project_id, selected_paths)
+        checked = check_archive(data)
+        artifact = self.files.blobs.path_of("workspace-archives", checked.digest)
+        _stage(artifact.parent, checked.digest, data)
+
+        async def effect(conn: aiosqlite.Connection, mutation: Any) -> dict[str, Any]:
+            return {"project_id": project_id, "archive_artifact_id": checked.digest,
+                    "archive_digest": checked.digest, "format_version": FORMAT_VERSION,
+                    "size_bytes": len(data), "source_entity_revision": expected_entity_revision,
+                    "row_counts": checked.counts, "selected_files": checked.selected_files,
+                    "private": True}
+
+        return await self.control.mutate(principal, scope, "workspace.export", client_operation_id,
+                                         expected_entity_revision, Entity("project", project_id), payload, effect)
 
     async def preview(self, archive: CheckedArchive) -> dict[str, Any]:
         await self._preflight(archive)
@@ -448,6 +529,9 @@ class WorkspaceArchive:
                 "row_counts": archive.counts, "collision": prior is not None,
                 "config_handles": archive.config_handles,
                 "folder_handles": archive.folder_handles,
+                "selected_files": archive.selected_files,
+                "selected_file_count": len(archive.selected_files),
+                "capability_handles": _historical_capabilities(archive.rows["board_workflow_runs"]),
                 "archived_only": sorted(ARCHIVED_ONLY),
                 "id_map": mapping, "conflicts": ["archive already imported"] if prior else [],
                 "missing_secrets": ["provider credentials", "plugin credentials", "webhook secrets"],
@@ -455,47 +539,106 @@ class WorkspaceArchive:
                 "restores_runtime": False,
                 "reconnect_required": ["folders", "provider and plugin credentials", "terminal sessions", "external integrations"]}
 
+    async def replay_import(self, principal: Principal, archive_digest: str, *, expected_collection_revision: int,
+                            client_operation_id: str) -> dict[str, Any] | None:
+        if principal.origin_class != "operator":
+            raise PermissionError("only the operator can restore a private workspace")
+        if SHA256.fullmatch(archive_digest) is None:
+            raise ArchiveRefused("archive identity is invalid")
+        scope = Scope("global", "global")
+        identity = uuid.uuid5(uuid.NAMESPACE_URL, "archive:" + archive_digest).hex
+        payload = {"archive_digest": archive_digest, "target_project_id": identity}
+        prior = await self.db.fetchone(
+            "SELECT 1 FROM operation_receipts WHERE scope_kind='global' AND scope_id='global' AND actor_id=?"
+            " AND operation_kind='workspace.import' AND client_operation_id=?",
+            (principal.actor_id, client_operation_id),
+        )
+        if prior is None:
+            return None
+        async def replay(conn: aiosqlite.Connection, mutation: Any) -> dict[str, Any]:
+            raise AssertionError("a durable import receipt must replay before its effect")
+        return await self.control.mutate(principal, scope, "workspace.import", client_operation_id,
+                                         expected_collection_revision, Entity("collection", "global"), payload, replay)
+
     async def import_command(self, principal: Principal, archive: CheckedArchive, *,
                              expected_collection_revision: int, client_operation_id: str) -> dict[str, Any]:
         if principal.origin_class != "operator":
             raise PermissionError("only the operator can restore a private workspace")
-        await self._preflight(archive)
         scope = Scope("global", "global")
         identity = uuid.uuid5(uuid.NAMESPACE_URL, "archive:" + archive.digest).hex
         payload = {"archive_digest": archive.digest, "target_project_id": identity}
+        replayed = await self.replay_import(principal, archive.digest,
+                                            expected_collection_revision=expected_collection_revision,
+                                            client_operation_id=client_operation_id)
+        if replayed is not None:
+            return replayed
+        await self._preflight(archive)
         staged: list[tuple[str, str]] = []
-        for item in archive.rows["files"]:
-            digest = item["sha256"]
-            content = archive.blobs[digest]
-            if _stage(self.files.blobs.path_of(FILES_TENANT, digest).parent, digest, content):
-                staged.append(("file", digest))
-            _, metadata_path = self.files.blobs._paths(FILES_TENANT, digest)
-            if not metadata_path.exists():
-                await self.files.blobs.put(FILES_TENANT, content, content_type=item["mime"])
-                with metadata_path.open("rb") as metadata:
-                    os.fsync(metadata.fileno())
-        for digest, content in archive.report_blobs.items():
-            if _stage(self.db.path.parent / "result-originals", digest, content):
-                staged.append(("report", digest))
-        for item in archive.rows["runs"]:
-            ref = item.get("detail_blob_ref")
-            if ref:
-                tenant = TENANT
-                if _stage(self.files.blobs.path_of(tenant, ref).parent, ref, archive.run_blobs[ref]):
-                    staged.append(("run", tenant + ":" + ref))
-                _, metadata_path = self.files.blobs._paths(tenant, ref)
+        folder_tree: Path | None = None
+        created_folder_tree = False
+        async def cleanup() -> None:
+            if created_folder_tree and folder_tree is not None:
+                import shutil
+                shutil.rmtree(folder_tree)
+            for kind, digest in staged:
+                tenant, ref = digest.split(":", 1) if kind == "run" else (FILES_TENANT, digest)
+                if kind == "session":
+                    tenant, ref = digest.split(":", 1)
+                    in_messages = await self.db.fetchone("SELECT 1 FROM session_messages WHERE message LIKE ? LIMIT 1", (f"%{ref}%",))
+                    in_events = await self.db.fetchone("SELECT 1 FROM events WHERE payload LIKE ? LIMIT 1", (f"%{ref}%",))
+                    if in_messages is None and in_events is None:
+                        self.files.blobs.path_of(tenant, ref).unlink(missing_ok=True)
+                        self.files.blobs._paths(tenant, ref)[1].unlink(missing_ok=True)
+                    continue
+                table = "files" if kind == "file" else "runs" if kind == "run" else "result_receipts"
+                column = "sha256" if kind == "file" else "detail_blob_ref" if kind == "run" else "original_blob_ref"
+                if await self.db.fetchone(f"SELECT 1 FROM {table} WHERE {column} = ? LIMIT 1", (ref,)) is None:
+                    path = self.files.blobs.path_of(tenant, ref) if kind in ("file", "run") else self.db.path.parent / "result-originals" / ref
+                    path.unlink(missing_ok=True)
+                    if kind in ("file", "run"):
+                        self.files.blobs._paths(tenant, ref)[1].unlink(missing_ok=True)
+        try:
+            folder_tree, created_folder_tree = stage_selected(
+                self.restore_root, identity, archive.selected_files, archive.workspace_blobs,
+                {folder["id"] for folder in archive.folder_handles},
+            )
+            for item in archive.rows["files"]:
+                digest = item["sha256"]
+                content = archive.blobs[digest]
+                if _stage(self.files.blobs.path_of(FILES_TENANT, digest).parent, digest, content):
+                    staged.append(("file", digest))
+                _, metadata_path = self.files.blobs._paths(FILES_TENANT, digest)
                 if not metadata_path.exists():
-                    await self.files.blobs.put(tenant, archive.run_blobs[ref])
+                    await self.files.blobs.put(FILES_TENANT, content, content_type=item["mime"])
                     with metadata_path.open("rb") as metadata:
                         os.fsync(metadata.fileno())
-        for ref, content in archive.session_blobs.items():
-            if _stage(self.files.blobs.path_of(TENANT, ref).parent, ref, content):
-                staged.append(("session", TENANT + ":" + ref))
-            _, metadata_path = self.files.blobs._paths(TENANT, ref)
-            if not metadata_path.exists():
-                await self.files.blobs.put(TENANT, content)
-                with metadata_path.open("rb") as metadata:
-                    os.fsync(metadata.fileno())
+            for digest, content in archive.report_blobs.items():
+                if _stage(self.db.path.parent / "result-originals", digest, content):
+                    staged.append(("report", digest))
+            for item in archive.rows["runs"]:
+                ref = item.get("detail_blob_ref")
+                if ref:
+                    tenant = TENANT
+                    if _stage(self.files.blobs.path_of(tenant, ref).parent, ref, archive.run_blobs[ref]):
+                        staged.append(("run", tenant + ":" + ref))
+                    _, metadata_path = self.files.blobs._paths(tenant, ref)
+                    if not metadata_path.exists():
+                        await self.files.blobs.put(tenant, archive.run_blobs[ref])
+                        with metadata_path.open("rb") as metadata:
+                            os.fsync(metadata.fileno())
+            for ref, content in archive.session_blobs.items():
+                if _stage(self.files.blobs.path_of(TENANT, ref).parent, ref, content):
+                    staged.append(("session", TENANT + ":" + ref))
+                _, metadata_path = self.files.blobs._paths(TENANT, ref)
+                if not metadata_path.exists():
+                    await self.files.blobs.put(TENANT, content)
+                    with metadata_path.open("rb") as metadata:
+                        os.fsync(metadata.fileno())
+        except BaseException as exc:
+            await cleanup()
+            if isinstance(exc, WorkspaceFileRefused):
+                raise ArchiveRefused(str(exc)) from exc
+            raise
 
         async def effect(conn: aiosqlite.Connection, mutation: Any) -> dict[str, Any]:
             if await one(conn, "SELECT 1 FROM workspace_archive_imports WHERE archive_digest = ?", (archive.digest,)):
@@ -513,6 +656,14 @@ class WorkspaceArchive:
                                      "concurrency_cap": archive.config_handles.get("orchestrator_concurrency_cap", 10)},
                 }), "", "archive", 1, project["goal_revision"]),
             )
+            for folder in archive.folder_handles:
+                await conn.execute(
+                    "INSERT INTO project_folders(id,project_id,path,label,env,is_git,readonly,position,created_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?)",
+                    (uuid.uuid5(uuid.NAMESPACE_URL, archive.digest + ":folder:" + folder["id"]).hex,
+                     identity, str(folder_tree / folder["id"]), folder["label"], self.db.local_env,
+                     0, int(folder["readonly"]), folder["position"], _now()),
+                )
             turn_map: dict[tuple[str, int], int] = {}
             for table in RESTORE_ORDER:
                 for source in archive.rows[table]:
@@ -552,23 +703,7 @@ class WorkspaceArchive:
             return await self.control.mutate(principal, scope, "workspace.import", client_operation_id,
                                              expected_collection_revision, Entity("collection", "global"), payload, effect)
         except BaseException:
-            for kind, digest in staged:
-                tenant, ref = digest.split(":", 1) if kind == "run" else (FILES_TENANT, digest)
-                if kind == "session":
-                    tenant, ref = digest.split(":", 1)
-                    in_messages = await self.db.fetchone("SELECT 1 FROM session_messages WHERE message LIKE ? LIMIT 1", (f"%{ref}%",))
-                    in_events = await self.db.fetchone("SELECT 1 FROM events WHERE payload LIKE ? LIMIT 1", (f"%{ref}%",))
-                    if in_messages is None and in_events is None:
-                        self.files.blobs.path_of(tenant, ref).unlink(missing_ok=True)
-                        self.files.blobs._paths(tenant, ref)[1].unlink(missing_ok=True)
-                    continue
-                table = "files" if kind == "file" else "runs" if kind == "run" else "result_receipts"
-                column = "sha256" if kind == "file" else "detail_blob_ref" if kind == "run" else "original_blob_ref"
-                if await self.db.fetchone(f"SELECT 1 FROM {table} WHERE {column} = ? LIMIT 1", (ref,)) is None:
-                    path = self.files.blobs.path_of(tenant, ref) if kind in ("file", "run") else self.db.path.parent / "result-originals" / ref
-                    path.unlink(missing_ok=True)
-                    if kind in ("file", "run"):
-                        self.files.blobs._paths(tenant, ref)[1].unlink(missing_ok=True)
+            await cleanup()
             raise
 
     async def _preflight(self, archive: CheckedArchive) -> None:

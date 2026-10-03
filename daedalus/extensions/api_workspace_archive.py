@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -33,12 +34,28 @@ class ImportInput(ArchiveInput):
     client_operation_id: str = Field(min_length=1, max_length=160)
 
 
+class SelectedPath(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    folder_id: str = Field(min_length=1, max_length=160)
+    path: str = Field(min_length=1, max_length=1024)
+
+
+class ExportInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_entity_revision: int = Field(ge=1, strict=True)
+    client_operation_id: str = Field(min_length=1, max_length=160)
+    selected_paths: list[SelectedPath] = Field(default_factory=list, max_length=1000)
+
+
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     def service() -> WorkspaceArchive:
         manager = app.manager
         if manager is None or not getattr(manager, "files", None):
             raise HTTPException(503, "file store is unavailable")
-        return WorkspaceArchive(app.db, manager.files)
+        return WorkspaceArchive(app.db, manager.files,
+                                restore_root=app.settings.workspaces_dir / "restored-projects")
 
     async def load_archive(artifact_id: str) -> bytes:
         path = service().files.blobs.path_of("workspace-archives", artifact_id)
@@ -89,18 +106,40 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                         headers={"Content-Disposition": 'attachment; filename="workspace-private.zip"',
                                  "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
-    @api.get("/api/projects/{project_id}/workspace-archive")
-    async def export_archive(project_id: str, who: dict[str, Any] = Depends(auth)) -> Response:
-        Principal.operator(who)
+    @api.post("/api/projects/{project_id}/workspace-archive")
+    async def export_archive(project_id: str, body: ExportInput,
+                             who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            data = await service().export(project_id)
+            return await service().export_command(
+                Principal.operator(who), project_id,
+                selected_paths=[path.model_dump() for path in body.selected_paths],
+                expected_entity_revision=body.expected_entity_revision,
+                client_operation_id=body.client_operation_id,
+            )
         except KeyError as exc:
             raise HTTPException(404, "no such project") from exc
         except (ArchiveRefused, FileNotFoundError) as exc:
             raise HTTPException(409, str(exc)) from exc
-        return Response(data, media_type="application/vnd.daedalus.workspace+zip",
-                        headers={"Content-Disposition": 'attachment; filename="workspace-private.zip"',
-                                 "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+        except ControlConflict as exc:
+            raise HTTPException(409, {"reason": str(exc), "current_revision": exc.current_revision}) from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
+
+    @api.get("/api/projects/{project_id}/workspace-archive")
+    async def latest_export(project_id: str, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        Principal.operator(who)
+        if await app.db.fetchone("SELECT 1 FROM projects WHERE id = ?", (project_id,)) is None:
+            raise HTTPException(404, "no such project")
+        row = await app.db.fetchone(
+            "SELECT response_json FROM operation_receipts WHERE scope_kind='project' AND scope_id=?"
+            " AND actor_id=? AND operation_kind='workspace.export' ORDER BY created_at DESC,id DESC LIMIT 1",
+            (project_id, Principal.operator(who).actor_id),
+        )
+        latest = json.loads(row["response_json"]) if row else None
+        available = False
+        if latest and isinstance(latest.get("archive_artifact_id"), str):
+            available = service().files.blobs.path_of("workspace-archives", latest["archive_artifact_id"]).is_file()
+        return {"latest": latest, "available": available}
 
     @api.post("/api/import/preview")
     async def preview_archive(body: ArchiveInput, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -113,9 +152,17 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.post("/api/import/apply")
     async def import_archive(body: ImportInput, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
+            principal = Principal.operator(who)
+            replayed = await service().replay_import(
+                principal, body.archive_artifact_id,
+                expected_collection_revision=body.expected_collection_revision,
+                client_operation_id=body.client_operation_id,
+            )
+            if replayed is not None:
+                return replayed
             archive = check_archive(await load_archive(body.archive_artifact_id))
             return await service().import_command(
-                Principal.operator(who), archive,
+                principal, archive,
                 expected_collection_revision=body.expected_collection_revision,
                 client_operation_id=body.client_operation_id,
             )

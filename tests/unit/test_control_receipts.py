@@ -51,6 +51,65 @@ async def test_retry_after_response_loss_replays_before_stale_cas(db: Database) 
     assert calls == 1
 
 
+async def test_project_compound_command_and_untouched_effect_have_one_revision(db: Database) -> None:
+    scope = await project(db)
+    other = await project(db, "other")
+    entity = Entity("project", scope.id)
+    store = ControlStore(db)
+
+    async def edit(conn: Any, mutation: Any) -> dict[str, Any]:
+        await conn.execute("UPDATE projects SET name = 'Renamed' WHERE id = 'project'")
+        await conn.execute("UPDATE projects SET settings = '{\"enabled\":true}' WHERE id = 'project'")
+        await conn.execute("UPDATE projects SET name = 'System change' WHERE id = 'other'")
+        return {"predicted_revision": mutation.entity_revision}
+
+    result = await store.mutate(OPERATOR, scope, "project.edit", "compound-project", 1, entity, {}, edit)
+    assert result["entity_revision"] == result["predicted_revision"] == 2
+    assert await store.revision(other, Entity("project", other.id)) == 2
+
+    async def unchanged(conn: Any, mutation: Any) -> dict[str, Any]:
+        return {"predicted_revision": mutation.entity_revision}
+
+    result = await store.mutate(OPERATOR, scope, "project.inspect", "untouched-project", 2, entity, {}, unchanged)
+    assert result["entity_revision"] == result["predicted_revision"] == 3
+
+
+async def test_multiple_collection_inserts_publish_one_revision(db: Database) -> None:
+    scope = await project(db)
+    store = ControlStore(db)
+
+    async def create(conn: Any, mutation: Any) -> dict[str, Any]:
+        for task_id in ("one", "two"):
+            await conn.execute("INSERT INTO board_tasks(id,title,status,priority,created_at,updated_at,project_id)"
+                               " VALUES (?,?,'todo',3,'2026-01-01','2026-01-01',?)", (task_id, task_id, scope.id))
+        return {"predicted_revision": mutation.entity_revision}
+
+    args = (OPERATOR, scope, "task.create", "two-tasks", 1, Entity("collection", scope.id), {}, create)
+    result = await store.mutate(*args)
+    assert result["entity_revision"] == result["predicted_revision"] == 2
+    assert await store.mutate(*args) == result
+    assert (await db.fetchone("SELECT count(*) FROM board_tasks"))[0] == 2
+
+
+async def test_failed_revision_publication_rolls_back_compound_changes(db: Database) -> None:
+    scope = await project(db)
+    entity = await task(db, scope)
+    await db.execute("CREATE TRIGGER refuse_revision BEFORE UPDATE OF entity_revision ON board_tasks"
+                     " WHEN OLD.entity_revision = 3 AND NEW.entity_revision = 2"
+                     " BEGIN SELECT RAISE(IGNORE); END")
+
+    async def edit(conn: Any, mutation: Any) -> dict[str, Any]:
+        await conn.execute("UPDATE board_tasks SET title = 'First write' WHERE id = 'task'")
+        await conn.execute("UPDATE board_tasks SET notes = 'Second write' WHERE id = 'task'")
+        return {"task_id": "task"}
+
+    with pytest.raises(ControlConflict, match="could not publish"):
+        await ControlStore(db).mutate(OPERATOR, scope, "task.edit", "refused-revision", 1, entity, {}, edit)
+    row = await db.fetchone("SELECT title,notes,entity_revision FROM board_tasks WHERE id = 'task'")
+    assert (row["title"], row["notes"], row["entity_revision"]) == ("Original", "", 1)
+    assert (await db.fetchone("SELECT count(*) FROM operation_receipts"))[0] == 0
+
+
 async def test_simultaneous_connections_commit_one_command(db: Database) -> None:
     scope = await project(db)
     entity = await task(db, scope)
@@ -178,7 +237,7 @@ async def test_heartbeat_does_not_invalidate_a_pending_operator_decision(db: Dat
     assert await ControlStore(db).revision(scope, entity) == 2
 
 
-async def test_host_retry_keeps_original_revision_even_when_command_advances_it_more_than_once(db: Database) -> None:
+async def test_compound_command_publishes_one_revision_and_replays_its_original_request(db: Database) -> None:
     scope = await project(db)
     entity = await task(db, scope)
     calls = 0
@@ -192,7 +251,7 @@ async def test_host_retry_keeps_original_revision_even_when_command_advances_it_
 
     store = ControlStore(db)
     saved = await store.mutate(OPERATOR, scope, "result.submit", "host-call", 1, entity, {"digest": "report"}, write)
-    assert saved["entity_revision"] == 3
+    assert saved["entity_revision"] == 2
     row = await db.fetchone("SELECT request_entity_revision FROM operation_receipts WHERE id = ?", (saved["receipt_id"],))
     assert row["request_entity_revision"] == 1
     await db.execute("UPDATE board_tasks SET priority = 1 WHERE id = 'task'")

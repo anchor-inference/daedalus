@@ -90,6 +90,19 @@ export class ApiError extends Error {
   }
 }
 
+async function archiveError(response: Response): Promise<ApiError> {
+  let detail: unknown = response.statusText;
+  let data: Record<string, unknown> = {};
+  try {
+    const parsed = await response.json();
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) data = parsed;
+    detail = parsed?.detail ?? detail;
+  } catch { /* a proxy may return plain text */ }
+  const message = typeof detail === "string" && detail ? detail : response.status >= 500
+    ? `Server unavailable (${response.status})` : `Request failed (${response.status})`;
+  return new ApiError(response.status, message, data);
+}
+
 async function call<T>(method: string, path: string, body?: unknown, responseType: "json" | "text" = "json"): Promise<T> {
   const response = await fetch(path, {
     method,
@@ -149,6 +162,16 @@ export const api = {
   patch: <T>(path: string, body?: unknown) => call<T>("PATCH", path, body),
   delete: <T>(path: string) => call<T>("DELETE", path),
   request: <T>(method: string, path: string, body?: unknown) => call<T>(method, path, body),
+  archiveUpload: async <T>(file: File): Promise<T> => {
+    const response = await fetch("/api/import/archive", { method: "POST", headers: authHeaders(), body: file });
+    if (!response.ok) throw await archiveError(response);
+    return await response.json() as T;
+  },
+  archiveDownload: async (artifactId: string): Promise<Blob> => {
+    const response = await fetch(`/api/import/archive/${encodeURIComponent(artifactId)}`, { headers: authHeaders() });
+    if (!response.ok) throw await archiveError(response);
+    return await response.blob();
+  },
   streamUrl: (sessionId: string) => `/api/sessions/${sessionId}/stream`,
   downloadUrl: (sessionId: string, path: string) => {
     const token = storedToken();

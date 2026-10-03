@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -52,7 +53,9 @@ async def test_card_command_replay_keeps_its_receipt_and_current_projection_sepa
         assert archived.status_code == 200, archived.text
         assert archived.json()["archived"] is True
         assert (await db.fetchone("SELECT status FROM board_tasks WHERE id = ?", (task_id,)))[0] == "dropped"
-        assert (await db.fetchone("SELECT count(*) FROM task_contract_versions WHERE task_id = ?", (task_id,)))[0] == 1
+        versions = await db.fetchall("SELECT contract_revision,snapshot_json FROM task_contract_versions WHERE task_id = ? ORDER BY contract_revision", (task_id,))
+        assert [row["contract_revision"] for row in versions] == [1, 2]
+        assert [json.loads(row["snapshot_json"])["title"] for row in versions] == ["Draft", "Edited"]
         assert (await db.fetchone("SELECT count(*) FROM operation_receipts"))[0] == 3
 
 
@@ -69,3 +72,38 @@ async def test_source_session_cannot_cross_a_board_scope(db: Database) -> None:
         result = await client.post("/api/projects/project/board", json=body)
         assert result.status_code == 201, result.text
         assert result.json()["task"]["origin_session_id"] == "source"
+
+
+async def test_operator_can_pin_and_revise_a_project_folder_with_exact_contract_receipts(db: Database) -> None:
+    await db.execute("INSERT INTO projects(id,name,created_at,settings) VALUES"
+                     " ('project','Work','now','{}'),('other','Other','now','{}')")
+    await db.execute("INSERT INTO planning_budgets(project_id,max_depth,max_tasks,max_tokens) VALUES ('project',3,20,100000)")
+    await db.execute("INSERT INTO project_folders(id,project_id,label,path,env,created_at) VALUES"
+                     " ('folder','project','Source','/tmp/source','container','now'),"
+                     " ('replacement','project','New source','/tmp/replacement','container','now'),"
+                     " ('foreign','other','Private','/tmp/other','container','now')")
+    api = FastAPI()
+    register(api, SimpleNamespace(db=db, manager=SimpleNamespace(bus=EventBus(db)), extensions={}), lambda: {"via": "cookie", "user_id": 1})
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
+        base = "/api/projects/project/board"
+        body = {"title": "Pinned work", "folder_id": "folder", "client_operation_id": "create", "expected_collection_revision": 1}
+        assert (await client.post(base, json={**body, "folder_id": "foreign"})).status_code == 409
+        assert (await db.fetchone("SELECT count(*) FROM board_tasks"))[0] == 0
+        assert (await client.post(base, json={**body, "folder_id": ""})).status_code == 422
+        response = await client.post(base, json=body)
+        assert response.status_code == 201, response.text
+        original = response.json()
+        task = original["task"]
+        assert task["folder_id"] == "folder"
+        contract = await db.fetchone("SELECT snapshot_json FROM task_contract_versions WHERE task_id = ? AND contract_revision = 1", (task["id"],))
+        assert json.loads(contract[0])["folder_id"] == "folder"
+        edit = {"folder_id": "replacement", "client_operation_id": "edit", "expected_entity_revision": task["entity_revision"]}
+        changed = await client.put(f"/api/board/{task['id']}", json=edit)
+        assert changed.status_code == 200, changed.text
+        assert changed.json()["task"]["folder_id"] == "replacement" and changed.json()["task"]["contract_revision"] == 2
+        latest = await db.fetchone("SELECT snapshot_json FROM task_contract_versions WHERE task_id = ? AND contract_revision = 2", (task["id"],))
+        assert json.loads(latest[0])["folder_id"] == "replacement"
+        replay = (await client.post(base, json=body)).json()
+        assert replay["command"] == original["command"] and replay["task"]["folder_id"] == "replacement"
+        assert (await client.put(f"/api/board/{task['id']}", json=edit)).json()["command"] == changed.json()["command"]
+        assert (await client.put(f"/api/board/{task['id']}", json={**edit, "client_operation_id": "stale"})).status_code == 409

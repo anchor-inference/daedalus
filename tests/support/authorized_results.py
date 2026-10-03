@@ -44,7 +44,8 @@ async def accept_branchless_result(team: Any, task_id: str) -> str:
     revision = task["entity_revision"]
     evidence_ids = []
     async with _client(team) as client:
-        for criterion in json.loads(version["snapshot_json"])["checklist"]:
+        snapshot = json.loads(version["snapshot_json"])
+        for criterion in [*snapshot["checklist"], *snapshot["requirements"]]:
             evidence = await client.post(base + "/evidence", json={
                 "client_operation_id": f"result-evidence:{uuid.uuid4().hex}",
                 "expected_entity_revision": revision, "criterion_id": criterion["id"],

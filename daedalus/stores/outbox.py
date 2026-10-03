@@ -107,7 +107,7 @@ class OutboxStore:
             cursor_row = await one(conn, "SELECT value FROM kv WHERE key = 'effect_admission_cursor'")
             position = json.loads(cursor_row["value"]) if cursor_row else {"project": "", "foreground": 0}
             foreground = sorted((row for row in rows if row["kind"] != "task.launch"),
-                                key=lambda row: ({"task.stop": 0, "review.merge": 1}.get(row["kind"], 2),
+                                key=lambda row: ({"task.stop": 0, "comparison.stop": 0, "review.merge": 1}.get(row["kind"], 2),
                                                  row["created_at"], row["id"]))
             launches = [row for row in rows if row["kind"] == "task.launch"]
             by_project: dict[str, list[aiosqlite.Row]] = {}

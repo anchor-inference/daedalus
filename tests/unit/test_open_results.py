@@ -17,6 +17,7 @@ from daedalus.host.events import EventFilter
 from daedalus.stores.database import Database
 from daedalus.stores.staff import Staff
 from tests.support.authorized_results import accept_branchless_result
+from tests.support.authorized_stop import stop_native_task
 from tests.unit.test_board_rounds import task_of
 from tests.unit.test_orchestrator import Rig, rig
 from tests.unit.test_orchestrator_team import fake, office
@@ -109,7 +110,8 @@ async def test_a_result_the_orchestrator_had_not_been_given_yet_is_not_one_it_pa
 
 
 @pytest.mark.parametrize("decision", ["tell", "blocked_waiting", "decide", "ask", "dropped"])
-async def test_each_decision_closes_the_result(settings: Settings, db: Database, tmp_path: Path, decision: str) -> None:
+async def test_each_decision_closes_the_result(settings: Settings, db: Database, tmp_path: Path,
+                                               decision: str, monkeypatch: pytest.MonkeyPatch) -> None:
     r = await rig(settings, db, tmp_path)
     try:
         fake(r)
@@ -121,6 +123,11 @@ async def test_each_decision_closes_the_result(settings: Settings, db: Database,
             assert live is not None and live.session.task_id == task_id
             await r.call(sid, "tell", staff="Sol", text="Target the supervisor on main")
         elif decision == "blocked_waiting":
+            with pytest.raises(Refused, match="stop or reconcile"):
+                await r.call(sid, "tasks", op="move", task_id=task_id, status="blocked")
+            current = await r.team.live_of(sol)
+            assert current is not None
+            await stop_native_task(r.team, task_id, current, monkeypatch)
             said = await r.call(sid, "tasks", op="move", task_id=task_id, status="blocked")
             assert "still waits for your decision" in said, "blocked alone says nothing of what it waits for"
             await r.call(sid, "tasks", op="move", task_id=task_id, status="blocked", waiting_on="the operator's choice of supervisor")
@@ -134,6 +141,9 @@ async def test_each_decision_closes_the_result(settings: Settings, db: Database,
         elif decision == "ask":
             await r.call(sid, "ask_operator", title="Supervisor version", text="Which supervisor version should the updater target?", task_id=task_id)
         else:
+            current = await r.team.live_of(sol)
+            assert current is not None
+            await stop_native_task(r.team, task_id, current, monkeypatch)
             await r.call(sid, "tasks", op="move", task_id=task_id, status="dropped", note="replaced by a new design")
         assert await r.orch.loops.open(r.project.id) == []
     finally:

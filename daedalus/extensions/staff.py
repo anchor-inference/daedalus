@@ -1834,7 +1834,7 @@ class Team:
         if notifications is not None and hasattr(notifications, "register_resolver"):
             notifications.register_resolver("staff", self.resolve_action)
         return manager.bus.on(
-            EventFilter(types=("permission.pending", "permission.resolved", "presence", "task.moved", "staff.status", "terminal.exited")),
+            EventFilter(types=("permission.pending", "permission.resolved", "presence", "task.changed", "task.moved", "staff.status", "terminal.exited")),
             self.on_bus,
             name="staff",
         )

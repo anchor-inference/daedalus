@@ -11,10 +11,16 @@ from fastapi import Depends, FastAPI, HTTPException
 from daedalus.extensions.comparison_commands import (
     choose_comparison,
     close_comparison,
+    comparison_history,
+    comparison_slot_review,
     comparison_state,
     queue_comparison,
+    review_comparison_slot,
 )
+from daedalus.extensions.comparison_stop import stop_comparison_slot
 from daedalus.extensions.comparisons import ComparisonRefused
+from daedalus.extensions.orchestrator_domain import DomainConflict
+from daedalus.extensions.review import ReviewRefused
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.inference_budget import BudgetRefused
 
@@ -38,6 +44,87 @@ def _priced_usd(value: Any) -> int:
 
 
 def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
+    @api.post("/api/board/{task_id}/comparisons/{group_id}/slots/{slot}/stop")
+    async def stop_slot(task_id: str, group_id: str, slot: int, body: dict[str, Any],
+                        who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        if (set(body) != {"client_operation_id", "expected_entity_revision", "reason"} or
+                not isinstance(body["client_operation_id"], str) or
+                type(body["expected_entity_revision"]) is not int or
+                not isinstance(body["reason"], str)):
+            raise HTTPException(422, "the slot stop needs a command ID, task revision and reason")
+        try:
+            return await stop_comparison_slot(
+                app, task_id=task_id, group_id=group_id, slot=slot,
+                principal=Principal.operator(who), client_operation_id=body["client_operation_id"],
+                expected_entity_revision=body["expected_entity_revision"], reason=body["reason"],
+            )
+        except KeyError as exc:
+            raise HTTPException(404, "task not found") from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except ControlConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @api.get("/api/board/{task_id}/comparisons/{group_id}/slots/{slot}/review")
+    async def read_slot_review(task_id: str, group_id: str, slot: int,
+                               who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await comparison_slot_review(app, task_id=task_id, group_id=group_id, slot=slot,
+                                                principal=Principal.operator(who))
+        except KeyError as exc:
+            raise HTTPException(404, "comparison slot not found") from exc
+        except ControlDenied as exc:
+            raise HTTPException(503, str(exc)) from exc
+        except (ReviewRefused, ComparisonRefused) as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @api.post("/api/board/{task_id}/comparisons/{group_id}/slots/{slot}/verdicts")
+    async def write_slot_verdict(task_id: str, group_id: str, slot: int, body: dict[str, Any],
+                                 who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        allowed = {"client_operation_id", "expected_entity_revision", "result_id", "verification",
+                   "accepted", "evidence_ids", "reason", "self_review_waiver_receipt_id"}
+        if (set(body) - allowed or not {"client_operation_id", "expected_entity_revision", "result_id",
+                                      "verification", "accepted", "evidence_ids"}.issubset(body) or
+                not isinstance(body["client_operation_id"], str) or
+                type(body["expected_entity_revision"]) is not int or
+                not isinstance(body["result_id"], str) or not body["result_id"] or
+                not isinstance(body["verification"], str) or type(body["accepted"]) is not bool or
+                not isinstance(body["evidence_ids"], list) or
+                any(not isinstance(item, str) or not item for item in body["evidence_ids"]) or
+                not isinstance(body.get("reason", ""), str) or
+                (body.get("self_review_waiver_receipt_id") is not None and
+                 not isinstance(body["self_review_waiver_receipt_id"], str))):
+            raise HTTPException(422, "the slot verdict needs an exact decision, evidence and command identity")
+        try:
+            return await review_comparison_slot(
+                app, task_id=task_id, group_id=group_id, slot=slot, principal=Principal.operator(who),
+                client_operation_id=body["client_operation_id"],
+                expected_entity_revision=body["expected_entity_revision"], result_id=body["result_id"],
+                verification=body["verification"], accepted=body["accepted"],
+                evidence_ids=body["evidence_ids"], reason=body.get("reason", ""),
+                self_review_waiver_receipt_id=body.get("self_review_waiver_receipt_id"),
+            )
+        except KeyError as exc:
+            raise HTTPException(404, "comparison slot or task not found") from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except (ControlConflict, ComparisonRefused, DomainConflict, ReviewRefused) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @api.get("/api/board/{task_id}/comparisons")
+    async def list_comparisons(task_id: str, limit: int = 20, before: str | None = None,
+                               _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await comparison_history(app, task_id=task_id, limit=limit, before=before)
+        except KeyError as exc:
+            raise HTTPException(404, "task or history cursor not found") from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
     @api.get("/api/board/{task_id}/comparisons/{group_id}")
     async def read_comparison(task_id: str, group_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:

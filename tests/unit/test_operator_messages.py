@@ -18,14 +18,17 @@ from daedalus.config import Settings
 from daedalus.extensions.operator_steps import StepsRefused, normalise
 from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.stores.database import Database
+from tests.support.authorized_launch import operator_task
 from tests.support.authorized_results import accept_branchless_result
+from tests.support.authorized_stop import bind_native_run, finish_native_stop, stop_native_task
+from tests.support.waiting import until_await
 from tests.unit.test_board_rounds import task_of
 from tests.unit.test_orchestrator import Rig, rig
 from tests.unit.test_orchestrator_team import fake, office
 from tests.unit.test_session_runner import ScriptedProvider
 from tests.unit.test_staff_runtime import close_team
 from tests.unit.test_steer_queue import H, _await_run, _client, _manager
-from tests.unit.test_task_contract import SCRIPT
+from tests.unit.test_task_contract import SCRIPT, apply_requirement
 
 STEPS = {
     "goal": "Manage the team's mailboxes yourself",
@@ -215,10 +218,12 @@ async def test_a_message_that_asks_several_things_is_kept_as_several_commitments
 # -- what became of the operator's words ----------------------------------------------------------------------------------
 
 
-async def test_a_requirement_from_the_operators_message_carries_the_message_and_its_fate(settings: Settings, db: Database, tmp_path: Path) -> None:
+async def test_a_requirement_from_the_operators_message_carries_the_message_and_its_fate(
+    settings: Settings, db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     r = await rig(settings, db, tmp_path)
     try:
-        fake(r)
+        runtime = fake(r)
         sid = await office(r)
         await r.orch.stop_queue(r.project.id)
         task_id, live = await working_on(r, sid, "Leo")
@@ -226,11 +231,28 @@ async def test_a_requirement_from_the_operators_message_carries_the_message_and_
 
         await r.manager.sessions.append_transcript(sid, [Message(role=MessageRole.user, content_blocks=[TextBlock(text="English only for now")], metadata={"daedalus.origin": "operator"})])
         seq = await r.orch.operator_message_seq(sid)
-        await r.call(sid, "require", task_id=task_id, text="English only for now", kind="scope", source="operator")
+        run_id, stops = await bind_native_run(r.team, live, monkeypatch)
+        staged = json.loads(await r.call(sid, "require", task_id=task_id, text="English only for now",
+                                         kind="scope", source="operator"))
+        assert staged["state"] == "pending_physical_exit"
+        assert runtime.sent == []
+        await finish_native_stop(r.team, live, run_id, staged["stop_effect_id"], stops)
+        await r.call(sid, "require", op="apply", task_id=task_id, intent_id=staged["intent_id"])
+        await r.call(sid, "assign", task_id=task_id, staff="Leo")
+        from tests.unit.test_orchestrator_team import admitted
+
+        await until_await(lambda: admitted(r, task_id), "the operator's revised scope launched")
+        assert "English only for now" in runtime.started[-1].first_message
         [receipt] = (await r.orch.focus_state(await r.refreshed()))["receipts"][str(seq)]
         assert (receipt["kind"], receipt["label"], receipt["task_id"]) == ("requirement", "R1", task_id)
-        assert receipt["deliveries"] == [{"staff_name": "Leo", "acknowledged": False, "opened": False, "via": "message", "cli": False}]
-        await r.team.ingress.report(live, "checkpoint", "noted", acknowledged=["R1"], call_id=f"fixture-report:{uuid.uuid4().hex}")
+        assert receipt["deliveries"] == [{"staff_name": "Leo", "acknowledged": False, "opened": False,
+                                          "via": "brief", "cli": False}]
+        member = await r.manager.staff.find(r.project.id, "Leo")
+        assert member is not None
+        fresh = await r.team.live_of(member)
+        assert fresh is not None and fresh.id != live.id
+        await r.team.ingress.report(fresh, "checkpoint", "noted", acknowledged=["R1"],
+                                    call_id=f"fixture-report:{uuid.uuid4().hex}")
         [receipt] = (await r.orch.focus_state(await r.refreshed()))["receipts"][str(seq)]
         assert receipt["deliveries"][0]["acknowledged"] is True
         focus = await r.orch.focus_state(await r.refreshed())
@@ -240,7 +262,9 @@ async def test_a_requirement_from_the_operators_message_carries_the_message_and_
         await r.manager.close()
 
 
-async def test_the_focus_state_lists_the_results_waiting_for_a_decision(settings: Settings, db: Database, tmp_path: Path) -> None:
+async def test_the_focus_state_lists_the_results_waiting_for_a_decision(
+    settings: Settings, db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     r = await rig(settings, db, tmp_path)
     try:
         fake(r)
@@ -248,6 +272,9 @@ async def test_the_focus_state_lists_the_results_waiting_for_a_decision(settings
         await r.orch.stop_queue(r.project.id)
         task_id, live = await working_on(r, sid, "Sol")
         await r.team.ingress.report(live, "stuck", "the supervisor races the swap", call_id=f"fixture-report:{uuid.uuid4().hex}")
+        with pytest.raises(Refused, match="stop or reconcile"):
+            await r.call(sid, "tasks", op="move", task_id=task_id, status="blocked", note="x")
+        await stop_native_task(r.team, task_id, live, monkeypatch)
         await r.call(sid, "tasks", op="move", task_id=task_id, status="blocked", note="x")
         focus = await r.orch.focus_state(await r.refreshed())
         [result] = focus["open_results"]
@@ -328,9 +355,18 @@ async def test_what_the_operator_allowed_for_a_card_is_the_basis_of_a_grant_with
         runtime = fake(r)
         sid = await office(r)
         await r.orch.stop_queue(r.project.id)
-        task_id, live = await working_on(r, sid, "Luna")
-        await r.call(sid, "require", task_id=task_id, text="Check the relay format with a local dry run", kind="scope", source="orchestrator")
-        await r.call(sid, "require", task_id=task_id, text="One test message to the operator's own address is allowed", kind="scope", source="operator")
+        await r.manager.staff.hire(r.project.id, name="Luna", role="Mail", isolation="shared")
+        task_id = await operator_task(db, r.project.id, "Mail relay", brief=SCRIPT)
+        await apply_requirement(r, sid, task_id, text="Check the relay format with a local dry run",
+                                kind="scope", source="orchestrator")
+        await apply_requirement(r, sid, task_id,
+                                text="One test message to the operator's own address is allowed",
+                                kind="scope", source="operator")
+        await r.call(sid, "assign", staff="Luna", task_id=task_id)
+        luna = await r.manager.staff.find(r.project.id, "Luna")
+        assert luna is not None
+        live = await r.team.live_of(luna)
+        assert live is not None
         ask = await r.manager.asks.get(await r.team.ingress.permission(live, "p-1", "Exec", "send one test message"))
         assert ask is not None
         with pytest.raises(Refused, match="or the R… of the operator's own scope"):

@@ -41,6 +41,7 @@ class CreateBody(BaseModel):
     brief: Brief = Field(default_factory=Brief)
     session_id: str | None = Field(default=None, max_length=200)
     assignee_staff_id: str | None = Field(default=None, max_length=200)
+    folder_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class UpdateBody(BaseModel):
@@ -58,6 +59,7 @@ class UpdateBody(BaseModel):
     assignee_staff_id: str | None = Field(default=None, max_length=200)
     check_ids: list[str] | None = Field(default=None, max_length=12)
     uncheck_ids: list[str] | None = Field(default=None, max_length=12)
+    folder_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:

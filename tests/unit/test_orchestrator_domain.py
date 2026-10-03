@@ -125,6 +125,41 @@ async def test_result_review_and_acceptance_pin_exact_contract_and_evidence(doma
     assert (await domain_db.fetchone("SELECT status FROM board_tasks WHERE id = 'task1'"))["status"] == "done"
 
 
+async def test_approval_needs_evidence_for_each_requirement_as_well_as_each_check(domain_db: Database) -> None:
+    original = b"Documented result"
+    digest = hashlib.sha256(original).hexdigest()
+    async with domain_db.transaction() as conn:
+        revised = await replace_contract(conn, task_id="task1",
+                                         requirements=[{"text": "No invented facts", "kind": "quality"}],
+                                         checks=[{"id": "C1", "text": "Clear result"}], acceptance="", brief={},
+                                         origin_kind="operator", origin_ref="request", change_kind="semantic")
+        await add_artifact_manifest(conn, manifest_id="manifest1", project_id=None, task_id="task1",
+                                    artifact_kind="document", artifact_key="report", artifact_revision=1,
+                                    digest=digest, size_bytes=len(original))
+        await submit_result(conn, result_id="result1", task_id="task1", attempt_id=None,
+                            contract_revision=revised["contract_revision"], outcome="complete",
+                            original_text=original.decode(), original_blob_ref=None, original_digest=digest,
+                            original_size_bytes=len(original), actor_id="worker", manifest_ids=["manifest1"],
+                            checks=[], limitations=[])
+        await add_review_evidence(conn, evidence_id="check1", result_id="result1", criterion_id="C1",
+                                  command="inspect", exit_code=0, environment_digest="env",
+                                  manifest_digest_before=digest, manifest_digest_after=digest)
+        with pytest.raises(DomainConflict, match="requirement"):
+            await record_verdict(conn, verdict_id="incomplete", result_id="result1", reviewer_actor_id="reviewer",
+                                 verification="verified", accepted=True, head=None, base=None,
+                                 environment_digest="env", evidence_ids=["check1"], reason="checked")
+        requirement = await conn.execute("SELECT id FROM task_requirements WHERE task_id = 'task1' AND state = 'active'")
+        row = await requirement.fetchone()
+        await requirement.close()
+        assert row is not None
+        await add_review_evidence(conn, evidence_id="requirement1", result_id="result1", criterion_id=row["id"],
+                                  command="inspect", exit_code=0, environment_digest="env",
+                                  manifest_digest_before=digest, manifest_digest_after=digest)
+        await record_verdict(conn, verdict_id="complete", result_id="result1", reviewer_actor_id="reviewer",
+                             verification="verified", accepted=True, head=None, base=None,
+                             environment_digest="env", evidence_ids=["check1", "requirement1"], reason="checked")
+
+
 async def test_changed_manifest_during_check_cannot_support_acceptance(domain_db: Database) -> None:
     original = b"report"
     digest = hashlib.sha256(original).hexdigest()

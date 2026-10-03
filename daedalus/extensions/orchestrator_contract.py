@@ -15,16 +15,16 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
+from daedalus.extensions.contract_changes import apply_change_in, link_stop_in, stage_change_in
 from daedalus.extensions.notifications import Draft
 from daedalus.extensions.orchestrator_domain import DomainConflict, OrchestratorDomain, record_verdict, return_result
 from daedalus.extensions.orchestrator_loops import DECIDED
-from daedalus.extensions.orchestrator_ops import Refused
+from daedalus.extensions.orchestrator_ops import Refused, board_principal
 from daedalus.extensions.task_contract import REQUIREMENT_KINDS, Contracts, Requirement
-from daedalus.host import prompts
+from daedalus.extensions.task_controls import queue_stop
 from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.files import FileRefused, StoredFile
 from daedalus.stores.projects import Project
-from daedalus.stores.staff import StaffError
 
 if TYPE_CHECKING:
     from daedalus.extensions.orchestrator import Orchestrators
@@ -102,24 +102,6 @@ async def bound(orch: Orchestrators, session_id: str, source: str) -> str:
     return f"operator:{seq}" if seq else source
 
 
-async def deliver(orch: Orchestrators, project: Project, task: dict[str, Any], requirement: Requirement, text: str, *, files: list[StoredFile] | None = None) -> str:
-    """Give a requirement to the member at work on its card, into the turn it is in; what happened.
-    Nobody at work on it: it goes with the card's next brief, as every requirement does."""
-    team = _team(orch)
-    member = await orch.manager.staff.get(task.get("assignee_staff_id") or "") if task.get("assignee_staff_id") else None
-    live = await team.live_of(member) if member is not None and member.active else None
-    if member is None or live is None or live.session.task_id != task["id"] or task["status"] != "doing":
-        return "nobody is at work on the card now; it goes with the card's brief to whoever works it next"
-    try:
-        receipt = await team.tell(member, text, when="now", by="orchestrator", files=files or None)
-    except StaffError as exc:
-        return f"it could not be sent to {member.name} ({exc}); it goes with the card's next brief"
-    path = (receipt.get("files") or [""])[0] if files else ""
-    await team.contracts.delivered(requirement, staff_session_id=live.id, staff_id=member.id, via="message", message_id=str(receipt["message_id"]), path=path)
-    state = receipt["state"] + (f" — {receipt['error']}" if receipt.get("error") else "")
-    return f"sent to {member.name} into the turn they are in (receipt: {state}); their confirmation shows in the state block until it comes"
-
-
 async def require(
     orch: Orchestrators,
     project: Project,
@@ -133,33 +115,105 @@ async def require(
     withdraw: str | None = None,
     file: str | None = None,
     why: str = "",
+    op: str = "stage",
+    intent_id: str | None = None,
+    client_operation_id: str = "",
+    expected_entity_revision: int | None = None,
 ) -> str:
     task = await card(orch, project, session_id, task_id)
-    if task["status"] == "dropped":
-        raise Refused(f"task {task['id']} is dropped")
+    if task.get("project_id") != project.id:
+        raise Refused("the task is outside this coordinator's project")
+    if op == "inspect":
+        rows = await orch.manager.db.fetchall(
+            "SELECT id,state,base_contract_revision,base_attempt_id,stop_receipt_id,stop_effect_id,"
+            " apply_receipt_id,created_at,applied_at FROM contract_change_intents"
+            " WHERE task_id = ? ORDER BY created_at,id", (task["id"],))
+        return json.dumps({"task_id": task["id"], "intents": [dict(row) for row in rows]}, ensure_ascii=False)
+    if op not in ("stage", "stop", "apply") or not client_operation_id or not isinstance(expected_entity_revision, int) or isinstance(expected_entity_revision, bool):
+        raise Refused("mutation needs op=stage, stop or apply, client_operation_id and expected_entity_revision")
+    if op == "stop":
+        if not intent_id:
+            raise Refused("stop needs the exact staged intent_id")
+        row = await orch.manager.db.fetchone("SELECT actor_id,state,stop_effect_id FROM contract_change_intents"
+                                             " WHERE id = ? AND task_id = ?", (intent_id, task["id"]))
+        principal = await board_principal(orch, session_id, project.id, "task.stop", task["id"])
+        if row is None or row["actor_id"] != principal.actor_id or row["state"] != "pending_stop":
+            raise Refused("no pending contract stop belongs to this actor and task")
+        if row["stop_effect_id"]:
+            previous = await orch.manager.db.fetchone("SELECT state FROM effect_outbox WHERE id = ?",
+                                                       (row["stop_effect_id"],))
+            if previous is None or previous["state"] not in ("cancelled", "failed"):
+                raise Refused("the preceding stop must be reconciled before another is issued")
+        try:
+            stop = await queue_stop(orch.app, task["id"], principal,
+                                    client_operation_id=client_operation_id,
+                                    expected_entity_revision=expected_entity_revision,
+                                    reason="the task contract has a pending semantic change")
+            async with orch.manager.db.transaction() as conn:
+                await link_stop_in(conn, intent_id=intent_id, actor_id=principal.actor_id,
+                                   stop_receipt_id=stop["receipt_id"], stop_effect_id=stop.get("effect_id"))
+        except (ControlConflict, ControlDenied, DomainConflict) as exc:
+            raise Refused(str(exc)) from exc
+        return json.dumps({"intent_id": intent_id, "state": "pending_physical_exit" if stop.get("effect_id") else "ready_to_apply",
+                           "stop_receipt_id": stop["receipt_id"], "stop_effect_id": stop.get("effect_id"),
+                           "entity_revision": stop["entity_revision"]}, ensure_ascii=False, sort_keys=True)
+    if op == "apply":
+        if not intent_id:
+            raise Refused("apply needs the exact staged intent_id")
+        row = await orch.manager.db.fetchone("SELECT actor_id,state,request_json,base_contract_revision FROM contract_change_intents"
+                                             " WHERE id = ? AND task_id = ?", (intent_id, task["id"]))
+        if row is None:
+            raise Refused("the contract intent is not on this task")
+        staged = json.loads(row["request_json"])
+        principal = await board_principal(orch, session_id, project.id, "contract.apply", task["id"])
+        if row["actor_id"] != principal.actor_id:
+            raise Refused("the contract intent belongs to another actor")
+        async def apply_effect(conn: Any, mutation: Any) -> dict[str, Any]:
+            return await apply_change_in(conn, intent_id=intent_id, principal=principal,
+                                         receipt_id=mutation.receipt_id)
+        try:
+            result = await ControlStore(orch.manager.db).mutate(
+                principal, Scope("project", project.id), "contract.apply", client_operation_id,
+                expected_entity_revision, Entity("task", task["id"]),
+                {"intent_id": intent_id, "source_literal": staged["source_literal"]}, apply_effect)
+        except (ControlConflict, ControlDenied, DomainConflict) as exc:
+            raise Refused(str(exc)) from exc
+        if (row["state"] != "applied" and staged["mode"] != "withdraw" and staged["kind"] == "constraint"
+                and staged["source"] == "orchestrator"):
+            condition = await _contracts(orch).find(task["id"], result["requirement_id"])
+            grant = next((item for item in await _contracts(orch).requirements(task["id"])
+                          if item.kind == "scope" and item.from_operator), None)
+            if condition is not None and grant is not None:
+                await narrowed(orch, project, task, condition, grant, staged.get("why", ""))
+        await orch._changed(project.id, "board", "orchestrator")
+        return json.dumps(result, ensure_ascii=False, sort_keys=True)
+    if intent_id:
+        raise Refused("stage creates its own stable intent_id")
+    if withdraw and (replaces or text.strip() or file):
+        raise Refused("withdraw names only its current requirement and source")
+    if task["status"] in ("review", "done", "dropped"):
+        raise Refused("return or reopen the exact result before changing this task's contract")
     contracts = _contracts(orch)
-    origin = await bound(orch, session_id, await source_of(orch, project, source))
+    literal_source = await source_of(orch, project, source)
+    origin = await bound(orch, session_id, literal_source)
+    mode = "withdraw" if withdraw else "replace" if replaces else "add"
+    target: Requirement | None = None
     if withdraw:
-        gone = await contracts.find(task["id"], withdraw)
-        if gone is None or gone.state != "active":
+        target = await contracts.find(task["id"], withdraw)
+        if target is None or target.state != "active":
             raise Refused(f"task {task['id']} has no requirement {withdraw} in force; Tasks(op='get') lists them")
-        if gone.from_operator and not _operator_backed(origin):
+        if target.from_operator and not _operator_backed(origin):
             raise Refused(
-                f"{gone.label} is the operator's (\"{_clip(gone.text)}\"): dropping it is their decision. AskOperator, and withdraw it "
+                f"{target.label} is the operator's (\"{_clip(target.text)}\"): dropping it is their decision. AskOperator, and withdraw it "
                 "with their answer as source='answer:<request id>'"
             )
-        await contracts.withdraw(gone)
-        said = await deliver(orch, project, task, gone, prompts.STAFF_REQUIREMENT_WITHDRAWN.format(label=gone.label, task_id=task["id"], origin=_origin_words(origin), text=gone.text))
-        await _journal(orch, project, f"Withdrew {gone.label} of {task['id']} (\"{_clip(gone.text)}\"), on {_origin_words(origin)}'s word.", task["id"])
-        return f"{gone.label} of {task['id']} is withdrawn; {said}"
-    replaced: Requirement | None = None
-    if replaces:
-        replaced = await contracts.find(task["id"], replaces)
-        if replaced is None or replaced.state != "active":
+    elif replaces:
+        target = await contracts.find(task["id"], replaces)
+        if target is None or target.state != "active":
             raise Refused(f"task {task['id']} has no requirement {replaces} in force; Tasks(op='get') lists them")
-        if replaced.from_operator and not _operator_backed(origin):
+        if target.from_operator and not _operator_backed(origin):
             raise Refused(
-                f"{replaced.label} is the operator's (\"{_clip(replaced.text)}\"): changing it — or letting the work fall short of it — is "
+                f"{target.label} is the operator's (\"{_clip(target.text)}\"): changing it — or letting the work fall short of it — is "
                 "their decision. AskOperator with the options, and once they answer, Require(replaces=…, source='answer:<request id>')"
             )
     stored: StoredFile | None = None
@@ -174,39 +228,64 @@ async def require(
     kind = (kind or "quality").strip().lower()
     if kind not in REQUIREMENT_KINDS:
         raise Refused(f"kind is one of {', '.join(REQUIREMENT_KINDS)}")
-    if kind == "input" and stored is None:
+    if not withdraw and kind == "input" and stored is None:
         raise Refused("an input names its file: file='att:…' (or a path in the project's folders)")
     body = (text or "").strip() or (f"{stored.name}: the work starts from it" if stored is not None else "")
+    if not withdraw and (not body or len(body) > 1000):
+        raise Refused("a requirement needs text of at most 1000 characters")
+    if mode == "add":
+        same = next((item for item in await contracts.requirements(task["id"])
+                     if item.text.casefold() == body.casefold()
+                     and item.file_id == (stored.id if stored else None)), None)
+        if same is not None:
+            return json.dumps({"task_id": task["id"], "state": "unchanged",
+                               "requirement_id": same.id, "label": same.label}, ensure_ascii=False)
     grants = [r for r in await contracts.requirements(task["id"]) if r.kind == "scope" and r.from_operator]
     if grants and kind == "constraint" and not _operator_backed(origin) and len(" ".join((why or "").split())) < WHY_MIN:
         raise Refused(narrowing_refusal(grants[0].text))
+    principal = await board_principal(orch, session_id, project.id,
+                                      "contract.withdraw" if withdraw else "contract.require", task["id"])
+    request = {"mode": mode, "text": body, "kind": kind, "source": origin,
+               "source_literal": literal_source, "target_id": target.id if target else None,
+               "file_id": stored.id if stored else None, "why": why}
+    async def stage_effect(conn: Any, mutation: Any) -> dict[str, Any]:
+        return await stage_change_in(conn, intent_id=mutation.object_id, receipt_id=mutation.receipt_id,
+                                     principal=principal, project_id=project.id, task_id=task["id"],
+                                     client_operation_id=client_operation_id, request=request)
     try:
-        requirement = await contracts.add(task["id"], project.id, body, kind, origin, replaces=replaced, file_id=stored.id if stored is not None else None)
-    except ValueError as exc:
+        result = await ControlStore(orch.manager.db).mutate(
+            principal, Scope("project", project.id), "contract.withdraw" if withdraw else "contract.require",
+            client_operation_id, expected_entity_revision, Entity("task", task["id"]), request, stage_effect)
+        current_intent = await orch.manager.db.fetchone(
+            "SELECT state,apply_receipt_id FROM contract_change_intents WHERE id = ?", (result["intent_id"],))
+        if current_intent is None:
+            raise Refused("the contract intent is missing after its receipt")
+        if current_intent["state"] == "applied":
+            result["state"] = "applied"
+            result["apply_receipt_id"] = current_intent["apply_receipt_id"]
+        elif result["state"] == "pending_stop":
+            try:
+                stop_principal = await board_principal(orch, session_id, project.id, "task.stop", task["id"])
+                stop = await queue_stop(orch.app, task["id"], stop_principal,
+                                        client_operation_id=f"{client_operation_id}:stop",
+                                        expected_entity_revision=result["entity_revision"],
+                                        reason="the task contract has a pending semantic change")
+            except (ControlConflict, ControlDenied, Refused) as exc:
+                result["state"] = "stop_unavailable"
+                result["blocker"] = str(exc)
+            else:
+                async with orch.manager.db.transaction() as conn:
+                    await link_stop_in(conn, intent_id=result["intent_id"], actor_id=principal.actor_id,
+                                       stop_receipt_id=stop["receipt_id"], stop_effect_id=stop.get("effect_id"))
+                result["stop_receipt_id"] = stop["receipt_id"]
+                result["stop_effect_id"] = stop.get("effect_id")
+                result["state"] = "pending_physical_exit" if stop.get("effect_id") else "ready_to_apply"
+        else:
+            result["state"] = "ready_to_apply"
+    except (ControlConflict, ControlDenied, DomainConflict) as exc:
         raise Refused(str(exc)) from exc
-    if stored is not None:
-        await orch.manager.files.attach_to_task(task["id"], [stored], actor="orchestrator")
-    told = ""
-    if grants and kind == "constraint" and not _operator_backed(origin):
-        await narrowed(orch, project, task, requirement, grants[0], why)
-        told = "; the operator is told of the condition you added to what they allowed"
-    message = prompts.STAFF_REQUIREMENT.format(
-        label=requirement.label, task_id=task["id"], origin=requirement.origin(), replaces=f", replaces {replaced.label}" if replaced is not None else "", text=requirement.text,
-    )
-    said = await deliver(orch, project, task, requirement, message, files=[stored] if stored is not None else None)
-    if kind == "scope" and _operator_backed(origin) and task.get("assignee_staff_id"):
-        holder = await orch.manager.staff.get(task["assignee_staff_id"])
-        from daedalus.extensions.orchestrator_team import restricted  # Lazy: the team's module imports this one
-
-        limit = restricted(holder) if holder is not None else ""
-        if limit:
-            said += (
-                f". {holder.name} runs {limit}, so cannot do what this allows: StaffEdit(staff='{holder.name}', permission_mode=…) — it takes effect "  # type: ignore[union-attr]
-                "from the next session, so Release and Assign(task_id) again — rather than asking the operator to allow it again"
-            )
     await orch._changed(project.id, "board", "orchestrator")
-    swap = f" in place of {replaced.label}" if replaced is not None else ""
-    return f"{requirement.label} is on {task['id']} ({requirement.kind}, from {requirement.origin()}){swap}; {said}{told}"
+    return json.dumps(result, ensure_ascii=False, sort_keys=True)
 
 
 def narrowing_refusal(grant: str) -> str:
@@ -222,7 +301,6 @@ async def narrowed(orch: Orchestrators, project: Project, task: dict[str, Any], 
     fix it" once became "read-only, no configuration changes, nothing until a report and a
     permission" in the brief, and the operator learnt it only from the result."""
     reason = " ".join((why or "").split())
-    await _journal(orch, project, f"Added a condition to what the operator allowed on {task['id']} ({grant.label} \"{_clip(grant.text, 80)}\"): {condition.label} {condition.text} — why: {reason}", task["id"], kind="narrowing")
     notifications = orch.app.notifications
     if notifications is None:
         return
@@ -346,4 +424,4 @@ OPS: dict[str, Callable[..., Awaitable[str]]] = {
     "decide": decide,
 }
 
-__all__ = ["OPS", "card", "deliver", "narrowed", "narrowing_refusal", "source_of"]
+__all__ = ["OPS", "card", "narrowed", "narrowing_refusal", "source_of"]

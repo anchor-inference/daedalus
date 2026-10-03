@@ -213,12 +213,23 @@ class ControlStore:
             response = await effect(conn, mutation)
             if not isinstance(response, dict) or set(response) & {"receipt_id", "entity_revision"}:
                 raise ValueError("the effect must return domain fields, without receipt metadata")
-            if entity.kind == "collection":
-                await conn.execute("UPDATE domain_collection_revisions SET revision = revision + 1 WHERE scope_kind = ? AND scope_id = ? AND revision = ?", (scope.kind, scope.id, current))
-            else:
-                table = "board_tasks" if entity.kind == "task" else "projects"
-                await conn.execute(f"UPDATE {table} SET entity_revision = entity_revision + 1 WHERE id = ? AND entity_revision = ?", (entity.id, current))
+            # Legacy writes advance revisions through triggers. BEGIN IMMEDIATE keeps those
+            # intermediate values private; a compound command publishes one revision, matching
+            # the mutation used by its immutable records and events.
+            after_effect = await self._entity(conn, scope, entity)
+            if after_effect < current:
+                raise ControlConflict("the effect replaced the command's revision")
+            if after_effect != mutation.entity_revision:
+                if entity.kind == "collection":
+                    cursor = await conn.execute("UPDATE domain_collection_revisions SET revision = ? WHERE scope_kind = ? AND scope_id = ? AND revision = ?", (mutation.entity_revision, scope.kind, scope.id, after_effect))
+                else:
+                    table = "board_tasks" if entity.kind == "task" else "projects"
+                    cursor = await conn.execute(f"UPDATE {table} SET entity_revision = ? WHERE id = ? AND entity_revision = ?", (mutation.entity_revision, entity.id, after_effect))
+                if cursor.rowcount != 1:
+                    raise ControlConflict("the command could not publish its revision")
             revision = await self._entity(conn, scope, entity)
+            if revision != mutation.entity_revision:
+                raise ControlConflict("the command published an unexpected revision", current_revision=revision)
             response = {**response, "receipt_id": mutation.receipt_id, "entity_revision": revision}
             await conn.execute(
                 "INSERT INTO operation_receipts(id,scope_kind,scope_id,project_id,actor_id,operation_kind,client_operation_id,grant_id,request_entity_revision,payload_hash,entity_revision,state,response_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",

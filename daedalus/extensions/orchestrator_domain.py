@@ -18,7 +18,7 @@ from typing import Any
 import aiosqlite
 
 from daedalus.extensions.ci_observations import ci_readiness
-from daedalus.extensions.task_contract import REQUIREMENT_KINDS, check_items
+from daedalus.extensions.task_contract import REQUIREMENT_KINDS, RETURNED, check_items
 from daedalus.stores.control import ControlStore, Principal
 from daedalus.stores.database import Database
 from daedalus.stores.knowledge import enqueue_artifact_change
@@ -164,9 +164,9 @@ async def replace_contract(
 
 
 async def capture_contract_change(conn: aiosqlite.Connection, task_id: str, *, origin_kind: str,
-                                  origin_ref: str = "") -> int:
+                                  origin_ref: str = "", previous_title: str | None = None) -> int:
     """Version a legacy card edit in its own transaction when its requirements or scope changed."""
-    task = await _one(conn, "SELECT contract_revision, checklist, acceptance, brief_json, depends_on,folder_id FROM board_tasks WHERE id = ?",
+    task = await _one(conn, "SELECT title,contract_revision, checklist, acceptance, brief_json, depends_on,folder_id FROM board_tasks WHERE id = ?",
                       (task_id,))
     if task is None:
         raise KeyError(task_id)
@@ -182,6 +182,7 @@ async def capture_contract_change(conn: aiosqlite.Connection, task_id: str, *, o
     old.setdefault("folder_id", None)
     old.setdefault("file_ids", [])
     old.setdefault("ci_checks", [])
+    old.setdefault("title", previous_title if previous_title is not None else task["title"])
     old_checks = old.get("checklist", [])
     old_by_text: dict[str, list[str]] = {}
     for old_item in old_checks:
@@ -199,7 +200,7 @@ async def capture_contract_change(conn: aiosqlite.Connection, task_id: str, *, o
         occupied.add(str(identifier))
         check_snapshot.append({"id": str(identifier), "text": text})
     check_snapshot = _checks(check_snapshot)
-    snapshot = {"requirements": [dict(row) for row in requirements], "checklist": check_snapshot,
+    snapshot = {"title": task["title"], "requirements": [dict(row) for row in requirements], "checklist": check_snapshot,
                 "acceptance": task["acceptance"], "depends_on": _json(task["depends_on"], []),
                 "brief": _json(task["brief_json"], {}), "folder_id": task["folder_id"],
                 "file_ids": [row["file_id"] for row in attached], "ci_checks": old["ci_checks"]}
@@ -440,6 +441,7 @@ async def record_verdict(
                               (result["task_id"], result["contract_revision"]))
         snapshot = _json(contract["snapshot_json"], {}) if contract is not None else {}
         required = {item["id"] for item in snapshot.get("checklist", [])}
+        required.update(item["id"] for item in snapshot.get("requirements", []))
         if required:
             covered = set()
             for evidence_id in evidence:
@@ -447,7 +449,7 @@ async def record_verdict(
                 if row is not None:
                     covered.add(row["criterion_id"])
             if not required.issubset(covered):
-                raise DomainConflict("not every acceptance check has applicable evidence")
+                raise DomainConflict("not every acceptance check or requirement has applicable evidence")
     await conn.execute(
         "INSERT INTO review_verdicts(id, result_id, contract_revision, reviewer_actor_id, verification, accepted,"
         " head, base, environment_digest, evidence_json, reason, self_review_waiver_receipt_id, created_at)"
@@ -615,7 +617,7 @@ async def return_result(
                            (_now(), task["current_attempt_id"]))
     await conn.execute("UPDATE board_tasks SET status = 'todo',acceptance_state = 'returned',"
                        " current_attempt_id = NULL,notes = substr(notes || ?, -8000) WHERE id = ?",
-                       (f"\n[{_now()[:16]}] returned: {reason.strip()}", task_id))
+                       (f"\n[{_now()[:16]}] {RETURNED}{reason.strip()}", task_id))
     await conn.execute("UPDATE open_loops SET closed_at = ?, closed_by = 'system', decision = ?"
                        " WHERE task_id = ? AND contract_revision = ? AND attempt_id IS ?"
                        " AND cause = 'report_done' AND closed_at IS NULL",

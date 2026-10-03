@@ -204,6 +204,47 @@ class KnowledgeStore:
                     row["source_status"] = "current" if revision == row["source_revision"] and digest == row["source_digest"] else "stale"
         return rows
 
+    async def inspection(self, project_id: str, *, limit: int, before: str | None = None) -> dict[str, Any]:
+        """Page current fact versions and their source freshness under the same revision snapshot."""
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("knowledge page size must be between one and one hundred")
+        scope = Scope("project", project_id)
+        control = ControlStore(self.db)
+        async with self.db.transaction() as conn:
+            project_revision = await control._entity(conn, scope, Entity("project", project_id))
+            collection_revision = await control._entity(conn, scope, Entity("collection", project_id))
+            args: list[Any] = [project_id]
+            page = ""
+            if before:
+                cursor = await conn.execute("SELECT created_at,fact_id FROM knowledge_fact_versions"
+                                            " WHERE project_id = ? AND fact_id = ? ORDER BY version DESC LIMIT 1",
+                                            (project_id, before))
+                boundary = await cursor.fetchone()
+                await cursor.close()
+                if boundary is None:
+                    raise KnowledgeConflict("knowledge page cursor is not in this project")
+                page = " AND (v.created_at < ? OR (v.created_at = ? AND v.fact_id < ?))"
+                args.extend([boundary["created_at"], boundary["created_at"], boundary["fact_id"]])
+            args.append(limit + 1)
+            cursor = await conn.execute("SELECT v.* FROM knowledge_fact_versions v JOIN"
+                                        " (SELECT fact_id,MAX(version) version FROM knowledge_fact_versions"
+                                        " WHERE project_id = ? GROUP BY fact_id) h"
+                                        " ON h.fact_id = v.fact_id AND h.version = v.version WHERE 1 = 1"
+                                        + page + " ORDER BY v.created_at DESC,v.fact_id DESC LIMIT ?", args)
+            found = await cursor.fetchall()
+            await cursor.close()
+            facts = [_view(row) for row in found[:limit]]
+            for row in facts:
+                try:
+                    revision, digest = await self._source(conn, project_id, row["source_kind"], row["source_id"])
+                except KnowledgeConflict:
+                    row["source_status"] = "missing"
+                else:
+                    row["source_status"] = "current" if revision == row["source_revision"] and digest == row["source_digest"] else "stale"
+        return {"project_id": project_id, "entity_revision": project_revision,
+                "collection_revision": collection_revision, "facts": facts,
+                "next_before": facts[-1]["fact_id"] if len(found) > limit else None}
+
     async def review(
         self, fact_id: str, project_id: str, *, expected_version: int, verdict: str,
         actor: str, reason: str,

@@ -7,7 +7,7 @@ import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
@@ -26,17 +26,17 @@ class CandidateBody(BaseModel):
     source_kind: Literal["file", "manifest", "run"]
     source_id: str = Field(min_length=1, max_length=128)
     scope: Literal["project"] = "project"
-    expected_collection_revision: int = Field(ge=1)
+    expected_collection_revision: int = Field(ge=1, strict=True)
     client_operation_id: str = Field(min_length=1, max_length=160)
 
 
 class ReviewBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    expected_version: int = Field(ge=1)
+    expected_version: int = Field(ge=1, strict=True)
     verdict: Literal["review", "promote", "invalidate", "forget", "rollback"]
     reason: str = Field(min_length=1, max_length=1000)
-    expected_entity_revision: int = Field(ge=1)
+    expected_entity_revision: int = Field(ge=1, strict=True)
     client_operation_id: str = Field(min_length=1, max_length=160)
 
 
@@ -44,8 +44,8 @@ class RevalidateBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     queue_id: str = Field(min_length=1, max_length=64)
-    expected_version: int = Field(ge=1)
-    expected_entity_revision: int = Field(ge=1)
+    expected_version: int = Field(ge=1, strict=True)
+    expected_entity_revision: int = Field(ge=1, strict=True)
     client_operation_id: str = Field(min_length=1, max_length=160)
 
 
@@ -59,20 +59,49 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(404, "no such project")
 
     @api.get("/api/projects/{project_id}/knowledge")
-    async def list_knowledge(project_id: str, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
+    async def list_knowledge(project_id: str, limit: int = Query(default=25, ge=1, le=100),
+                             before: str | None = Query(default=None, max_length=128),
+                             who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        Principal.operator(who)
         await project_exists(project_id)
-        return await store().list_with_freshness(project_id)
+        try:
+            return await store().inspection(project_id, limit=limit, before=before)
+        except KnowledgeConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
 
-    @api.get("/api/projects/{project_id}/knowledge/{fact_id}/history")
-    async def fact_history(project_id: str, fact_id: str, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
+    @api.get("/api/projects/{project_id}/knowledge/sources")
+    async def knowledge_sources(project_id: str, who: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
+        Principal.operator(who)
         await project_exists(project_id)
         rows = await app.db.fetchall(
-            "SELECT * FROM knowledge_fact_versions WHERE project_id = ? AND fact_id = ? ORDER BY version",
-            (project_id, fact_id),
+            "SELECT DISTINCT f.id source_id,'file' source_kind,f.name label FROM files f"
+            " JOIN file_access a ON a.file_id = f.id WHERE a.scope = ? ORDER BY f.created_at DESC,f.id DESC LIMIT 50",
+            (project_id,),
+        )
+        manifests = await app.db.fetchall(
+            "SELECT m.id source_id,'manifest' source_kind,m.artifact_key label FROM artifact_manifests m"
+            " LEFT JOIN board_tasks t ON t.id = m.task_id WHERE COALESCE(m.project_id,t.project_id) = ?"
+            " AND NOT EXISTS (SELECT 1 FROM artifact_manifests later WHERE later.artifact_key = m.artifact_key"
+            " AND later.task_id IS m.task_id AND later.project_id IS m.project_id"
+            " AND later.artifact_revision > m.artifact_revision) ORDER BY m.created_at DESC,m.id DESC LIMIT 50",
+            (project_id,),
+        )
+        return [dict(row) for row in (*rows, *manifests)]
+
+    @api.get("/api/projects/{project_id}/knowledge/{fact_id}/history")
+    async def fact_history(project_id: str, fact_id: str, limit: int = Query(default=25, ge=1, le=100),
+                           before_version: int | None = Query(default=None, ge=1, le=2**63 - 1),
+                           _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
+        await project_exists(project_id)
+        rows = await app.db.fetchall(
+            "SELECT * FROM knowledge_fact_versions WHERE project_id = ? AND fact_id = ? AND version < ?"
+            " ORDER BY version DESC LIMIT ?", (project_id, fact_id, before_version or 2**63 - 1, limit),
         )
         if not rows:
-            raise HTTPException(404, "no such fact")
-        return [dict(row) for row in rows]
+            exists = await app.db.fetchone("SELECT 1 FROM knowledge_fact_versions WHERE project_id = ? AND fact_id = ? LIMIT 1", (project_id, fact_id))
+            if exists is None:
+                raise HTTPException(404, "no such fact")
+        return [dict(row) for row in reversed(rows)]
 
     @api.get("/api/projects/{project_id}/knowledge/stale")
     async def stale_knowledge(project_id: str, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:

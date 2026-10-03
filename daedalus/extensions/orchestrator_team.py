@@ -578,6 +578,22 @@ async def assign(
             f"task {existing['id']} is \"{existing['title']}\"{at}: \"{renamed}\" is other work, which is a card of its own — Assign without "
             "task_id. If it is the same work under a better title, say so in reason"
         )
+    if existing is not None:
+        ownership = await orch.manager.db.fetchone(
+            "SELECT t.current_attempt_id,"
+            " EXISTS(SELECT 1 FROM runtime_exit_observations e"
+            " WHERE e.attempt_id = t.current_attempt_id) AS exited,"
+            " EXISTS(SELECT 1 FROM effect_outbox o WHERE o.kind = 'task.launch'"
+            " AND o.state IN ('pending','claimed','unknown')"
+            " AND json_extract(o.payload_json,'$.control.task_id') = t.id) AS pending_launch"
+            " FROM board_tasks t WHERE t.id = ?", (existing["id"],))
+        if ownership is not None and ((ownership["current_attempt_id"] and not ownership["exited"])
+                                      or ownership["pending_launch"]):
+            # An edit followed by a refused launch used to leave the old worker running under
+            # a newly written title and brief, with no command tying them to the same attempt.
+            raise Refused("stop or reconcile the current execution before reassigning or changing and relaunching this task")
+        reopen_after_exit = bool(ownership is not None and ownership["current_attempt_id"]
+                                 and ownership["exited"] and existing["status"] == "doing")
     try:
         commands = BoardCommands(orch.manager.db, bus=orch.manager.bus)
         scope = Scope("project", project.id)
@@ -608,9 +624,11 @@ async def assign(
             changed = await commands.update(principal, scope, task["id"], client_operation_id=client_operation_id,
                                             expected_entity_revision=expected_entity_revision,
                                             title=renamed, brief=given or None, depends_on=depends_on, priority=priority,
+                                            status="todo" if reopen_after_exit else None,
                                             checklist=wanted_checks or (split_checks(merged["done_when"])
                                                                           if "done_when" in given else None),
                                             note=(f"reassigned from {owner.name}: {handover}" if handover and owner else ""),
+                                            reassignment_reason=handover or None,
                                             assignee_staff_id=member.id, folder_id=target.id if target else None,
                                             file_ids=file_ids, requirements=handoff_requirements)
             task = await board.get(changed["task_id"], actor=session_id)

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import sqlite3
+import uuid
 import zipfile
 from copy import deepcopy
 
 import pytest
 from pydantic import ValidationError
 
+from daedalus.extensions import workspace_archive
 from daedalus.extensions.api_workspace_archive import ImportInput
 from daedalus.extensions.orchestrator_domain import OriginalReports
 from daedalus.extensions.workspace_archive import ArchiveRefused, WorkspaceArchive, _archive_bytes, check_archive
@@ -24,6 +27,28 @@ from daedalus.stores.files import FileStore
 def test_import_revision_requires_an_integer() -> None:
     with pytest.raises(ValidationError):
         ImportInput(archive_artifact_id="a" * 64, expected_collection_revision="2", client_operation_id="restore")
+
+
+@pytest.mark.asyncio
+async def test_project_without_folders_remains_portable(tmp_path) -> None:
+    db = Database(tmp_path / "state.sqlite")
+    await db.open()
+    try:
+        files = FileStore(db, FileBlobStore(tmp_path / "blobs"))
+        await db.execute("INSERT INTO projects(id,name,created_at,settings) VALUES (?,?,?,?)",
+                         ("source", "Notes", "2026-01-01", "{}"))
+        service = WorkspaceArchive(db, files, restore_root=tmp_path / "managed")
+        archive = check_archive(await service.export("source"))
+        assert archive.folder_handles == []
+        preview = await service.preview(archive)
+        assert preview["valid"] is True
+        revision = await ControlStore(db).revision(Scope("global", "global"), Entity("collection", "global"))
+        restored = await service.import_command(Principal("operator:1", "operator"), archive,
+                                                expected_collection_revision=revision, client_operation_id="restore")
+        assert restored["runtime_state"] == "inactive"
+        assert await db.fetchall("SELECT * FROM project_folders WHERE project_id=?", (restored["project_id"],)) == []
+    finally:
+        await db.close()
 
 
 @pytest.fixture
@@ -73,6 +98,17 @@ async def archive_store(tmp_path):
         await db.execute(
             "INSERT INTO task_contract_versions(task_id,contract_revision,origin_kind,snapshot_json,created_at) VALUES (?,?,?,?,?)",
             ("task", 1, "operator", '{"requirements":[],"depends_on":[]}', "2026-01-01"),
+        )
+        await db.execute(
+            "INSERT INTO board_workflow_runs(id,project_id,task_id,definition_digest,definition,budget,status,created_at,updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            ("workflow", "source", "task", hashlib.sha256(b"workflow").hexdigest(),
+             '{"nodes":[{"id":"node","kind":"task","task_id":"task","capabilities":["board.read"]}]}',
+             "{}", "completed", "2026-01-01", "2026-01-01"),
+        )
+        await db.execute(
+            "INSERT INTO board_workflow_steps(run_id,node_id,kind,status) VALUES (?,?,?,?)",
+            ("workflow", "node", "task", "completed"),
         )
         await db.execute(
             "INSERT INTO staff_sessions(id,staff_id,kind,task_id,status,status_at,started_at,team_token_hash) VALUES (?,?,?,?,?,?,?,?)",
@@ -161,6 +197,8 @@ async def test_private_archive_roundtrips_transcript_contract_report_and_blob(ar
     checked = check_archive(data)
     assert checked.counts["session_messages"] == 1
     assert checked.counts["task_contract_versions"] == 1
+    assert checked.counts["board_workflow_runs"] == 1
+    assert checked.counts["board_workflow_steps"] == 1
     assert checked.counts["files"] == 1
     assert checked.counts["events"] == 1
     assert checked.counts["dispatch_messages"] == 1
@@ -176,6 +214,7 @@ async def test_private_archive_roundtrips_transcript_contract_report_and_blob(ar
     assert restored != "source"
     assert result["runtime_state"] == "inactive"
     assert result["archived_only"]["app_events"] == 1
+    assert result["archived_only"]["board_workflow_runs"] == 1
     assert await db.fetchall("PRAGMA foreign_key_check") == []
     task = await db.fetchone("SELECT id,status,current_attempt_id,accepted_result_id FROM board_tasks WHERE project_id = ?", (restored,))
     assert task["status"] == "blocked" and task["current_attempt_id"] is None
@@ -206,6 +245,8 @@ async def test_private_archive_roundtrips_transcript_contract_report_and_blob(ar
     assert await db.fetchone("SELECT 1 FROM planning_budgets WHERE project_id = ?", (restored,))
     assert await db.fetchone("SELECT 1 FROM file_transfers WHERE scope = ?", (restored,))
     assert await db.fetchone("SELECT 1 FROM app_events WHERE project_id = ?", (restored,)) is None
+    assert await db.fetchone("SELECT 1 FROM board_workflow_runs WHERE project_id = ?", (restored,)) is None
+    assert (await service.preview(checked))["capability_handles"] == ["board.read"]
     assert (await service.preview(checked))["id_map"]["board_tasks"]["task"] == task["id"]
     assert await service.import_command(principal, checked, expected_collection_revision=revision, client_operation_id="restore-one") == result
     with pytest.raises(ControlConflict):
@@ -266,5 +307,105 @@ async def test_failed_import_removes_newly_staged_blobs(archive_store, tmp_path)
             assert not files.blobs.path_of("files", digest).exists()
         for digest in invalid.session_blobs:
             assert not files.blobs.path_of(TENANT, digest).exists()
+    finally:
+        await destination.close()
+
+
+async def test_selected_workspace_file_restores_under_new_managed_folder(archive_store, tmp_path) -> None:
+    db, _, service = archive_store
+    await db.execute("UPDATE project_folders SET env = ? WHERE id = 'folder'", (db.local_env,))
+    source_folder = tmp_path / "secret-location"
+    (source_folder / "notes" / "nested").mkdir(parents=True)
+    (source_folder / "notes" / "nested" / "draft.txt").write_bytes(b"Portable draft")
+    data = await service.export("source", [{"folder_id": "folder", "path": "notes/nested/draft.txt"}])
+    checked = check_archive(data)
+    assert checked.selected_files[0]["path"] == "notes/nested/draft.txt"
+    with zipfile.ZipFile(io.BytesIO(data)) as zipped:
+        assert b"secret-location" not in zipped.read("workspace.json")
+        assert zipped.read("workspace-files/folder/notes/nested/draft.txt") == b"Portable draft"
+    principal = Principal.operator({"via": "token", "user_id": 1})
+    revision = await ControlStore(db).revision(Scope("global", "global"), Entity("collection", "global"))
+    imported = await service.import_command(principal, checked, expected_collection_revision=revision, client_operation_id="files")
+    folder = await db.fetchone("SELECT path,env FROM project_folders WHERE project_id = ?", (imported["project_id"],))
+    assert folder["env"] == db.local_env
+    assert (service.restore_root / imported["project_id"] / "folder" / "notes" / "nested" / "draft.txt").read_bytes() == b"Portable draft"
+    assert str(folder["path"]) == str(service.restore_root / imported["project_id"] / "folder")
+    (service.restore_root / imported["project_id"] / "folder" / "notes" / "nested" / "draft.txt").write_bytes(b"edited after restore")
+    assert await service.import_command(principal, checked, expected_collection_revision=revision, client_operation_id="files") == imported
+
+
+async def test_selected_workspace_file_rolls_back_with_failed_import(archive_store, tmp_path) -> None:
+    db, _, service = archive_store
+    await db.execute("UPDATE project_folders SET env = ? WHERE id = 'folder'", (db.local_env,))
+    source_folder = tmp_path / "secret-location"
+    source_folder.mkdir()
+    (source_folder / "note.txt").write_bytes(b"Private note")
+    checked = check_archive(await service.export("source", [{"folder_id": "folder", "path": "note.txt"}]))
+    rows = deepcopy(checked.rows)
+    rows["result_receipts"][0]["outcome"] = "invalid"
+    invalid = check_archive(_archive_bytes(rows, checked.blobs, checked.report_blobs,
+                                           checked.config_handles, checked.run_blobs,
+                                           checked.folder_handles, checked.session_blobs,
+                                           checked.selected_files, checked.workspace_blobs))
+    destination = Database(tmp_path / "destination" / "state.sqlite")
+    await destination.open()
+    try:
+        files = FileStore(destination, FileBlobStore(tmp_path / "destination" / "blobs"))
+        restored = WorkspaceArchive(destination, files)
+        with pytest.raises(sqlite3.IntegrityError):
+            await restored.import_command(Principal.operator({"via": "token", "user_id": 1}), invalid,
+                                          expected_collection_revision=1, client_operation_id="invalid-files")
+        assert not (restored.restore_root / uuid.uuid5(uuid.NAMESPACE_URL, "archive:" + invalid.digest).hex).exists()
+        assert await destination.fetchone("SELECT 1 FROM projects") is None
+    finally:
+        await destination.close()
+
+
+async def test_archive_refuses_unknown_version_and_escaping_selected_path(archive_store, tmp_path) -> None:
+    db, _, service = archive_store
+    await db.execute("UPDATE project_folders SET env = ? WHERE id = 'folder'", (db.local_env,))
+    source_folder = tmp_path / "secret-location"
+    source_folder.mkdir()
+    (source_folder / "note.txt").write_bytes(b"note")
+    checked = check_archive(await service.export("source", [{"folder_id": "folder", "path": "note.txt"}]))
+    bad_path = dict(checked.selected_files[0], path="../escape")
+    with pytest.raises(ArchiveRefused):
+        check_archive(_archive_bytes(checked.rows, checked.blobs, checked.report_blobs,
+                                     checked.config_handles, checked.run_blobs, checked.folder_handles,
+                                     checked.session_blobs, [bad_path], {"folder/../escape": b"note"}))
+    original = await service.export("source")
+    with zipfile.ZipFile(io.BytesIO(original)) as source:
+        entries = {name: source.read(name) for name in source.namelist()}
+    manifest = json.loads(entries["manifest.json"])
+    manifest["format"] = 999
+    entries["manifest.json"] = json.dumps(manifest).encode()
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as destination:
+        for name, content in entries.items():
+            destination.writestr(name, content)
+    with pytest.raises(ArchiveRefused):
+        check_archive(output.getvalue())
+
+
+async def test_staging_failure_removes_new_restore_folder(archive_store, tmp_path, monkeypatch) -> None:
+    db, _, source = archive_store
+    await db.execute("UPDATE project_folders SET env = ? WHERE id = 'folder'", (db.local_env,))
+    source_folder = tmp_path / "secret-location"
+    source_folder.mkdir()
+    (source_folder / "note.txt").write_bytes(b"note")
+    checked = check_archive(await source.export("source", [{"folder_id": "folder", "path": "note.txt"}]))
+    destination = Database(tmp_path / "destination" / "state.sqlite")
+    await destination.open()
+    try:
+        service = WorkspaceArchive(destination, FileStore(destination, FileBlobStore(tmp_path / "destination" / "blobs")))
+        def fail_stage(*_args):
+            raise RuntimeError("staging failed")
+        monkeypatch.setattr(workspace_archive, "_stage", fail_stage)
+        with pytest.raises(RuntimeError, match="staging failed"):
+            await service.import_command(Principal.operator({"via": "token", "user_id": 1}), checked,
+                                         expected_collection_revision=1, client_operation_id="stage-failed")
+        restored = uuid.uuid5(uuid.NAMESPACE_URL, "archive:" + checked.digest).hex
+        assert not (service.restore_root / restored).exists()
+        assert await destination.fetchone("SELECT 1 FROM projects") is None
     finally:
         await destination.close()
