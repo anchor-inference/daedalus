@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -30,7 +31,9 @@ from daedalus.extensions.orchestrator_domain import (
     submit_result,
     workflow_readiness,
 )
+from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
+from daedalus.stores.outbox import OutboxStore
 
 
 @pytest.fixture
@@ -100,6 +103,16 @@ async def test_result_review_and_acceptance_pin_exact_contract_and_evidence(doma
             await record_verdict(conn, verdict_id="self", result_id="result1", reviewer_actor_id="worker",
                                  verification="verified", accepted=True, head=None, base=None,
                                  environment_digest="env1", evidence_ids=["evidence1"], reason="")
+        await conn.execute("INSERT INTO operation_receipts(id,scope_kind,scope_id,actor_id,operation_kind,"
+                           " client_operation_id,payload_hash,entity_revision,state,response_json,created_at)"
+                           " VALUES ('unrelated','global','global','reviewer','unrelated','call1','hash',1,'committed',"
+                           " '{\"approved\":true,\"task_id\":\"task1\",\"result_id\":\"result1\",\"contract_revision\":1}',"
+                           " '2026-01-01')")
+        with pytest.raises(DomainConflict, match="worker"):
+            await record_verdict(conn, verdict_id="self", result_id="result1", reviewer_actor_id="worker",
+                                 verification="verified", accepted=True, head=None, base=None,
+                                 environment_digest="env1", evidence_ids=["evidence1"], reason="",
+                                 self_review_waiver_receipt_id="unrelated")
         await record_verdict(conn, verdict_id="verdict1", result_id="result1", reviewer_actor_id="reviewer",
                              verification="verified", accepted=True, head=None, base=None,
                              environment_digest="env1", evidence_ids=["evidence1"], reason="checked")
@@ -185,6 +198,30 @@ async def test_duplicate_check_ids_rejected_and_reorder_preserves_ids(domain_db:
         ("C2", "Other"), ("C1", "Clear result")]
 
 
+async def test_operator_merge_effect_is_claimable_after_worker_attempt_completed(domain_db: Database) -> None:
+    await domain_db.execute("INSERT INTO execution_attempts(id,task_id,contract_revision,host_generation,"
+                            " fence_token_hash,state,created_at,updated_at)"
+                            " VALUES ('attempt1','task1',1,1,'fence','completed','2026-01-01','2026-01-01')")
+    await domain_db.execute("UPDATE board_tasks SET current_attempt_id = 'attempt1' WHERE id = 'task1'")
+    principal = Principal.operator({"via": "token", "user_id": 1})
+    control = ControlStore(domain_db)
+    scope = Scope("global", "global")
+
+    async def queue(conn: Any, mutation: Any) -> dict[str, Any]:
+        action_id = await OutboxStore.enqueue(conn, mutation, principal, kind="review.merge",
+                                               operation="review.merge", payload={"task_id": "task1"},
+                                               effects=("git.merge",), task_id="task1")
+        return {"action_id": action_id}
+
+    revision = await control.revision(scope, Entity("task", "task1"))
+    queued = await control.mutate(principal, scope, "review.merge", "merge1", revision,
+                                  Entity("task", "task1"), {"task_id": "task1"}, queue,
+                                  effects=("git.merge",))
+    claim = await OutboxStore(domain_db).claim(("review.merge",))
+    assert claim is not None and claim.id == queued["action_id"]
+    assert claim.attempt_id is None
+
+
 async def test_legacy_dependency_requires_resolution_and_claim_is_single(domain_db: Database) -> None:
     await domain_db.execute("INSERT INTO board_tasks(id, title, status, priority, acceptance, checklist, depends_on,"
                             " created_at, updated_at, brief_json, contract_revision) VALUES"
@@ -215,7 +252,7 @@ async def test_legacy_dependency_requires_resolution_and_claim_is_single(domain_
 async def test_workflow_rejects_cycle_and_uses_typed_gates(domain_db: Database) -> None:
     await domain_db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = 'task1'")
     async with domain_db.transaction() as conn:
-        steps = [{"id": "work", "kind": "work"}, {"id": "review", "kind": "review", "gate": {"human_ack_id": "ack"}}]
+        steps = [{"id": "work", "kind": "work"}, {"id": "review", "kind": "review", "gate": {"not_before": "2999-01-01T00:00:00+00:00"}}]
         with pytest.raises(ValueError, match="cycle"):
             await configure_workflow(conn, task_id="task1", steps=steps, edges=[("work", "review"), ("review", "work")])
         with pytest.raises(ValueError, match="unsupported"):
@@ -224,7 +261,7 @@ async def test_workflow_rejects_cycle_and_uses_typed_gates(domain_db: Database) 
         state = await workflow_readiness(conn, "task1")
         assert state[0]["ready"] is False if state[0]["step_id"] == "review" else True
         assert next(item for item in state if item["step_id"] == "review")["blockers"] == [
-            "predecessor_step_incomplete", "human_ack_missing"]
+            "predecessor_step_incomplete", "not_before"]
 
 
 async def test_next_action_requires_current_prerequisites_and_is_replaced_atomically(domain_db: Database) -> None:

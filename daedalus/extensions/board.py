@@ -32,7 +32,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.notifications import Draft
-from daedalus.extensions.orchestrator_domain import capture_contract_change
+from daedalus.extensions.orchestrator_domain import capture_contract_change, check_planning_capacity
 from daedalus.extensions.task_contract import Contracts
 
 if TYPE_CHECKING:
@@ -118,6 +118,8 @@ class Board:
             await self._assignee(project_id, assignee_staff_id)
         status = "blocked" if await self._has_open_deps(deps) else "todo"
         async with self.app.db.transaction() as conn:
+            if project_id is not None:
+                await check_planning_capacity(conn, project_id, deps)
             await conn.execute(
             "INSERT INTO board_tasks(id, title, status, priority, acceptance, checklist, depends_on, session_id, origin_session_id, notes, created_at, updated_at, project_id, assignee_staff_id, brief_json)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -307,6 +309,8 @@ class Board:
         if status and status not in STATUSES:
             raise ValueError(f"status must be one of {', '.join(STATUSES)}")
         moving = status is not None and status != task["status"]
+        if moving and status == "done":
+            raise ValueError("a task finishes only through exact-result acceptance")
         if who.kind == "staff":
             # A staff member works its own tasks and reports; the plan of the team is the orchestrator's.
             if moving and task.get("assignee_staff_id") != who.staff_id:
@@ -317,10 +321,6 @@ class Board:
                 raise ValueError("a staff member does not reassign or rewrite tasks; ask the orchestrator")
         if who.kind == "agent" and assignee_staff_id:
             raise ValueError("only the operator or the project's orchestrator assigns tasks")
-        if moving and status == "done" and task.get("branch") and task.get("merge_state") != "merged":
-            # The work is on a staff branch nobody has merged: "done" would call finished what is not
-            # in the folder yet. Acceptance from review is what merges it.
-            raise ValueError(f"task {task_id} has unmerged work on branch {task['branch']}; accept it from review, which merges it")
         if assignee_staff_id:
             await self._assignee(task.get("project_id"), assignee_staff_id)
         new_brief = self._merge_brief(task["brief"], brief) if brief is not None else None
@@ -436,14 +436,6 @@ class Board:
             if row is not None:
                 frontier.extend(json.loads(row["depends_on"] or "[]"))
         return False
-
-    async def accept(self, task_id: str, *, by: str = "operator") -> dict[str, Any]:
-        """Refuse the old one-tap operation; acceptance requires an exact reviewed result receipt."""
-        raise ValueError("acceptance requires a result, verdict, and current contract; use the exact-result accept command")
-
-    async def set_acceptance(self, task_id: str, state: str) -> None:
-        """How far a card's result is accepted (see :mod:`daedalus.extensions.task_contract`)."""
-        await self.app.db.execute("UPDATE board_tasks SET acceptance_state = ? WHERE id = ? AND project_id IS NOT NULL", (state, task_id))
 
     async def needs_you(self, project_id: str) -> list[dict[str, Any]]:
         """What in this project waits on the operator: the open requests routed to them, oldest first.
@@ -664,8 +656,6 @@ class Board:
             return await self.update(kwargs.pop("task_id"), **kwargs)
         if op == "list":
             return await self.list(kwargs.get("status"), include_done=bool(kwargs.get("include_done", False)), actor=kwargs.get("actor"), project_id=kwargs.get("project_id"))
-        if op == "accept":
-            return await self.accept(kwargs["task_id"], by=kwargs.get("by", "operator"))
         if op == "needs_you":
             return await self.needs_you(kwargs["project_id"])
         if op == "get":

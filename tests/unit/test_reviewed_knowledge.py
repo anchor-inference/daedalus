@@ -8,7 +8,7 @@ import pytest
 
 from daedalus.stores.control import ControlConflict, Principal
 from daedalus.stores.database import Database
-from daedalus.stores.knowledge import KnowledgeConflict, KnowledgeStore
+from daedalus.stores.knowledge import KnowledgeConflict, KnowledgeStore, enqueue_artifact_change
 
 
 @pytest.fixture
@@ -109,8 +109,21 @@ async def test_task_manifest_source_becomes_stale_at_next_artifact_revision(db: 
         "INSERT INTO artifact_manifests(id,task_id,artifact_kind,artifact_key,artifact_revision,digest,size_bytes,created_at) "
         "VALUES ('manifest-two','task','document','draft',2,'digest-two',12,'now')"
     )
+    async with db.transaction() as conn:
+        assert await enqueue_artifact_change(
+            conn, task_id="task", project_id="project", artifact_key="draft", artifact_revision=2
+        ) == 1
     assert await store.context_facts("project") == []
     assert (await store.list_with_freshness("project"))[0]["source_status"] == "stale"
+    pending = await store.stale_queue("project")
+    assert len(pending) == 1
+    assert pending[0]["replacement_manifest_id"] == "manifest-two"
+    resolved = await store.revalidate_command(
+        Principal.operator({"via": "token", "user_id": 1}), "project", candidate["fact_id"], pending[0]["id"],
+        expected_revision=1, expected_version=2, client_operation_id="revalidate-stale-fact",
+    )
+    assert resolved["status"] == "invalidated"
+    assert await store.stale_queue("project") == []
 
 
 async def test_compaction_captures_exact_contract_revision_before_rewrite(db: Database) -> None:

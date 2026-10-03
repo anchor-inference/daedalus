@@ -252,6 +252,9 @@ class Settings(BaseSettings):
     agent's. ``None`` in a container, where the file is interpolated into a compose project the agent
     cannot reach anyway."""
 
+    remote_ssh_identity_file: Path | None = Field(default=None, validation_alias="DAEDALUS_REMOTE_SSH_IDENTITY_FILE")
+    """Operator-provided client key for explicitly paired remote hosts; absent disables SSH probes and transfers."""
+
     rebuild_trigger_dir: Path = Path("/run/daedalus-rebuild")
     """Shared with the rebuilder sidecar — the only container that can reach Docker. It is a rebuild
     channel only while something is on the other end of it, which the sidecar says by keeping a
@@ -1196,7 +1199,7 @@ ORCHESTRATOR_ONLY_TOOLS = [
     "Dismiss",
     "Assign",
     "Require",
-    "Accept",
+    "ReviewResult",
     "Decide",
     "Tell",
     "ReadStaff",

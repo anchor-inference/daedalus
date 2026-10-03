@@ -400,7 +400,7 @@ async def tasks(
                 current = await board.get(task_id, actor=session_id)
                 open_checks = [f"C{i}" for i, c in enumerate(current["checklist"], start=1) if not c.get("done")]
                 if open_checks and current["status"] != "done":
-                    raise Refused(f"task {task_id} has checks not marked ({', '.join(open_checks)}): Accept(task_id='{task_id}', checks=[…]) records them once the work is handed in")
+                    raise Refused(f"task {task_id} has unchecked criteria ({', '.join(open_checks)}): review the current result with bound evidence, then the operator accepts it")
             waits = " ".join((waiting_on or "").split())
             if waits:
                 if status != "blocked":
@@ -820,7 +820,7 @@ async def project_report(orch: Orchestrators, project: Project, session_id: str,
         if row is not None and row["acceptance_state"] == "handed_in":
             # "Ready" once went out for work nobody had looked at; the operator learns which it is.
             body = f"(Handed in by the member, not checked yet.)\n{body}"
-            unchecked = f"; task {task_id} is handed in and not checked, and the operator was told so — Accept records your check"
+            unchecked = f"; task {task_id} is handed in and not checked, and the operator was told so — ReviewResult shows its exact report"
     attached = []
     for ref in [str(f) for f in files or [] if str(f or "").strip()][:HANDOVER_MAX_FILES]:
         try:

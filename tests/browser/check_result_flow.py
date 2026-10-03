@@ -22,6 +22,8 @@ class ResultStub(BoardStub):
         base = "/api/board/review-one"
         result = f"{base}/results/result-one"
         task = self.tasks[0]
+        if path == "/api/artifact-manifests/artifact-one/transfer-readiness" and method == "GET":
+            return 200, {"manifest_id": "artifact-one", "project_id": PID, "available": False, "reason": "file_unavailable", "transfers": []}
         if path == f"{base}/contract" and method == "GET":
             return 200, {"task_id": task["id"], "contract_revision": 1, "entity_revision": task["entity_revision"], "checklist": [{"id": "C1", "text": "Export opens"}]}
         if path == f"{base}/results" and method == "GET":
@@ -30,6 +32,8 @@ class ResultStub(BoardStub):
             return 200, [previous, current]
         if path == f"{result}/original" and method == "GET":
             return 200, {"original_text": "An export was generated\nFull source report"}
+        if path == f"{result}/turns" and method == "GET":
+            return 200, [{"session_id": "session-source", "turn_seq": 7, "source_ref": "turn:7", "source_digest": "d" * 64, "source_current": True}]
         if path == f"{result}/comments" and method == "GET":
             return 200, []
         if path == f"{result}/evidence" and method == "GET":
@@ -87,8 +91,11 @@ def run() -> int:
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "result comparison overflow"
         expect(flow.get_by_role("button", name="Accept this result")).to_be_disabled()
         flow.get_by_text("Evidence and original report").click()
+        expect(flow.get_by_text("Send artifact to a host")).to_be_visible()
         flow.get_by_role("button", name="Show original report").click()
         expect(flow.locator(".result-original")).to_contain_text("Full source report")
+        flow.get_by_role("button", name="Source messages").click()
+        expect(flow.get_by_role("button", name="Open source message")).to_be_visible()
         flow.get_by_text("Review checks and evidence").click()
         flow.get_by_role("textbox", name="What did you observe?").fill("Opened the export and checked its schema")
         flow.get_by_role("button", name="Record observation").click()

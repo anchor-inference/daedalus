@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.effects import EffectOutcome, EffectResolution
-from daedalus.stores.control import ControlConflict, ControlStore, Entity, Principal, Scope, one
+from daedalus.stores.control import ControlConflict, ControlStore, Entity, Principal, Scope, now, one
 from daedalus.stores.outbox import Claim, OutboxStore
 
 if TYPE_CHECKING:
@@ -27,6 +27,16 @@ async def queue_stop(app: Application, task_id: str, principal: Principal, *, cl
     async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
         task = await one(conn, "SELECT * FROM board_tasks WHERE id = ?", (task_id,))
         assert task is not None
+        async with conn.execute("SELECT id FROM effect_outbox WHERE kind = 'task.launch' AND state = 'pending'"
+                                " AND json_extract(payload_json,'$.control.task_id') = ?", (task_id,)) as cursor:
+            waiting = await cursor.fetchall()
+        if waiting:
+            ids = [row["id"] for row in waiting]
+            await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ?,completed_at = ?"
+                               " WHERE kind = 'task.launch' AND state = 'pending'"
+                               " AND json_extract(payload_json,'$.control.task_id') = ?",
+                               (reason or "the operator stopped the queued launch", now(), task_id))
+            return {"task_id": task_id, "cancelled_launches": ids, "state": "completed"}
         async with conn.execute("SELECT id,staff_id,kind,session_id,terminal_id FROM staff_sessions WHERE task_id = ? AND ended_at IS NULL", (task_id,)) as cursor:
             staff = await cursor.fetchall()
         if len(staff) > 1:
@@ -52,7 +62,11 @@ async def queue_stop(app: Application, task_id: str, principal: Principal, *, cl
         if target["staff_session_id"]:
             await conn.execute("UPDATE staff_sessions SET pause_requested = 1 WHERE id = ?", (target["staff_session_id"],))
         if target["attempt_id"]:
-            await conn.execute("UPDATE execution_attempts SET state = 'cancelled' WHERE id = ? AND state IN ('queued','starting','running','waiting','recovering')", (target["attempt_id"],))
+            # Until physical termination is observed, this execution still prevents a replacement.
+            # Marking it cancelled at request time used to permit two workers on the same task.
+            await conn.execute("UPDATE execution_attempts SET state = 'recovering',updated_at = ?"
+                               " WHERE id = ? AND state IN ('queued','starting','running','waiting','recovering')",
+                               (now(), target["attempt_id"]))
         action_id = await OutboxStore.enqueue(conn, mutation, principal, kind="task.stop", operation="task.stop", payload=target, task_id=task_id, effects=("execution.stop",))
         return {"task_id": task_id, "effect_id": action_id, "state": "queued"}
 
@@ -65,18 +79,27 @@ class TaskStopEffect:
     def __init__(self, app: Application) -> None:
         self.app = app
 
+    async def completed(self, target: dict[str, Any], evidence: dict[str, Any]) -> EffectResolution:
+        if target.get("attempt_id"):
+            async with self.app.db.transaction() as conn:
+                await conn.execute("UPDATE execution_attempts SET state = 'cancelled',updated_at = ?"
+                                   " WHERE id = ? AND task_id = ? AND state = 'recovering'"
+                                   " AND EXISTS(SELECT 1 FROM board_tasks WHERE id = ? AND current_attempt_id = ?)",
+                                   (now(), target["attempt_id"], target["task_id"], target["task_id"], target["attempt_id"]))
+        return EffectResolution("completed", evidence)
+
     async def observe(self, claim: Claim) -> EffectResolution | None:
         target = claim.payload
         if target["kind"] == "daedalus":
             run = await self.app.db.fetchone("SELECT status,session_id FROM runs WHERE id = ?", (target["run_id"],))
             if run is not None and run["session_id"] == target["session_id"] and run["status"] in ("completed", "error", "cancelled"):
-                return EffectResolution("completed", {"run_id": target["run_id"], "observed_status": run["status"]})
+                return await self.completed(target, {"run_id": target["run_id"], "observed_status": run["status"]})
         else:
             terminals = self.app.extensions.get("terminals")
             if terminals is not None:
                 terminal = await terminals.get(target["terminal_id"])
                 if terminal["status"] == "exited":
-                    return EffectResolution("completed", {"terminal_id": target["terminal_id"], "observed_status": "exited"})
+                    return await self.completed(target, {"terminal_id": target["terminal_id"], "observed_status": "exited"})
         return None
 
     async def run(self, claim: Claim, check: Callable[[Claim], Awaitable[None]]) -> EffectOutcome:

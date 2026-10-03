@@ -25,7 +25,6 @@ import re
 import secrets
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -43,7 +42,7 @@ from daedalus.harness.health import ChannelHealth, channel_health
 from daedalus.host import prompts
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.handoff import Delivered, Handoff, box_name
-from daedalus.host.launch_queue import Admission, Entry, LaunchQueue, MachineCapacity, TerminalsCapacity
+from daedalus.host.launch_queue import Entry, LaunchQueue, MachineCapacity, TerminalsCapacity
 from daedalus.host.staff_daedalus import DaedalusStaffRuntime
 from daedalus.host.worktrees import (
     WORKTREES_DIR,
@@ -65,6 +64,7 @@ from daedalus.staff_runtime import (
     StartRequest,
     UsageSnapshot,
 )
+from daedalus.stores.control import ControlDenied, Principal
 from daedalus.stores.files import FileRefused, StoredFile, file_ref
 from daedalus.stores.projects import Project, ProjectFolder
 from daedalus.stores.staff import (
@@ -75,7 +75,6 @@ from daedalus.stores.staff import (
     StaffBusy,
     StaffError,
     StaffSession,
-    daedalus_cannot_reach,
 )
 from daedalus.terminals.bridge import HostBridge
 
@@ -192,18 +191,6 @@ def _returned(row: Any) -> str:
         if RETURNED in line:
             return line.split(RETURNED, 1)[1].strip()
     return ""
-
-
-@dataclass(frozen=True, slots=True)
-class Assigned:
-    """What an assignment did: started now, or queued at a position for a stated reason."""
-
-    admission: Admission
-    task: BoardTask
-
-    def view(self) -> dict[str, Any]:
-        a = self.admission
-        return {"state": a.state, "position": a.position, "reason": a.reason, "detail": a.detail, "task_id": self.task.id}
 
 
 class Team:
@@ -436,19 +423,8 @@ class Team:
         return moved
 
     async def hand_in_to(self, task: BoardTask, worktree: Worktree | None) -> str:
-        """Where a task goes when its member reports it done: review, or straight to done.
-
-        Review is the operator's column: it is for what they have to look at — a branch to merge, or
-        a task they posted themselves. A task the orchestrator wrote and handed out without a branch
-        is the orchestrator's to judge, and it reads the report in any case; parking it in review made
-        the column a heap of every round of every conversation with a member, none of which the
-        operator was ever asked about, and nothing ever took them out. A revision reopens the same
-        card (``Assign(task_id=…)``), so going to done loses nothing.
-        """
-        if worktree is not None or task.branch:
-            return "review"
-        row = await self.manager.db.fetchone("SELECT origin_session_id FROM board_tasks WHERE id = ?", (task.id,))
-        return "done" if row is not None and row["origin_session_id"] else "review"
+        """A report enters review until an exact result and verdict authorize completion."""
+        return "review"
 
     async def record_result(self, task: BoardTask, member: Staff, note: str) -> None:
         """Keep what a member reported on its card, so the card says what came of the work and not only
@@ -533,6 +509,8 @@ class Team:
 
     async def _reuses(self, entry: Entry) -> bool:
         """Whether the entry would go into its member's live session as the next message."""
+        if entry.principal is not None:
+            return False
         if entry.resume_from or await self.manager.db.kv_get(self._resume_key(entry.staff_id, entry.task_id)):
             return False
         live = await self._live_member(entry.staff_id)
@@ -592,10 +570,17 @@ class Team:
         if task is None:
             raise StaffError(f"task {entry.task_id} is gone")
         source = entry.resume_from or await self.manager.db.kv_get(self._resume_key(entry.staff_id, entry.task_id))
-        await self.start(member, task, by=entry.by, resume_from=source)
+        if entry.principal is None or entry.check_authority is None:
+            raise ControlDenied("a queued launch must retain its authenticated command")
+        await self.start(member, task, principal=entry.principal, check_authority=entry.check_authority,
+                         by=entry.by, resume_from=source)
         await self.manager.db.execute("DELETE FROM kv WHERE key = ?", (self._resume_key(entry.staff_id, entry.task_id),))
 
     async def _launch_failed(self, entry: Entry, exc: BaseException) -> None:
+        if entry.principal is not None:
+            # The outbox preserves the command's failure or uncertainty. Removing the assignment
+            # here used to hide a process whose start succeeded before its response was lost.
+            return
         # An assignment that cannot start is taken back rather than retried by every pump: the task
         # stays on the board, unassigned, and the event says why.
         task = await self.task(entry.task_id)
@@ -670,83 +655,16 @@ class Team:
             raise StaffError("the selected CLI session belongs to a worktree, not this launch folder")
         return LiveSession(owner, source)
 
-    async def assign(self, member: Staff, task: str | dict[str, Any], *, by: str = "operator", resume_from: str | None = None) -> dict[str, Any]:
-        """Give a member a task (its id, or the board's view of it): it starts now, or waits in the
-        project's launch queue. Returns ``{state: started|queued, position, reason, detail, task_id}``;
-        a refusal is a :class:`StaffError`, which is a ``ValueError``."""
-        return (await self._assign(member, str(task["id"]) if isinstance(task, dict) else task, by=by, resume_from=resume_from)).view()
+    async def assign(self, member: Staff, task: str | dict[str, Any], *, principal: Principal,
+                     client_operation_id: str, expected_entity_revision: int,
+                     resume_from: str | None = None) -> dict[str, Any]:
+        """Commit an authenticated launch; capacity waiting survives without inferred operator rights."""
+        from daedalus.extensions.task_launch import queue_launch  # Lazy: the durable handler also calls Team.
 
-    async def _assign(self, member: Staff, task_id: str, *, by: str, resume_from: str | None = None) -> Assigned:
-        if not member.active:
-            raise StaffError(f"{member.name} has been dismissed")
-        task = await self.task(task_id)
-        if task is None:
-            raise KeyError(task_id)
-        if task.project_id != member.project_id:
-            raise StaffError(f"task {task.id} is not on the board of {member.name}'s project")
-        if task.status in FINISHED_TASK or task.status == "review":
-            raise StaffError(f"task {task.id} is {task.status}; reopen it before assigning it")
-        missing = task.missing()
-        if missing:
-            raise StaffError(f"task {task.id} has no {', '.join(m.replace('_', '-') for m in missing)} yet; a task is handed over with all four parts of its brief")
-        if task.status == "doing" and task.assignee_staff_id and task.assignee_staff_id != member.id:
-            holder, gone = await self._holder(task)
-            if not gone:
-                raise StaffBusy(f"task {task.id} is being worked on by {holder}; release them first")
-            # Nobody works it: the card was left in doing by a member whose session is over. A
-            # one-off helper died a third of a second after its start, the card stayed in doing under
-            # its name, and every Assign to the member who had done the work before was refused as
-            # "being worked on by someone else"; Release and Dismiss found no session and no member,
-            # and the orchestrator hired a second helper only to free the card. It passes on here,
-            # and the card says so.
-            await self.note_on_card(task.id, f"the card passed from {holder} to {member.name}: {gone}")
-            task = await self._move_task(task, "todo", actor=by)
-        if task.status == "blocked" and not await self.open_dependencies(task):
-            # An assignment is the decision that the card goes now. Left blocked, the queue held it
-            # as waiting for a dependency that had long been done.
-            task = await self._move_task(task, "todo", actor=by)
-        runtime = self.runtime(member)
-        project = await self.project(member.project_id)
-        folder = self.folder_for(project, member, task)
-        if resume_from:
-            await self._resume_source(member, task, folder, resume_from)
-        terminal = member.harness != "daedalus"
-        if not terminal and not folder.local(self.manager.projects.local_env):
-            # Said before anything is queued: a Daedalus member given a host task from the container
-            # would otherwise wait in the queue for a start that can never happen.
-            raise StaffError(f"{member.name} cannot work on task {task.id}: {daedalus_cannot_reach(folder.path, folder.env, self.manager.projects.local_env)}")
-        if not (terminal and self.capacity() is None):
-            # Without the terminals service a command-line member waits in the queue with that reason
-            # rather than being refused: the service may be starting.
-            available = await runtime.available(folder.env)
-            if not available.ok and not terminal:
-                raise StaffError(f"{member.name} cannot start: {available.reason}")
-        if member.isolation == "worktree":
-            # Said now, not when the queue reaches it, for the same reason. A folder git cannot be
-            # asked about yet (a host folder while the bridge is away) is left to the start.
-            try:
-                await self.worktrees.check(folder)
-            except WorktreeRefused as exc:
-                raise StaffError(no_worktree(member, task, exc)) from exc
-            except WorktreeError:
-                pass
-        if await self.manager.files.of_task(task.id):
-            # Said now, not when the queue reaches it: a folder nobody can put the task's files in is a
-            # refusal the assigner can act on.
-            try:
-                self.handoff.check_target(folder)
-            except FileRefused as exc:
-                raise StaffError(f"task {task.id} carries files, and they cannot reach {member.name}: {exc}") from exc
-        if task.assignee_staff_id != member.id:
-            await self._set_assignee(task, member.id, actor=by)
-        key = self._resume_key(member.id, task.id)
-        if resume_from:
-            await self.manager.db.kv_set(key, resume_from)
-        else:
-            await self.manager.db.execute("DELETE FROM kv WHERE key = ?", (key,))
-        entry = Entry(project.id, member.id, member.name, task.id, task.priority, terminal, by, env=folder.env, resume_from=resume_from)
-        admission = await self.queue.request(entry)
-        return Assigned(admission, (await self.task(task.id)) or task)
+        task_id = str(task["id"]) if isinstance(task, dict) else task
+        return await queue_launch(self.app, task_id, principal, staff_id=member.id,
+                                  client_operation_id=client_operation_id,
+                                  expected_entity_revision=expected_entity_revision, resume_from=resume_from)
 
     async def _holder(self, task: BoardTask) -> tuple[str, str]:
         """Who holds a card in doing, and, when nobody works it any more, why not (else ``""``).
@@ -791,12 +709,20 @@ class Team:
         """A stop and retasking share ownership: neither may overtake the other's external call."""
         return self._execution_locks.setdefault(staff_id, asyncio.Lock())
 
-    async def start(self, member: Staff, task: BoardTask, *, by: str = "operator", resume_from: str | None = None) -> LiveSession:
+    async def start(self, member: Staff, task: BoardTask, *, principal: Principal,
+                    check_authority: Callable[[], Awaitable[None]], by: str = "operator",
+                    resume_from: str | None = None) -> LiveSession:
         async with self.execution_lock(member.id):
-            return await self._start(member, task, by=by, resume_from=resume_from)
+            return await self._start(member, task, principal=principal, check_authority=check_authority,
+                                     by=by, resume_from=resume_from)
 
-    async def _start(self, member: Staff, task: BoardTask, *, by: str, resume_from: str | None) -> LiveSession:
+    async def _start(self, member: Staff, task: BoardTask, *, principal: Principal,
+                     check_authority: Callable[[], Awaitable[None]], by: str,
+                     resume_from: str | None) -> LiveSession:
         """Start a session of ``member`` for ``task`` now; the launch queue calls this once it admits it."""
+        if principal.origin_class != "operator" and not principal.grant_id:
+            raise StaffError("a host-attested launch principal is required")
+        await check_authority()
         runtime = self.runtime(member)
         project = await self.project(member.project_id)
         folder = self.folder_for(project, member, task)
@@ -804,11 +730,8 @@ class Team:
         previous = await self.live_of(member)
         if previous is not None:
             previous = await self.settle_stale(previous)
-            if source is None and self._continues(previous, folder):
-                handed = await self._hand_over(previous, task, folder, by=by)
-                if handed is not None:
-                    return handed
-                previous = await self.live_of(member)
+            # Every launch has its own session and attempt binding; reusing a CLI turn would let
+            # the previous task's provider reference publish into the new task's contract.
         if previous is not None:
             if previous.session.status in ACTIVE_STATUSES:
                 raise StaffBusy(f"{member.name} is still working")
@@ -890,59 +813,48 @@ class Team:
             first_message_id=first_id,
             allow_rules=tuple(r["rule"] for r in await self.manager.staff.allow_rules(member.id)),
         )
+        identity = None
+        entered_provider = False
         try:
+            from daedalus.extensions.launch_controls import (  # Lazy: attempt creation follows the claimed session.
+                observe_bind,
+                prepare_attempt,
+            )
+
+            identity = await prepare_attempt(self.app, principal, member, task, session, fence_token=token)
+            await check_authority()
+            entered_provider = True
             started = await runtime.resume(request, source) if source else await runtime.start(request)
-        except Exception as exc:
-            await self.manager.staff.end_session(session.id, f"could not start: {exc}"[:500])
-            await self.publish("staff.status", {"status": "exited", "previous": "starting", "detail": f"could not start: {exc}"[:500]}, member=member)
-            await self._move_task(moved, "todo", actor="system", assignee=None)
+            await self.manager.staff.started(session.id, session_id=started.session_id, terminal_id=started.terminal_id, cli_session_id=started.cli_session_id, transcript_ref=started.transcript_ref)
+            await observe_bind(self.app, identity, session, started)
+        except (Exception, asyncio.CancelledError) as exc:
+            if entered_provider:
+                # A provider can create the process before its response disappears. Keep its slot,
+                # task and session owned until an observation establishes what actually happened.
+                async with self.app.db.transaction() as conn:
+                    cursor = await conn.execute("UPDATE execution_attempts SET state = 'recovering',updated_at = ?"
+                                                " WHERE id = ? AND state IN ('queued','starting','running','waiting')",
+                                                (_now(), identity.id))
+                    changed = cursor.rowcount
+                    await cursor.close()
+                    if changed:
+                        await conn.execute("UPDATE staff_sessions SET status = 'no_signal',status_at = ?"
+                                           " WHERE id = ? AND ended_at IS NULL", (_now(), session.id))
+                if changed:
+                    await self.publish("staff.status", {"status": "no_signal", "previous": "starting",
+                                       "detail": "the launch outcome is unknown; reconcile the original execution"}, member=member)
+            else:
+                if identity is not None:
+                    await self.app.db.execute("UPDATE execution_attempts SET state = 'failed',updated_at = ?"
+                                              " WHERE id = ? AND state = 'queued'", (_now(), identity.id))
+                await self.manager.staff.end_session(session.id, f"could not start: {exc}"[:500])
+                await self.publish("staff.status", {"status": "exited", "previous": "starting", "detail": f"could not start: {exc}"[:500]}, member=member)
+                await self._move_task(moved, "todo", actor="system", assignee=None)
             raise
-        await self.manager.staff.started(session.id, session_id=started.session_id, terminal_id=started.terminal_id, cli_session_id=started.cli_session_id, transcript_ref=started.transcript_ref)
         refreshed = await self.manager.staff.session(session.id)
         if first_id:
             await self.ingress.message_state(first_id, "submitted")
         return LiveSession(member, refreshed or session)
-
-    async def _hand_over(self, live: LiveSession, task: BoardTask, folder: ProjectFolder, *, by: str) -> LiveSession | None:
-        """Give a live command-line session its next task as its next message.
-
-        The member keeps its terminal, its conversation and what it learned of the folder; the brief
-        goes through the delivery pipeline like any message, so it waits for the turn to end, and its
-        receipt is the proof it arrived. The session's row moves to the task and the task to doing
-        before the message is queued, for the same reason as at a start: a quick Report(done) must
-        find them there. ``None`` when the message could not be queued; the session is then ended
-        and the caller launches afresh.
-        """
-        member = live.staff
-        predecessor = next((s for s in await self.manager.staff.sessions(member.id, limit=20) if s.task_id == task.id and s.id != live.id), None)
-        _, cwd = await self.cwd_of(live)
-        delivered = await self.hand_files(member, await self.manager.files.of_task(task.id), folder=folder, cwd=cwd, task_id=task.id, by=by)
-        session = await self.manager.staff.retask(live.id, task.id)
-        if session is None:
-            return None
-        if session.pause_requested:
-            await self.manager.staff.request_pause(session.id, False)  # a new assignment resumes a paused member
-        live = LiveSession(member, session)
-        fresh, earlier = await self.brief_files(delivered)
-        contract = await self.contract_block(member, task, session.id, delivered)
-        text = prompts.STAFF_NEXT_TASK + self.first_message(member, task, folder, None, predecessor, by, fresh, earlier, rules=await self.rules_block(member.project_id), contract=contract)
-        try:
-            message_id = (await self.manager.staff.add_message(member.id, text, origin=by, mode="after_turn", staff_session_id=session.id)).id
-        except StaffError:
-            message_id = ""  # a brief longer than a message may be; it is still sent, just not receipted
-        await self._move_task(task, "doing", actor=by, assignee=member.id, folder_id=folder.id)
-        origin = "orchestrator" if by == "orchestrator" else "operator"
-        try:
-            receipt = await self.runtime(member).send(live, OutgoingMessage(message_id, text, "after_turn", origin))  # type: ignore[arg-type]
-        except Exception as exc:  # noqa: BLE001 — a session that cannot take a message is replaced, not left holding the task
-            logger.warning("%s's session could not take task %s: %s", member.name, task.id, exc)
-            if message_id:
-                await self.ingress.message_state(message_id, "failed", str(exc)[:500])
-            await self._end(live, f"could not take task {task.id}: {exc}"[:500], stop=True)
-            return None
-        if message_id:
-            await self.ingress.message_state(message_id, receipt.state, receipt.error)
-        return (await self.live(session.id)) or live
 
     def permission_level(self, project: Project) -> str:
         """The permission level a command-line member starts with. ``full`` autonomy starts it exactly
@@ -1787,37 +1699,6 @@ class Team:
                 logger.exception("staff tick failed")
             await asyncio.sleep(TICK_SECONDS)
 
-    async def rebuild(self) -> int:
-        """Offer every assigned task that has not started to the queue again; the board is what survives a restart."""
-        rows = await self.manager.db.fetchall(
-            "SELECT t.id AS task_id, t.priority, t.project_id, t.folder_id, m.id AS staff_id FROM board_tasks t JOIN staff m ON m.id = t.assignee_staff_id "
-            "WHERE t.status IN ('todo', 'blocked') AND m.archived_at IS NULL ORDER BY t.priority, t.created_at"
-        )
-        count = 0
-        for row in rows:
-            member = await self.manager.staff.get(row["staff_id"])
-            project = await self.manager.projects.get(row["project_id"]) if row["project_id"] else None
-            if member is None or project is None:
-                continue
-            task = await self.task(row["task_id"])
-            folder = self.folder_for(project, member, task)
-            by = await self._assigned_by(row["task_id"])
-            self.queue.add(Entry(project.id, member.id, member.name, row["task_id"], int(row["priority"]), member.harness != "daedalus", by, env=folder.env))
-            count += 1
-        return count
-
-    async def _assigned_by(self, task_id: str) -> str:
-        """Who gave the task to its member, from the last ``task.assigned`` on record. The queue used
-        to take every task it rebuilt after a restart as the operator's, so the brief of a task the
-        orchestrator assigned went out as "assigned by the operator" and was listed as the operator's
-        own message."""
-        row = await self.manager.db.fetchone(
-            "SELECT json_extract(payload_json, '$.actor') AS actor FROM app_events WHERE type = 'task.assigned' AND json_extract(payload_json, '$.task_id') = ? "
-            "ORDER BY seq DESC LIMIT 1",
-            (task_id,),
-        )
-        return "orchestrator" if row is not None and row["actor"] == "orchestrator" else "operator"
-
     # -- the team server of command-line staff --------------------------------------------------------
 
     async def authenticate(self, staff_session_id: str, token: str) -> LiveSession:
@@ -1860,7 +1741,8 @@ class Team:
         if op == "report":
             return await self.ingress.report(
                 live, str(kwargs.get("kind") or ""), str(kwargs.get("note") or ""), kwargs.get("artifacts"), kwargs.get("remember"),
-                evidence=kwargs.get("evidence"), acknowledged=kwargs.get("acknowledged"), operator_steps=kwargs.get("operator_steps"),
+                call_id=kwargs.get("call_id"), evidence=kwargs.get("evidence"), acknowledged=kwargs.get("acknowledged"),
+                operator_steps=kwargs.get("operator_steps"),
             )
         raise ValueError(op)
 
@@ -1989,6 +1871,7 @@ class Ingress:
         note = (note or "").strip()
         if not note:
             raise ValueError("a report needs a note")
+        original_note = note
         # Checked before anything moves, so steps that cannot be carried refuse the whole report.
         steps = normalise_steps(operator_steps) if operator_steps else None
         task = await self.team.task(live.session.task_id) if live.session.task_id else None
@@ -2025,19 +1908,6 @@ class Ingress:
                 proven, unproven, stray = await self._evidence(task, live.staff, evidence)
                 if stray:
                     told += f"; evidence for {', '.join(stray)} matched no check or requirement of the task"
-                await self.team.record_result(task, live.staff, note)
-            if task is not None and task.status in ("doing", "todo", "blocked"):
-                to = await self.team.hand_in_to(task, worktree)
-                await self.team._move_task(task, to, actor="staff", merge_state="proposed" if worktree is not None else "")
-                await contracts.set_acceptance(task.id, "handed_in")
-                board = self.team.app.extensions.get("board")
-                if to == "done" and board is not None:
-                    # The board's own moves promote what waited on a finished task; this move is the
-                    # team's, and without this the tasks after it would wait for a move nobody makes.
-                    await board._promote_dependents(task.id)
-                told += f"; task {task.id} is in review" if to == "review" else f"; task {task.id} is handed in, and the orchestrator checks it against your report"
-                if unproven:
-                    told += f"; you gave no evidence for {', '.join(unproven)}"
         if remember and remember.strip():
             await self.manager.staff.append_notes(live.staff.id, remember.strip())
             told += "; noted for your next sessions"
@@ -2049,6 +1919,7 @@ class Ingress:
             told += f"; your report was longer than {NOTE_MAX} characters and was cut there"
         payload: dict[str, Any] = {"kind": kind, "text": note, "actor": "staff"}
         refs = [str(a)[:300] for a in (artifacts or []) if str(a).strip()][:20]
+        kept: list[StoredFile] = []
         if refs:
             payload["refs"] = refs
             kept, notes = await self._take_in(live, refs)
@@ -2057,6 +1928,19 @@ class Ingress:
                 told += "; kept for the team: " + ", ".join(f.short() for f in kept)
             if notes:
                 told += "; not kept: " + "; ".join(notes)
+        if kind == "done" and task is not None:
+            from daedalus.extensions.staff_results import (
+                submit_staff_report,  # Lazy: hand-in requires a claimed attempt.
+            )
+
+            await submit_staff_report(self.team.app, live, original_note, kept, proven, call_id)
+            await self.team.record_result(task, live.staff, original_note)
+            if task.status in ("doing", "todo", "blocked"):
+                to = await self.team.hand_in_to(task, worktree)
+                await self.team._move_task(task, to, actor="staff", merge_state="proposed" if worktree is not None else "")
+                told += f"; task {task.id} is in review"
+            if unproven:
+                told += f"; you gave no evidence for {', '.join(unproven)}"
         if task is not None:
             payload["task_id"] = task.id
         if confirmed:
@@ -2219,8 +2103,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     team.review = Review(app, team)
     app.extensions["staff"] = team
     handler = team.attach()
-    await team.rebuild()
     return [handler, asyncio.create_task(team.loop(), name="staff")]
 
 
-__all__ = ["AlreadyAnswered", "Assigned", "Ingress", "Team", "install"]
+__all__ = ["AlreadyAnswered", "Ingress", "Team", "install"]

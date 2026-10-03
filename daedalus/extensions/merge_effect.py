@@ -50,7 +50,7 @@ class MergeEffect:
             return EffectOutcome("failed", "result, verdict, or task review state changed")
         async with self.app.db.transaction() as conn:
             latest = await conn.execute("SELECT id FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
-                                        " AND attempt_id IS ? ORDER BY created_at DESC,id DESC LIMIT 1",
+                                        " AND attempt_id IS ? ORDER BY created_at DESC,rowid DESC LIMIT 1",
                                         (claim.task_id, row["contract_revision"], row["current_attempt_id"]))
             latest_result = await latest.fetchone()
             await latest.close()

@@ -8,10 +8,9 @@ a Daedalus staff member is not a terminal and is held to its project's limit onl
 project are spaced ``stagger`` seconds apart, so a queue that frees six slots at once does not start
 six processes in the same second.
 
-The queue is in memory. What it holds is not lost with it: an assignment is the task's assignee on the
-board, and the host offers every assigned task that has not started to the queue again at start. A
-waiting entry always carries why it waits, because "queued" with no reason is the question the
-operator then has to ask.
+The queue offers capacity to one claimed durable command at a time. Deferred work remains in the
+outbox; a timer or restart cannot launch an assignment without that command's current authority.
+Waiting entries carry their reason so the operator can see what prevents admission.
 """
 
 from __future__ import annotations
@@ -23,6 +22,8 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
+
+from daedalus.stores.control import Principal
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,8 @@ class Entry:
     detail: str = ""
     error: BaseException | None = None
     started: bool = False
+    principal: Principal | None = None
+    check_authority: Callable[[], Awaitable[None]] | None = None
 
     def view(self, position: int) -> dict[str, Any]:
         return {
@@ -216,6 +219,15 @@ class LaunchQueue:
         position = next((i for i, e in enumerate(self.entries(entry.project_id), start=1) if e is entry), 0)
         return Admission("queued", position, entry.reason, entry.detail)
 
+    async def offer(self, entry: Entry) -> Admission:
+        """Attempt admission; durable commands retain waiting work outside this memory queue."""
+        try:
+            return await self.request(entry)
+        finally:
+            # A pending outbox command is retried only after another capacity observation. Leaving
+            # its entry here would let an unclaimed command start from a later timer callback.
+            self.withdraw(entry.project_id, task_id=entry.task_id)
+
     def add(self, entry: Entry) -> None:
         """Queue an assignment without starting anything now: what a restart restores from the board."""
         entry.order = next(self._order)
@@ -264,7 +276,7 @@ class LaunchQueue:
             if active >= concurrency:
                 self._wait(entry, "project", f"{active} of the project's {concurrency} staff slots are working")
                 continue
-            reuse = self._reuses is not None and await self._reuses(entry)
+            reuse = entry.principal is None and self._reuses is not None and await self._reuses(entry)
             if entry.terminal and not reuse:
                 machine = await self._machine(entry.env)
                 if machine is not None:

@@ -143,6 +143,13 @@ class ControlStore:
             raise ControlDenied("operation is outside the approved scope")
         if not set(effects) <= set(json.loads(grant["effects_json"])):
             raise ControlDenied("effect is outside the approved scope")
+        if principal.origin_class == "agent" and principal.actor_id.startswith("orchestrator:"):
+            if scope.kind != "project":
+                raise ControlDenied("a coordinator acts only within its project")
+            project = await one(conn, "SELECT settings FROM projects WHERE id = ?", (scope.id,))
+            office = json.loads(project["settings"]).get("orchestrator", {}) if project else {}
+            if not office.get("enabled") or office.get("session_id") != principal.actor_id.partition(":")[2]:
+                raise ControlDenied("the coordinator was disabled or replaced")
 
     async def mutate(self, principal: Principal, scope: Scope, operation: str, client_operation_id: str, expected_revision: int, entity: Entity, payload: dict[str, Any], effect: Effect, *, effects: tuple[str, ...] = ()) -> dict[str, Any]:
         if not client_operation_id or len(client_operation_id) > 160 or not re.fullmatch(r"[a-z][a-z0-9_.:-]{0,119}", operation):
@@ -175,12 +182,17 @@ class ControlStore:
             revision = await self._entity(conn, scope, entity)
             response = {**response, "receipt_id": mutation.receipt_id, "entity_revision": revision}
             await conn.execute(
-                "INSERT INTO operation_receipts(id,scope_kind,scope_id,project_id,actor_id,operation_kind,client_operation_id,grant_id,payload_hash,entity_revision,state,response_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (mutation.receipt_id, *key[:2], scope.id if scope.kind == "project" else None, *key[2:], principal.grant_id, payload_hash, revision, "committed", canonical(response), now()),
+                "INSERT INTO operation_receipts(id,scope_kind,scope_id,project_id,actor_id,operation_kind,client_operation_id,grant_id,request_entity_revision,payload_hash,entity_revision,state,response_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (mutation.receipt_id, *key[:2], scope.id if scope.kind == "project" else None, *key[2:], principal.grant_id, expected_revision, payload_hash, revision, "committed", canonical(response), now()),
             )
             return response
 
     async def issue_grant(self, issuer: Principal, subject: Principal, scope: Scope, *, operations: list[str], effects: list[str], expires_at: str, task_id: str | None = None) -> dict[str, Any]:
+        async with self.db.transaction() as conn:
+            return await self.issue_grant_in(conn, issuer, subject, scope, operations=operations, effects=effects, expires_at=expires_at, task_id=task_id)
+
+    async def issue_grant_in(self, conn: aiosqlite.Connection, issuer: Principal, subject: Principal, scope: Scope, *, operations: list[str], effects: list[str], expires_at: str, task_id: str | None = None) -> dict[str, Any]:
+        """Issue within the caller's command so a refused attempt cannot leave a usable grant."""
         if issuer.origin_class != "operator" or subject.origin_class == "operator":
             raise ControlDenied("only an operator can issue non-operator authority")
         expires = datetime.fromisoformat(expires_at)
@@ -188,17 +200,16 @@ class ControlStore:
             raise ValueError("a future timezone-aware expiry is required")
         if not subject.actor_id or not operations or any(not re.fullmatch(r"[a-z][a-z0-9_.:-]{0,119}", op) for op in operations + effects):
             raise ValueError("a subject and explicit operations are required")
-        async with self.db.transaction() as conn:
-            await self.authorize(conn, issuer, scope, "grant.issue")
-            if task_id is not None:
-                await self._entity(conn, scope, Entity("task", task_id))
-            grant_id = uuid.uuid4().hex
-            await conn.execute(
-                "INSERT INTO actor_grants(id,actor_id,origin_class,issuer_id,scope_kind,scope_id,project_id,task_id,operations_json,effects_json,expires_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (grant_id, subject.actor_id, subject.origin_class, issuer.actor_id, "task" if task_id else scope.kind, task_id or scope.id, scope.id if scope.kind == "project" else None, task_id, canonical(sorted(set(operations))), canonical(sorted(set(effects))), expires.astimezone(UTC).isoformat(), now()),
-            )
-            await conn.execute("INSERT INTO grant_events(grant_id,actor_id,generation,event,at) VALUES (?,?,1,'issued',?)", (grant_id, issuer.actor_id, now()))
-            return {"grant_id": grant_id, "generation": 1, "scope": {"kind": "task" if task_id else scope.kind, "id": task_id or scope.id}, "operations": sorted(set(operations)), "effects": sorted(set(effects)), "expires_at": expires.astimezone(UTC).isoformat()}
+        await self.authorize(conn, issuer, scope, "grant.issue")
+        if task_id is not None:
+            await self._entity(conn, scope, Entity("task", task_id))
+        grant_id = uuid.uuid4().hex
+        await conn.execute(
+            "INSERT INTO actor_grants(id,actor_id,origin_class,issuer_id,scope_kind,scope_id,project_id,task_id,operations_json,effects_json,expires_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (grant_id, subject.actor_id, subject.origin_class, issuer.actor_id, "task" if task_id else scope.kind, task_id or scope.id, scope.id if scope.kind == "project" else None, task_id, canonical(sorted(set(operations))), canonical(sorted(set(effects))), expires.astimezone(UTC).isoformat(), now()),
+        )
+        await conn.execute("INSERT INTO grant_events(grant_id,actor_id,generation,event,at) VALUES (?,?,1,'issued',?)", (grant_id, issuer.actor_id, now()))
+        return {"grant_id": grant_id, "generation": 1, "scope": {"kind": "task" if task_id else scope.kind, "id": task_id or scope.id}, "operations": sorted(set(operations)), "effects": sorted(set(effects)), "expires_at": expires.astimezone(UTC).isoformat()}
 
     async def revoke_grant(self, issuer: Principal, grant_id: str, *, reason: str) -> None:
         if issuer.origin_class != "operator":

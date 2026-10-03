@@ -1,0 +1,71 @@
+"""Bind an authorized launch to its worker before that worker can publish a report."""
+
+from __future__ import annotations
+
+import uuid
+from contextvars import ContextVar
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
+
+from daedalus.staff_runtime import BoardTask, Started
+from daedalus.stores.control import ControlDenied, ControlStore, Principal, Scope, one
+from daedalus.stores.executions import ACTIVE, AttemptIdentity
+from daedalus.stores.staff import Staff, StaffSession
+
+if TYPE_CHECKING:
+    from daedalus.app import Application
+
+launch_attempt: ContextVar[str | None] = ContextVar("launch_attempt", default=None)
+
+
+async def prepare_attempt(app: Application, principal: Principal, member: Staff, task: BoardTask,
+                          session: StaffSession, *, fence_token: str) -> AttemptIdentity:
+    """Issue only report authority and claim the current contract in one transaction."""
+    if task.project_id != member.project_id or session.staff_id != member.id or session.task_id != task.id:
+        raise ControlDenied("the worker, session and task must belong to the same project")
+    control = ControlStore(app.db)
+    scope = Scope("project", member.project_id)
+    async with app.db.transaction() as conn:
+        await control.authorize(conn, principal, scope, "task.launch", task_id=task.id, effects=("execution.start",))
+        row = await one(conn, "SELECT contract_revision FROM board_tasks WHERE id = ?", (task.id,))
+        if row is None:
+            raise KeyError(task.id)
+        subject = Principal(f"staff:{member.id}", "agent")
+        grant = await control.issue_grant_in(conn, principal, subject, scope, operations=["result.submit"],
+                                            effects=[], task_id=task.id,
+                                            expires_at=(datetime.now(UTC) + timedelta(hours=24)).isoformat())
+        worker = Principal(subject.actor_id, "agent", grant["grant_id"], grant["generation"])
+        return await app.executions.create(conn, attempt_id=launch_attempt.get() or uuid.uuid4().hex, task_id=task.id,
+                                           contract_revision=row["contract_revision"], launcher=principal,
+                                           worker=worker, staff_session_id=session.id, runtime_kind=session.kind,
+                                           fence_token=fence_token)
+
+
+async def observe_bind(app: Application, identity: AttemptIdentity, session: StaffSession,
+                       started: Started) -> None:
+    """Record the runtime's returned reference, including a worker that finished very quickly."""
+    reference = f"session:{started.session_id}" if session.kind == "daedalus" else f"terminal:{started.terminal_id}"
+    if (session.kind == "daedalus" and not started.session_id) or (session.kind == "cli" and not started.terminal_id):
+        raise ControlDenied("the runtime returned no observed execution reference")
+    async with app.db.transaction() as conn:
+        generation = await app.executions._host(conn)
+        if generation != identity.host_generation:
+            raise ControlDenied("the observed execution belongs to a previous host generation")
+        row = await one(conn, "SELECT a.*,t.current_attempt_id,s.session_id,s.terminal_id FROM execution_attempts a"
+                        " JOIN board_tasks t ON t.id = a.task_id JOIN staff_sessions s ON s.id = a.staff_session_id"
+                        " WHERE a.id = ? AND s.id = ?", (identity.id, session.id))
+        if row is None or app.executions._identity(row) != identity or row["current_attempt_id"] != identity.id:
+            raise ControlDenied("the observed runtime belongs to a superseded attempt")
+        if (session.kind == "daedalus" and row["session_id"] != started.session_id) or (session.kind == "cli" and row["terminal_id"] != started.terminal_id):
+            raise ControlDenied("the observed reference is not bound to this staff session")
+        if row["provider_session_ref"] and row["provider_session_ref"] != reference:
+            raise ControlDenied("the execution reference cannot be replaced")
+        if row["state"] in ACTIVE:
+            await app.executions.bind(conn, identity, provider_session_ref=reference)
+        elif row["state"] in ("completed", "failed", "cancelled") and row["host_generation"] == identity.host_generation:
+            # A report can commit inside runtime.start before Started is returned. This records the
+            # observed reference without reviving the worker or granting a second delivery.
+            await conn.execute("UPDATE execution_attempts SET provider_session_ref = ? WHERE id = ?",
+                               (reference, identity.id))
+        else:
+            raise ControlDenied("the execution needs explicit recovery before binding")

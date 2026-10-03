@@ -115,6 +115,53 @@ async def test_dispatcher_does_not_repeat_an_opaque_handler_failure(db: Database
     assert calls == 1
 
 
+async def test_admission_wait_is_durable_without_busy_looping_or_delivering_twice(db: Database) -> None:
+    action_id = await enqueue(db)
+    ready = False
+    delivered = 0
+
+    class WaitingHandler:
+        async def run(self, claim: Any, check: Any) -> EffectOutcome:
+            nonlocal delivered
+            if not ready:
+                return EffectOutcome("deferred", "all worker slots are occupied")
+            await check(claim)
+            delivered += 1
+            return EffectOutcome("completed")
+
+    dispatcher = EffectDispatcher(OutboxStore(db))
+    dispatcher.register("test.effect", WaitingHandler())
+    assert await dispatcher.step()
+    row = await dispatcher.store.view(action_id)
+    assert row["state"] == "pending"
+    assert row["error"] == "all worker slots are occupied"
+    assert not await dispatcher.step()
+    assert delivered == 0
+    # A new runtime reconstructs admission from the committed command, not a lost memory entry.
+    restarted = EffectDispatcher(OutboxStore(db))
+    restarted.register("test.effect", WaitingHandler())
+    assert await restarted.store.recover() == 0
+    ready = True
+    assert await restarted.step()
+    assert not await restarted.step()
+    assert delivered == 1
+
+
+async def test_revocation_before_deferral_cancels_without_reopening_the_claim(db: Database) -> None:
+    control = ControlStore(db)
+    subject = Principal("agent:worker", "agent")
+    grant = await control.issue_grant(OPERATOR, subject, SCOPE, operations=["test.queue"], effects=[],
+                                      expires_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat())
+    action_id = await enqueue(db, principal=Principal(subject.actor_id, "agent", grant["grant_id"], 1))
+    store = OutboxStore(db)
+    claim = await store.claim(("test.effect",))
+    assert claim is not None
+    await control.revoke_grant(OPERATOR, grant["grant_id"], reason="cancelled while waiting")
+    assert not await store.defer(claim, reason="waiting for a slot")
+    assert (await store.view(action_id))["state"] == "cancelled"
+    assert await store.claim(("test.effect",)) is None
+
+
 async def test_stopping_a_handler_records_unknown_before_database_close(db: Database) -> None:
     action_id = await enqueue(db)
     started = asyncio.Event()

@@ -137,6 +137,20 @@ async def test_every_project_keeps_its_folder_and_every_session_its_directory(tm
     # The migrations after this one run as well and add tables of their own; this one's are these.
     later = {"terminals", "terminal_audit", "harness_catalog", "harness_launches", "harness_deliveries", "push_subscriptions", "dispatches", "dispatch_messages", "files", "file_access", "task_files", "file_transfers", "browsers", "browser_profiles", "browser_groups", "browser_audit", "staff_allow_rules", "browser_workflows", "task_requirements", "requirement_deliveries", "open_loops"}
     later.update({"domain_collection_revisions", "actor_grants", "grant_events", "operation_receipts", "execution_attempts", "effect_outbox", "quarantined_attempt_events"})
+    later.update({
+        "task_contract_versions", "artifact_manifests", "result_receipts", "result_artifacts",
+        "review_evidence", "review_verdicts", "task_merge_receipts", "review_returns",
+        "review_comments", "review_comment_resolutions", "task_dependency_edges", "handoff_claims",
+        "workflow_steps", "workflow_edges", "scope_impacts", "project_goal_revisions",
+        "next_actions", "staff_role_versions", "planning_budgets", "replan_fingerprints",
+        "comparison_groups", "comparison_group_attempts",
+        "knowledge_fact_versions", "knowledge_reviews", "knowledge_dependencies",
+        "compaction_captures", "result_turn_anchors", "skill_manifests", "plugin_manifests",
+        "watch_deliveries", "board_workflow_runs", "board_workflow_steps", "issue_links",
+        "lifecycle_parents", "lifecycle_owners",
+        "execution_hosts", "execution_host_challenges", "execution_host_observations",
+        "execution_host_decisions", "artifact_transfers", "knowledge_invalidation_queue",
+    })
     assert new - later == {"project_folders", "project_briefs", "project_journal", "staff", "staff_sessions", "staff_messages", "asks", "watches"}
     assert after["project_folders"] == counts["projects"]
 

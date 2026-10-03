@@ -47,6 +47,8 @@ def run() -> int:
             return answer(route, {"presets": {}, "model": {}})
         if path == "/api/plugins/catalog":
             return answer(route, [{"manifest": extension, "valid": True, "digest": "a" * 64, "required_capabilities": ["board.read"], "ui_extensions": extension["ui_extensions"]}])
+        if path == "/api/runtime/hosts" and request.method == "GET":
+            return answer(route, {"items": [], "collection_revision": 1})
         if path == "/api/plugins" and request.method == "GET":
             return answer(route, {"items": installed, "collection_revision": len(installed) + 1})
         if path == "/api/plugins/safe-mode" and request.method == "GET":
@@ -101,6 +103,14 @@ def run() -> int:
         page.locator(".project-row", has_text="Plain").get_by_role("button", name="Settings for Plain").click()
         extensions = page.locator(".project-extensions")
         expect(extensions).to_be_visible()
+        hosts = page.locator(".project-runtime-hosts")
+        expect(hosts).to_be_visible()
+        expect(hosts).not_to_contain_text("No remote host identities recorded")
+        hosts.locator("summary").first.click()
+        expect(hosts).to_contain_text("No remote host identities recorded")
+        page.set_viewport_size({"width": 320, "height": 560})
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "host settings overflow the phone"
+        page.set_viewport_size({"width": 1440, "height": 900})
         expect(extensions.locator(".project-extension")).to_have_count(0)
         extensions.locator("summary").first.click()
         expect(extensions.locator(".project-extension")).to_have_count(1)

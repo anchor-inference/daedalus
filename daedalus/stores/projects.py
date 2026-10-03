@@ -568,6 +568,8 @@ class ProjectStore:
             )
             await conn.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at)"
                                " VALUES (?,1,'','system',?)", (project_id, created.isoformat()))
+            await conn.execute("INSERT INTO planning_budgets(project_id,goal_contract_revision,max_depth,max_tasks,max_tokens)"
+                               " VALUES (?,1,3,50,100000)", (project_id,))
             for folder in made:
                 await conn.execute(
                     "INSERT INTO project_folders(id, project_id, path, label, env, is_git, readonly, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",

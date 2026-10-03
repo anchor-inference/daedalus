@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.knowledge import KnowledgeConflict, KnowledgeStore
+from daedalus.stores.result_anchors import result_turn_refs
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -35,6 +36,15 @@ class ReviewBody(BaseModel):
     expected_version: int = Field(ge=1)
     verdict: Literal["review", "promote", "invalidate", "forget", "rollback"]
     reason: str = Field(min_length=1, max_length=1000)
+    expected_entity_revision: int = Field(ge=1)
+    client_operation_id: str = Field(min_length=1, max_length=160)
+
+
+class RevalidateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    queue_id: str = Field(min_length=1, max_length=64)
+    expected_version: int = Field(ge=1)
     expected_entity_revision: int = Field(ge=1)
     client_operation_id: str = Field(min_length=1, max_length=160)
 
@@ -63,6 +73,29 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         if not rows:
             raise HTTPException(404, "no such fact")
         return [dict(row) for row in rows]
+
+    @api.get("/api/projects/{project_id}/knowledge/stale")
+    async def stale_knowledge(project_id: str, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
+        await project_exists(project_id)
+        return await store().stale_queue(project_id)
+
+    @api.post("/api/projects/{project_id}/knowledge/{fact_id}/revalidate")
+    async def revalidate_knowledge(
+        project_id: str, fact_id: str, body: RevalidateBody,
+        who: dict[str, Any] = Depends(auth),
+    ) -> dict[str, Any]:
+        await project_exists(project_id)
+        try:
+            return await store().revalidate_command(
+                Principal.operator(who), project_id, fact_id, body.queue_id,
+                expected_revision=body.expected_entity_revision,
+                expected_version=body.expected_version,
+                client_operation_id=body.client_operation_id,
+            )
+        except (KnowledgeConflict, ControlConflict) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
 
     @api.get("/api/sessions/{session_id}/compaction-captures")
     async def compaction_captures(session_id: str, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
@@ -145,3 +178,10 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         refs.extend(f"manifest:{row['id']}@{row['revision']}#{row['digest']}" for row in packet["artifacts"])
         refs.extend(item["source"] for item in packet["facts"])
         return {**packet, "source_refs": refs, "packet_hash": "sha256:" + digest}
+
+    @api.get("/api/board/{task_id}/results/{result_id}/turns")
+    async def result_turns(task_id: str, result_id: str, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
+        try:
+            return await result_turn_refs(app.db, task_id, result_id)
+        except KeyError as exc:
+            raise HTTPException(404, "no such result on this task") from exc

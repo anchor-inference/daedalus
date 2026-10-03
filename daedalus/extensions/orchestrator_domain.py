@@ -345,13 +345,13 @@ async def record_verdict(
     result = await _one(conn, "SELECT task_id, contract_revision, attempt_id, outcome, actor_id FROM result_receipts WHERE id = ?", (result_id,))
     if result is None:
         raise KeyError(result_id)
-    task = await _one(conn, "SELECT contract_revision,current_attempt_id FROM board_tasks WHERE id = ?", (result["task_id"],))
+    task = await _one(conn, "SELECT contract_revision,current_attempt_id,status FROM board_tasks WHERE id = ?", (result["task_id"],))
     if task is None or int(task["contract_revision"]) != int(result["contract_revision"]):
         raise DomainConflict("review target is stale after a contract change")
     if result["attempt_id"] != task["current_attempt_id"]:
         raise DomainConflict("review target came from a superseded attempt")
     latest = await _one(conn, "SELECT id FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
-                        " AND attempt_id IS ? ORDER BY created_at DESC,id DESC LIMIT 1",
+                        " AND attempt_id IS ? ORDER BY created_at DESC,rowid DESC LIMIT 1",
                         (result["task_id"], result["contract_revision"], result["attempt_id"]))
     if latest is None or latest["id"] != result_id:
         raise DomainConflict("a newer result superseded the reviewed result")
@@ -368,6 +368,8 @@ async def record_verdict(
             raise DomainConflict("the worker cannot independently review its own result")
     if accepted and (verification != "verified" or result["outcome"] != "complete"):
         raise DomainConflict("only a verified complete result can be accepted")
+    if accepted and task["status"] != "review":
+        raise DomainConflict("a result can be approved only while the task is in review")
     evidence = []
     for evidence_id in evidence_ids:
         row = await _one(conn, "SELECT result_id, contract_revision, exit_code, manifest_digest_before,"
@@ -423,6 +425,12 @@ async def add_review_comment(
     result = await _one(conn, "SELECT task_id FROM result_receipts WHERE id = ?", (result_id,))
     if result is None:
         raise KeyError(result_id)
+    if priority == "blocking":
+        active_merge = await _one(conn, "SELECT 1 FROM task_merge_receipts m JOIN effect_outbox e ON e.id = m.id"
+                                  " WHERE m.result_id = ? AND e.state IN ('claimed','completed','unknown') LIMIT 1",
+                                  (result_id,))
+        if active_merge is not None:
+            raise DomainConflict("a claimed merge freezes blocking review comments until reconciliation")
     if manifest_id is not None:
         attached = await _one(conn, "SELECT 1 FROM result_artifacts WHERE result_id = ? AND manifest_id = ?",
                               (result_id, manifest_id))
@@ -486,7 +494,7 @@ async def accept_result(
     if result is None or result["task_id"] != task_id or result["contract_revision"] != contract_revision or result["outcome"] != "complete":
         raise DomainConflict("the accepted result is missing, partial, or stale")
     latest = await _one(conn, "SELECT id FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
-                        " AND attempt_id IS ? ORDER BY created_at DESC,id DESC LIMIT 1",
+                        " AND attempt_id IS ? ORDER BY created_at DESC,rowid DESC LIMIT 1",
                         (task_id, contract_revision, task["current_attempt_id"]))
     if result["attempt_id"] != task["current_attempt_id"] or latest is None or latest["id"] != result_id:
         raise DomainConflict("a newer result or attempt superseded the reviewed result")
@@ -530,6 +538,11 @@ async def return_result(
             verdict is None or verdict["result_id"] != result_id or verdict["contract_revision"] != contract_revision or
             (result["attempt_id"] is not None and result["attempt_id"] != task["current_attempt_id"])):
         raise DomainConflict("return target is not the current reviewed result")
+    latest = await _one(conn, "SELECT id FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
+                        " AND attempt_id IS ? ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                        (task_id, contract_revision, task["current_attempt_id"]))
+    if latest is None or latest["id"] != result_id:
+        raise DomainConflict("a newer result superseded the return target")
     await conn.execute("INSERT INTO review_returns(id,task_id,result_id,verdict_id,contract_revision,actor_id,reason,created_at)"
                        " VALUES (?,?,?,?,?,?,?,?)",
                        (return_id, task_id, result_id, verdict_id, contract_revision, actor_id, reason.strip(), _now()))
@@ -664,7 +677,7 @@ async def configure_workflow(
         if step.get("kind") not in ("work", "review", "wait", "human"):
             raise ValueError("workflow step kind is invalid")
         gate = step.get("gate") or {}
-        if set(gate) - {"accepted_result_id", "artifact_digest", "human_ack_id", "not_before"}:
+        if set(gate) - {"accepted_result_id", "artifact_digest", "not_before"}:
             raise ValueError("workflow gate contains an unsupported condition")
     outgoing: dict[str, list[str]] = {step_id: [] for step_id in step_by_id}
     for source, target in edges:
@@ -722,16 +735,41 @@ async def workflow_readiness(conn: aiosqlite.Connection, task_id: str) -> list[d
                                   (task["accepted_result_id"], gate["artifact_digest"]))
             if artifact is None:
                 blockers.append("artifact_missing")
-        if gate.get("human_ack_id"):
-            receipt = await _one(conn, "SELECT 1 FROM operation_receipts WHERE id = ?", (gate["human_ack_id"],))
-            if receipt is None:
-                blockers.append("human_ack_missing")
         if gate.get("not_before") and gate["not_before"] > _now():
             blockers.append("not_before")
         result.append({"step_id": step["id"], "kind": step["step_kind"], "state": step["state"],
                        "ready": step["state"] in ("pending", "ready") and not blockers,
                        "blockers": blockers})
     return result
+
+
+async def advance_workflow_step(
+    conn: aiosqlite.Connection, *, task_id: str, step_id: str, action: str,
+) -> dict[str, Any]:
+    """Move one step only when its current contract and all typed gates permit it."""
+    if action not in ("ack", "start", "complete"):
+        raise ValueError("workflow action is invalid")
+    step = await _one(conn, "SELECT id,step_kind,state FROM workflow_steps WHERE id = ? AND task_id = ?",
+                      (step_id, task_id))
+    if step is None:
+        raise KeyError(step_id)
+    projected = next(item for item in await workflow_readiness(conn, task_id) if item["step_id"] == step_id)
+    if action == "ack":
+        if step["step_kind"] != "human" or step["state"] not in ("pending", "ready"):
+            raise DomainConflict("only a pending human step accepts an operator acknowledgement")
+        if projected["blockers"]:
+            raise DomainConflict("the human step is blocked by an upstream gate")
+        await conn.execute("UPDATE workflow_steps SET state = 'complete',entity_revision = entity_revision + 1"
+                           " WHERE id = ? AND task_id = ?", (step_id, task_id))
+        return {"task_id": task_id, "step_id": step_id, "state": "complete", "acknowledged": True}
+    if projected["blockers"] or (not projected["ready"] and not (action == "complete" and step["state"] == "running")):
+        raise DomainConflict("workflow step is blocked by its current gates or predecessor")
+    if action == "start" and step["step_kind"] not in ("work", "review"):
+        raise DomainConflict("this step does not have a running state")
+    state = "running" if action == "start" else "complete"
+    await conn.execute("UPDATE workflow_steps SET state = ?,entity_revision = entity_revision + 1"
+                       " WHERE id = ? AND task_id = ?", (state, step_id, task_id))
+    return {"task_id": task_id, "step_id": step_id, "state": state}
 
 
 async def set_next_action(
@@ -854,6 +892,8 @@ async def apply_goal_revision(
     await conn.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,origin_ref,created_at)"
                        " VALUES (?,?,?,?,?,?)", (project_id, revision, body, origin_kind, origin_ref, _now()))
     await conn.execute("UPDATE projects SET goal_revision = ? WHERE id = ?", (revision, project_id))
+    await conn.execute("UPDATE planning_budgets SET goal_contract_revision = ?,entity_revision = entity_revision + 1"
+                       " WHERE project_id = ?", (revision, project_id))
     await conn.execute("INSERT INTO project_briefs(project_id,section,body,updated_at,updated_by)"
                        " VALUES (?,'goals',?,?,?) ON CONFLICT(project_id,section) DO UPDATE SET"
                        " body = excluded.body,updated_at = excluded.updated_at,updated_by = excluded.updated_by",
@@ -872,6 +912,31 @@ async def apply_goal_revision(
                            " entity_revision = entity_revision + 1 WHERE id = ?", (task_id,))
     return {"project_id": project_id, "goal_revision": revision,
             "affected_task_ids": preview["affected_task_ids"], "semantic_change": True}
+
+
+async def check_planning_capacity(conn: aiosqlite.Connection, project_id: str,
+                                  dependencies: list[str], *, additional_tasks: int = 1) -> dict[str, int]:
+    """Reserve a finite task count and dependency depth under the caller's write transaction."""
+    budget = await _one(conn, "SELECT max_depth,max_tasks FROM planning_budgets WHERE project_id = ?", (project_id,))
+    if budget is None:
+        raise DomainConflict("the project has no planning budget")
+    tasks = await _many(conn, "SELECT id,depends_on FROM board_tasks WHERE project_id = ?", (project_id,))
+    if len(tasks) + additional_tasks > budget["max_tasks"]:
+        raise DomainConflict("the project task count exceeds its planning budget")
+    graph = {row["id"]: _json(row["depends_on"], []) for row in tasks}
+
+    def depth(task_id: str, visited: set[str]) -> int:
+        if task_id not in graph or task_id in visited:
+            raise DomainConflict("planning dependency is outside the project or cyclic")
+        if len(visited) >= budget["max_depth"]:
+            raise DomainConflict("the plan exceeds its dependency depth budget")
+        upstream = graph[task_id]
+        return 1 + max((depth(parent, visited | {task_id}) for parent in upstream), default=0)
+
+    new_depth = 1 + max((depth(dependency, set()) for dependency in dependencies), default=0)
+    if new_depth > budget["max_depth"]:
+        raise DomainConflict("the plan exceeds its dependency depth budget")
+    return {"depth": new_depth, "remaining_tasks": budget["max_tasks"] - len(tasks) - additional_tasks}
 
 
 async def update_role_profile(
@@ -925,13 +990,13 @@ class OrchestratorDomain:
                                       " FROM board_tasks WHERE id = ?", (task_id,))
         if task is None:
             raise KeyError(task_id)
-        rows = await self.db.fetchall("SELECT * FROM result_receipts WHERE task_id = ? ORDER BY created_at DESC, id DESC", (task_id,))
+        rows = await self.db.fetchall("SELECT * FROM result_receipts WHERE task_id = ? ORDER BY created_at DESC, rowid DESC", (task_id,))
         current_result_id = next((row["id"] for row in rows if int(row["contract_revision"]) == int(task["contract_revision"])
                                   and row["attempt_id"] == task["current_attempt_id"]), None)
         out = []
         for row in rows:
             verdict = await self.db.fetchone("SELECT id, verification, accepted, contract_revision, head, base"
-                                             " FROM review_verdicts WHERE result_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", (row["id"],))
+                                             " FROM review_verdicts WHERE result_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1", (row["id"],))
             manifests = await self.db.fetchall("SELECT m.id, m.artifact_kind, m.artifact_key, m.artifact_revision,"
                                                " m.digest, m.size_bytes FROM result_artifacts a JOIN artifact_manifests m"
                                                " ON m.id = a.manifest_id WHERE a.result_id = ?", (row["id"],))

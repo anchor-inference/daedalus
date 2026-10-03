@@ -1,4 +1,4 @@
-"""Read-only review projection and explicit rejection for a staff branch.
+"""Read-only review projection for a staff branch.
 
 The merge itself runs through a fenced outbox effect. Reading this projection cannot change the
 task, and merging a branch does not itself accept an immutable result.
@@ -6,23 +6,18 @@ task, and merging a branch does not itself accept an immutable result.
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any
 
-from daedalus.extensions.staff import SENT_BACK
+from daedalus.extensions.orchestrator_domain import unresolved_review_comments
 from daedalus.host.worktrees import BranchComparison, WorktreeError
 from daedalus.stores.projects import Project, ProjectFolder
-from daedalus.stores.staff import StaffError
 
 if TYPE_CHECKING:
     from daedalus.app import Application
     from daedalus.extensions.board import Board
     from daedalus.extensions.staff import Team
 
-logger = logging.getLogger(__name__)
-
 RECEIPTS_MAX = 20
-NOTE_MAX = 2000
 
 
 class ReviewRefused(ValueError):
@@ -105,6 +100,29 @@ class Review:
                                             " ORDER BY created_at DESC,id DESC LIMIT 1", (task_id,))
         head_sha = await self.team.worktrees.commit_identity(folder, str(task["branch"])) if comparison.exists else None
         current_sha = await self.team.worktrees.commit_identity(folder)
+        binding = await self.app.db.fetchone("SELECT contract_revision,current_attempt_id FROM board_tasks"
+                                            " WHERE id = ?", (task_id,))
+        result = await self.app.db.fetchone(
+            "SELECT id,outcome FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
+            " AND attempt_id IS ? ORDER BY created_at DESC,rowid DESC LIMIT 1",
+            (task_id, binding["contract_revision"], binding["current_attempt_id"]),
+        ) if binding is not None else None
+        verdict = await self.app.db.fetchone(
+            "SELECT id,verification,accepted,head,base FROM review_verdicts WHERE result_id = ?"
+            " ORDER BY created_at DESC,rowid DESC LIMIT 1", (result["id"],),
+        ) if result is not None else None
+        if result is None:
+            blockers.append({"code": "result_missing", "text": "no current immutable result was submitted"})
+        elif result["outcome"] != "complete":
+            blockers.append({"code": "result_incomplete", "text": "the current result is not complete"})
+        if result is not None:
+            if verdict is None or verdict["verification"] != "verified" or not verdict["accepted"]:
+                blockers.append({"code": "verdict_missing", "text": "no independent verified approval binds this result"})
+            elif verdict["head"] != head_sha or verdict["base"] != current_sha:
+                blockers.append({"code": "verdict_stale", "text": "the reviewed branch or base changed"})
+            async with self.app.db.transaction() as conn:
+                if await unresolved_review_comments(conn, result["id"]):
+                    blockers.append({"code": "comments", "text": "blocking review comments remain unresolved"})
         return {
             "task_id": task["id"],
             "title": task["title"],
@@ -117,6 +135,11 @@ class Review:
             "base_sha": current_sha if not merged or merged["state"] != "merged" else merged["base_sha"],
             "current_sha": current_sha,
             "merge_receipt": dict(merged) if merged is not None else None,
+            "result_id": result["id"] if result is not None else None,
+            "verdict_id": verdict["id"] if verdict is not None else None,
+            "verification": verdict["verification"] if verdict is not None else "unverified",
+            "verdict_accepted": bool(verdict["accepted"]) if verdict is not None else False,
+            "ci_status": "unknown",
             "folder": {"id": folder.id, "path": str(folder.path), "label": folder.label, "env": folder.env},
             "exists": comparison.exists,
             "on_base": not base or comparison.current == base,
@@ -136,45 +159,6 @@ class Review:
             "project": {"id": project.id, "name": project.name},
         }
 
-    async def merge(self, task_id: str, *, by: str = "operator") -> dict[str, Any]:
-        """External merges require a queued, exact-result command and a fenced effect claim."""
-        raise ReviewRefused("merge requires an exact result, verified verdict, and queued operation receipt")
-
-    async def reject(self, task_id: str, note: str, *, by: str = "operator") -> dict[str, Any]:
-        """Send the work back: the task returns to doing with ``merge_state='rejected'`` and the note goes
-        to the member — told at once when their session is live, otherwise waiting in the task's notes
-        for the session the assignment starts."""
-        note = (note or "").strip()[:NOTE_MAX]
-        if not note:
-            raise ReviewRefused("say what to change: a rejection needs a note")
-        task, _project, _folder = await self._where(task_id)
-        # One line in the task's notes, which is where the next session reads it from.
-        line = " ".join(note.split())
-        if task["status"] != "review":
-            raise ReviewRefused(f"only a task in review can be sent back; this one is {task['status']}")
-        member = await self.team.manager.staff.get(task["assignee_staff_id"]) if task.get("assignee_staff_id") else None
-        live = await self.team.live_of(member) if member is not None else None
-        told = False
-        await self.app.db.execute("UPDATE board_tasks SET merge_state = 'rejected', acceptance_state = 'returned' WHERE id = ?", (task["id"],))
-        if live is not None and live.session.task_id == task["id"]:
-            updated = await self.board.update(task["id"], status="doing", note=f"{SENT_BACK}{by}: {line}")
-            try:
-                await self.team.tell(member, f"The operator sent task {task['id']} (\"{task['title']}\") back from review:\n{note}\n\nChange it on {task['branch']}, commit, and report done again.", when="after_turn", by=by)  # type: ignore[arg-type]
-                told = True
-            except (StaffError, KeyError, RuntimeError) as exc:
-                logger.warning("could not tell %s about the rejection of %s: %s", member.name if member else "?", task["id"], exc)
-        else:
-            # Nobody is on it: back to the queue, where the assignment starts a session whose first
-            # message carries the task's notes.
-            updated = await self.board.update(task["id"], status="todo", note=f"{SENT_BACK}{by}: {line}")
-            if member is not None and member.active:
-                try:
-                    await self.team.assign(member, task["id"], by=by)
-                except (StaffError, KeyError, ValueError) as exc:
-                    logger.info("the rejected task %s waits for an assignment: %s", task["id"], exc)
-        updated = await self.board.get(task["id"])
-        updated["told"] = told
-        return updated
 
 
 __all__ = ["Review", "ReviewRefused"]

@@ -35,6 +35,28 @@ async def app(settings: Settings, db: Database) -> Any:
     await manager.close()
 
 
+async def test_direct_board_completion_requires_review_receipt(app: Any) -> None:
+    board = Board(app)
+    task = await board.add(title="A checked task", operator=True)
+    with pytest.raises(ValueError, match="exact-result acceptance"):
+        await board.update(task["id"], status="done")
+    assert (await board.get(task["id"]))["status"] == "todo"
+
+
+async def test_project_task_count_and_depth_are_reserved_before_insert(app: Any, tmp_path: Path) -> None:
+    team = await _team(app, tmp_path)
+    board = Board(app)
+    await app.db.execute("UPDATE planning_budgets SET max_tasks = 1,max_depth = 1 WHERE project_id = ?",
+                         (team.project,))
+    first = await board.add(title="First", project_id=team.project, operator=True)
+    with pytest.raises(ValueError, match="task count"):
+        await board.add(title="Second", project_id=team.project, operator=True)
+    await app.db.execute("UPDATE planning_budgets SET max_tasks = 2 WHERE project_id = ?", (team.project,))
+    with pytest.raises(ValueError, match="depth"):
+        await board.add(title="Dependent", project_id=team.project, depends_on=[first["id"]], operator=True)
+    assert (await app.db.fetchone("SELECT count(*) AS n FROM board_tasks WHERE project_id = ?", (team.project,)))["n"] == 1
+
+
 async def _team(app: Any, tmp_path: Path) -> SimpleNamespace:
     """A project with an orchestrator, one staff member with a session, an ordinary agent in it and one outside."""
     manager: SessionManager = app.manager
@@ -101,7 +123,9 @@ async def test_staff_move_only_their_own_tasks_and_never_to_done(app: Any, tmp_p
     doing = await board.update(mine["id"], status="doing", actor=team.ada_session)
     assert doing["status"] == "doing" and doing["session_id"] == team.ada_session
     assert (await board.update(mine["id"], status="review", note="ready", actor=team.ada_session))["status"] == "review"
-    for status in ("done", "dropped", "todo"):
+    with pytest.raises(ValueError, match="exact-result acceptance"):
+        await board.update(mine["id"], status="done", actor=team.ada_session)
+    for status in ("dropped", "todo"):
         with pytest.raises(ValueError, match="takes a task to doing, review, blocked"):
             await board.update(mine["id"], status=status, actor=team.ada_session)
     with pytest.raises(ValueError, match="only the tasks assigned to them"):
@@ -131,28 +155,27 @@ async def test_staff_move_only_their_own_tasks_and_never_to_done(app: Any, tmp_p
         await board.update(loose["id"], assignee_staff_id=team.ada.id)
 
 
-async def test_unmerged_branch_is_never_done_and_accept_closes_review(app: Any, tmp_path: Path) -> None:
+async def test_review_cannot_close_without_an_exact_result(app: Any, tmp_path: Path) -> None:
     board = Board(app)
     team = await _team(app, tmp_path)
     task = await board.add(title="Checkout", project_id=team.project, assignee_staff_id=team.ada.id, operator=True)
-    with pytest.raises(ValueError, match="only a task in review"):
-        await board.accept(task["id"])
+    with pytest.raises(ValueError, match="exact-result acceptance"):
+        await board.update(task["id"], status="done")
     await board.update(task["id"], status="doing", actor=team.ada_session)
     await board.update(task["id"], status="review", actor=team.ada_session)
     await app.db.execute("UPDATE board_tasks SET branch = 'agent/ada/checkout', merge_state = 'proposed' WHERE id = ?", (task["id"],))
-    # Nobody closes work that is not in the folder: not the operator's plain move, not the orchestrator, not accept.
+    # Neither an unmerged branch nor a manually marked merge proves an accepted result.
     for actor in (None, team.orchestrator):
-        with pytest.raises(ValueError, match="unmerged work on branch agent/ada/checkout"):
+        with pytest.raises(ValueError, match="exact-result acceptance"):
             await board.update(task["id"], status="done", actor=actor)
-    with pytest.raises(ValueError, match="merged before it is accepted"):
-        await board.accept(task["id"])
     await app.db.execute("UPDATE board_tasks SET merge_state = 'merged' WHERE id = ?", (task["id"],))
-    accepted = await board.accept(task["id"])
-    assert accepted["status"] == "done" and "accepted by the operator" in accepted["notes"]
+    with pytest.raises(ValueError, match="exact-result acceptance"):
+        await board.update(task["id"], status="done")
 
     plain = await board.add(title="Photos", project_id=team.project, operator=True)
     await board.update(plain["id"], status="review")
-    assert (await board.accept(plain["id"]))["status"] == "done"
+    with pytest.raises(ValueError, match="exact-result acceptance"):
+        await board.update(plain["id"], status="done")
 
 
 async def test_every_change_is_an_event_that_names_its_actor(app: Any, tmp_path: Path) -> None:
@@ -164,9 +187,8 @@ async def test_every_change_is_an_event_that_names_its_actor(app: Any, tmp_path:
         second = await board.add(title="Photos", project_id=team.project, depends_on=[first["id"]], operator=True)
         await board.update(first["id"], status="doing", actor=team.ada_session)
         await board.update(first["id"], status="review", actor=team.ada_session)
-        await board.accept(first["id"])
         await board.update(second["id"], assignee_staff_id=team.bo.id, actor=team.orchestrator)
-        for _ in range(9):
+        for _ in range(6):
             event = await anext(events)
             seen.append((event.type, event.payload, event.staff_id, event.project_id))
     kinds = [(kind, payload["task_id"], payload.get("actor"), payload.get("from"), payload.get("to")) for kind, payload, _, _ in seen]
@@ -176,10 +198,6 @@ async def test_every_change_is_an_event_that_names_its_actor(app: Any, tmp_path:
         ("task.created", second["id"], "operator", None, "blocked"),
         ("task.moved", first["id"], "staff", "todo", "doing"),
         ("task.moved", first["id"], "staff", "doing", "review"),
-        ("task.moved", first["id"], "operator", "review", "done"),
-        # Its dependency finished, so the second task became ready without anyone moving it.
-        ("task.moved", second["id"], "system", "blocked", "todo"),
-        ("task.accepted", first["id"], "operator", None, None),
         ("task.assigned", second["id"], "orchestrator", None, None),
     ]
     assert all(project == team.project for *_, project in seen)
@@ -284,16 +302,15 @@ async def test_the_board_over_http(app: Any, tmp_path: Path) -> None:
         assert [t["id"] for t in listing["tasks"]] == [task["id"]] and listing["tasks"][0]["assignee"]["name"] == "Ada"
         assert listing["needs_you"] == [] and listing["counts"]["todo"] == 1
 
-        assert (await client.post(f"/api/board/{task['id']}/accept", headers=HEADERS)).status_code == 409
+        assert (await client.put(f"/api/board/{task['id']}", headers=HEADERS,
+                                 json={"status": "done"})).status_code == 400
         await client.put(f"/api/board/{task['id']}", headers=HEADERS, json={"status": "review"})
-        accepted = await client.post(f"/api/board/{task['id']}/accept", headers=HEADERS)
-        assert accepted.status_code == 200 and accepted.json()["status"] == "done"
-        assert (await client.post("/api/board/nope/accept", headers=HEADERS)).status_code == 404
 
         # The shell's project lens over the global board.
         await board.add(title="elsewhere", session_id=team.outsider)
         lens = (await client.get(f"/api/board?include_done=1&project={team.project}", headers=HEADERS)).json()
         assert [t["title"] for t in lens] == ["Checkout"]
         assert len((await client.get("/api/board?include_done=1", headers=HEADERS)).json()) == 2
-        done_hidden = (await client.get(base, headers=HEADERS)).json()
-        assert done_hidden["tasks"] == [] and done_hidden["counts"]["done"] == 1
+        in_review = (await client.get(base, headers=HEADERS)).json()
+        assert [task["title"] for task in in_review["tasks"]] == ["Checkout"]
+        assert in_review["counts"]["done"] == 0

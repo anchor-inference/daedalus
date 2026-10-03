@@ -91,7 +91,7 @@ class OutboxStore:
                 rows = await cursor.fetchall()
             return [await self._decode(conn, row) for row in rows]
 
-    async def claim(self, kinds: tuple[str, ...]) -> Claim | None:
+    async def claim(self, kinds: tuple[str, ...], *, exclude: tuple[str, ...] = ()) -> Claim | None:
         if not kinds:
             return None
         async with self.db.transaction() as conn:
@@ -99,6 +99,8 @@ class OutboxStore:
             async with conn.execute(f"SELECT * FROM effect_outbox WHERE state = 'pending' AND kind IN ({placeholders}) ORDER BY created_at,id", kinds) as cursor:
                 rows = await cursor.fetchall()
             for row in rows:
+                if row["id"] in exclude:
+                    continue
                 try:
                     await self._authorize(conn, row)
                 except (ControlDenied, KeyError) as exc:
@@ -109,6 +111,24 @@ class OutboxStore:
                 assert claimed is not None
                 return await self._authorize(conn, claimed)
         return None
+
+    async def defer(self, claim: Claim, *, reason: str) -> bool:
+        """Release a claim whose trusted handler has not attempted any external effect."""
+        if not reason:
+            raise ValueError("a deferred command must say what it waits for")
+        async with self.db.transaction() as conn:
+            row = await one(conn, "SELECT * FROM effect_outbox WHERE id = ?", (claim.id,))
+            if row is None or row["state"] != "claimed" or row["claim_generation"] != claim.generation:
+                return False
+            try:
+                await self._authorize(conn, row)
+            except (ControlDenied, KeyError) as exc:
+                await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ?,completed_at = ? WHERE id = ?",
+                                   (str(exc), now(), claim.id))
+                return False
+            await conn.execute("UPDATE effect_outbox SET state = 'pending',claimed_at = NULL,error = ? WHERE id = ? AND claim_generation = ?",
+                               (reason, claim.id, claim.generation))
+            return True
 
     async def check(self, claim: Claim) -> None:
         """Recheck ownership and authority immediately before the handler's external effect."""

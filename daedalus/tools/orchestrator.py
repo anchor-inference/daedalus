@@ -16,7 +16,7 @@ from protocore.contracts.types import ToolDefinition, ToolParameterSchema, ToolR
 from protocore.tools.decorator import tool
 
 from daedalus.tools import search_hint
-from daedalus.tools._common import error, ok, services_for
+from daedalus.tools._common import call_id, error, ok, services_for
 
 WATCH_EVENTS = (
     "staff_finished", "staff_question", "staff_permission", "staff_crashed", "staff_silent",
@@ -515,47 +515,46 @@ require().definition.parameters.properties["kind"]["enum"] = ["quality", "scope"
 
 
 @search_hint(
-    "accept result check handed in done review verify evidence return rework approve mark checks "
+    "review result check handed in verification evidence return rework verdict exact report "
     "принять результат проверить сданное приемка вернуть на доработку отметить пункты одобрить"
 )
 @tool(
-    name="Accept",
+    name="ReviewResult",
     description=(
-        "Record your check of work a member handed in. verdict='accepted' takes a mark for every check (C…) and "
-        "requirement (R…) of the card: checks=[{item, ok, note}] — an input the member opened is marked by the host; "
-        "a check you did not see pass is ok=false. verdict='returned' reopens the card for its member with what "
-        "failed (staff and reason to give it to someone else). ask_operator=true, with your marks, puts it in the "
-        "operator's review column for them to accept: for what they will use themselves or judge by taste. A card "
-        "with no checks and no requirements is accepted with note alone."
+        "Inspect immutable reports for a task, or append an independent verdict to an exact result. "
+        "op='inspect' returns result ids, current candidate and entity revision. op='verdict' requires "
+        "result_id, expected_entity_revision, verification (verified, failed or stale), accepted, "
+        "evidence_ids and reason; branch work also needs exact head/base. An accepted verdict means the "
+        "reviewer approved that result, not that the operator accepted the task. op='return' requires "
+        "the exact result_id, verdict_id, contract_revision, expected_entity_revision and reason. "
+        "Mutations require a host-issued reviewer grant; tool arguments cannot choose their actor."
     ),
 )
-async def accept(
+async def review_result(
     context: ToolContext,
     task_id: str,
-    verdict: str = "accepted",
-    checks: list[dict[str, Any]] | None = None,
-    note: str = "",
-    ask_operator: bool = False,
-    staff: str | None = None,
+    op: str = "inspect",
+    result_id: str | None = None,
+    verdict_id: str | None = None,
+    expected_entity_revision: int | None = None,
+    verification: str = "unverified",
+    accepted: bool = False,
+    evidence_ids: list[str] | None = None,
+    head: str | None = None,
+    base: str | None = None,
+    environment_digest: str | None = None,
     reason: str = "",
+    contract_revision: int | None = None,
 ) -> ToolResult:
-    return await _call(context, "accept", task_id=task_id, verdict=verdict, checks=checks, note=note, ask_operator=ask_operator, staff=staff, reason=reason)
+    return await _call(context, "review_result", task_id=task_id, op=op, result_id=result_id,
+                       verdict_id=verdict_id, expected_entity_revision=expected_entity_revision,
+                       verification=verification, accepted=accepted, evidence_ids=evidence_ids,
+                       head=head, base=base, environment_digest=environment_digest, reason=reason,
+                       contract_revision=contract_revision, client_operation_id=call_id(context))
 
 
-accept().definition.parameters.properties["verdict"]["enum"] = ["accepted", "returned"]
-accept().definition.parameters.properties["checks"] = {
-    "type": "array",
-    "description": "One mark per check (C1 …) and requirement (R1 …).",
-    "items": {
-        "type": "object",
-        "properties": {
-            "item": {"type": "string", "description": "C1, R2, or its words."},
-            "ok": {"type": "boolean", "description": "Whether you saw it met."},
-            "note": {"type": "string", "description": "What you looked at, or what is wrong."},
-        },
-        "required": ["item", "ok"],
-    },
-}
+review_result().definition.parameters.properties["op"]["enum"] = ["inspect", "verdict", "return"]
+review_result().definition.parameters.properties["verification"]["enum"] = ["unverified", "verified", "failed", "stale"]
 
 
 @search_hint(
@@ -805,7 +804,7 @@ async def unwatch(context: ToolContext, id: str) -> ToolResult:
 
 TOOLS = [
     brief, folders, journal, team, tasks, peek, AskOperator, withdraw_questions, project_report,
-    hire, staff_edit, dismiss, assign, staff_sessions, require, accept, decide, tell, read_staff, answer, interrupt, pause, release, harnesses,
+    hire, staff_edit, dismiss, assign, staff_sessions, require, review_result, decide, tell, read_staff, answer, interrupt, pause, release, harnesses,
     wake_me, Watch, unwatch,
 ]
 

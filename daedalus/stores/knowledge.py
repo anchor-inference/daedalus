@@ -28,6 +28,53 @@ def _view(row: Any) -> dict[str, Any]:
     return dict(row)
 
 
+async def enqueue_artifact_change(
+    conn: Any, *, task_id: str | None, project_id: str | None,
+    artifact_key: str, artifact_revision: int,
+) -> int:
+    """Queue facts made stale by a committed artifact revision in the same transaction."""
+    if task_id is not None:
+        cursor = await conn.execute(
+            "SELECT m.id,COALESCE(m.project_id,t.project_id) project_id FROM artifact_manifests m "
+            "JOIN board_tasks t ON t.id = m.task_id "
+            "WHERE m.task_id = ? AND m.artifact_key = ? AND m.artifact_revision = ?",
+            (task_id, artifact_key, artifact_revision),
+        )
+    else:
+        cursor = await conn.execute(
+            "SELECT id,project_id FROM artifact_manifests WHERE task_id IS NULL AND project_id = ? "
+            "AND artifact_key = ? AND artifact_revision = ?",
+            (project_id, artifact_key, artifact_revision),
+        )
+    new = await cursor.fetchone()
+    await cursor.close()
+    if new is None or (project_id is not None and new["project_id"] != project_id):
+        raise KnowledgeConflict("new artifact does not belong to the declared scope")
+    scope_sql = "old.task_id = ?" if task_id is not None else "old.task_id IS NULL AND old.project_id = ?"
+    scope_id = task_id if task_id is not None else project_id
+    cursor = await conn.execute(
+        "SELECT d.fact_id,d.fact_version,d.source_id FROM knowledge_dependencies d "
+        "JOIN knowledge_fact_versions v ON v.fact_id = d.fact_id AND v.version = d.fact_version "
+        "JOIN artifact_manifests old ON old.id = d.source_id "
+        "WHERE d.source_kind = 'manifest' AND v.status = 'promoted' AND v.project_id = ? "
+        "AND v.version = (SELECT MAX(version) FROM knowledge_fact_versions WHERE fact_id = v.fact_id) "
+        "AND old.artifact_key = ? AND old.artifact_revision < ? AND " + scope_sql,
+        (new["project_id"], artifact_key, artifact_revision, scope_id),
+    )
+    dependencies = await cursor.fetchall()
+    await cursor.close()
+    for item in dependencies:
+        queue_id = hashlib.sha256(f"{item['fact_id']}:{item['fact_version']}:{new['id']}".encode()).hexdigest()[:32]
+        await conn.execute(
+            "INSERT OR IGNORE INTO knowledge_invalidation_queue "
+            "(id,fact_id,fact_version,project_id,source_id,replacement_manifest_id,observed_revision,created_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (queue_id, item["fact_id"], item["fact_version"], new["project_id"],
+             item["source_id"], new["id"], artifact_revision, _now()),
+        )
+    return len(dependencies)
+
+
 class KnowledgeStore:
     def __init__(self, db: Database) -> None:
         self.db = db
@@ -221,7 +268,66 @@ class KnowledgeStore:
             (fact_id, version, source["source_kind"], source["source_id"],
              source["source_revision"], source["source_digest"]),
         )
+        if verdict in {"invalidate", "forget"}:
+            await conn.execute(
+                "UPDATE knowledge_invalidation_queue SET status = 'resolved', resolution_version = ?, resolved_at = ? "
+                "WHERE fact_id = ? AND fact_version = ? AND status = 'pending'",
+                (version, at, fact_id, expected_version),
+            )
         return {"fact_id": fact_id, "version": version, "status": status}
+
+    async def stale_queue(self, project_id: str) -> list[dict[str, Any]]:
+        rows = await self.db.fetchall(
+            "SELECT q.*,v.claim,m.digest replacement_digest FROM knowledge_invalidation_queue q "
+            "JOIN knowledge_fact_versions v ON v.fact_id = q.fact_id AND v.version = q.fact_version "
+            "JOIN artifact_manifests m ON m.id = q.replacement_manifest_id "
+            "WHERE q.project_id = ? AND q.status = 'pending' ORDER BY q.created_at,q.id LIMIT 200",
+            (project_id,),
+        )
+        return [dict(row) for row in rows]
+
+    async def revalidate_command(
+        self, principal: Principal, project_id: str, fact_id: str, queue_id: str, *,
+        expected_revision: int, expected_version: int, client_operation_id: str,
+    ) -> dict[str, Any]:
+        async def effect(conn: Any, _mutation: Any) -> dict[str, Any]:
+            cursor = await conn.execute(
+                "SELECT * FROM knowledge_invalidation_queue WHERE id = ? AND fact_id = ? "
+                "AND project_id = ? AND status = 'pending'", (queue_id, fact_id, project_id),
+            )
+            queued = await cursor.fetchone()
+            await cursor.close()
+            if queued is None or queued["fact_version"] != expected_version:
+                raise KnowledgeConflict("invalidation queue or fact version changed")
+            cursor = await conn.execute(
+                "SELECT * FROM knowledge_fact_versions WHERE fact_id = ? AND project_id = ? "
+                "ORDER BY version DESC LIMIT 1", (fact_id, project_id),
+            )
+            current = await cursor.fetchone()
+            await cursor.close()
+            if current is None or current["version"] != expected_version or current["status"] != "promoted":
+                raise KnowledgeConflict("promoted fact version changed")
+            try:
+                revision, digest = await self._source(conn, project_id, current["source_kind"], current["source_id"])
+                stale = revision != current["source_revision"] or digest != current["source_digest"]
+            except KnowledgeConflict:
+                stale = True
+            if stale:
+                return await self._review(
+                    conn, fact_id, project_id, expected_version, "invalidate", principal.actor_id,
+                    "source artifact revision changed",
+                )
+            await conn.execute(
+                "UPDATE knowledge_invalidation_queue SET status = 'dismissed', resolved_at = ? WHERE id = ?",
+                (_now(), queue_id),
+            )
+            return {"fact_id": fact_id, "version": expected_version, "status": "promoted", "queue_status": "dismissed"}
+
+        return await ControlStore(self.db).mutate(
+            principal, Scope("project", project_id), "knowledge.revalidate", client_operation_id,
+            expected_revision, Entity("project", project_id),
+            {"fact_id": fact_id, "queue_id": queue_id, "expected_version": expected_version}, effect,
+        )
 
     async def review_command(
         self, principal: Principal, project_id: str, fact_id: str, *, expected_revision: int,

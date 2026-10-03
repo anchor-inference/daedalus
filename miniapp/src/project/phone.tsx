@@ -373,6 +373,7 @@ function terminalLine(row: TerminalRow): string {
 }
 
 export function PhoneTerminals({ projectId, toast }: { projectId: string; toast: (text: string) => void }) {
+  const offline = useOffline();
   const { project } = useProject(projectId);
   const { data } = useQuery<{ terminals: TerminalRow[] }>(terminalsKey(projectId), { pollMs: 10000, staleMs: 3000 });
   const rows = Array.isArray(data?.terminals) ? data!.terminals : [];
@@ -382,6 +383,7 @@ export function PhoneTerminals({ projectId, toast }: { projectId: string; toast:
   const env: TerminalEnvName = project?.settings.default_env ?? project?.folders[0]?.env ?? "container";
   const folder = project?.folders.find((f) => f.env === env && !f.readonly) ?? project?.folders.find((f) => f.env === env);
   async function make() {
+    if (offline) return;
     setMaking(true);
     try {
       const { openFreeTerminal } = await import("../screens/Terminals");
@@ -397,9 +399,10 @@ export function PhoneTerminals({ projectId, toast }: { projectId: string; toast:
         projectId={projectId}
         title={t("focus.page.terminals")}
         subtitle={project?.name}
-        actions={<button className="iconbtn" disabled={making || !project} onClick={() => void make()} aria-label={t("term.new")} title={t("term.new")}><Icon name="plus" /></button>}
+        actions={<button className="iconbtn" disabled={making || !project || offline} onClick={() => void make()} aria-label={t("term.new")} title={t("term.new")}><Icon name="plus" /></button>}
       />
       <div className="screen phone-project">
+        {offline && <div className="result-warning" role="status">{t("focus.terminalOffline")}</div>}
         <NeedsYouBanner projectId={projectId} toast={toast} />
         {!data && <Skeleton rows={2} />}
         {data && rows.length === 0 && <div className="empty calm">{t("focus.terminals.empty")}</div>}
@@ -414,7 +417,7 @@ export function PhoneTerminals({ projectId, toast }: { projectId: string; toast:
                 </span>
                 <EnvPill env={row.env} />
               </a>
-              <TerminalRowMenu row={row} toast={toast} />
+              {!offline && <TerminalRowMenu row={row} toast={toast} />}
             </div>
           ))}
         </div>
@@ -431,6 +434,7 @@ export function PhoneTerminals({ projectId, toast }: { projectId: string; toast:
  * the member's open request is answered from the buttons above the keys.
  */
 export function StaffPhoneTerminal({ staffId, projectId, ...props }: PhoneTerminalProps & { staffId: string; projectId: string | null }) {
+  const offline = useOffline();
   const { data: member } = useMember(staffId);
   const pid = projectId ?? member?.project_id ?? "";
   const { data } = useQuery<{ asks: Ask[] }>(pid ? operatorAsksKey(pid) : null, { pollMs: 10000, staleMs: 2000 });
@@ -443,6 +447,7 @@ export function StaffPhoneTerminal({ staffId, projectId, ...props }: PhoneTermin
   const compose = {
     placeholder: name ? t("term.phone.compose.staff", { name }) : t("term.phone.compose"),
     onSend: async (text: string) => {
+      if (offline) { toast(t("focus.staffDraftOffline")); return false; }
       try {
         // The same choice the staff view's composer starts on, with no picker here to change it.
         await api.post(`/api/staff/${enc(staffId)}/messages`, { text, when: composerWhen(nowChoice(view?.capabilities), null) });
@@ -455,11 +460,12 @@ export function StaffPhoneTerminal({ staffId, projectId, ...props }: PhoneTermin
       }
     },
   };
-  const actions = mine && pid ? (
+  const askActions = mine && pid ? (
     <div className="term-phone-ask" data-ask={mine.short_id}>
       <div className="term-phone-ask-text truncate">{mine.text}</div>
       <AskAnswers key={mine.id} ask={mine} projectId={pid} toast={toast} always={canAlways(mine, view?.capabilities)} server={alwaysServer(mine, view?.capabilities)} />
     </div>
   ) : null;
+  const actions = offline ? <><div className="result-warning" role="status">{t("focus.staffDraftOffline")}</div>{askActions}</> : askActions;
   return <PhoneTerminal {...props} compose={compose} actions={actions} />;
 }

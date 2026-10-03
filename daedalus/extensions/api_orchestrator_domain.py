@@ -16,6 +16,7 @@ from daedalus.extensions.orchestrator_domain import (
     add_artifact_manifest,
     add_review_comment,
     add_review_evidence,
+    advance_workflow_step,
     apply_goal_revision,
     claim_handoff,
     configure_workflow,
@@ -33,6 +34,7 @@ from daedalus.extensions.orchestrator_domain import (
     update_role_profile,
     workflow_readiness,
 )
+from daedalus.extensions.planning import create_plan, token_readiness
 from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.outbox import OutboxStore
 
@@ -88,6 +90,34 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
         except (ControlConflict, DomainConflict) as exc:
             raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @api.get("/api/projects/{project_id}/plans/readiness")
+    async def plan_readiness(project_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        async with app.db.transaction() as conn:
+            try:
+                return await token_readiness(conn, project_id)
+            except DomainConflict as exc:
+                raise HTTPException(409, str(exc)) from exc
+
+    @api.post("/api/projects/{project_id}/plans")
+    async def post_plan(project_id: str, body: dict[str, Any],
+                        who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            revision = body["expected_collection_revision"]
+            if isinstance(revision, bool) or not isinstance(revision, int):
+                raise ValueError("expected_collection_revision must be an integer")
+            async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
+                return await create_plan(conn, mutation, project_id=project_id,
+                                         tasks=body["tasks"], fanout_reason=body.get("fanout_reason", ""))
+            return await store().mutate(Principal.operator(who), Scope("project", project_id),
+                                      "plan.create", str(body["client_operation_id"]), revision,
+                                      Entity("collection", project_id), body, effect)
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except (ControlConflict, DomainConflict) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except (KeyError, ValueError, TypeError) as exc:
             raise HTTPException(422, str(exc)) from exc
 
     @api.get("/api/staff/{staff_id}/role")
@@ -369,6 +399,16 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
                                             edges=[tuple(edge) for edge in body.get("edges", [])])
         return await mutate(task_id, who, body, "workflow.configure", effect)
 
+    @api.post("/api/board/{task_id}/workflow/{step_id}/{action}")
+    async def workflow_step(task_id: str, step_id: str, action: str, body: dict[str, Any],
+                            who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        if action not in ("ack", "start", "complete"):
+            raise HTTPException(404, "no such workflow action")
+        async def effect(conn: Any, _: Any) -> dict[str, Any]:
+            return await advance_workflow_step(conn, task_id=task_id, step_id=step_id, action=action)
+        return await mutate(task_id, who, body, "workflow.ack" if action == "ack" else
+                            f"workflow.step.{action}", effect)
+
     @api.get("/api/board/{task_id}/next-action")
     async def next_action(task_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any] | None:
         async with app.db.transaction() as conn:
@@ -467,7 +507,7 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
                     (pinned["attempt_id"] is not None and pinned["attempt_id"] != pinned["current_attempt_id"])):
                 raise DomainConflict("result, verdict, attempt, or reviewed Git identity changed")
             latest = await conn.execute("SELECT id FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
-                                        " AND attempt_id IS ? ORDER BY created_at DESC,id DESC LIMIT 1",
+                                        " AND attempt_id IS ? ORDER BY created_at DESC,rowid DESC LIMIT 1",
                                         (task_id, pinned["contract_revision"], pinned["current_attempt_id"]))
             latest_result = await latest.fetchone()
             await latest.close()

@@ -15,7 +15,7 @@ from protocore.tools.ask_user import AskUserInput, AskUserOption, AskUserPauseRe
 from protocore.tools.decorator import tool
 
 from daedalus.tools import search_hint
-from daedalus.tools._common import error, ok, services_for
+from daedalus.tools._common import call_id, error, ok, services_for
 
 QUESTION_MAX = 2000
 OPTION_MAX = 200
@@ -37,7 +37,7 @@ def _hook(context: ToolContext):  # type: ignore[no-untyped-def]
         "cannot go on without a decision), 'stuck' (something outside your task blocks you) or 'done' (the "
         "deliverable meets the task's done-when; it hands the task in: work on your own branch goes to review for "
         "the operator to merge, and a worktree with uncommitted changes is refused — commit first; any other task "
-        "goes to done, handed in for the orchestrator to check against your note). note: a short factual summary. "
+        "also goes to review until the exact result is checked). note: a factual report preserved in full. "
         "evidence (with done): [{item, how, result}] for each check (C1 …) and requirement (R1 …) of the task — "
         "what you ran or looked at and what it showed. acknowledged: the requirements (R…) sent to you that you "
         "have taken into your plan. operator_steps: when the operator has to do something themselves — sign in, press, check — the steps for them, which reach them word for word: {goal, steps: […], roles?: [{account, purpose}], expected?, check?, limits?, verified: 'on-running-version' when you walked every step on the version that runs, else 'unverified', verified_how?}. Never a password in them: name where it is kept. artifacts: paths or links of what you produced. remember: one "
@@ -60,9 +60,9 @@ async def report(
     try:
         text = await hook(
             "report", session_id=context.session_id, kind=kind, note=note, artifacts=artifacts, remember=remember, evidence=evidence, acknowledged=acknowledged,
-            operator_steps=operator_steps,
+            operator_steps=operator_steps, call_id=call_id(context),
         )
-    except (KeyError, ValueError, RuntimeError) as exc:
+    except (KeyError, ValueError, RuntimeError, PermissionError) as exc:
         return error(context, str(exc))
     return ok(context, text)
 

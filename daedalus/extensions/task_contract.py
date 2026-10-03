@@ -353,6 +353,8 @@ class Contracts:
     async def set_acceptance(self, task_id: str, state: str) -> None:
         if state not in ACCEPTANCE_STATES:
             raise ValueError(f"acceptance is one of {', '.join(s or "''" for s in ACCEPTANCE_STATES)}")
+        if state in ("accepted", "operator_approved"):
+            raise ValueError("approval needs an exact result and review verdict")
         await self.db.execute("UPDATE board_tasks SET acceptance_state = ? WHERE id = ?", (state, task_id))
 
     @staticmethod

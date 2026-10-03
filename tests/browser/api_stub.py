@@ -287,6 +287,8 @@ GATES: dict[str, object] = {
     "/api/browsers/profiles": {"profiles": []},
     "/api/browsers/recordings": {"envs": []},
     "/api/browsers/notes": {"notes": []},
+    # Remote identity is optional and empty until a real host is paired.
+    "/api/runtime/hosts": {"items": [], "collection_revision": 1},
     # Without a browser installed, the workloads are the terminals alone: their own bar.
     "/api/workloads/load": {"terminals": terminal_load(), "browsers": None, "together": None},
     # Terminal environments and the terminals in them: a container environment that works, a host
@@ -433,6 +435,8 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
     if path in GATES:
         return 200, "application/json", json.dumps(GATES[path])
     parts = path.split("/")
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "artifact-manifests" and parts[4] == "transfer-readiness":
+        return 200, "application/json", json.dumps({"manifest_id": parts[3], "project_id": "", "available": False, "reason": "file_unavailable", "transfers": []})
     if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] in ("mode", "yagni"):
         # The composer's mode chip: a harness that reads the switch back answers these itself.
         return 200, "application/json", "{}"

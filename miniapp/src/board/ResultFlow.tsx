@@ -5,11 +5,13 @@ import { useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { absTime } from "../format";
 import { t } from "../i18n";
+import { navigate, projectSessionPath, sessionPath } from "../router";
 import { useOffline, useQuery, invalidate } from "../store";
 import { errorText } from "../ui";
 import { mergeBlock, type ProjectTask, type Review } from "./board";
 import { reviewKey } from "./ReviewPanel";
 import { EvidenceReview, type ResultContract } from "./EvidenceReview";
+import { ResultTransfer } from "./ResultTransfer";
 
 export type ResultReceipt = {
   result_id: string;
@@ -36,6 +38,7 @@ export type ResultReceipt = {
 
 type Contract = ResultContract;
 type Comment = { comment_id: string; result_id: string; priority: "blocking" | "important" | "suggestion"; body: string; manifest_id: string | null; path: string | null; head: string | null; line_start: number | null; line_end: number | null; state: string; created_at: string };
+type SourceTurn = { session_id: string; turn_seq: number; source_ref: string; source_digest: string; source_current: boolean };
 
 /** A missing source field is a blocker, never an invitation to infer readiness from the card status. */
 export function acceptanceBlock(task: ProjectTask, result: ResultReceipt | null, contract: Contract | null, review: Review | null, uncertain: boolean): string | null {
@@ -84,6 +87,10 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
   const [original, setOriginal] = useState<{ resultId: string; text: string } | null>(null);
   const [originalError, setOriginalError] = useState("");
   const [loadingOriginal, setLoadingOriginal] = useState(false);
+  const [sourceTurns, setSourceTurns] = useState<{ resultId: string; turns: SourceTurn[] } | null>(null);
+  const [sourceError, setSourceError] = useState<{ resultId: string; text: string } | null>(null);
+  const [loadingSources, setLoadingSources] = useState(false);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [comparedId, setComparedId] = useState("");
   const [busy, setBusy] = useState(false);
   const [returning, setReturning] = useState(false);
@@ -126,6 +133,18 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
     } finally {
       setLoadingOriginal(false);
     }
+  }
+
+  async function showSources() {
+    if (!result || loadingSources) return;
+    setLoadingSources(true);
+    setSourceError(null);
+    try {
+      const turns = await api.get<SourceTurn[]>(`${base}/results/${encodeURIComponent(result.result_id)}/turns`);
+      setSourceTurns({ resultId: result.result_id, turns });
+    } catch (error) {
+      setSourceError({ resultId: result.result_id, text: errorText(error) });
+    } finally { setLoadingSources(false); }
   }
 
   async function accept() {
@@ -260,14 +279,21 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
       <p className="result-state">{t("result.state", { outcome: t(`result.outcome.${result.outcome}`), verification: t(`result.verification.${result.verification}`), acceptance: t(`result.acceptance.${task.acceptance_state || "open"}`) })}</p>
       {(result.limitations ?? []).length > 0 && <div className="result-warning" role="status"><b>{t("result.limitations")}</b><ul>{result.limitations.map((item, index) => <li key={index}>{detail(item)}</li>)}</ul></div>}
       {(result.checks ?? []).length > 0 && <div className="result-checks"><b>{t("result.checks")}</b><ul>{result.checks.map((item, index) => <li key={index}>{detail(item)}</li>)}</ul></div>}
-      <details className="result-details">
+      <details className="result-details" onToggle={(event) => setEvidenceOpen(event.currentTarget.open)}>
         <summary>{t("result.evidence")}</summary>
         <div>{t("result.version", { revision: result.contract_revision })} · {absTime(result.created_at)}</div>
         <ul>{(result.artifacts ?? []).map((artifact) => <li key={artifact.id}>{artifact.artifact_kind}: {artifact.artifact_key} · {artifact.digest}</li>)}</ul>
+        {evidenceOpen && task.project_id && (result.artifacts ?? []).length > 0 && <ResultTransfer projectId={task.project_id} artifacts={result.artifacts} toast={toast} />}
         <div className="mono">{result.original_digest}</div>
         <button type="button" className="btn small" disabled={loadingOriginal} onClick={() => void showOriginal()}>{t("result.original")}</button>
         {originalError && <p className="bad" role="alert">{originalError}</p>}
         {original?.resultId === result.result_id && <pre className="result-original">{original.text}</pre>}
+        <button type="button" className="btn small" disabled={loadingSources} onClick={() => void showSources()}>{t("result.sourceMessages")}</button>
+        {sourceError?.resultId === result.result_id && <p className="bad" role="alert">{sourceError.text}</p>}
+        {sourceTurns?.resultId === result.result_id && (sourceTurns.turns.length ? <ul>{sourceTurns.turns.map((turn) => <li key={`${turn.session_id}:${turn.turn_seq}`}>
+          <button type="button" className="linkbtn" onClick={() => navigate((task.project_id ? projectSessionPath(task.project_id, turn.session_id) : sessionPath(turn.session_id)) + `#m${turn.turn_seq}`)}>{t("result.openSourceMessage")}</button>
+          {!turn.source_current && <span className="chip tiny warn">{t("result.sourceChanged")}</span>}
+        </li>)}</ul> : <p className="sub">{t("result.noSourceMessages")}</p>)}
       </details>
       {compared && <details className="result-details">
         <summary>{t("result.previous", { count: earlier.length })}</summary>

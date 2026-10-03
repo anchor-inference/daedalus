@@ -11,7 +11,7 @@ import { absTime, describeCron, relTime, relTimeLong, untilShort } from "../form
 import { t } from "../i18n";
 import { Icon } from "../icons";
 import { PageHeader } from "../shell";
-import { invalidate, useQuery } from "../store";
+import { invalidate, useOffline, useQuery } from "../store";
 import { errorText } from "../ui";
 import { useFocus, useProject, wakeupsKey, watchesKey } from "./data";
 import { NOTIFY_LEVELS, TASK_STATUSES, TELL_TIMINGS, WATCH_ACTIONS, WATCH_KINDS, emptyWatch, watchBody, watchThenText, watchWhenText, type WatchDraft, type WatchKind } from "./watchmodel";
@@ -22,6 +22,7 @@ const enc = encodeURIComponent;
 type Props = { projectId: string; back?: string | null; compact?: boolean; toast?: (text: string) => void };
 
 export function WakeupsPage({ projectId, back, compact, toast }: Props) {
+  const offline = useOffline();
   const { project } = useProject(projectId);
   const { data, error, refresh } = useQuery<{ wakeups: Wakeup[]; max: number }>(wakeupsKey(projectId), { pollMs: 30000, staleMs: 5000 });
   const [adding, setAdding] = useState(false);
@@ -30,6 +31,7 @@ export function WakeupsPage({ projectId, back, compact, toast }: Props) {
   const list = data?.wakeups ?? [];
 
   async function cancel(w: Wakeup) {
+    if (offline || error) return;
     try {
       await api.delete(`${wakeupsKey(projectId)}/${enc(w.id)}`);
       say(t("focus.wakeups.cancelled"));
@@ -41,11 +43,12 @@ export function WakeupsPage({ projectId, back, compact, toast }: Props) {
 
   const body = (
     <div className="wakeups">
+      {(offline || error) && <div className="result-warning" role="status">{t("focus.connectionRequired")}</div>}
       <section className="wakeup-section" aria-label={t("focus.wakeups.title")}>
         <div className="wakeup-section-head">
           <span className="wakeup-section-title">{t("focus.wakeups.title")}</span>
           <span className="grow" />
-          {enabled && <button className="btn small" onClick={() => setAdding(true)}><Icon name="plus" size={14} /> {t("focus.wakeups.add")}</button>}
+          {enabled && <button className="btn small" disabled={offline || !!error} onClick={() => setAdding(true)}><Icon name="plus" size={14} /> {t("focus.wakeups.add")}</button>}
         </div>
         {!data && !error && <Skeleton rows={2} />}
         {error && !data && <div className="empty"><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
@@ -64,14 +67,14 @@ export function WakeupsPage({ projectId, back, compact, toast }: Props) {
                 {w.cron && <span className="mono"> · {w.cron} UTC</span>}
               </div>
             </div>
-            <button className="iconbtn small quiet" onClick={() => void cancel(w)} title={t("focus.wakeups.cancel")} aria-label={t("focus.wakeups.cancel")}>
+            <button className="iconbtn small quiet" disabled={offline || !!error} onClick={() => void cancel(w)} title={t("focus.wakeups.cancel")} aria-label={t("focus.wakeups.cancel")}>
               <Icon name="close" size={16} />
             </button>
           </div>
         ))}
       </section>
       <WatchesSection projectId={projectId} toast={say} />
-      {adding && <WakeupSheet projectId={projectId} onClose={() => setAdding(false)} toast={say} />}
+      {adding && <WakeupSheet projectId={projectId} unverified={!!error} onClose={() => setAdding(false)} toast={say} />}
     </div>
   );
   if (compact) return body;
@@ -83,7 +86,8 @@ export function WakeupsPage({ projectId, back, compact, toast }: Props) {
   );
 }
 
-function WakeupSheet({ projectId, onClose, toast }: { projectId: string; onClose: () => void; toast: (text: string) => void }) {
+function WakeupSheet({ projectId, unverified, onClose, toast }: { projectId: string; unverified: boolean; onClose: () => void; toast: (text: string) => void }) {
+  const offline = useOffline();
   const soon = new Date(Date.now() + 3600000);
   const [draft, setDraft] = useState<WakeupDraft>({ note: "", when: "in", minutes: "30", date: soon.toLocaleDateString("en-CA"), time: soon.toTimeString().slice(0, 5), cron: "" });
   const [busy, setBusy] = useState(false);
@@ -94,7 +98,7 @@ function WakeupSheet({ projectId, onClose, toast }: { projectId: string; onClose
   const preview = timing?.cron ? describeCron(timing.cron) : timing?.at ? t("fmt.once", { when: absTime(timing.at) }) : timing?.in_minutes ? untilShort(Date.now() + timing.in_minutes * 60000) : "";
 
   async function save() {
-    if (!request) return;
+    if (!request || offline || unverified) return;
     setBusy(true);
     try {
       await api.post(wakeupsKey(projectId), request);
@@ -145,7 +149,7 @@ function WakeupSheet({ projectId, onClose, toast }: { projectId: string; onClose
       <div className="sub form-hint">{t("focus.wakeups.hint")}</div>
       <div className="sheet-foot">
         <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" disabled={busy || !request} onClick={() => void save()}>{t("focus.wakeups.set")}</button>
+        <button className="btn primary" disabled={busy || !request || offline || unverified} onClick={() => void save()}>{t("focus.wakeups.set")}</button>
       </div>
     </Sheet>
   );
@@ -157,11 +161,13 @@ function WakeupSheet({ projectId, onClose, toast }: { projectId: string; onClose
 const STOPPED = ["once", "budget", "pattern", "slow_pattern"];
 
 function WatchesSection({ projectId, toast }: { projectId: string; toast: (text: string) => void }) {
+  const offline = useOffline();
   const { data, error, refresh } = useQuery<WatchList>(watchesKey(projectId), { pollMs: 30000, staleMs: 5000 });
   const [adding, setAdding] = useState(false);
   const list = data?.watches ?? [];
 
   async function act(w: ProjectWatch, change: "toggle" | "remove") {
+    if (offline || error) return;
     try {
       if (change === "remove") await api.delete(`${watchesKey(projectId)}/${enc(w.id)}`);
       else await api.patch(`${watchesKey(projectId)}/${enc(w.id)}`, { enabled: !w.enabled });
@@ -174,10 +180,11 @@ function WatchesSection({ projectId, toast }: { projectId: string; toast: (text:
 
   return (
     <section className="wakeup-section" aria-label={t("focus.watches.title")}>
+      {(offline || error) && <div className="result-warning" role="status">{t("focus.connectionRequired")}</div>}
       <div className="wakeup-section-head">
         <span className="wakeup-section-title">{t("focus.watches.title")}</span>
         <span className="grow" />
-        <button className="btn small" onClick={() => setAdding(true)}><Icon name="plus" size={14} /> {t("focus.watches.add")}</button>
+        <button className="btn small" disabled={offline || !!error} onClick={() => setAdding(true)}><Icon name="plus" size={14} /> {t("focus.watches.add")}</button>
       </div>
       {!data && !error && <Skeleton rows={2} />}
       {error && !data && <div className="empty"><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
@@ -198,20 +205,21 @@ function WatchesSection({ projectId, toast }: { projectId: string; toast: (text:
             {!w.enabled && w.stopped && <div className={`wakeup-meta ${w.stopped === "once" ? "sub" : "watch-stopped"}`}>{t(STOPPED.includes(w.stopped) ? `focus.watches.stopped.${w.stopped}` : "focus.watches.stopped.other")}</div>}
             {w.last_error && !w.stopped && <div className="wakeup-meta watch-stopped">{t("focus.watches.error", { error: w.last_error })}</div>}
           </div>
-          <button className="iconbtn small quiet" onClick={() => void act(w, "toggle")} title={t(w.enabled ? "focus.watches.pause" : "focus.watches.resume")} aria-label={t(w.enabled ? "focus.watches.pause" : "focus.watches.resume")} aria-pressed={!w.enabled}>
+          <button className="iconbtn small quiet" disabled={offline || !!error} onClick={() => void act(w, "toggle")} title={t(w.enabled ? "focus.watches.pause" : "focus.watches.resume")} aria-label={t(w.enabled ? "focus.watches.pause" : "focus.watches.resume")} aria-pressed={!w.enabled}>
             <Icon name={w.enabled ? "pause" : "play"} size={16} />
           </button>
-          <button className="iconbtn small quiet" onClick={() => void act(w, "remove")} title={t("focus.watches.remove")} aria-label={t("focus.watches.remove")}>
+          <button className="iconbtn small quiet" disabled={offline || !!error} onClick={() => void act(w, "remove")} title={t("focus.watches.remove")} aria-label={t("focus.watches.remove")}>
             <Icon name="close" size={16} />
           </button>
         </div>
       ))}
-      {adding && <WatchSheet projectId={projectId} providers={data?.providers ?? []} minCooldown={data?.min_cooldown_minutes ?? 1} onClose={() => setAdding(false)} toast={toast} />}
+      {adding && <WatchSheet projectId={projectId} providers={data?.providers ?? []} minCooldown={data?.min_cooldown_minutes ?? 1} unverified={!!error} onClose={() => setAdding(false)} toast={toast} />}
     </section>
   );
 }
 
-function WatchSheet({ projectId, providers, minCooldown, onClose, toast }: { projectId: string; providers: string[]; minCooldown: number; onClose: () => void; toast: (text: string) => void }) {
+function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, toast }: { projectId: string; providers: string[]; minCooldown: number; unverified: boolean; onClose: () => void; toast: (text: string) => void }) {
+  const offline = useOffline();
   const { project } = useProject(projectId);
   const { team, board, terminals } = useFocus(projectId);
   const [draft, setDraft] = useState<WatchDraft>(() => ({ ...emptyWatch(), provider: providers[0] ?? "" }));
@@ -227,7 +235,7 @@ function WatchSheet({ projectId, providers, minCooldown, onClose, toast }: { pro
   const staffKind = kind.startsWith("staff_");
 
   async function save() {
-    if (!request) return;
+    if (!request || offline || unverified) return;
     setBusy(true);
     try {
       await api.post(watchesKey(projectId), request);
@@ -386,7 +394,7 @@ function WatchSheet({ projectId, providers, minCooldown, onClose, toast }: { pro
       <div className="sub form-hint">{t("focus.watches.hint")}</div>
       <div className="sheet-foot">
         <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" disabled={busy || !request} onClick={() => void save()}>{t("focus.watches.set")}</button>
+        <button className="btn primary" disabled={busy || !request || offline || unverified} onClick={() => void save()}>{t("focus.watches.set")}</button>
       </div>
     </Sheet>
   );

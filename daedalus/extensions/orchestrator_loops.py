@@ -3,7 +3,7 @@ followed yet.
 
 A member's report of done, stuck or needs-input opens one; so does a card left in todo with nobody on
 it for longer than a turn of the orchestrator. It closes with a decision about that work — the result
-accepted or returned (``Accept``), the next step assigned on the card or after it, the member's
+reviewed or returned (``ReviewResult``), the next step assigned on the card or after it, the member's
 question answered, a question put to the operator, the card set aside as waiting for someone or
 something named, the card dropped, or ``Decide``: nothing further, and why. The operator acting on
 the card closes it too.
@@ -184,7 +184,7 @@ class OpenResults:
             kind = {"report_done": "reported done", "report_stuck": "reported stuck", "report_needs_input": "needs input"}[loop["cause"]]
             said = f"{who} {kind} on {card}: \"{loop['summary']}\""
             nudge = {
-                "report_done": "Accept it (accepted, returned or for the operator), or Decide",
+                "report_done": "inspect its exact result with ReviewResult; verify it with evidence, return it, or Decide",
                 "report_stuck": "give the next step (Assign on the card or after it), ask the operator, set it aside as waiting on someone named, or Decide",
                 "report_needs_input": "answer it (Tell), ask the operator, or Decide",
             }[loop["cause"]]

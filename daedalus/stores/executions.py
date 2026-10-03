@@ -18,6 +18,7 @@ import aiosqlite
 
 from daedalus.stores.control import ControlDenied, ControlStore, Principal, Scope, canonical, now, one
 from daedalus.stores.database import Database
+from daedalus.stores.lifecycle import admit_child
 
 ACTIVE = ("queued", "starting", "running", "waiting")
 
@@ -134,6 +135,9 @@ class ExecutionStore:
                             now(), now(), worker.actor_id, worker.grant_id, worker.grant_generation, staff_session_id, runtime_kind))
         await conn.execute("UPDATE board_tasks SET current_attempt_id = ?,accepted_result_id = NULL,"
                            " accepted_contract_revision = NULL,acceptance_state = '' WHERE id = ?", (attempt_id, task_id))
+        if task["project_id"]:
+            await admit_child(conn, control=self.control, principal=launcher, parent_kind="task", parent_id=task_id,
+                              project_id=task["project_id"], child_kind="execution_attempt", child_id=attempt_id)
         return AttemptIdentity(attempt_id, task_id, contract_revision, generation, worker)
 
     async def _check(self, conn: aiosqlite.Connection, attempt_id: str, *, operation: str) -> tuple[aiosqlite.Row, AttemptIdentity]:

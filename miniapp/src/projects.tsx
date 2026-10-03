@@ -14,6 +14,7 @@ import { invalidate, useQuery } from "./store";
 import { confirmAsync, errorText } from "./ui";
 import { plural, t } from "./i18n";
 import { ProjectExtensions } from "./project/ProjectExtensions";
+import { ExecutionHosts } from "./project/ExecutionHosts";
 
 const PICKED = "daedalus.project";
 
@@ -433,6 +434,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
         <span className="sub">{t("project.snapshots.hint.edit")}</span>
       </label>
       <ProjectExtensions projectId={project.id} toast={toast} />
+      <ExecutionHosts toast={toast} />
       {project.sessions.length > 0 && (
         <>
           <label className="field">{t("project.agents.in")}</label>

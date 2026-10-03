@@ -176,3 +176,26 @@ async def test_heartbeat_does_not_invalidate_a_pending_operator_decision(db: Dat
     assert await ControlStore(db).revision(scope, entity) == 1
     await db.execute("UPDATE board_tasks SET status = 'review' WHERE id = 'task'")
     assert await ControlStore(db).revision(scope, entity) == 2
+
+
+async def test_host_retry_keeps_original_revision_even_when_command_advances_it_more_than_once(db: Database) -> None:
+    scope = await project(db)
+    entity = await task(db, scope)
+    calls = 0
+
+    async def write(conn: Any, mutation: Any) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        await conn.execute("UPDATE board_tasks SET notes = 'Full result' WHERE id = 'task'")
+        await conn.execute("UPDATE board_tasks SET status = 'review' WHERE id = 'task'")
+        return {"task_id": "task"}
+
+    store = ControlStore(db)
+    saved = await store.mutate(OPERATOR, scope, "result.submit", "host-call", 1, entity, {"digest": "report"}, write)
+    assert saved["entity_revision"] == 3
+    row = await db.fetchone("SELECT request_entity_revision FROM operation_receipts WHERE id = ?", (saved["receipt_id"],))
+    assert row["request_entity_revision"] == 1
+    await db.execute("UPDATE board_tasks SET priority = 1 WHERE id = 'task'")
+    assert await store.mutate(OPERATOR, scope, "result.submit", "host-call", row["request_entity_revision"], entity,
+                              {"digest": "report"}, write) == saved
+    assert calls == 1

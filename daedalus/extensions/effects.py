@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class EffectOutcome:
-    state: Literal["completed", "failed", "unknown"]
+    state: Literal["completed", "failed", "unknown", "deferred"]
     error: str | None = None
 
 
@@ -40,6 +40,7 @@ class EffectDispatcher:
         self.handlers: dict[str, Handler] = {}
         self.wake = asyncio.Event()
         self.delivery_ready = asyncio.Event()
+        self.postponed: set[str] = set()
 
     def register(self, kind: str, handler: Handler) -> None:
         if kind in self.handlers:
@@ -68,7 +69,7 @@ class EffectDispatcher:
         return resolved
 
     async def step(self) -> bool:
-        claim = await self.store.claim(tuple(self.handlers))
+        claim = await self.store.claim(tuple(self.handlers), exclude=tuple(self.postponed))
         if claim is None:
             return False
         try:
@@ -86,7 +87,11 @@ class EffectDispatcher:
             logger.exception("effect %s failed with an uncertain outcome", claim.id)
             await self.store.finish(claim, state="unknown", error=f"{type(exc).__name__}: {exc}")
         else:
-            await self.store.finish(claim, state=outcome.state, error=outcome.error)
+            if outcome.state == "deferred":
+                await self.store.defer(claim, reason=outcome.error or "waiting for admission")
+                self.postponed.add(claim.id)
+            else:
+                await self.store.finish(claim, state=outcome.state, error=outcome.error)
         return True
 
     async def run(self) -> None:
@@ -96,6 +101,7 @@ class EffectDispatcher:
         await self.delivery_ready.wait()
         while True:
             self.wake.clear()
+            self.postponed.clear()
             try:
                 await self.reconcile()
                 while await self.step():
@@ -111,13 +117,23 @@ class EffectDispatcher:
 
 
 async def install(app: Application) -> list[asyncio.Task[None]]:
+    from daedalus.extensions.coordinator_authority import (
+        install_authority,  # Lazy: authority hooks follow application stores.
+    )
     from daedalus.extensions.merge_effect import MergeEffect  # Lazy: handlers import the dispatcher outcome contracts.
+    from daedalus.extensions.runtime_transfers import (
+        ArtifactTransferEffect,  # Lazy: the handler imports dispatcher outcomes.
+    )
     from daedalus.extensions.task_controls import (
         TaskStopEffect,  # Lazy: the handler imports the dispatcher outcome contracts.
     )
+    from daedalus.extensions.task_launch import TaskLaunchEffect  # Lazy: the handler imports dispatcher outcomes.
 
     dispatcher = EffectDispatcher(OutboxStore(app.db))
     dispatcher.register("task.stop", TaskStopEffect(app))
+    dispatcher.register("task.launch", TaskLaunchEffect(app))
     dispatcher.register("review.merge", MergeEffect(app))
+    dispatcher.register("artifact.transfer", ArtifactTransferEffect(app))
     app.extensions["effects"] = dispatcher
+    install_authority(app)
     return [asyncio.create_task(dispatcher.run(), name="effect-dispatcher")]

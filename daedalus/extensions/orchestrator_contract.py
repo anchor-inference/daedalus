@@ -1,26 +1,27 @@
-"""What the orchestrator's contract tools do: a card's requirements (``Require``), the check of a result
-(``Accept``) and the decision that nothing further follows one (``Decide``).
+"""What the orchestrator's contract tools do: requirements, exact-result review and decisions.
 
 The limits are the host's, not the prompt's. A requirement the operator stated is not replaced or
 withdrawn on the orchestrator's word: the fallback "draw the screen if you cannot record it" once
 went to a member as a message, against the operator's demand for real recordings, and the operator
-found drawn screens an hour and a half later. A result is accepted only with a mark for each of its
-checks and requirements: a silent video was once closed as done against a bar of two reference videos
-with sound, because "done" was all a member's report took. Neither limit asks the operator anything
-on its own — the orchestrator decides what goes to them.
+found drawn screens an hour and a half later. A reviewed result is pinned to its immutable report,
+current contract and evidence: a silent video was once closed as done against a bar of two reference
+videos with sound, because "done" was all a member's report took. The operator decides final acceptance.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.notifications import Draft
+from daedalus.extensions.orchestrator_domain import DomainConflict, OrchestratorDomain, record_verdict, return_result
 from daedalus.extensions.orchestrator_loops import DECIDED
 from daedalus.extensions.orchestrator_ops import Refused
-from daedalus.extensions.task_contract import REQUIREMENT_KINDS, RETURNED, Contracts, Requirement
+from daedalus.extensions.task_contract import REQUIREMENT_KINDS, Contracts, Requirement
 from daedalus.host import prompts
+from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.files import FileRefused, StoredFile
 from daedalus.stores.projects import Project
 from daedalus.stores.staff import StaffError
@@ -28,7 +29,6 @@ from daedalus.stores.staff import StaffError
 if TYPE_CHECKING:
     from daedalus.extensions.orchestrator import Orchestrators
 
-VERDICTS = ("accepted", "returned")
 WHY_MIN = 8
 """The least a reason may be: a clause, so "ok" is not a decision anyone can read later."""
 OPERATOR_SOURCES = ("operator",)
@@ -251,135 +251,70 @@ async def _journal(orch: Orchestrators, project: Project, text: str, task_id: st
     await orch._changed(project.id, "journal", "orchestrator")
 
 
-def _marks(raw: list[Any] | None) -> list[tuple[str, bool, str]]:
-    out: list[tuple[str, bool, str]] = []
-    for entry in raw or []:
-        if isinstance(entry, dict):
-            item = str(entry.get("item") or entry.get("check") or "").strip()
-            ok = entry.get("ok")
-            if isinstance(ok, str):
-                ok = ok.strip().lower() in ("true", "yes", "ok", "met", "pass", "passed")
-            out.append((item, bool(ok), str(entry.get("note") or "").strip()[:500]))
-    return out
-
-
-async def accept(
-    orch: Orchestrators,
-    project: Project,
-    session_id: str,
-    *,
-    task_id: str,
-    verdict: str = "accepted",
-    checks: list[Any] | None = None,
-    note: str = "",
-    ask_operator: bool = False,
-    staff: str | None = None,
-    reason: str = "",
+async def review_result(
+    orch: Orchestrators, project: Project, session_id: str, *, task_id: str,
+    op: str = "inspect", result_id: str | None = None, verdict_id: str | None = None,
+    expected_entity_revision: int | None = None, client_operation_id: str = "",
+    verification: str = "unverified", accepted: bool = False,
+    evidence_ids: list[str] | None = None, head: str | None = None, base: str | None = None,
+    environment_digest: str | None = None, reason: str = "",
+    contract_revision: int | None = None,
 ) -> str:
+    """Review a pinned report with an office grant supplied by the host, never by tool arguments."""
     task = await card(orch, project, session_id, task_id)
-    verdict = (verdict or "accepted").strip().lower()
-    if verdict not in VERDICTS:
-        raise Refused(f"verdict is one of {', '.join(VERDICTS)}")
-    if task["status"] not in ("done", "review"):
-        raise Refused(f"task {task['id']} is {task['status']}: nothing was handed in to check yet")
-    contracts = _contracts(orch)
-    items = await contracts.checks(task["id"])
-    requirements = await contracts.requirements(task["id"])
-    marked: dict[str, tuple[bool, str]] = {}
-    unknown: list[str] = []
-    given = _marks(checks)
-    if not items and given:
-        # A card made before it had checks, or with none: the checks marked now become its checks.
-        # Refusing them as matching nothing sent an orchestrator round in circles on a finished card.
-        items = [{"text": item[:200], "done": False} for item, _, _ in given if item and contracts.match(item, [], requirements) is None]
-    for item, ok, why in given:
-        target = contracts.match(item, items, requirements)
-        if target is None:
-            unknown.append(item or "(unnamed)")
-            continue
-        label = f"C{int(target[1]) + 1}" if target[0] == "C" else target[1].label  # type: ignore[union-attr]
-        marked[label] = (ok, why)
-    if unknown:
-        raise Refused(f"{', '.join(unknown)} matches no check (C…) or requirement (R…) of task {task['id']}; Tasks(op='get', task_id='{task['id']}') lists them")
-    # An input is checked by the host: the member could not hand in without opening it.
-    holder = task.get("assignee_staff_id") or ""
-    member = await orch.manager.staff.get(holder) if holder else None
-    unopened = {r.id for r, _ in await contracts.unmet_inputs(task["id"], holder, cli=member is not None and member.harness != "daedalus")} if holder else set()
-    for requirement in requirements:
-        if requirement.kind == "input" and requirement.label not in marked and requirement.id not in unopened:
-            marked[requirement.label] = (True, "opened by the member")
-    wanted = [(f"C{i}", item["text"]) for i, item in enumerate(items, start=1)] + [(r.label, r.text) for r in requirements]
-    missing = [f"{label} ({_clip(text, 40)})" for label, text in wanted if label not in marked]
-    failed = [label for label, (ok, _) in marked.items() if not ok]
-    if verdict == "accepted":
-        if missing:
-            raise Refused(
-                f"not marked: {', '.join(missing)}. Accepting takes a mark for each: checks=[{{item, ok, note}}]. A check you did not see pass "
-                "is ok=false — then the work is returned, or the operator judges it (ask_operator=true)"
-            )
-        if failed and not ask_operator:
-            raise Refused(f"{', '.join(failed)} {'is' if len(failed) == 1 else 'are'} marked not met: accepted needs every item met — return the work (verdict='returned') or let the operator judge it (ask_operator=true)")
-    elif not failed and not note.strip():
-        raise Refused("say what is wrong: a mark with ok=false for what failed, or a note")
-    await _keep_marks(contracts, task["id"], items, requirements, marked)
-    summary = "; ".join(f"{label} {'met' if ok else 'not met'}" + (f" ({why})" if why else "") for label, (ok, why) in marked.items())
-    loops = orch.loops
-    if verdict == "returned":
-        if task.get("branch"):
-            raise Refused(f"task {task['id']} has work on branch {task['branch']}, which the operator reviews: they send it back from review; for more work on it, create a new task")
-        what = "; ".join(filter(None, [", ".join(f"{label} not met" + (f": {marked[label][1]}" if marked[label][1] else "") for label in failed), note.strip()]))
-        await contracts.set_acceptance(task["id"], "returned")
-        await _team(orch).note_on_card(task["id"], RETURNED + what)
-        from daedalus.extensions.orchestrator_team import assign  # Lazy: the team's module imports this one
+    if task.get("project_id") != project.id:
+        raise Refused("the result is outside this orchestrator's project")
+    domain = OrchestratorDomain(orch.manager.db)
+    if op == "inspect":
+        results = await domain.results(task_id)
+        if result_id:
+            results = [item for item in results if item["result_id"] == result_id]
+        contract = await domain.contract(task_id)
+        return json.dumps({"task_id": task_id, "contract": contract, "results": results},
+                          ensure_ascii=False, sort_keys=True)
+    if op not in ("verdict", "return"):
+        raise Refused("op is inspect, verdict or return")
+    if not result_id or not client_operation_id or not isinstance(expected_entity_revision, int) or isinstance(expected_entity_revision, bool):
+        raise Refused("mutation needs result_id, host call id and expected_entity_revision")
+    if op == "return" and (not verdict_id or contract_revision is None):
+        raise Refused("return needs the exact verdict_id and contract_revision")
+    if op == "verdict" and verification not in ("verified", "failed", "stale"):
+        raise Refused("verification must be verified, failed or stale")
+    await orch.current(session_id)
+    authority = orch.app.extensions.get("orchestrator_review_authority")
+    if authority is None:
+        raise Refused("review authority is unavailable")
+    principal = await authority(session_id=session_id, project_id=project.id, task_id=task_id,
+                                operation="review.verdict" if op == "verdict" else "review.return")
+    if not isinstance(principal, Principal) or principal.origin_class != "agent" or not principal.grant_id:
+        raise Refused("the host did not attest a scoped reviewer")
+    control = ControlStore(orch.manager.db)
+    payload = {"task_id": task_id, "result_id": result_id, "verdict_id": verdict_id,
+               "verification": verification, "accepted": accepted, "evidence_ids": evidence_ids or [],
+               "head": head, "base": base, "environment_digest": environment_digest,
+               "reason": reason, "contract_revision": contract_revision}
 
-        said = await assign(orch, project, session_id, staff=staff, task_id=task["id"], reason=reason)
-        await _journal(orch, project, f"Returned {task['id']} \"{_clip(task['title'])}\": {what}", task["id"])
-        return f"returned {task['id']}: {what}. {said}"
-    if ask_operator:
-        await contracts.set_acceptance(task["id"], "accepted")
-        if task["status"] != "review":
-            await orch.board.update(task["id"], status="review", note=f"checked by the orchestrator, for the operator to accept: {summary or note.strip() or 'no checks'}", actor=session_id)  # type: ignore[union-attr]
-        await loops.close(project.id, task_id=task["id"], by="orchestrator", decision="given to the operator to accept")
-        await _ask_operator_to_accept(orch, project, task, summary, note)
-        return f"{task['id']} is in the operator's review column with your marks ({summary or 'no checks'}); their acceptance arrives as an event"
-    await contracts.set_acceptance(task["id"], "accepted")
-    await orch.keep_commitments_of(project.id, task["id"], "its task was accepted")
-    await _team(orch).note_on_card(task["id"], f"accepted by the orchestrator: {summary or note.strip() or 'no checks to mark'}")
-    await loops.close(project.id, task_id=task["id"], by="orchestrator", decision="accepted")
-    await orch._changed(project.id, "board", "orchestrator")
-    merge = "; the branch still waits for the operator's merge" if task["status"] == "review" and task.get("branch") else ""
-    return f"{task['id']} \"{_clip(task['title'])}\" is accepted" + (f": {summary}" if summary else "") + merge
+    async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
+        if op == "verdict":
+            return await record_verdict(
+                conn, verdict_id=mutation.object_id, result_id=result_id,
+                reviewer_actor_id=principal.actor_id, verification=verification, accepted=accepted,
+                head=head, base=base, environment_digest=environment_digest,
+                evidence_ids=evidence_ids or [], reason=reason)
+        assert verdict_id is not None and contract_revision is not None
+        return await return_result(
+            conn, return_id=mutation.object_id, task_id=task_id, result_id=result_id,
+            verdict_id=verdict_id, contract_revision=contract_revision,
+            actor_id=principal.actor_id, reason=reason)
 
-
-async def _keep_marks(contracts: Contracts, task_id: str, items: list[dict[str, Any]], requirements: list[Requirement], marked: dict[str, tuple[bool, str]]) -> None:
-    for index, item in enumerate(items, start=1):
-        if f"C{index}" in marked:
-            ok, why = marked[f"C{index}"]
-            item["mark"] = {"ok": ok, "note": why, "by": "orchestrator"}
-            item["done"] = ok
-    if items:
-        await contracts.set_checks(task_id, items)
-    for requirement in requirements:
-        if requirement.label in marked:
-            ok, why = marked[requirement.label]
-            await contracts.set_mark(requirement, {"ok": ok, "note": why, "by": "orchestrator"})
-
-
-async def _ask_operator_to_accept(orch: Orchestrators, project: Project, task: dict[str, Any], summary: str, note: str) -> None:
-    notifications = orch.app.notifications
-    if notifications is None:
-        return
-    body = "; ".join(filter(None, [f"The orchestrator's check: {summary}" if summary else "", note.strip()])) or "The orchestrator checked what it could; the rest is yours to see."
-    await notifications.post(Draft(
-        "orchestrator_report",
-        f"{project.name}: \"{_clip(task['title'])}\" waits for your acceptance",
-        body,
-        kind="project_accept",
-        project_id=project.id,
-        link=f"/app/project/{project.id}",
-        dedupe_key=f"project-accept:{task['id']}",
-        source="orchestrator",
-    ))
+    try:
+        response = await control.mutate(principal, Scope("project", project.id),
+                                        "review.verdict" if op == "verdict" else "review.return",
+                                        client_operation_id, expected_entity_revision,
+                                        Entity("task", task_id), payload, effect)
+    except (ControlConflict, ControlDenied, DomainConflict, ValueError, KeyError) as exc:
+        raise Refused(str(exc)) from exc
+    return json.dumps(response, ensure_ascii=False, sort_keys=True)
 
 
 async def decide(orch: Orchestrators, project: Project, session_id: str, *, why: str, task_id: str | None = None, loop: str | None = None) -> str:
@@ -407,7 +342,7 @@ async def decide(orch: Orchestrators, project: Project, session_id: str, *, why:
 
 OPS: dict[str, Callable[..., Awaitable[str]]] = {
     "require": require,
-    "accept": accept,
+    "review_result": review_result,
     "decide": decide,
 }
 
