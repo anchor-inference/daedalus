@@ -79,6 +79,7 @@ from daedalus.extensions import (
     api_plugins,
     api_project_start,
     api_projects,
+    api_provider_holds,
     api_runtime,
     api_skill_quality,
     api_staff,
@@ -1517,6 +1518,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_projects.register(api, app, auth)
     api_project_start.register(api, app, auth)
     api_goal_budget.register(api, app, auth)
+    api_provider_holds.register(api, app, auth)
     api_knowledge.register(api, app, auth)
     api_runtime.register(api, app, auth)
     api_lifecycle.register(api, app, auth)

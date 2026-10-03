@@ -8,6 +8,7 @@ the reasoning stream, and how usage is shaped.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -16,6 +17,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from dataclasses import dataclass, field
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 import httpx
 from protocore.contracts.llm import (
@@ -35,6 +37,7 @@ from protocore.contracts.types import Message, MessageRole, StopReason, TextBloc
 from daedalus import __version__
 from daedalus.providers.admission import InferenceAdmission
 from daedalus.providers.dsml import DsmlGuard
+from daedalus.providers.failure_evidence import FailureEvidence, failure_evidence
 from daedalus.providers.llamacpp import tools_to_llamacpp_wire
 from daedalus.providers.pricing import ModelPricing, complete_usage
 from daedalus.providers.wire import messages_to_wire, parse_json_arguments, tools_to_wire
@@ -143,6 +146,10 @@ def classify_failure(status: int, text: str) -> ProviderVerdict:
     """
     kind, code, message = _error_fields(text)
     lowered = f"{code} {message}".lower()
+    if status in (401, 403):
+        return ProviderVerdict("auth", False)
+    if status == 402 or code in {"insufficient_quota", "billing_hard_limit_reached", "billing_not_active"}:
+        return ProviderVerdict("billing", False)
     if status == 429 or kind == "rate_limit_error":
         return ProviderVerdict("rate_limit", True)
     if status in (408, 504):
@@ -239,6 +246,13 @@ class ProviderEndpoint:
     temperature: float | None = None
     """When set, every request to this endpoint samples at this temperature (a benchmark pin)."""
 
+    def source_digest(self) -> str:
+        """Bind a saved provider decision to this connection without retaining its credentials."""
+        source = {"id": self.id, "kind": self.kind, "base_url": self.base_url,
+                  "api_key": self.api_key, "extra_headers": self.extra_headers,
+                  "temperature": self.temperature}
+        return hashlib.sha256(json.dumps(source, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
     def pricing_for(self, model: str) -> ModelPricing | None:
         if model in self.pricing:
             return self.pricing[model]
@@ -319,7 +333,9 @@ class OpenAICompatibleProvider(ILLMProvider):
                     raw = await response.aread()
                     if response.status_code == 400:
                         logger.warning("%s rejected a request; message shape: %s", self.endpoint.id, message_shape(body["messages"]))
-                    self._raise_for_status(response.status_code, raw.decode("utf-8", "replace"))
+                    text = raw.decode("utf-8", "replace")
+                    await self._observe_failure(request, reservation, response.status_code, text, response.headers)
+                    self._raise_for_status(response.status_code, text)
                 async for data in _sse_data(response):
                     if data == "[DONE]":
                         break
@@ -422,7 +438,7 @@ class OpenAICompatibleProvider(ILLMProvider):
         started = time.monotonic()
         reservation = await self._admit(request, body)
         try:
-            data = await self._post(body, request)
+            data = await self._post(body, request, reservation)
             text = _message_text(data)
             usage_raw = data.get("usage") or {}
             normalized = normalize_usage(usage_raw)
@@ -454,7 +470,7 @@ class OpenAICompatibleProvider(ILLMProvider):
         started = time.monotonic()
         reservation = await self._admit(request, body)
         try:
-            data = await self._post(body, request)
+            data = await self._post(body, request, reservation)
             text = _message_text(data)
             usage_raw = data.get("usage") or {}
             normalized = normalize_usage(usage_raw)
@@ -577,7 +593,8 @@ class OpenAICompatibleProvider(ILLMProvider):
             if thinking:
                 body["reasoning_effort"] = effort
 
-    async def _post(self, body: dict[str, Any], request: LLMRequest | None = None) -> dict[str, Any]:
+    async def _post(self, body: dict[str, Any], request: LLMRequest | None = None,
+                    reservation: str | None = None) -> dict[str, Any]:
         try:
             response = await self._client.post(
                 self._url("/chat/completions"), json=body, headers=self._headers(request)
@@ -587,6 +604,8 @@ class OpenAICompatibleProvider(ILLMProvider):
         except httpx.HTTPError as exc:
             raise LLMProviderError(f"{self.endpoint.id}: transport error: {exc}") from exc
         if response.status_code >= 400:
+            if request is not None:
+                await self._observe_failure(request, reservation, response.status_code, response.text, response.headers)
             self._raise_for_status(response.status_code, response.text)
         data = response.json()
         if "error" in data and not data.get("choices"):
@@ -611,6 +630,17 @@ class OpenAICompatibleProvider(ILLMProvider):
         if verdict.reason == "timeout":
             raise _classified(LLMTimeoutError(f"{self.endpoint.id}: HTTP {status}: {text[:300]}"), verdict)
         raise _classified(LLMProviderError(failure_text(self.endpoint.id, status, text)), verdict)
+
+    async def _observe_failure(self, request: LLMRequest, reservation: str | None, status: int,
+                               text: str, headers: httpx.Headers) -> FailureEvidence:
+        evidence = failure_evidence(status, text, headers, provider_kind=self.endpoint.kind,
+                                    provider_host=(urlsplit(self.endpoint.base_url).hostname or "").lower())
+        if self._admission is not None and hasattr(self._admission, "failure"):
+            try:
+                await self._admission.failure(self.endpoint, request, reservation, evidence)
+            except Exception:  # noqa: BLE001 — the provider refusal remains the user's primary error
+                logger.exception("could not retain a provider failure observation for %s", self.endpoint.id)
+        return evidence
 
     def _url(self, path: str) -> str:
         return self.endpoint.base_url.rstrip("/") + path

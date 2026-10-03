@@ -12,12 +12,14 @@ from typing import TYPE_CHECKING, Any
 
 from protocore.contracts.llm import LLMProviderError, LLMRequest
 
+from daedalus.providers.failure_evidence import FailureEvidence
 from daedalus.providers.openai_compat import ProviderEndpoint, ProviderVerdict
 from daedalus.providers.pricing import ModelPricing, complete_usage
 from daedalus.stores.comparison_funding import PairAllocation
 from daedalus.stores.control import ControlDenied, canonical, one
 from daedalus.stores.goal_budget import charge_for_session_in, goal_constraints_in, pin_reservation_in
 from daedalus.stores.inference_budget import BudgetRefused, Constraint, InferenceBudget, microusd
+from daedalus.stores.provider_holds import ProviderHolds, pinned_target_in
 
 if TYPE_CHECKING:
     from daedalus.host.session_runner import SessionManager
@@ -60,6 +62,11 @@ class HostInferenceAdmission:
         self.manager = manager
         self.db = manager.db
         self.store = InferenceBudget(self.db)
+        self.failures = ProviderHolds(self.db)
+
+    async def failure(self, endpoint: ProviderEndpoint, request: LLMRequest,
+                      reservation_id: str | None, evidence: FailureEvidence) -> str | None:
+        return await self.failures.failure(endpoint, request, reservation_id, evidence)
 
     async def quote_for_member(self, staff_id: str, *, slot_id: str, slot: int,
                                allowance_microusd: int) -> Any:
@@ -148,6 +155,14 @@ class HostInferenceAdmission:
                 observer = request.observability
                 attempt = None
                 if observer is not None and observer.session_id:
+                    if observer.run_id:
+                        target = await pinned_target_in(conn, observer.session_id, observer.run_id)
+                        if target is not None:
+                            configured = self.manager.providers.get(str(target["provider_id"])).endpoint
+                            if ((endpoint.id, request.model) != (target["provider_id"], target["model"])
+                                    or target["provider_source_digest"] != endpoint.source_digest()
+                                    or target["provider_source_digest"] != configured.source_digest()):
+                                raise ControlDenied("the resumed provider connection changed after approval")
                     executions = getattr(self.manager, "execution_store", None)
                     if executions is not None:
                         attempt = await executions.check_inference(conn, observer.session_id, observer.run_id)

@@ -32,6 +32,7 @@ import { ToolGroupsSettings } from "../toolgroupsview";
 import { CompactionModelSelect } from "../compactionmodel";
 import { AsrSettingsCard } from "./AsrSettings";
 import { DesktopAppCard } from "../updatedialog";
+import { ProviderLimit } from "./ProviderLimit";
 
 const DEFAULT_KINDS = ["deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"];
 /** The generic protocol also serves remote vendors, so temperature is available there too. */
@@ -353,6 +354,7 @@ function ProviderBlock({ id, p, kinds, available, onPatch, onRemove }: {
               </div>
             </label>
           </div>
+          <ProviderLimit providerId={id} />
           <div className="btnrow mrow-foot">
             <span className="grow" />
             <button className="btn small danger" onClick={async () => { if (await confirmAsync(t("settings.provider.remove.title", { id }), { body: t("settings.provider.remove.body"), action: t("settings.provider.remove.action") })) onRemove(id); }}>

@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
-from daedalus.extensions import api_knowledge, workspace_archive
+from daedalus.extensions import api_knowledge, api_workspace_archive, workspace_archive
 from daedalus.extensions.api_workspace_archive import ImportInput
 from daedalus.extensions.orchestrator_domain import OriginalReports
 from daedalus.extensions.workspace_archive import ArchiveRefused, WorkspaceArchive, _archive_bytes, check_archive
@@ -318,6 +318,102 @@ async def test_context_packet_tamper_is_rejected_before_import(archive_store) ->
                                      checked.config_handles, checked.run_blobs,
                                      checked.folder_handles, checked.session_blobs))
     assert await db.fetchone("SELECT 1 FROM workspace_archive_imports") is None
+
+
+async def test_historical_goal_cost_is_portable_without_restoring_spend_authority(archive_store) -> None:
+    db, _, service = archive_store
+    await db.execute(
+        "INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at)"
+        " VALUES ('source',1,'Research','operator','2026-01-01')"
+    )
+    await db.execute(
+        "INSERT INTO project_goal_budgets(project_id,budget_id,limit_microusd,"
+        "coordination_limit_microusd,activated_goal_revision,activated_at,updated_at)"
+        " VALUES ('source','source-budget',1000000,200000,1,'2026-01-01','2026-01-01')"
+    )
+    await db.execute(
+        "INSERT INTO usage_events(seq,at,provider_id,model,purpose,session_id,"
+        "input_tokens,output_tokens,cost_usd,raw)"
+        " VALUES (9001,'2026-01-01','provider','model','task','session',10,5,0.012345,'{}')"
+    )
+    for reservation_id, state, actual, usage_seq in (
+        ("charged", "settled", 12345, 9001), ("uncertain", "unknown", None, None),
+    ):
+        await db.execute(
+            "INSERT INTO inference_reservations(id,provider_id,model,session_id,request_digest,"
+            "quoted_microusd,actual_microusd,rate_version,quote_json,state,usage_event_seq,created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (reservation_id, "provider", "model", "session", "a" * 64,
+             20000, actual, "rate", "{}", state, usage_seq, "2026-01-01"),
+        )
+        await db.execute(
+            "INSERT INTO goal_budget_admissions(reservation_id,budget_id,project_id,goal_revision,"
+            "charge_class,root_session_id,attributed_at) VALUES (?,?,?,?,?,?,?)",
+            (reservation_id, "source-budget", "source", 1, "work", "session", "2026-01-01"),
+        )
+        await db.execute(
+            "INSERT INTO inference_reservation_scopes(reservation_id,scope_key,cap_microusd)"
+            " VALUES (?,?,?)", (reservation_id, "goal:source-budget", 1000000),
+        )
+    await db.execute("UPDATE usage_events SET inference_reservation_id='charged' WHERE seq=9001")
+    await db.execute(
+        "INSERT INTO comparison_groups(id,task_id,contract_revision,max_attempts,created_at)"
+        " VALUES ('source-pair','task',1,2,'2026-01-01')"
+    )
+    await db.execute(
+        "INSERT INTO comparison_funding_slots(id,group_id,slot,staff_id,project_id,task_id,"
+        "contract_revision,host_generation,provider_id,model,allowance_microusd,rate_version,"
+        "quote_json,state,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("source-slot", "source-pair", 1, "member", "source", "task", 1, 1,
+         "provider", "model", 100000, "b" * 64, "{}", "held", "2026-01-01"),
+    )
+    await db.execute(
+        "INSERT INTO goal_budget_allocations(slot_id,budget_id,project_id,goal_revision,attributed_at)"
+        " VALUES ('source-slot','source-budget','source',1,'2026-01-01')"
+    )
+    await db.execute(
+        "INSERT INTO comparison_funding_scopes(slot_id,scope_key,cap_microusd)"
+        " VALUES ('source-slot','goal:source-budget',1000000)"
+    )
+    checked = check_archive(await service.export("source"))
+    assert checked.counts["goal_inference_reservations"] == 2
+    assert checked.counts["goal_usage_events"] == 1
+    assert checked.counts["goal_comparison_slots"] == 1
+    assert checked.counts["goal_comparison_groups"] == 1
+    assert "raw" not in checked.rows["goal_usage_events"][0]
+    assert "quote_json" not in checked.rows["goal_inference_reservations"][0]
+    principal = Principal.operator({"via": "token", "user_id": 1})
+    revision = await ControlStore(db).revision(Scope("global", "global"), Entity("collection", "global"))
+    result = await service.import_command(principal, checked,
+                                          expected_collection_revision=revision,
+                                          client_operation_id="restore-with-cost")
+    restored = result["project_id"]
+    summary = result["historical_goal_budget"]
+    assert summary["historical_observed_spent_microusd"] == 12345
+    assert summary["historical_total_microusd"] is None
+    assert summary["unresolved_charge_count"] == 1
+    assert summary["unreleased_allocation_count"] == 1
+    assert summary["current_available_microusd"] is None
+    assert await db.fetchone("SELECT 1 FROM project_goal_budgets WHERE project_id=?", (restored,)) is None
+    assert (await db.fetchone("SELECT COUNT(*) AS n FROM inference_reservations"))["n"] == 2
+    snapshot = await db.fetchone("SELECT * FROM historical_goal_budget_snapshots WHERE project_id=?", (restored,))
+    assert snapshot["source_budget_id"] == "source-budget"
+    assert len(json.loads(snapshot["snapshot_json"])["goal_inference_reservations"]) == 2
+    api = FastAPI()
+    api_workspace_archive.register(api, SimpleNamespace(db=db, manager=None),
+                                   lambda: {"via": "token", "user_id": 1})
+    async with AsyncClient(transport=ASGITransport(app=api), base_url="http://test") as client:
+        history = await client.get(f"/api/projects/{restored}/workspace-archive/budget-history")
+        assert history.status_code == 200
+        assert history.json()["historical_total_microusd"] is None
+        assert history.json()["restored"] is False
+        assert history.json()["row_counts"]["goal_usage_events"] == 1
+    altered = deepcopy(checked.rows)
+    altered["goal_budget_admissions"][0]["project_id"] = "foreign"
+    with pytest.raises(ArchiveRefused, match="leaves the source budget"):
+        check_archive(_archive_bytes(altered, checked.blobs, checked.report_blobs,
+                                     checked.config_handles, checked.run_blobs,
+                                     checked.folder_handles, checked.session_blobs))
 
 
 async def test_corrupt_archive_and_failed_restore_leave_no_project(archive_store) -> None:

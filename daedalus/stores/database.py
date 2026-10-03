@@ -23,6 +23,7 @@ from daedalus.stores.execution_schema import MIGRATION as EXECUTION_MIGRATION
 from daedalus.stores.extension_schema import EXTENSION_SCHEMA
 from daedalus.stores.goal_budget_schema import MIGRATION as GOAL_BUDGET_MIGRATION
 from daedalus.stores.grant_lineage_schema import MIGRATION as GRANT_LINEAGE_MIGRATION
+from daedalus.stores.historical_budget_schema import MIGRATION as HISTORICAL_BUDGET_MIGRATION
 from daedalus.stores.historical_context_schema import MIGRATION as HISTORICAL_CONTEXT_MIGRATION
 from daedalus.stores.inference_budget_schema import MIGRATION as INFERENCE_BUDGET_MIGRATION
 from daedalus.stores.issue_sync_schema import ISSUE_SYNC_MIGRATION
@@ -31,6 +32,7 @@ from daedalus.stores.lifecycle_ownership_schema import MIGRATION as LIFECYCLE_OW
 from daedalus.stores.lifecycle_schema import MIGRATION as LIFECYCLE_MIGRATION
 from daedalus.stores.orchestrator_contract_schema import MIGRATION as ORCHESTRATOR_CONTRACT_MIGRATION
 from daedalus.stores.planning_schema import MIGRATION as PLANNING_MIGRATION
+from daedalus.stores.provider_hold_schema import MIGRATION as PROVIDER_HOLD_MIGRATION
 from daedalus.stores.receipt_request_schema import MIGRATION as RECEIPT_REQUEST_MIGRATION
 from daedalus.stores.result_anchor_schema import MIGRATION as RESULT_ANCHOR_MIGRATION
 from daedalus.stores.runtime_entry_schema import MIGRATION as RUNTIME_ENTRY_MIGRATION
@@ -1737,6 +1739,8 @@ MIGRATIONS.append(STAFF_CONTEXT_SCHEMA)
 MIGRATIONS.append(RUNTIME_ENTRY_MIGRATION)
 MIGRATIONS.append(GOAL_BUDGET_MIGRATION)
 MIGRATIONS.append(HISTORICAL_CONTEXT_MIGRATION)
+MIGRATIONS.append(PROVIDER_HOLD_MIGRATION)
+MIGRATIONS.append(HISTORICAL_BUDGET_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

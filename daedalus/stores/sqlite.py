@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
+import aiosqlite
 from protocore.contracts.events import IEventStream
 from protocore.contracts.run import IRunStore, RunNotFoundError
 from protocore.contracts.session import ISessionStore, SessionNotFoundError
@@ -668,7 +669,13 @@ class SqliteRunStore(IRunStore):
         self._db = db
 
     async def create(self, run: Run) -> None:
-        await self._db.execute(
+        async with self._db.transaction() as conn:
+            await self.create_in(conn, run)
+
+    @staticmethod
+    async def create_in(conn: aiosqlite.Connection, run: Run) -> None:
+        """Create a run alongside the caller's durable admission or continuation receipt."""
+        await conn.execute(
             "INSERT OR REPLACE INTO runs(id, tenant_id, session_id, status, created_at, updated_at, detail_blob_ref)"
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
             (

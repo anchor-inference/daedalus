@@ -135,6 +135,9 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
         install_authority,  # Lazy: authority hooks follow application stores.
     )
     from daedalus.extensions.merge_effect import MergeEffect  # Lazy: handlers import the dispatcher outcome contracts.
+    from daedalus.extensions.provider_resume import (
+        ProviderResumeEffect,  # Lazy: the handler imports the dispatcher outcome contracts.
+    )
     from daedalus.extensions.runtime_transfers import (
         ArtifactTransferEffect,  # Lazy: the handler imports dispatcher outcomes.
     )
@@ -152,6 +155,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     dispatcher.register("comparison.stop", ComparisonStopEffect(app))
     dispatcher.register("review.merge", MergeEffect(app))
     dispatcher.register("artifact.transfer", ArtifactTransferEffect(app))
+    dispatcher.register("provider.resume", ProviderResumeEffect(app))
     app.extensions["effects"] = dispatcher
     install_authority(app)
     return [asyncio.create_task(dispatcher.run(), name="effect-dispatcher")]

@@ -14,10 +14,12 @@ from daedalus.extensions.workspace_archive import (
     MAX_ARCHIVE_BYTES,
     ArchiveRefused,
     WorkspaceArchive,
+    _historical_budget_summary,
+    _sha,
     _stage,
     check_archive,
 )
-from daedalus.stores.control import ControlConflict, ControlDenied, Principal
+from daedalus.stores.control import ControlConflict, ControlDenied, Principal, canonical
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -140,6 +142,29 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         if latest and isinstance(latest.get("archive_artifact_id"), str):
             available = service().files.blobs.path_of("workspace-archives", latest["archive_artifact_id"]).is_file()
         return {"latest": latest, "available": available}
+
+    @api.get("/api/projects/{project_id}/workspace-archive/budget-history")
+    async def historical_budget(project_id: str, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        Principal.operator(who)
+        if await app.db.fetchone("SELECT 1 FROM projects WHERE id = ?", (project_id,)) is None:
+            raise HTTPException(404, "no such project")
+        row = await app.db.fetchone(
+            "SELECT archive_digest,source_budget_id,snapshot_digest,snapshot_json"
+            " FROM historical_goal_budget_snapshots WHERE project_id = ?", (project_id,),
+        )
+        if row is None:
+            return {"state": "not_in_source", "restored": False,
+                    "current_available_microusd": None}
+        snapshot = json.loads(row["snapshot_json"])
+        if (_sha(canonical(snapshot).encode()) != row["snapshot_digest"] or
+                len(snapshot.get("project_goal_budgets", [])) != 1 or
+                snapshot["project_goal_budgets"][0]["budget_id"] != row["source_budget_id"]):
+            raise HTTPException(409, "historical budget snapshot has changed")
+        return {**_historical_budget_summary(snapshot),
+                "archive_digest": row["archive_digest"],
+                "source_budget_id": row["source_budget_id"],
+                "snapshot_digest": row["snapshot_digest"],
+                "row_counts": {name: len(items) for name, items in snapshot.items()}}
 
     @api.post("/api/import/preview")
     async def preview_archive(body: ArchiveInput, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

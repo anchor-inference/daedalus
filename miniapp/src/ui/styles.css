@@ -1980,6 +1980,8 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
    by the rule above, it was cut flush against the row's menu — "DeepSee" with nothing to say so. */
 .erow-meta > span.erow-model { flex: 0 1 auto; }
 .mrow-foot { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); align-items: center; }
+.provider-limit { margin-top: 10px; padding: 8px 0; border-top: 1px solid var(--line); line-height: 1.4; }
+.provider-limit .linkbtn { margin-left: 8px; }
 .mrow.default .mtitle::before { content: ""; }
 @media (max-width: 480px) { .kpi-grid > .kpi:last-child:nth-child(odd) { grid-column: 1 / -1; } }
 

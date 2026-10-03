@@ -96,6 +96,13 @@ from daedalus.stores.knowledge import KnowledgeStore
 from daedalus.stores.media import MediaStore
 from daedalus.stores.persistent import PersistentMemory, PersistentWorkspace
 from daedalus.stores.projects import Project, ProjectFolder, ProjectSettings, ProjectStore
+from daedalus.stores.provider_holds import (
+    PROVIDER_RESUME_NOTE,
+    pin_resumed_run_in,
+    pinned_target_in,
+    recovery_candidate_in,
+    resume_target_in,
+)
 from daedalus.stores.sqlite import (
     LiveControlStore,
     SqliteEventStream,
@@ -2497,6 +2504,17 @@ class SessionManager:
 
     # -- input --------------------------------------------------------------------
 
+    async def resume_provider_hold(
+        self, session_id: str, failed_run_id: str, provider_id: str, model: str,
+        *, client_message_id: str,
+    ) -> str:
+        """Continue one approved provider hold; its source is checked under the input lock."""
+        return await self.submit(
+            session_id, PROVIDER_RESUME_NOTE, as_answer=False, origin="core",
+            client_message_id=client_message_id,
+            _provider_resume=(failed_run_id, provider_id, model),
+        )
+
     async def submit(
         self,
         session_id: str,
@@ -2511,6 +2529,7 @@ class SessionManager:
         via: str = "app",
         operator_words: Sequence[str] | None = None,
         reply_to: dict[str, Any] | None = None,
+        _provider_resume: tuple[str, str, str] | None = None,
     ) -> str:
         """Deliver input. Starts a run, or queues a follow-up when one is active.
 
@@ -2593,7 +2612,25 @@ class SessionManager:
             if client_message_id:
                 existing = await self.live.check_receipt(session_id, client_message_id, "input", receipt_payload)
                 if existing is not None and existing["status"] != "accepted":
+                    if _provider_resume is not None:
+                        async with self.db.transaction() as conn:
+                            pinned = await pinned_target_in(conn, session_id, str(existing["run_id"] or ""))
+                        if (existing["status"] != "consumed" or pinned is None
+                                or pinned["action_id"] != client_message_id.removeprefix("provider-resume:")
+                                or (pinned["provider_id"], pinned["model"]) != _provider_resume[1:]):
+                            raise RuntimeError("the provider continuation has no matching durable run pin")
                     return str(existing["run_id"] or state.run_id or "")
+            if _provider_resume is not None:
+                failed_run_id, provider_id, model = _provider_resume
+                if (not client_message_id or text != PROVIDER_RESUME_NOTE or origin != "core"
+                        or as_answer or steer or follow_up or attachments
+                        or state.running or state.pending is not None
+                        or state.run_id not in (None, failed_run_id)):
+                    raise RuntimeError("the provider continuation no longer matches the failed idle session")
+                async with self.db.transaction() as conn:
+                    target = await resume_target_in(conn, session_id, failed_run_id, provider_id, model, client_message_id)
+                if target["provider_source_digest"] != self.providers.get(provider_id).endpoint.source_digest():
+                    raise RuntimeError("the held provider connection changed; review the new configuration")
             body, image_refs = await self._ingest_attachments(state, text, attachments)
             if state.pending is not None:
                 if as_answer:
@@ -2627,11 +2664,15 @@ class SessionManager:
                 return state.run_id or ""
             provider_id: str | None = None
             if not state.running:
-                try:
-                    rungs, _ = self.resolve_model(await self.live.load(session_id))
-                    provider_id = rungs[0][0].endpoint.id if rungs else None
-                except Exception:  # noqa: BLE001 — a model problem surfaces when the run starts, not here
-                    provider_id = None
+                if _provider_resume is not None:
+                    provider_id = _provider_resume[1]
+                    self.providers.get(provider_id)
+                else:
+                    try:
+                        rungs, _ = self.resolve_model(await self.live.load(session_id))
+                        provider_id = rungs[0][0].endpoint.id if rungs else None
+                    except Exception:  # noqa: BLE001 — a model problem surfaces when the run starts, not here
+                        provider_id = None
                 exceeded = self.budget_exceeded()
                 if exceeded and not self.provider_costs_nothing(provider_id):
                     raise RuntimeError(f"daily budget exceeded ({exceeded}); runs resume tomorrow or after /budget reset")
@@ -2738,11 +2779,19 @@ class SessionManager:
                     content_blocks=[TextBlock(text=body)],
                     metadata={"daedalus.origin": origin, **words, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **({"image_refs": [{"ref": ref, "mime": mime} for ref, mime in image_refs]} if image_refs else {})},
                 )
+                if _provider_resume is not None:
+                    message.metadata["daedalus.provider_resume"] = {
+                        "failed_run_id": _provider_resume[0], "provider_id": _provider_resume[1],
+                        "model": _provider_resume[2],
+                    }
                 # Only what cannot be sent at all is compacted here — a model whose window is smaller
                 # than the history was built for. The ratio-based compaction happens between runs
                 # (see _drive), because it is a summariser call of a minute or two and the operator's
                 # message used to queue behind it.
-                await self._maybe_auto_compact(state, required_only=True)
+                # A held-provider decision must not spend on the previous engine's fallback
+                # while preparing its input. The pinned engine handles its own context bound.
+                if _provider_resume is None:
+                    await self._maybe_auto_compact(state, required_only=True)
                 await self.sessions.append_transcript(session_id, [message])
             else:
                 message = recorded_message
@@ -2992,6 +3041,28 @@ class SessionManager:
         reasoning_effort: str | None = None,
         clear: bool = False,
     ) -> None:
+        state = await self.get_state(session_id)
+        arguments = dict(model_name=model_name, provider=provider, preset=preset, thinking=thinking,
+                         reasoning_effort=reasoning_effort, clear=clear)
+        if state is None:
+            await self._set_model_locked(session_id, **arguments)
+            return
+        # A continuation pins its model while holding this lock. Checking before acquiring it
+        # let a concurrent override change the engine after the durable pin was written.
+        async with state.submit_lock:
+            await self._set_model_locked(session_id, **arguments)
+
+    async def _set_model_locked(
+        self,
+        session_id: str,
+        *,
+        model_name: str | None = None,
+        provider: str | None = None,
+        preset: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+        clear: bool = False,
+    ) -> None:
         if clear:
             await self.live.clear_overrides(session_id)
             return
@@ -3001,6 +3072,11 @@ class SessionManager:
             raise ValueError(f"unknown or unusable provider {provider!r}")
         if reasoning_effort is not None and reasoning_effort not in REASONING_EFFORTS:
             raise ValueError(f"reasoning_effort must be one of {', '.join(REASONING_EFFORTS)}")
+        state = self._states.get(session_id)
+        if state is not None and state.running and state.run_id and (model_name or provider or preset):
+            async with self.db.transaction() as conn:
+                if await pinned_target_in(conn, session_id, state.run_id) is not None:
+                    raise RuntimeError("this provider continuation is pinned; stop it before changing its model")
         await self.live.set_model(
             session_id, model_name=model_name, provider=provider, preset=preset, thinking_enabled=thinking, reasoning_effort=reasoning_effort
         )
@@ -3018,14 +3094,35 @@ class SessionManager:
 
     # -- runs -----------------------------------------------------------------------
 
-    async def _build_engine(self, state: SessionState, run_id: str) -> QueryEngine:
+    async def _build_engine(
+        self, state: SessionState, run_id: str, *, message: Message | None = None,
+    ) -> QueryEngine:
         overrides = await self.live.load(state.session.id)
         for hook in self.preset_hooks:
             chosen = hook(state)
             if chosen:
                 overrides = {**overrides, "preset": chosen}
                 break
-        rungs, preset = self.resolve_model(overrides)
+        target = None
+        async with self.db.transaction() as conn:
+            if message is not None and message.metadata.get("daedalus.provider_resume"):
+                requested = message.metadata["daedalus.provider_resume"]
+                target = await resume_target_in(
+                    conn, state.session.id, requested["failed_run_id"], requested["provider_id"],
+                    requested["model"], str(message.metadata.get("daedalus.client_message_id") or ""),
+                )
+            else:
+                target = await pinned_target_in(conn, state.session.id, run_id)
+        if target is not None:
+            provider_id, model = str(target["provider_id"]), str(target["model"])
+            rungs = [(self.providers.get(provider_id), model)]
+            if target["provider_source_digest"] != rungs[0][0].endpoint.source_digest():
+                raise RuntimeError("the held provider connection changed; review the new configuration")
+            _, preset = self.config.preset()
+            preset = next((item for item in self.config.presets.values()
+                           if item.provider == provider_id and item.model == model), preset)
+        else:
+            rungs, preset = self.resolve_model(overrides)
         hold = ExitStack()
         hold.enter_context(self.providers.hold([provider for provider, _ in rungs]))
         try:
@@ -3399,7 +3496,7 @@ class SessionManager:
             message = await self._with_turn_context(state, message)
         if state.engine is None or not continue_turn:
             run_id = uuid.uuid4().hex[:12]
-            engine = await self._build_engine(state, run_id)
+            engine = await self._build_engine(state, run_id, message=message)
             state.tool_groups_loaded = {}
             await self._clear_queued_group_loads(state)
             if state.engine is not None:
@@ -3415,15 +3512,48 @@ class SessionManager:
         staff_session_id = state.metadata.get("staff_session_id")
         if staff_session_id and admission is not None:
             await admission(str(staff_session_id), state.session.id, run_id)
-        state.run_id = run_id
         if message is not None:
             message.metadata["daedalus.run_id"] = run_id
             await self.sessions.replace_transcript_message(state.session.id, self.sessions.transcript_key(message), message)
         if not continue_turn:
-            await self.runs.create(Run(id=run_id, tenant_id=TENANT, session_id=state.session.id, status=RunStatus.running))
+            run = Run(id=run_id, tenant_id=TENANT, session_id=state.session.id, status=RunStatus.running)
+            requested = message.metadata.get("daedalus.provider_resume") if message is not None else None
+            if requested is not None:
+                client_message_id = str(message.metadata.get("daedalus.client_message_id") or "")
+                seqs = await self.sessions.transcript_seqs(state.session.id, [self.sessions.transcript_key(message)])
+                async with self.db.transaction() as conn:
+                    await resume_target_in(
+                        conn, state.session.id, requested["failed_run_id"], requested["provider_id"],
+                        requested["model"], client_message_id,
+                    )
+                    await self.runs.create_in(conn, run)
+                    await pin_resumed_run_in(
+                        conn, action_id=client_message_id.removeprefix("provider-resume:"),
+                        session_id=state.session.id, run_id=run_id,
+                    )
+                    # Run ownership, the provider pin and input placement survive the same
+                    # crash. A restart must never build the default chain for this decision.
+                    await conn.execute(
+                        "UPDATE input_receipts SET status = 'consumed',run_id = ?,step_id = 'start',"
+                        "message_seq = ?,updated_at = ? WHERE session_id = ? AND client_message_id = ?"
+                        " AND status = 'accepted'",
+                        (run_id, seqs[0] if seqs else None, datetime.now(UTC).isoformat(),
+                         state.session.id, client_message_id),
+                    )
+                    snapshot = {**engine.snapshot(), "state": "running",
+                                "provider_resume_input": message.model_dump(mode="json")}
+                    await conn.execute(
+                        "INSERT INTO snapshots(run_id,tenant_id,session_id,state,snapshot,updated_at)"
+                        " VALUES (?,?,?,'running',?,?)",
+                        (run_id, TENANT, state.session.id, json.dumps(snapshot), datetime.now(UTC).isoformat()),
+                    )
+            else:
+                await self.runs.create(run)
+            state.run_id = run_id
             await self._publish(state, "run.started", {"run_id": run_id, "origin": state.run_origin, "title": state.session.title})
         else:
             await self.runs.update_status(run_id, TENANT, RunStatus.running)
+            state.run_id = run_id
         state.task = asyncio.create_task(self._drive(state, engine, message, continue_turn), name=f"run:{run_id}")
         state.task.add_done_callback(_log_task_failure)
         await self._publish_status(state, "running")
@@ -3763,6 +3893,10 @@ class SessionManager:
             return
         if state.running or state.pending is not None or state.run_id != failed_run_id:
             return  # something else moved the session on meanwhile (an operator message, a scheduled turn)
+        if failed_run_id:
+            async with self.db.transaction() as conn:
+                if await recovery_candidate_in(conn, state.session.id, failed_run_id):
+                    return
         try:
             await self.submit(state.session.id, self.OUTAGE_NOTE, as_answer=False, origin="core")
         except RuntimeError as exc:
@@ -5045,6 +5179,15 @@ class SessionManager:
         try:
             engine = await self._build_engine(state, entry["run_id"])
             await engine.resume_from_snapshot(entry["snapshot"])
+            prepared_input = entry["snapshot"].get("provider_resume_input")
+            message = Message.model_validate(prepared_input) if prepared_input is not None else None
+            if message is not None:
+                receipt = await self.live.receipt(
+                    session_id, str(message.metadata.get("daedalus.client_message_id") or ""),
+                )
+                if (receipt is None or receipt["status"] != "consumed" or receipt["run_id"] != entry["run_id"]
+                        or not message.metadata.get("daedalus.provider_resume")):
+                    raise RuntimeError("the prepared provider input has no matching durable placement")
         except Exception:  # noqa: BLE001
             logger.exception("could not resume run %s", entry["run_id"])
             await self.events.delete_snapshot(entry["run_id"])
@@ -5074,13 +5217,15 @@ class SessionManager:
                 except Exception:  # noqa: BLE001
                     logger.exception("pending-restored callback failed")
             return
-        if not engine.history:
+        if not engine.history and message is None:
             await self.events.delete_snapshot(entry["run_id"])
             return
         if engine.state is not LoopState.RUNNING:
             engine.transition_to(LoopState.RUNNING)
         async with self.idle_work:
-            state.task = asyncio.create_task(self._drive(state, engine, None, True), name=f"resume:{entry['run_id']}")
+            state.task = asyncio.create_task(
+                self._drive(state, engine, message, message is None), name=f"resume:{entry['run_id']}",
+            )
         state.task.add_done_callback(_log_task_failure)
         resumed.append(entry["run_id"])
 

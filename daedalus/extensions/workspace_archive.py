@@ -34,7 +34,7 @@ from daedalus.stores.control import ControlConflict, ControlStore, Entity, Princ
 from daedalus.stores.database import Database
 from daedalus.stores.files import FILES_TENANT, FileStore
 
-FORMAT_VERSION = 3
+FORMAT_VERSION = 4
 MAX_ARCHIVE_BYTES = 256 << 20
 MAX_ENTRY_BYTES = 64 << 20
 MAX_ROWS = 100_000
@@ -90,13 +90,62 @@ QUERIES: dict[str, str] = {
     "watches": "SELECT * FROM watches WHERE project_id = ? ORDER BY created_at,id",
     "watch_deliveries": "SELECT d.* FROM watch_deliveries d JOIN watches w ON w.id = d.watch_id WHERE w.project_id = ? ORDER BY d.created_at,d.id",
     "planning_budgets": "SELECT * FROM planning_budgets WHERE project_id = ? ORDER BY project_id",
+    "project_goal_budgets": "SELECT * FROM project_goal_budgets WHERE project_id = ?",
+    "goal_budget_admissions": "SELECT * FROM goal_budget_admissions WHERE project_id = ? ORDER BY attributed_at,reservation_id",
+    "goal_budget_allocations": "SELECT * FROM goal_budget_allocations WHERE project_id = ? ORDER BY attributed_at,slot_id",
+    "goal_inference_reservations": "SELECT r.id,r.provider_id,r.model,r.session_id,r.run_id,r.request_digest,"
+                                   "r.quoted_microusd,r.actual_microusd,r.rate_version,r.state,r.usage_event_seq,"
+                                   "r.created_at,r.started_at,r.settled_at,r.execution_attempt_id,r.comparison_slot_id"
+                                   " FROM inference_reservations r JOIN goal_budget_admissions a"
+                                   " ON a.reservation_id = r.id WHERE a.project_id = ? ORDER BY r.created_at,r.id",
+    "goal_inference_scopes": "SELECT s.reservation_id,s.scope_key,s.cap_microusd"
+                             " FROM inference_reservation_scopes s JOIN goal_budget_admissions a"
+                             " ON a.reservation_id = s.reservation_id WHERE a.project_id = ?"
+                             " AND s.scope_key IN ('goal:'||a.budget_id,'goalcoord:'||a.budget_id)"
+                             " ORDER BY s.reservation_id,s.scope_key",
+    "goal_usage_events": "SELECT u.seq,u.at,u.provider_id,u.model,u.purpose,u.run_id,u.session_id,"
+                         "u.input_tokens,u.output_tokens,u.cache_read_tokens,u.reasoning_tokens,"
+                         "u.cost_usd,u.duration_ms,u.inference_reservation_id"
+                         " FROM usage_events u JOIN goal_budget_admissions a"
+                         " ON a.reservation_id = u.inference_reservation_id WHERE a.project_id = ?"
+                         " ORDER BY u.seq",
+    "goal_comparison_groups": "SELECT DISTINCT g.id,g.task_id,g.contract_revision,g.created_at,g.state,"
+                              "g.budget_cap_microusd,g.reserved_microusd,g.selected_result_id,g.selected_at"
+                              " FROM comparison_groups g JOIN comparison_funding_slots s ON s.group_id = g.id"
+                              " JOIN goal_budget_allocations a ON a.slot_id = s.id"
+                              " WHERE a.project_id = ? ORDER BY g.created_at,g.id",
+    "goal_comparison_slots": "SELECT s.id,s.group_id,s.slot,s.staff_id,s.project_id,s.task_id,"
+                             "s.contract_revision,s.provider_id,s.model,s.allowance_microusd,"
+                             "s.rate_version,s.attempt_id,s.state,s.created_at,s.launch_started_at,s.released_at"
+                             " FROM comparison_funding_slots s JOIN goal_budget_allocations a"
+                             " ON a.slot_id = s.id WHERE a.project_id = ? ORDER BY s.created_at,s.id",
+    "goal_comparison_scopes": "SELECT s.slot_id,s.scope_key,s.cap_microusd"
+                              " FROM comparison_funding_scopes s JOIN goal_budget_allocations a"
+                              " ON a.slot_id = s.slot_id WHERE a.project_id = ?"
+                              " AND s.scope_key = 'goal:'||a.budget_id"
+                              " ORDER BY s.slot_id,s.scope_key",
     "file_transfers": "SELECT * FROM file_transfers WHERE scope = ? ORDER BY id",
     "app_events": "SELECT * FROM app_events WHERE project_id = ? ORDER BY seq",
     "replan_fingerprints": "SELECT * FROM replan_fingerprints WHERE project_id = ? ORDER BY contract_revision",
     "scope_impacts": "SELECT * FROM scope_impacts WHERE project_id = ? ORDER BY created_at,id",
 }
 
-ARCHIVED_ONLY = frozenset({"app_events", "replan_fingerprints", "scope_impacts", "board_workflow_runs", "board_workflow_steps", "staff_context_packets"})
+GOAL_HISTORY = frozenset({"project_goal_budgets", "goal_budget_admissions", "goal_budget_allocations",
+                          "goal_inference_reservations", "goal_inference_scopes", "goal_usage_events",
+                          "goal_comparison_groups", "goal_comparison_slots", "goal_comparison_scopes"})
+ARCHIVED_ONLY = frozenset({"app_events", "replan_fingerprints", "scope_impacts", "board_workflow_runs",
+                           "board_workflow_steps", "staff_context_packets"}) | GOAL_HISTORY
+GOAL_HISTORY_FIELDS = {
+    "project_goal_budgets": "project_id budget_id limit_microusd coordination_limit_microusd activated_goal_revision activated_at updated_at",
+    "goal_budget_admissions": "reservation_id budget_id project_id goal_revision charge_class root_session_id attributed_at",
+    "goal_budget_allocations": "slot_id budget_id project_id goal_revision charge_class attributed_at",
+    "goal_inference_reservations": "id provider_id model session_id run_id request_digest quoted_microusd actual_microusd rate_version state usage_event_seq created_at started_at settled_at execution_attempt_id comparison_slot_id",
+    "goal_inference_scopes": "reservation_id scope_key cap_microusd",
+    "goal_usage_events": "seq at provider_id model purpose run_id session_id input_tokens output_tokens cache_read_tokens reasoning_tokens cost_usd duration_ms inference_reservation_id",
+    "goal_comparison_groups": "id task_id contract_revision created_at state budget_cap_microusd reserved_microusd selected_result_id selected_at",
+    "goal_comparison_slots": "id group_id slot staff_id project_id task_id contract_revision provider_id model allowance_microusd rate_version attempt_id state created_at launch_started_at released_at",
+    "goal_comparison_scopes": "slot_id scope_key cap_microusd",
+}
 
 # These columns would carry local locations, resumable authority, or mutable runtime state. They are
 # omitted rather than masked inside an otherwise plausible live object.
@@ -194,6 +243,126 @@ def _validate_historical_packet(row: dict[str, Any], sessions: dict[str, str]) -
         if isinstance(exc, ArchiveRefused):
             raise
         raise ArchiveRefused("historical context packet is invalid") from exc
+
+
+def _validate_goal_history(rows: dict[str, list[dict[str, Any]]], project_id: str) -> None:
+    for table, fields in GOAL_HISTORY_FIELDS.items():
+        if any(set(row) != set(fields.split()) for row in rows[table]):
+            raise ArchiveRefused("historical budget contains unreviewed fields")
+    budget_rows = rows["project_goal_budgets"]
+    if len(budget_rows) > 1 or any(row["project_id"] != project_id for row in budget_rows):
+        raise ArchiveRefused("historical budget leaves the source project")
+    if not budget_rows:
+        if any(rows[name] for name in GOAL_HISTORY):
+            raise ArchiveRefused("historical charges have no project budget")
+        return
+    budget = budget_rows[0]
+    budget_id = budget["budget_id"]
+    if not isinstance(budget_id, str) or not budget_id:
+        raise ArchiveRefused("historical budget identity is invalid")
+    for name in ("limit_microusd", "coordination_limit_microusd"):
+        amount = budget[name]
+        if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+            raise ArchiveRefused("historical budget amount is invalid")
+    if budget["coordination_limit_microusd"] > budget["limit_microusd"]:
+        raise ArchiveRefused("historical coordination limit exceeds the budget")
+    admissions = {row["reservation_id"]: row for row in rows["goal_budget_admissions"]}
+    allocations = {row["slot_id"]: row for row in rows["goal_budget_allocations"]}
+    reservations = {row["id"]: row for row in rows["goal_inference_reservations"]}
+    slots = {row["id"]: row for row in rows["goal_comparison_slots"]}
+    groups = {row["id"]: row for row in rows["goal_comparison_groups"]}
+    if (len(admissions) != len(rows["goal_budget_admissions"]) or
+            len(allocations) != len(rows["goal_budget_allocations"]) or
+            len(reservations) != len(rows["goal_inference_reservations"]) or
+            len(slots) != len(rows["goal_comparison_slots"]) or
+            len(groups) != len(rows["goal_comparison_groups"]) or
+            set(admissions) != set(reservations) or set(allocations) != set(slots)):
+        raise ArchiveRefused("historical charge identities are incomplete")
+    for row in [*admissions.values(), *allocations.values()]:
+        if row["project_id"] != project_id or row["budget_id"] != budget_id:
+            raise ArchiveRefused("historical charge leaves the source budget")
+    revisions = {row["goal_revision"] for row in rows["project_goal_revisions"]}
+    if any(row["goal_revision"] not in revisions for row in
+           [*admissions.values(), *allocations.values()]):
+        raise ArchiveRefused("historical charge has no source goal revision")
+    if any(row["charge_class"] != "work" for row in allocations.values()):
+        raise ArchiveRefused("historical allocation has an invalid charge class")
+    source_sessions = {row["id"] for row in rows["sessions"]}
+    if any(row["root_session_id"] not in source_sessions or row["charge_class"] not in
+           {"coordination", "work"} for row in admissions.values()):
+        raise ArchiveRefused("historical inference has no source project root")
+    source_tasks = {row["id"] for row in rows["board_tasks"]}
+    source_staff = {row["id"] for row in rows["staff"]}
+    if any(row["task_id"] not in source_tasks for row in groups.values()):
+        raise ArchiveRefused("historical comparison leaves the source project")
+    for row in slots.values():
+        if (row["project_id"] != project_id or row["task_id"] not in source_tasks
+                or row["group_id"] not in groups or groups[row["group_id"]]["task_id"] != row["task_id"]
+                or row["staff_id"] not in source_staff or row["state"] not in {"held", "released"}
+                or isinstance(row["allowance_microusd"], bool)
+                or not isinstance(row["allowance_microusd"], int)
+                or row["allowance_microusd"] <= 0):
+            raise ArchiveRefused("historical allocation leaves the source project")
+    for row in reservations.values():
+        if (row["state"] not in {"reserved", "inflight", "settled", "unknown", "released", "overrun"}
+                or isinstance(row["quoted_microusd"], bool)
+                or not isinstance(row["quoted_microusd"], int) or row["quoted_microusd"] < 0
+                or (row["actual_microusd"] is not None and
+                    (isinstance(row["actual_microusd"], bool)
+                     or not isinstance(row["actual_microusd"], int)
+                     or row["actual_microusd"] < 0))):
+            raise ArchiveRefused("historical inference amount or state is invalid")
+    reservation_scopes = {(row["reservation_id"], row["scope_key"]) for row in rows["goal_inference_scopes"]}
+    slot_scopes = {(row["slot_id"], row["scope_key"]) for row in rows["goal_comparison_scopes"]}
+    if any(row["reservation_id"] not in admissions or row["scope_key"] not in
+           {f"goal:{budget_id}", f"goalcoord:{budget_id}"} for row in rows["goal_inference_scopes"]):
+        raise ArchiveRefused("historical inference scope leaves the budget")
+    if any(row["slot_id"] not in allocations or row["scope_key"] != f"goal:{budget_id}"
+           for row in rows["goal_comparison_scopes"]):
+        raise ArchiveRefused("historical allocation scope leaves the budget")
+    if any((reservation_id, f"goal:{budget_id}") not in reservation_scopes or
+           (admission["charge_class"] == "coordination" and
+            (reservation_id, f"goalcoord:{budget_id}") not in reservation_scopes)
+           for reservation_id, admission in admissions.items()):
+        raise ArchiveRefused("historical inference is missing its goal scope")
+    if any((slot_id, f"goal:{budget_id}") not in slot_scopes for slot_id in allocations):
+        raise ArchiveRefused("historical allocation is missing its goal scope")
+    if any(isinstance(row["cap_microusd"], bool) or not isinstance(row["cap_microusd"], int)
+           or row["cap_microusd"] < 0 for row in [*rows["goal_inference_scopes"],
+                                                *rows["goal_comparison_scopes"]]):
+        raise ArchiveRefused("historical budget scope cap is invalid")
+    usage = rows["goal_usage_events"]
+    if len({row["seq"] for row in usage}) != len(usage) or any(
+            row["inference_reservation_id"] not in reservations or
+            reservations[row["inference_reservation_id"]]["usage_event_seq"] != row["seq"] or
+            reservations[row["inference_reservation_id"]]["provider_id"] != row["provider_id"] or
+            reservations[row["inference_reservation_id"]]["model"] != row["model"]
+            for row in usage):
+        raise ArchiveRefused("historical usage leaves its exact inference reservation")
+    if any(row["usage_event_seq"] is not None and row["usage_event_seq"] not in
+           {event["seq"] for event in usage} for row in reservations.values()):
+        raise ArchiveRefused("historical charged usage is missing")
+
+
+def _historical_budget_summary(rows: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    budget = rows["project_goal_budgets"]
+    if not budget:
+        return {"state": "not_in_source", "restored": False, "current_available_microusd": None}
+    reservations = rows["goal_inference_reservations"]
+    uncertain = [row for row in reservations if row["state"] in {"reserved", "inflight", "unknown"}
+                 or (row["state"] in {"settled", "overrun"} and row["actual_microusd"] is None)]
+    observed = sum(row["actual_microusd"] or 0 for row in reservations
+                   if row["state"] in {"settled", "overrun"})
+    return {"state": "historical_not_restored", "restored": False,
+            "source_budget_id": budget[0]["budget_id"],
+            "source_limit_microusd": budget[0]["limit_microusd"],
+            "source_coordination_limit_microusd": budget[0]["coordination_limit_microusd"],
+            "historical_observed_spent_microusd": observed,
+            "historical_total_microusd": observed if not uncertain else None,
+            "unresolved_charge_count": len(uncertain),
+            "unresolved_quoted_microusd": sum(row["quoted_microusd"] for row in uncertain),
+            "unreleased_allocation_count": sum(row["state"] == "held" for row in rows["goal_comparison_slots"]),
+            "current_available_microusd": None}
 
 
 def _now() -> str:
@@ -307,6 +476,7 @@ def check_archive(data: bytes) -> CheckedArchive:
             if row.get("task_id") not in task_ids:
                 raise ArchiveRefused("historical context packet names a task outside the archive")
             _validate_historical_packet(row, sessions)
+        _validate_goal_history(rows, payload["source_project_id"])
         blobs = {name[6:]: value for name, value in entries.items() if name.startswith("files/")}
         reports = {name[8:]: value for name, value in entries.items() if name.startswith("reports/")}
         run_blobs = {name[12:]: value for name, value in entries.items() if name.startswith("run-details/")}
@@ -569,6 +739,7 @@ class WorkspaceArchive:
                 "archived_only": sorted(ARCHIVED_ONLY),
                 "id_map": mapping, "conflicts": ["archive already imported"] if prior else [],
                 "missing_secrets": ["provider credentials", "plugin credentials", "webhook secrets"],
+                "historical_goal_budget": _historical_budget_summary(archive.rows),
                 "imported_project_id": prior["project_id"] if prior else None,
                 "restores_runtime": False,
                 "reconnect_required": ["folders", "provider and plugin credentials", "terminal sessions", "external integrations"]}
@@ -740,9 +911,19 @@ class WorkspaceArchive:
                      source["packet_json"], source["role"], source["role_hint"],
                      source["contract_revision"], source["created_at"], _now()),
                 )
+            if archive.rows["project_goal_budgets"]:
+                snapshot = {name: archive.rows[name] for name in sorted(GOAL_HISTORY)}
+                payload = canonical(snapshot)
+                await conn.execute(
+                    "INSERT INTO historical_goal_budget_snapshots(archive_digest,project_id,source_budget_id,"
+                    "snapshot_digest,snapshot_json,imported_at) VALUES (?,?,?,?,?,?)",
+                    (archive.digest, identity, archive.rows["project_goal_budgets"][0]["budget_id"],
+                     _sha(payload.encode()), payload, _now()),
+                )
             return {"project_id": identity, "archive_digest": archive.digest,
                     "restored_rows": {name: count for name, count in archive.counts.items() if name not in ARCHIVED_ONLY},
                     "archived_only": {name: archive.counts[name] for name in ARCHIVED_ONLY},
+                    "historical_goal_budget": _historical_budget_summary(archive.rows),
                     "runtime_state": "inactive", "private": True}
 
         try:
@@ -758,6 +939,8 @@ class WorkspaceArchive:
         if any((item["session_id"], int(item["turn_seq"])) not in turns for item in archive.rows["result_turn_anchors"]):
             raise ArchiveRefused("result evidence names a missing source turn")
         for table, items in archive.rows.items():
+            if table in GOAL_HISTORY:
+                continue
             columns = {row["name"] for row in await self.db.fetchall(f"PRAGMA table_info({table})")}
             if not columns:
                 raise ArchiveRefused("archive targets an unavailable schema")

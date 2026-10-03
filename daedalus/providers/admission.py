@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 if TYPE_CHECKING:
     from protocore.contracts.llm import LLMRequest
 
+    from daedalus.providers.failure_evidence import FailureEvidence
     from daedalus.providers.openai_compat import ProviderEndpoint
 
 
@@ -16,3 +17,6 @@ class InferenceAdmission(Protocol):
     async def cost(self, reservation_id: str, raw: dict[str, Any], normalized: dict[str, Any]) -> float | None: ...
 
     async def interrupted(self, reservation_id: str, reason: str) -> None: ...
+
+    async def failure(self, endpoint: ProviderEndpoint, request: LLMRequest,
+                      reservation_id: str | None, evidence: FailureEvidence) -> str | None: ...
