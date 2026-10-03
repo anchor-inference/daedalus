@@ -191,6 +191,17 @@ func TestViewSendsFramesOnlyOnChangeAndPaces(t *testing.T) {
 		t.Fatalf("first frame: %+v", f.Meta)
 	}
 	v.ack(f.FrameNo)
+	// The first frame can be of a page still finishing its first paint, and the paint that completes
+	// it is a change like any other: on a loaded CI runner it arrived 0.8 s in and failed the check
+	// below. So the page is let settle first — frames until 0.7 s pass without one, for 5 s at most —
+	// and what is held is the real promise: once nothing changes, nothing is sent.
+	for settle := time.Now().Add(5 * time.Second); time.Now().Before(settle); {
+		late, ok := v.frame(700 * time.Millisecond)
+		if !ok {
+			break
+		}
+		v.ack(late.FrameNo)
+	}
 	// A still page sends nothing more.
 	if f2, ok := v.frame(2 * time.Second); ok {
 		t.Fatalf("a still page sent frame %d", f2.FrameNo)
