@@ -26,6 +26,8 @@ def microusd(value: Any) -> int:
         raise BudgetRefused("a finite nonnegative dollar amount is required") from exc
     if not amount.is_finite() or amount < 0:
         raise BudgetRefused("a finite nonnegative dollar amount is required")
+    if amount > Decimal(2**63 - 1) / 1_000_000:
+        raise BudgetRefused("the dollar amount exceeds the ledger's integer range")
     result = int((amount * 1_000_000).to_integral_value(rounding=ROUND_CEILING))
     if result > 2**63 - 1:
         raise BudgetRefused("the dollar amount exceeds the ledger's integer range")
@@ -73,6 +75,32 @@ async def _historical(conn: aiosqlite.Connection, limit: Constraint) -> int:
     return total
 
 
+async def held_in(conn: aiosqlite.Connection, limit: Constraint) -> tuple[int, set[str]]:
+    """Count a prepaid allocation once, including its unfinished descendant requests."""
+    from daedalus.stores.comparison_funding import pool_balances_in, pool_matches
+
+    pools = [row for row in await pool_balances_in(conn) if pool_matches(row, limit)]
+    covered = {row['id'] for row in pools}
+    total = sum(row['held'] for row in pools)
+    clauses = ["r.state IN ('reserved','inflight','unknown')"]
+    args: list[Any] = []
+    for column, value in (("provider_id", limit.provider_id), ("run_id", limit.run_id)):
+        if value is not None:
+            clauses.append(f"r.{column} = ?")
+            args.append(value)
+    if limit.session_ids:
+        clauses.append("(r.session_id IN (" + ",".join("?" for _ in limit.session_ids) + ")"
+                       " OR EXISTS (SELECT 1 FROM inference_reservation_scopes s"
+                       " WHERE s.reservation_id = r.id AND s.scope_key = ?))")
+        args.extend((*limit.session_ids, limit.key))
+    async with conn.execute("SELECT r.comparison_slot_id,r.quoted_microusd FROM inference_reservations r"
+                            " WHERE " + " AND ".join(clauses), tuple(args)) as cursor:
+        for row in await cursor.fetchall():
+            if row['comparison_slot_id'] not in covered:
+                total += row['quoted_microusd']
+    return total, covered
+
+
 class InferenceBudget:
     def __init__(self, db: Database) -> None:
         self.db = db
@@ -108,7 +136,7 @@ class InferenceBudget:
                 "SELECT provider_id,sum(quoted_microusd) AS held,count(*) AS count,"
                 "sum(CASE WHEN state = 'unknown' THEN quoted_microusd ELSE 0 END) AS uncertain,"
                 "sum(state = 'unknown') AS uncertain_count FROM inference_reservations"
-                " WHERE state IN ('reserved','inflight','unknown') GROUP BY provider_id",
+                " WHERE state IN ('reserved','inflight','unknown') AND comparison_slot_id IS NULL GROUP BY provider_id",
             )
             rows = await cursor.fetchall()
             await cursor.close()
@@ -119,6 +147,16 @@ class InferenceBudget:
                             reserved_count=int(row["count"]), uncertain_count=int(row["uncertain_count"]))
                 for field in ("reserved_usd", "uncertain_usd", "reserved_count", "uncertain_count"):
                     total[field] += view[field]
+            from daedalus.stores.comparison_funding import pool_balances_in
+
+            for row in await pool_balances_in(conn):
+                view = providers.setdefault(row['provider_id'], balance(0.0))
+                additions = {'reserved_usd': row['held'] / 1_000_000,
+                             'uncertain_usd': row['uncertain'] / 1_000_000,
+                             'reserved_count': 1, 'uncertain_count': int(row['uncertain_count'] or 0)}
+                for field, value in additions.items():
+                    view[field] += value
+                    total[field] += value
         for view in (total, *providers.values()):
             for field in ("spent_usd", "reserved_usd", "uncertain_usd"):
                 view[field] = round(view[field], 6)
@@ -127,7 +165,8 @@ class InferenceBudget:
     async def reserve_in(self, conn: aiosqlite.Connection, *, reservation_id: str,
                          provider_id: str, model: str, session_id: str | None, run_id: str | None,
                          request_digest: str, quoted_microusd: int, rate_version: str,
-                         quote: dict[str, Any], constraints: tuple[Constraint, ...]) -> dict[str, Any]:
+                         quote: dict[str, Any], constraints: tuple[Constraint, ...],
+                         execution_attempt_id: str | None = None) -> dict[str, Any]:
         """The host supplies a verified quote; this store never invents an input token bound."""
         if (type(quoted_microusd) is not int or not 0 <= quoted_microusd <= 2**63 - 1 or not reservation_id or
                 not provider_id or not model or not rate_version or not re.fullmatch(r"[0-9a-f]{64}", request_digest) or
@@ -137,32 +176,29 @@ class InferenceBudget:
             raise BudgetRefused("each applicable balance must be supplied once")
         if await one(conn, "SELECT 1 FROM inference_reservations WHERE id = ?", (reservation_id,)) is not None:
             raise BudgetRefused("this inference admission already exists")
+        slot_id = None
+        if execution_attempt_id is not None:
+            from daedalus.stores.comparison_funding import ComparisonFunding
+
+            if await one(conn, 'SELECT 1 FROM execution_attempts WHERE id = ?', (execution_attempt_id,)) is None:
+                raise BudgetRefused('the inference has no host-attested execution attempt')
+            slot_id = await ComparisonFunding(self.db).check_slot_in(conn, execution_attempt_id, provider_id,
+                                                                   model, quoted_microusd, quote)
         for limit in constraints:
             if not limit.key or type(limit.cap_microusd) is not int or not 0 <= limit.cap_microusd <= 2**63 - 1:
                 raise BudgetRefused("a finite integer balance is required")
             spent = await _historical(conn, limit)
-            clauses = ["r.state IN ('reserved','inflight','unknown')"]
-            args: list[Any] = []
-            for column, value in (("provider_id", limit.provider_id), ("run_id", limit.run_id)):
-                if value is not None:
-                    clauses.append(f"r.{column} = ?")
-                    args.append(value)
-            if limit.session_ids:
-                clauses.append("(r.session_id IN (" + ",".join("?" for _ in limit.session_ids) + ")"
-                               " OR EXISTS (SELECT 1 FROM inference_reservation_scopes s"
-                               " WHERE s.reservation_id = r.id AND s.scope_key = ?))")
-                args.extend((*limit.session_ids, limit.key))
-            # A new day or a counter reset cannot refund a call which may settle afterward.
-            # Session ownership pinned at admission survives a child being detached meanwhile.
-            row = await one(conn, "SELECT coalesce(sum(r.quoted_microusd),0) AS held"
-                            " FROM inference_reservations r WHERE " + " AND ".join(clauses), tuple(args))
-            if spent + int(row["held"]) + quoted_microusd > limit.cap_microusd:
+            held, covered_slots = await held_in(conn, limit)
+            # A funded request consumes its own held pool. A new child/run-specific cap still
+            # sees the individual quote; no parent allocation can bypass that narrower cap.
+            increment = 0 if slot_id in covered_slots else quoted_microusd
+            if spent + held + increment > limit.cap_microusd:
                 raise BudgetRefused(f"{limit.key}: the quote exceeds available balance")
         await conn.execute("INSERT INTO inference_reservations(id,provider_id,model,session_id,run_id,"
-                           "request_digest,quoted_microusd,rate_version,quote_json,state,created_at)"
-                           " VALUES (?,?,?,?,?,?,?,?,?,'reserved',?)",
+                           "request_digest,quoted_microusd,rate_version,quote_json,state,created_at,execution_attempt_id,comparison_slot_id)"
+                           " VALUES (?,?,?,?,?,?,?,?,?,'reserved',?,?,?)",
                            (reservation_id, provider_id, model, session_id, run_id, request_digest,
-                            quoted_microusd, rate_version, canonical(quote), now()))
+                            quoted_microusd, rate_version, canonical(quote), now(), execution_attempt_id, slot_id))
         for limit in constraints:
             await conn.execute("INSERT INTO inference_reservation_scopes(reservation_id,scope_key,cap_microusd)"
                                " VALUES (?,?,?)", (reservation_id, limit.key, limit.cap_microusd))

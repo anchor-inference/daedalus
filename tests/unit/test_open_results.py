@@ -16,6 +16,7 @@ from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.host.events import EventFilter
 from daedalus.stores.database import Database
 from daedalus.stores.staff import Staff
+from tests.support.authorized_results import accept_branchless_result
 from tests.unit.test_board_rounds import task_of
 from tests.unit.test_orchestrator import Rig, rig
 from tests.unit.test_orchestrator_team import fake, office
@@ -44,10 +45,12 @@ async def started(r: Rig, sid: str, name: str = "Sol", title: str = "Updater pro
     return task_id, member
 
 
-async def report(r: Rig, member: Staff, kind: str, text: str) -> str:
+async def report(r: Rig, member: Staff, kind: str, text: str,
+                 *, artifacts: list[str] | None = None) -> str:
     live = await r.team.live_of(member)
     assert live is not None
-    told = await r.team.ingress.report(live, kind, text, call_id=f"fixture-report:{uuid.uuid4().hex}")
+    told = await r.team.ingress.report(live, kind, text, artifacts=artifacts,
+                                       call_id=f"fixture-report:{uuid.uuid4().hex}")
     await r.team.ingress.status((await r.team.live_of(member)) or live, "idle")
     return told
 
@@ -145,11 +148,15 @@ async def test_silence_decides_nothing(settings: Settings, db: Database, tmp_pat
         fake(r)
         sid = await office(r)
         task_id, sol = await started(r, sid)
-        await report(r, sol, "done", "the three gates pass")
+        live = await r.team.live_of(sol)
+        assert live is not None
+        _folder, cwd = await r.team.cwd_of(live)
+        (Path(cwd) / "gates.txt").write_text("All three gates passed\n")
+        await report(r, sol, "done", "the three gates pass", artifacts=["gates.txt"])
         await r.call(sid, "journal", text="read sol's report")
         [loop] = await r.orch.loops.open(r.project.id)
         assert (loop["task_id"], loop["cause"]) == (task_id, "report_done")
-        await r.call(sid, "accept", task_id=task_id, checks=[{"item": "C1", "ok": True, "note": "ran them"}])
+        await accept_branchless_result(r.team, task_id)
         assert await r.orch.loops.open(r.project.id) == []
     finally:
         await close_team(r.manager)

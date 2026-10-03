@@ -709,6 +709,9 @@ class BoardStub:
         self.merged: list[str] = []
         self.rejected: list[tuple[str, str]] = []
         self.stops: list[tuple[str, dict]] = []
+        self.workflow_runs: dict[str, dict] = {}
+        self.workflow_commands: dict[str, dict] = {}
+        self.workflow_unknowns = 0
 
     @staticmethod
     def task(id_: str, title: str, *, status: str = "todo", priority: int = 3, assignee: dict | None = None, **fields: object) -> dict:
@@ -767,6 +770,73 @@ class BoardStub:
     def answer(self, method: str, path: str, query: str, body: dict | None) -> tuple[int, object] | None:
         """``(status, body)`` for a route of the board, or None for anything else."""
         base = f"/api/projects/{self.project['id']}/board"
+        if path == "/api/board-workflows/validate" and method == "POST":
+            return 200, {"valid": True, "topology": [node["id"] for node in (body or {}).get("nodes", [])], "required_capabilities": [], "definition_digest": "a" * 64}
+        if path == "/api/board-workflows/runs" and method == "POST":
+            payload = dict(body or {})
+            if payload.get("project_id") != self.project["id"]:
+                return None
+            key = payload.get("client_operation_id", "")
+            if key in self.workflow_commands:
+                return 200, self.workflow_commands[key]
+            row = next((task for task in self.tasks if task["id"] == payload.get("task_id")), None)
+            if row is None or row["entity_revision"] != payload.get("expected_entity_revision"):
+                return 409, {"detail": "task revision changed"}
+            if any(run["task_id"] == row["id"] and run["status"] in {"pending", "running", "blocked"} for run in self.workflow_runs.values()):
+                return 409, {"detail": "task already has an active workflow"}
+            run_id = f"workflow-{len(self.workflow_runs) + 1}"
+            nodes = payload["nodes"]
+            self.workflow_runs[run_id] = {"run_id": run_id, "task_id": row["id"], "status": "running", "created_at": "2026-09-24T10:00:00Z",
+                                          "definition_value": {"nodes": nodes, "edges": payload["edges"], "budget": payload["budget"]},
+                                          "projection_current": True,
+                                          "steps": [{"node_id": node["id"], "task_id": node["task_id"], "kind": node["kind"], "status": "ready" if node["kind"] == "approval" else "pending",
+                                                     "step_revision": 1, "source_contract_revision": 1, "current_input_digest": "b" * 64, "input_digest": "b" * 64,
+                                                     "source_current": True, "projected_state": "ready", "can_approve": node["kind"] == "approval" and len(nodes) == 1,
+                                                     "approval_blocker": "predecessor_unready" if node["kind"] == "approval" and len(nodes) > 1 else None,
+                                                     "receipt_id": None} for node in nodes]}
+            row["entity_revision"] += 1
+            receipt = {"run_id": run_id, "status": "pending", "receipt_id": f"receipt-{run_id}", "entity_revision": row["entity_revision"]}
+            self.workflow_commands[key] = receipt
+            if self.workflow_unknowns:
+                self.workflow_unknowns -= 1
+                return 503, {"detail": "connection interrupted after submission"}
+            return 200, receipt
+        if path.startswith("/api/board-workflows/runs/"):
+            parts = path.split("/")
+            run = self.workflow_runs.get(parts[4]) if len(parts) >= 5 else None
+            if run is None:
+                return 404, {"detail": "no such workflow"}
+            if len(parts) == 5 and method == "GET":
+                task_runs = [item for item in self.workflow_runs.values() if item["task_id"] == run["task_id"]]
+                newer = task_runs[-1] if task_runs and task_runs[-1]["run_id"] != run["run_id"] else None
+                steps = [{**step, "can_approve": False, "approval_blocker": "newer_run"} if newer and step["kind"] == "approval" else step for step in run["steps"]]
+                return 200, {**run, "superseded_by": newer["run_id"] if newer else None, "steps": steps}
+            if method == "POST" and len(parts) == 6 and parts[5] == "reconcile":
+                step = next((step for step in run["steps"] if step["node_id"] == (body or {}).get("node_id")), None)
+                if step is None:
+                    return 404, {"detail": "no such workflow step"}
+                current = step["status"] == "completed" and (body or {}).get("expected_input_hash") == step["input_digest"]
+                return 200, {"run_id": run["run_id"], "node_id": step["node_id"], "decision": "reuse" if current else "needs_review",
+                             "reason": "matching_verified_receipt" if current else "source_changed", "receipt_id": step["receipt_id"],
+                             "current_input_hash": step["current_input_digest"]}
+            if method == "POST" and len(parts) == 6 and parts[5] == "cancel":
+                run["status"] = "cancelled"
+                return 200, {"run_id": run["run_id"], "status": "cancelled", "receipt_id": "receipt-cancel"}
+            if method == "POST" and len(parts) == 8 and parts[5] == "steps" and parts[7] == "approve":
+                step = next((step for step in run["steps"] if step["node_id"] == parts[6]), None)
+                if step is None or not step["can_approve"] or (body or {}).get("expected_input_digest") != step["current_input_digest"]:
+                    return 409, {"detail": "approval source changed"}
+                step.update(status="completed", can_approve=False, receipt_id="receipt-approval")
+                run["status"] = "completed"
+                return 200, {"run_id": run["run_id"], "status": "completed", "receipt_id": "receipt-approval"}
+        if path.startswith("/api/board/") and path.endswith("/board-workflows") and method == "GET":
+            task_id = path.split("/")[3]
+            row = next((task for task in self.tasks if task["id"] == task_id), None)
+            if row is None:
+                return 404, {"detail": "no such project task"}
+            items = [run for run in reversed(list(self.workflow_runs.values())) if run["task_id"] == task_id]
+            return 200, {"task_id": task_id, "project_id": self.project["id"], "task_entity_revision": row["entity_revision"],
+                         "items": [{key: run[key] for key in ("run_id", "status", "created_at")} for run in items], "next_before": None}
         if path == "/api/control/effects/stop-1" and method == "GET":
             return 200, {"effect_id": "stop-1", "state": "pending"}
         if path.startswith("/api/control/effects/launch-") and method == "GET":

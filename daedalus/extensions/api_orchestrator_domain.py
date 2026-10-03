@@ -174,7 +174,7 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
                 cursor = await conn.execute(
                     "WITH RECURSIVE affected(id) AS (SELECT ? UNION SELECT t.id FROM board_tasks t"
                     " JOIN json_each(t.depends_on) d JOIN affected a ON d.value = a.id"
-                    " WHERE t.project_id IS ?) SELECT t.id,t.title,t.status,t.project_id,t.assignee_staff_id"
+                    " WHERE t.project_id IS ?) SELECT t.id,t.title,t.status,t.project_id,t.assignee_staff_id,t.current_attempt_id"
                     " FROM board_tasks t JOIN affected a ON a.id = t.id", (task_id, scope.id if scope.kind == "project" else None),
                 )
                 rows = await cursor.fetchall()
@@ -197,6 +197,12 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
                         events.append(await bus.persist_in(conn, "task.moved", {**payload, "from": prior["status"],
                                                            "to": task["status"]}, project_id=task["project_id"],
                                                            staff_id=task["assignee_staff_id"]))
+                    if identity == task_id and operation == 'result.accept' and response.get('acceptance_state') == 'operator_approved':
+                        decision = {**payload, 'result_id': response['result_id'], 'verdict_id': response['verdict_id'],
+                                    'contract_revision': response['contract_revision'], 'attempt_id': task['current_attempt_id'],
+                                    'receipt_id': mutation.receipt_id}
+                        events.append(await bus.persist_in(conn, 'task.accepted', decision,
+                                                           project_id=task['project_id'], staff_id=task['assignee_staff_id']))
                 return response
 
             async with bus.transaction_guard():

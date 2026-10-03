@@ -13,13 +13,14 @@ if TYPE_CHECKING:
 
 REVIEW_OPERATIONS = ("review.verdict", "review.return")
 AUTHORITY_BUNDLES = {
-    "planning": {"operations": ["board.task.create", "board.task.update"], "effects": [], "scope_kind": "project"},
-    "execution": {"operations": ["task.launch", "staff.release"],
+    "planning": {"operations": ["board.task.create", "board.task.update", "contract.require", "contract.apply", "contract.withdraw"],
+                 "effects": [], "scope_kind": "project"},
+    "execution": {"operations": ["task.launch", "task.stop", "staff.release"],
                   "effects": ["execution.start", "execution.stop"], "scope_kind": "task"},
-    "execution_project": {"operations": ["task.launch", "staff.release"],
+    "execution_project": {"operations": ["task.launch", "task.stop", "staff.release"],
                           "effects": ["execution.start", "execution.stop"], "scope_kind": "project"},
     "review": {"operations": list(REVIEW_OPERATIONS), "effects": [], "scope_kind": "project"},
-    "watches": {"operations": ["watch.create", "watch.change", "watch.remove", "watch.deliver"],
+    "watch": {"operations": ["watch.create", "watch.change", "watch.remove", "watch.deliver"],
                 "effects": ["watch.wake", "watch.tell", "watch.notify"], "scope_kind": "project"},
 }
 

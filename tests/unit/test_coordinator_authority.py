@@ -9,7 +9,13 @@ from types import SimpleNamespace
 import pytest
 
 from daedalus.extensions.board_commands import BoardCommands
-from daedalus.extensions.coordinator_authority import grant_review, install_authority, resolve_authority
+from daedalus.extensions.coordinator_authority import (
+    approve_authority,
+    authority_view,
+    grant_review,
+    install_authority,
+    resolve_authority,
+)
 from daedalus.stores.control import ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
 
@@ -89,3 +95,29 @@ async def test_generic_tool_session_needs_an_explicit_scoped_grant(db: Database)
     await ControlStore(db).revoke_grant(OPERATOR, grant["grant_id"], reason="approval withdrawn")
     with pytest.raises(ControlDenied):
         await hook("agent", "board.task.create")
+
+
+async def test_new_contract_and_stop_rights_require_fresh_explicit_approval(db: Database) -> None:
+    app, _ = await office(db)
+    control = ControlStore(db)
+    expiry = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    earlier = await control.issue_grant(OPERATOR, Principal("orchestrator:coordinator", "agent"), Scope("project", "project"),
+                                        operations=["board.task.create", "board.task.update", "task.launch", "staff.release"],
+                                        effects=["execution.start", "execution.stop"], expires_at=expiry)
+    for operation in ("contract.require", "contract.apply", "contract.withdraw", "task.stop"):
+        with pytest.raises(ControlDenied, match="no current grant"):
+            await resolve_authority(app, session_id="coordinator", project_id="project", task_id="task", operation=operation)
+    for bundle in ("planning", "execution"):
+        revision = (await db.fetchone("SELECT entity_revision FROM projects WHERE id = 'project'"))[0]
+        args = {"client_operation_id": f"approve-{bundle}", "expected_entity_revision": revision,
+                "expected_coordinator_session_id": "coordinator", "bundle_id": bundle,
+                "expires_at": expiry, "task_id": "task" if bundle == "execution" else None}
+        receipt = await approve_authority(app, "project", OPERATOR, **args)
+        assert await approve_authority(app, "project", OPERATOR, **args) == receipt
+    for operation in ("contract.require", "contract.apply", "contract.withdraw", "task.stop"):
+        principal = await resolve_authority(app, session_id="coordinator", project_id="project", task_id="task", operation=operation)
+        assert principal.grant_id != earlier["grant_id"]
+    row = await db.fetchone("SELECT operations_json FROM actor_grants WHERE id = ?", (earlier["grant_id"],))
+    assert set(json.loads(row[0])) == {"board.task.create", "board.task.update", "task.launch", "staff.release"}
+    view = await authority_view(app, "project")
+    assert any(bundle["id"] == "watch" and "watch.deliver" in bundle["operations"] for bundle in view["available_bundles"])

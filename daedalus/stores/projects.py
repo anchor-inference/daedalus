@@ -43,6 +43,31 @@ message that asked several things — open until an entry of ``COMMITMENT_KEPT_K
 COMMITMENT_KEPT_KIND = "commitment_kept"
 COMMITMENT_TEXT_MAX = 400
 COMMITMENTS_MAX = 30
+
+
+async def keep_task_commitments_in(conn: Any, *, project_id: str, task_id: str,
+                                   result_id: str, verdict_id: str,
+                                   contract_revision: int) -> list[int]:
+    """Close task-linked promises in the transaction that accepted their exact result."""
+    cursor = await conn.execute(
+        "SELECT c.id,c.text FROM project_journal c WHERE c.project_id = ? AND c.kind = ?"
+        " AND json_extract(c.refs_json, '$.task_id') = ? AND NOT EXISTS ("
+        "SELECT 1 FROM project_journal k WHERE k.project_id = c.project_id"
+        " AND k.kind = ? AND CAST(json_extract(k.refs_json, '$.commitment_id') AS INTEGER) = c.id)"
+        " ORDER BY c.id", (project_id, COMMITMENT_KIND, task_id, COMMITMENT_KEPT_KIND))
+    rows = await cursor.fetchall()
+    await cursor.close()
+    for row in rows:
+        await conn.execute(
+            "INSERT INTO project_journal(project_id,at,author,kind,text,refs_json)"
+            " VALUES (?,?,'system',?,?,?)",
+            (project_id, _now(), COMMITMENT_KEPT_KIND,
+             f"Kept #{row['id']}: {row['text'][:200]}\nHow: accepted result {result_id}",
+             json.dumps({"commitment_id": row["id"], "task_id": task_id,
+                         "result_id": result_id, "verdict_id": verdict_id,
+                         "contract_revision": contract_revision}, sort_keys=True)),
+        )
+    return [int(row["id"]) for row in rows]
 RULE_TEXT_MAX = 600
 """A rule is an instruction, not a document: what it needs is in the brief or the journal."""
 RULES_MAX = 10

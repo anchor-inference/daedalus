@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -100,3 +101,11 @@ async def test_exact_result_flow_over_http(domain_api) -> None:  # type: ignore[
     replay = await client.post(base + f"/results/{result_id}/accept", headers={"X-User": "2"}, json=request)
     assert replay.status_code == 200 and replay.json() == accepted.json()
     assert (await db.fetchone("SELECT status FROM board_tasks WHERE id = 'task1'"))["status"] == "done"
+    decisions = await db.fetchall("SELECT payload_json FROM app_events WHERE type = 'task.accepted'")
+    assert len(decisions) == 1
+    decision = json.loads(decisions[0]['payload_json'])
+    assert decision['task_id'] == 'task1' and decision['result_id'] == result_id
+    assert decision['verdict_id'] == verdict.json()['verdict_id']
+    assert decision['contract_revision'] == 1 and decision['attempt_id'] is None
+    assert decision['actor'] == 'operator' and decision['actor_id']
+    assert decision['receipt_id']

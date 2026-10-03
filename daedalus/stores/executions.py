@@ -106,13 +106,15 @@ class ExecutionStore:
 
     async def create(self, conn: aiosqlite.Connection, *, attempt_id: str, task_id: str,
                      contract_revision: int, launcher: Principal, worker: Principal, staff_session_id: str,
-                     runtime_kind: str, fence_token: str) -> AttemptIdentity:
+                     runtime_kind: str, fence_token: str, comparison_slot_id: str | None = None) -> AttemptIdentity:
         """Claim in the authorized launch command's transaction, before starting the provider."""
         generation = await self._host(conn)
         if runtime_kind not in ("daedalus", "cli") or len(fence_token) < 24 or not attempt_id:
             raise ValueError("a runtime and an unguessable fence token are required")
-        task = await one(conn, "SELECT project_id,contract_revision,current_attempt_id FROM board_tasks WHERE id = ?", (task_id,))
-        member = await one(conn, "SELECT staff_id,task_id,kind,ended_at FROM staff_sessions WHERE id = ?", (staff_session_id,))
+        task = await one(conn, "SELECT project_id,contract_revision,current_attempt_id,status,folder_id"
+                         " FROM board_tasks WHERE id = ?", (task_id,))
+        member = await one(conn, "SELECT staff_id,task_id,kind,ended_at,folder_id,worktree_path,branch"
+                           " FROM staff_sessions WHERE id = ?", (staff_session_id,))
         if task is None or member is None:
             raise KeyError(task_id)
         if member["task_id"] != task_id or member["kind"] != runtime_kind or member["ended_at"] or worker.origin_class != "agent" or worker.actor_id != f"staff:{member['staff_id']}":
@@ -124,6 +126,25 @@ class ExecutionStore:
         await self.control.authorize(conn, launcher, self._scope(task["project_id"]), "task.launch",
                                      task_id=task_id, effects=("execution.start",))
         await self.control.authorize(conn, worker, self._scope(task["project_id"]), "result.submit", task_id=task_id)
+        slot = None
+        if comparison_slot_id is None and await one(conn, "SELECT 1 FROM comparison_groups WHERE task_id = ?"
+                                                   " AND state IN ('planned','active','ready')", (task_id,)):
+            raise ControlDenied('an undecided comparison owns this task; reconcile its alternatives first')
+        if comparison_slot_id is not None:
+            slot = await one(conn, "SELECT s.*,g.state AS group_state,g.selected_result_id"
+                             " FROM comparison_funding_slots s JOIN comparison_groups g ON g.id = s.group_id"
+                             " WHERE s.id = ?", (comparison_slot_id,))
+            both = await one(conn, "SELECT count(*) AS count FROM comparison_funding_slots"
+                             " WHERE group_id = ? AND state = 'held'", (slot["group_id"],)) if slot else None
+            if (slot is None or slot["state"] != "held" or slot["attempt_id"] is not None or
+                    slot["group_state"] not in ("planned", "active") or slot["selected_result_id"] is not None or
+                    both is None or both["count"] != 2 or slot["task_id"] != task_id or
+                    slot["project_id"] != task["project_id"] or slot["staff_id"] != member["staff_id"] or
+                    slot["contract_revision"] != contract_revision or slot["host_generation"] != generation or
+                    task["current_attempt_id"] is not None or task["status"] not in ("todo", "blocked") or
+                    not task["folder_id"] or member["folder_id"] != task["folder_id"] or
+                    not member["worktree_path"] or not member["branch"] or runtime_kind != "daedalus"):
+                raise ControlDenied("the comparison attempt has no current funded isolated slot")
         async with conn.execute("SELECT a.id,a.state FROM execution_attempts a WHERE a.task_id = ?"
                                 " AND NOT EXISTS (SELECT 1 FROM runtime_exit_observations e"
                                 " WHERE e.attempt_id = a.id AND e.contract_revision = a.contract_revision"
@@ -131,7 +152,10 @@ class ExecutionStore:
                                 " AND e.provider_session_ref = a.provider_session_ref AND e.runtime_kind = a.runtime_kind"
                                 " AND ((a.runtime_kind = 'daedalus' AND e.runtime_ref = a.native_run_id)"
                                 " OR (a.runtime_kind = 'cli' AND e.runtime_instance = a.runtime_instance"
-                                " AND a.provider_session_ref = 'terminal:' || e.runtime_ref)))", (task_id,)) as cursor:
+                                " AND a.provider_session_ref = 'terminal:' || e.runtime_ref)))"
+                                " AND (? IS NULL OR NOT EXISTS (SELECT 1 FROM comparison_group_attempts m"
+                                " WHERE m.attempt_id = a.id AND m.group_id = ?))",
+                                (task_id, slot["group_id"] if slot else None, slot["group_id"] if slot else None)) as cursor:
             previous = await cursor.fetchone()
         if previous is not None:
             if previous["state"] in (*ACTIVE, "recovering"):
@@ -142,8 +166,34 @@ class ExecutionStore:
                            " staff_session_id,runtime_kind) VALUES (?,?,?,?,?,'queued',?,?,?,?,?,?,?)",
                            (attempt_id, task_id, contract_revision, generation, hashlib.sha256(fence_token.encode()).hexdigest(),
                             now(), now(), worker.actor_id, worker.grant_id, worker.grant_generation, staff_session_id, runtime_kind))
-        await conn.execute("UPDATE board_tasks SET current_attempt_id = ?,accepted_result_id = NULL,"
-                           " accepted_contract_revision = NULL,acceptance_state = '' WHERE id = ?", (attempt_id, task_id))
+        if slot is None:
+            await conn.execute("UPDATE board_tasks SET current_attempt_id = ?,accepted_result_id = NULL,"
+                               " accepted_contract_revision = NULL,acceptance_state = '' WHERE id = ?", (attempt_id, task_id))
+        else:
+            from daedalus.extensions.comparisons import AdmissionProof, admit_attempt
+            from daedalus.stores.comparison_funding import ComparisonFunding
+
+            bound = await ComparisonFunding(self.db).bind_attempt_in(conn, comparison_slot_id, attempt_id)
+            proof = AdmissionProof(comparison_slot_id, bound["allowance_microusd"], bound["rate_version"],
+                                   hashlib.sha256(member["worktree_path"].encode()).hexdigest(), comparison_slot_id)
+
+            async def funded(check_conn: aiosqlite.Connection, group_id: str, candidate_id: str,
+                             candidate: AdmissionProof) -> bool:
+                row = await one(check_conn, "SELECT 1 FROM comparison_funding_slots WHERE id = ? AND group_id = ?"
+                                " AND attempt_id = ? AND state = 'held' AND allowance_microusd = ?"
+                                " AND rate_version = ?", (candidate.reservation_id, group_id, candidate_id,
+                                                           candidate.reserved_microusd, candidate.rate_version))
+                return row is not None
+
+            async def capacity(check_conn: aiosqlite.Connection, candidate_id: str, capacity_id: str) -> bool:
+                row = await one(check_conn, "SELECT 1 FROM comparison_funding_slots WHERE id = ?"
+                                " AND attempt_id = ? AND state = 'held' AND host_generation = ?",
+                                (capacity_id, candidate_id, generation))
+                return row is not None
+
+            await admit_attempt(conn, group_id=slot["group_id"], attempt_id=attempt_id,
+                                slot=slot["slot"], proof=proof, verify_budget=funded,
+                                verify_capacity=capacity)
         if task["project_id"]:
             await admit_child(conn, control=self.control, principal=launcher, parent_kind="task", parent_id=task_id,
                               project_id=task["project_id"], child_kind="execution_attempt", child_id=attempt_id)
@@ -158,20 +208,40 @@ class ExecutionStore:
         if row is None:
             raise ControlDenied("the execution attempt is missing")
         identity = self._identity(row)
-        if row["state"] not in ACTIVE or identity.host_generation != generation or row["current_attempt_id"] != attempt_id or row["current_contract"] != identity.contract_revision:
+        if (row["state"] not in ACTIVE or identity.host_generation != generation or
+                row["current_contract"] != identity.contract_revision or
+                not await self.current_binding_in(conn, row)):
             raise ControlDenied("the execution attempt or contract has been superseded")
         if row["session_task"] != identity.task_id or row["ended_at"] or identity.principal.actor_id != f"staff:{row['staff_id']}":
             raise ControlDenied("the execution session is no longer owned")
         await self.control.authorize(conn, identity.principal, self._scope(row["project_id"]), operation, task_id=identity.task_id)
         return row, identity
 
+    async def current_binding_in(self, conn: aiosqlite.Connection, attempt: aiosqlite.Row) -> bool:
+        """A comparison member owns only its funded group slot until a winner is projected."""
+        if attempt["current_attempt_id"] == attempt["id"]:
+            return True
+        if await one(conn, "SELECT 1 FROM comparison_group_attempts WHERE attempt_id = ?",
+                     (attempt["id"],)) is None:
+            return False
+        member = await one(conn, "SELECT 1 FROM comparison_group_attempts m"
+                           " JOIN comparison_groups g ON g.id = m.group_id"
+                           " JOIN comparison_funding_slots s ON s.id = m.budget_reservation_id"
+                           " WHERE m.attempt_id = ? AND g.task_id = ? AND g.contract_revision = ?"
+                           " AND g.state IN ('planned','active','ready') AND g.selected_result_id IS NULL"
+                           " AND s.attempt_id = m.attempt_id AND s.state = 'held'"
+                           " AND s.host_generation = ?", (attempt["id"], attempt["task_id"],
+                                                           attempt["contract_revision"], attempt["host_generation"]))
+        return member is not None
+
     async def check_staff(self, conn: aiosqlite.Connection, staff_session_id: str, *, operation: str = "result.submit") -> AttemptIdentity:
         """Resolve only after the ingress authenticated this staff session through the host."""
-        row = await one(conn, "SELECT a.id FROM execution_attempts a JOIN board_tasks t ON t.current_attempt_id = a.id"
-                        " WHERE a.staff_session_id = ?", (staff_session_id,))
-        if row is None:
+        async with conn.execute("SELECT a.id FROM execution_attempts a WHERE a.staff_session_id = ?",
+                                (staff_session_id,)) as cursor:
+            attempts = await cursor.fetchall()
+        if len(attempts) != 1:
             raise ControlDenied("the staff session has no current execution attempt")
-        _, identity = await self._check(conn, row["id"], operation=operation)
+        _, identity = await self._check(conn, attempts[0]["id"], operation=operation)
         return identity
 
     async def check_inference(self, conn: aiosqlite.Connection, session_id: str,
@@ -207,16 +277,20 @@ class ExecutionStore:
         if worker is None:
             return None
         generation = await self._host(conn)
-        row = await one(conn, "SELECT a.*,t.project_id,t.current_attempt_id,t.contract_revision AS current_contract,"
-                        "s.staff_id,s.task_id AS session_task,s.session_id,s.ended_at FROM execution_attempts a"
-                        " JOIN board_tasks t ON t.id = a.task_id JOIN staff_sessions s ON s.id = a.staff_session_id"
-                        " WHERE a.staff_session_id = ? AND a.id = t.current_attempt_id", (worker,))
+        async with conn.execute("SELECT a.*,t.project_id,t.current_attempt_id,t.contract_revision AS current_contract,"
+                                "s.staff_id,s.task_id AS session_task,s.session_id,s.ended_at FROM execution_attempts a"
+                                " JOIN board_tasks t ON t.id = a.task_id JOIN staff_sessions s ON s.id = a.staff_session_id"
+                                " WHERE a.staff_session_id = ?", (worker,)) as cursor:
+            attempts = await cursor.fetchall()
+        row = attempts[0] if len(attempts) == 1 else None
         if (row is None or row["host_generation"] != generation or row["runtime_kind"] != "daedalus"
                 or row["state"] not in (*ACTIVE, "completed", "failed")
                 or row["current_contract"] != row["contract_revision"] or row["ended_at"]
                 or row["session_task"] != row["task_id"] or row["session_id"] != identity
                 or row["provider_session_ref"] != f"session:{identity}"):
             raise ControlDenied("the inference worker or contract is no longer owned")
+        if not await self.current_binding_in(conn, row):
+            raise ControlDenied("the inference worker no longer owns its task or comparison slot")
         admitted = self._identity(row)
         if admitted.principal.actor_id != f"staff:{row['staff_id']}":
             raise ControlDenied("the inference actor does not own the worker")

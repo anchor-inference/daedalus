@@ -20,8 +20,11 @@ import itertools
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
+
+import aiosqlite
 
 from daedalus.stores.control import Principal
 
@@ -105,6 +108,7 @@ class Entry:
     started: bool = False
     principal: Principal | None = None
     check_authority: Callable[[], Awaitable[None]] | None = None
+    capacity_slot_id: str | None = None
 
     def view(self, position: int) -> dict[str, Any]:
         return {
@@ -156,6 +160,9 @@ class LaunchQueue:
         clock: Callable[[], float] = time.monotonic,
         on_failure: Callable[[Entry, BaseException], Awaitable[None]] | None = None,
         reuses: Callable[[Entry], Awaitable[bool]] | None = None,
+        check_reserved: Callable[[Entry], Awaitable[bool]] | None = None,
+        active_in: Callable[[aiosqlite.Connection, str], Awaitable[int]] | None = None,
+        concurrency_in: Callable[[aiosqlite.Connection, str], Awaitable[int]] | None = None,
     ) -> None:
         self._concurrency = concurrency
         self._active = active
@@ -167,6 +174,9 @@ class LaunchQueue:
         self._clock = clock
         self._on_failure = on_failure
         self._reuses = reuses
+        self._check_reserved = check_reserved
+        self._active_in = active_in
+        self._concurrency_in = concurrency_in
         """Whether an entry goes to its member's live session as a message rather than a launch: it
         then opens no terminal and starts no process, so neither the machine's cap nor the spacing
         of launches applies to it. Without this, a member idle at its prompt waited behind other
@@ -176,6 +186,7 @@ class LaunchQueue:
         self._terminal_launches = 0
         """Command-line launches under way whose terminal may not be counted by the service yet."""
         self._lock = asyncio.Lock()
+        self._guard_owner: asyncio.Task[Any] | None = None
         self._order = itertools.count()
         self._timers: dict[str, asyncio.TimerHandle] = {}
         self._tasks: set[asyncio.Task[None]] = set()
@@ -199,6 +210,31 @@ class LaunchQueue:
     def projects(self) -> list[str]:
         return [p for p, items in self._entries.items() if items]
 
+    @asynccontextmanager
+    async def admission_guard(self):
+        """Hold queue admission while a caller commits a bounded pair of capacity claims."""
+        async with self._lock:
+            self._guard_owner = asyncio.current_task()
+            try:
+                yield
+            finally:
+                self._guard_owner = None
+
+    async def check_pair_capacity(self, project_id: str, *, count: int = 2) -> bool:
+        """Check project slots under admission_guard before both reservations are committed."""
+        if self._guard_owner is not asyncio.current_task() or count != 2:
+            raise ValueError("pair capacity needs the admission guard and exactly two slots")
+        return await self._active(project_id) + count <= await self._concurrency(project_id)
+
+    async def check_pair_capacity_in(self, conn: aiosqlite.Connection, project_id: str,
+                                     *, count: int = 2) -> bool:
+        """Check capacity on the command's connection so pair reservation cannot deadlock."""
+        if self._guard_owner is not asyncio.current_task() or count != 2:
+            raise ValueError("pair capacity needs the admission guard and exactly two slots")
+        if self._active_in is None or self._concurrency_in is None:
+            raise RuntimeError("transactional pair capacity readers are not installed")
+        return await self._active_in(conn, project_id) + count <= await self._concurrency_in(conn, project_id)
+
     # -- changing ----------------------------------------------------------------------------------
 
     async def request(self, entry: Entry) -> Admission:
@@ -209,7 +245,8 @@ class LaunchQueue:
         """
         entry.order = next(self._order)
         items = self._entries.setdefault(entry.project_id, [])
-        items[:] = [e for e in items if e.task_id != entry.task_id]
+        items[:] = [e for e in items if (e.task_id, e.capacity_slot_id) !=
+                    (entry.task_id, entry.capacity_slot_id)]
         items.append(entry)
         await self.pump(entry.project_id)
         if entry.error is not None:
@@ -226,13 +263,15 @@ class LaunchQueue:
         finally:
             # A pending outbox command is retried only after another capacity observation. Leaving
             # its entry here would let an unclaimed command start from a later timer callback.
-            self.withdraw(entry.project_id, task_id=entry.task_id)
+            items = self._entries.get(entry.project_id, [])
+            items[:] = [queued for queued in items if queued is not entry]
 
     def add(self, entry: Entry) -> None:
         """Queue an assignment without starting anything now: what a restart restores from the board."""
         entry.order = next(self._order)
         items = self._entries.setdefault(entry.project_id, [])
-        items[:] = [e for e in items if e.task_id != entry.task_id]
+        items[:] = [e for e in items if (e.task_id, e.capacity_slot_id) !=
+                    (entry.task_id, entry.capacity_slot_id)]
         items.append(entry)
 
     def withdraw(self, project_id: str, *, task_id: str | None = None, staff_id: str | None = None) -> int:
@@ -273,7 +312,12 @@ class LaunchQueue:
             if waits is not None:
                 self._wait(entry, "busy", waits)
                 continue
-            if active >= concurrency:
+            reserved = entry.capacity_slot_id is not None
+            if reserved and (self._check_reserved is None or not await self._check_reserved(entry)):
+                self._entries.get(project_id, []).remove(entry)
+                entry.error = ValueError("the comparison capacity reservation is no longer current")
+                continue
+            if active - int(reserved) >= concurrency:
                 self._wait(entry, "project", f"{active} of the project's {concurrency} staff slots are working")
                 continue
             reuse = entry.principal is None and self._reuses is not None and await self._reuses(entry)
@@ -290,7 +334,7 @@ class LaunchQueue:
                 break
             await self._start(entry, reuse=reuse)
             launched_here = launched_here or (entry.started and not reuse)
-            if entry.started:
+            if entry.started and not reserved:
                 active += 1
         # Whatever the loop did not reach waits behind the entry that stopped it.
         for entry in self.entries(project_id):

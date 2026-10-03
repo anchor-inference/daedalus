@@ -15,6 +15,7 @@ import aiosqlite
 
 from daedalus.config import native_mode
 from daedalus.stores.ci_schema import MIGRATION as CI_MIGRATION
+from daedalus.stores.comparison_funding_schema import MIGRATION as COMPARISON_FUNDING_MIGRATION
 from daedalus.stores.comparison_schema import MIGRATION as COMPARISON_MIGRATION
 from daedalus.stores.control_schema import MIGRATION as CONTROL_MIGRATION
 from daedalus.stores.execution_schema import MIGRATION as EXECUTION_MIGRATION
@@ -34,6 +35,7 @@ from daedalus.stores.runtime_schema import RUNTIME_SCHEMA
 from daedalus.stores.staff_report_schema import MIGRATION as STAFF_REPORT_MIGRATION
 from daedalus.stores.watch_authority_schema import MIGRATION as WATCH_AUTHORITY_MIGRATION
 from daedalus.stores.watch_delivery_schema import WATCH_DELIVERY_MIGRATION
+from daedalus.stores.workflow_scope_schema import MIGRATION as WORKFLOW_SCOPE_MIGRATION
 from daedalus.stores.workspace_archive_schema import MIGRATION as WORKSPACE_ARCHIVE_MIGRATION
 
 logger = logging.getLogger(__name__)
@@ -1723,6 +1725,8 @@ MIGRATIONS.append(ISSUE_SYNC_MIGRATION)
 MIGRATIONS.append(WATCH_DELIVERY_MIGRATION)
 MIGRATIONS.append(INFERENCE_BUDGET_MIGRATION)
 MIGRATIONS.append(WATCH_AUTHORITY_MIGRATION)
+MIGRATIONS.append(WORKFLOW_SCOPE_MIGRATION)
+MIGRATIONS.append(COMPARISON_FUNDING_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

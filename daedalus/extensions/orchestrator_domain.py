@@ -23,6 +23,7 @@ from daedalus.stores.control import ControlStore, Principal
 from daedalus.stores.database import Database
 from daedalus.stores.knowledge import enqueue_artifact_change
 from daedalus.stores.lifecycle import admit_child
+from daedalus.stores.projects import keep_task_commitments_in
 
 RESULT_OUTCOMES = frozenset(("complete", "partial", "failed", "needs_input", "cancelled"))
 MANIFEST_KINDS = frozenset(("code", "document", "research", "export", "media", "other"))
@@ -305,7 +306,7 @@ async def _comparison_member(conn: aiosqlite.Connection, task_id: str, attempt_i
     return await _one(conn, "SELECT g.id,g.state,g.selected_result_id FROM comparison_group_attempts m"
                       " JOIN comparison_groups g ON g.id = m.group_id"
                       " WHERE m.attempt_id = ? AND g.task_id = ? AND g.contract_revision = ?"
-                      " AND g.state IN ('active','ready')", (attempt_id, task_id, contract_revision))
+                      " AND g.state IN ('planned','active','ready')", (attempt_id, task_id, contract_revision))
 
 
 async def submit_result(
@@ -417,7 +418,7 @@ async def record_verdict(
         ci = await ci_readiness(conn, result["task_id"], result["contract_revision"], head)
         if ci["state"] == "blocked":
             raise DomainConflict("required CI has not passed for the reviewed head")
-    if accepted and task["status"] != "review":
+    if accepted and comparison is None and task["status"] != "review":
         raise DomainConflict("a result can be approved only while the task is in review")
     evidence = []
     for evidence_id in evidence_ids:
@@ -455,7 +456,7 @@ async def record_verdict(
          int(accepted), head, base, environment_digest, _canonical(evidence), reason,
          self_review_waiver_receipt_id, _now()),
     )
-    if accepted:
+    if accepted and comparison is None:
         await conn.execute("UPDATE board_tasks SET acceptance_state = 'accepted' WHERE id = ? AND status = 'review'",
                            (result["task_id"],))
     return {"verdict_id": verdict_id, "result_id": result_id, "verification": verification,
@@ -531,7 +532,7 @@ async def accept_result(
     current_merge_sha: str | None = None,
 ) -> dict[str, Any]:
     """Bind acceptance to the exact immutable result and the current review evidence."""
-    task = await _one(conn, "SELECT status, contract_revision, acceptance_state, branch, merge_state, checklist, current_attempt_id"
+    task = await _one(conn, "SELECT project_id, status, contract_revision, acceptance_state, branch, merge_state, checklist, current_attempt_id"
                       " FROM board_tasks WHERE id = ?", (task_id,))
     if task is None:
         raise KeyError(task_id)
@@ -571,6 +572,15 @@ async def accept_result(
     await conn.execute("UPDATE board_tasks SET accepted_result_id = ?, accepted_contract_revision = ?,"
                        " acceptance_state = 'operator_approved', status = 'done', checklist = ? WHERE id = ?",
                        (result_id, contract_revision, _canonical(checked), task_id))
+    # The exact result decision must close its open reminder in the same receipt transaction.
+    await conn.execute("UPDATE open_loops SET closed_at = ?, closed_by = 'system', decision = ?"
+                       " WHERE task_id = ? AND contract_revision = ? AND attempt_id IS ?"
+                       " AND cause = 'report_done' AND closed_at IS NULL",
+                       (_now(), f"accepted result {result_id}", task_id, contract_revision, result["attempt_id"]))
+    if task["project_id"] is not None:
+        await keep_task_commitments_in(conn, project_id=task["project_id"], task_id=task_id,
+                                       result_id=result_id, verdict_id=verdict_id,
+                                       contract_revision=contract_revision)
     await reconcile_dependents(conn, task_id)
     return {"task_id": task_id, "result_id": result_id, "verdict_id": verdict_id,
             "contract_revision": contract_revision, "acceptance_state": "operator_approved"}
@@ -606,6 +616,10 @@ async def return_result(
     await conn.execute("UPDATE board_tasks SET status = 'todo',acceptance_state = 'returned',"
                        " current_attempt_id = NULL,notes = substr(notes || ?, -8000) WHERE id = ?",
                        (f"\n[{_now()[:16]}] returned: {reason.strip()}", task_id))
+    await conn.execute("UPDATE open_loops SET closed_at = ?, closed_by = 'system', decision = ?"
+                       " WHERE task_id = ? AND contract_revision = ? AND attempt_id IS ?"
+                       " AND cause = 'report_done' AND closed_at IS NULL",
+                       (_now(), f"returned result {result_id}", task_id, contract_revision, result["attempt_id"]))
     await reconcile_dependents(conn, task_id)
     return {"return_id": return_id, "task_id": task_id, "result_id": result_id,
             "verdict_id": verdict_id, "acceptance_state": "returned", "status": "todo"}
@@ -706,6 +720,13 @@ async def resolve_dependency(
                            " WHERE id = ?", (result_id, predecessor["contract_revision"], artifact_digest, edge_id))
     else:
         raise ValueError("resolution must be satisfied or waived")
+    successor = await _one(conn, "SELECT status FROM board_tasks WHERE id = ?", (edge["successor_task_id"],))
+    if successor is not None and successor["status"] in ("todo", "blocked"):
+        ready = (await dependency_readiness(conn, edge["successor_task_id"]))["ready"]
+        status = "todo" if ready else "blocked"
+        if status != successor["status"]:
+            await conn.execute("UPDATE board_tasks SET status = ?,updated_at = ? WHERE id = ?",
+                               (status, _now(), edge["successor_task_id"]))
     return {"edge_id": edge_id, "resolution_state": resolution}
 
 
@@ -778,7 +799,8 @@ async def configure_workflow(
                            " VALUES (?, ?, ?, 'pending', ?, ?)",
                            (step_id, task_id, step["kind"], task["contract_revision"], _canonical(step.get("gate") or {})))
     for source, target in edges:
-        await conn.execute("INSERT INTO workflow_edges(source_step_id, target_step_id) VALUES (?, ?)", (source, target))
+        await conn.execute("INSERT INTO workflow_edges(task_id, source_step_id, target_step_id) VALUES (?, ?, ?)",
+                           (task_id, source, target))
     return {"task_id": task_id, "contract_revision": task["contract_revision"],
             "step_count": len(steps), "edge_count": len(edges)}
 
@@ -798,7 +820,8 @@ async def workflow_readiness(conn: aiosqlite.Connection, task_id: str) -> list[d
         blockers: list[str] = []
         if step["contract_revision"] != task["contract_revision"]:
             blockers.append("stale_contract")
-        incoming = await _many(conn, "SELECT source_step_id FROM workflow_edges WHERE target_step_id = ?", (step["id"],))
+        incoming = await _many(conn, "SELECT source_step_id FROM workflow_edges"
+                               " WHERE task_id = ? AND target_step_id = ?", (task_id, step["id"]))
         incoming_by_step[step["id"]] = [edge["source_step_id"] for edge in incoming]
         gate = _json(step["gate_json"], {})
         if gate.get("accepted_result_id") and gate["accepted_result_id"] != task["accepted_result_id"]:

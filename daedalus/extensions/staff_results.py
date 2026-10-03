@@ -140,12 +140,14 @@ class StaffReportService:
         row = await self.db.fetchone(
             "SELECT a.id,a.contract_revision,a.host_generation,a.actor_id,a.grant_id,a.grant_generation,"
             " a.state,a.staff_session_id,t.project_id,t.current_attempt_id,t.contract_revision AS current_contract,"
+            " m.group_id AS comparison_group_id,"
             " s.staff_id,s.task_id AS session_task FROM execution_attempts a"
             " JOIN board_tasks t ON t.id = a.task_id JOIN staff_sessions s ON s.id = a.staff_session_id"
+            " LEFT JOIN comparison_group_attempts m ON m.attempt_id = a.id"
             " WHERE a.staff_session_id = ? AND a.task_id = ?", (live.id, task_id))
         if (row is None or row["project_id"] != live.staff.project_id or
                 row["staff_id"] != live.staff.id or row["session_task"] != task_id or
-                row["current_attempt_id"] != row["id"] or
+                (row["current_attempt_id"] != row["id"] and row["comparison_group_id"] is None) or
                 row["current_contract"] != row["contract_revision"] or
                 row["actor_id"] != f"staff:{live.staff.id}" or
                 not row["grant_id"] or row["grant_generation"] is None):
@@ -264,9 +266,10 @@ class StaffReportService:
                                     original_digest=original_digest, original_size_bytes=size,
                                     actor_id=principal.actor_id, manifest_ids=manifest_ids,
                                     checks=checks, limitations=[])
-                await conn.execute("UPDATE board_tasks SET status = 'review',"
-                                   " merge_state = CASE WHEN branch IS NOT NULL AND branch != '' THEN 'proposed'"
-                                   " ELSE merge_state END WHERE id = ?", (task_id,))
+                if row["comparison_group_id"] is None:
+                    await conn.execute("UPDATE board_tasks SET status = 'review',"
+                                       " merge_state = CASE WHEN branch IS NOT NULL AND branch != '' THEN 'proposed'"
+                                       " ELSE merge_state END WHERE id = ?", (task_id,))
                 await executions.complete(conn, identity, outcome="complete")
                 result_id = mutation.object_id
             elif kind in ("needs_input", "stuck"):
@@ -276,6 +279,9 @@ class StaffReportService:
                 "text": note if len(original) <= 6000 else note[:5000] + "\n[full report in report receipt]",
                 "actor": "staff", "task_id": task_id, "call_id": call_id,
                 "report_id": mutation.object_id, "original_digest": original_digest}
+            if row["comparison_group_id"] is not None:
+                event_payload["comparison_group_id"] = row["comparison_group_id"]
+                event_payload["attempt_id"] = identity.id
             if refs:
                 event_payload["refs"] = refs
             if file_refs:

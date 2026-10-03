@@ -6,6 +6,7 @@ import json
 import secrets
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -70,7 +71,8 @@ async def queued_fixture(db: Database):
         return None
 
     team = SimpleNamespace(member=staff.get, task=task, project=project,
-                           folder_for=lambda *_: SimpleNamespace(id="folder", env="container"))
+                           folder_for=lambda *_: SimpleNamespace(id="folder", env="container"),
+                           worktrees=SimpleNamespace(check=AsyncMock(return_value=None)))
     team.queue = LaunchQueue(concurrency=concurrency, active=active, ready=ready, free=ready,
                              launch=launch, capacity=lambda: None, stagger=lambda: 0)
     app.extensions["staff"] = team

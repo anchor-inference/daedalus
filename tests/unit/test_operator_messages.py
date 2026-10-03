@@ -6,6 +6,7 @@ message, and searching one conversation."""
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from daedalus.config import Settings
 from daedalus.extensions.operator_steps import StepsRefused, normalise
 from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.stores.database import Database
+from tests.support.authorized_results import accept_branchless_result
 from tests.unit.test_board_rounds import task_of
 from tests.unit.test_orchestrator import Rig, rig
 from tests.unit.test_orchestrator_team import fake, office
@@ -189,8 +191,16 @@ async def test_a_message_that_asks_several_things_is_kept_as_several_commitments
         assert [c["text"] for c in focus["commitments"]] == ["Clean up the drafts", "Answer what we publish next, from the plan"]
         assert [c["kind"] for c in focus["receipts"][str(seq)]] == ["commitment", "commitment"]
 
-        await r.team.ingress.report(live, "done", "drafts cleaned", evidence=[{"item": "C1", "how": "listed", "result": "ok"}], call_id=f"fixture-report:{uuid.uuid4().hex}")
-        await r.call(sid, "accept", task_id=task_id, checks=[{"item": "C1", "ok": True}, {"item": "C2", "ok": True}])
+        _folder, cwd = await r.team.cwd_of(live)
+        (Path(cwd) / "drafts.txt").write_text("The obsolete drafts were removed\n")
+        await r.team.ingress.report(live, "done", "drafts cleaned", artifacts=["drafts.txt"],
+                                    evidence=[{"item": "C1", "how": "listed", "result": "ok"}],
+                                    call_id=f"fixture-report:{uuid.uuid4().hex}")
+        result_id = await accept_branchless_result(r.team, task_id)
+        kept = await r.manager.db.fetchall("SELECT refs_json FROM project_journal"
+                                           " WHERE project_id = ? AND kind = 'commitment_kept'", (r.project.id,))
+        assert len(kept) == 1
+        assert json.loads(kept[0]["refs_json"])["result_id"] == result_id
         [left] = (await r.orch.focus_state(await r.refreshed()))["commitments"]
         assert left["text"].startswith("Answer what we publish next")
         await r.call(sid, "journal", op="keep", commitment=left["id"], why="answered from the plan file")

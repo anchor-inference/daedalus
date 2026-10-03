@@ -201,10 +201,30 @@ async def choose_result(
                    if item["attempt_id"] == selected["attempt_id"]), None)
     if member is None or result_id not in {item["result_id"] for item in member["results"]}:
         raise ComparisonRefused("the result is outside this comparison")
+    latest_result = await _one(conn, "SELECT id FROM result_receipts WHERE task_id = ?"
+                               " AND contract_revision = ? AND attempt_id = ?"
+                               " ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                               (group["task_id"], group["contract_revision"], selected["attempt_id"]))
+    if latest_result is None or latest_result["id"] != result_id:
+        raise ComparisonRefused("a newer result superseded this selection")
     newer = await _one(conn, "SELECT id FROM review_verdicts WHERE result_id = ?"
                        " ORDER BY created_at DESC,id DESC LIMIT 1", (result_id,))
     if newer is None or newer["id"] != verdict_id:
         raise ComparisonRefused("a newer verdict superseded this selection")
+    source = await _one(conn, "SELECT a.staff_session_id,s.branch,s.folder_id,s.base_ref,"
+                        " s.worktree_path,f.project_id AS folder_project,t.project_id AS task_project,"
+                        " m.worktree_identity FROM execution_attempts a"
+                        " JOIN staff_sessions s ON s.id = a.staff_session_id"
+                        " JOIN comparison_group_attempts m ON m.attempt_id = a.id AND m.group_id = ?"
+                        " JOIN board_tasks t ON t.id = a.task_id"
+                        " LEFT JOIN project_folders f ON f.id = s.folder_id"
+                        " WHERE a.id = ?", (group_id, selected["attempt_id"]))
+    if (source is None or not source["branch"] or not source["folder_id"] or
+            not source["worktree_path"] or not source["task_project"] or
+            source["folder_project"] != source["task_project"] or
+            not source["worktree_identity"] or
+            hashlib.sha256(source["worktree_path"].encode()).hexdigest() != source["worktree_identity"]):
+        raise ComparisonRefused("the selected worktree has no exact project branch binding")
     # Selection pins the reviewed bytes. The later merge effect checks the live head before Git.
     head, base = selected["head"], selected["base"]
     total_cost = sum(item["observed_cost_microusd"] for item in readiness["alternatives"])
@@ -212,7 +232,9 @@ async def choose_result(
         raise ComparisonRefused("the observed comparison cost exceeded its cap")
     evidence = {"group_id": group_id, "result_id": result_id, "verdict_id": verdict_id,
                 "contract_revision": group["contract_revision"], "alternatives": readiness["alternatives"],
-                "head": head, "base": base, "cost_microusd": total_cost}
+                "head": head, "base": base, "cost_microusd": total_cost,
+                "folder_id": source["folder_id"], "branch": source["branch"],
+                "worktree_identity": source["worktree_identity"]}
     digest = hashlib.sha256(json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     await conn.execute("INSERT INTO comparison_selection_receipts(id,operation_receipt_id,group_id,task_id,"
                        " contract_revision,result_id,verdict_id,attempt_id,head_sha,base_sha,comparison_digest,"
@@ -223,8 +245,11 @@ async def choose_result(
     await conn.execute("UPDATE comparison_groups SET state = 'chosen',selected_result_id = ?,"
                        " selected_verdict_id = ?,selection_receipt_id = ?,selected_at = ? WHERE id = ?",
                        (result_id, verdict_id, selection_receipt_id, _now(), group_id))
-    await conn.execute("UPDATE board_tasks SET current_attempt_id = ?,acceptance_state = 'handed_in'"
-                       " WHERE id = ?", (selected["attempt_id"], group["task_id"]))
+    await conn.execute("UPDATE board_tasks SET current_attempt_id = ?,accepted_result_id = NULL,"
+                       " accepted_contract_revision = NULL,acceptance_state = 'handed_in',"
+                       " status = 'review',folder_id = ?,branch = ?,merge_state = 'proposed'"
+                       " WHERE id = ?", (selected["attempt_id"], source["folder_id"],
+                                        source["branch"], group["task_id"]))
     return {"group_id": group_id, "selected_result_id": result_id,
             "selected_verdict_id": verdict_id, "selection_receipt_id": selection_receipt_id,
             "comparison_digest": digest, "observed_cost_microusd": total_cost,

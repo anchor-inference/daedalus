@@ -15,9 +15,9 @@ type Pending = { path: string; body: Record<string, unknown>; kind: "approve" | 
 
 const bundleIds: BundleId[] = ["planning", "execution", "execution_project", "review", "watch"];
 const rights: Record<BundleId, { scope_kind: "project" | "task"; operations: string[]; effects: string[] }> = {
-  planning: { scope_kind: "project", operations: ["board.task.create", "board.task.update"], effects: [] },
-  execution: { scope_kind: "task", operations: ["task.launch", "staff.release"], effects: ["execution.start", "execution.stop"] },
-  execution_project: { scope_kind: "project", operations: ["task.launch", "staff.release"], effects: ["execution.start", "execution.stop"] },
+  planning: { scope_kind: "project", operations: ["board.task.create", "board.task.update", "contract.require", "contract.apply", "contract.withdraw"], effects: [] },
+  execution: { scope_kind: "task", operations: ["task.launch", "task.stop", "staff.release"], effects: ["execution.start", "execution.stop"] },
+  execution_project: { scope_kind: "project", operations: ["task.launch", "task.stop", "staff.release"], effects: ["execution.start", "execution.stop"] },
   review: { scope_kind: "project", operations: ["review.verdict", "review.return"], effects: [] },
   watch: { scope_kind: "project", operations: ["watch.create", "watch.change", "watch.remove", "watch.deliver"], effects: ["watch.wake", "watch.tell", "watch.notify"] },
 };
@@ -52,6 +52,8 @@ function grantName(grant: Grant): string {
       return bundleName(id);
   }
   if (same(grant.operations, ["task.launch"]) && same(grant.effects, ["execution.start"])) return t("authority.bundle.legacyExecution");
+  if (same(grant.operations, ["board.task.create", "board.task.update"]) && same(grant.effects, [])) return t("authority.bundle.legacyPlanning");
+  if (same(grant.operations, ["task.launch", "staff.release"]) && same(grant.effects, ["execution.start", "execution.stop"])) return t("authority.bundle.legacyStaff");
   return bundleName("");
 }
 
@@ -114,7 +116,7 @@ export function CoordinatorAuthority({ projectId, toast }: { projectId: string; 
     const scope = bundle.scope_kind === "task" ? candidates.find((task) => task.id === taskId)?.title ?? "" : t("authority.scope.project");
     if (!(await confirmAsync(t("authority.approve.confirm"), {
       body: t("authority.approve.preview", { bundle: bundleName(bundleId), scope, expiry: when(expiry), rights: [...bundle.operations, ...bundle.effects].join(", ") })
-        + (["execution", "execution_project", "watch"].includes(bundleId) ? `\n${t(`authority.bundle.help.${bundleId}`)}` : ""),
+        + `\n${t(`authority.bundle.help.${bundleId}`)}`,
       action: t("authority.approve"),
     }))) return;
     const intent: Pending = { path: base, kind: "approve", label: bundleName(bundleId),

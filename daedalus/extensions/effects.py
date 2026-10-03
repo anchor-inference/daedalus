@@ -125,6 +125,7 @@ class EffectDispatcher:
 
 
 async def install(app: Application) -> list[asyncio.Task[None]]:
+    from daedalus.extensions.comparison_launch import ComparisonLaunchEffect
     from daedalus.extensions.coordinator_authority import (
         install_authority,  # Lazy: authority hooks follow application stores.
     )
@@ -140,6 +141,9 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     dispatcher = EffectDispatcher(OutboxStore(app.db))
     dispatcher.register("task.stop", TaskStopEffect(app))
     dispatcher.register("task.launch", TaskLaunchEffect(app))
+    comparison = ComparisonLaunchEffect(app)
+    dispatcher.register("comparison.launch.first", comparison)
+    dispatcher.register("comparison.launch.second", comparison)
     dispatcher.register("review.merge", MergeEffect(app))
     dispatcher.register("artifact.transfer", ArtifactTransferEffect(app))
     app.extensions["effects"] = dispatcher

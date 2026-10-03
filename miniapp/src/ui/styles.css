@@ -3032,6 +3032,16 @@ button.staff-row:hover { background: var(--surface-2); }
 .btn.warn { color: var(--warn); background: transparent; border-color: color-mix(in srgb, var(--warn) 50%, transparent); font-weight: 600; }
 .btn.warn:hover { background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .pboard-sheet-status { margin-bottom: 8px; flex-wrap: wrap; }
+.task-workflow { border-top: 1px solid var(--line); padding: 12px 0; }
+.task-workflow > .section-title { width: 100%; text-align: left; }
+.task-workflow-body { display: grid; gap: 10px; min-width: 0; }
+.task-workflow-body p { margin: 0; }
+.task-workflow-create, .task-workflow-run { display: grid; gap: 10px; min-width: 0; }
+.task-workflow-step { display: grid; grid-template-columns: auto minmax(100px, 1fr) minmax(120px, 2fr); gap: 6px; align-items: center; margin: 8px 0; }
+.task-workflow-step > .field { min-width: 0; }
+.task-workflow-step > button, .task-workflow-step > select:nth-of-type(3) { grid-column: 2 / -1; justify-self: start; }
+.task-workflow .pboard-item { min-width: 0; }
+@media (max-width: 440px) { .task-workflow-step { grid-template-columns: auto minmax(0, 1fr); } .task-workflow-step > select, .task-workflow-step > button { grid-column: 2; } }
 .pboard-moves { margin: 0 0 6px; flex-wrap: wrap; }
 .pboard-brief { border: 0; padding: 0; margin: 0; min-width: 0; }
 .pboard-brief legend, .pboard-contract-title { padding: 0; margin: 14px 0 0; color: var(--fg-2); font-size: var(--fs-12); text-transform: uppercase; letter-spacing: 0.06em; }

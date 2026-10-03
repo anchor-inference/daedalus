@@ -26,7 +26,7 @@ from daedalus.stores.control import ControlConflict, ControlStore, Entity, Princ
 from daedalus.stores.database import Database
 from daedalus.stores.files import FILES_TENANT, FileStore
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 MAX_ARCHIVE_BYTES = 256 << 20
 MAX_ENTRY_BYTES = 64 << 20
 MAX_ROWS = 100_000
@@ -57,8 +57,8 @@ QUERIES: dict[str, str] = {
     "task_requirements": "SELECT r.* FROM task_requirements r JOIN board_tasks t ON t.id = r.task_id WHERE t.project_id = ? ORDER BY r.task_id,r.number",
     "requirement_deliveries": "SELECT d.* FROM requirement_deliveries d JOIN task_requirements r ON r.id = d.requirement_id WHERE r.project_id = ? ORDER BY d.requirement_id,d.staff_session_id",
     "task_dependency_edges": "SELECT e.* FROM task_dependency_edges e JOIN board_tasks t ON t.id = e.successor_task_id WHERE t.project_id = ? ORDER BY e.id",
-    "workflow_steps": "SELECT s.* FROM workflow_steps s JOIN board_tasks t ON t.id = s.task_id WHERE t.project_id = ? ORDER BY s.id",
-    "workflow_edges": "SELECT e.* FROM workflow_edges e JOIN workflow_steps s ON s.id = e.source_step_id JOIN board_tasks t ON t.id = s.task_id WHERE t.project_id = ? ORDER BY e.source_step_id,e.target_step_id",
+    "workflow_steps": "SELECT s.* FROM workflow_steps s JOIN board_tasks t ON t.id = s.task_id WHERE t.project_id = ? ORDER BY s.task_id,s.id",
+    "workflow_edges": "SELECT e.* FROM workflow_edges e JOIN board_tasks t ON t.id = e.task_id WHERE t.project_id = ? ORDER BY e.task_id,e.source_step_id,e.target_step_id",
     "artifact_manifests": "SELECT a.* FROM artifact_manifests a WHERE a.project_id = ? OR a.task_id IN (SELECT id FROM board_tasks WHERE project_id = ?) ORDER BY a.id",
     "result_receipts": "SELECT r.* FROM result_receipts r JOIN board_tasks t ON t.id = r.task_id WHERE t.project_id = ? ORDER BY r.created_at,r.id",
     "result_artifacts": "SELECT ra.* FROM result_artifacts ra JOIN result_receipts r ON r.id = ra.result_id JOIN board_tasks t ON t.id = r.task_id WHERE t.project_id = ? ORDER BY ra.result_id,ra.manifest_id",
@@ -123,8 +123,7 @@ ID_TABLES = {
 REFERENCES = {
     "project_id": "projects", "session_id": "sessions", "staff_id": "staff",
     "staff_session_id": "staff_sessions", "task_id": "board_tasks", "predecessor_task_id": "board_tasks",
-    "successor_task_id": "board_tasks", "source_step_id": "workflow_steps",
-    "target_step_id": "workflow_steps", "file_id": "files", "original_artifact_file_id": "files",
+    "successor_task_id": "board_tasks", "file_id": "files", "original_artifact_file_id": "files",
     "artifact_manifest_id": "artifact_manifests", "manifest_id": "artifact_manifests",
     "result_id": "result_receipts", "required_result_id": "result_receipts",
     "accepted_result_id": "result_receipts", "verdict_id": "review_verdicts",
@@ -592,8 +591,16 @@ class WorkspaceArchive:
         mapping: dict[str, dict[Any, Any]] = {"projects": {archive.source_project_id: project_id}}
         for table in ID_TABLES:
             suffix = 12 if table == "files" else 32
-            mapping[table] = {row["id"]: uuid.uuid5(uuid.NAMESPACE_URL, f"{archive.digest}:{table}:{row['id']}").hex[:suffix]
-                              for row in archive.rows[table]}
+            if table == "workflow_steps":
+                mapping[table] = {
+                    (row["task_id"], row["id"]):
+                        uuid.uuid5(uuid.NAMESPACE_URL,
+                                   f"{archive.digest}:{table}:{row['task_id']}:{row['id']}").hex[:suffix]
+                    for row in archive.rows[table]
+                }
+            else:
+                mapping[table] = {row["id"]: uuid.uuid5(uuid.NAMESPACE_URL, f"{archive.digest}:{table}:{row['id']}").hex[:suffix]
+                                  for row in archive.rows[table]}
             if len(mapping[table]) != len(archive.rows[table]) or len(set(mapping[table].values())) != len(mapping[table]):
                 raise ArchiveRefused("archive has duplicate row identities")
         mapping["knowledge_fact_versions"] = {
@@ -605,8 +612,16 @@ class WorkspaceArchive:
     @staticmethod
     def _remap_row(table: str, source: dict[str, Any], mapping: dict[str, dict[Any, Any]], archive_digest: str) -> dict[str, Any]:
         row = dict(source)
-        if table in ID_TABLES:
+        if table == "workflow_steps":
+            row["id"] = mapping[table][(source["task_id"], source["id"])]
+        elif table in ID_TABLES:
             row["id"] = mapping[table][source["id"]]
+        if table == "workflow_edges":
+            for field in ("source_step_id", "target_step_id"):
+                key = (source["task_id"], source[field])
+                if key not in mapping["workflow_steps"]:
+                    raise ArchiveRefused("workflow edge leaves its task or names a missing step")
+                row[field] = mapping["workflow_steps"][key]
         if table == "project_journal":
             row.pop("id", None)
         if table == "session_messages":

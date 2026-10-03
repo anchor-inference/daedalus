@@ -18,6 +18,7 @@ import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { LifecycleCancel } from "../project/LifecycleCancel";
 import { ReviewPanel } from "./ReviewPanel";
 import { ResultFlow } from "./ResultFlow";
+import { TaskWorkflow } from "./TaskWorkflow";
 import { Harness, statusTone } from "../team/team";
 import { confirmAsync, errorText } from "../ui";
 import {
@@ -688,6 +689,7 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
       {task?.status === "doing" && <div className="btnrow"><button type="button" className="btn small warn" disabled={writeBlocked || busy || !!stopEffectId} onClick={() => void stopTask()}>{t("result.stopTaskAction")}</button><span className="sub">{t("result.stopTaskScope")}</span></div>}
       {stopEffectId && <div className="result-warning" role="status">{t(stopEffect.error ? "result.stopTaskUnconfirmed" : stopEffect.data?.state === "completed" ? "result.stopTaskObserved" : stopEffect.data?.state === "unknown" ? "result.stopTaskUnconfirmed" : "result.stopTaskPending")} <button type="button" className="linkbtn" onClick={() => stopEffect.refresh()}>{t("common.retry")}</button></div>}
       {task && <LifecycleCancel kind="task" id={task.id} projectId={projectId} onDone={onDone} toast={toast} />}
+      {task && <TaskWorkflow projectId={projectId} task={task} tasks={data.tasks} />}
 
       {task && hasAcceptance(task) && <AcceptanceSection task={task} />}
 

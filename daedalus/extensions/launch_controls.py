@@ -17,13 +17,17 @@ if TYPE_CHECKING:
     from daedalus.app import Application
 
 launch_attempt: ContextVar[str | None] = ContextVar("launch_attempt", default=None)
+launch_capacity_slot: ContextVar[str | None] = ContextVar("launch_capacity_slot", default=None)
 
 
 async def prepare_attempt(app: Application, principal: Principal, member: Staff, task: BoardTask,
-                          session: StaffSession, *, fence_token: str) -> AttemptIdentity:
+                          session: StaffSession, *, fence_token: str,
+                          capacity_slot_id: str | None = None) -> AttemptIdentity:
     """Issue only report authority and claim the current contract in one transaction."""
     if task.project_id != member.project_id or session.staff_id != member.id or session.task_id != task.id:
         raise ControlDenied("the worker, session and task must belong to the same project")
+    if capacity_slot_id != launch_capacity_slot.get():
+        raise ControlDenied("the launch lost its funded capacity slot binding")
     control = ControlStore(app.db)
     scope = Scope("project", member.project_id)
     async with app.db.transaction() as conn:
@@ -37,7 +41,7 @@ async def prepare_attempt(app: Application, principal: Principal, member: Staff,
         return await app.executions.create(conn, attempt_id=launch_attempt.get() or uuid.uuid4().hex, task_id=task.id,
                                            contract_revision=row["contract_revision"], launcher=principal,
                                            worker=worker, staff_session_id=session.id, runtime_kind=session.kind,
-                                           fence_token=fence_token)
+                                           fence_token=fence_token, comparison_slot_id=capacity_slot_id)
 
 
 async def observe_bind(app: Application, identity: AttemptIdentity, session: StaffSession,
@@ -53,7 +57,8 @@ async def observe_bind(app: Application, identity: AttemptIdentity, session: Sta
         row = await one(conn, "SELECT a.*,t.current_attempt_id,s.session_id,s.terminal_id FROM execution_attempts a"
                         " JOIN board_tasks t ON t.id = a.task_id JOIN staff_sessions s ON s.id = a.staff_session_id"
                         " WHERE a.id = ? AND s.id = ?", (identity.id, session.id))
-        if row is None or app.executions._identity(row) != identity or row["current_attempt_id"] != identity.id:
+        if (row is None or app.executions._identity(row) != identity or
+                not await app.executions.current_binding_in(conn, row)):
             raise ControlDenied("the observed runtime belongs to a superseded attempt")
         if (session.kind == "daedalus" and row["session_id"] != started.session_id) or (session.kind == "cli" and row["terminal_id"] != started.terminal_id):
             raise ControlDenied("the observed reference is not bound to this staff session")

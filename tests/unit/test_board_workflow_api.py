@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,7 +28,7 @@ async def test_task_workflow_list_and_source_bound_approval(tmp_path: Path) -> N
         api = FastAPI()
 
         async def authenticated(x_user: int = Header(1)) -> dict[str, int | str]:
-            return {"via": "token", "user_id": x_user}
+            return {"via": "token" if x_user > 0 else "staff", "user_id": x_user}
 
         service = BoardWorkflows(db)
         register(api, SimpleNamespace(db=db, extensions={"board_workflows": service}), authenticated)
@@ -43,6 +44,10 @@ async def test_task_workflow_list_and_source_bound_approval(tmp_path: Path) -> N
             started = await client.post("/api/board-workflows/runs", json=definition)
             assert started.status_code == 200, started.text
             run_id = started.json()["run_id"]
+            assert (await client.get(task_path, headers={"x-user": "-1"})).status_code == 403
+            assert (await client.get(f"/api/board-workflows/runs/{run_id}", headers={"x-user": "-1"})).status_code == 403
+            assert (await client.post(f"/api/board-workflows/runs/{run_id}/reconcile", headers={"x-user": "-1"},
+                                      json={"node_id": "operator", "expected_input_hash": "b" * 64})).status_code == 403
             assert (await client.post("/api/board-workflows/runs", json=definition)).json() == started.json()
             listed = (await client.get(task_path)).json()
             assert [item["run_id"] for item in listed["items"]] == [run_id]
@@ -66,5 +71,16 @@ async def test_task_workflow_list_and_source_bound_approval(tmp_path: Path) -> N
             assert approved.status_code == 200, approved.text
             assert (await client.post(approval_path, json=body)).json() == approved.json()
             assert (await client.get(run_path)).json()["status"] == "completed"
+            for index in range(22):
+                await db.execute(
+                    "INSERT INTO board_workflow_runs(id,project_id,task_id,definition_digest,definition,budget,status,created_at,updated_at) "
+                    "VALUES (?,?,?,'digest',?,?,'completed',?,?)",
+                    (f"older-{index:02d}", "project", "task-a", json.dumps({key: definition[key] for key in ("nodes", "edges", "budget")}),
+                     json.dumps(definition["budget"]), f"2026-01-{index + 1:02d}T00:00:00Z", f"2026-01-{index + 1:02d}T00:00:00Z"),
+                )
+            first_page = (await client.get(task_path)).json()
+            assert len(first_page["items"]) == 20 and first_page["next_before"]
+            second_page = (await client.get(task_path, params={"before": first_page["next_before"]})).json()
+            assert len(second_page["items"]) == 3 and second_page["next_before"] is None
     finally:
         await db.close()

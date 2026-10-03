@@ -65,9 +65,9 @@ from daedalus.staff_runtime import (
     StartRequest,
     UsageSnapshot,
 )
-from daedalus.stores.control import ControlDenied, Principal
+from daedalus.stores.control import ControlDenied, Principal, one
 from daedalus.stores.files import FileRefused, StoredFile
-from daedalus.stores.projects import Project, ProjectFolder
+from daedalus.stores.projects import Project, ProjectFolder, ProjectSettings
 from daedalus.stores.staff import (
     ACTIVE_STATUSES,
     HARNESS_NAMES,
@@ -227,6 +227,9 @@ class Team:
             stagger=lambda: self.manager.config.staff.launch_stagger_seconds,
             on_failure=self._launch_failed,
             reuses=self._reuses,
+            check_reserved=self._reserved_capacity,
+            active_in=self._active_in,
+            concurrency_in=self._concurrency_in,
         )
         self._pause_commits: set[asyncio.Task[None]] = set()
         self.review: Any = None
@@ -453,7 +456,54 @@ class Team:
         return project.settings.orchestrator.concurrency if project is not None else 0
 
     async def _active(self, project_id: str) -> int:
-        return sum(1 for s in (await self.manager.staff.live_sessions(project_id)).values() if s.status in ACTIVE_STATUSES)
+        async with self.app.db.transaction() as conn:
+            return await self._active_in(conn, project_id)
+
+    async def _concurrency_in(self, conn: Any, project_id: str) -> int:
+        row = await one(conn, 'SELECT settings FROM projects WHERE id = ?', (project_id,))
+        return ProjectSettings.load(json.loads(row['settings'])).orchestrator.concurrency if row is not None else 0
+
+    async def _active_in(self, conn: Any, project_id: str) -> int:
+        """Count physical workers and promised pair slots in the caller's admission snapshot."""
+        from daedalus.stores.comparison_funding import physical_exit_in
+
+        async with conn.execute("SELECT s.id,a.id AS attempt_id FROM staff_sessions s JOIN staff m ON m.id = s.staff_id"
+                                " LEFT JOIN execution_attempts a ON a.staff_session_id = s.id"
+                                " WHERE m.project_id = ? AND s.ended_at IS NULL AND s.status IN ("
+                                + ','.join('?' for _ in ACTIVE_STATUSES) + ')', (project_id, *sorted(ACTIVE_STATUSES))) as cursor:
+            rows = await cursor.fetchall()
+        active = set()
+        for row in rows:
+            if row['attempt_id'] is None or not await physical_exit_in(conn, row['attempt_id']):
+                active.add(row['id'])
+        async with conn.execute("SELECT f.attempt_id,a.staff_session_id FROM comparison_funding_slots f"
+                                " LEFT JOIN execution_attempts a ON a.id = f.attempt_id"
+                                " WHERE f.project_id = ? AND f.state = 'held'", (project_id,)) as cursor:
+            slots = await cursor.fetchall()
+        held = 0
+        for slot in slots:
+            if slot['staff_session_id'] in active:
+                continue
+            if slot['attempt_id'] is not None and await physical_exit_in(conn, slot['attempt_id']):
+                continue
+            held += 1
+        return len(active) + held
+
+    async def _reserved_capacity(self, entry: Entry) -> bool:
+        """Subtract only this entry's real unspent capacity claim, never an arbitrary slot ID."""
+        from daedalus.stores.comparison_funding import physical_exit_in
+
+        async with self.app.db.transaction() as conn:
+            generation = await self.app.executions._host(conn)
+            slot = await one(conn, "SELECT f.*,g.state AS group_state,t.contract_revision AS current_contract"
+                             " FROM comparison_funding_slots f JOIN comparison_groups g ON g.id = f.group_id"
+                             " JOIN board_tasks t ON t.id = f.task_id WHERE f.id = ?", (entry.capacity_slot_id,))
+            if (slot is None or slot['state'] != 'held' or slot['group_state'] not in ('planned','active')
+                    or slot['project_id'] != entry.project_id or slot['staff_id'] != entry.staff_id
+                    or slot['task_id'] != entry.task_id or slot['host_generation'] != generation
+                    or slot['contract_revision'] != slot['current_contract'] or entry.terminal):
+                return False
+            return slot['attempt_id'] is None or not await physical_exit_in(conn, slot['attempt_id'])
 
     async def _ready(self, entry: Entry) -> str | None:
         task = await self.task(entry.task_id)
@@ -577,12 +627,14 @@ class Team:
         task = await self.task(entry.task_id)
         if task is None:
             raise StaffError(f"task {entry.task_id} is gone")
-        source = entry.resume_from or await self.manager.db.kv_get(self._resume_key(entry.staff_id, entry.task_id))
+        source = None if entry.capacity_slot_id is not None else (
+            entry.resume_from or await self.manager.db.kv_get(self._resume_key(entry.staff_id, entry.task_id)))
         if entry.principal is None or entry.check_authority is None:
             raise ControlDenied("a queued launch must retain its authenticated command")
         await self.start(member, task, principal=entry.principal, check_authority=entry.check_authority,
-                         by=entry.by, resume_from=source)
-        await self.manager.db.execute("DELETE FROM kv WHERE key = ?", (self._resume_key(entry.staff_id, entry.task_id),))
+                         by=entry.by, resume_from=source, capacity_slot_id=entry.capacity_slot_id)
+        if entry.capacity_slot_id is None:
+            await self.manager.db.execute("DELETE FROM kv WHERE key = ?", (self._resume_key(entry.staff_id, entry.task_id),))
 
     async def _launch_failed(self, entry: Entry, exc: BaseException) -> None:
         if entry.principal is not None:
@@ -721,17 +773,21 @@ class Team:
 
     async def start(self, member: Staff, task: BoardTask, *, principal: Principal,
                     check_authority: Callable[[], Awaitable[None]], by: str = "operator",
-                    resume_from: str | None = None) -> LiveSession:
+                    resume_from: str | None = None, capacity_slot_id: str | None = None) -> LiveSession:
         async with self.execution_lock(member.id):
             return await self._start(member, task, principal=principal, check_authority=check_authority,
-                                     by=by, resume_from=resume_from)
+                                     by=by, resume_from=resume_from, capacity_slot_id=capacity_slot_id)
 
     async def _start(self, member: Staff, task: BoardTask, *, principal: Principal,
                      check_authority: Callable[[], Awaitable[None]], by: str,
-                     resume_from: str | None) -> LiveSession:
+                     resume_from: str | None, capacity_slot_id: str | None) -> LiveSession:
         """Start a session of ``member`` for ``task`` now; the launch queue calls this once it admits it."""
         if principal.origin_class != "operator" and not principal.grant_id:
             raise StaffError("a host-attested launch principal is required")
+        if capacity_slot_id is not None and (member.harness != "daedalus" or member.isolation != "worktree"):
+            raise StaffError("a funded comparison needs an isolated native worker")
+        if capacity_slot_id is not None and resume_from is not None:
+            raise StaffError("a comparison cannot reuse an earlier worker session")
         await check_authority()
         runtime = self.runtime(member)
         project = await self.project(member.project_id)
@@ -799,7 +855,9 @@ class Team:
             first_id = ""  # a brief longer than a message may be; it is still sent, just not receipted
         # On the board before the session starts: a quick worker's Report(done) must find the task in
         # doing, not be overtaken by this move.
-        moved = await self._move_task(task, "doing", actor=by, assignee=member.id, branch=worktree.branch if worktree else None, folder_id=folder.id)
+        moved = task if capacity_slot_id is not None else await self._move_task(
+            task, "doing", actor=by, assignee=member.id,
+            branch=worktree.branch if worktree else None, folder_id=folder.id)
         request = StartRequest(
             staff=member,
             project=project,
@@ -831,8 +889,15 @@ class Team:
                 prepare_attempt,
             )
 
-            identity = await prepare_attempt(self.app, principal, member, task, session, fence_token=token)
+            identity = await prepare_attempt(self.app, principal, member, task, session, fence_token=token,
+                                             capacity_slot_id=capacity_slot_id)
             await check_authority()
+            if capacity_slot_id is not None:
+                from daedalus.stores.comparison_funding import ComparisonFunding
+
+                async with self.app.db.transaction() as conn:
+                    await self.app.executions._check(conn, identity.id, operation='result.submit')
+                    await ComparisonFunding(self.app.db).start_launch_in(conn, capacity_slot_id, identity.id)
             entered_provider = True
             started = await runtime.resume(request, source) if source else await runtime.start(request)
             await self.manager.staff.started(session.id, session_id=started.session_id, terminal_id=started.terminal_id, cli_session_id=started.cli_session_id, transcript_ref=started.transcript_ref)
@@ -859,7 +924,8 @@ class Team:
                                               " WHERE id = ? AND state = 'queued'", (_now(), identity.id))
                 await self.manager.staff.end_session(session.id, f"could not start: {exc}"[:500])
                 await self.publish("staff.status", {"status": "exited", "previous": "starting", "detail": f"could not start: {exc}"[:500]}, member=member)
-                await self._move_task(moved, "todo", actor="system", assignee=None)
+                if capacity_slot_id is None:
+                    await self._move_task(moved, "todo", actor="system", assignee=None)
             raise
         refreshed = await self.manager.staff.session(session.id)
         if first_id:

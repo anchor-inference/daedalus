@@ -145,12 +145,12 @@ class BoardWorkflows:
         if task is None or task["project_id"] != project_id or task["status"] not in {"todo", "doing"}:
             raise WorkflowRefused("task is not ready on this project board")
         cursor = await conn.execute(
-            "SELECT id FROM board_workflow_runs WHERE task_id = ? "
-            "AND status IN ('pending','running','blocked') LIMIT 1", (task_id,),
+            "SELECT id,status FROM board_workflow_runs WHERE task_id = ? "
+            "ORDER BY created_at DESC,id DESC LIMIT 1", (task_id,),
         )
-        active = await cursor.fetchone()
+        latest = await cursor.fetchone()
         await cursor.close()
-        if active is not None:
+        if latest is not None and latest["status"] in {"pending", "running", "blocked"}:
             raise WorkflowRefused("the task already has an active workflow")
         if not (await dependency_readiness(conn, task_id))["ready"]:
             raise WorkflowRefused("root task has unresolved Board dependencies")
@@ -289,7 +289,7 @@ class BoardWorkflows:
 
     async def _project_node(self, conn: Any, node: dict[str, Any], current: str) -> tuple[str, str]:
         cursor = await conn.execute(
-            "SELECT status,contract_revision,accepted_result_id,accepted_contract_revision "
+            "SELECT status,contract_revision,current_attempt_id,accepted_result_id,accepted_contract_revision,branch,merge_state "
             "FROM board_tasks WHERE id = ?", (node["task_id"],),
         )
         task = await cursor.fetchone()
@@ -300,27 +300,47 @@ class BoardWorkflows:
         deps = await dependency_readiness(conn, node["task_id"])
         gates = await workflow_readiness(conn, node["task_id"])
         gate_ok = all(gate["state"] == "complete" for gate in gates)
-        accepted = task["accepted_result_id"] is not None and task["accepted_contract_revision"] == task["contract_revision"]
-        evidence: dict[str, Any] | None = None
-        verdict = None
-        if node["kind"] in {"review", "check"}:
-            if node["kind"] == "check":
-                cursor = await conn.execute(
-                    "SELECT id FROM result_receipts WHERE task_id = ? AND contract_revision = ? "
-                    "ORDER BY created_at DESC,id DESC LIMIT 1", (node["task_id"], task["contract_revision"]),
-                )
-                result = await cursor.fetchone()
-                await cursor.close()
-                result_id = result["id"] if result is not None else None
-            else:
-                result_id = task["accepted_result_id"]
+        cursor = await conn.execute(
+            "SELECT id,attempt_id,outcome FROM result_receipts WHERE task_id = ? AND contract_revision = ? "
+            "AND attempt_id IS ? ORDER BY created_at DESC,rowid DESC LIMIT 1",
+            (node["task_id"], task["contract_revision"], task["current_attempt_id"]),
+        )
+        latest_result = await cursor.fetchone()
+        await cursor.close()
+        accepted_result_id = task["accepted_result_id"]
+        accepted_result = latest_result if latest_result is not None and latest_result["id"] == accepted_result_id else None
+        accepted = (accepted_result is not None and accepted_result["outcome"] == "complete"
+                    and task["accepted_contract_revision"] == task["contract_revision"])
+        result = latest_result if node["kind"] == "check" else accepted_result
+        result_id = result["id"] if result is not None else None
+        cursor = await conn.execute(
+            "SELECT id,accepted,verification,head,base FROM review_verdicts WHERE result_id = ? "
+            "ORDER BY created_at DESC,rowid DESC LIMIT 1", (result_id,),
+        )
+        verdict = await cursor.fetchone()
+        await cursor.close()
+        approved_verdict = bool(verdict is not None and verdict["accepted"] and verdict["verification"] == "verified")
+        merge = None
+        if task["branch"] and approved_verdict and accepted_result_id == result_id:
             cursor = await conn.execute(
-                "SELECT id,accepted,verification FROM review_verdicts WHERE result_id = ? "
-                "ORDER BY created_at DESC,id DESC LIMIT 1", (result_id,),
+                "SELECT state,head_sha,base_sha,merge_sha FROM task_merge_receipts "
+                "WHERE task_id = ? AND result_id = ? AND verdict_id = ?",
+                (node["task_id"], result_id, verdict["id"]),
             )
-            verdict = await cursor.fetchone()
+            merge = await cursor.fetchone()
             await cursor.close()
-            evidence = {"result_id": result_id, "verdict_id": verdict["id"] if verdict else None}
+        branch_current = not task["branch"] or bool(
+            task["merge_state"] == "merged" and merge is not None and merge["state"] == "merged"
+            and merge["merge_sha"] and verdict is not None
+            and merge["head_sha"] == verdict["head"] and merge["base_sha"] == verdict["base"]
+        )
+        evidence = {
+            "result_id": result_id, "outcome": result["outcome"] if result is not None else None,
+            "attempt_id": result["attempt_id"] if result is not None else None,
+            "verdict_id": verdict["id"] if verdict else None,
+            "verdict_status": (verdict["verification"], verdict["accepted"], verdict["head"], verdict["base"]) if verdict else None,
+            "merge": (merge["state"], merge["head_sha"], merge["base_sha"], merge["merge_sha"]) if merge else None,
+        }
         fingerprint = digest({
             "task_id": node["task_id"], "contract_revision": task["contract_revision"],
             "accepted_result_id": task["accepted_result_id"], "dependency": deps["dependency_fingerprint"],
@@ -330,12 +350,16 @@ class BoardWorkflows:
         if not deps["ready"] or not artifacts_present:
             return "blocked", fingerprint
         if node["kind"] == "task":
-            if accepted and gate_ok:
+            if accepted and approved_verdict and branch_current and gate_ok:
                 return "completed", fingerprint
+            if accepted_result_id is not None and not (accepted and approved_verdict and branch_current):
+                return "blocked", fingerprint
             return "running" if task["status"] == "doing" else "ready", fingerprint
         if node["kind"] in {"review", "check"}:
+            if node["kind"] == "review" and accepted_result_id is not None and not (accepted and approved_verdict and branch_current):
+                return "blocked", fingerprint
             if verdict is not None and verdict["verification"] == "verified":
-                if node["kind"] == "review" and verdict["accepted"]:
+                if node["kind"] == "review" and accepted and approved_verdict and branch_current:
                     return "completed", fingerprint
                 if node["kind"] == "check" and bool(verdict["accepted"]) == (node.get("check", {}).get("receipt_status") == "accepted"):
                     return "completed", fingerprint
@@ -442,6 +466,13 @@ class BoardWorkflows:
             await cursor.close()
             if run is None:
                 raise KeyError(run_id)
+            cursor = await conn.execute(
+                "SELECT id FROM board_workflow_runs WHERE task_id = ? "
+                "ORDER BY created_at DESC,id DESC LIMIT 1", (run["task_id"],),
+            )
+            latest = await cursor.fetchone()
+            await cursor.close()
+            superseded = latest is not None and latest["id"] != run_id
             definition = json.loads(run["definition"])
             nodes = {node["id"]: node for node in definition["nodes"]}
             cursor = await conn.execute(
@@ -467,7 +498,9 @@ class BoardWorkflows:
                 reason = ""
                 can_approve = False
                 if node["kind"] == "approval":
-                    if run["status"] in {"cancelled", "failed"}:
+                    if superseded:
+                        reason = "newer_run"
+                    elif run["status"] in {"cancelled", "failed"}:
                         reason = "run_ended"
                     elif row["status"] == "completed" and source_current:
                         reason = "already_approved"
@@ -486,7 +519,8 @@ class BoardWorkflows:
                               "projected_state": projected, "can_approve": can_approve,
                               "approval_blocker": reason or None})
             return {**dict(run), "run_id": run["id"], "definition_value": definition,
-                    "projection_current": all_current, "steps": views}
+                    "projection_current": all_current, "superseded_by": latest["id"] if superseded else None,
+                    "steps": views}
 
     async def _predecessors_current(
         self, conn: Any, definition: dict[str, Any], steps: dict[str, Any], node_id: str,
@@ -529,6 +563,14 @@ class BoardWorkflows:
             await cursor.close()
             if run_row is None or run_row["status"] in {"cancelled", "failed"}:
                 raise WorkflowRefused("workflow is no longer active")
+            cursor = await conn.execute(
+                "SELECT id FROM board_workflow_runs WHERE task_id = ? "
+                "ORDER BY created_at DESC,id DESC LIMIT 1", (run["task_id"],),
+            )
+            latest = await cursor.fetchone()
+            await cursor.close()
+            if latest is None or latest["id"] != run_id:
+                raise WorkflowRefused("a newer workflow superseded this approval")
             definition = json.loads(run_row["definition"])
             node = next((item for item in definition["nodes"] if item["id"] == node_id), None)
             if node is None or node["kind"] != "approval":

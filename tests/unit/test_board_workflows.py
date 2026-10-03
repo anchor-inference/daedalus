@@ -115,6 +115,26 @@ async def test_approval_requires_current_host_source_and_replays_exact_receipt(t
         assert approved["status"] == "completed"
         assert approved == await workflows.approve_command(principal, run_id, "operator", **payload)
         assert (await workflows.inspect(run_id))["steps"][0]["receipt_id"] == approved["receipt_id"]
+        revision = (await db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'task-a'"))["entity_revision"]
+        newer = await workflows.start(
+            principal, "project", "task-a", definition,
+            expected_entity_revision=revision, client_operation_id="newer-approval-run",
+        )
+        await db.execute("UPDATE board_tasks SET contract_revision = 3 WHERE id = 'task-a'")
+        await workflows.advance_run(run_id)
+        historical = await workflows.inspect(run_id)
+        assert historical["superseded_by"] == newer["run_id"]
+        assert not historical["steps"][0]["can_approve"]
+        assert historical["steps"][0]["approval_blocker"] == "newer_run"
+        revision = (await db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'task-a'"))["entity_revision"]
+        with pytest.raises(WorkflowRefused, match="newer workflow"):
+            await workflows.approve_command(
+                principal, run_id, "operator", expected_entity_revision=revision,
+                expected_step_revision=historical["steps"][0]["step_revision"],
+                expected_source_contract_revision=3,
+                expected_input_digest=historical["steps"][0]["current_input_digest"],
+                client_operation_id="stale-old-run-approval",
+            )
     finally:
         await db.close()
 
@@ -152,6 +172,14 @@ async def test_cross_task_run_advances_from_accepted_result_and_explicit_approva
         await db.execute(
             "UPDATE board_tasks SET accepted_result_id = 'result', accepted_contract_revision = 1, status = 'done' "
             "WHERE id = 'task-a'"
+        )
+        unverified = await workflows.advance_run(started["run_id"])
+        assert unverified["status"] == "blocked" and (await db.fetchone(
+            "SELECT status FROM board_workflow_steps WHERE run_id = ? AND node_id = 'draft'", (started["run_id"],),
+        ))["status"] != "completed"
+        await db.execute(
+            "INSERT INTO review_verdicts(id,result_id,contract_revision,reviewer_actor_id,verification,accepted,created_at) "
+            "VALUES ('verdict','result',1,'operator:1','verified',1,'now')"
         )
         progressed = await workflows.advance_run(started["run_id"])
         assert progressed["status"] == "running" and progressed["changed"] == 2
@@ -221,6 +249,10 @@ async def test_missing_manifest_bytes_block_reuse_without_rerunning_effect(tmp_p
             "INSERT INTO result_receipts(id,task_id,contract_revision,outcome,original_text,original_digest,original_size_bytes,actor_id,created_at) "
             "VALUES ('result','task-a',1,'complete','Report','digest',6,'operator:1','now')"
         )
+        await db.execute(
+            "INSERT INTO review_verdicts(id,result_id,contract_revision,reviewer_actor_id,verification,accepted,created_at) "
+            "VALUES ('verdict','result',1,'operator:1','verified',1,'now')"
+        )
         definition = {"nodes": [{"id": "output", "kind": "task", "task_id": "task-a"}], "edges": [], "budget": {"max_steps": 1}}
         workflows = BoardWorkflows(db, files=files)
         run = await workflows.start(
@@ -240,6 +272,45 @@ async def test_missing_manifest_bytes_block_reuse_without_rerunning_effect(tmp_p
         preview = await workflows.reconcile_preview(run["run_id"], "output", step["input_digest"])
         assert preview["decision"] == "needs_review" and preview["reason"] == "effect_missing_or_stale"
         assert (await workflows.advance_run(run["run_id"]))["status"] == "blocked"
+    finally:
+        await db.close()
+
+
+async def test_branch_result_without_matching_merge_receipt_cannot_complete_workflow(tmp_path) -> None:
+    db = Database(tmp_path / "state.sqlite")
+    await db.open()
+    try:
+        await db.execute("INSERT INTO projects(id,name,created_at) VALUES ('project','Project','now')")
+        await db.execute(
+            "INSERT INTO board_tasks(id,title,status,project_id,branch,created_at,updated_at) "
+            "VALUES ('task-a','Task','todo','project','work','now','now')"
+        )
+        await db.execute(
+            "INSERT INTO task_contract_versions(task_id,contract_revision,origin_kind,snapshot_json,created_at) "
+            "VALUES ('task-a',1,'operator','{}','now')"
+        )
+        workflows = BoardWorkflows(db)
+        definition = {"nodes": [{"id": "work", "kind": "task", "task_id": "task-a"}],
+                      "edges": [], "budget": {"max_steps": 1, "max_parallel": 1}}
+        started = await workflows.start(
+            Principal.operator({"via": "token", "user_id": 1}), "project", "task-a", definition,
+            expected_entity_revision=1, client_operation_id="branch-run",
+        )
+        await db.execute(
+            "INSERT INTO result_receipts(id,task_id,contract_revision,outcome,original_text,original_digest,original_size_bytes,actor_id,created_at) "
+            "VALUES ('result','task-a',1,'complete','Report','digest',6,'operator:1','now')"
+        )
+        await db.execute(
+            "INSERT INTO review_verdicts(id,result_id,contract_revision,reviewer_actor_id,verification,accepted,head,base,created_at) "
+            "VALUES ('verdict','result',1,'operator:1','verified',1,'head','base','now')"
+        )
+        await db.execute(
+            "UPDATE board_tasks SET accepted_result_id = 'result', accepted_contract_revision = 1, "
+            "merge_state = 'merged', status = 'done' WHERE id = 'task-a'"
+        )
+        projected = await workflows.advance_run(started["run_id"])
+        assert projected["status"] == "blocked"
+        assert (await workflows.inspect(started["run_id"]))["steps"][0]["status"] == "blocked"
     finally:
         await db.close()
 

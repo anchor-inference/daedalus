@@ -56,6 +56,8 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
             raise ControlDenied("the worker is not an active member of this project")
         if task["status"] not in ("todo", "blocked"):
             raise ControlConflict("reopen the task before launching a new attempt")
+        if await one(conn, "SELECT 1 FROM comparison_groups WHERE task_id = ? AND state IN ('planned','active','ready')", (task_id,)):
+            raise ControlConflict('reconcile the undecided comparison before launching an ordinary attempt')
         parent = await one(conn, "SELECT cancel_state FROM lifecycle_parents WHERE parent_kind = 'task' AND parent_id = ?", (task_id,))
         if parent is not None and parent["cancel_state"] != "active":
             raise ControlConflict("the task parent was cancelled; revise its contract before admitting new work")

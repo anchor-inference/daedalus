@@ -146,13 +146,16 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(404, "no such workflow") from exc
 
     @api.post("/api/board-workflows/runs/{run_id}/reconcile")
-    async def reconcile_workflow(run_id: str, body: ReconcileBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def reconcile_workflow(run_id: str, body: ReconcileBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
+            Principal.operator(who)
             return await workflows().reconcile_preview(run_id, body.node_id, body.expected_input_hash)
         except KeyError as exc:
             raise HTTPException(404, "no such workflow step") from exc
         except WorkflowRefused as exc:
             raise HTTPException(409, str(exc)) from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
 
     @api.post("/api/board-workflows/runs/{run_id}/cancel")
     async def cancel_workflow(

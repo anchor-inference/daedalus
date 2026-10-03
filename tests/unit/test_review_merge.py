@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from daedalus.extensions.api import build_app
 from daedalus.extensions.api_orchestrator_domain import install_routes
 from daedalus.extensions.board import Board
 from daedalus.extensions.merge_effect import MergeEffect
-from daedalus.extensions.review import Review
+from daedalus.extensions.review import Review, ReviewRefused
 from daedalus.extensions.staff import Team
 from daedalus.host.session_runner import SessionManager
 from daedalus.staff_runtime import StartRequest
@@ -243,6 +244,54 @@ async def test_legacy_one_tap_routes_cannot_bypass_exact_review(settings: Settin
             assert review["result_id"] and review["verdict_id"] is None
             assert [blocker["code"] for blocker in review["blockers"]] == ["verdict_missing"]
             assert (await task_row(r.manager, task_id))["status"] == "review"
+    finally:
+        await r.close()
+
+
+async def test_comparison_review_uses_member_worktree_without_projecting_branch(settings: Settings, db: Database,
+                                                                                   tmp_path: Path) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        member = await r.hire()
+        task_id = await board_task(r.manager, r.project, "Compare reports")
+        assert r.project.primary is not None
+        worktree = await r.team.worktrees.prepare(r.project.primary, member.name, task_id, "Compare reports")
+        (worktree.cwd / "candidate.txt").write_text("candidate\n")
+        git(worktree.path, "add", "-A")
+        git(worktree.path, "commit", "-qm", "Candidate work")
+        await r.manager.db.execute("INSERT INTO staff_sessions(id,staff_id,kind,task_id,status,status_at,"
+                                   "started_at,folder_id,worktree_path,branch,base_ref)"
+                                   " VALUES ('candidate-session',?,'daedalus',?,'working','2026-01-01',"
+                                   " '2026-01-01',?,?,?,?)",
+                                   (member.id, task_id, r.project.primary.id, str(worktree.path),
+                                    worktree.branch, worktree.base_ref))
+        await r.manager.db.execute("INSERT INTO execution_attempts(id,task_id,contract_revision,host_generation,"
+                                   "fence_token_hash,state,staff_session_id,runtime_kind,created_at,updated_at)"
+                                   " VALUES ('candidate-attempt',?,1,1,'digest','completed','candidate-session',"
+                                   " 'daedalus','2026-01-01','2026-01-01')", (task_id,))
+        await r.manager.db.execute("INSERT INTO comparison_groups(id,task_id,contract_revision,max_attempts,"
+                                   "created_at,state,budget_cap_microusd)"
+                                   " VALUES ('candidate-group',?,1,2,'2026-01-01','active',1000)", (task_id,))
+        await r.manager.db.execute("INSERT INTO comparison_group_attempts(group_id,attempt_id,slot,"
+                                   "reserved_microusd,worktree_identity)"
+                                   " VALUES ('candidate-group','candidate-attempt',1,500,?)",
+                                   (hashlib.sha256(str(worktree.path).encode()).hexdigest(),))
+        content = "complete alternative"
+        await r.manager.db.execute("INSERT INTO result_receipts(id,task_id,contract_revision,attempt_id,outcome,"
+                                   "original_text,original_digest,original_size_bytes,actor_id,created_at)"
+                                   " VALUES ('candidate-result',?,1,'candidate-attempt','complete',?,?,?,?,?)",
+                                   (task_id, content, hashlib.sha256(content.encode()).hexdigest(),
+                                    len(content), "staff", "2026-01-01"))
+        projected = await r.review.review(task_id, comparison_attempt_id="candidate-attempt")
+        assert projected["branch"] == worktree.branch
+        assert projected["comparison_group_id"] == "candidate-group"
+        assert projected["result_id"] == "candidate-result"
+        assert projected["can_merge"] is False
+        assert [item["code"] for item in projected["blockers"]] == ["verdict_missing"]
+        task = await task_row(r.manager, task_id)
+        assert task["branch"] is None and task["current_attempt_id"] is None and task["status"] == "todo"
+        with pytest.raises(ReviewRefused, match="comparison attempt"):
+            await r.review.review(task_id, comparison_attempt_id="missing")
     finally:
         await r.close()
 

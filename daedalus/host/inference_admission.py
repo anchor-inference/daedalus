@@ -28,13 +28,63 @@ def maximum_rate(*values: float | None) -> Decimal:
     return max(rates)
 
 
+def model_quote(endpoint: ProviderEndpoint, model: str, output: int) -> tuple[dict[str, Any], int]:
+    """Share the provider ceiling and worst published rate between launch and each real send."""
+    if type(output) is not int or not 1 <= output <= 2**63 - 1:
+        raise BudgetRefused('a finite output token cap is required before inference')
+    free = endpoint.kind == 'llamacpp'
+    price = endpoint.pricing.get(model)
+    if free:
+        input_bound = 0
+        input_rate = output_rate = Decimal(0)
+    else:
+        if price is None or price.input is None or price.output is None or price.input_limit is None or not price.limit_source:
+            raise BudgetRefused('this model needs a priced, provider-enforced input ceiling before a capped call')
+        input_bound = price.input_limit
+        if type(input_bound) is not int or not 1 <= input_bound <= 2**63 - 1:
+            raise BudgetRefused("the provider's billable input ceiling is invalid")
+        input_rate = maximum_rate(price.input, price.input_off_peak, price.cache_hit, price.cache_hit_off_peak)
+        output_rate = maximum_rate(price.output, price.output_off_peak)
+    quoted = microusd((input_rate * input_bound + output_rate * output) / Decimal(1_000_000))
+    quote = {'provider_id': endpoint.id, 'provider_kind': endpoint.kind, 'model': model, 'input_bound': input_bound,
+             'output_bound': output, 'input_rate': str(input_rate), 'output_rate': str(output_rate),
+             'bound_source': price.limit_source if price is not None and not free else 'operator-local-model',
+             'rate_card': asdict(price) if price is not None and not free else None}
+    return quote, quoted
+
+
 class HostInferenceAdmission:
     def __init__(self, manager: SessionManager) -> None:
         self.manager = manager
         self.db = manager.db
         self.store = InferenceBudget(self.db)
 
-    async def _constraints(self, conn: Any, endpoint: ProviderEndpoint, request: LLMRequest) -> tuple[Constraint, ...]:
+    async def quote_for_member(self, staff_id: str, *, slot_id: str, slot: int,
+                               allowance_microusd: int) -> Any:
+        async with self.db.transaction() as conn:
+            return await self.quote_for_member_in(conn, staff_id, slot_id=slot_id, slot=slot,
+                                                  allowance_microusd=allowance_microusd)
+
+    async def quote_for_member_in(self, conn: Any, staff_id: str, *, slot_id: str, slot: int,
+                                  allowance_microusd: int) -> Any:
+        """Resolve the selected staff preset once; a comparison cannot spend on a fallback rung."""
+        from daedalus.stores.comparison_funding import PairAllocation
+
+        member = await one(conn, 'SELECT harness,model,archived_at FROM staff WHERE id = ?', (staff_id,))
+        if member is None or member['harness'] != 'daedalus' or member['archived_at']:
+            raise BudgetRefused('the comparison needs an active native worker')
+        if member['model'] and member['model'] not in self.manager.config.presets:
+            raise BudgetRefused('the worker model preset no longer exists')
+        rungs, preset = self.manager.resolve_model({'preset': member['model']} if member['model'] else {})
+        if not rungs:
+            raise BudgetRefused('the selected comparison model is unavailable')
+        adapter, model = rungs[0]
+        quote, _ = model_quote(adapter.endpoint, model, int(preset.max_output_tokens))
+        return PairAllocation(slot_id, slot, staff_id, adapter.endpoint.id, model, allowance_microusd,
+                              hashlib.sha256(canonical(quote).encode()).hexdigest(), quote)
+
+    def prelaunch_constraints(self, provider_ids: tuple[str, ...]) -> tuple[Constraint, ...]:
+        """Current installation and provider caps before the alternative sessions exist."""
         manager = self.manager
         limits = manager.config.limits
         result = []
@@ -44,10 +94,17 @@ class HostInferenceAdmission:
         since = limits.total_since or None
         if limits.usd_total > 0:
             result.append(Constraint(f"total:{since or 'all'}", microusd(limits.usd_total), since=since))
-        provider_cap = limits.usd_total_per_provider.get(endpoint.id, 0)
-        if provider_cap > 0:
-            result.append(Constraint(f"provider:{endpoint.id}:{since or 'all'}", microusd(provider_cap),
-                                     provider_id=endpoint.id, since=since))
+        for provider_id in dict.fromkeys(provider_ids):
+            provider_cap = limits.usd_total_per_provider.get(provider_id, 0)
+            if provider_cap > 0:
+                result.append(Constraint(f"provider:{provider_id}:{since or 'all'}", microusd(provider_cap),
+                                         provider_id=provider_id, since=since))
+        return tuple(result)
+
+    async def _constraints(self, conn: Any, endpoint: ProviderEndpoint, request: LLMRequest) -> tuple[Constraint, ...]:
+        manager = self.manager
+        limits = manager.config.limits
+        result = list(self.prelaunch_constraints((endpoint.id,)))
         observer = request.observability
         if observer is None or not observer.session_id:
             return tuple(result)
@@ -88,10 +145,11 @@ class HostInferenceAdmission:
         try:
             async with self.db.transaction() as conn:
                 observer = request.observability
+                attempt = None
                 if observer is not None and observer.session_id:
                     executions = getattr(self.manager, "execution_store", None)
                     if executions is not None:
-                        await executions.check_inference(conn, observer.session_id, observer.run_id)
+                        attempt = await executions.check_inference(conn, observer.session_id, observer.run_id)
                     else:
                         worker = await one(conn, "WITH RECURSIVE owned(id) AS (SELECT ? UNION"
                                            " SELECT json_extract(s.metadata,'$.subagent_of') FROM sessions s"
@@ -108,30 +166,15 @@ class HostInferenceAdmission:
                 price = endpoint.pricing.get(request.model)
                 if not free and (price is None or price.input is None or price.output is None
                                  or price.input_limit is None or not price.limit_source):
-                    if not constraints:
+                    # A prepaid comparison cannot silently send an unpriced fallback even when
+                    # the operator has disabled broader daily or installation spending limits.
+                    comparison = await one(conn, 'SELECT 1 FROM comparison_funding_slots WHERE attempt_id = ?',
+                                           (attempt.id,)) if attempt is not None else None
+                    if not constraints and comparison is None:
                         return None
                     raise BudgetRefused("this model needs a priced, provider-enforced input ceiling before a capped call")
-                output = body.get("max_tokens")
-                if type(output) is not int or output < 1:
-                    raise BudgetRefused("a finite output token cap is required before inference")
-                if free:
-                    input_bound = 0
-                    input_rate = output_rate = Decimal(0)
-                else:
-                    assert price is not None
-                    input_bound = price.input_limit
-                    if type(input_bound) is not int or not 1 <= input_bound <= 2**63 - 1:
-                        raise BudgetRefused("the provider's billable input ceiling is invalid")
-                    # The provider may cross a peak boundary while a request is in flight.
-                    # Cache misses and the highest published rates bound that possible charge.
-                    input_rate = maximum_rate(price.input, price.input_off_peak, price.cache_hit, price.cache_hit_off_peak)
-                    output_rate = maximum_rate(price.output, price.output_off_peak)
-                quoted = microusd((input_rate * input_bound + output_rate * output) / Decimal(1_000_000))
-                at = datetime.now(UTC).isoformat()
-                quote = {"provider_kind": endpoint.kind, "model": request.model, "input_bound": input_bound,
-                         "output_bound": output, "input_rate": str(input_rate), "output_rate": str(output_rate),
-                         "bound_source": price.limit_source if price is not None and not free else "operator-local-model",
-                         "rate_card": asdict(price) if price is not None else None, "quoted_at": at}
+                quote, quoted = model_quote(endpoint, request.model, body.get('max_tokens'))
+                quote['quoted_at'] = datetime.now(UTC).isoformat()
                 observer = request.observability
                 reservation = uuid.uuid4().hex
                 await self.store.reserve_in(
@@ -140,6 +183,7 @@ class HostInferenceAdmission:
                     request_digest=hashlib.sha256(canonical(body).encode()).hexdigest(), quoted_microusd=quoted,
                     rate_version=hashlib.sha256(canonical(quote).encode()).hexdigest(), quote=quote,
                     constraints=constraints,
+                    execution_attempt_id=attempt.id if attempt is not None else None,
                 )
                 await self.store.start_in(conn, reservation)
                 return reservation

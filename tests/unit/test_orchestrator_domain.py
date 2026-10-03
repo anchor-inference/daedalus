@@ -226,7 +226,7 @@ async def test_operator_merge_effect_is_claimable_after_worker_attempt_completed
 async def test_legacy_dependency_requires_resolution_and_claim_is_single(domain_db: Database) -> None:
     await domain_db.execute("INSERT INTO board_tasks(id, title, status, priority, acceptance, checklist, depends_on,"
                             " created_at, updated_at, brief_json, contract_revision) VALUES"
-                            " ('task2', 'Next', 'todo', 3, '', '[]', '[]', '2026-01-01', '2026-01-01', '{}', 1)")
+                            " ('task2', 'Next', 'blocked', 3, '', '[]', '[]', '2026-01-01', '2026-01-01', '{}', 1)")
     await domain_db.execute("INSERT INTO task_contract_versions(task_id, contract_revision, origin_kind, origin_ref,"
                             " snapshot_json, created_at) VALUES ('task2', 1, 'legacy', '',"
                             " '{\"requirements\":[],\"checklist\":[],\"acceptance\":\"\",\"brief\":{}}', '2026-01-01')")
@@ -244,6 +244,8 @@ async def test_legacy_dependency_requires_resolution_and_claim_is_single(domain_
         with pytest.raises(DomainConflict, match="waiver"):
             await resolve_dependency(conn, edge_id="edge1", resolution="waived")
         await resolve_dependency(conn, edge_id="edge1", resolution="waived", waiver_receipt_id="waiver1")
+        successor = await conn.execute_fetchall("SELECT status FROM board_tasks WHERE id = 'task2'")
+        assert successor[0]["status"] == "todo"
         first = await claim_handoff(conn, claim_id="claim1", task_id="task2", operation_id="waiver1", reservation_id="r1")
         second = await claim_handoff(conn, claim_id="claim2", task_id="task2", operation_id="waiver1", reservation_id="r2")
         assert first["claim_id"] == second["claim_id"] == "claim1"
