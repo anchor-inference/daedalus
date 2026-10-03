@@ -28,10 +28,11 @@ import type { Staff, Team } from "../team/team";
 import type { ProjectBoardData } from "../board/board";
 import { errorText } from "../ui";
 import { boardKey, staffKey, terminalsKey, useProject, useUsage } from "./data";
-import { firstWait, oldestOpen, PHONE_TABS, type PhoneTab, splitTeam, staffTone, teamCounts, waitKey } from "./focus";
+import { firstWait, oldestOpen, operatorReviewReady, PHONE_TABS, type PhoneTab, splitTeam, staffTone, teamCounts, waitKey } from "./focus";
 import { useMember } from "./staff";
 import { spendLine, staffUsage } from "./usage";
 import { budgetCompact, useGoalBudget } from "./ProjectBudget";
+import { budgetAttention, distinctOperatorActions, type NextAction } from "./attention-model";
 
 const enc = encodeURIComponent;
 const operatorAsksKey = (projectId: string) => `/api/asks?project=${enc(projectId)}&routed_to=operator`;
@@ -61,16 +62,27 @@ export function useOperatorAsks(projectId: string) {
   useEvent(["ask.", "permission.", "staff.status"], (event) => {
     if (!event.project_id || event.project_id === projectId) invalidate(`/api/asks?project=${enc(projectId)}`);
   }, [projectId]);
-  const asks = Array.isArray(query.data?.asks) ? query.data!.asks : [];
+  const asks = Array.isArray(query.data?.asks) ? [...new Map(query.data!.asks.map((ask) => [ask.id, ask])).values()] : [];
   const open = useMemo(() => oldestOpen(asks), [asks]);
-  return { ...open, unverified: !!query.error || !query.data };
+  return { ...open, openAsks: asks.filter((ask) => ask.routed_to === "operator" && !ask.resolved_at),
+    unverified: !!query.error || !query.data };
 }
 
 // ── the tab bar ──────────────────────────────────────────────────────────────────────────────
 
 /** The project's tabs, in the place of the app's. The team's tab carries how many requests wait. */
 export function ProjectTabs({ projectId, current }: { projectId: string; current: PhoneTab | null }) {
-  const { waiting } = useOperatorAsks(projectId);
+  const { openAsks, unverified: asksUnverified } = useOperatorAsks(projectId);
+  const live = useStreamUp();
+  const offline = useOffline();
+  const board = useQuery<ProjectBoardData>(boardKey(projectId), { pollMs: live ? 60000 : 15000, staleMs: 3000 });
+  const next = useQuery<{ actions: NextAction[] }>(`/api/projects/${enc(projectId)}/next-actions`, { pollMs: live ? 60000 : 15000, staleMs: 3000 });
+  const budget = useGoalBudget(projectId);
+  const countKnown = !offline && !asksUnverified && !!board.data && !board.error
+    && !!next.data && !next.error && !!budget.data && !budget.error;
+  const decisions = openAsks.length + (board.data?.tasks ?? []).filter(operatorReviewReady).length
+    + distinctOperatorActions(next.data?.actions ?? [], openAsks, board.data?.tasks ?? []).length
+    + (budgetAttention(budget.data) ? 1 : 0);
   return (
     <nav className="tabbar project-tabs" aria-label={t("phone.tabs")}>
       {PHONE_TABS.map((tab) => {
@@ -79,7 +91,9 @@ export function ProjectTabs({ projectId, current }: { projectId: string; current
           <a key={tab} href={href} data-tab={tab} className={current === tab ? "active" : ""} aria-current={current === tab ? "page" : undefined} onClick={(e) => go(e, href)}>
             <span className="glyph">
               <Icon name={TAB_ICONS[tab]} size={22} />
-          {tab === "attention" && waiting > 0 && <span className="tab-badge">{waiting}</span>}
+          {tab === "attention" && (countKnown ? decisions > 0 : true) && <span className="tab-badge"
+            title={countKnown ? undefined : t("focus.attention.countUnknown")}
+            aria-label={countKnown ? undefined : t("focus.attention.countUnknown")}>{countKnown ? (decisions > 99 ? "99+" : decisions) : "?"}</span>}
             </span>
             {t(`focus.nav.${tab}`)}
           </a>

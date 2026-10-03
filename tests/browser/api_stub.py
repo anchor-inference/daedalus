@@ -1216,6 +1216,8 @@ class FocusStub:
         """What ``GET /api/projects/<id>/focus-state`` answers, by project; a project not here has an empty one."""
         self.next_actions: dict[str, list[dict]] = {}
         """Operator-owned next steps returned by the project-wide readiness projection."""
+        self.budget_views: dict[str, dict] = {}
+        self.budget_read_error: set[str] = set()
         self.posted: list[tuple[str, dict]] = []
         """Every message the operator sent to a chat of the project: ``(session id, body)``, as posted."""
         self.search_busy = False
@@ -1303,6 +1305,12 @@ class FocusStub:
         if path.startswith("/api/projects/") and path.endswith("/next-actions") and method == "GET":
             pid = path.split("/")[3]
             return 200, {"project_id": pid, "actions": self.next_actions.get(pid, [])}
+        if path.startswith("/api/projects/") and path.endswith("/budget") and method == "GET":
+            pid = path.split("/")[3]
+            if pid in self.budget_read_error:
+                return 503, {"detail": "budget unavailable"}
+            if pid in self.budget_views:
+                return 200, self.budget_views[pid]
         if path.startswith("/api/sessions/") and path.endswith("/messages") and method == "POST" and path.count("/") == 4:
             sid = path.split("/")[3]
             if sid in self.details:
