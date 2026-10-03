@@ -4415,6 +4415,11 @@ button.staff-row:hover { background: var(--surface-2); }
 .project-budget-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 10px; margin: 10px 0; }
 .project-budget-fields input { min-width: 0; }
 .pagehead-actions .project-budget-chip { max-width: min(32vw, 130px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-resources { margin: 14px 0; padding: 12px 0; border-top: 1px solid var(--line); }
+.project-resources > summary { cursor: pointer; font-weight: 600; }
+.project-resource-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 10px; margin: 10px 0; align-items: center; }
+.project-resource-fields input { min-width: 0; }
+@media (max-width: 480px) { .project-resource-fields { grid-template-columns: minmax(0, 1fr); } }
 .project-extension-list { display: grid; gap: 12px; margin-top: 12px; }
 .project-extension { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 12px; min-width: 0; }
 .project-extension-head { display: flex; justify-content: space-between; gap: 8px; }

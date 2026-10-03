@@ -81,6 +81,7 @@ from daedalus.extensions import (
     api_projects,
     api_provider_holds,
     api_recurring,
+    api_resource_profiles,
     api_runtime,
     api_skill_quality,
     api_staff,
@@ -90,6 +91,7 @@ from daedalus.extensions import (
     launcher_updates,
 )
 from daedalus.extensions import commands as slash
+from daedalus.extensions.artifact_headers import artifact_headers
 from daedalus.extensions.ci_observations import record_signed_delivery
 from daedalus.extensions.heartbeat import TEMPLATE as HEARTBEAT_TEMPLATE
 from daedalus.extensions.inbound import PAYLOAD_MAX_CHARS, flatten_payload, verify_signature
@@ -1502,6 +1504,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_provider_holds.register(api, app, auth)
     api_knowledge.register(api, app, auth)
     api_recurring.register(api, app, auth)
+    api_resource_profiles.register(api, app, auth)
     api_runtime.register(api, app, auth)
     api_lifecycle.register(api, app, auth)
     api_staff_reports.register(api, app, auth)
@@ -4003,7 +4006,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         mime, location = found
         if location.startswith(("https://", "http://")):
             return RedirectResponse(location, status_code=302, headers=noindex)
-        return FileResponse(location, media_type=mime, content_disposition_type="inline", headers={**noindex, "X-Content-Type-Options": "nosniff"})
+        return FileResponse(location, media_type=mime, content_disposition_type="inline", headers={**noindex, **artifact_headers(mime)})
 
     @api.get("/c/{slug}")
     async def dialog_page(slug: str, request: Request) -> Response:

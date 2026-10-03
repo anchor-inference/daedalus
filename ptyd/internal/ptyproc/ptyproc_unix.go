@@ -43,7 +43,11 @@ func Start(spec Spec) (*Proc, error) {
 	DefaultSignalsForChildren()
 	cmd := &exec.Cmd{Path: spec.Path, Args: spec.Argv, Dir: spec.Dir, Env: spec.Env}
 	size := &pty.Winsize{Cols: uint16(spec.Cols), Rows: uint16(spec.Rows), X: uint16(spec.PxW), Y: uint16(spec.PxH)}
-	master, err := pty.StartWithAttrs(cmd, size, &syscall.SysProcAttr{Setsid: true, Setctty: true})
+	attrs := &syscall.SysProcAttr{Setsid: true, Setctty: true}
+	if err := containmentAttrs(attrs, spec); err != nil {
+		return nil, err
+	}
+	master, err := pty.StartWithAttrs(cmd, size, attrs)
 	if err != nil {
 		return nil, err
 	}

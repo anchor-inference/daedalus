@@ -21,6 +21,9 @@ type Spec struct {
 	// Wrapped is a program started inside bubblewrap: the process the PTY runs is bubblewrap, and
 	// the program is its grandchild in a namespace of its own. See ProgramGroup.
 	Wrapped bool
+	// UseContainment places the child in an already limited cgroup at clone, before its code runs.
+	UseContainment bool
+	ContainmentFD  int
 }
 
 // Exit is how the program ended.

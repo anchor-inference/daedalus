@@ -169,6 +169,7 @@ class SideChannels:
         stdin: bytes | None = None,
         max_output: int | None = None,
         actor: str = "system",
+        resources: dict[str, Any] | None = None,
     ) -> ExecResult:
         """Run a program of the daemon's list in ``env`` (not in a terminal) and return its output.
 
@@ -186,6 +187,9 @@ class SideChannels:
             params["stdin_b64"] = base64.b64encode(stdin).decode()
         if max_output is not None:
             params["max_output"] = max_output
+        if resources is not None:
+            params["resources"] = {"scope": resources["scope"],
+                                   "expected_instance": resources["expected_instance"]}
         detail: dict[str, Any] = {"argv": [a[:200] for a in argv[:32]], "cwd": cwd}
         try:
             result = await self._side_call(env, "exec.run", params, what=f"running {argv[0]}", timeout=timeout + 15)

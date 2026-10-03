@@ -109,6 +109,7 @@ class Entry:
     principal: Principal | None = None
     check_authority: Callable[[], Awaitable[None]] | None = None
     capacity_slot_id: str | None = None
+    resources: dict[str, Any] | None = None
 
     def view(self, position: int) -> dict[str, Any]:
         return {

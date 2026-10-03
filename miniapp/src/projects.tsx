@@ -20,6 +20,7 @@ import { CoordinatorAuthority } from "./project/CoordinatorAuthority";
 import { ProjectKnowledge } from "./project/ProjectKnowledge";
 import { ProjectArchive } from "./project/ProjectArchive";
 import { ProjectBudget, budgetKey } from "./project/ProjectBudget";
+import { ProjectResources, resourceProfileKey } from "./project/ProjectResources";
 
 const PICKED = "daedalus.project";
 
@@ -58,7 +59,7 @@ function savedProjectWrite(projectId: string): ProjectWrite | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(`daedalus.project.write.${projectId}`) ?? "null");
     const suffix = typeof value?.path === "string" && value.path.startsWith(base) ? value.path.slice(base.length) : null;
-    const pathAllowed = suffix === "" || suffix === "/folders" || suffix === "/budget"
+    const pathAllowed = suffix === "" || suffix === "/folders" || suffix === "/budget" || suffix === "/resource-profile"
       || (typeof suffix === "string" && /^\/folders\/[^/]+$/.test(suffix));
     return pathAllowed && ["PATCH", "POST", "DELETE", "PUT"].includes(value.method)
       && typeof value.body?.client_operation_id === "string" && Number.isInteger(value.body?.expected_entity_revision)
@@ -97,7 +98,7 @@ function useProjectWrites(projectId: string, revision: number | undefined, readF
       setConfirmed(intent);
       setConflict(null);
       setRequiredRevision(receipt.entity_revision);
-      if (intent.path === budgetKey(projectId)) invalidate(intent.path);
+      if (intent.path === budgetKey(projectId) || intent.path === resourceProfileKey(projectId)) invalidate(intent.path);
       afterChange(); refresh();
       toast(intent.label);
       (onSuccess ?? completion.current)?.();
@@ -110,7 +111,7 @@ function useProjectWrites(projectId: string, revision: number | undefined, readF
         const currentRevision = error.data.current_revision ?? (detail && typeof detail === "object" ? (detail as Record<string, unknown>).current_revision : null);
         if (Number.isInteger(currentRevision)) setConflict(Number(intent.body.expected_entity_revision));
         completion.current = null;
-        if (intent.path === budgetKey(projectId)) invalidate(intent.path);
+        if (intent.path === budgetKey(projectId) || intent.path === resourceProfileKey(projectId)) invalidate(intent.path);
         refresh();
       } else if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
         remember(null);
@@ -140,6 +141,7 @@ function useProjectWrites(projectId: string, revision: number | undefined, readF
       setRequiredRevision(fresh.entity_revision ?? null);
       setConflict(null);
       invalidate(budgetKey(projectId));
+      invalidate(resourceProfileKey(projectId));
       afterChange(); refresh();
     } catch (error) { toast(errorText(error)); }
     finally { setBusy(false); }
@@ -647,10 +649,11 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
         <span className="sub">{t("project.snapshots.hint.edit")}</span>
       </label>
       <ProjectBudget projectId={project.id} write={writes.write} canWrite={writes.ready} confirmed={writes.confirmed} />
+      <ProjectResources projectId={project.id} write={writes.write} canWrite={writes.ready} />
       <ProjectExtensions projectId={project.id} toast={toast} />
       <ProjectArchive project={project} toast={toast} onChanged={afterChange} readFailed={!!projects.error}
         onOpenRestored={(id) => { rememberProject(id); onClose(); navigate(projectPagePath(id, "team")); }} />
-      <CoordinatorAuthority projectId={project.id} toast={toast} />
+      <CoordinatorAuthority projectId={project.id} toast={toast} onChanged={() => { afterChange(); projects.refresh(); }} />
       <ProjectKnowledge projectId={project.id} toast={toast} />
       <ExecutionHosts toast={toast} />
       <LifecycleCancel kind="project_goal" id={project.id} projectId={project.id} onDone={afterChange} toast={toast} />

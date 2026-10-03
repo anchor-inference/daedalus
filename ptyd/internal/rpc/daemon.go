@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ascorblack/daedalus/ptyd/internal/config"
+	"github.com/ascorblack/daedalus/ptyd/internal/containment"
 	"github.com/ascorblack/daedalus/ptyd/internal/ptyproc"
 	"github.com/ascorblack/daedalus/ptyd/internal/sandbox"
 	"github.com/ascorblack/daedalus/ptyd/internal/shellint"
@@ -26,17 +27,19 @@ import (
 
 // Daemon is the state every method works on.
 type Daemon struct {
-	Config       *config.Config
-	Instance     string // new at every start, so the host can tell a restarted daemon from its predecessor
-	StartedAt    time.Time
-	Registry     *term.Registry
-	Events       *events.Log
-	Log          *slog.Logger
-	EmulatorName string
-	Environ      []string        // the environment spawned processes inherit
-	Side         *Side           // the side channels; nil in builds and tests without them
-	ShellDir     string          // where the shell-integration scripts are installed; "" for none
-	Sandbox      *sandbox.Prober // bubblewrap; nil where the daemon offers no sandbox
+	Config            *config.Config
+	Instance          string // new at every start, so the host can tell a restarted daemon from its predecessor
+	StartedAt         time.Time
+	Registry          *term.Registry
+	Events            *events.Log
+	Log               *slog.Logger
+	EmulatorName      string
+	Environ           []string                // the environment spawned processes inherit
+	Side              *Side                   // the side channels; nil in builds and tests without them
+	ShellDir          string                  // where the shell-integration scripts are installed; "" for none
+	Sandbox           *sandbox.Prober         // bubblewrap; nil where the daemon offers no sandbox
+	Containment       *containment.Controller // cgroup v2, when this daemon has delegated controllers
+	ContainmentReason string
 
 	sampler  *procstat.Sampler
 	statsMu  sync.Mutex
@@ -69,6 +72,10 @@ func (d *Daemon) Register(srv *server.Server) {
 	srv.Handle("terminal.wait_for", d.waitFor)
 	srv.Handle("terminal.commands", d.commands)
 	srv.Handle("terminal.stats", d.stats)
+	srv.Handle("attempt.containment", d.containment)
+	srv.Handle("attempt.preflight", d.preflightContainment)
+	srv.Handle("attempt.kill", d.killAttempt)
+	srv.Handle("attempt.release", d.releaseAttempt)
 	d.registerSide(srv)
 }
 
@@ -119,6 +126,10 @@ func (d *Daemon) info(ctx context.Context, c *server.Conn, params json.RawMessag
 		stats = "unsupported on " + runtime.GOOS
 	}
 	sample := d.sample(nil, time.Second)
+	contained := containment.Status{Kind: "cgroup_v2", Reason: d.ContainmentReason}
+	if d.Containment != nil {
+		contained = d.Containment.Probe()
+	}
 	return map[string]any{
 		"version":    version.Version,
 		"protocol":   version.Protocol,
@@ -137,6 +148,7 @@ func (d *Daemon) info(ctx context.Context, c *server.Conn, params json.RawMessag
 			"shell_integration": d.integrations(),
 			"emulator":          d.EmulatorName,
 			"stats":             stats,
+			"containment":       contained,
 		},
 		"hooks":         d.hooksInfo(),
 		"side_channels": d.sideInfo(),

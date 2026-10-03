@@ -113,6 +113,34 @@ func TestWrapLeavesUnsuitableFoldersReadOnly(t *testing.T) {
 	}
 }
 
+func TestStrictWrapRejectsWritableSymlinkParents(t *testing.T) {
+	base := t.TempDir()
+	base, _ = filepath.EvalSymlinks(base)
+	dir := filepath.Join(base, "real", "project")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(base, "alias")
+	if err := os.Symlink(filepath.Join(base, "real"), alias); err != nil {
+		t.Fatal(err)
+	}
+	throughParent := filepath.Join(alias, "project")
+	plan, err := Wrap(Options{Bwrap: "bwrap", Argv: []string{"/bin/sh"}, Cwd: dir,
+		Writable: []string{throughParent, dir}, Strict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(plan.Writable, []string{dir}) || len(plan.Skipped) != 1 ||
+		plan.Skipped[0].Path != throughParent || plan.Skipped[0].Reason != "a symbolic link" {
+		t.Fatalf("a parent symlink was writable: %+v", plan)
+	}
+	_, err = Wrap(Options{Bwrap: "bwrap", Argv: []string{"/bin/sh"}, Cwd: dir,
+		Rebind: []Bind{{Path: throughParent, Writable: true}}, Strict: true})
+	if err == nil {
+		t.Fatal("a writable daemon rebind through a parent symlink was accepted")
+	}
+}
+
 func TestWrapWorkingDirectory(t *testing.T) {
 	base := t.TempDir()
 	base, _ = filepath.EvalSymlinks(base)

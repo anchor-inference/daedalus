@@ -271,6 +271,8 @@ export function stepOption(key: string, index: number, count: number): number | 
 }
 
 /** Ctrl+Enter, or ⌘+Enter on a Mac: Send. */
-export function isSendKey(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">): boolean {
+export function isSendKey(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "isComposing" | "keyCode">): boolean {
+  // An IME uses Enter to finish a character; it must not send the whole answer batch.
+  if (e.isComposing || e.keyCode === 229) return false;
   return e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.altKey;
 }

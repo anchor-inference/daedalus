@@ -125,6 +125,8 @@ class StartRequest:
     """The staff message the first message is recorded as, so its receipt can be reported."""
     allow_rules: tuple[str, ...] = ()
     """The operator's standing grants to the member, as the CLI's allow rules, for a CLI that keeps them."""
+    resources: dict[str, Any] | None = None
+    """An exact host-owned resource binding; the runtime pins its launch before spawning."""
 
 
 @dataclass(frozen=True, slots=True)

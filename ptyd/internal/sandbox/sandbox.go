@@ -46,6 +46,7 @@ type Options struct {
 	Writable []string // folders the program may write, as the host sent them
 	Mask     []string // directories to hide behind an empty tmpfs: the daemon's run and state
 	Rebind   []Bind   // paths under a mask that are bound back
+	Strict   bool     // refuse writable paths through symlinks for a kernel-isolated attempt
 }
 
 // Skip is a writable folder left read-only, and why. The program still starts: one folder that
@@ -105,7 +106,7 @@ func Wrap(o Options) (Plan, error) {
 	plan := Plan{}
 	seen := map[string]bool{}
 	for _, raw := range o.Writable {
-		path, reason := checkWritable(raw, masks)
+		path, reason := checkWritable(raw, masks, o.Strict)
 		if reason != "" {
 			plan.Skipped = append(plan.Skipped, Skip{Path: raw, Reason: reason})
 			continue
@@ -134,6 +135,11 @@ func Wrap(o Options) (Plan, error) {
 		if _, err := os.Stat(b.Path); err != nil {
 			continue
 		}
+		if o.Strict && b.Writable {
+			if _, reason := checkWritable(b.Path, nil, true); reason != "" {
+				return Plan{}, fmt.Errorf("sandbox: strict writable rebind: %s", reason)
+			}
+		}
 		flag := "--ro-bind"
 		if b.Writable {
 			flag = "--bind"
@@ -146,7 +152,7 @@ func Wrap(o Options) (Plan, error) {
 }
 
 // checkWritable returns the folder to bind, or why it is left read-only.
-func checkWritable(raw string, masks []string) (string, string) {
+func checkWritable(raw string, masks []string, strict bool) (string, string) {
 	if !filepath.IsAbs(raw) {
 		return "", "not an absolute path"
 	}
@@ -163,6 +169,25 @@ func checkWritable(raw string, masks []string) (string, string) {
 		if within(path, m) {
 			return "", "inside the terminal daemon's own directories"
 		}
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", "missing"
+	}
+	for _, sys := range []string{"/proc", "/dev", "/sys"} {
+		if within(resolved, sys) {
+			return "", "a system directory"
+		}
+	}
+	for _, m := range masks {
+		if within(resolved, m) {
+			return "", "inside the terminal daemon's own directories"
+		}
+	}
+	// A strict cgroup boundary cannot rely on a path that can be redirected between this check
+	// and bubblewrap's bind mount. A parent symlink is as dangerous as a final symlink.
+	if strict && resolved != path {
+		return "", "a symbolic link"
 	}
 	// A bind needs a real directory at both ends: a symlink or a file makes bubblewrap refuse the
 	// whole command. A symlink is also how a folder would be pointed somewhere it was not approved.

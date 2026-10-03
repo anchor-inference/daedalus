@@ -27,7 +27,7 @@ from daedalus.extensions.watches import WatchRefused
 from daedalus.host import prompts
 from daedalus.host.peek import LocalFolderAccess, PeekRefused
 from daedalus.staff_runtime import LiveSession
-from daedalus.stores.control import ControlDenied, ControlStore, Entity, Principal, Scope
+from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.files import HANDOVER_MAX_FILES, MAIN, FileRefused, human_size, parse_handle
 from daedalus.stores.projects import (
     BRIEF_SECTIONS,
@@ -917,13 +917,30 @@ async def project_report(orch: Orchestrators, project: Project, session_id: str,
 # -- its own alarms -------------------------------------------------------------------------------
 
 
-async def wake_me(orch: Orchestrators, project: Project, session_id: str, *, note: str, at: str | None = None, in_minutes: int | None = None, cron: str | None = None) -> str:
+async def wake_me(orch: Orchestrators, project: Project, session_id: str, *, note: str, at: str | None = None,
+                  in_minutes: int | None = None, cron: str | None = None,
+                  client_operation_id: str) -> str:
+    principal = None
+    if cron is None:
+        authority = orch.app.extensions.get("board_tool_authority")
+        if authority is not None:
+            try:
+                candidate, scope = await authority(session_id, "schedule.propose")
+                if scope == Scope("project", project.id):
+                    principal = candidate
+            except ControlDenied:
+                pass
     try:
-        wakeup = await wakeups.set_wakeup(orch.app, project, note=note, at=at, in_minutes=in_minutes, cron=cron, by_session=session_id)
-    except wakeups.WakeupRefused as exc:
+        wakeup = await wakeups.set_wakeup(orch.app, project, note=note, at=at, in_minutes=in_minutes,
+                                         cron=cron, by_session=session_id, principal=principal,
+                                         client_operation_id=client_operation_id)
+    except (wakeups.WakeupRefused, ControlDenied, ControlConflict) as exc:
         raise Refused(str(exc)) from exc
     await orch._changed(project.id, "wakeups", "orchestrator")
-    return f"wake-up saved: {wakeups.describe(wakeup)}. It can fire only after the operator approves the standing schedule in the app."
+    approval = ("It can fire under the current coordinator approval."
+                if wakeup["authority_state"] == "current" else
+                "It can fire only after the operator approves the standing schedule in the app.")
+    return f"wake-up saved: {wakeups.describe(wakeup)}. {approval}"
 
 
 def _watches(orch: Orchestrators) -> Any:
@@ -975,11 +992,30 @@ async def unwatch(orch: Orchestrators, project: Project, session_id: str, *, id:
             client_operation_id=client_operation_id,
         )
         return f"watch {ref} removed"
-    try:
-        removed = await wakeups.cancel(orch.app, project.id, ref, by_session=session_id)
-    except wakeups.WakeupRefused as exc:
-        raise Refused(str(exc)) from exc
-    if removed:
+    wake = await orch.manager.db.fetchone(
+        "SELECT id,schedule_revision,actor_id,target_session FROM schedules"
+        " WHERE id = ? AND kind = 'wake' AND project_id = ? AND deleted_at IS NULL",
+        (ref, project.id),
+    )
+    if wake is not None:
+        authority = orch.app.extensions.get("board_tool_authority")
+        if authority is None:
+            raise Refused("wake-up authority is unavailable")
+        try:
+            principal, scope = await authority(session_id, "schedule.cancel")
+            if scope != Scope("project", project.id):
+                raise ControlDenied("wake-up authority belongs to another project")
+            revision = await ControlStore(orch.manager.db).revision(scope, Entity("collection", project.id))
+            await orch.app.extensions["recurring"].cancel_internal_wake(
+                principal, project_id=project.id, session_id=session_id, schedule_id=ref,
+                expected_collection_revision=revision,
+                expected_schedule_revision=wake["schedule_revision"],
+                client_operation_id=client_operation_id,
+            )
+        except ControlDenied as exc:
+            raise Refused("this wake-up needs operator approval for the current coordinator") from exc
+        except ControlConflict as exc:
+            raise Refused(str(exc)) from exc
         await orch._changed(project.id, "wakeups", "orchestrator")
         return f"wake-up {ref} cancelled"
     raise Refused(f"{project.name} has no wake-up or watch {ref!r}; the state block lists them with their ids")

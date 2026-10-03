@@ -22,6 +22,8 @@ AUTHORITY_BUNDLES = {
     "review": {"operations": list(REVIEW_OPERATIONS), "effects": [], "scope_kind": "project"},
     "watch": {"operations": ["watch.create", "watch.change", "watch.remove", "watch.deliver"],
                 "effects": ["watch.wake", "watch.tell", "watch.notify"], "scope_kind": "project"},
+    "wake_internal": {"operations": ["schedule.propose", "schedule.cancel", "schedule.fire"],
+                      "effects": ["schedule.wake"], "scope_kind": "project"},
 }
 
 

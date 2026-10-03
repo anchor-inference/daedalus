@@ -55,6 +55,8 @@ class TerminalSpec:
     created_by: str = "operator"
     """``operator`` or ``agent:<actor>``. An agent's launch waits for a place under the cap; the
     operator's goes past it once confirmed."""
+    resources: dict[str, Any] | None = None
+    """An exact host-approved attempt scope and immutable ceilings; the daemon chooses the handle."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +71,7 @@ class EnvStatus:
     sandbox: str = ""
     """``ok`` when the environment's daemon can run a terminal in the sandbox; otherwise why not, in
     the daemon's words; empty while the environment is unavailable."""
+    containment: dict[str, Any] = field(default_factory=dict)
     shell: str = ""
     home: str = ""
     port_range: str = ""
@@ -90,6 +93,7 @@ class EnvStatus:
             "detail": self.detail,
             "version": self.version,
             "sandbox": self.sandbox,
+            "containment": self.containment,
             "shell": self.shell,
             "home": self.home,
             "port_range": self.port_range,

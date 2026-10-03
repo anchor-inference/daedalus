@@ -16,6 +16,7 @@ import { PageHeader, useMedia } from "../shell";
 import { invalidate, useOffline, useQuery } from "../store";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { LifecycleCancel } from "../project/LifecycleCancel";
+import { waitKey } from "../project/focus";
 import { ReviewPanel } from "./ReviewPanel";
 import { ResultFlow } from "./ResultFlow";
 import { TaskWorkflow } from "./TaskWorkflow";
@@ -34,6 +35,7 @@ import {
   NeedsYou,
   ProjectBoardData,
   ProjectTask,
+  LaunchEffect,
   Requirement,
   TaskStatus,
   acceptanceChip,
@@ -45,6 +47,7 @@ import {
   deliveryState,
   emptyBrief,
   hasAcceptance,
+  launchFeedback,
   missingBrief,
   requirementSource,
   sections,
@@ -477,10 +480,11 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
   const [stopEffectId, setStopEffectId] = useState<string | null>(null);
   const stopEffect = useQuery<{ state: string }>(stopEffectId ? `/api/control/effects/${encodeURIComponent(stopEffectId)}` : null, { pollMs: 5000, staleMs: 0 });
   const [launchEffectId, setLaunchEffectId] = useState<string | null>(() => task ? storedLaunchEffect(task.id) : null);
-  const launchEffect = useQuery<{ state: string }>(launchEffectId ? `/api/control/effects/${encodeURIComponent(launchEffectId)}` : null, { pollMs: 5000, staleMs: 0 });
+  const launchEffect = useQuery<LaunchEffect>(launchEffectId ? `/api/control/effects/${encodeURIComponent(launchEffectId)}` : null, { pollMs: 5000, staleMs: 0 });
   useEffect(() => { setLaunchEffectId(task ? storedLaunchEffect(task.id) : null); }, [task?.id]);
   const writeBlocked = offline || (!!task && !Number.isInteger(task.entity_revision));
-  const launchPending = !!launchEffectId && (!!launchEffect.error || !launchEffect.data || ["pending", "claimed", "unknown"].includes(launchEffect.data.state));
+  const launchStatus = launchFeedback(launchEffect.data, !!launchEffect.error);
+  const launchPending = !!launchEffectId && launchStatus.blocked;
 
   // Only tasks still open can be waited for; a dependency already listed stays offered so it can be removed.
   const candidates = data.tasks.filter((other) => other.id !== task?.id && ((other.status !== "done" && other.status !== "dropped") || deps.includes(other.id)));
@@ -782,8 +786,12 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
         </div>
       )}
       {task && launchEffectId && <div className="result-warning" role="status">
-        {t(launchEffect.error || !launchEffect.data ? "pboard.launch.unconfirmed" : launchEffect.data.state === "completed" ? "pboard.launch.dispatched" : launchEffect.data.state === "pending" || launchEffect.data.state === "claimed" ? "pboard.launch.pending" : "pboard.launch.unconfirmed")}
-        <button type="button" className="linkbtn" onClick={() => launchEffect.refresh()}>{t("common.retry")}</button>
+        {t(launchStatus.key)}
+        {launchStatus.wait && <div>{t(waitKey(launchStatus.wait))}</div>}
+        {launchStatus.detail && <div className="sub">{launchStatus.detail}</div>}
+        {launchStatus.blocked && launchStatus.key === "pboard.launch.unconfirmed" && <div className="sub">{t("pboard.launch.inspectFirst")}</div>}
+        {launchStatus.key === "pboard.launch.deliveryFailed" && <div className="sub">{t("pboard.launch.repairFirst")}</div>}
+        <button type="button" className="linkbtn" onClick={() => launchEffect.refresh()}>{t("pboard.launch.refresh")}</button>
       </div>}
 
       <label className="field">{t("pboard.depends")}</label>

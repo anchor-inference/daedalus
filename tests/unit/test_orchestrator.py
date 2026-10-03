@@ -29,6 +29,7 @@ from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.session_runner import SessionManager
 from daedalus.staff_runtime import ReadPage
 from daedalus.stores.control import ControlStore, Entity, Principal, Scope
+from daedalus.stores.coordinator_handoff_schema import MIGRATION as COORDINATOR_HANDOFF_MIGRATION
 from daedalus.stores.database import Database
 from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.projects import Project, ProjectError
@@ -99,6 +100,8 @@ class Rig:
 
 
 async def rig(settings: Settings, db: Database, tmp_path: Path, script: list[dict[str, Any]] | None = None) -> Rig:
+    if await db.fetchone("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'coordinator_handoffs'") is None:
+        await db.conn.executescript(COORDINATOR_HANDOFF_MIGRATION)
     provider = ScriptedProvider(script or [])
     manager = await _manager(settings, db, provider)
     # An orchestrator always runs a preset, so the scripted model answers for any of them.
@@ -111,6 +114,12 @@ async def rig(settings: Settings, db: Database, tmp_path: Path, script: list[dic
     install_authority(app)
     manager.service_hooks["board"] = board.service
     orch = Orchestrators(app)
+    app._config_lock = asyncio.Lock()
+
+    async def listed(_base_url: str, _api_key: str | None) -> dict[str, Any]:
+        return {"base_url": "http://127.0.0.1:1/v1", "models": [preset.model for preset in manager.config.presets.values()]}
+
+    orch.catalogue_lookup = listed
     app.extensions["orchestrator"] = orch
     orch.attach()
     repo = repository(tmp_path)
@@ -641,11 +650,21 @@ async def test_the_orchestrator_routes_and_the_model_chip(settings: Settings, db
             chip = await client.post(f"/api/sessions/{sid}/model", json={"preset": FALLBACK_PRESET}, headers=headers)
             assert chip.status_code == 200
             assert (await r.refreshed()).settings.orchestrator.model == FALLBACK_PRESET
-            replaced = await client.post(f"{base}/orchestrator/replace", json={"reason": "fresh start"}, headers=headers)
+            before_replace = await r.refreshed()
+            replaced = await client.post(f"{base}/orchestrator/replace", json={
+                "reason": "fresh start", "client_operation_id": "route-replacement",
+                "expected_entity_revision": before_replace.entity_revision,
+                "expected_coordinator_session_id": sid,
+            }, headers=headers)
             assert replaced.status_code == 200 and replaced.json()["session_id"] not in ("", sid)
             off = await client.delete(f"{base}/orchestrator", headers=headers)
             assert off.status_code == 200 and off.json()["enabled"] is False and off.json()["session_id"] == ""
-            assert (await client.post(f"{base}/orchestrator/replace", json={}, headers=headers)).status_code == 409
+            disabled = await r.refreshed()
+            assert (await client.post(f"{base}/orchestrator/replace", json={
+                "reason": "after disable", "client_operation_id": "route-disabled",
+                "expected_entity_revision": disabled.entity_revision,
+                "expected_coordinator_session_id": replaced.json()["session_id"],
+            }, headers=headers)).status_code == 409
             settings_view = await client.get("/api/settings", headers=headers)
             assert settings_view.status_code == 200
             assert settings_view.json()["orchestrator"]["strongest"] == DEFAULT_PRESET

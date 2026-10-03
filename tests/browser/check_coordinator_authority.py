@@ -30,8 +30,8 @@ RIGHTS = {
     "watch": {"scope_kind": "project", "operations": ["watch.create", "watch.change", "watch.remove", "watch.deliver"], "effects": ["watch.wake", "watch.tell", "watch.notify"]},
 }
 WORDS = {
-    "en": {"projects": "Projects", "settings": "Settings for Bakery", "title": "Coordinator permissions", "add": "Approve an action", "watch": "Manage project watches", "approve": "Approve", "retry": "Retry original request", "withdraw": "Withdraw approval", "reason": "Reason for withdrawal", "active": "Active approvals: 1", "wake": "may wake the coordinator"},
-    "ru": {"projects": "Проекты", "settings": "Настройки: Bakery", "title": "Полномочия координатора", "add": "Разрешить действие", "watch": "Управлять наблюдениями проекта", "approve": "Разрешить", "retry": "Повторить исходный запрос", "withdraw": "Отозвать разрешение", "reason": "Причина отзыва", "active": "Действующих разрешений: 1", "wake": "могут будить координатора"},
+    "en": {"projects": "Projects", "settings": "Settings for Bakery", "title": "Coordinator permissions", "add": "Approve an action", "watch": "Manage project watches", "approve": "Approve", "retry": "Retry original request", "withdraw": "Withdraw approval", "reason": "Reason for withdrawal", "active": "Active approvals: 1", "wake": "may wake the coordinator", "handoff": "Replace coordinator", "handoffAction": "Check and replace", "handoffRetry": "Retry request", "handoffReason": "Reason or context (optional)", "handoffDone": "Office transferred; old-session retirement requested"},
+    "ru": {"projects": "Проекты", "settings": "Настройки: Bakery", "title": "Полномочия координатора", "add": "Разрешить действие", "watch": "Управлять наблюдениями проекта", "approve": "Разрешить", "retry": "Повторить исходный запрос", "withdraw": "Отозвать разрешение", "reason": "Причина отзыва", "active": "Действующих разрешений: 1", "wake": "могут будить координатора", "handoff": "Заменить координатора", "handoffAction": "Проверить и заменить", "handoffRetry": "Повторить запрос", "handoffReason": "Причина или контекст (необязательно)", "handoffDone": "Проект передан; завершение прежней сессии запрошено"},
 }
 
 
@@ -42,7 +42,7 @@ def run() -> int:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(executable_path=CHROMIUM)
         for language in ("en", "ru"):
-            for width, height, mobile in ((390, 844, True), (1440, 900, False)):
+            for width, height, mobile in ((320, 560, True), (390, 844, True), (1440, 900, False)):
                 context = browser.new_context(viewport={"width": width, "height": height}, is_mobile=mobile, has_touch=mobile)
                 page = context.new_page()
                 page.set_default_timeout(6000)
@@ -61,7 +61,9 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
     words = WORDS[language]
     project = copy.deepcopy(PROJECT)
     max_expiry = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
-    state: dict[str, object] = {"revision": 1, "grant": None, "lost": True, "approvals": [], "withdrawals": []}
+    state: dict[str, object] = {"revision": 1, "grant": None, "lost": True, "approvals": [], "withdrawals": [],
+                                "handoff": None, "handoff_lost": True, "handoff_commands": [], "handoff_receipt": None,
+                                "office": "coordinator-session"}
     base = "/api/projects/p1/orchestrator/authority"
 
     def answer(route, body: object, status: int = 200) -> None:  # type: ignore[no-untyped-def]
@@ -87,7 +89,7 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
             return answer(route, {"project": {"id": "p1", "name": "Bakery"}, "tasks": [], "staff": [], "needs_you": [], "counts": {}})
         if path == base and method == "GET":
             return answer(route, {"project_id": "p1", "entity_revision": state["revision"],
-                "current_coordinator_session_id": "coordinator-session", "readiness_blockers": [],
+                "current_coordinator_session_id": state["office"], "readiness_blockers": [],
                 "available_bundles": [{"id": key, **rule, "max_expires_at": max_expiry, "blockers": []} for key, rule in RIGHTS.items()],
                 "grants": [state["grant"]] if state["grant"] else []})
         if path == base and method == "POST":
@@ -120,6 +122,27 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
             grant["state"] = "revoked"
             state["revision"] = 3
             return answer(route, {"grant_id": "grant-1", "receipt_id": "receipt-withdrawal", "entity_revision": 3})
+        if path == "/api/projects/p1/orchestrator/replace" and method == "GET":
+            return answer(route, {"handoff": state["handoff"]})
+        if path == "/api/projects/p1/orchestrator/replace" and method == "POST":
+            assert isinstance(body, dict)
+            assert set(body) == {"reason", "client_operation_id", "expected_entity_revision", "expected_coordinator_session_id"}
+            commands = state["handoff_commands"]
+            assert isinstance(commands, list)
+            commands.append(body)
+            assert body["expected_entity_revision"] == 3 and body["expected_coordinator_session_id"] == "coordinator-session"
+            if state["handoff_receipt"] is None:
+                state["revision"] = 4
+                state["office"] = "coordinator-next"
+                state["handoff"] = {"handoff_id": "handoff-1", "state": "completed", "blocker": None,
+                                     "old_active": False, "new_active": True, "receipt_id": "receipt-handoff"}
+                state["handoff_receipt"] = {"handoff_id": "handoff-1", "state": "retirement_pending",
+                                            "receipt_id": "receipt-handoff", "session_id": "coordinator-next", "entity_revision": 4}
+            if state["handoff_lost"]:
+                state["handoff_lost"] = False
+                return answer(route, {"detail": "response lost"}, 503)
+            return answer(route, state["handoff_receipt"] if commands[0] == body else {"detail": "intent changed"},
+                          200 if commands[0] == body else 409)
         if path == "/api/settings" and method == "GET":
             return answer(route, {"presets": {}, "model": {}})
         if path == "/api/project-directories" and method == "GET":
@@ -164,6 +187,21 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
     section.get_by_text("Earlier approvals (1)" if language == "en" else "Прежние разрешения (1)").click()
     expect(section.get_by_text("withdrawn" if language == "en" else "отозвано", exact=False)).to_be_visible()
     assert len(state["withdrawals"]) == 1
+    handoff = section.locator("details.sheet-section", has=page.get_by_text(words["handoff"])).last
+    handoff.locator("summary").first.click()
+    handoff.get_by_label(words["handoffReason"]).fill("Fresh context")
+    handoff.get_by_role("button", name=words["handoffAction"]).click()
+    page.locator(".dialog[role='alertdialog']").get_by_role("button", name=words["handoffAction"]).click()
+    expect(handoff.get_by_role("button", name=words["handoffRetry"])).to_be_visible()
+    page.reload()
+    section = open_authority()
+    handoff = section.locator("details.sheet-section", has=page.get_by_text(words["handoff"])).last
+    handoff.locator("summary").first.click()
+    expect(handoff.get_by_label(words["handoffReason"])).to_have_value("Fresh context")
+    handoff.get_by_role("button", name=words["handoffRetry"]).click()
+    expect(handoff.get_by_text(words["handoffDone"], exact=False)).to_be_visible()
+    commands = state["handoff_commands"]
+    assert isinstance(commands, list) and len(commands) == 2 and commands[0] == commands[1]
     overflow = page.evaluate("() => { const s = document.querySelector('.sheet'); return [document.documentElement.scrollWidth - innerWidth, s ? s.scrollWidth - s.clientWidth : 0]; }")
     assert overflow[0] <= 0 and overflow[1] <= 1, overflow
 

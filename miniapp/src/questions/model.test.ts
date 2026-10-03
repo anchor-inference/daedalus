@@ -184,11 +184,15 @@ describe("the list", () => {
     expect(stepOption("ArrowUp", 0, 3)).toBe(2);
     expect(stepOption("End", 0, 3)).toBe(2);
     expect(stepOption("a", 0, 3)).toBeNull();
-    const key = (over: Partial<KeyboardEvent>) => ({ key: "Enter", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...over });
+    const key = (over: Partial<KeyboardEvent>) => ({ key: "Enter", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, isComposing: false, keyCode: 0, ...over });
     expect(isSendKey(key({ ctrlKey: true }))).toBe(true);
     expect(isSendKey(key({ metaKey: true }))).toBe(true);
     expect(isSendKey(key({}))).toBe(false);
     expect(isSendKey(key({ ctrlKey: true, altKey: true }))).toBe(false);
+    expect(isSendKey(key({ ctrlKey: true, isComposing: true }))).toBe(false);
+    expect(isSendKey(key({ metaKey: true, isComposing: true }))).toBe(false);
+    expect(isSendKey(key({ ctrlKey: true, keyCode: 229 }))).toBe(false);
+    expect(isSendKey(key({ metaKey: true, keyCode: 229 }))).toBe(false);
   });
 });
 

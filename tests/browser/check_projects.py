@@ -30,6 +30,16 @@ def run() -> int:
     authority_requests: list[dict] = []
     authority_receipts: dict[str, tuple[dict, dict]] = {}
     authority_unknown = [1]
+    current_coordinator = ["coordinator-current"]
+    handoff_status: list[dict | None] = [None]
+    handoff_requests: list[dict] = []
+    handoff_receipts: dict[str, tuple[dict, dict]] = {}
+    handoff_unknown = [1]
+    resource_profile = {"configured": False, "project_id": "p1", "entity_revision": 1,
+                        "profile_revision": None, "state": "disabled", "limits": None,
+                        "disk_quota_supported": False}
+    resource_attempts: list[dict] = []
+    resource_receipts: dict[str, tuple[dict, dict]] = {}
     host_list_failure = [False]
     host_list_item = [False]
     unhandled = Unhandled()
@@ -45,7 +55,7 @@ def run() -> int:
         if path == "/api/projects" and request.method == "POST":
             payload = request.post_data_json
             created.append(payload)
-            project = {"id": f"p{len(projects) + 1}", "name": payload["name"], "folders": folders((payload.get("folders") or [{"path": f"/managed/p{len(projects) + 1}"}])[0]["path"]), "created_at": "2026-09-19T00:00:00Z", "settings": {"snapshots": True, "system": ""}, "system": "", "sessions": []}
+            project = {"id": f"p{len(projects) + 1}", "name": payload["name"], "entity_revision": 1, "folders": folders((payload.get("folders") or [{"path": f"/managed/p{len(projects) + 1}"}])[0]["path"]), "created_at": "2026-09-19T00:00:00Z", "settings": {"snapshots": True, "system": ""}, "system": "", "sessions": []}
             projects.append(project)
             return answer(route, project)
         if path == "/api/projects":
@@ -93,6 +103,31 @@ def run() -> int:
             return answer(route, {"tasks": [{"id": "t-owned", "title": "Owned task"}]})
         if path == "/api/control/revisions" and request.method == "GET":
             return answer(route, {"scope": {"kind": "global", "id": "global"}, "collection_revision": 1, "entity_revision": None})
+        if path == "/api/admission/resources" and request.method == "GET":
+            unavailable = {"available": False, "reason": "cpu controller is not delegated"}
+            return answer(route, {"container": unavailable, "host": unavailable,
+                                  "native": {"available": False, "reason": "in-process runtime"},
+                                  "disk_quota_supported": False})
+        if path == "/api/projects/p1/resource-profile" and request.method == "GET":
+            return answer(route, resource_profile)
+        if path == "/api/projects/p1/resource-profile" and request.method == "PUT":
+            payload = request.post_data_json
+            resource_attempts.append(payload)
+            key = payload["client_operation_id"]
+            if key in resource_receipts:
+                original, receipt = resource_receipts[key]
+                return answer(route, receipt if original == payload else {"detail": "intent changed"},
+                              status=200 if original == payload else 409)
+            if payload["expected_entity_revision"] != projects[0]["entity_revision"]:
+                return answer(route, {"detail": "project changed", "current_revision": projects[0]["entity_revision"]}, status=409)
+            projects[0]["entity_revision"] += 1
+            resource_profile.update({"configured": True, "entity_revision": projects[0]["entity_revision"],
+                                     "profile_revision": 1, "state": payload["state"],
+                                     "limits": {key: payload[key] for key in ("memory_bytes", "cpu_millis", "process_count", "disk_bytes")}})
+            receipt = {"receipt_id": f"resource-{key}", "entity_revision": projects[0]["entity_revision"],
+                       "profile_revision": 1, "state": payload["state"], "limits": resource_profile["limits"]}
+            resource_receipts[key] = payload, receipt
+            return answer(route, {"detail": "response lost"}, status=503)
         if path == "/api/projects/p1/workspace-archive" and request.method == "GET":
             return answer(route, {"latest": None, "available": False})
         if path == "/api/projects/p1/orchestrator/authority" and request.method == "GET":
@@ -107,8 +142,32 @@ def run() -> int:
                     ("watch", "project", ["watch.create", "watch.change", "watch.remove", "watch.deliver"], ["watch.wake", "watch.tell", "watch.notify"]),
                 )
             ]
-            return answer(route, {"project_id": "p1", "entity_revision": authority_revision[0], "current_coordinator_session_id": "coordinator-current",
+            return answer(route, {"project_id": "p1", "entity_revision": authority_revision[0], "current_coordinator_session_id": current_coordinator[0],
                                   "available_bundles": bundles, "grants": authority_grants, "readiness_blockers": []})
+        if path == "/api/projects/p1/orchestrator/replace" and request.method == "GET":
+            return answer(route, {"handoff": handoff_status[0]})
+        if path == "/api/projects/p1/orchestrator/replace" and request.method == "POST":
+            payload = request.post_data_json
+            handoff_requests.append(payload)
+            key = payload["client_operation_id"]
+            if key in handoff_receipts:
+                original, receipt = handoff_receipts[key]
+                return answer(route, receipt if original == payload else {"detail": "intent changed"}, status=200 if original == payload else 409)
+            if (payload["expected_entity_revision"] != authority_revision[0]
+                    or payload["expected_coordinator_session_id"] != current_coordinator[0]):
+                return answer(route, {"detail": "coordinator changed"}, status=409)
+            authority_revision[0] += 1
+            current_coordinator[0] = "coordinator-next"
+            handoff_status[0] = {"handoff_id": "handoff-1", "state": "completed", "blocker": None,
+                                 "old_active": False, "new_active": True, "receipt_id": "handoff-receipt"}
+            receipt = {"handoff_id": "handoff-1", "state": "retirement_pending", "old_active": False,
+                       "receipt_id": "handoff-receipt", "session_id": current_coordinator[0],
+                       "entity_revision": authority_revision[0]}
+            handoff_receipts[key] = payload, receipt
+            if handoff_unknown[0]:
+                handoff_unknown[0] -= 1
+                return answer(route, {"detail": "unconfirmed response"}, status=503)
+            return answer(route, receipt)
         if path == "/api/projects/p1/orchestrator/authority" and request.method == "POST":
             payload = request.post_data_json
             authority_requests.append(payload)
@@ -205,6 +264,27 @@ def run() -> int:
         assert created[1] == {"name": "Existing", "folders": [{"path": "/work/existing"}]}, created[1]
         page.locator(".project-chip").click()
         page.locator(".project-row", has_text="Plain").get_by_role("button", name="Settings for Plain").click()
+        resources = page.locator("details.project-resources")
+        expect(resources).to_be_visible()
+        resources.locator("summary").click()
+        expect(resources).to_contain_text("Enable strict limits")
+        resources.get_by_role("checkbox").check()
+        expect(resources).to_contain_text("cpu controller is not delegated")
+        expect(resources).to_contain_text("hard disk-space quota is unavailable")
+        resources.locator("#resource-memory-p1").fill("512")
+        resources.locator("#resource-cpu-p1").fill("1000")
+        resources.locator("#resource-processes-p1").fill("64")
+        for width in (320, 390, 1440):
+            page.set_viewport_size({"width": width, "height": 900})
+            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), f"resource settings overflow {width}px"
+        resources.get_by_role("button", name="Save resource limits").click()
+        expect(page.locator(".result-warning")).to_contain_text("Retry original request")
+        assert resource_attempts[0]["expected_entity_revision"] == 1
+        assert resource_attempts[0]["memory_bytes"] == 512 * 1048576
+        assert resource_attempts[0]["cpu_millis"] == 1000 and resource_attempts[0]["process_count"] == 64
+        page.get_by_role("button", name="Retry original request").click()
+        expect(resources.locator("summary")).to_contain_text("512 MiB", timeout=5000)
+        assert resource_attempts[1] == resource_attempts[0], "uncertain resource write did not replay the exact request"
         extensions = page.locator(".project-extensions")
         expect(extensions).to_be_visible()
         hosts = page.locator(".project-runtime-hosts")
@@ -234,7 +314,7 @@ def run() -> int:
         expect(lifecycle).to_contain_text("Stop requested")
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "lifecycle settings overflow the phone"
         page.set_viewport_size({"width": 1440, "height": 900})
-        expect(extensions.locator(".project-extension")).to_have_count(0)
+        expect(extensions.locator("article.project-extension")).to_have_count(0)
         extensions.locator("summary").first.click()
         expect(extensions.locator("article.project-extension")).to_have_count(1)
         expect(extensions.locator("details.project-extension")).to_have_count(1)
@@ -278,6 +358,23 @@ def run() -> int:
         expect(authority).to_contain_text("Active approvals: 2", timeout=5000)
         assert authority_requests[-1]["bundle_id"] == "watch" and authority_requests[-1]["task_id"] is None
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "authority controls overflow the phone"
+        handoff = authority.locator("details.sheet-section", has_text="Replace coordinator")
+        handoff.locator("summary").first.click()
+        handoff.locator("textarea").fill("Refresh the coordinator context")
+        handoff.get_by_role("button", name="Check and replace").click()
+        expect(page.locator(".sheet-backdrop.confirm .dialog")).to_contain_text("model catalogue")
+        page.locator(".sheet-backdrop.confirm .dialog button").last.click()
+        expect(handoff).to_contain_text("unknown", timeout=5000)
+        assert handoff_requests[0]["expected_coordinator_session_id"] == "coordinator-current"
+        authority.locator("summary").first.click()
+        authority.locator("summary").first.click()
+        handoff = authority.locator("details.sheet-section", has_text="Replace coordinator")
+        handoff.locator("summary").first.click()
+        expect(handoff.locator("textarea")).to_have_value("Refresh the coordinator context")
+        handoff.get_by_role("button", name="Retry request").click()
+        expect(handoff).to_contain_text("Office transferred; old-session retirement requested", timeout=5000)
+        assert handoff_requests[1] == handoff_requests[0], "uncertain replacement did not replay the exact command"
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "handoff controls overflow the phone"
         host_list_item[0] = True
         hosts = page.locator("details.project-runtime-hosts")
         hosts.locator("summary").first.click()

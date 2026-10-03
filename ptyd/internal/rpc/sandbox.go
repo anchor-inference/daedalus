@@ -42,7 +42,7 @@ func (d *Daemon) sandboxStatus() string {
 // paths of the daemon's state directory it needs, because the sandbox hides the rest of it: the
 // shell-integration scripts read-only, and for a launch its overlay files and the hook command
 // read-only and its dial directory writable.
-func (d *Daemon) wrapSandbox(ctx context.Context, p *sandboxParams, path string, argv []string, cwd, launchID string) (sandbox.Plan, error) {
+func (d *Daemon) wrapSandbox(ctx context.Context, p *sandboxParams, path string, argv []string, cwd, launchID string, strict bool) (sandbox.Plan, error) {
 	if d.Sandbox == nil {
 		return sandbox.Plan{}, wire.Errorf(wire.CodeUnsupported, "the sandbox is not available in this build")
 	}
@@ -63,7 +63,7 @@ func (d *Daemon) wrapSandbox(ctx context.Context, p *sandboxParams, path string,
 	program := append([]string{path}, argv[1:]...)
 	plan, err := sandbox.Wrap(sandbox.Options{
 		Bwrap: d.Sandbox.Bwrap(), Argv: program, Cwd: cwd, Writable: p.Writable,
-		Mask: []string{d.Config.RunDir, d.Config.StateDir}, Rebind: rebind,
+		Mask: []string{d.Config.RunDir, d.Config.StateDir}, Rebind: rebind, Strict: strict,
 	})
 	if errors.Is(err, sandbox.ErrHiddenCwd) {
 		return sandbox.Plan{}, wire.Errorf(wire.CodeInvalidParams, "%v", err)

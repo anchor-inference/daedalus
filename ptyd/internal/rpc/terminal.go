@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ascorblack/daedalus/ptyd/internal/config"
+	"github.com/ascorblack/daedalus/ptyd/internal/containment"
 	"github.com/ascorblack/daedalus/ptyd/internal/ptyproc"
 	"github.com/ascorblack/daedalus/ptyd/internal/sandbox"
 	"github.com/ascorblack/daedalus/ptyd/internal/shellint"
@@ -51,6 +52,11 @@ type createParams struct {
 	Sandbox     json.RawMessage   `json:"sandbox"`
 	LaunchID    string            `json:"launch_id"`
 	Labels      map[string]string `json:"labels"`
+	Resources   *struct {
+		Scope            containment.Scope  `json:"scope"`
+		Limits           containment.Limits `json:"limits"`
+		ExpectedInstance string             `json:"expected_instance"`
+	} `json:"resources"`
 }
 
 // checkSize refuses a size outside the daemon's range. A size below the minimum is what a hidden
@@ -180,7 +186,7 @@ func (d *Daemon) create(ctx context.Context, c *server.Conn, params json.RawMess
 	var program []string
 	var plan sandbox.Plan
 	if box != nil {
-		if plan, err = d.wrapSandbox(ctx, box, path, argv, cwd, p.LaunchID); err != nil {
+		if plan, err = d.wrapSandbox(ctx, box, path, argv, cwd, p.LaunchID, p.Resources != nil); err != nil {
 			return nil, err
 		}
 		program, argv, path = argv, plan.Argv, plan.Argv[0]
@@ -193,13 +199,39 @@ func (d *Daemon) create(ctx context.Context, c *server.Conn, params json.RawMess
 	if labels == nil {
 		labels = map[string]string{}
 	}
+	var owned containment.Handle
+	if p.Resources != nil {
+		if box == nil {
+			return nil, wire.Errorf(wire.CodeForbidden, "strict attempt containment needs a read-only system mount")
+		}
+		if d.Containment == nil {
+			return nil, wire.Errorf(wire.CodeUnsupported, "attempt containment is unavailable: %s", d.ContainmentReason)
+		}
+		if p.Resources.Scope.LaunchID != p.LaunchID || p.LaunchID == "" {
+			return nil, bad("attempt containment must bind this exact launch")
+		}
+		if p.Resources.ExpectedInstance != d.Instance {
+			return nil, wire.Errorf(wire.CodeUnsupported, "the daemon generation changed before process placement")
+		}
+		if status := d.Containment.Probe(); !status.Available {
+			return nil, wire.Errorf(wire.CodeUnsupported, "attempt containment is unavailable: %s", status.Reason)
+		}
+		owned, err = d.Containment.Claim(p.Resources.Scope, p.Resources.Limits)
+		if err != nil {
+			return nil, wire.Errorf(wire.CodeUnsupported, "attempt containment: %v", err)
+		}
+	}
 	t, err := d.Registry.Create(term.Spec{
 		ID: p.ID, Path: path, Argv: argv, Cwd: cwd, CwdFallback: fallback, Env: env, Cols: p.Cols, Rows: p.Rows,
 		Title: p.Title, RingBytes: ring, LogPath: logPath, InputIdle: idle, LaunchID: p.LaunchID, Labels: labels,
 		Shell: shell, Nonce: nonce, Integration: integration, Sandbox: box != nil, Program: program,
+		Containment: owned,
 	})
 	d.launchStarted(t, p.LaunchID, p.ID)
 	if err != nil {
+		if owned != nil {
+			_ = owned.Close()
+		}
 		if e := termError(err); e != err {
 			return nil, e
 		}
@@ -212,6 +244,13 @@ func (d *Daemon) create(ctx context.Context, c *server.Conn, params json.RawMess
 	d.Log.Info("terminal created", "terminal", t.ID, "pid", t.Pid, "program", name, "sandbox", box != nil)
 	reply := map[string]any{"id": t.ID, "pid": t.Pid, "cwd": cwd, "cwd_fallback": fallback, "shell": shell,
 		"shell_integration": integration, "created_at": t.CreatedAt}
+	if owned != nil {
+		observed, observeErr := owned.Observe()
+		if observeErr != nil {
+			return nil, wire.Errorf(wire.CodeInternal, "attempt containment could not be observed: %v", observeErr)
+		}
+		reply["containment"] = observed
+	}
 	if box != nil {
 		// What the sandbox made writable, and each folder it left read-only with the reason: the host
 		// tells the operator rather than letting a write fail later with no explanation.

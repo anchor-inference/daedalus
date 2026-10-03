@@ -93,6 +93,10 @@ func (d *Daemon) execRun(ctx context.Context, c *server.Conn, params json.RawMes
 		TimeoutMs int64             `json:"timeout_ms"`
 		Stdin     []byte            `json:"stdin_b64"`
 		MaxOutput int               `json:"max_output"`
+		Resources *struct {
+			Scope            json.RawMessage `json:"scope"`
+			ExpectedInstance string          `json:"expected_instance"`
+		} `json:"resources"`
 	}
 	if err := decode(params, &p); err != nil {
 		return nil, err
@@ -102,6 +106,11 @@ func (d *Daemon) execRun(ctx context.Context, c *server.Conn, params json.RawMes
 	}
 	if p.TimeoutMs < 0 {
 		return nil, wire.Errorf(wire.CodeInvalidParams, "timeout_ms must not be negative")
+	}
+	if p.Resources != nil {
+		// A side-channel program would see the daemon's writable cgroupfs without the terminal
+		// sandbox. Refuse it rather than let a worker process move itself out of the attempt group.
+		return nil, wire.Errorf(wire.CodeForbidden, "strict attempts cannot run unsandboxed exec side channels")
 	}
 	res, err := d.Side.Exec.Run(ctx, sidechan.ExecRequest{Argv: p.Argv, Cwd: p.Cwd, Env: p.Env,
 		Timeout: time.Duration(p.TimeoutMs) * time.Millisecond, Stdin: p.Stdin, MaxOutput: p.MaxOutput})

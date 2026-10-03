@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
 
-from daedalus.stores.control import Principal
+from daedalus.stores.control import ControlDenied, Principal
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -136,6 +136,8 @@ async def set_wakeup(
     in_minutes: int | None = None,
     cron: str | None = None,
     by_session: str | None = None,
+    principal: Principal | None = None,
+    client_operation_id: str | None = None,
 ) -> dict[str, Any]:
     """Set a wake-up for the project's orchestrator. ``by_session`` is the orchestrator that set it
     itself; without it the operator did. Returns the wake-up as :func:`view` shows it."""
@@ -154,6 +156,33 @@ async def set_wakeup(
     if await count(app, project.id) >= limit:
         raise WakeupRefused(f"{project.name} already has {limit} wake-ups; cancel one first")
     run_at, recurring = resolve_when(app, at=at, in_minutes=in_minutes, cron=cron)
+    if principal is not None and by_session is not None and run_at is not None:
+        if not client_operation_id:
+            raise WakeupRefused("the host must identify the wake-up command")
+        service: Any = app.extensions.get("recurring")
+        if service is None:
+            raise WakeupRefused("durable scheduling is unavailable")
+        revision = await app.db.fetchone(
+            "SELECT revision FROM domain_collection_revisions WHERE scope_kind='project' AND scope_id=?",
+            (project.id,),
+        )
+        if revision is None:
+            raise WakeupRefused("the project no longer exists")
+        try:
+            created = await service.create_internal_wake(
+                principal, project_id=project.id, session_id=by_session,
+                name=short_name(text), prompt=text, run_at=run_at,
+                requested_time={"at": at, "in_minutes": in_minutes},
+                expected_collection_revision=int(revision["revision"]),
+                client_operation_id=client_operation_id,
+            )
+        except ControlDenied:
+            # The grant may end before this wake. Save a proposal, which stays
+            # inert until an operator explicitly approves its exact output.
+            pass
+        else:
+            row = await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (created["id"],))
+            return view(dict(row)) if row is not None else created
     try:
         created = await scheduler.create(
             name=short_name(text),

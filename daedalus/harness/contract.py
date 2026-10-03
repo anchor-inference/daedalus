@@ -14,7 +14,7 @@ against a fake daemon, and keeps every write to a terminal on the one audited pa
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Collection, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -291,6 +291,15 @@ class LaunchSpec:
     allow_rules: tuple[str, ...] = ()
     """The standing grants the operator gave this member ("Always"), as the CLI's allow rules
     (``standing_rule``). Written into every launch, so a grant outlives the session it was given in."""
+
+    def validate_permissions(self, modes: Collection[str]) -> None:
+        """Reject a permission setting the adapter cannot map before reserving launch resources."""
+        if self.permission_level not in ("ask", "edits", "all"):
+            raise ValueError(f"unsupported permission level {self.permission_level!r}")
+        if self.permission_mode and self.permission_mode not in modes:
+            # An unknown explicit mode used to fall back to the project's autonomy, which could
+            # turn a misspelled read-only request into full access without another decision.
+            raise ValueError(f"unsupported {self.harness} permission mode {self.permission_mode!r}")
 
 
 @dataclass(frozen=True, slots=True)

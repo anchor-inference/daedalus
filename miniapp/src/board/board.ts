@@ -6,6 +6,28 @@ import type { Harness, StaffStatus } from "../team/team";
 
 export type TaskStatus = "todo" | "doing" | "review" | "done" | "blocked" | "dropped";
 
+export type LaunchEffect = { state: string; error?: string | null; wait_reason?: string | null; wait_detail?: string | null };
+
+/** A failed delivery is definitive; a stale or lost observation still blocks another launch. */
+export function launchFeedback(effect: LaunchEffect | undefined, readFailed: boolean) {
+  if (readFailed || !effect) return { key: "pboard.launch.unconfirmed", blocked: true, detail: "", wait: null };
+  const keys: Record<string, string> = {
+    pending: "pboard.launch.pending", claimed: "pboard.launch.delivering", completed: "pboard.launch.dispatched",
+    failed: "pboard.launch.deliveryFailed", cancelled: "pboard.launch.cancelled",
+  };
+  let detail = effect.wait_detail || effect.error || "";
+  try {
+    const parsed = JSON.parse(detail);
+    if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
+  } catch { /* A host refusal can be plain text. */ }
+  return {
+    key: keys[effect.state] || "pboard.launch.unconfirmed",
+    blocked: !["failed", "cancelled", "completed"].includes(effect.state),
+    detail,
+    wait: effect.state === "pending" ? effect.wait_reason || null : null,
+  };
+}
+
 /** The board's columns, left to right: what waits on the operator, then the work in the order it flows. */
 export const COLUMNS = ["needs", "doing", "review", "queue", "done"] as const;
 export type Column = (typeof COLUMNS)[number];

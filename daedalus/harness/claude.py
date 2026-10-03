@@ -271,9 +271,10 @@ class ClaudeCodeAdapter:
         return self._plan(spec, ref, resume=True)
 
     def _mode(self, spec: LaunchSpec) -> str:
+        spec.validate_permissions(PERMISSION_MODES)
         if spec.permission_mode:
-            return PERMISSION_MODES.get(spec.permission_mode, "manual")
-        return LEVEL_MODES.get(spec.permission_level, "manual")
+            return PERMISSION_MODES[spec.permission_mode]
+        return LEVEL_MODES[spec.permission_level]
 
     def _plan(self, spec: LaunchSpec, session: str, *, resume: bool) -> LaunchPlan:
         mode = self._mode(spec)

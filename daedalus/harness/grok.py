@@ -257,9 +257,10 @@ class GrokAdapter:
         return self._plan(spec, ref, resume=True)
 
     def _mode(self, spec: LaunchSpec) -> str:
+        spec.validate_permissions(PERMISSION_MODES)
         if spec.permission_mode in PERMISSION_MODES:
             return spec.permission_mode
-        return LEVEL_MODES.get(spec.permission_level, "default")
+        return LEVEL_MODES[spec.permission_level]
 
     def _plan(self, spec: LaunchSpec, session: str, *, resume: bool) -> LaunchPlan:
         holds = {"DAEDALUS_ASK_HOLD_MS": str(spec.ask_hold_ms), "DAEDALUS_REPORT_HOLD_MS": str(spec.report_hold_ms)}

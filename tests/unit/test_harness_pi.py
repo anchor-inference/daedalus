@@ -62,7 +62,7 @@ def test_the_adapter_is_registered_and_its_plan_loads_the_bridge_from_the_launch
     assert plan.env == {"DAEDALUS_ASK_HOLD_MS": "300000", "DAEDALUS_REPORT_HOLD_MS": "15000"}
     assert plan.hooks.sources == ("pi",) and plan.first_prompt_via == "argv"
     # pi has no agents and no permission modes; an effort it does not know is left out, not refused.
-    bare = list(PiAdapter().launch_plan(spec(effort="ultra", agent="reviewer", permission_mode="plan", team_block="", team_skill="", first_prompt=None)).argv)
+    bare = list(PiAdapter().launch_plan(spec(effort="ultra", agent="reviewer", team_block="", team_skill="", first_prompt=None)).argv)
     assert "--thinking" not in bare and "--append-system-prompt" not in bare and "--skill" not in bare and not any("reviewer" in a for a in bare)
     # A resume is the same launch with the old id: --session-id takes a session up when it exists.
     assert list(PiAdapter().resume_plan(spec(first_prompt=None), "11111111-1111-4111-8111-111111111111").argv[1:3]) == ["--session-id", "11111111-1111-4111-8111-111111111111"]

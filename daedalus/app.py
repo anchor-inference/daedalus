@@ -16,6 +16,7 @@ from typing import Any
 
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.notifications import Category, Draft, NotificationService, Tone
+from daedalus.extensions.resource_runtime import ResourceMonitor
 from daedalus.host.boot_guard import BootGuard
 from daedalus.host.component_install import Installer
 from daedalus.host.config_validation import ConfigConflict, config_revision
@@ -41,6 +42,7 @@ class Application:
         self.config = RuntimeConfig.load(settings.config_path)
         self.db = Database(settings.db_path, workspaces_dir=settings.workspaces_dir)
         self.executions = ExecutionStore(self.db)
+        self.resource_monitor = ResourceMonitor(self)
         self.manager: SessionManager | None = None
         self.front: TelegramFront | None = None
         self.background: list[asyncio.Task[None]] = []
@@ -122,6 +124,7 @@ class Application:
         if self.settings.telegram_bot_token:
             self.front = TelegramFront(self.settings, self.config, self.manager, save_config=self.save_config, speech=self.speech)
         await self._install_extensions()
+        self.resource_monitor.start()
         # The voice the operator chose is built now rather than by the first answer they ask for.
         # It costs a second or two of a start that is already doing several, and it is the difference
         # between an answer that is read out as it is written and one that is read out after it.
@@ -285,6 +288,8 @@ class Application:
             return
         self._shut_down = True
         try:
+            # Stop observations before terminal clients and the database begin closing.
+            await self.resource_monitor.close()
             await self._stop_api()
             for task in self.background:
                 task.cancel()

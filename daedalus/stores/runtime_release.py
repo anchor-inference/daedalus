@@ -5,6 +5,7 @@ from __future__ import annotations
 import aiosqlite
 
 from daedalus.stores.control import one
+from daedalus.stores.resource_profiles import released_in
 
 
 async def physical_exit_in(conn: aiosqlite.Connection, attempt_id: str) -> bool:
@@ -15,7 +16,9 @@ async def physical_exit_in(conn: aiosqlite.Connection, attempt_id: str) -> bool:
                       " WHERE a.id = ? AND ((a.runtime_kind = 'daedalus' AND e.runtime_ref = a.native_run_id)"
                       " OR (a.runtime_kind = 'cli' AND e.runtime_instance = a.runtime_instance"
                       " AND a.provider_session_ref = 'terminal:' || e.runtime_ref))", (attempt_id,))
-    return proof is not None
+    if proof is None:
+        return False
+    return await released_in(conn, attempt_id)
 
 
 async def no_entry_in(conn: aiosqlite.Connection, attempt_id: str) -> bool:

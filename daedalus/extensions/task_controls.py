@@ -10,8 +10,10 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.effects import EffectOutcome, EffectResolution
+from daedalus.extensions.resource_runtime import binding, reconcile, stop
 from daedalus.stores.control import ControlConflict, ControlStore, Entity, Principal, Scope, now, one
 from daedalus.stores.outbox import Claim, OutboxStore
+from daedalus.stores.resource_profiles import released_in
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -89,6 +91,8 @@ class TaskStopEffect:
     async def completed(self, target: dict[str, Any], evidence: dict[str, Any]) -> EffectResolution | None:
         if target.get("attempt_id"):
             async with self.app.db.transaction() as conn:
+                if not await released_in(conn, target["attempt_id"]):
+                    return None
                 generation = await self.app.executions._host(conn)
                 proof = await one(conn, "SELECT e.attempt_id FROM runtime_exit_observations e"
                                   " JOIN execution_attempts a ON a.id = e.attempt_id"
@@ -128,6 +132,13 @@ class TaskStopEffect:
         task = await self.app.db.fetchone("SELECT current_attempt_id FROM board_tasks WHERE id = ?", (target["task_id"],))
         if task is None or task["current_attempt_id"] != target["attempt_id"]:
             return EffectOutcome("failed", "the task execution has been replaced")
+        if target["kind"] == "cli" and await binding(self.app, target["attempt_id"]) is not None:
+            await check(claim)
+            if not await stop(self.app, target["attempt_id"]):
+                return EffectOutcome("unknown", "the exact attempt containment has no empty kernel observation")
+            if await self.observe(claim) is not None:
+                return EffectOutcome("completed")
+            return EffectOutcome("unknown", "the attempt processes stopped but the terminal exit is not yet observed")
         if target["kind"] == "daedalus":
             state = self.app.manager.live_state(target["session_id"])
             if state is None or state.run_id != target["run_id"]:
@@ -152,4 +163,8 @@ class TaskStopEffect:
         return EffectOutcome("unknown", "stop requested; execution termination is not yet observed")
 
     async def reconcile(self, claim: Claim) -> EffectResolution | None:
+        target = claim.payload
+        if target["kind"] == "cli" and await binding(self.app, target["attempt_id"]) is not None:
+            if not await reconcile(self.app, target["attempt_id"]):
+                return None
         return await self.observe(claim)

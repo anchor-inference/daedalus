@@ -180,6 +180,15 @@ class ReplaceBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str = Field(default="", max_length=300)
+    client_operation_id: str = Field(min_length=1, max_length=160)
+    expected_entity_revision: int = Field(ge=1)
+    expected_coordinator_session_id: str = Field(min_length=1, max_length=200)
+
+
+class MainReplaceBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(default="", max_length=300)
 
 
 class CancelBody(BaseModel):
@@ -529,14 +538,27 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return office(await orchestrators().disable(project_id))
 
     @api.post("/api/projects/{project_id}/orchestrator/replace")
-    async def replace_orchestrator(project_id: str, body: ReplaceBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """A new orchestrator session in place of the current one, linked to it and journaled."""
+    async def replace_orchestrator(project_id: str, body: ReplaceBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Prepare the successor and commit an exact receipted office handoff."""
         await existing(project_id)
         try:
-            project = await orchestrators().replace(project_id, body.reason or "replaced by the operator")
+            return await orchestrators().replace_command(
+                project_id, body.reason, principal=Principal.operator(who),
+                client_operation_id=body.client_operation_id,
+                expected_entity_revision=body.expected_entity_revision,
+                expected_coordinator_session_id=body.expected_coordinator_session_id,
+            )
+        except ControlConflict as exc:
+            raise HTTPException(409, {"reason": str(exc), "current_revision": exc.current_revision}) from exc
         except ProjectError as exc:
             raise HTTPException(409, str(exc)) from exc
-        return office(project)
+
+    @api.get("/api/projects/{project_id}/orchestrator/replace")
+    async def replacement_status(project_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        await existing(project_id)
+        from daedalus.extensions.coordinator_handoff import CoordinatorHandoff
+
+        return {"handoff": await CoordinatorHandoff(orchestrators()).view(project_id)}
 
     @api.get("/api/projects/{project_id}/state")
     async def project_state(project_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -719,7 +741,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return {"session_id": await dispatcher().ensure()}
 
     @api.post("/api/main/replace")
-    async def replace_main(body: ReplaceBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def replace_main(body: MainReplaceBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """A fresh main orchestrator in place of the current one; the old chat keeps its history."""
         return {"session_id": await dispatcher().replace(body.reason, by="operator")}
 

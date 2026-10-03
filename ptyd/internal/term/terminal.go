@@ -15,6 +15,7 @@ import (
 
 	"github.com/ascorblack/daedalus/ptyd/internal/answer"
 	"github.com/ascorblack/daedalus/ptyd/internal/config"
+	"github.com/ascorblack/daedalus/ptyd/internal/containment"
 	"github.com/ascorblack/daedalus/ptyd/internal/emulator"
 	"github.com/ascorblack/daedalus/ptyd/internal/logx"
 	"github.com/ascorblack/daedalus/ptyd/internal/ptyproc"
@@ -79,8 +80,9 @@ type Spec struct {
 	Integration string
 	// Sandbox is a program wrapped in bubblewrap: Path and Argv are bubblewrap's, and Program is
 	// what it runs, which is what the terminal reports as its argv.
-	Sandbox bool
-	Program []string
+	Sandbox     bool
+	Program     []string
+	Containment containment.Handle
 }
 
 // ModesInfo is the part of the emulator's modes that clients and adapters act on.
@@ -117,11 +119,12 @@ type Terminal struct {
 	Sandbox     bool
 	cwdFallback bool
 
-	deps Deps
-	proc *ptyproc.Proc
-	ring *ring.Ring
-	in   *input
-	disk *logx.Rotating
+	deps        Deps
+	proc        *ptyproc.Proc
+	containment containment.Handle
+	ring        *ring.Ring
+	in          *input
+	disk        *logx.Rotating
 
 	vt     chan vtRequest
 	vtQuit chan struct{}
@@ -171,8 +174,12 @@ func Start(spec Spec, deps Deps) (*Terminal, error) {
 		}
 	}
 	tag := "DAEDALUS_TERMINAL_ID=" + spec.ID
-	proc, err := ptyproc.Start(ptyproc.Spec{Path: spec.Path, Argv: spec.Argv, Dir: spec.Cwd, Env: spec.Env,
-		Cols: spec.Cols, Rows: spec.Rows, Tag: tag, Wrapped: spec.Sandbox})
+	program := ptyproc.Spec{Path: spec.Path, Argv: spec.Argv, Dir: spec.Cwd, Env: spec.Env,
+		Cols: spec.Cols, Rows: spec.Rows, Tag: tag, Wrapped: spec.Sandbox}
+	if spec.Containment != nil {
+		program.UseContainment, program.ContainmentFD = true, spec.Containment.FD()
+	}
+	proc, err := ptyproc.Start(program)
 	if err != nil {
 		if disk != nil {
 			disk.Close()
@@ -187,7 +194,7 @@ func Start(spec Spec, deps Deps) (*Terminal, error) {
 	t := &Terminal{
 		ID: spec.ID, Pid: proc.Pid, Argv: argv, Sandbox: spec.Sandbox, Shell: spec.Shell, CreatedAt: now, LaunchID: spec.LaunchID,
 		Labels: spec.Labels, cwdFallback: spec.CwdFallback,
-		deps: deps, proc: proc, ring: ring.New(spec.RingBytes), disk: disk,
+		deps: deps, proc: proc, containment: spec.Containment, ring: ring.New(spec.RingBytes), disk: disk,
 		vt: make(chan vtRequest, emulatorQueue), vtQuit: make(chan struct{}),
 		readerDone: make(chan struct{}), done: make(chan struct{}),
 		title: spec.Title, cwd: spec.Cwd, cols: spec.Cols, rows: spec.Rows, status: "running", sizeOwner: "host",
@@ -450,6 +457,9 @@ func (t *Terminal) Exit() (ptyproc.Exit, bool) {
 func (t *Terminal) forget() {
 	t.closeAttachments()
 	t.vtOnce.Do(func() { close(t.vtQuit) })
+	if t.containment != nil {
+		_ = t.containment.Close()
+	}
 }
 
 // Errors of terminal operations.

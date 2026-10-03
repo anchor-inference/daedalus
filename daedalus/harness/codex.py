@@ -236,7 +236,8 @@ class CodexAdapter:
 
     @staticmethod
     def _modes(spec: LaunchSpec) -> tuple[str, str]:
-        sandbox, approval = LEVELS.get(spec.permission_level, LEVELS["ask"])
+        spec.validate_permissions(SANDBOXES)
+        sandbox, approval = LEVELS[spec.permission_level]
         if spec.permission_mode in SANDBOXES:
             sandbox = spec.permission_mode
             if sandbox == "danger-full-access":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -25,6 +26,7 @@ from daedalus.stores.control import (
 from daedalus.stores.executions import ACTIVE
 from daedalus.stores.goal_budget import requires_priced_native_in
 from daedalus.stores.outbox import Claim, OutboxStore
+from daedalus.stores.resource_profiles import latest_in, strict_target
 from daedalus.stores.runtime_release import no_entry_in
 from daedalus.stores.staff import StaffError, daedalus_cannot_reach
 
@@ -51,6 +53,55 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
         raise ControlConflict("a worker task needs a project")
     scope = Scope("project", row["project_id"])
     payload = {"staff_id": staff_id, "resume_from": resume_from}
+    control = ControlStore(app.db)
+    resources: dict[str, Any] | None = None
+    async with app.db.transaction() as conn:
+        await control.authorize(conn, principal, scope, "task.launch", task_id=task_id,
+                                effects=("execution.start",))
+        request_hash = digest({"entity": {"kind": "task", "id": task_id},
+                               "expected_revision": expected_entity_revision, "payload": payload,
+                               "effects": ["execution.start"]})
+        receipt = await one(conn, "SELECT payload_hash,response_json FROM operation_receipts"
+                            " WHERE scope_kind = 'project' AND scope_id = ? AND actor_id = ?"
+                            " AND operation_kind = 'task.launch' AND client_operation_id = ?",
+                            (scope.id, principal.actor_id, client_operation_id))
+        if receipt is not None:
+            if receipt["payload_hash"] != request_hash:
+                raise ControlConflict("the command identity was reused with a different request")
+            return json.loads(receipt["response_json"])
+        profile = await latest_in(conn, scope.id)
+        if profile is not None and profile["state"] == "enabled":
+            task_row = await one(conn, "SELECT folder_id FROM board_tasks WHERE id = ?", (task_id,))
+            member_row = await one(conn, "SELECT harness,default_folder_id FROM staff"
+                                   " WHERE id = ? AND project_id = ? AND archived_at IS NULL",
+                                   (staff_id, scope.id))
+            if member_row is None:
+                raise ControlDenied("the worker is not an active member of this project")
+            folder = None
+            for folder_id in (task_row["folder_id"], member_row["default_folder_id"]):
+                if folder_id:
+                    folder = await one(conn, "SELECT env FROM project_folders WHERE id = ?"
+                                       " AND project_id = ?", (folder_id, scope.id))
+                    if folder is not None:
+                        break
+            if folder is None:
+                folder = await one(conn, "SELECT env FROM project_folders WHERE project_id = ?"
+                                   " ORDER BY position LIMIT 1", (scope.id,))
+            if folder is None:
+                raise ControlConflict("the project has no worker folder")
+            env, harness = folder["env"], member_row["harness"]
+        else:
+            env = harness = ""
+    if profile is not None and profile["state"] == "enabled":
+        if harness == "daedalus":
+            strict_target(profile, env=env, harness=harness, capability={})
+        terminals = app.extensions.get("terminals")
+        if terminals is None:
+            raise ControlConflict("the terminal daemon cannot prove resource containment")
+        capability = await terminals.containment_capability(env)
+        resources = strict_target(profile, env=env, harness=harness, capability=capability)
+        await terminals.preflight_attempt_resources(env, limits=resources["limits"],
+                                                    daemon_instance=resources["daemon_instance"])
 
     async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
         task = await one(conn, "SELECT * FROM board_tasks WHERE id = ?", (task_id,))
@@ -77,6 +128,14 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
                                                      app.manager.projects.local_env))
         if member["harness"] != "daedalus" and await requires_priced_native_in(conn, task["project_id"]):
             raise ControlConflict("a dollar-capped project needs priced native worker admission")
+        current_profile = await latest_in(conn, task["project_id"])
+        if resources is None:
+            if current_profile is not None and current_profile["state"] == "enabled":
+                raise ControlConflict("the resource profile changed before launch")
+        elif (current_profile is None or current_profile["state"] != "enabled"
+              or int(current_profile["revision"]) != resources["profile_revision"]
+              or folder["env"] != resources["env"]):
+            raise ControlConflict("the resource profile or worker environment changed before launch")
         if task["status"] not in ("todo", "blocked"):
             raise ControlConflict("reopen the task before launching a new attempt")
         if await one(conn, "SELECT 1 FROM comparison_groups WHERE task_id = ? AND state IN ('planned','active','ready')", (task_id,)):
@@ -101,12 +160,13 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
         target = {"task_id": task_id, "staff_id": staff_id, "resume_from": resume_from,
                   "previous_attempt_id": task["current_attempt_id"], "attempt_id": attempt_id,
                   "folder_id": task["folder_id"],
-                  "task_digest": task_digest(assigned), "member_digest": member_digest(member)}
+                  "task_digest": task_digest(assigned), "member_digest": member_digest(member),
+                  "resources": resources}
         await OutboxStore.enqueue(conn, mutation, principal, kind="task.launch", operation="task.launch",
                                   payload=target, task_id=task_id, effects=("execution.start",))
         return {"task_id": task_id, "effect_id": action_id, "state": "queued"}
 
-    result = await ControlStore(app.db).mutate(principal, scope, "task.launch", client_operation_id,
+    result = await control.mutate(principal, scope, "task.launch", client_operation_id,
                                               expected_entity_revision, Entity("task", task_id), payload,
                                               effect, effects=("execution.start",))
     app.extensions["effects"].notify()
@@ -140,6 +200,15 @@ class TaskLaunchEffect:
             raise ControlDenied("another attempt replaced this launch command")
         if task["status"] not in ("todo", "blocked", "doing"):
             raise ControlDenied("the task was closed or handed in before launch")
+        profile = await self.app.db.fetchone("SELECT revision,state FROM resource_profile_versions"
+                                            " WHERE project_id = ? ORDER BY revision DESC LIMIT 1",
+                                            (task["project_id"],))
+        resources = target.get("resources")
+        if resources is None:
+            if profile is not None and profile["state"] == "enabled":
+                raise ControlDenied("the resource profile changed after the launch command")
+        elif profile is None or profile["state"] != "enabled" or profile["revision"] != resources["profile_revision"]:
+            raise ControlDenied("the resource profile changed after the launch command")
 
     async def run(self, claim: Claim, check: Callable[[Claim], Awaitable[None]]) -> EffectOutcome:
         team = self.app.extensions.get("staff")
@@ -147,6 +216,15 @@ class TaskLaunchEffect:
             return EffectOutcome("deferred", "the staff runtime is not ready")
         try:
             await self.validate(claim)
+            resource = claim.payload.get("resources")
+            if resource is not None:
+                capability = await self.app.extensions["terminals"].containment_capability(resource["env"])
+                if (not capability.get("available") or capability.get("sandbox") != "ok"
+                        or capability.get("daemon_instance") != resource["daemon_instance"]):
+                    raise ControlDenied("the terminal daemon cannot enforce the pinned resource profile")
+                await self.app.extensions["terminals"].preflight_attempt_resources(
+                    resource["env"], limits=resource["limits"],
+                    daemon_instance=resource["daemon_instance"])
             member = await team.member(claim.payload["staff_id"])
             task = await team.task(claim.payload["task_id"])
             assert task is not None
@@ -185,7 +263,8 @@ class TaskLaunchEffect:
         entry = Entry(project.id, member.id, member.name, task.id, task.priority,
                       member.harness != "daedalus", "operator" if claim.principal.origin_class == "operator" else "orchestrator",
                       env=folder.env, resume_from=claim.payload["resume_from"],
-                      principal=claim.principal, check_authority=authorized)
+                      principal=claim.principal, check_authority=authorized,
+                      resources=claim.payload.get("resources"))
         bound = launch_attempt.set(claim.payload["attempt_id"])
         try:
             admission = await team.queue.offer(entry)

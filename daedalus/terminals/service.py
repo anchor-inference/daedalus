@@ -395,6 +395,7 @@ class Terminals(SideChannels):
                     detail="" if link.available else link.detail,
                     version=version,
                     sandbox=str(capabilities.get("sandbox") or "") if link.available else "",
+                    containment=dict(capabilities.get("containment") or {}) if link.available else {},
                     shell=str(info.get("shell") or ""),
                     home=str(info.get("home") or ""),
                     port_range=self.port_ranges.get(env, ""),
@@ -707,6 +708,24 @@ class Terminals(SideChannels):
         if not (spec.profile == "shell" or spec.profile.startswith("harness:")):
             raise InvalidRequest("a profile is shell or harness:<name>")
         project_id = spec.project_id or await self.owners.project_of(spec.owner)
+        if spec.owner.kind == "staff" and project_id:
+            profile = await self.db.fetchone("SELECT state FROM resource_profile_versions"
+                                             " WHERE project_id = ? ORDER BY revision DESC LIMIT 1",
+                                             (project_id,))
+            if profile is not None and profile["state"] == "enabled":
+                scope = (spec.resources or {}).get("scope") or {}
+                binding = await self.db.fetchone(
+                    "SELECT b.attempt_id,b.host_generation,b.daemon_instance,b.launch_id,b.env"
+                    " FROM attempt_resource_bindings b JOIN execution_attempts a ON a.id = b.attempt_id"
+                    " JOIN staff_sessions s ON s.id = a.staff_session_id"
+                    " WHERE s.staff_id = ? AND s.ended_at IS NULL AND b.state IN ('reserved','enforced')"
+                    " AND b.attempt_id = ?",
+                    (spec.owner.id, scope.get("attempt_id")),
+                )
+                if (binding is None or binding["host_generation"] != scope.get("host_generation")
+                        or binding["daemon_instance"] != spec.resources.get("expected_instance")
+                        or binding["launch_id"] != scope.get("launch_id") or binding["env"] != spec.env):
+                    raise InvalidRequest("a strict staff terminal needs its exact attempt containment")
         cwd = spec.cwd or await self.owners.default_cwd(spec.env, spec.owner, project_id) or ""
         terminal_id = secrets.token_hex(6)
         row = {
@@ -752,6 +771,8 @@ class Terminals(SideChannels):
             params["log_to_disk"] = True
         if spec.sandbox:
             params["sandbox"] = {"writable": await self.owners.sandbox_writable(spec.env, spec.owner, project_id, cwd)}
+        if spec.resources is not None:
+            params["resources"] = spec.resources
         try:
             result = await self._call(spec.env, "terminal.create", params, what="starting the terminal")
         except BaseException:
@@ -784,10 +805,46 @@ class Terminals(SideChannels):
             row,
         )
         view = await self.get(terminal_id)
+        if spec.resources is not None:
+            view["containment"] = result.get("containment")
+            view["daemon_instance"] = link.instance
         view["cwd_fallback"] = bool(result.get("cwd_fallback"))
         if spec.sandbox:
             view["sandbox_skipped"] = skipped
         return view
+
+    async def containment_capability(self, env: str) -> dict[str, Any]:
+        """Read the daemon's effective probe now; a cached mount presence is not admission proof."""
+        info = await self._call(env, "daemon.info", {}, what="checking attempt containment")
+        link = self.links[env]
+        capabilities = info.get("capabilities") or {}
+        status = dict(capabilities.get("containment") or {})
+        return {**status, "sandbox": capabilities.get("sandbox"), "daemon_instance": link.instance}
+
+    async def preflight_attempt_resources(self, env: str, *, limits: dict[str, int],
+                                          daemon_instance: str) -> None:
+        if self.links[env].instance != daemon_instance:
+            raise InvalidRequest("the terminal daemon generation changed during resource admission")
+        await self._call(env, "attempt.preflight", {"limits": limits,
+                                                   "expected_instance": daemon_instance},
+                         what="checking the requested attempt ceilings")
+
+    async def observe_attempt(self, env: str, scope: dict[str, str], *, daemon_instance: str) -> dict[str, Any]:
+        if self.links[env].instance != daemon_instance:
+            raise InvalidRequest("the attempt's terminal daemon generation changed")
+        return dict(await self._call(env, "attempt.containment", {"scope": scope},
+                                     what="observing exact attempt containment"))
+
+    async def kill_attempt(self, env: str, scope: dict[str, str], *, daemon_instance: str) -> dict[str, Any]:
+        if self.links[env].instance != daemon_instance:
+            raise InvalidRequest("the attempt's terminal daemon generation changed")
+        return dict(await self._call(env, "attempt.kill", {"scope": scope},
+                                     what="ending exact attempt containment"))
+
+    async def release_attempt(self, env: str, scope: dict[str, str], *, daemon_instance: str) -> None:
+        if self.links[env].instance != daemon_instance:
+            raise InvalidRequest("the attempt's terminal daemon generation changed")
+        await self._call(env, "attempt.release", {"scope": scope}, what="releasing empty attempt containment")
 
     async def kill(self, terminal_id: str, *, actor: str = "operator") -> TerminalView:
         """End a terminal: hang-up to its process group, then the kill after the grace."""

@@ -27,7 +27,7 @@ import secrets
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
@@ -70,6 +70,7 @@ from daedalus.staff_runtime import (
     UsageSnapshot,
 )
 from daedalus.stores.harness import HarnessStore
+from daedalus.stores.resource_profiles import bind_launch_in, for_staff_in, observe_in
 from daedalus.terminals.model import EnvUnavailable, NotFound, Origin, Owner, TerminalError, TerminalEvent, TerminalSpec
 from daedalus.terminals.model import LaunchSpec as DaemonLaunch
 from daedalus.terminals.service import Terminals
@@ -237,11 +238,13 @@ class RuntimeEnvironment:
     implementation, for the staff runtime and the harness manager alike, so every program run and
     file read is audited and fenced by the daemon's lists the same way."""
 
-    def __init__(self, terminals: Terminals, env: str, *, home: str = "", actor: str = "agent:harness") -> None:
+    def __init__(self, terminals: Terminals, env: str, *, home: str = "", actor: str = "agent:harness",
+                 resources: dict[str, Any] | None = None) -> None:
         self.terminals = terminals
         self._env = env
         self._home = home
         self.actor = actor
+        self.resources = resources
 
     @property
     def name(self) -> Any:
@@ -257,7 +260,8 @@ class RuntimeEnvironment:
 
     async def run(self, argv: list[str], *, cwd: str | None = None, env: Mapping[str, str] | None = None, timeout: float = 30.0) -> ExecResult:
         try:
-            result = await self.terminals.exec_run(self._env, list(argv), cwd=cwd, env_vars=dict(env) if env else None, timeout=timeout, actor=self.actor)
+            result = await self.terminals.exec_run(self._env, list(argv), cwd=cwd, env_vars=dict(env) if env else None,
+                                                   timeout=timeout, actor=self.actor, resources=self.resources)
         except NotFound as exc:
             # "Not installed" and "the environment is down" are different answers to a version check;
             # the contract names them so a caller never has to know the terminals' error classes.
@@ -529,6 +533,12 @@ class CliStaffRuntime:
         # Written before the daemon hears of it: a launch the database does not know is one a
         # restarted host could never take up or end.
         await self.store.open_launch(record)
+        if req.resources is not None:
+            async with self.store.db.transaction() as conn:
+                resources = await bind_launch_in(conn, attempt_id=req.resources["attempt_id"],
+                                                 host_generation=req.resources["host_generation"],
+                                                 launch_id=launch_id)
+            req = replace(req, resources=resources)
         cfg = self.config()
         hold = max([cfg.ask_hold_s * 1000 + HOLD_MARGIN_MS, cfg.permission_hold_s * 1000 + HOLD_MARGIN_MS, *plan.hooks.hold_ms.values(), *(t.hold_ms + HOLD_MARGIN_MS for t in spec.tool_sets)])
         registered = False
@@ -564,7 +574,8 @@ class CliStaffRuntime:
             staff_session_id=req.staff_session_id,
             launch=launch,
             term=RuntimeTerminal(self.terminals, view["id"], req.env, actor=actor, launch_id=launch_id, hooks=hooks),
-            env_port=RuntimeEnvironment(self.terminals, req.env, actor=f"agent:{actor}"),
+            env_port=RuntimeEnvironment(self.terminals, req.env, actor=f"agent:{actor}",
+                                        resources=req.resources),
             cwd=cwd,
             companions=companions,
             plan=plan,
@@ -594,8 +605,18 @@ class CliStaffRuntime:
             launch_id=launch_id,
             # An agent's launch: at the machine's cap it waits in the service's line for a place.
             created_by=f"agent:{actor}",
+            resources=req.resources,
+            sandbox=req.resources is not None,
         )
         view: dict[str, Any] = dict(await self.terminals.create(spec))
+        if req.resources is not None:
+            evidence = dict(view.get("containment") or {})
+            evidence["scope"] = req.resources["scope"]
+            evidence["daemon_instance"] = view.get("daemon_instance")
+            async with self.store.db.transaction() as conn:
+                await observe_in(conn, attempt_id=req.resources["scope"]["attempt_id"],
+                                 launch_id=launch_id, kind="spawn", evidence=evidence,
+                                 terminal_id=view["id"])
         return view
 
     def _run(self, session: CliSession, *, gate: bool = True) -> None:
@@ -1345,7 +1366,13 @@ class CliStaffRuntime:
         ref = self._transcript_ref(live)
         if not ref:
             return []
-        port = session.env_port if session is not None else RuntimeEnvironment(self.terminals, await self._env_of(live), actor=f"agent:{self._actor(live.id)}")
+        if session is not None:
+            port = session.env_port
+        else:
+            async with self.store.db.transaction() as conn:
+                resources = await for_staff_in(conn, live.id)
+            port = RuntimeEnvironment(self.terminals, await self._env_of(live),
+                                      actor=f"agent:{self._actor(live.id)}", resources=resources)
         turns = await self.adapter.transcript(port, ref)
         return turns[-READ_TRANSCRIPT_TURNS:]
 
@@ -1523,12 +1550,15 @@ class CliStaffRuntime:
                 continue
             assert launch.terminal_id is not None
             view = await self.terminals.get(launch.terminal_id)
+            async with self.store.db.transaction() as conn:
+                resources = await for_staff_in(conn, launch.staff_session_id)
             hooks: asyncio.Queue[HookPost | None] = asyncio.Queue()
             session = CliSession(
                 staff_session_id=launch.staff_session_id,
                 launch=launch,
                 term=RuntimeTerminal(self.terminals, launch.terminal_id, launch.env, actor=actor, launch_id=launch.launch_id, hooks=hooks),
-                env_port=RuntimeEnvironment(self.terminals, launch.env, actor=f"agent:{actor}"),
+                env_port=RuntimeEnvironment(self.terminals, launch.env, actor=f"agent:{actor}",
+                                            resources=resources),
                 cwd=str(view.get("cwd") or ""),
                 companions={launch.companion_terminal_id: "companion"} if launch.companion_terminal_id else {},
                 transcript_ref=live.session.transcript_ref or "",

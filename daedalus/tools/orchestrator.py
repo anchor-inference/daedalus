@@ -734,15 +734,18 @@ async def harnesses(context: ToolContext, harness: str | None = None, env: str |
 @tool(
     name="WakeMe",
     description=(
-        "Set an alarm for yourself: when it fires you are woken with the note, even in the middle of a turn. Give "
+        "Save an alarm for yourself. A one-shot within your explicit coordinator wake approval can fire; other "
+        "alarms wait for the operator to approve them in the app. Give "
         "exactly one of in_minutes (at least 1), at (ISO 8601; without an offset it is the operator's time) or cron "
         "(minute hour day month weekday, in UTC; at most every 10 minutes by default). The note says what to look at "
         "— write it for yourself without this conversation. The scheduler looks every 30 seconds, so a wake-up can "
-        "come up to half a minute late. Unwatch(id) cancels it; the state block lists yours."
+        "come up to half a minute late. Unwatch(id) cancels an alarm owned by your current approval; "
+        "the state block lists yours."
     ),
 )
 async def wake_me(context: ToolContext, note: str, at: str | None = None, in_minutes: int | None = None, cron: str | None = None) -> ToolResult:
-    return await _call(context, "wake_me", note=note, at=at, in_minutes=in_minutes, cron=cron)
+    return await _call(context, "wake_me", note=note, at=at, in_minutes=in_minutes, cron=cron,
+                       client_operation_id=_command_id(context))
 
 
 class Watch(Tool):

@@ -178,6 +178,8 @@ class FakeDialogs:
     async def media(self, session_id: str, presentation_id: str, item_id: str) -> tuple[str, str] | None:
         if presentation_id == "pic" and item_id == "one":
             return "text/plain", str(self.path)
+        if presentation_id == "active" and item_id == "one":
+            return "image/svg+xml", str(self.path)
         if presentation_id == "remote":
             return "image/png", "https://example.com/pic.png"
         return None
@@ -243,6 +245,11 @@ def test_a_public_link_opens_without_a_login_and_a_private_one_needs_its_key(cli
 
     shot = client.get("/c/public-dialog-slug/media/pic/one")
     assert shot.status_code == 200 and shot.text == "pixels" and shot.headers["x-content-type-options"] == "nosniff"
+    active = client.get("/c/public-dialog-slug/media/active/one")
+    assert active.status_code == 200 and active.text == "pixels"
+    policy = active.headers["content-security-policy"]
+    assert "sandbox allow-scripts;" in policy and "allow-same-origin" not in policy
+    assert "connect-src 'none'" in policy
     remote = client.get("/c/public-dialog-slug/media/remote/one", follow_redirects=False)
     assert remote.status_code == 302 and remote.headers["location"] == "https://example.com/pic.png"
     assert client.get("/c/public-dialog-slug/media/pic/missing").status_code == 404

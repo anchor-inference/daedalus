@@ -17,6 +17,7 @@ import (
 
 	"github.com/ascorblack/daedalus/ptyd/internal/answer"
 	"github.com/ascorblack/daedalus/ptyd/internal/config"
+	"github.com/ascorblack/daedalus/ptyd/internal/containment"
 	"github.com/ascorblack/daedalus/ptyd/internal/emulator/production"
 	"github.com/ascorblack/daedalus/ptyd/internal/logx"
 	"github.com/ascorblack/daedalus/ptyd/internal/rpc"
@@ -146,6 +147,11 @@ func serve(args []string) error {
 	daemon := &rpc.Daemon{
 		Config: cfg, Instance: hex.EncodeToString(instance), StartedAt: time.Now().UTC(), Registry: registry,
 		Events: evlog, Log: log, EmulatorName: production.Name, Environ: environ,
+	}
+	if owned, err := containment.NewController(daemon.Instance); err == nil {
+		daemon.Containment = owned
+	} else {
+		daemon.ContainmentReason = err.Error()
 	}
 	// Without its scripts the daemon still starts shells, plainly: marks are a convenience, and a
 	// read-only or full state directory must not cost the operator every terminal.

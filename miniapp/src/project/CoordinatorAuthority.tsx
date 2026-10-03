@@ -3,8 +3,9 @@ import { api, ApiError } from "../api";
 import { locale, t } from "../i18n";
 import { useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
+import { CoordinatorHandoff } from "./CoordinatorHandoff";
 
-type BundleId = "planning" | "execution" | "execution_project" | "review" | "watch";
+type BundleId = "planning" | "execution" | "execution_project" | "review" | "watch" | "wake_internal";
 type Bundle = { id: string; operations: string[]; effects: string[]; scope_kind: "project" | "task"; max_expires_at: string; blockers: string[] };
 type Grant = { grant_id: string; generation: number; session_id: string; scope: { kind: string; id: string }; operations: string[]; effects: string[];
   expires_at: string; revoked_at: string | null; state: "active" | "expired" | "revoked" | "stale"; receipt_id: string | null;
@@ -13,13 +14,14 @@ type Authority = { project_id: string; entity_revision: number; current_coordina
   available_bundles: Bundle[]; grants: Grant[]; readiness_blockers: string[] };
 type Pending = { path: string; body: Record<string, unknown>; kind: "approve" | "revoke"; label: string };
 
-const bundleIds: BundleId[] = ["planning", "execution", "execution_project", "review", "watch"];
+const bundleIds: BundleId[] = ["planning", "execution", "execution_project", "review", "watch", "wake_internal"];
 const rights: Record<BundleId, { scope_kind: "project" | "task"; operations: string[]; effects: string[] }> = {
   planning: { scope_kind: "project", operations: ["board.task.create", "board.task.update", "contract.require", "contract.apply", "contract.withdraw"], effects: [] },
   execution: { scope_kind: "task", operations: ["task.launch", "task.stop", "staff.release"], effects: ["execution.start", "execution.stop"] },
   execution_project: { scope_kind: "project", operations: ["task.launch", "task.stop", "staff.release"], effects: ["execution.start", "execution.stop"] },
   review: { scope_kind: "project", operations: ["review.verdict", "review.return"], effects: [] },
   watch: { scope_kind: "project", operations: ["watch.create", "watch.change", "watch.remove", "watch.deliver"], effects: ["watch.wake", "watch.tell", "watch.notify"] },
+  wake_internal: { scope_kind: "project", operations: ["schedule.propose", "schedule.cancel", "schedule.fire"], effects: ["schedule.wake"] },
 };
 
 function same(a: string[], b: string[]): boolean {
@@ -57,7 +59,7 @@ function grantName(grant: Grant): string {
   return bundleName("");
 }
 
-export function CoordinatorAuthority({ projectId, toast }: { projectId: string; toast: (message: string) => void }) {
+export function CoordinatorAuthority({ projectId, toast, onChanged }: { projectId: string; toast: (message: string) => void; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
   const [bundleId, setBundleId] = useState<BundleId>("planning");
   const [taskId, setTaskId] = useState("");
@@ -193,6 +195,9 @@ export function CoordinatorAuthority({ projectId, toast }: { projectId: string; 
           <details><summary>{t("authority.exact")}</summary><div className="mono">{[...(bundle?.operations ?? []), ...(bundle?.effects ?? [])].join(" · ")}</div></details>
           <button type="button" className="btn small" disabled={!canApprove} onClick={() => void approve()}>{t("authority.approve")}</button>
         </details>
+        <CoordinatorHandoff projectId={projectId} revision={current.entity_revision}
+          sessionId={current.current_coordinator_session_id ?? ""} toast={toast}
+          onChanged={async () => { await authority.refresh(); onChanged(); }} />
       </>}
     </div>}
   </details>;

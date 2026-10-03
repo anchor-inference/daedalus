@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING
 
+from daedalus.extensions.resource_runtime import binding, reconcile
 from daedalus.stores.comparison_funding import ComparisonFunding
 from daedalus.stores.control import ControlDenied, now, one
 from daedalus.stores.executions import ACTIVE, AttemptIdentity
@@ -14,6 +16,8 @@ from daedalus.stores.lifecycle import record_owned_exit
 if TYPE_CHECKING:
     from daedalus.app import Application
     from daedalus.host.events import EventBus
+
+logger = logging.getLogger(__name__)
 
 
 async def enter_runtime(app: Application, identity: AttemptIdentity, *, capacity_slot_id: str | None) -> None:
@@ -156,4 +160,12 @@ async def observe_exit(app: Application, *, staff_session_id: str, runtime_ref: 
                                              session_id=before["session_id"])
         if event is not None:
             bus.announce_committed(event)
+        if row["runtime_kind"] == "cli":
+            if await binding(app, row["id"]) is not None:
+                try:
+                    await reconcile(app, row["id"])
+                except Exception:
+                    # The terminal exit remains an exact observation; the resource slot stays
+                    # held until a later probe proves the whole attempt group empty.
+                    logger.exception("the exited terminal's attempt containment could not be reconciled")
         return True

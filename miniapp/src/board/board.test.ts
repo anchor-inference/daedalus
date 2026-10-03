@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Assignee, NeedsYou, ProjectTask, acceptanceChip, acceptanceTone, arrange, briefChanges, chips, columnCount, columnOf, deliveryState, emptyBrief, hasAcceptance, mergeBlock, mergesOnAccept, missingBrief, requirementSource, sections, statusLine, toggleFilter } from "./board";
+import { Assignee, NeedsYou, ProjectTask, acceptanceChip, acceptanceTone, arrange, briefChanges, chips, columnCount, columnOf, deliveryState, emptyBrief, hasAcceptance, launchFeedback, mergeBlock, mergesOnAccept, missingBrief, requirementSource, sections, statusLine, toggleFilter } from "./board";
 
 let seq = 0;
 function task(fields: Partial<ProjectTask> = {}): ProjectTask {
@@ -166,5 +166,27 @@ describe("the task contract", () => {
     expect(deliveryState({ ...sent, acknowledged_at: "2026-09-24T10:00:00Z", cli: true }, "input")).toBe("words");
     expect(deliveryState({ ...sent, acknowledged_at: "2026-09-24T10:00:00Z", cli: true }, "scope")).toBe("confirmed");
     expect(deliveryState({ ...sent, cli: true }, "input")).toBe("sent");
+  });
+});
+
+
+describe("launch delivery observations", () => {
+  it("keeps a definitive failure separate from an unknown transport outcome", () => {
+    const refused = launchFeedback({ state: "failed", error: "Provider authentication is required" }, false);
+    expect(refused.key).toBe("pboard.launch.deliveryFailed");
+    expect(refused.detail).toBe("Provider authentication is required");
+    expect(refused.blocked).toBe(false);
+    expect(launchFeedback({ state: "unknown", error: "connection lost" }, false).blocked).toBe(true);
+    expect(launchFeedback({ state: "completed" }, true).key).toBe("pboard.launch.unconfirmed");
+    expect(launchFeedback(undefined, false).blocked).toBe(true);
+  });
+  it("retains typed waiting reasons and treats delivery completion separately from task acceptance", () => {
+    const queued = launchFeedback({ state: "pending", wait_reason: "machine", error: JSON.stringify({ detail: "Host unavailable" }) }, false);
+    expect(queued.wait).toBe("machine");
+    expect(queued.detail).toBe("Host unavailable");
+    expect(queued.blocked).toBe(true);
+    expect(launchFeedback({ state: "claimed" }, false).key).toBe("pboard.launch.delivering");
+    expect(launchFeedback({ state: "completed" }, false).key).toBe("pboard.launch.dispatched");
+    expect(launchFeedback({ state: "new-state" }, false).blocked).toBe(true);
   });
 });

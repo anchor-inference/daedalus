@@ -14,6 +14,7 @@ from urllib.parse import quote
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
+from daedalus.extensions.artifact_headers import artifact_headers
 from daedalus.stores.files import HANDLE_RE, FileStore
 
 if TYPE_CHECKING:
@@ -60,7 +61,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(404, "the file's bytes are gone")
         inline = stored.mime.startswith(INLINE)
         disposition = f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(stored.name)}"
-        return FileResponse(source, media_type=stored.mime, headers={"Content-Disposition": disposition, "Access-Control-Allow-Origin": "https://web.telegram.org"})
+        return FileResponse(source, media_type=stored.mime, headers={**artifact_headers(stored.mime), "Content-Disposition": disposition, "Access-Control-Allow-Origin": "https://web.telegram.org"})
 
     @api.get("/api/projects/{project_id}/files")
     async def project_files(project_id: str, limit: int = Query(50, ge=1, le=200), _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

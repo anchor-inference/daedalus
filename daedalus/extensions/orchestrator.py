@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, tzinfo
 from pathlib import Path
@@ -253,6 +254,8 @@ class Orchestrators:
         assert app.manager is not None
         self.manager: SessionManager = app.manager
         self._locks: dict[str, asyncio.Lock] = {}
+        self._handoff_locks: dict[str, asyncio.Lock] = {}
+        self._mutation_flights: dict[str, set[str]] = {}
         self.queues: dict[str, WakeQueue] = {}
         self._operator_words: dict[str, list[str]] = {}
         """The operator's passages each rendered batch relays, by the batch's text, for its delivery
@@ -266,6 +269,8 @@ class Orchestrators:
         self.clock: Callable[[], float] | None = None
         """A fake monotonic clock for the wake queues, in tests."""
         self._replacing: set[str] = set()
+        self.catalogue_lookup: Callable[[str, str | None], Awaitable[dict[str, Any]]] | None = None
+        """Tests inject an authenticated catalogue transport; production uses the host's model lookup."""
         self._background: set[asyncio.Task[None]] = set()
         self.loops = OpenResults(self)
         """The results of the team no decision has followed yet (``orchestrator_loops``)."""
@@ -274,6 +279,9 @@ class Orchestrators:
 
     def lock(self, project_id: str) -> asyncio.Lock:
         return self._locks.setdefault(project_id, asyncio.Lock())
+
+    def handoff_lock(self, project_id: str) -> asyncio.Lock:
+        return self._handoff_locks.setdefault(project_id, asyncio.Lock())
 
     @property
     def team(self) -> Any:
@@ -394,12 +402,17 @@ class Orchestrators:
     async def disable(self, project_id: str, *, by: str = "operator") -> Project:
         """Switch the orchestrator off. Its session stays, with its history; what it was asked goes to the operator."""
         async with self.lock(project_id):
-            project = await self.project(project_id)
-            orchestrator = project.settings.orchestrator
-            if not orchestrator.enabled and not orchestrator.session_id:
-                return project
-            await self.manager.projects.update_orchestrator(project_id, enabled=False)
-            if orchestrator.session_id and await self.manager.projects.set_orchestrator(project_id, expect=orchestrator.session_id, value=""):
+            # The office handoff uses this same short lock. A disable that read the predecessor
+            # must not turn off its successor between the read and the session compare-and-set.
+            async with self.manager.db.authority_effect_lock("project", project_id):
+                project = await self.project(project_id)
+                orchestrator = project.settings.orchestrator
+                if not orchestrator.enabled and not orchestrator.session_id:
+                    return project
+                await self.manager.projects.update_orchestrator(project_id, enabled=False)
+                retired = bool(orchestrator.session_id and await self.manager.projects.set_orchestrator(
+                    project_id, expect=orchestrator.session_id, value=""))
+            if retired:
                 await self._retire(orchestrator.session_id, project_id, successor="")
             await self._left_office(project_id)
             await self._hand_requests_to_operator(project_id, why="the orchestrator was switched off")
@@ -407,40 +420,31 @@ class Orchestrators:
             await self._changed(project_id, "orchestrator.disabled", by)
             return await self.project(project_id)
 
-    async def replace(self, project_id: str, reason: str, *, by: str = "operator") -> Project:
-        """A new orchestrator session in place of the current one, linked both ways, never silently.
+    async def replace(self, project_id: str, reason: str) -> Project:
+        """Use the same durable handoff for an internal recovery as the operator's command."""
+        from daedalus.extensions.coordinator_handoff import CoordinatorHandoff
+        from daedalus.stores.control import Principal
 
-        The predecessor is retired (its tools refuse from now on, and a run it is in is stopped), the
-        wake-ups it set are re-pointed at the successor, the journal records the replacement, and the
-        successor's first state block names the predecessor and the reason.
-        """
-        reason = " ".join((reason or "").split())[:300] or "replaced"
-        async with self.lock(project_id):
-            project = await self.project(project_id)
-            orchestrator = project.settings.orchestrator
-            if not orchestrator.enabled:
-                raise ProjectError(f"{project.name} has no orchestrator to replace; switch it on instead")
-            old = orchestrator.session_id
-            session_id = await self._new_session(project, predecessor=old, reason=reason)
-            if not await self.manager.projects.set_orchestrator(project_id, expect=old, value=session_id):
-                await self.manager.delete_session(session_id)
-                return await self.project(project_id)
-            if old:
-                await self._retire(old, project_id, successor=session_id)
-                await self.manager.db.execute("UPDATE schedules SET target_session = ? WHERE target_session = ?", (session_id, old))
-            await wakeups.repoint(self.app, project_id, session_id)
-            project = await self.project(project_id)
-            await self._sync_model(project)
-            await self.manager.projects.record(
-                project_id, "system", "replacement",
-                f"The orchestrator {old or '(none)'} was replaced by {session_id} ({by}): {reason}",
-                {"predecessor": old, "successor": session_id},
-            )
-            await self._changed(project_id, "orchestrator.replaced", by)
-            queue = self.queues.get(project_id)
-            if queue is not None:
-                queue.poke()
-            return project
+        project = await self.project(project_id)
+        response = await CoordinatorHandoff(self).replace(
+            project_id, reason, principal=Principal("system:orchestrator", "system"),
+            client_operation_id=uuid.uuid4().hex, expected_entity_revision=project.entity_revision,
+            expected_coordinator_session_id=project.settings.orchestrator.session_id,
+        )
+        if response["state"] == "blocked":
+            raise ProjectError(f"the replacement is blocked: {response['blocker']}")
+        return await self.project(project_id)
+
+    async def replace_command(self, project_id: str, reason: str, *, principal: Any,
+                              client_operation_id: str, expected_entity_revision: int,
+                              expected_coordinator_session_id: str) -> dict[str, Any]:
+        from daedalus.extensions.coordinator_handoff import CoordinatorHandoff
+
+        return await CoordinatorHandoff(self).replace(
+            project_id, reason, principal=principal, client_operation_id=client_operation_id,
+            expected_entity_revision=expected_entity_revision,
+            expected_coordinator_session_id=expected_coordinator_session_id,
+        )
 
     async def _never_had_one(self, project_id: str) -> bool:
         """Whether no session of the project has ever been its orchestrator. Every project's settings
@@ -468,14 +472,18 @@ class Orchestrators:
         host bridge, and the folders stay the project's for every other tool."""
         return not project.folders or not project.primary.local(self.manager.projects.local_env)
 
-    async def _new_session(self, project: Project, *, predecessor: str, reason: str) -> str:
-        metadata: dict[str, Any] = {"orchestrator_of": project.id, "telegram_detached": True}
+    async def _new_session(self, project: Project, *, predecessor: str, reason: str,
+                           prepared_handoff_id: str | None = None, session_id: str | None = None) -> str:
+        metadata: dict[str, Any] = ({"orchestrator_prepared_of": project.id, "handoff_id": prepared_handoff_id,
+                                    "telegram_detached": True} if prepared_handoff_id else
+                                   {"orchestrator_of": project.id, "telegram_detached": True})
         if self.needs_home(project):
             metadata[HOME_KEY] = HOME_NAME.format(project_id=project.id)
         if predecessor:
             metadata["predecessor"] = predecessor
             metadata["predecessor_reason"] = reason
-        state = await self.manager.create_session(f"Orchestrator · {project.name}", metadata=metadata, project_id=project.id)
+        state = await self.manager.create_session(f"Orchestrator · {project.name}", session_id=session_id,
+                                                  metadata=metadata, project_id=project.id)
         return state.session.id
 
     async def _retire(self, session_id: str, project_id: str, *, successor: str) -> None:
@@ -554,7 +562,13 @@ class Orchestrators:
             return False
         if not clear and not preset:
             return False
-        await self.update(project.id, model="" if clear else preset)
+        async with self.lock(project.id):
+            try:
+                current, _ = await self.current(session_id)
+            except NotCurrent:
+                return False
+            await self._update_locked(current, model="" if clear else preset, autonomy=None,
+                                      concurrency=None, concurrency_cap=None, by="operator")
         return True
 
     # -- what it sees ---------------------------------------------------------------------------------
@@ -1257,7 +1271,7 @@ class Orchestrators:
 
         async def go() -> None:
             try:
-                await self.replace(project_id, reason, by="system")
+                await self.replace(project_id, reason)
             except Exception:  # noqa: BLE001
                 logger.exception("could not replace the orchestrator of %s", project_id)
             finally:
@@ -1557,7 +1571,13 @@ class Orchestrators:
         if project_id and status == "completed":
             row = await self.manager.db.fetchone("SELECT created_at FROM runs WHERE id = ?", (run_id,))
             try:
-                await self.turn_ended(project_id, str(row["created_at"]) if row is not None else _now())
+                async with self.lock(project_id):
+                    try:
+                        await self.current(session_id)
+                    except NotCurrent:
+                        pass
+                    else:
+                        await self.turn_ended(project_id, str(row["created_at"]) if row is not None else _now())
             except Exception:  # noqa: BLE001 — the queue below must still be poked
                 logger.exception("the end of the orchestrator's turn in %s could not be followed up", project_id)
         queue = self.queues.get(project_id) if project_id else None
@@ -1581,8 +1601,14 @@ class Orchestrators:
             return
         project_id = str(row["id"])
         async with self.lock(project_id):
-            await self.manager.projects.update_orchestrator(project_id, enabled=False)
-            await self.manager.projects.set_orchestrator(project_id, expect=session_id, value="")
+            # A late deletion callback for the predecessor cannot disable a committed successor.
+            async with self.manager.db.authority_effect_lock("project", project_id):
+                current = await self.project(project_id)
+                if current.settings.orchestrator.session_id != session_id:
+                    return
+                await self.manager.projects.update_orchestrator(project_id, enabled=False)
+                if not await self.manager.projects.set_orchestrator(project_id, expect=session_id, value=""):
+                    return
             await self._left_office(project_id)
         await self._hand_requests_to_operator(project_id, why="the orchestrator's session was deleted")
         await self.manager.projects.record(project_id, "system", "orchestrator", f"The orchestrator's session {session_id} was deleted; the orchestrator is off.", {"session_id": session_id})
@@ -1701,7 +1727,25 @@ class Orchestrators:
     async def service(self, operation: str, /, **kwargs: Any) -> Any:
         """The tools' hook: every operation first checks that the calling session holds the office.
         The operation is positional because several tools have an argument called ``op`` of their own."""
-        return await orchestrator_ops.dispatch(self, operation, OPERATIONS, **kwargs)
+        from daedalus.extensions.orchestrator_admission import mutates
+
+        if not mutates(operation, kwargs):
+            return await orchestrator_ops.dispatch(self, operation, OPERATIONS, **kwargs)
+        session_id = str(kwargs.get("session_id") or "")
+        project, _ = await self.current(session_id)
+        flight_id = uuid.uuid4().hex
+        async with self.manager.db.authority_effect_lock("project", project.id):
+            await self.current(session_id)
+            self._mutation_flights.setdefault(project.id, set()).add(flight_id)
+        try:
+            return await orchestrator_ops.dispatch(self, operation, OPERATIONS, **kwargs)
+        finally:
+            async with self.manager.db.authority_effect_lock("project", project.id):
+                flights = self._mutation_flights.get(project.id)
+                if flights is not None:
+                    flights.discard(flight_id)
+                    if not flights:
+                        del self._mutation_flights[project.id]
 
     def folder_access(self, project: Project, folder: ProjectFolder, session_id: str) -> FolderAccess:
         """How ``Peek`` reads a folder: directly when it is this process's, through the host bridge when
@@ -1753,6 +1797,9 @@ class Orchestrators:
 
     async def resume(self) -> None:
         """Start the wake queues of every project that has an orchestrator, each from its cursor."""
+        from daedalus.extensions.coordinator_handoff import CoordinatorHandoff
+
+        await CoordinatorHandoff(self).reconcile()
         for project in await self.manager.projects.list():
             orchestrator = project.settings.orchestrator
             if orchestrator.enabled and orchestrator.session_id:

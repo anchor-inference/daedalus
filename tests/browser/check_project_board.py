@@ -189,6 +189,30 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     expect(page.locator(".toast")).to_contain_text(words["queued"])
     expect(cols.locator(".pboard-col.queue .pcard", has_text="Delivery zones")).to_be_visible()
 
+    # The delivery receipt can fail definitively or remain unknown; neither completes the task.
+    launched_id = stub.launched[-1][0]
+    effect_id = f"launch-{launched_id}"
+    states = (
+        ({"state": "failed", "error": "Provider authentication is required"}, "Launch request failed" if lang == "en" else "Запрос на запуск завершился ошибкой"),
+        ({"state": "unknown", "error": "Delivery connection lost"}, "Launch outcome is unconfirmed" if lang == "en" else "Результат запроса на запуск не подтверждён"),
+        ({"state": "pending", "wait_reason": "machine", "wait_detail": "Host unavailable"}, "Launch request is pending" if lang == "en" else "Запрос на запуск ожидает обработки"),
+        ({"state": "claimed"}, "Launch request is being delivered" if lang == "en" else "Запрос на запуск доставляется"),
+        ({"state": "completed"}, "Launch request completed; check the task's current state" if lang == "en" else "Запрос на запуск обработан; проверьте текущее состояние задачи"),
+    )
+    for observed, label in states:
+        stub.launch_effects[effect_id] = observed
+        cols.locator(".pcard", has_text="Delivery zones").click()
+        warning = sheet.locator(".result-warning[role='status']")
+        expect(warning).to_contain_text(label)
+        if observed.get("error") or observed.get("wait_detail"):
+            expect(warning).to_contain_text(observed.get("error") or observed["wait_detail"])
+        if observed["state"] == "failed":
+            expect(warning).not_to_contain_text("unconfirmed" if lang == "en" else "не подтверждён")
+        fits(page, f"{lang} delivery {observed['state']}")
+        page.keyboard.press("Escape")
+        expect(sheet).to_have_count(0)
+    stub.launch_effects.pop(effect_id)
+
     # Open a task: the address names it, and an edit sends only what changed.
     cols.locator(".pcard", has_text="Menu photo captions").click()
     expect(sheet).to_be_visible()

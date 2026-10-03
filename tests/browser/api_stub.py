@@ -478,6 +478,13 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
     if method.upper() == "GET" and path == "/api/control/revisions":
         return 200, "application/json", json.dumps({"scope": {"kind": "global", "id": "global"},
                                                       "collection_revision": 1, "entity_revision": None})
+    if method.upper() == "GET" and path == "/api/admission/resources":
+        unavailable = {"available": False, "reason": "kernel delegation is unavailable"}
+        return 200, "application/json", json.dumps({"container": unavailable, "host": unavailable,
+                                                      "native": {"available": False, "reason": "in-process runtime"},
+                                                      "disk_quota_supported": False})
+    if method.upper() == "GET" and path == "/api/plugins/read-models":
+        return 200, "application/json", json.dumps([])
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "workspace-archive":
         return 200, "application/json", json.dumps({"latest": None, "available": False})
     if method.upper() == "GET" and len(parts) == 6 and parts[2] == "projects" and parts[4:] == ["workspace-archive", "budget-history"]:
@@ -491,6 +498,11 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "budget":
         return 200, "application/json", json.dumps({"configured": False, "project_id": parts[3],
                                                       "entity_revision": 1, "goal_revision": 1})
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "resource-profile":
+        return 200, "application/json", json.dumps({"configured": False, "project_id": parts[3],
+                                                      "entity_revision": 1, "profile_revision": None,
+                                                      "state": "disabled", "limits": None,
+                                                      "disk_quota_supported": False})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "usage":
         # A project nobody invented spend for spent nothing; a harness with a team answers it itself.
         nothing = {w: {"usd": 0.0, "tokens": 0, "unpriced": 0} for w in ("today", "week", "all")}
@@ -712,6 +724,7 @@ class BoardStub:
         self.updated: list[tuple[str, dict]] = []
         self.launched: list[tuple[str, dict]] = []
         self.launch_failures = 0
+        self.launch_effects: dict[str, dict] = {}
         self.launch_unknowns = 0
         self.unknown_launches: list[tuple[str, dict]] = []
         self.cancellations: list[tuple[str, dict]] = []
@@ -853,7 +866,8 @@ class BoardStub:
         if path == "/api/control/effects/stop-1" and method == "GET":
             return 200, {"effect_id": "stop-1", "state": "pending"}
         if path.startswith("/api/control/effects/launch-") and method == "GET":
-            return 200, {"effect_id": path.rsplit("/", 1)[-1], "state": "pending"}
+            identity = path.rsplit("/", 1)[-1]
+            return 200, {"effect_id": identity, **self.launch_effects.get(identity, {"state": "pending"})}
         if path == "/api/control/revisions" and method == "GET":
             return 200, {"scope": {"kind": "project", "id": self.project["id"]}, "entity_revision": 1, "collection_revision": len(self.tasks) + 1}
         if path.startswith("/api/lifecycle/"):
@@ -1168,6 +1182,7 @@ class FocusStub:
         self.wakeups = wakeups or []
         self.woken: list[dict] = []
         self.watches = watches or []
+        self.coordinator_handoffs: dict[str, dict] = {}
         self.watched: list[tuple[str, dict]] = []
         self.watch_collection_revision = 1
         self.watch_project_revision = 1
@@ -1304,6 +1319,26 @@ class FocusStub:
                 messages.append({"role": "user", "seq": seq, "origin": "operator", "text": payload.get("text", ""), "thinking": "", "tool_calls": [], "tool_results": [], "created_at": now,
                                  "delivery": "steer" if payload.get("steer") else None, "reply_to": reply})
                 return 200, {"run_id": f"run-{seq}"}
+        if path.startswith("/api/projects/") and path.endswith("/orchestrator/replace"):
+            pid = path.split("/")[3]
+            if method == "GET":
+                return 200, {"handoff": self.coordinator_handoffs.get(pid)}
+            if method == "POST":
+                project = self.project(pid)
+                if project is None:
+                    return 404, {"detail": "no such project"}
+                command = dict(body or {})
+                office = project.get("settings", {}).get("orchestrator", {})
+                if not office.get("enabled") or office.get("session_id") != command.get("expected_coordinator_session_id"):
+                    return 409, {"detail": "coordinator changed"}
+                handoff = {"handoff_id": f"handoff-{pid}", "state": "completed", "blocker": None,
+                           "old_active": False, "new_active": True, "receipt_id": f"receipt-{pid}"}
+                self.coordinator_handoffs[pid] = handoff
+                office["session_id"] = f"orch-next-{pid}"
+                project["entity_revision"] = int(project.get("entity_revision") or 1) + 1
+                return 200, {"handoff_id": handoff["handoff_id"], "state": "retirement_pending",
+                             "old_active": False, "receipt_id": handoff["receipt_id"], "session_id": office["session_id"],
+                             "entity_revision": project["entity_revision"]}
         if path.startswith("/api/projects/") and path.endswith("/orchestrator") and method == "POST":
             pid = path.split("/")[3]
             project = self.project(pid)

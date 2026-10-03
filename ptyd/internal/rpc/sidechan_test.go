@@ -156,6 +156,10 @@ func TestExecAndFilesOverTheSocket(t *testing.T) {
 	if we := f.callErr("exec.run", map[string]any{"argv": []string{"sh", "-c", "true"}}); we == nil || we.Code != wire.CodeForbidden {
 		t.Fatalf("sh: %v", we)
 	}
+	if we := f.callErr("exec.run", map[string]any{"argv": []string{"git", "--version"},
+		"resources": map[string]any{"scope": map[string]any{"attempt_id": "attempt_123"}}}); we == nil || we.Code != wire.CodeForbidden {
+		t.Fatalf("strict side-channel process escaped its sandbox: %v", we)
+	}
 	if _, err := exec.LookPath("git"); err == nil {
 		var res struct {
 			ExitCode int    `json:"exit_code"`

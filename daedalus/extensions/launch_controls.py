@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 launch_attempt: ContextVar[str | None] = ContextVar("launch_attempt", default=None)
 launch_capacity_slot: ContextVar[str | None] = ContextVar("launch_capacity_slot", default=None)
+launch_resources: ContextVar[dict | None] = ContextVar("launch_resources", default=None)
 
 
 async def prepare_attempt(app: Application, principal: Principal, member: Staff, task: BoardTask,
@@ -38,10 +39,19 @@ async def prepare_attempt(app: Application, principal: Principal, member: Staff,
         grant = await control.issue_worker_grant_in(conn, principal, scope, staff_session_id=session.id,
                                                    expires_at=(datetime.now(UTC) + timedelta(hours=24)).isoformat())
         worker = Principal(f"staff:{member.id}", "agent", grant["grant_id"], grant["generation"])
-        return await app.executions.create(conn, attempt_id=launch_attempt.get() or uuid.uuid4().hex, task_id=task.id,
+        identity = await app.executions.create(conn, attempt_id=launch_attempt.get() or uuid.uuid4().hex, task_id=task.id,
                                            contract_revision=row["contract_revision"], launcher=principal,
                                            worker=worker, staff_session_id=session.id, runtime_kind=session.kind,
                                            fence_token=fence_token, comparison_slot_id=capacity_slot_id)
+        resource = launch_resources.get()
+        if resource is not None:
+            from daedalus.stores.resource_profiles import bind_attempt_in  # Lazy: resource profiles are optional.
+
+            if session.kind != "cli":
+                raise ControlDenied("in-process workers cannot use a strict attempt resource profile")
+            await bind_attempt_in(conn, attempt_id=identity.id, project_id=member.project_id,
+                                  host_generation=identity.host_generation, resource=resource)
+        return identity
 
 
 async def observe_bind(app: Application, identity: AttemptIdentity, session: StaffSession,

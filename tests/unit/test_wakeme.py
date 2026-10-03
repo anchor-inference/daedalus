@@ -17,11 +17,12 @@ from protocore.contracts.llm import LLMRequest, ProviderDelta
 from daedalus.config import Settings
 from daedalus.extensions import wakeups
 from daedalus.extensions.api import build_app
+from daedalus.extensions.coordinator_authority import approve_authority
 from daedalus.extensions.effects import EffectDispatcher
 from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.extensions.recurring import Recurring, RecurringEffect
 from daedalus.extensions.scheduler import Scheduler
-from daedalus.stores.control import Principal
+from daedalus.stores.control import ControlDenied, Principal
 from daedalus.stores.database import Database
 from daedalus.stores.outbox import OutboxStore
 from tests.support.waiting import until_await
@@ -122,6 +123,53 @@ async def test_wake_me_wakes_the_scripted_orchestrator_with_its_note_once(settin
         await r.manager.close()
 
 
+async def test_approved_current_coordinator_can_set_and_cancel_only_its_one_shot_wake(
+    settings: Settings, db: Database, tmp_path: Path,
+) -> None:
+    r = await rig(settings, db, tmp_path)
+    scheduler = with_scheduler(r)
+    try:
+        project = await r.orch.enable(r.project.id)
+        sid = project.settings.orchestrator.session_id
+        entity = await db.fetchone("SELECT entity_revision FROM projects WHERE id = ?", (project.id,))
+        await approve_authority(
+            r.team.app, project.id, Principal("operator:1", "operator"),
+            client_operation_id="allow-own-wake", expected_entity_revision=entity["entity_revision"],
+            expected_coordinator_session_id=sid, bundle_id="wake_internal",
+            expires_at=(datetime.now(UTC) + timedelta(hours=2)).isoformat(),
+        )
+        saved = await r.call(sid, "wake_me", note="Check the build", in_minutes=10,
+                             client_operation_id="wake-one")
+        replay = await r.call(sid, "wake_me", note="Check the build", in_minutes=10,
+                              client_operation_id="wake-one")
+        assert replay == saved
+        assert "ready" in saved and "current coordinator approval" in saved
+        [wakeup] = await wakeups.wakeups(r.team.app, project.id)
+        assert wakeup["authority_state"] == "current"
+        await make_due(db, wakeup["id"])
+        await db.execute("UPDATE schedules SET kind='message' WHERE id=?", (wakeup["id"],))
+        with pytest.raises(ControlDenied, match="only its own one-shot wake"):
+            await r.team.app.extensions["recurring"].reserve(wakeup["id"])
+        await db.execute("UPDATE schedules SET kind='wake' WHERE id=?", (wakeup["id"],))
+        assert await r.call(sid, "unwatch", id=wakeup["id"], client_operation_id="cancel-one") == (
+            f"wake-up {wakeup['id']} cancelled"
+        )
+        assert await wakeups.wakeups(r.team.app, project.id) == []
+        await make_due(db, wakeup["id"])
+        await scheduler.tick()
+        assert await events(r.manager, "schedule.fired") == []
+        await r.call(sid, "wake_me", note="Check the release", in_minutes=10,
+                     client_operation_id="wake-two")
+        [due] = await wakeups.wakeups(r.team.app, project.id)
+        await make_due(db, due["id"])
+        await scheduler.tick()
+        await until_await(lambda: events(r.manager, "schedule.fired"), "the bounded wake was delivered")
+        [fired] = await events(r.manager, "schedule.fired")
+        assert fired.payload["schedule_id"] == due["id"]
+    finally:
+        await r.manager.close()
+
+
 class HeldProvider(ScriptedProvider):
     """A scripted model whose first answer waits for the test, so the orchestrator is busy meanwhile."""
 
@@ -215,7 +263,8 @@ async def test_cancel_and_the_tool_refusals(settings: Settings, db: Database, tm
     try:
         project = await r.orch.enable(r.project.id)
         sid = project.settings.orchestrator.session_id
-        said = await r.call(sid, "wake_me", note="Look at the queue", at=(datetime.now(UTC) + timedelta(hours=2)).isoformat())
+        said = await r.call(sid, "wake_me", note="Look at the queue", at=(datetime.now(UTC) + timedelta(hours=2)).isoformat(),
+                            client_operation_id="pending-wake")
         assert said.startswith("wake-up saved: [") and "needs operator approval" in said
         [wakeup] = await wakeups.wakeups(r.team.app, r.project.id)
         with pytest.raises(Refused, match="has no wake-up or watch 'nope'"):
@@ -225,7 +274,8 @@ async def test_cancel_and_the_tool_refusals(settings: Settings, db: Database, tm
         assert await wakeups.cancel(r.team.app, r.project.id, wakeup["id"], principal=Principal("operator:1", "operator"))
         assert await wakeups.wakeups(r.team.app, r.project.id) == []
         with pytest.raises(Refused, match="already passed"):
-            await r.call(sid, "wake_me", note="late", at="2000-01-01T00:00")
+            await r.call(sid, "wake_me", note="late", at="2000-01-01T00:00",
+                         client_operation_id="late-wake")
         # Another project's wake-up is not this one's to cancel.
         other = await r.manager.projects.create("Other", [])
         assert not await wakeups.cancel(r.team.app, other.id, wakeup["id"])

@@ -199,11 +199,12 @@ class OpenCodeAdapter:
         return self._plan(spec, ref)
 
     def _plan(self, spec: LaunchSpec, resume: str) -> LaunchPlan:
+        spec.validate_permissions(())
         low, high = spec.port_range
         port = random.randint(low, high)
         server = _Server(port, secrets.token_urlsafe(24), spec.title, spec.model, spec.agent, resume)
         self._planned[spec.launch_id] = server
-        permission: dict[str, Any] = {**PERMISSIONS.get(spec.permission_level, PERMISSIONS["ask"]), "external_directory": {f"{LAUNCH_DIR}/**": "allow"}}
+        permission: dict[str, Any] = {**PERMISSIONS[spec.permission_level], "external_directory": {f"{LAUNCH_DIR}/**": "allow"}}
         config: dict[str, Any] = {
             "mcp": {
                 "daedalus_team": {

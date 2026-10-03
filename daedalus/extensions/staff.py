@@ -25,6 +25,7 @@ import re
 import secrets
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -33,6 +34,7 @@ from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
 
 from daedalus.extensions.board import NOTES_MAX_CHARS
+from daedalus.extensions.launch_controls import launch_resources
 from daedalus.extensions.notifications import ActionConflict, ActionOutcome, ActionRefused, Draft
 from daedalus.extensions.runtime_observations import admit_native_run, enter_runtime, observe_exit, observe_no_entry
 from daedalus.extensions.staff_results import StaffReportService
@@ -632,8 +634,13 @@ class Team:
             entry.resume_from or await self.manager.db.kv_get(self._resume_key(entry.staff_id, entry.task_id)))
         if entry.principal is None or entry.check_authority is None:
             raise ControlDenied("a queued launch must retain its authenticated command")
-        await self.start(member, task, principal=entry.principal, check_authority=entry.check_authority,
-                         by=entry.by, resume_from=source, capacity_slot_id=entry.capacity_slot_id)
+        bound_resources = launch_resources.set(entry.resources)
+        try:
+            await self.start(member, task, principal=entry.principal, check_authority=entry.check_authority,
+                             by=entry.by, resume_from=source, capacity_slot_id=entry.capacity_slot_id,
+                             resources=entry.resources)
+        finally:
+            launch_resources.reset(bound_resources)
         if entry.capacity_slot_id is None:
             await self.manager.db.execute("DELETE FROM kv WHERE key = ?", (self._resume_key(entry.staff_id, entry.task_id),))
 
@@ -774,14 +781,17 @@ class Team:
 
     async def start(self, member: Staff, task: BoardTask, *, principal: Principal,
                     check_authority: Callable[[], Awaitable[None]], by: str = "operator",
-                    resume_from: str | None = None, capacity_slot_id: str | None = None) -> LiveSession:
+                    resume_from: str | None = None, capacity_slot_id: str | None = None,
+                    resources: dict[str, Any] | None = None) -> LiveSession:
         async with self.execution_lock(member.id):
             return await self._start(member, task, principal=principal, check_authority=check_authority,
-                                     by=by, resume_from=resume_from, capacity_slot_id=capacity_slot_id)
+                                     by=by, resume_from=resume_from, capacity_slot_id=capacity_slot_id,
+                                     resources=resources)
 
     async def _start(self, member: Staff, task: BoardTask, *, principal: Principal,
                      check_authority: Callable[[], Awaitable[None]], by: str,
-                     resume_from: str | None, capacity_slot_id: str | None) -> LiveSession:
+                     resume_from: str | None, capacity_slot_id: str | None,
+                     resources: dict[str, Any] | None = None) -> LiveSession:
         """Start a session of ``member`` for ``task`` now; the launch queue calls this once it admits it."""
         if principal.origin_class != "operator" and not principal.grant_id:
             raise StaffError("a host-attested launch principal is required")
@@ -789,6 +799,13 @@ class Team:
             raise StaffError("a funded comparison needs an isolated native worker")
         if capacity_slot_id is not None and resume_from is not None:
             raise StaffError("a comparison cannot reuse an earlier worker session")
+        if resources is not None and member.harness == "daedalus":
+            raise StaffError("in-process workers cannot use a strict attempt resource profile")
+        profile = await self.app.db.fetchone("SELECT state FROM resource_profile_versions"
+                                             " WHERE project_id = ? ORDER BY revision DESC LIMIT 1",
+                                             (member.project_id,))
+        if profile is not None and profile["state"] == "enabled" and resources is None:
+            raise StaffError("a strict resource profile requires an exact queued CLI containment binding")
         await check_authority()
         runtime = self.runtime(member)
         project = await self.project(member.project_id)
@@ -897,6 +914,7 @@ class Team:
             origin="orchestrator" if by == "orchestrator" else "operator",
             first_message_id=first_id,
             allow_rules=tuple(r["rule"] for r in await self.manager.staff.allow_rules(member.id)),
+            resources=resources,
         )
         identity = None
         entered_provider = False
@@ -908,6 +926,9 @@ class Team:
 
             identity = await prepare_attempt(self.app, principal, member, task, session, fence_token=token,
                                              capacity_slot_id=capacity_slot_id)
+            if resources is not None:
+                request = replace(request, resources={**resources, "attempt_id": identity.id,
+                                                      "host_generation": str(identity.host_generation)})
             await check_authority()
             current_context = await assemble_task_context(self.app.db, task.id, role="worker",
                                                           role_hint=member.role)

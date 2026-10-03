@@ -56,6 +56,25 @@ def _contract(schedule: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _withdraw_schedule_effects_in(conn: Any, control: ControlStore, schedule_id: str, grant_id: str | None,
+                                        principal: Principal, *, reason: str) -> None:
+    if not grant_id:
+        return
+    grant = await one(conn, "SELECT actor_id FROM actor_grants WHERE id = ?", (grant_id,))
+    if grant is None:
+        raise ControlDenied("the schedule approval no longer exists")
+    if grant["actor_id"].startswith("orchestrator:"):
+        # This narrow approval can back several one-shot wakes. Revising one
+        # cancels only that wake's pending effect; office handoff revokes the grant.
+        await conn.execute(
+            "UPDATE effect_outbox SET state = 'cancelled',error = ? WHERE state = 'pending'"
+            " AND id IN (SELECT effect_id FROM recurring_cycles WHERE schedule_id = ?)",
+            (reason, schedule_id),
+        )
+    else:
+        await control.revoke_grant_in(conn, principal, grant_id, reason=reason)
+
+
 async def repoint_project_schedules_in(conn: Any, *, project_id: str, old_session_id: str | None,
                                        new_session_id: str) -> list[str]:
     """Retarget coordinator schedules in a proven office swap, leaving approval to the operator.
@@ -101,9 +120,14 @@ async def repoint_project_schedules_in(conn: Any, *, project_id: str, old_sessio
         if row["grant_id"]:
             grant = await one(conn, "SELECT actor_id,scope_kind,scope_id,project_id,generation,revoked_at"
                               " FROM actor_grants WHERE id = ?", (row["grant_id"],))
-            if (grant is None or grant["actor_id"] != f"schedule:{row['id']}"
+            expected_actor = (f"orchestrator:{row['target_session']}"
+                              if str(row["actor_id"] or "").startswith("orchestrator:")
+                              else f"schedule:{row['id']}")
+            if (grant is None or grant["actor_id"] != expected_actor
                     or grant["scope_kind"] != "project" or grant["scope_id"] != project_id
-                    or grant["project_id"] != project_id or grant["generation"] != row["grant_generation"]):
+                    or grant["project_id"] != project_id
+                    or (grant["generation"] != row["grant_generation"]
+                        and not (grant["revoked_at"] and grant["generation"] > row["grant_generation"]))):
                 raise ControlDenied("the schedule grant no longer matches its project")
             if not grant["revoked_at"]:
                 generation = int(grant["generation"]) + 1
@@ -133,6 +157,104 @@ class Recurring:
         self.app = app
         self.db = app.db
         self.control = ControlStore(self.db)
+
+    async def create_internal_wake(self, principal: Principal, *, project_id: str,
+                                   session_id: str, name: str, prompt: str, run_at: str,
+                                   requested_time: dict[str, Any],
+                                   expected_collection_revision: int,
+                                   client_operation_id: str) -> dict[str, Any]:
+        """Persist one office wake using only its current, operator-approved narrow grant."""
+        if principal.origin_class != "agent" or principal.actor_id != f"orchestrator:{session_id}":
+            raise ControlDenied("only the current coordinator can save its own wake")
+        if not name.strip() or len(name) > 160 or not prompt.strip() or len(prompt) > 500:
+            raise ValueError("the wake-up needs a bounded name and note")
+        due = datetime.fromisoformat(run_at.replace("Z", "+00:00"))
+        if due.tzinfo is None:
+            raise ValueError("a timezone-aware wake time is required")
+        scope = Scope("project", project_id)
+        payload = {"name": name, "prompt": prompt, "requested_time": requested_time,
+                   "target_session": session_id, "kind": "wake"}
+        earlier = await self.db.fetchone(
+            "SELECT entity_revision FROM operation_receipts WHERE scope_kind='project' AND scope_id=?"
+            " AND actor_id=? AND operation_kind='schedule.propose' AND client_operation_id=?",
+            (project_id, principal.actor_id, client_operation_id),
+        )
+        if earlier is not None:
+            expected_collection_revision = int(earlier["entity_revision"]) - 1
+
+        async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
+            if due <= datetime.now(UTC):
+                raise ValueError("a future wake time is required")
+            grant = await one(conn, "SELECT * FROM actor_grants WHERE id = ?", (principal.grant_id,))
+            if (grant is None or grant["actor_id"] != principal.actor_id
+                    or grant["scope_kind"] != "project" or grant["scope_id"] != project_id
+                    or grant["parent_grant_id"] is not None):
+                raise ControlDenied("a direct project wake approval is required")
+            if due > datetime.fromisoformat(grant["expires_at"]):
+                raise ControlDenied("wake time exceeds the approved coordinator grant expiry")
+            target = await one(conn, "SELECT project_id,metadata FROM sessions WHERE id = ?", (session_id,))
+            if (target is None or target["project_id"] != project_id
+                    or json.loads(target["metadata"] or "{}").get("orchestrator_of") != project_id):
+                raise ControlDenied("the wake target is no longer the current coordinator")
+            schedule_id = "s" + mutation.object_id[:15]
+            contract = _contract({"kind": "wake", "target_session": session_id, "prompt": prompt})
+            await conn.execute(
+                "INSERT INTO schedules(id,name,cron,run_at,prompt,files,model,recurring,enabled,workspace,"
+                "next_run_at,created_by_session,created_at,kind,target_session,run_in,schedule_revision,project_id,"
+                "actor_id,grant_id,grant_generation,authority_state,output_contract_json,timezone,updated_at)"
+                " VALUES (?,?,NULL,?,?,'[]',NULL,0,1,'',?,?,?,?,?,'self',1,?,?,?,?, 'current',?,'UTC',?)",
+                (schedule_id, name.strip(), due.isoformat(), prompt.strip(), due.isoformat(), session_id,
+                 now(), "wake", session_id, project_id, principal.actor_id, principal.grant_id,
+                 principal.grant_generation, canonical(contract), now()),
+            )
+            return {"id": schedule_id, "kind": "wake", "next_run_at": due.isoformat(),
+                    "schedule_revision": 1, "authority_state": "current", "output_contract": contract,
+                    "grant_expires_at": grant["expires_at"]}
+
+        return await self.control.mutate(principal, scope, "schedule.propose", client_operation_id,
+                                         expected_collection_revision, Entity("collection", project_id),
+                                         payload, effect)
+
+    async def cancel_internal_wake(self, principal: Principal, *, project_id: str,
+                                   session_id: str, schedule_id: str,
+                                   expected_collection_revision: int,
+                                   expected_schedule_revision: int,
+                                   client_operation_id: str) -> dict[str, Any]:
+        if principal.origin_class != "agent" or principal.actor_id != f"orchestrator:{session_id}":
+            raise ControlDenied("only the current coordinator can cancel its own wake")
+        scope = Scope("project", project_id)
+        payload = {"schedule_id": schedule_id, "expected_schedule_revision": expected_schedule_revision}
+
+        async def effect(conn: Any, _: Any) -> dict[str, Any]:
+            row = await one(conn, "SELECT * FROM schedules WHERE id = ?", (schedule_id,))
+            if row is None or row["deleted_at"]:
+                raise KeyError(schedule_id)
+            if (row["project_id"] != project_id or row["actor_id"] != principal.actor_id
+                    or row["grant_id"] != principal.grant_id
+                    or row["grant_generation"] != principal.grant_generation
+                    or row["target_session"] != session_id or row["kind"] != "wake" or row["cron"]):
+                raise ControlDenied("this wake-up is not owned by the current coordinator approval")
+            if row["schedule_revision"] != expected_schedule_revision:
+                raise ControlConflict("the wake-up changed", current_revision=row["schedule_revision"])
+            uncertain = await one(
+                conn, "SELECT c.id FROM recurring_cycles c JOIN effect_outbox e ON e.id = c.effect_id"
+                " WHERE c.schedule_id = ? AND e.state IN ('claimed','unknown') LIMIT 1", (schedule_id,),
+            )
+            if uncertain is not None:
+                raise ControlDenied("reconcile uncertain wake delivery before cancellation")
+            await _withdraw_schedule_effects_in(conn, self.control, schedule_id, row["grant_id"],
+                                                principal, reason="coordinator cancelled its wake")
+            await conn.execute(
+                "UPDATE schedules SET enabled=0,authority_state='needs_approval',"
+                "schedule_revision=schedule_revision+1,deleted_at=?,updated_at=? WHERE id=?",
+                (now(), now(), schedule_id),
+            )
+            return {"id": schedule_id, "deleted": True}
+
+        async with self.db.authority_effect_lock("project", project_id):
+            return await self.control.mutate(principal, scope, "schedule.cancel", client_operation_id,
+                                             expected_collection_revision, Entity("collection", project_id),
+                                             payload, effect)
 
     async def create(self, principal: Principal, *, name: str, prompt: str, cron: str | None,
                      run_at: str | None, kind: str, target_session: str | None,
@@ -235,7 +357,8 @@ class Recurring:
             if uncertain is not None:
                 raise ControlDenied("reconcile an earlier uncertain occurrence before reapproval")
             if current["grant_id"]:
-                await self.control.revoke_grant_in(conn, principal, current["grant_id"], reason="schedule reapproved")
+                await _withdraw_schedule_effects_in(conn, self.control, schedule_id, current["grant_id"],
+                                                    principal, reason="schedule reapproved")
             approval = await self.control.issue_grant_in(
                 conn, principal, Principal(f"schedule:{schedule_id}", "system"), scope,
                 operations=["schedule.fire"], effects=[f"schedule.{current['kind'] or 'agent'}"],
@@ -318,7 +441,8 @@ class Recurring:
             if uncertain is not None:
                 raise ControlDenied("reconcile an uncertain occurrence before changing the schedule")
             if current["grant_id"]:
-                await self.control.revoke_grant_in(conn, principal, current["grant_id"], reason="schedule revised")
+                await _withdraw_schedule_effects_in(conn, self.control, schedule_id, current["grant_id"],
+                                                    principal, reason="schedule revised")
             revision = int(current["schedule_revision"]) + 1
             await conn.execute(
                 "UPDATE schedules SET name = ?,prompt = ?,cron = ?,run_at = ?,recurring = ?,enabled = ?,"
@@ -359,7 +483,8 @@ class Recurring:
             if uncertain is not None:
                 raise ControlDenied("reconcile an uncertain occurrence before removing the schedule")
             if current["grant_id"]:
-                await self.control.revoke_grant_in(conn, principal, current["grant_id"], reason="schedule removed")
+                await _withdraw_schedule_effects_in(conn, self.control, schedule_id, current["grant_id"],
+                                                    principal, reason="schedule removed")
             await conn.execute("UPDATE schedules SET enabled = 0,authority_state = 'needs_approval',"
                                "schedule_revision = schedule_revision + 1,deleted_at = ?,updated_at = ? WHERE id = ?",
                                (now(), now(), schedule_id))
@@ -389,7 +514,16 @@ class Recurring:
         if schedule["authority_state"] != "current" or not schedule["grant_id"]:
             return None
         scope = _scope(schedule)
-        principal = Principal(f"schedule:{schedule_id}", "system", schedule["grant_id"], schedule["grant_generation"])
+        grant = await self.db.fetchone("SELECT actor_id,origin_class FROM actor_grants WHERE id = ?",
+                                       (schedule["grant_id"],))
+        if grant is None:
+            raise ControlDenied("the schedule approval no longer exists")
+        principal = Principal(grant["actor_id"], grant["origin_class"], schedule["grant_id"],
+                              schedule["grant_generation"])
+        if principal.actor_id.startswith("orchestrator:") and (
+                (schedule["kind"] or "agent") != "wake" or schedule["cron"]
+                or schedule["target_session"] != principal.actor_id.partition(":")[2]):
+            raise ControlDenied("a coordinator grant covers only its own one-shot wake")
         contract = json.loads(schedule["output_contract_json"])
         if contract != _contract(schedule):
             raise ControlDenied("the schedule output contract changed without review")
@@ -408,6 +542,10 @@ class Recurring:
                     or current["next_run_at"] != schedule["next_run_at"]
                     or current["grant_id"] != schedule["grant_id"]):
                 raise ControlConflict("the scheduled occurrence changed before reservation")
+            if principal.actor_id.startswith("orchestrator:") and (
+                    (current["kind"] or "agent") != "wake" or current["cron"]
+                    or current["target_session"] != principal.actor_id.partition(":")[2]):
+                raise ControlDenied("a coordinator grant covers only its own one-shot wake")
             unresolved = await one(
                 conn, "SELECT c.id FROM recurring_cycles c JOIN effect_outbox e ON e.id = c.effect_id"
                 " WHERE c.schedule_id = ? AND e.state IN ('pending','claimed','unknown') LIMIT 1",
@@ -582,6 +720,10 @@ class RecurringEffect:
                 return EffectOutcome("failed", "the scheduled occurrence is no longer approved")
             if row["intent_digest"] != digest(schedule) or json.loads(row["output_contract_json"]) != _contract(schedule):
                 return EffectOutcome("failed", "the scheduled action no longer matches its approved output")
+            if claim.principal.actor_id.startswith("orchestrator:") and (
+                    row["kind"] != "wake" or row["manual"]
+                    or schedule.get("target_session") != claim.principal.actor_id.partition(":")[2]):
+                return EffectOutcome("failed", "the coordinator approval covers only its own one-shot wake")
             target_session = schedule.get("target_session")
             if target_session and row["project_id"]:
                 target = await self.app.db.fetchone("SELECT project_id FROM sessions WHERE id = ?", (target_session,))

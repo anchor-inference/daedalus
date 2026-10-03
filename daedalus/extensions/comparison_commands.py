@@ -20,6 +20,7 @@ from daedalus.stores.comparisons import (
 )
 from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope, now, one
 from daedalus.stores.outbox import OutboxStore
+from daedalus.stores.resource_profiles import latest_in
 from daedalus.stores.runtime_release import attempt_released_in, physical_exit_in
 
 if TYPE_CHECKING:
@@ -81,6 +82,9 @@ async def queue_comparison(
                                 for staff_id, allowance in zip(staff_ids, allowances, strict=True)]}
 
     async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
+        profile = await latest_in(conn, scope.id)
+        if profile is not None and profile["state"] == "enabled":
+            raise ComparisonRefused("strict per-attempt ceilings cannot isolate in-process comparison workers")
         current = await one(conn, "SELECT * FROM board_tasks WHERE id = ?", (task_id,))
         if current is None or current["project_id"] != scope.id or current["contract_revision"] != contract_revision:
             raise ComparisonRefused("the task contract changed before comparison admission")

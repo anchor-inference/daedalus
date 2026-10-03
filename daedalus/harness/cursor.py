@@ -108,7 +108,8 @@ class CursorAdapter:
         return self._plan(spec, ref)
 
     def _plan(self, spec: LaunchSpec, resume: str) -> LaunchPlan:
-        mode = spec.permission_mode if spec.permission_mode in ("ask", "plan", "agent") else "ask"
+        spec.validate_permissions(("ask", "plan", "agent"))
+        mode = spec.permission_mode or "ask"
         # ACP asks for permission on some calls, but file edits can proceed without an approval
         # request. Only the explicit full-access mode may therefore enter Cursor's agent mode.
         deny = ["Write(**)", "Shell(*)"] if mode != "agent" else []

@@ -203,7 +203,16 @@ def desktop(page: Page, feed: EventFeed, lang: str) -> None:
 
     # Lev's question is answered on the phone a moment before Send; Ctrl+Enter sends from a field.
     focus.late["ask-font"] = {"selected": ["Inter"], "via": "telegram"}
-    card(page, "q4r8tz").locator(".q-field").focus()
+    field = card(page, "q4r8tz").locator(".q-field")
+    field.focus()
+    draft = field.input_value()
+    for composing, code, modifier in ((True, 13, "ctrlKey"), (True, 13, "metaKey"), (False, 229, "ctrlKey"), (False, 229, "metaKey")):
+        assert field.evaluate("""(el, event) => el.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter', bubbles: true, cancelable: true,
+          isComposing: event.composing, keyCode: event.code, [event.modifier]: true,
+        }))""", {"composing": composing, "code": code, "modifier": modifier}), "IME completion was intercepted as Send"
+        expect(field).to_have_value(draft)
+    assert not focus.batches, "composing a character sent pending answers"
     page.keyboard.press("Control+Enter")
     expect(page.get_by_text(words["toast"])).to_be_visible()
     assert len(focus.batches) == 1, focus.batches

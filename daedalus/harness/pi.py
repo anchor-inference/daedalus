@@ -169,6 +169,7 @@ class PiAdapter:
         return self._plan(spec, ref)
 
     def _plan(self, spec: LaunchSpec, session: str) -> LaunchPlan:
+        spec.validate_permissions(())
         files: dict[str, bytes] = {BRIDGE_FILE: bridge_source()}
         argv: list[str] = ["pi", "--session-id", session, "-e", f"{LAUNCH_DIR}/{BRIDGE_FILE}"]
         if spec.team_block:
