@@ -138,6 +138,14 @@ TOOL_GROUPS: dict[str, ToolGroupSpec] = {
         "on an inbound webhook or message (IntentCreate). Not cron, sleep or a service",
         "lazy",
     ),
+    "calendar": ToolGroupSpec(
+        "Read and change the operator's calendar events, including calendars connected to Google, Outlook and Yandex",
+        "lazy",
+    ),
+    "diagrams": ToolGroupSpec(
+        "Create and edit native Excalidraw diagrams the operator can open in the app",
+        "lazy",
+    ),
     "self_development": ToolGroupSpec(
         "Any change to yourself, your code, prompts or skills (repositories 'bot' and 'core'): a worktree "
         "(SelfWorkspace), then a pull request (SelfPropose) or an applied change, a rebuild, a rollback. Never git "

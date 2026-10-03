@@ -687,7 +687,7 @@ class Orchestrators:
         runtimes = set(team.runtimes) if team is not None else set()
         lines: list[str] = []
         if "daedalus" in runtimes and self.manager.config.presets:
-            lines.append("Daedalus (presets): " + _listed(sorted(self.manager.config.presets), HIREABLE_MODELS))
+            lines.append("Daedalus (presets): " + _listed(sorted(self.manager.config.presets), HIREABLE_MODELS) + " · efforts off, low, medium, high, xhigh (Assign can override each call)")
         manager: Any = self.app.extensions.get("harness")
         if manager is None:
             return lines

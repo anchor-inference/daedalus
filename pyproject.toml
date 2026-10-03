@@ -20,6 +20,8 @@ dependencies = [
     "python-multipart>=0.0.32",
     "webauthn>=3.0.0",
     "tzdata>=2024.1",  # quiet hours run in the operator's zone; neither the container nor Windows ships a zone database
+    "icalendar>=6,<7",
+    "defusedxml>=0.7,<1",
 ]
 
 [project.optional-dependencies]

@@ -34,12 +34,12 @@ BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "b4k3ry20f0c5"
 
-ORDER = ["home", "agents", "orchestration", "inbox", "board", "changes", "terminals", "voice", "schedules", "menu", "settings"]
+ORDER = ["home", "agents", "orchestration", "inbox", "board", "calendar", "changes", "terminals", "voice", "schedules", "menu", "settings"]
 WORDS = {
     "en": {"home": "Home", "agents": "Agents", "orchestration": "Orchestration", "terminals": "Terminals", "board": "Board", "inbox": "Inbox",
-           "changes": "Changes", "voice": "Voice", "schedules": "Schedules", "services": "Services", "menu": "Menu", "settings": "Settings", "account": "Account", "toggle": "Toggle sidebar", "unfold": "Chats", "unfold.projects": "Projects", "more": "More"},
+           "calendar": "Calendar", "changes": "Changes", "voice": "Voice", "schedules": "Schedules", "services": "Services", "menu": "Menu", "settings": "Settings", "account": "Account", "toggle": "Toggle sidebar", "unfold": "Chats", "unfold.projects": "Projects", "more": "More"},
     "ru": {"home": "Главная", "agents": "Агенты", "orchestration": "Оркестрация", "terminals": "Терминалы", "board": "Доска", "inbox": "Входящие",
-           "changes": "Изменения", "voice": "Голос", "schedules": "Расписания", "services": "Сервисы", "menu": "Меню", "settings": "Настройки", "account": "Аккаунт", "toggle": "Показать боковую панель", "unfold": "Чаты", "unfold.projects": "Проекты", "more": "Ещё"},
+           "calendar": "Календарь", "changes": "Изменения", "voice": "Голос", "schedules": "Расписания", "services": "Сервисы", "menu": "Меню", "settings": "Настройки", "account": "Аккаунт", "toggle": "Показать боковую панель", "unfold": "Чаты", "unfold.projects": "Проекты", "more": "Ещё"},
 }
 # The unseen notifications the bell and the Inbox count, and what waits in orchestration: Bakery's one
 # request and the main chat's own confirmation (the mirrored questions are Bakery's, counted there).
@@ -135,7 +135,7 @@ def desktop(page: Page, lang: str) -> None:
     page.wait_for_url("**/app/agents")
     expect(page.locator("nav.sidebar:not(.orch-sidebar)")).to_be_visible()
     assert page.evaluate("localStorage.getItem('daedalus.mode')") == "agents"
-    for key, path in (("board", "/app/board"), ("inbox", "/app/inbox"), ("schedules", "/app/schedules")):
+    for key, path in (("board", "/app/board"), ("inbox", "/app/inbox"), ("calendar", "/app/calendar"), ("schedules", "/app/schedules")):
         rail.locator(f"[data-rail='{key}']").click()
         page.wait_for_url(f"**{path}")
         expect(rail.locator(f"[data-rail='{key}']")).to_have_class(re.compile(r"\bon\b"))

@@ -323,7 +323,8 @@ def judge_sidebar(s: dict) -> list[str]:
         if (got["rail"], got["sidebar"], got["main"]) != (rail, sidebar, main):
             problems.append(f"{key}: rail/sidebar/conversation start {got['rail']}/{got['sidebar']}/{got['main']}, not {rail}/{sidebar}/{main}")
     # The companion toggle lives beside the other secondary destinations.
-    if s["menuItems"] != 7:
+    # Diagrams live in More while Calendar has a dedicated rail icon.
+    if s["menuItems"] != 8:
         problems.append(f"the menu has {s['menuItems']} items")
     if not s["menuLang"]:
         problems.append("the menu has no language switch")

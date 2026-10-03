@@ -69,6 +69,7 @@ from daedalus.stores.files import FileRefused, StoredFile, file_ref
 from daedalus.stores.projects import Project, ProjectFolder
 from daedalus.stores.staff import (
     ACTIVE_STATUSES,
+    DAEDALUS_EFFORTS,
     HARNESS_NAMES,
     Ask,
     Staff,
@@ -611,6 +612,10 @@ class Team:
     def _resume_key(staff_id: str, task_id: str) -> str:
         return f"staff_resume:{staff_id}:{task_id}"
 
+    @staticmethod
+    def _effort_key(staff_id: str, task_id: str) -> str:
+        return f"staff_effort:{staff_id}:{task_id}"
+
     async def resume_sessions(self, member: Staff, *, task_id: str | None = None, before: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         """Conversations in the member's launch folder, including those of dismissed namesakes."""
         if member.harness == "daedalus":
@@ -669,13 +674,15 @@ class Team:
             raise StaffError("the selected CLI session belongs to a worktree, not this launch folder")
         return LiveSession(owner, source)
 
-    async def assign(self, member: Staff, task: str | dict[str, Any], *, by: str = "operator", resume_from: str | None = None) -> dict[str, Any]:
+    async def assign(self, member: Staff, task: str | dict[str, Any], *, by: str = "operator", resume_from: str | None = None, effort: str | None = None) -> dict[str, Any]:
         """Give a member a task (its id, or the board's view of it): it starts now, or waits in the
         project's launch queue. Returns ``{state: started|queued, position, reason, detail, task_id}``;
         a refusal is a :class:`StaffError`, which is a ``ValueError``."""
-        return (await self._assign(member, str(task["id"]) if isinstance(task, dict) else task, by=by, resume_from=resume_from)).view()
+        return (await self._assign(member, str(task["id"]) if isinstance(task, dict) else task, by=by, resume_from=resume_from, effort=effort)).view()
 
-    async def _assign(self, member: Staff, task_id: str, *, by: str, resume_from: str | None = None) -> Assigned:
+    async def _assign(self, member: Staff, task_id: str, *, by: str, resume_from: str | None = None, effort: str | None = None) -> Assigned:
+        if effort is not None and (member.harness != "daedalus" or effort not in DAEDALUS_EFFORTS[1:]):
+            raise StaffError("an assignment's effort is a Daedalus effort: off, low, medium, high or xhigh")
         if not member.active:
             raise StaffError(f"{member.name} has been dismissed")
         task = await self.task(task_id)
@@ -743,6 +750,11 @@ class Team:
             await self.manager.db.kv_set(key, resume_from)
         else:
             await self.manager.db.execute("DELETE FROM kv WHERE key = ?", (key,))
+        effort_key = self._effort_key(member.id, task.id)
+        if effort is not None:
+            await self.manager.db.kv_set(effort_key, effort)
+        else:
+            await self.manager.db.execute("DELETE FROM kv WHERE key = ?", (effort_key,))
         entry = Entry(project.id, member.id, member.name, task.id, task.priority, terminal, by, env=folder.env, resume_from=resume_from)
         admission = await self.queue.request(entry)
         return Assigned(admission, (await self.task(task.id)) or task)
@@ -870,7 +882,7 @@ class Team:
             staff_session_id=session.id,
             env=folder.env,
             model=member.model,
-            effort=member.effort,
+            effort=(await self.manager.db.kv_get(self._effort_key(member.id, task.id))) or member.effort,
             agent=member.agent,
             permission_level=self.permission_level(project),
             permission_mode=member.permission_mode,

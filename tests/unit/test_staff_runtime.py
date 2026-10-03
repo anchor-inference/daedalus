@@ -312,6 +312,24 @@ async def fake_team(settings: Settings, db: Database, tmp_path: Path, *, capacit
     return manager, team, runtime, found
 
 
+async def test_assignment_effort_overrides_member_default_and_survives_queue(settings: Settings, db: Database, tmp_path: Path) -> None:
+    manager, team, runtime, project = await fake_team(settings, db, tmp_path, concurrency=1)
+    try:
+        ada = await manager.staff.hire(project.id, name="Ada", isolation="shared", effort="low")
+        bo = await manager.staff.hire(project.id, name="Bo", isolation="shared", effort="medium")
+        first = await board_task(manager, project, "First")
+        later = await board_task(manager, project, "Later")
+        assert (await team.assign(ada, first, effort="high"))["state"] == "started"
+        assert runtime.started[0].effort == "high"
+        assert ada.effort == "low", "a call does not change the member's standing setting"
+        assert (await team.assign(bo, later, effort="off"))["state"] == "queued"
+        assert await db.kv_get(team._effort_key(bo.id, later)) == "off"
+        with pytest.raises(StaffError, match="Daedalus effort"):
+            await team.assign(bo, later, effort="extreme")
+    finally:
+        await manager.close()
+
+
 async def test_a_dirty_worktree_refuses_done_and_a_pause_commits_it(settings: Settings, db: Database, tmp_path: Path) -> None:
     manager, team, runtime, project = await fake_team(settings, db, tmp_path)
     try:

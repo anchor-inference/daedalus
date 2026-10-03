@@ -36,7 +36,16 @@ from daedalus.host.events import EventFilter
 from daedalus.staff_runtime import LiveSession, ReadRequest
 from daedalus.stores.files import FileRefused, StoredFile
 from daedalus.stores.projects import Project, ProjectFolder
-from daedalus.stores.staff import HARNESS_NAMES, HARNESSES, ISOLATIONS, MESSAGE_MODES, Staff, StaffBusy, StaffError
+from daedalus.stores.staff import (
+    DAEDALUS_EFFORTS,
+    HARNESS_NAMES,
+    HARNESSES,
+    ISOLATIONS,
+    MESSAGE_MODES,
+    Staff,
+    StaffBusy,
+    StaffError,
+)
 
 if TYPE_CHECKING:
     from daedalus.extensions.orchestrator import Orchestrators
@@ -440,6 +449,7 @@ async def assign(
     checks: list[str] | None = None,
     reason: str = "",
     resume_from: str | None = None,
+    effort: str | None = None,
 ) -> str:
     team = _team(orch)
     board = orch.board
@@ -488,6 +498,8 @@ async def assign(
         raise Refused(f"task {existing['id']}: {gone}; name who takes it (staff=…)")
     else:
         raise Refused("Assign needs staff: who takes the new task")
+    if effort is not None and (member.harness != "daedalus" or effort not in DAEDALUS_EFFORTS[1:]):
+        raise Refused("an assignment's effort is a Daedalus effort: off, low, medium, high or xhigh")
     handover = ""
     at_work = existing is not None and existing["status"] == "doing"
     if owner is not None and owner.active and not owner.one_off and owner.id != member.id and not at_work:
@@ -580,7 +592,10 @@ async def assign(
         await team.note_on_card(task["id"], f"the work passed from {owner.name} to {member.name}: {handover}")  # type: ignore[union-attr]
         await _journal(orch, project, "reassignment", f"Task {task['id']} \"{task['title']}\" passed from {owner.name} to {member.name}: {handover}", {"task_id": task["id"], "from": owner.id, "to": member.id})  # type: ignore[union-attr]
     try:
-        launched = await team.assign(member, task["id"], by="orchestrator", **({"resume_from": resume_from} if resume_from else {}))
+        launch_options = {"resume_from": resume_from} if resume_from else {}
+        if effort is not None:
+            launch_options["effort"] = effort
+        launched = await team.assign(member, task["id"], by="orchestrator", **launch_options)
     except KeyError as exc:
         raise Refused(f"no task {task['id']} on {project.name}'s board") from exc
     except StaffError as exc:
@@ -1147,7 +1162,7 @@ async def harnesses(orch: Orchestrators, project: Project, session_id: str, *, h
     environments = [env] if env else sorted({f.env for f in project.folders} or {orch.manager.projects.local_env})
     lines: list[str] = []
     if harness is None:
-        lines.append("Daedalus: " + ("ready" if "daedalus" in runtimes else "no runtime") + f", in the {orch.manager.projects.local_env}")
+        lines.append("Daedalus: " + ("ready" if "daedalus" in runtimes else "no runtime") + f", in the {orch.manager.projects.local_env}; efforts off, low, medium, high, xhigh")
         if manager is None:
             lines.append("the command-line agents are not set up on this installation")
             return "\n".join(lines)
@@ -1175,6 +1190,7 @@ async def harnesses(orch: Orchestrators, project: Project, session_id: str, *, h
             "Daedalus: " + ("ready" if "daedalus" in runtimes else "no runtime"),
             f"models (presets): {', '.join(presets) or 'the default only'}",
             f"agents (personas): {', '.join(orch.manager.staff.personas()) or 'none'}",
+            "efforts: off, low, medium, high, xhigh; the preset is the default, Hire/StaffEdit sets a member default, Assign overrides one assignment",
         ])
     if manager is None:
         raise Refused("the command-line agents are not set up on this installation")

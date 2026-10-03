@@ -208,7 +208,8 @@ async def test_a_large_mcp_server_is_held_back_behind_the_search(settings: Setti
         for query in ("create an event in the calendar", "создай событие в календаре"):
             context = ToolContext(tenant_id="daedalus", run_id="r", session_id=state.session.id, metadata={"tool_call_id": "c1", TOOL_VISIBILITY_POLICY_METADATA_KEY: engine.effective_tool_policy})
             result = await search.invoke(context, {"query": query})
-            assert mcp_tool_name("bigsrv", "create_calendar_event") in result.metadata["matches"][:3], query
+            # The host calendar tools now match this query before the connected server's copy.
+            assert mcp_tool_name("bigsrv", "create_calendar_event") in result.metadata["matches"], query
 
         # A session that did not enable the server is not told of it, nor offered the search.
         other = await manager.create_session("other", metadata=eager)

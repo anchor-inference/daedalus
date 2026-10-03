@@ -263,6 +263,9 @@ GATES: dict[str, object] = {
     "/api/asr": {"configured": False, "reason": "", "provider": "", "model": "", "max_seconds": 120, "autosend": False},
     "/api/proposals": [],
     "/api/schedules": [],
+    "/api/calendar/events": [],
+    "/api/calendar/accounts": [],
+    "/api/diagrams": [],
     # A project's requests: none waits, so a phone's project draws no banner.
     "/api/asks": {"asks": []},
     "/api/sessions": {"sessions": [], "projects": []},

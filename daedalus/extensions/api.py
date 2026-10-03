@@ -62,8 +62,17 @@ from daedalus.config import (
     on_demand_tool_groups_for,
 )
 from daedalus.doctor import DoctorContext, render_text, run_checks, summarize
-from daedalus.extensions import api_browsers, api_files, api_harnesses, api_projects, api_staff, launcher_updates
+from daedalus.extensions import (
+    api_browsers,
+    api_files,
+    api_harnesses,
+    api_projects,
+    api_staff,
+    api_workspace,
+    launcher_updates,
+)
 from daedalus.extensions import commands as slash
+from daedalus.extensions.calendar_sync import sync_loop
 from daedalus.extensions.heartbeat import TEMPLATE as HEARTBEAT_TEMPLATE
 from daedalus.extensions.inbound import PAYLOAD_MAX_CHARS, flatten_payload, verify_signature, webhook_facts
 from daedalus.extensions.notifications import ActionConflict, ActionRefused, Draft, NotificationService
@@ -106,6 +115,8 @@ from daedalus.speech.tts_service import MEDIA_TYPE_HEADER, SEQUENCE_TYPE
 from daedalus.speech.tts_service import frame as speech_frame
 from daedalus.staff_runtime import LiveSession
 from daedalus.stores import pairing, passkeys
+from daedalus.stores.calendar import CalendarStore
+from daedalus.stores.database import Database
 from daedalus.stores.harness import HarnessStore
 from daedalus.stores.media import MEDIA_TENANT
 from daedalus.stores.projects import Project
@@ -1257,9 +1268,15 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        calendar_stop = asyncio.Event()
+        calendar_db = getattr(app, "db", None)
+        calendar_task = asyncio.create_task(sync_loop(CalendarStore(calendar_db), calendar_stop)) if isinstance(calendar_db, Database) else None
         try:
             yield
         finally:
+            if calendar_task is not None:
+                calendar_stop.set()
+                await calendar_task
             await dependency_planner.close()
             await prompt_change_planner.close()
 
@@ -1544,6 +1561,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_staff.register(api, app, auth)
     # The files orchestration keeps by handle: the cards a chat draws, their bytes, the audit.
     api_files.register(api, app, auth)
+    if isinstance(getattr(app, "db", None), Database):
+        api_workspace.register(api, app, auth)
     # The agent's browser: its groups, the live view's ticket and socket, control, the audit.
     api_browsers.register(api, app, auth)
 
