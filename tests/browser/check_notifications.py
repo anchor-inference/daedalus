@@ -351,6 +351,34 @@ def run() -> int:
                 problems.append(f"on a small laptop the stack covers the composer: {stack} over {composer}")
             page.set_viewport_size({"width": 1440, "height": 900})
             context.close()
+            for _ in range(100):
+                if not Streams.open:
+                    break
+                time.sleep(0.05)
+
+            # With the companion enabled, the same filtered stream becomes its speech bubble;
+            # the lower-right notification stack must not be drawn alongside it.
+            pet_context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
+            pet_context.add_init_script("localStorage.setItem('daedalus.pet', 'on')")
+            pet_context.route("**/api/**", route_api)
+            pet_page = pet_context.new_page()
+            pet_page.goto(f"{BASE}/agents?token=t&lang=en", wait_until="commit")
+            pet_page.wait_for_selector(".pet-canvas", timeout=20000)
+            if not wait(pet_page, lambda: len(Streams.open) >= 1, 10):
+                problems.append("the companion window did not open the event stream")
+            arrive(notification(19, "Companion brings this update", session=S3))
+            if not wait(pet_page, lambda: pet_page.locator(".pet-bubble").count() and "Companion brings this update" in pet_page.locator(".pet-bubble").inner_text(), 4):
+                problems.append("the companion did not bring the notification")
+            if toasts(pet_page):
+                problems.append("a lower-right notification appeared beside the companion")
+            send("notify.resolved", {"id": 19, "resolution": "done"}, session=S3)
+            if not wait(pet_page, lambda: pet_page.locator(".pet-bubble").count() == 0, 3):
+                problems.append("the companion kept a resolved notification visible")
+            pet_context.close()
+            for _ in range(100):
+                if not Streams.open:
+                    break
+                time.sleep(0.05)
 
             # The phone: one banner, the More tab's badge, and Needs you first on the Inbox.
             Centre.entries[:] = [e for e in Centre.entries if e["id"] < 6]

@@ -39,8 +39,9 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
+from protocore.contracts.llm import LLMObservabilityContext, LLMRequest
 from protocore.contracts.memory import MemoryScope
-from protocore.contracts.types import ToolResultBlock, ToolUseBlock
+from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResultBlock, ToolUseBlock
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
@@ -66,6 +67,10 @@ from daedalus.extensions import commands as slash
 from daedalus.extensions.heartbeat import TEMPLATE as HEARTBEAT_TEMPLATE
 from daedalus.extensions.inbound import PAYLOAD_MAX_CHARS, flatten_payload, verify_signature, webhook_facts
 from daedalus.extensions.notifications import ActionConflict, ActionRefused, Draft, NotificationService
+from daedalus.extensions.pet import ACTIONS as PET_ACTIONS
+from daedalus.extensions.pet import EMOTIONS as PET_EMOTIONS
+from daedalus.extensions.pet import PROPS as PET_PROPS
+from daedalus.extensions.pet import normalize_reaction
 from daedalus.extensions.push import PushRefused, PushService
 from daedalus.extensions.review import ReviewRefused
 from daedalus.extensions.services import SHARE_COOKIE_PREFIX, SHARE_MODES, pid_alive
@@ -1238,6 +1243,12 @@ class TerminalSocket:
 class TerminalRestartBody(BaseModel):
     sandbox: bool | None = None
     confirm: bool = False
+
+
+class PetReactionBody(BaseModel):
+    preset: str = Field(min_length=1, max_length=120)
+    event: str = Field(min_length=1, max_length=60, pattern=r"^[a-z_ ]+$")
+    lang: Literal["en", "ru"] = "ru"
 
 
 def build_app(app: Application, api_token: str) -> FastAPI:
@@ -5661,6 +5672,50 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         for entry in view["search_backends"]:
             entry["available"] = True if not entry["needs_key"] else (None if keyed is None else entry["id"] in keyed)
         return view
+
+    pet_calls: dict[str, Any] = {"day": "", "count": 0, "last": 0.0}
+
+    @api.post("/api/pet/react")
+    async def pet_reaction(body: PetReactionBody, _: dict[str, Any] = Depends(auth)) -> dict[str, str]:
+        """A rare, tiny model call; the browser sends an event label, never conversation text."""
+        today = datetime.now(UTC).date().isoformat()
+        if pet_calls["day"] != today:
+            pet_calls.update(day=today, count=0, last=0.0)
+        if pet_calls["count"] >= 24 or time.monotonic() - pet_calls["last"] < 30:
+            raise HTTPException(429, "companion reaction limit reached")
+        preset = app.config.presets.get(body.preset)
+        if preset is None:
+            raise HTTPException(404, "unknown model preset")
+        try:
+            provider = manager.providers.get(preset.provider)
+        except KeyError as exc:
+            raise HTTPException(503, "model provider is unavailable") from exc
+        pet_calls["count"] += 1
+        pet_calls["last"] = time.monotonic()
+        prompt = (
+            "You are Daedalus, a tiny warm companion inside an app. The line must be a string "
+            f"containing one cozy, useful sentence in {'Russian' if body.lang == 'ru' else 'English'}, never a number. "
+            "Avoid claims about actions you did not see or the time of day. "
+            "Return only JSON: {line, emotion, action, prop}. Keep line under 100 characters. "
+            f"emotion: {', '.join(sorted(PET_EMOTIONS))}. action: {', '.join(sorted(PET_ACTIONS))}. "
+            f"prop: empty string or {', '.join(sorted(PET_PROPS))}. "
+            f"Event label: {body.event}."
+        )
+        request = LLMRequest(
+            model=preset.model,
+            messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text=prompt)])],
+            max_tokens=110,
+            temperature=0.5,
+            extra={"enable_thinking": False},
+            observability=LLMObservabilityContext(tenant_id="operator", session_id="pet", call_purpose="pet_reaction", call_category="session"),
+        )
+        try:
+            with manager.providers.hold([provider]):
+                response = await asyncio.wait_for(provider.complete_text(request), timeout=15)
+            raw = "".join(block.text for block in response.message.content_blocks if isinstance(block, TextBlock))
+            return normalize_reaction(raw)
+        except (TimeoutError, ValueError) as exc:
+            raise HTTPException(502, "companion reaction failed") from exc
 
     def _settings_candidate(body: SettingsBody) -> dict[str, Any]:
         current = app.config.model_dump(mode="json")

@@ -1,4 +1,3 @@
-import { useDesktopPet } from "./ui/pet";
 import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, SessionList, SessionSummary, telegram, TerminalList } from "./api";
 import { StatusLabel } from "./ui/components";
@@ -25,6 +24,7 @@ import { insideTerminal } from "./terminal/keys";
 import { startEvents } from "./events";
 import { useSummary } from "./notifications";
 import { NotificationToasts } from "./toasts";
+import { PetHost } from "./pethost";
 import { UpdateHost } from "./updatedialog";
 import { listenForOpen, syncPush } from "./push";
 import { focusView, phoneTab } from "./project/focus";
@@ -209,7 +209,11 @@ export function App() {
       .catch(() => setOnboarding({ has_model: true } as OnboardingState)); // an older bot has no such route: let the app through
   }, [authed]);
   const notifications = useSummary(!!authed);
-  useDesktopPet(!!authed, notifications.needs_you > 0);
+  useEffect(() => {
+    // A desktop window opened by the former Pet switch can survive a web reload. Close it when
+    // the signed-in in-app companion takes over, so the operator never gets two mascots.
+    if (authed) void window.daedalus?.pet?.(false);
+  }, [authed]);
   useAppBadge(notifications.unseen);
   const projects = useProjects();
   const projectList = projects.data ?? [];
@@ -636,6 +640,7 @@ export function App() {
       {more && <MoreSheet screen={route.screen} counts={counts} selfdev={selfdev} onClose={() => setMore(false)} />}
       {picking && sessionId && <SessionPicker exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
       <NotificationToasts />
+      <PetHost needsReply={notifications.needs_you > 0} activity={route.screen} />
       <UpdateHost />
       <ToastHost />
       <ConfirmHost />

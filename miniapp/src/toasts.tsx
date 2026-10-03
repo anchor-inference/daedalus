@@ -19,6 +19,7 @@ import { navigate, pathFor } from "./router";
 import { useMedia } from "./shell";
 import { ActionButtons, categoryLabel, noticeIcon, openEntry, toneClass } from "./notifications";
 import { plural, t } from "./i18n";
+import { usePetPreference } from "./ui/pet";
 
 /** A notification that only reports something: long enough to read two lines twice. */
 export const TOAST_MS = 7000;
@@ -224,6 +225,7 @@ function reaching(e: React.PointerEvent): boolean {
 }
 
 export function NotificationToasts() {
+  const [pet] = usePetPreference();
   const wide = useMedia("(min-width: 1024px)");
   const enabled = usePopupsShown();
   const queue = useRef(new ToastQueue(wide ? STACK_MAX : 1));
@@ -247,6 +249,9 @@ export function NotificationToasts() {
   useEffect(() => {
     if (!enabled && queue.current.clear()) schedule();
   }, [enabled, schedule]);
+  useEffect(() => {
+    if (pet && queue.current.clear()) schedule();
+  }, [pet, schedule]);
 
   useEvent(["notify"], (event, meta) => {
     if (!enabled || !shouldToast(event.payload, meta, currentContext())) return;
@@ -255,15 +260,21 @@ export function NotificationToasts() {
       if (raised.current.includes(event.seq)) return;
       raised.current = [...raised.current.slice(-RAISED_MAX + 1), event.seq];
     }
+    if (pet) {
+      window.dispatchEvent(new CustomEvent("daedalus:pet-notice", { detail: event.payload.notification as Notification }));
+      return;
+    }
     queue.current.push(event.payload.notification as Notification, seq);
     schedule();
   });
   // Answered or read somewhere else: the toast has nothing left to say.
   useEvent(["notify.resolved"], (event) => {
+    if (pet) window.dispatchEvent(new CustomEvent("daedalus:pet-clear", { detail: Number(event.payload.id) }));
     if (queue.current.dismiss(Number(event.payload.id))) schedule();
   });
   useEvent(["notify.seen"], (event) => {
     const ids = event.payload.ids;
+    if (pet) window.dispatchEvent(new CustomEvent("daedalus:pet-clear", { detail: ids }));
     if (ids === "all") queue.current.clear();
     else if (Array.isArray(ids)) for (const id of ids) queue.current.dismiss(Number(id));
     schedule();
@@ -300,7 +311,7 @@ export function NotificationToasts() {
   const items = queue.current.visible();
   const waiting = queue.current.waiting.length;
   useBannerRoom(stack, !wide && enabled && items.length > 0, items.length);
-  if (!enabled || items.length === 0) return null;
+  if (!enabled || pet || items.length === 0) return null;
   return (
     <div
       ref={stack}

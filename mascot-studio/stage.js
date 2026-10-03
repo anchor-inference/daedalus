@@ -24,11 +24,12 @@ function bodyRadius(y) { // the lathe profile of chibi2.js's body (its mesh sits
 }
 
 export class MascotStage {
-  constructor(canvas) {
+  constructor(canvas, options = {}) {
     this.canvas = canvas;
-    this.stage = createStage({ canvas, fitCanvas: true, transparent: true, fov: 30, maxDpr: 1.5, exposure: 1.06, envIntensity: 0.6 });
+    this.stage = createStage({ canvas, fitCanvas: true, transparent: true, fov: 30, maxDpr: options.compact ? 1 : 1.5, maxFps: options.compact ? 24 : undefined, exposure: 1.06, envIntensity: 0.6 });
     this.scene = this.stage.scene;
     this.lights = studioLights(this.scene, { target: new THREE.Vector3(0, 2.0, 0), key: 2.4, rim: 8, fill: 0.9, hemi: 0.42, shadowRadius: 3 });
+    if (options.compact) this.lights.key.shadow.mapSize.set(512, 512);
     // a low warm light from the front, so the bronze and the face read warm and close
     const warm = new THREE.PointLight(0xffc89a, 1.1, 9, 2); warm.position.set(-1.2, 1.3, 3.2); this.scene.add(warm);
     this.buildPlinth();
@@ -40,6 +41,7 @@ export class MascotStage {
     };
     this.variants = {};
     for (const [id, f] of Object.entries(make)) {
+      if (options.compact && id !== "daedalus") continue;
       const V = f();
       V.id = id;
       const m = V.model;
@@ -78,9 +80,11 @@ export class MascotStage {
     this.tmp = new THREE.Vector3(); this.tmp2 = new THREE.Vector3(); this.tmpQ = new THREE.Quaternion(); this.tmpE = new THREE.Euler();
     this.bindDrag();
     this.stage.onFrame((dt, t) => this.update(dt, t));
-    window.addEventListener("resize", () => this.frame(true));
+    this.onResize = () => this.frame(true);
+    window.addEventListener("resize", this.onResize);
     // the canvas also changes size when the layout does (a phone's toolbar, the library opening)
-    new ResizeObserver(() => { this.stage.measure(); this.frame(true); }).observe(canvas);
+    this.observer = new ResizeObserver(() => { this.stage.measure(); this.frame(true); });
+    this.observer.observe(canvas);
     this.setMascot("daedalus");
     this.stage.start();
     this.frame(true);
@@ -145,6 +149,11 @@ export class MascotStage {
     this.rebuildItems();
   }
   setVoiceLevel(n) { this.voiceLevel = clamp(n, 0, 1); }
+  dispose() {
+    this.observer.disconnect();
+    window.removeEventListener("resize", this.onResize);
+    this.stage.dispose();
+  }
   // The mascot says a line: the mouth moves for about that long, unless it is asleep or drinking.
   talk(seconds) { this.talkFrom = this.now(); this.talkUntil = this.talkFrom + seconds; }
   setFraming(mode) { if (mode !== this.framing) { this.framing = mode; this.frame(); } }

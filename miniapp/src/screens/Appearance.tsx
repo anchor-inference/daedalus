@@ -1,4 +1,4 @@
-import { usePetPreference } from "../ui/pet";
+import { usePetModel, usePetPreference } from "../ui/pet";
 // Appearance is this browser's look: the named themes, then the few adjustments that are not a new theme.
 
 import { useState } from "react";
@@ -6,6 +6,8 @@ import { FONT_CATALOG, FONT_ROLES, FontRole, THEMES, ThemeId, fontUrlAllowed, re
 import { t } from "../i18n";
 import { Dropdown, Segmented, Switch } from "../ui/index";
 import { Row } from "../settingsrow";
+import { type Settings } from "../api";
+import { useQuery } from "../store";
 
 function usePrefs(): [Prefs, (patch: Partial<Prefs>) => void, (next: Prefs) => void] {
   const [prefs, setPrefs] = useState(readPrefs);
@@ -23,6 +25,8 @@ function urlOf(prefs: Prefs, role: FontRole): string {
 export function AppearancePanel() {
   const [prefs, update, replace] = usePrefs();
   const [pet, setPet] = usePetPreference();
+  const [petModel, setPetModel] = usePetModel();
+  const petSettings = useQuery<Settings>(pet ? "/api/settings" : null);
   const [role, setRole] = useState<FontRole>("prose");
   const [query, setQuery] = useState("");
   const [url, setUrl] = useState("");
@@ -51,7 +55,15 @@ export function AppearancePanel() {
   return (
     <>
       <p className="sub">{t("theme.lead")}</p>
-      {window.daedalus?.pet && <div className="card"><Row title={t("pet.title")} desc={t("pet.hint")}><Switch checked={pet} onChange={setPet} label={t("pet.title")} /></Row></div>}
+      <div className="card">
+        <Row title={t("pet.title")} desc={t("pet.hint")}><Switch checked={pet} onChange={setPet} label={t("pet.title")} /></Row>
+        {pet && <Row title={t("pet.model")} desc={t("pet.model.hint")}>
+          <select className="field" value={petModel} aria-label={t("pet.model")} onChange={(event) => setPetModel(event.target.value)}>
+            <option value="">{t("pet.model.off")}</option>
+            {Object.entries(petSettings.data?.presets ?? {}).map(([id, preset]) => <option key={id} value={id}>{preset.label || `${preset.provider}/${preset.model}`}</option>)}
+          </select>
+        </Row>}
+      </div>
       <div className="settings-themes" role="listbox" aria-label={t("settings.sec.appearance")}>
         {THEMES.map((item) => (
           <button key={item.id} type="button" className={resolved.id === item.id ? "on" : ""} aria-pressed={resolved.id === item.id} onClick={() => update({ follow: false, theme: item.id })}>

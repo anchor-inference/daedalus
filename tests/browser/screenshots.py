@@ -656,6 +656,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     path = url.split("?", 1)[0]
     rel = path[path.index("/api/") :]
     params = parse_qs(urlsplit(url).query)
+    if rel == "/api/pet/react" and request.method == "POST":
+        return respond(route, {"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})
     search = file_search(rel, params.get("q", [""])[0])
     if search is not None:
         return respond(route, search)
