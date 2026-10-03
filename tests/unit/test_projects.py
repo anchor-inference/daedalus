@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -603,7 +604,9 @@ async def test_a_spawned_agent_of_a_project_session_stays_in_the_project(setting
 
 
 async def test_a_scheduled_task_of_a_project_session_fires_in_the_project(settings: Settings, config: RuntimeConfig, db: Database, tmp_path: Path) -> None:
+    from daedalus.extensions.schedule_proposals import ScheduleProposals
     from daedalus.extensions.scheduler import Scheduler
+    from daedalus.stores.control import Principal
 
     manager = SessionManager(settings, config, db=db)
     await manager.start()
@@ -624,15 +627,26 @@ async def test_a_scheduled_task_of_a_project_session_fires_in_the_project(settin
 
         manager.submit = fake_submit  # type: ignore[method-assign]
         scheduler = Scheduler(app)  # type: ignore[arg-type]
+        app.extensions["schedule_proposals"] = ScheduleProposals(app)
         project = await manager.projects.create("Repo", [str(root)])
         owner = await manager.create_session("owner", project_id=project.id)
 
-        created = await scheduler.create(
+        proposed = await scheduler.create(
             name="nightly", prompt="tidy up", cron="0 3 * * *", run_at=None,
             files=[str(root / "notes.md")], created_by_session=owner.session.id,
+            source_run_id=None, source_command_id="nightly-project",
+        )
+        assert await db.fetchone("SELECT id FROM schedules") is None
+        revision = await db.fetchone("SELECT revision FROM domain_collection_revisions"
+                                     " WHERE scope_kind='project' AND scope_id=?", (project.id,))
+        created = await app.extensions["schedule_proposals"].accept(
+            Principal("operator:1", "operator"), proposed["id"],
+            request_digest=proposed["request_digest"], expected_proposal_revision=1,
+            expires_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
+            expected_collection_revision=revision["revision"], client_operation_id="approve-nightly-project",
         )
         # The task runs in the folder, and the file it was given is not copied out of it.
-        assert created["workspace"] == str(root)
+        assert (await db.fetchone("SELECT workspace FROM schedules WHERE id=?", (created["id"],)))["workspace"] == str(root)
         assert not (settings.workspaces_dir / f"sched-{created['id']}").exists()
 
         row = dict(await db.fetchone("SELECT * FROM schedules WHERE id = ?", (created["id"],)))

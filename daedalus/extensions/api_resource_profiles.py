@@ -24,6 +24,8 @@ class ProfileBody(BaseModel):
     cpu_millis: int = Field(ge=0)
     process_count: int = Field(ge=0)
     disk_bytes: int = Field(ge=0)
+    min_free_disk_bytes: int = Field(ge=0)
+    expected_profile_revision: int | None = Field(ge=1)
     expected_entity_revision: int = Field(ge=1)
     client_operation_id: str = Field(min_length=1, max_length=160)
 
@@ -41,6 +43,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                     "profile_revision": profile["revision"] if profile is not None else None,
                     "state": profile["state"] if profile is not None else "disabled",
                     "limits": limits(profile) if profile is not None else None,
+                    "min_free_disk_bytes": profile["min_free_disk_bytes"] if profile is not None else 0,
                     "disk_quota_supported": False}
 
     @api.put("/api/projects/{project_id}/resource-profile")
@@ -52,6 +55,8 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             return await set_profile_in(conn, project_id=project_id, state=body.state,
                                         memory_bytes=body.memory_bytes, cpu_millis=body.cpu_millis,
                                         process_count=body.process_count, disk_bytes=body.disk_bytes,
+                                        min_free_disk_bytes=body.min_free_disk_bytes,
+                                        expected_profile_revision=body.expected_profile_revision,
                                         receipt_id=mutation.receipt_id)
 
         try:
@@ -100,6 +105,10 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             observation = await one(conn, "SELECT * FROM attempt_resource_observations"
                                     " WHERE attempt_id = ? ORDER BY observed_at DESC,id DESC LIMIT 1",
                                     (attempt_id,))
+            disk = await one(conn, "SELECT min_free_disk_bytes,admission_json,preparation_json"
+                             " FROM attempt_disk_preflights WHERE attempt_id = ?", (attempt_id,))
+            entry = await one(conn, "SELECT observation_json FROM attempt_disk_entry_observations"
+                              " WHERE attempt_id = ? ORDER BY observed_at DESC,id DESC LIMIT 1", (attempt_id,))
         if attempt["profile_revision"] is None:
             return {"attempt_id": attempt_id, "kind": "none", "state": "not_configured",
                     "runtime_kind": attempt["runtime_kind"]}
@@ -107,4 +116,9 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                 "runtime_kind": attempt["runtime_kind"], "profile_revision": attempt["profile_revision"],
                 "host_generation": attempt["host_generation"], "daemon_instance": attempt["daemon_instance"],
                 "launch_id": attempt["launch_id"], "limits": json.loads(attempt["limits_json"]),
-                "observation": dict(observation) if observation is not None else None}
+                "observation": dict(observation) if observation is not None else None,
+                "disk_preflight": {"min_free_disk_bytes": disk["min_free_disk_bytes"],
+                                   "admission": json.loads(disk["admission_json"]),
+                                   "preparation": json.loads(disk["preparation_json"]),
+                                   "entry": json.loads(entry["observation_json"]) if entry is not None else None}
+                                   if disk is not None else None}

@@ -63,7 +63,9 @@ def panel(page: Page, lang: str) -> None:
     sheet.locator("#wakeup-minutes").fill("45")
     sheet.locator(".sheet-foot .btn.primary", has_text=words["set"]).click()
     expect(sheet).to_have_count(0)
-    assert focus.woken[-1] == {"note": words["note"], "in_minutes": 45}, focus.woken
+    assert (focus.woken[-1]["note"] == words["note"] and focus.woken[-1]["in_minutes"] == 45
+            and focus.woken[-1]["expected_collection_revision"] == 1
+            and focus.woken[-1]["client_operation_id"] and focus.woken[-1]["expires_at"]), focus.woken
     expect(page.locator(".panel .wakeup-row", has_text=words["note"])).to_contain_text(words["by_you"])
 
     # Every day at a time: a five-field cron line, never the local clock sent as if it were UTC.
@@ -74,7 +76,9 @@ def panel(page: Page, lang: str) -> None:
     sheet.locator(".sheet-foot .btn.primary").click()
     expect(sheet).to_have_count(0)
     sent = focus.woken[-1]
-    assert set(sent) == {"note", "cron"} and len(sent["cron"].split()) == 5 and sent["cron"].endswith("* * *"), sent
+    assert (set(sent) == {"note", "cron", "expires_at", "expected_collection_revision", "client_operation_id"}
+            and len(sent["cron"].split()) == 5 and sent["cron"].endswith("* * *")
+            and sent["expected_collection_revision"] == 2 and sent["client_operation_id"]), sent
     # Closing the form precedes the list's refetch; count only after the new row has landed.
     expect(page.locator(".panel .wakeup-row", has_text=words["note"] + " 2")).to_be_visible()
 

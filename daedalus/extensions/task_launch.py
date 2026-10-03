@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.effects import EffectOutcome, EffectResolution
 from daedalus.extensions.launch_controls import launch_attempt
 from daedalus.extensions.orchestrator_domain import dependency_readiness
 from daedalus.host.launch_queue import Entry
-from daedalus.host.worktrees import WorktreeRefused
+from daedalus.host.worktrees import WORKTREES_DIR, WorktreeRefused, staff_slug
 from daedalus.stores.control import (
     ControlConflict,
     ControlDenied,
@@ -26,7 +27,7 @@ from daedalus.stores.control import (
 from daedalus.stores.executions import ACTIVE
 from daedalus.stores.goal_budget import requires_priced_native_in
 from daedalus.stores.outbox import Claim, OutboxStore
-from daedalus.stores.resource_profiles import latest_in, strict_target
+from daedalus.stores.resource_profiles import disk_snapshot, latest_in, record_disk_entry_in, strict_target
 from daedalus.stores.runtime_release import no_entry_in
 from daedalus.stores.staff import StaffError, daedalus_cannot_reach
 
@@ -72,7 +73,7 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
         profile = await latest_in(conn, scope.id)
         if profile is not None and profile["state"] == "enabled":
             task_row = await one(conn, "SELECT folder_id FROM board_tasks WHERE id = ?", (task_id,))
-            member_row = await one(conn, "SELECT harness,default_folder_id FROM staff"
+            member_row = await one(conn, "SELECT harness,name,isolation,default_folder_id FROM staff"
                                    " WHERE id = ? AND project_id = ? AND archived_at IS NULL",
                                    (staff_id, scope.id))
             if member_row is None:
@@ -80,16 +81,17 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
             folder = None
             for folder_id in (task_row["folder_id"], member_row["default_folder_id"]):
                 if folder_id:
-                    folder = await one(conn, "SELECT env FROM project_folders WHERE id = ?"
+                    folder = await one(conn, "SELECT id,path,env FROM project_folders WHERE id = ?"
                                        " AND project_id = ?", (folder_id, scope.id))
                     if folder is not None:
                         break
             if folder is None:
-                folder = await one(conn, "SELECT env FROM project_folders WHERE project_id = ?"
+                folder = await one(conn, "SELECT id,path,env FROM project_folders WHERE project_id = ?"
                                    " ORDER BY position LIMIT 1", (scope.id,))
             if folder is None:
                 raise ControlConflict("the project has no worker folder")
             env, harness = folder["env"], member_row["harness"]
+            workspace_path = str(Path(folder["path"]) / WORKTREES_DIR / staff_slug(member_row["name"])) if member_row["isolation"] == "worktree" else folder["path"]
         else:
             env = harness = ""
     if profile is not None and profile["state"] == "enabled":
@@ -100,8 +102,19 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
             raise ControlConflict("the terminal daemon cannot prove resource containment")
         capability = await terminals.containment_capability(env)
         resources = strict_target(profile, env=env, harness=harness, capability=capability)
-        await terminals.preflight_attempt_resources(env, limits=resources["limits"],
-                                                    daemon_instance=resources["daemon_instance"])
+        resources["folder_id"] = folder["id"]
+        resources["workspace_path_digest"] = digest(folder["path"])
+        resources["launch_workspace_digest"] = digest(workspace_path)
+        try:
+            preflight = await terminals.preflight_attempt_resources(
+                env, limits=resources["limits"], daemon_instance=resources["daemon_instance"],
+                workspace_path=workspace_path if resources["min_free_disk_bytes"] else None,
+                min_free_disk_bytes=resources["min_free_disk_bytes"])
+        except Exception as exc:
+            raise ControlConflict("selected workspace resource preflight is unavailable") from exc
+        if resources["min_free_disk_bytes"]:
+            resources["disk_admission"] = disk_snapshot(preflight.get("disk") if preflight else None,
+                                                         path=workspace_path, minimum=resources["min_free_disk_bytes"])
 
     async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
         task = await one(conn, "SELECT * FROM board_tasks WHERE id = ?", (task_id,))
@@ -112,12 +125,12 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
         folder = None
         for folder_id in (task["folder_id"], member["default_folder_id"]):
             if folder_id:
-                folder = await one(conn, "SELECT path,env FROM project_folders"
+                folder = await one(conn, "SELECT id,path,env FROM project_folders"
                                    " WHERE id = ? AND project_id = ?", (folder_id, task["project_id"]))
                 if folder is not None:
                     break
         if folder is None:
-            folder = await one(conn, "SELECT path,env FROM project_folders"
+            folder = await one(conn, "SELECT id,path,env FROM project_folders"
                                " WHERE project_id = ? ORDER BY position LIMIT 1", (task["project_id"],))
         if folder is None:
             raise StaffError("the project has no folder to work in")
@@ -134,7 +147,9 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
                 raise ControlConflict("the resource profile changed before launch")
         elif (current_profile is None or current_profile["state"] != "enabled"
               or int(current_profile["revision"]) != resources["profile_revision"]
-              or folder["env"] != resources["env"]):
+              or folder["env"] != resources["env"] or folder["id"] != resources["folder_id"]
+              or digest(folder["path"]) != resources["workspace_path_digest"]
+              or int(current_profile["min_free_disk_bytes"]) != resources["min_free_disk_bytes"]):
             raise ControlConflict("the resource profile or worker environment changed before launch")
         if task["status"] not in ("todo", "blocked"):
             raise ControlConflict("reopen the task before launching a new attempt")
@@ -200,14 +215,15 @@ class TaskLaunchEffect:
             raise ControlDenied("another attempt replaced this launch command")
         if task["status"] not in ("todo", "blocked", "doing"):
             raise ControlDenied("the task was closed or handed in before launch")
-        profile = await self.app.db.fetchone("SELECT revision,state FROM resource_profile_versions"
+        profile = await self.app.db.fetchone("SELECT revision,state,min_free_disk_bytes FROM resource_profile_versions"
                                             " WHERE project_id = ? ORDER BY revision DESC LIMIT 1",
                                             (task["project_id"],))
         resources = target.get("resources")
         if resources is None:
             if profile is not None and profile["state"] == "enabled":
                 raise ControlDenied("the resource profile changed after the launch command")
-        elif profile is None or profile["state"] != "enabled" or profile["revision"] != resources["profile_revision"]:
+        elif (profile is None or profile["state"] != "enabled" or profile["revision"] != resources["profile_revision"]
+              or profile["min_free_disk_bytes"] != resources["min_free_disk_bytes"]):
             raise ControlDenied("the resource profile changed after the launch command")
 
     async def run(self, claim: Claim, check: Callable[[Claim], Awaitable[None]]) -> EffectOutcome:
@@ -222,9 +238,6 @@ class TaskLaunchEffect:
                 if (not capability.get("available") or capability.get("sandbox") != "ok"
                         or capability.get("daemon_instance") != resource["daemon_instance"]):
                     raise ControlDenied("the terminal daemon cannot enforce the pinned resource profile")
-                await self.app.extensions["terminals"].preflight_attempt_resources(
-                    resource["env"], limits=resource["limits"],
-                    daemon_instance=resource["daemon_instance"])
             member = await team.member(claim.payload["staff_id"])
             task = await team.task(claim.payload["task_id"])
             assert task is not None
@@ -232,6 +245,22 @@ class TaskLaunchEffect:
                 return EffectOutcome("failed", "the task brief is incomplete")
             project = await team.project(member.project_id)
             folder = team.folder_for(project, member, task)
+            if resource is not None:
+                workspace_path = str(Path(folder.path) / WORKTREES_DIR / staff_slug(member.name)) if member.isolation == "worktree" else str(folder.path)
+                if (folder.id != resource["folder_id"] or digest(str(folder.path)) != resource["workspace_path_digest"]
+                        or digest(workspace_path) != resource["launch_workspace_digest"]):
+                    raise ControlDenied("the selected workspace changed after resource admission")
+                try:
+                    preflight = await self.app.extensions["terminals"].preflight_attempt_resources(
+                        resource["env"], limits=resource["limits"], daemon_instance=resource["daemon_instance"],
+                        workspace_path=workspace_path if resource["min_free_disk_bytes"] else None,
+                        min_free_disk_bytes=resource["min_free_disk_bytes"])
+                except Exception as exc:
+                    raise ControlDenied("selected workspace resource preflight is unavailable") from exc
+                if resource["min_free_disk_bytes"]:
+                    disk_snapshot(preflight.get("disk") if preflight else None,
+                                  path=workspace_path, minimum=resource["min_free_disk_bytes"],
+                                  admitted=resource["disk_admission"])
             if member.isolation == "worktree":
                 from daedalus.extensions.staff import no_worktree  # Lazy: staff installs the launch handler
 
@@ -251,6 +280,16 @@ class TaskLaunchEffect:
         async def authorized() -> None:
             await check(claim)
             await self.validate(claim)
+            if resource is not None and resource["min_free_disk_bytes"]:
+                try:
+                    preflight = await self.app.extensions["terminals"].preflight_attempt_resources(
+                        resource["env"], limits=resource["limits"], daemon_instance=resource["daemon_instance"],
+                        workspace_path=workspace_path, min_free_disk_bytes=resource["min_free_disk_bytes"])
+                except Exception as exc:
+                    raise ControlDenied("selected workspace free space is unknown before runtime entry") from exc
+                snapshot = disk_snapshot(preflight.get("disk") if preflight else None,
+                    path=workspace_path, minimum=resource["min_free_disk_bytes"], admitted=resource["disk_admission"])
+                resource["disk_preparation"] = snapshot
             async with self.app.db.transaction() as conn:
                 parent = await one(conn, "SELECT cancel_state FROM lifecycle_parents WHERE parent_kind = 'task' AND parent_id = ?",
                                    (claim.payload["task_id"],))
@@ -259,6 +298,10 @@ class TaskLaunchEffect:
                 attempt = await one(conn, "SELECT id FROM execution_attempts WHERE id = ?", (claim.payload["attempt_id"],))
                 if attempt is not None:
                     await self.app.executions._check(conn, attempt["id"], operation="result.submit")
+                    if resource is not None and resource["min_free_disk_bytes"]:
+                        if snapshot["workspace_exists"] is not True:
+                            raise ControlDenied("the selected worktree does not exist before runtime entry")
+                        await record_disk_entry_in(conn, attempt_id=attempt["id"], observation=snapshot)
 
         entry = Entry(project.id, member.id, member.name, task.id, task.priority,
                       member.harness != "daedalus", "operator" if claim.principal.origin_class == "operator" else "orchestrator",

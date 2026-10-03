@@ -259,7 +259,7 @@ class Recurring:
     async def create(self, principal: Principal, *, name: str, prompt: str, cron: str | None,
                      run_at: str | None, kind: str, target_session: str | None,
                      project_id: str | None, expires_at: str, expected_collection_revision: int,
-                     client_operation_id: str) -> dict[str, Any]:
+                     client_operation_id: str, requested_time: dict[str, Any] | None = None) -> dict[str, Any]:
         if principal.origin_class != "operator":
             raise ControlDenied("only an operator can approve a standing schedule")
         name, prompt = name.strip(), prompt.strip()
@@ -283,7 +283,8 @@ class Recurring:
                 raise ValueError("a timezone-aware run_at is required")
             next_run = next_run.astimezone(UTC)
         scope = Scope("project", project_id) if project_id else Scope("global", "global")
-        payload = {"name": name, "prompt": prompt, "cron": cron, "run_at": run_at,
+        payload = {"name": name, "prompt": prompt, "cron": cron,
+                   "run_at": requested_time if requested_time is not None else run_at,
                    "kind": kind, "target_session": target_session, "project_id": project_id,
                    "expires_at": expires_at}
         key = (scope.kind, scope.id, principal.actor_id, "schedule.create", client_operation_id)

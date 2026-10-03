@@ -822,12 +822,14 @@ class Terminals(SideChannels):
         return {**status, "sandbox": capabilities.get("sandbox"), "daemon_instance": link.instance}
 
     async def preflight_attempt_resources(self, env: str, *, limits: dict[str, int],
-                                          daemon_instance: str) -> None:
+                                          daemon_instance: str, workspace_path: str | None = None,
+                                          min_free_disk_bytes: int = 0) -> dict[str, Any]:
         if self.links[env].instance != daemon_instance:
             raise InvalidRequest("the terminal daemon generation changed during resource admission")
-        await self._call(env, "attempt.preflight", {"limits": limits,
-                                                   "expected_instance": daemon_instance},
-                         what="checking the requested attempt ceilings")
+        return dict(await self._call(env, "attempt.preflight", {"limits": limits,
+                           "expected_instance": daemon_instance, "workspace_path": workspace_path,
+                           "min_free_disk_bytes": min_free_disk_bytes},
+                           what="checking the requested attempt ceilings and selected workspace"))
 
     async def observe_attempt(self, env: str, scope: dict[str, str], *, daemon_instance: str) -> dict[str, Any]:
         if self.links[env].instance != daemon_instance:

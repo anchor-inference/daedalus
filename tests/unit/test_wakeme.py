@@ -21,6 +21,7 @@ from daedalus.extensions.coordinator_authority import approve_authority
 from daedalus.extensions.effects import EffectDispatcher
 from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.extensions.recurring import Recurring, RecurringEffect
+from daedalus.extensions.schedule_proposals import ScheduleProposals
 from daedalus.extensions.scheduler import Scheduler
 from daedalus.stores.control import ControlDenied, Principal
 from daedalus.stores.database import Database
@@ -52,6 +53,7 @@ def with_scheduler(r: Rig) -> Scheduler:
     scheduler._maintained_at = datetime.now(UTC)
     app.extensions["scheduler"] = scheduler
     app.extensions["recurring"] = Recurring(app)
+    app.extensions["schedule_proposals"] = ScheduleProposals(app)
     dispatcher = app.extensions.get("effects") or EffectDispatcher(OutboxStore(app.db))
     effect = RecurringEffect(app)
     for kind in ("agent", "message", "lazy", "wake"):
@@ -75,6 +77,21 @@ async def approve_wakeup(r: Rig, wakeup_id: str) -> None:
     )
 
 
+async def operator_wakeup(r: Rig, project: Any, *, note: str,
+                          at: str | None = None, in_minutes: int | None = None,
+                          cron: str | None = None, command_id: str = "operator-wake") -> dict[str, Any]:
+    revision = await r.manager.db.fetchone(
+        "SELECT revision FROM domain_collection_revisions WHERE scope_kind='project' AND scope_id=?",
+        (project.id,),
+    )
+    return await wakeups.set_wakeup(
+        r.team.app, project, note=note, at=at, in_minutes=in_minutes, cron=cron,
+        principal=Principal("operator:1", "operator"), client_operation_id=command_id,
+        expected_collection_revision=revision["revision"],
+        expires_at=(datetime.now(UTC) + timedelta(days=30)).isoformat(),
+    )
+
+
 async def make_due(db: Database, wakeup_id: str) -> None:
     """The moment has come: the scheduler's clock is the wall clock, so the row is moved instead."""
     await db.execute("UPDATE schedules SET next_run_at = ? WHERE id = ?", ((datetime.now(UTC) - timedelta(seconds=5)).isoformat(), wakeup_id))
@@ -93,10 +110,19 @@ async def test_wake_me_wakes_the_scripted_orchestrator_with_its_note_once(settin
         sid = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
         await r.manager.submit(sid, "Keep an eye on the migration")
         await until_await(lambda: _idle(r.manager, sid), "the first turn ended")
+        [proposal] = await r.team.app.extensions["schedule_proposals"].list()
+        assert proposal["prompt"] == "Check whether Ada's migration finished" and proposal["status"] == "pending"
+        assert await wakeups.wakeups(r.team.app, r.project.id) == []
+        revision = await db.fetchone("SELECT revision FROM domain_collection_revisions"
+                                     " WHERE scope_kind='project' AND scope_id=?", (r.project.id,))
+        accepted = await r.team.app.extensions["schedule_proposals"].accept(
+            Principal("operator:1", "operator"), proposal["id"], request_digest=proposal["request_digest"],
+            expected_proposal_revision=proposal["proposal_revision"],
+            expires_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
+            expected_collection_revision=revision["revision"], client_operation_id="accept-scripted-wake",
+        )
         [wakeup] = await wakeups.wakeups(r.team.app, r.project.id)
-        assert wakeup["note"] == "Check whether Ada's migration finished" and wakeup["set_by"] == "orchestrator"
-        assert wakeup["authority_state"] == "needs_approval"
-        await approve_wakeup(r, wakeup["id"])
+        assert wakeup["id"] == accepted["id"] and wakeup["set_by"] == "orchestrator"
         due = datetime.fromisoformat(wakeup["next_run_at"]) - datetime.now(UTC)
         assert timedelta(seconds=30) < due <= timedelta(minutes=1)
         assert f"[{wakeup['id']}]" in await r.orch.project_state(await r.refreshed(), session_id=sid)
@@ -194,9 +220,8 @@ async def test_a_wake_up_reaches_a_busy_orchestrator(settings: Settings, db: Dat
     try:
         project = await r.orch.enable(r.project.id)
         sid = project.settings.orchestrator.session_id
-        wakeup = await wakeups.set_wakeup(r.team.app, project, note="Is the build green?", in_minutes=5)
+        wakeup = await operator_wakeup(r, project, note="Is the build green?", in_minutes=5)
         assert wakeup["set_by"] == "operator"
-        await approve_wakeup(r, wakeup["id"])
         await r.manager.submit(sid, "Plan the week")
         await held.started.wait()
         await make_due(db, wakeup["id"])
@@ -220,10 +245,8 @@ async def test_cron_advances_and_the_bounds_hold(settings: Settings, db: Databas
     scheduler = with_scheduler(r)
     try:
         project = await r.orch.enable(r.project.id)
-        sid = project.settings.orchestrator.session_id
         app = r.team.app
-        daily = await wakeups.set_wakeup(app, project, note="Morning round", cron="0 7 * * *", by_session=sid)
-        await approve_wakeup(r, daily["id"])
+        daily = await operator_wakeup(r, project, note="Morning round", cron="0 7 * * *", command_id="morning")
         first = daily["next_run_at"]
         await make_due(db, daily["id"])
         await scheduler.tick()
@@ -244,15 +267,26 @@ async def test_cron_advances_and_the_bounds_hold(settings: Settings, db: Databas
         ]
         for args, expected in refusals:
             with pytest.raises(wakeups.WakeupRefused, match=expected):
-                await wakeups.set_wakeup(app, project, **args)
+                await operator_wakeup(r, project, **args)
         r.manager.config.orchestrator.wakeups_max = 2
-        await wakeups.set_wakeup(app, project, note="second", in_minutes=30)
+        await operator_wakeup(r, project, note="second", in_minutes=30, command_id="second")
         with pytest.raises(wakeups.WakeupRefused, match="already has 2 wake-ups"):
-            await wakeups.set_wakeup(app, project, note="third", in_minutes=30)
-        # An ordinary session cannot make itself a wake-up through the scheduler either.
+            await operator_wakeup(r, project, note="third", in_minutes=30, command_id="third")
+        # An ordinary session may suggest a wake, but it cannot activate a false office target.
         ordinary = await r.manager.create_session("work", project_id=r.project.id)
-        with pytest.raises(ValueError, match="belongs to a project's orchestrator"):
-            await scheduler.create(name="w", prompt="w", cron=None, run_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat(), kind="wake", created_by_session=ordinary.session.id)
+        suggestion = await scheduler.create(name="w", prompt="w", cron=None,
+                                            run_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+                                            kind="wake", created_by_session=ordinary.session.id,
+                                            source_run_id=None, source_command_id="ordinary-wake")
+        revision = await db.fetchone("SELECT revision FROM domain_collection_revisions"
+                                     " WHERE scope_kind='project' AND scope_id=?", (project.id,))
+        with pytest.raises(ControlDenied, match="no longer the current coordinator"):
+            await app.extensions["schedule_proposals"].accept(
+                Principal("operator:1", "operator"), suggestion["id"],
+                request_digest=suggestion["request_digest"], expected_proposal_revision=1,
+                expires_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
+                expected_collection_revision=revision["revision"], client_operation_id="reject-false-office",
+            )
     finally:
         await r.manager.close()
 
@@ -266,19 +300,27 @@ async def test_cancel_and_the_tool_refusals(settings: Settings, db: Database, tm
         said = await r.call(sid, "wake_me", note="Look at the queue", at=(datetime.now(UTC) + timedelta(hours=2)).isoformat(),
                             client_operation_id="pending-wake")
         assert said.startswith("wake-up saved: [") and "needs operator approval" in said
-        [wakeup] = await wakeups.wakeups(r.team.app, r.project.id)
+        [proposal] = await r.team.app.extensions["schedule_proposals"].list()
+        assert await wakeups.wakeups(r.team.app, r.project.id) == []
         with pytest.raises(Refused, match="has no wake-up or watch 'nope'"):
             await r.call(sid, "unwatch", id="nope", client_operation_id="missing-wakeup")
-        with pytest.raises(Refused, match="needs operator approval"):
-            await r.call(sid, "unwatch", id=wakeup["id"], client_operation_id="cancel-wakeup")
-        assert await wakeups.cancel(r.team.app, r.project.id, wakeup["id"], principal=Principal("operator:1", "operator"))
+        with pytest.raises(Refused, match="has no wake-up or watch"):
+            await r.call(sid, "unwatch", id=proposal["id"], client_operation_id="cancel-wakeup")
+        revision = await db.fetchone("SELECT revision FROM domain_collection_revisions"
+                                     " WHERE scope_kind='project' AND scope_id=?", (r.project.id,))
+        withdrawn = await r.team.app.extensions["schedule_proposals"].withdraw(
+            Principal("operator:1", "operator"), proposal["id"], request_digest=proposal["request_digest"],
+            expected_proposal_revision=1, expected_collection_revision=revision["revision"],
+            client_operation_id="withdraw-wake",
+        )
+        assert withdrawn["status"] == "withdrawn"
         assert await wakeups.wakeups(r.team.app, r.project.id) == []
         with pytest.raises(Refused, match="already passed"):
             await r.call(sid, "wake_me", note="late", at="2000-01-01T00:00",
                          client_operation_id="late-wake")
         # Another project's wake-up is not this one's to cancel.
         other = await r.manager.projects.create("Other", [])
-        assert not await wakeups.cancel(r.team.app, other.id, wakeup["id"])
+        assert await wakeups.cancel(r.team.app, other.id, proposal["id"]) is None
     finally:
         await r.manager.close()
 
@@ -289,7 +331,7 @@ async def test_a_replaced_or_restarted_orchestrator_receives_its_predecessors_wa
     try:
         project = await r.orch.enable(r.project.id)
         old = project.settings.orchestrator.session_id
-        wakeup = await wakeups.set_wakeup(r.team.app, project, note="Review the release notes", in_minutes=10, by_session=old)
+        wakeup = await operator_wakeup(r, project, note="Review the release notes", in_minutes=10)
         new = (await r.orch.replace(r.project.id, "fresh context")).settings.orchestrator.session_id
         row = await db.fetchone("SELECT target_session FROM schedules WHERE id = ?", (wakeup["id"],))
         assert row is not None and row["target_session"] == new
@@ -323,21 +365,34 @@ async def test_the_wake_up_routes(settings: Settings, db: Database, tmp_path: Pa
         headers = {"X-Daedalus-Token": "tok"}
         base = f"/api/projects/{r.project.id}"
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:  # type: ignore[arg-type]
-            refused = await client.post(f"{base}/wakeups", json={"note": "x", "in_minutes": 5}, headers=headers)
+            listing = await client.get(f"{base}/wakeups", headers=headers)
+            rev = listing.json()["collection_revision"]
+            expiry = (datetime.now(UTC) + timedelta(days=30)).isoformat()
+            command = {"expected_collection_revision": rev, "client_operation_id": "route-create",
+                       "expires_at": expiry}
+            refused = await client.post(f"{base}/wakeups", json={"note": "x", "in_minutes": 5,
+                                                                    **command}, headers=headers)
             assert refused.status_code == 400 and "no orchestrator" in refused.json()["detail"]
             await r.orch.enable(r.project.id)
-            made = await client.post(f"{base}/wakeups", json={"note": "Ask Ada about the tests", "in_minutes": 45}, headers=headers)
+            rev = (await client.get(f"{base}/wakeups", headers=headers)).json()["collection_revision"]
+            command["expected_collection_revision"] = rev
+            made = await client.post(f"{base}/wakeups", json={"note": "Ask Ada about the tests", "in_minutes": 45,
+                                                                 **command}, headers=headers)
             assert made.status_code == 200, made.text
             assert made.json()["set_by"] == "operator" and made.json()["note"] == "Ask Ada about the tests"
-            assert (await client.post(f"{base}/wakeups", json={"note": "x", "cron": "* * * * *"}, headers=headers)).status_code == 400
-            assert (await client.post(f"{base}/wakeups", json={"note": "x", "in_minutes": 5, "extra": 1}, headers=headers)).status_code == 422
+            assert (await client.post(f"{base}/wakeups", json={"note": "x", "cron": "* * * * *", **command}, headers=headers)).status_code == 400
+            assert (await client.post(f"{base}/wakeups", json={"note": "x", "in_minutes": 5, "extra": 1, **command}, headers=headers)).status_code == 422
             listed = await client.get(f"{base}/wakeups", headers=headers)
             assert listed.status_code == 200 and [w["id"] for w in listed.json()["wakeups"]] == [made.json()["id"]]
-            assert (await client.delete(f"{base}/wakeups/nope", headers=headers)).status_code == 404
-            assert (await client.delete(f"{base}/wakeups/{made.json()['id']}", headers=headers)).json() == {"deleted": True}
+            delete = {"expected_collection_revision": listed.json()["collection_revision"],
+                      "expected_schedule_revision": listed.json()["wakeups"][0]["schedule_revision"],
+                      "client_operation_id": "route-delete"}
+            assert (await client.request("DELETE", f"{base}/wakeups/nope", json=delete, headers=headers)).status_code == 404
+            removed = await client.request("DELETE", f"{base}/wakeups/{made.json()['id']}", json=delete, headers=headers)
+            assert removed.json()["deleted"] is True and removed.json()["receipt_id"]
+            replay = await client.request("DELETE", f"{base}/wakeups/{made.json()['id']}", json=delete, headers=headers)
+            assert replay.json() == removed.json()
             assert (await client.get(f"{base}/wakeups", headers=headers)).json()["wakeups"] == []
-        changes = [e.payload.get("change") for e in await events(r.manager, "project.changed")]
-        assert changes.count("wakeups") == 2
     finally:
         await r.manager.close()
 

@@ -83,6 +83,17 @@ class WakeupBody(BaseModel):
     in_minutes: int | None = None
     cron: str | None = None
     """In UTC, like every schedule."""
+    expires_at: str
+    expected_collection_revision: int = Field(ge=1, strict=True)
+    client_operation_id: str = Field(min_length=1, max_length=160)
+
+
+class WakeupDelete(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_collection_revision: int = Field(ge=1, strict=True)
+    expected_schedule_revision: int = Field(ge=1, strict=True)
+    client_operation_id: str = Field(min_length=1, max_length=160)
 
 
 class FolderBody(BaseModel):
@@ -587,29 +598,44 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def get_wakeups(project_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """The orchestrator's wake-ups, whoever set them, soonest first."""
         await existing(project_id)
-        return {"wakeups": await wakeups.wakeups(app, project_id), "max": manager.config.orchestrator.wakeups_max}
+        revision = await app.db.fetchone("SELECT revision FROM domain_collection_revisions"
+                                         " WHERE scope_kind='project' AND scope_id=?", (project_id,))
+        return {"wakeups": await wakeups.wakeups(app, project_id),
+                "max": manager.config.orchestrator.wakeups_max,
+                "collection_revision": revision["revision"] if revision else None}
 
     @api.post("/api/projects/{project_id}/wakeups")
-    async def post_wakeup(project_id: str, body: WakeupBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def post_wakeup(project_id: str, body: WakeupBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """The operator leaves the orchestrator a wake-up with a note."""
         project = await existing(project_id)
         try:
-            wakeup = await wakeups.set_wakeup(app, project, note=body.note, at=body.at, in_minutes=body.in_minutes, cron=body.cron)
-        except wakeups.WakeupRefused as exc:
-            raise HTTPException(400, str(exc)) from exc
-        await manager.bus.publish("project.changed", {"change": "wakeups", "actor": "operator"}, project_id=project_id)
+            wakeup = await wakeups.set_wakeup(
+                app, project, note=body.note, at=body.at, in_minutes=body.in_minutes,
+                cron=body.cron, principal=Principal.operator(who),
+                client_operation_id=body.client_operation_id,
+                expected_collection_revision=body.expected_collection_revision,
+                expires_at=body.expires_at,
+            )
+        except (wakeups.WakeupRefused, ValueError, ControlDenied) as exc:
+            raise HTTPException(409 if isinstance(exc, ControlConflict) else 400, str(exc)) from exc
         return wakeup
 
     @api.delete("/api/projects/{project_id}/wakeups/{wakeup_id}")
-    async def delete_wakeup(project_id: str, wakeup_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def delete_wakeup(project_id: str, wakeup_id: str, body: WakeupDelete,
+                            who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         await existing(project_id)
         try:
-            if not await wakeups.cancel(app, project_id, wakeup_id, principal=Principal.operator(_)):
+            removed = await wakeups.cancel(
+                app, project_id, wakeup_id, principal=Principal.operator(who),
+                expected_collection_revision=body.expected_collection_revision,
+                expected_schedule_revision=body.expected_schedule_revision,
+                client_operation_id=body.client_operation_id,
+            )
+            if removed is None:
                 raise HTTPException(404, "no such wake-up")
-        except wakeups.WakeupRefused as exc:
+        except (wakeups.WakeupRefused, ValueError, ControlDenied) as exc:
             raise HTTPException(409, str(exc)) from exc
-        await manager.bus.publish("project.changed", {"change": "wakeups", "actor": "operator"}, project_id=project_id)
-        return {"deleted": True}
+        return removed
 
     # -- watches -------------------------------------------------------------------------
 

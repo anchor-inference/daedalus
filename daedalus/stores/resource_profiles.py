@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from typing import Any
@@ -24,27 +25,31 @@ async def latest_in(conn: aiosqlite.Connection, project_id: str) -> aiosqlite.Ro
 
 async def set_profile_in(conn: aiosqlite.Connection, *, project_id: str, state: str,
                          memory_bytes: int, cpu_millis: int, process_count: int,
-                         disk_bytes: int, receipt_id: str) -> dict[str, Any]:
+                         disk_bytes: int, min_free_disk_bytes: int,
+                         expected_profile_revision: int | None, receipt_id: str) -> dict[str, Any]:
     if state not in ("enabled", "disabled"):
         raise ValueError("invalid resource profile state")
-    values = (memory_bytes, cpu_millis, process_count, disk_bytes)
+    values = (memory_bytes, cpu_millis, process_count, disk_bytes, min_free_disk_bytes)
     if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in values):
         raise ValueError("resource ceilings must be nonnegative integers")
     if state == "enabled" and (memory_bytes < 16 << 20 or cpu_millis < 10 or process_count < 1):
         raise ValueError("enabled ceilings need at least 16 MiB, ten millicores and one process")
     if state == "enabled" and disk_bytes:
         raise ValueError("this environment cannot enforce a disk-space quota")
-    if memory_bytes > 1 << 50 or cpu_millis > 100000 or process_count > 65536:
+    if memory_bytes > 1 << 50 or cpu_millis > 100000 or process_count > 65536 or min_free_disk_bytes > 1 << 50:
         raise ValueError("resource ceiling exceeds the supported range")
     previous = await latest_in(conn, project_id)
+    if (int(previous["revision"]) if previous is not None else None) != expected_profile_revision:
+        raise ControlConflict("the resource profile changed; review current limits before saving")
     revision = int(previous["revision"]) + 1 if previous is not None else 1
     await conn.execute(
         "INSERT INTO resource_profile_versions(project_id,revision,state,memory_bytes,cpu_millis,"
-        "process_count,disk_bytes,receipt_id,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        "process_count,disk_bytes,min_free_disk_bytes,receipt_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (project_id, revision, state, *values, receipt_id, now()),
     )
     return {"project_id": project_id, "profile_revision": revision, "state": state,
-            "limits": dict(zip(LIMIT_FIELDS, values, strict=True))}
+            "limits": dict(zip(LIMIT_FIELDS, values[:4], strict=True)),
+            "min_free_disk_bytes": min_free_disk_bytes}
 
 
 def strict_target(profile: aiosqlite.Row, *, env: str, harness: str,
@@ -64,7 +69,31 @@ def strict_target(profile: aiosqlite.Row, *, env: str, harness: str,
     if not isinstance(instance, str) or not instance:
         raise ControlConflict("the terminal daemon generation is unknown")
     return {"profile_revision": int(profile["revision"]), "limits": limits(profile),
-            "env": env, "daemon_instance": instance}
+            "env": env, "daemon_instance": instance,
+            "min_free_disk_bytes": int(profile["min_free_disk_bytes"])}
+
+
+def disk_snapshot(observation: dict[str, Any] | None, *, path: str, minimum: int,
+                  admitted: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Accept only a fresh daemon observation of the selected workspace volume, never a reservation."""
+    if minimum <= 0:
+        raise ValueError("a positive free-space threshold is required")
+    if not isinstance(observation, dict) or observation.get("available") is not True:
+        reason = observation.get("reason") if isinstance(observation, dict) else "no observation"
+        raise ControlConflict(f"selected workspace free space is unknown: {reason}")
+    expected_path = hashlib.sha256(path.encode()).hexdigest()
+    fields = ("free_bytes", "device_id", "mount_id", "observed_at", "path_digest", "workspace_exists")
+    if (type(observation.get("free_bytes")) is not int or observation["free_bytes"] < 0
+            or any(not isinstance(observation.get(field), str) or not observation[field]
+                   for field in fields[1:5]) or observation["path_digest"] != expected_path
+            or type(observation.get("workspace_exists")) is not bool):
+        raise ControlConflict("selected workspace volume observation is incomplete or stale")
+    if observation["free_bytes"] < minimum:
+        raise ControlConflict("selected workspace has less free space than the configured minimum")
+    if admitted is not None and (observation["device_id"], observation["mount_id"]) != (
+            admitted["device_id"], admitted["mount_id"]):
+        raise ControlConflict("selected workspace volume changed after the launch command")
+    return {field: observation[field] for field in fields}
 
 
 async def bind_attempt_in(conn: aiosqlite.Connection, *, attempt_id: str, project_id: str,
@@ -72,7 +101,8 @@ async def bind_attempt_in(conn: aiosqlite.Connection, *, attempt_id: str, projec
     profile = await latest_in(conn, project_id)
     if (profile is None or profile["state"] != "enabled"
             or int(profile["revision"]) != resource["profile_revision"]
-            or limits(profile) != resource["limits"]):
+            or limits(profile) != resource["limits"]
+            or int(profile["min_free_disk_bytes"]) != resource["min_free_disk_bytes"]):
         raise ControlConflict("the resource profile changed before the attempt was bound")
     await conn.execute(
         "INSERT INTO attempt_resource_bindings(attempt_id,project_id,profile_revision,host_generation,"
@@ -80,6 +110,35 @@ async def bind_attempt_in(conn: aiosqlite.Connection, *, attempt_id: str, projec
         (attempt_id, project_id, profile["revision"], str(host_generation), resource["env"],
          resource["daemon_instance"], canonical(resource["limits"]), "reserved", now(), now()),
     )
+    if resource["min_free_disk_bytes"]:
+        if not resource.get("disk_admission") or not resource.get("disk_preparation") or not resource.get("folder_id"):
+            raise ControlConflict("the selected workspace has no complete disk preflight")
+        await conn.execute(
+            "INSERT INTO attempt_disk_preflights(attempt_id,project_id,profile_revision,folder_id,"
+            "min_free_disk_bytes,admission_json,preparation_json,created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (attempt_id, project_id, profile["revision"], resource["folder_id"],
+             resource["min_free_disk_bytes"], canonical(resource["disk_admission"]),
+             canonical(resource["disk_preparation"]), now()),
+        )
+
+
+async def record_disk_entry_in(conn: aiosqlite.Connection, *, attempt_id: str,
+                               observation: dict[str, Any]) -> None:
+    pinned = await one(conn, "SELECT admission_json,min_free_disk_bytes FROM attempt_disk_preflights"
+                       " WHERE attempt_id = ?",
+                       (attempt_id,))
+    if pinned is None:
+        raise ControlConflict("the attempt has no selected workspace disk preflight")
+    admitted = json.loads(pinned["admission_json"])
+    if (observation.get("device_id"), observation.get("mount_id"), observation.get("path_digest")) != (
+            admitted["device_id"], admitted["mount_id"], admitted["path_digest"]):
+        raise ControlConflict("the selected workspace volume or path changed before runtime entry")
+    if (type(observation.get("free_bytes")) is not int
+            or observation["free_bytes"] < pinned["min_free_disk_bytes"]
+            or observation.get("workspace_exists") is not True):
+        raise ControlConflict("the selected workspace has no verified free space before runtime entry")
+    await conn.execute("INSERT INTO attempt_disk_entry_observations(id,attempt_id,observation_json,observed_at)"
+                       " VALUES (?,?,?,?)", (uuid.uuid4().hex, attempt_id, canonical(observation), now()))
 
 
 async def bind_launch_in(conn: aiosqlite.Connection, *, attempt_id: str,

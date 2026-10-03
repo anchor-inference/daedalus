@@ -37,6 +37,7 @@ def run() -> int:
     handoff_unknown = [1]
     resource_profile = {"configured": False, "project_id": "p1", "entity_revision": 1,
                         "profile_revision": None, "state": "disabled", "limits": None,
+                        "min_free_disk_bytes": 0,
                         "disk_quota_supported": False}
     resource_attempts: list[dict] = []
     resource_receipts: dict[str, tuple[dict, dict]] = {}
@@ -120,12 +121,15 @@ def run() -> int:
                               status=200 if original == payload else 409)
             if payload["expected_entity_revision"] != projects[0]["entity_revision"]:
                 return answer(route, {"detail": "project changed", "current_revision": projects[0]["entity_revision"]}, status=409)
+            if payload["expected_profile_revision"] != resource_profile["profile_revision"]:
+                return answer(route, {"detail": "profile changed"}, status=409)
             projects[0]["entity_revision"] += 1
             resource_profile.update({"configured": True, "entity_revision": projects[0]["entity_revision"],
-                                     "profile_revision": 1, "state": payload["state"],
+                                     "profile_revision": (resource_profile["profile_revision"] or 0) + 1,
+                                     "state": payload["state"], "min_free_disk_bytes": payload["min_free_disk_bytes"],
                                      "limits": {key: payload[key] for key in ("memory_bytes", "cpu_millis", "process_count", "disk_bytes")}})
             receipt = {"receipt_id": f"resource-{key}", "entity_revision": projects[0]["entity_revision"],
-                       "profile_revision": 1, "state": payload["state"], "limits": resource_profile["limits"]}
+                       "profile_revision": resource_profile["profile_revision"], "state": payload["state"], "limits": resource_profile["limits"]}
             resource_receipts[key] = payload, receipt
             return answer(route, {"detail": "response lost"}, status=503)
         if path == "/api/projects/p1/workspace-archive" and request.method == "GET":
@@ -274,6 +278,7 @@ def run() -> int:
         resources.locator("#resource-memory-p1").fill("512")
         resources.locator("#resource-cpu-p1").fill("1000")
         resources.locator("#resource-processes-p1").fill("64")
+        resources.locator("#resource-min-free-p1").fill("1024")
         for width in (320, 390, 1440):
             page.set_viewport_size({"width": width, "height": 900})
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), f"resource settings overflow {width}px"
@@ -281,10 +286,22 @@ def run() -> int:
         expect(page.locator(".result-warning")).to_contain_text("Retry original request")
         assert resource_attempts[0]["expected_entity_revision"] == 1
         assert resource_attempts[0]["memory_bytes"] == 512 * 1048576
+        assert resource_attempts[0]["min_free_disk_bytes"] == 1024 * 1048576
+        assert resource_attempts[0]["expected_profile_revision"] is None
         assert resource_attempts[0]["cpu_millis"] == 1000 and resource_attempts[0]["process_count"] == 64
         page.get_by_role("button", name="Retry original request").click()
         expect(resources.locator("summary")).to_contain_text("512 MiB", timeout=5000)
         assert resource_attempts[1] == resource_attempts[0], "uncertain resource write did not replay the exact request"
+        resources.locator("#resource-cpu-p1").fill("1500")
+        resource_profile["profile_revision"] = 2
+        resource_profile["limits"] = {**resource_profile["limits"], "cpu_millis": 1100}
+        resources.get_by_role("button", name="Check current settings").click()
+        expect(resources).to_contain_text("Resource settings changed while you were editing")
+        expect(resources.locator("#resource-cpu-p1")).to_have_value("1500")
+        expect(resources.get_by_role("button", name="Save resource limits")).to_be_disabled()
+        assert len(resource_attempts) == 2, "a stale draft was silently rebased and sent"
+        resources.get_by_role("button", name="Discard draft and load current").click()
+        expect(resources.locator("#resource-cpu-p1")).to_have_value("1100")
         extensions = page.locator(".project-extensions")
         expect(extensions).to_be_visible()
         hosts = page.locator(".project-runtime-hosts")

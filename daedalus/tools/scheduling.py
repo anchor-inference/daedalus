@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
@@ -51,6 +53,10 @@ async def schedule_create(
         return error(context, "scheduling is not available in this session")
     if bool(cron) == bool(run_at):
         return error(context, "give exactly one of cron or run_at")
+    call_id = context.metadata.get("tool_call_id")
+    if not isinstance(call_id, str) or not call_id:
+        return error(context, "the host did not identify this schedule command")
+    command_id = "schedule-tool:" + hashlib.sha256(f"{context.run_id}:{call_id}".encode()).hexdigest()
     try:
         created = await services.schedule(
             "create",
@@ -61,13 +67,15 @@ async def schedule_create(
             files=[str(services.resolve(f)) for f in files or []],
             model=model,
             created_by_session=context.session_id,
+            source_run_id=context.run_id,
+            source_command_id=command_id,
             kind=kind,
             run_in=run_in,
         )
-    except ValueError as exc:
+    except (ValueError, PermissionError) as exc:
         return error(context, str(exc))
     where = " in this session" if created.get("run_in") == "self" else ""
-    return ok(context, f"schedule {created['id']} '{name}' ({created.get('kind', kind)}{where}) awaits operator approval; proposed next at {created.get('next_run_at')}", schedule_id=created["id"])
+    return ok(context, f"schedule proposal {created['id']} '{name}' ({created.get('kind', kind)}{where}) awaits operator approval; proposed next at {created.get('next_run_at')}", proposal_id=created["id"])
 
 
 @tool_group("scheduling")
@@ -80,12 +88,12 @@ async def schedule_list(context: ToolContext) -> ToolResult:
     services = services_for(context)
     if services.schedule is None:
         return error(context, "scheduling is not available in this session")
-    items = await services.schedule("list")
+    items = await services.schedule("list", source_session_id=context.session_id)
     if not items:
         return ok(context, "(no scheduled tasks)")
     lines = [
         f"- {s['id']} [{s.get('kind') or 'agent'}] '{s['name']}' {'cron ' + s['cron'] if s.get('cron') else 'once at ' + str(s.get('run_at'))}"
-        f" next={s.get('next_run_at')} enabled={bool(s.get('enabled', 1))}"
+        f" next={s.get('next_run_at')} status={s['status'] if s.get('status') else ('enabled' if s.get('enabled', 1) else 'paused')}"
         + (f" failures={s['failure_count']}" if s.get("failure_count") else "")
         for s in items
     ]
@@ -97,12 +105,25 @@ async def schedule_list(context: ToolContext) -> ToolResult:
     "delete scheduled job cancel cron reminder unschedule stop recurring "
     "удалить удали отменить отмени напоминалку напоминание расписание снять сними регулярное"
 )
-@tool(name="ScheduleDelete", description="Explain how to remove a scheduled task with operator approval.")
+@tool(name="ScheduleDelete", description="Withdraw your own pending schedule proposal. An approved schedule must be removed by the operator in Schedules.")
 async def schedule_delete(context: ToolContext, schedule_id: str) -> ToolResult:
     services = services_for(context)
     if services.schedule is None:
         return error(context, "scheduling is not available in this session")
-    return error(context, "Open Schedules in the app to remove an approved action with a receipt")
+    call_id = context.metadata.get("tool_call_id")
+    if not isinstance(call_id, str) or not call_id:
+        return error(context, "the host did not identify this schedule command")
+    if not schedule_id.startswith("p"):
+        return error(context, "Open Schedules in the app to remove an approved action with a receipt")
+    command_id = "schedule-tool:" + hashlib.sha256(f"{context.run_id}:{call_id}".encode()).hexdigest()
+    try:
+        withdrawn = await services.schedule(
+            "withdraw", proposal_id=schedule_id, source_session_id=context.session_id,
+            source_run_id=context.run_id, source_command_id=command_id,
+        )
+    except (ValueError, PermissionError) as exc:
+        return error(context, str(exc))
+    return ok(context, f"schedule proposal {schedule_id} withdrawn", proposal_id=withdrawn["proposal_id"])
 
 
 TOOLS = [schedule_create, schedule_list, schedule_delete]

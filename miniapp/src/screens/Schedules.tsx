@@ -6,7 +6,7 @@ import { absTime, cronFor, describeCron, describeSchedule, relTime, untilShort }
 import { Icon } from "../icons";
 import { navigate, pathFor } from "../router";
 import { PageHeader, screenTitle } from "../ui/index";
-import { invalidate, useQuery } from "../store";
+import { invalidate, useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { t } from "../i18n";
 import { useSessionTitles } from "./Sessions";
@@ -29,6 +29,8 @@ const kindWord = (kind: Schedule["kind"]) => t(`sched.kind.${kind}`);
 
 type Cycle = { id: string; due_at: string; kind: string; effect_state: string | null; action_state: string; effect_error: string | null };
 type CycleHistory = { schedule_revision: number; authority_state: string; collection_revision: number | null; scope: { kind: string; id: string }; cycles: Cycle[] };
+type ScheduleProposal = { id: string; name: string; prompt: string; cron: string | null; run_at: string | null; kind: Schedule["kind"]; next_run_at: string; file_count: number; files: { name: string; size: number; digest: string }[]; legacy_file_review_required: boolean; source_session_id: string | null; source_project_id: string | null; proposal_revision: number; request_digest: string; status: "pending" | "withdrawn" | "accepted"; created_at: string };
+type ProposalList = { entries: ScheduleProposal[]; collection_revisions: Record<string, number> };
 
 function scheduleRevision(s: Schedule): number {
   if (!Number.isInteger(s.schedule_revision)) throw new Error(t("sched.approval.refresh"));
@@ -144,6 +146,7 @@ export function SchedulesScreen({ toast, onOpen, selected }: { toast: (t: string
         actions={<button className="iconbtn primary" onClick={() => setCreating(true)} title={t("sched.new")} aria-label={t("sched.new")}><Icon name="plus" /></button>}
       />
       <div className="screen narrow">
+        <PendingProposals toast={toast} onAccepted={reload} />
         {loading && !error && <Skeleton rows={4} />}
         {error && !items && <div className="empty"><b>{t("sched.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
         {items && items.length === 0 && (
@@ -210,6 +213,60 @@ export function SchedulesScreen({ toast, onOpen, selected }: { toast: (t: string
       )}
     </>
   );
+}
+
+function PendingProposals({ toast, onAccepted }: { toast: (text: string) => void; onAccepted: () => void }) {
+  const offline = useOffline();
+  const { data, error, refresh } = useQuery<ProposalList>("/api/recurring/proposals", { pollMs: 30000, staleMs: 5000 });
+  const [busy, setBusy] = useState<string | null>(null);
+  const pending = useRef<Record<string, { fingerprint: string; id: string }>>({});
+  const [approvalClock] = useState(() => Date.now());
+  const entries = data?.entries.filter((item) => item.status === "pending") ?? [];
+  const expiresFor = (item: ScheduleProposal) => {
+    const due = Date.parse(item.next_run_at);
+    return new Date(Math.max(approvalClock + 30 * 86400000,
+      !item.cron && Number.isFinite(due) ? due + 86400000 : 0)).toISOString();
+  };
+  async function decide(item: ScheduleProposal, action: "accept" | "withdraw" | "review-files") {
+    const scope = item.source_project_id ? `project:${item.source_project_id}` : "global:global";
+    const revision = data?.collection_revisions[scope];
+    if (!Number.isInteger(revision) || error || offline) return;
+    const body = { request_digest: item.request_digest, expected_proposal_revision: item.proposal_revision,
+      expected_collection_revision: revision!, ...(action === "accept" ? { expires_at: expiresFor(item) } : {}) };
+    const key = `${item.id}:${action}`;
+    const fingerprint = JSON.stringify(body);
+    if (pending.current[key]?.fingerprint !== fingerprint) pending.current[key] = { fingerprint, id: crypto.randomUUID() };
+    setBusy(item.id);
+    try {
+      await api.post(`/api/recurring/proposals/${encodeURIComponent(item.id)}/${action}`, { ...body, client_operation_id: pending.current[key].id });
+      delete pending.current[key];
+      refresh(); onAccepted();
+      toast(t(action === "accept" ? "sched.proposal.accepted" : action === "review-files" ? "sched.proposal.reviewed" : "sched.proposal.withdrawn"));
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) { delete pending.current[key]; refresh(); }
+      toast(errorText(e));
+    } finally { setBusy(null); }
+  }
+  return <section aria-label={t("sched.proposal.title")}>
+    <div className="section-title">{t("sched.proposal.title")} <span className="n">{entries.length}</span></div>
+    {error && <div className="result-warning" role="status">{t("sched.proposal.readfailed")} <button className="btn small" onClick={refresh}>{t("common.retry")}</button></div>}
+    {entries.map((item) => <div key={item.id} className="erow schedule">
+      <div className="grow">
+        <b>{item.name}</b> <span className="sub">{t(`sched.kind.${item.kind}`)}</span>
+        <div className="sub">{item.cron ? item.cron : absTime(item.next_run_at)} · {t("sched.proposal.source", { id: item.source_session_id ?? "—" })}</div>
+        <div className="sub">{t("sched.approval.expires", { at: absTime(expiresFor(item)) })}</div>
+        <div className="proposal-text">{item.prompt}</div>
+        {item.file_count > 0 && <div className="sub">{t("sched.proposal.files", { n: item.file_count })}</div>}
+        {item.legacy_file_review_required && <div className="result-warning">{t("sched.proposal.legacyfiles")}</div>}
+        {item.files.map((file) => <div className="sub mono" key={`${file.name}:${file.digest}`}>{file.name} · {file.size} B · SHA-256 {file.digest}</div>)}
+      </div>
+      <div className="row-actions">
+        <button className="btn small" disabled={!!busy || !!error || offline || !data?.collection_revisions[item.source_project_id ? `project:${item.source_project_id}` : "global:global"]} onClick={() => void decide(item, "withdraw")}>{t("sched.proposal.withdraw")}</button>
+        {item.legacy_file_review_required && <button className="btn small" disabled={!!busy || !!error || offline || !data?.collection_revisions[item.source_project_id ? `project:${item.source_project_id}` : "global:global"]} onClick={() => void decide(item, "review-files")}>{t("sched.proposal.reviewfiles")}</button>}
+        <button className="btn small primary" disabled={item.legacy_file_review_required || !!busy || !!error || offline || !data?.collection_revisions[item.source_project_id ? `project:${item.source_project_id}` : "global:global"]} onClick={() => void decide(item, "accept")}>{t("sched.proposal.accept")}</button>
+      </div>
+    </div>)}
+  </section>;
 }
 
 function RecurringInspection({ schedule, toast, reload }: { schedule: Schedule; toast: (text: string) => void; reload: () => void }) {

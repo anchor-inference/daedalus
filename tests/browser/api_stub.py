@@ -502,6 +502,7 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
         return 200, "application/json", json.dumps({"configured": False, "project_id": parts[3],
                                                       "entity_revision": 1, "profile_revision": None,
                                                       "state": "disabled", "limits": None,
+                                                      "min_free_disk_bytes": 0,
                                                       "disk_quota_supported": False})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "usage":
         # A project nobody invented spend for spent nothing; a harness with a team answers it itself.
@@ -1180,6 +1181,7 @@ class FocusStub:
         self.lifted: list[int] = []
         self.schedules = schedules
         self.wakeups = wakeups or []
+        self.wake_collection_revision = 1
         self.woken: list[dict] = []
         self.watches = watches or []
         self.coordinator_handoffs: dict[str, dict] = {}
@@ -1398,6 +1400,10 @@ class FocusStub:
             return 200, self.schedules
         if path == "/api/recurring/overview" and method == "GET":
             return 200, {"global_collection_revision": 1}
+        if path == "/api/recurring/proposals" and method == "GET":
+            return 200, {"entries": [], "collection_revisions": {"global:global": 1}}
+        if path.startswith("/api/recurring/proposals/") and method == "POST":
+            return 404, {"detail": "no such proposal"}
         if path == "/api/recurring/preview" and method == "POST":
             payload = body or {}
             return 200, {"next_run_at": payload.get("run_at") or "2026-09-25T09:00:00Z", "timezone": "UTC",
@@ -1496,20 +1502,31 @@ class FocusStub:
             parts = path.split("/")
             pid = parts[3]
             if len(parts) == 5 and method == "GET":
-                return 200, {"wakeups": [w for w in self.wakeups if w["project_id"] == pid], "max": 20}
+                return 200, {"wakeups": [w for w in self.wakeups if w["project_id"] == pid],
+                             "max": 20, "collection_revision": self.wake_collection_revision}
             if len(parts) == 5 and method == "POST":
                 payload = dict(body or {})
                 self.woken.append(payload)
+                if not payload.get("client_operation_id") or payload.get("expected_collection_revision") != self.wake_collection_revision or not payload.get("expires_at"):
+                    return 409, {"detail": "wake command changed"}
                 if not str(payload.get("note", "")).strip():
                     return 400, {"detail": "a wake-up needs a note: what to look at when it fires"}
                 at = payload.get("at") or ("2026-09-24T12:30:00Z" if payload.get("in_minutes") else None)
-                row = {"id": f"wk{len(self.wakeups) + 1}", "project_id": pid, "note": payload["note"], "cron": payload.get("cron"), "at": at, "next_run_at": at or "2026-09-25T07:00:00Z", "last_run_at": None, "enabled": True, "set_by": "operator", "created_at": "2026-09-24T10:00:00Z"}
+                row = {"id": f"wk{len(self.wakeups) + 1}", "project_id": pid, "note": payload["note"], "cron": payload.get("cron"), "at": at, "next_run_at": at or "2026-09-25T07:00:00Z", "last_run_at": None, "enabled": True, "set_by": "operator", "created_at": "2026-09-24T10:00:00Z", "schedule_revision": 1}
                 self.wakeups.append(row)
+                self.wake_collection_revision += 1
                 return 200, row
             if len(parts) == 6 and method == "DELETE":
+                payload = dict(body or {})
+                found = next((w for w in self.wakeups if w["project_id"] == pid and w["id"] == parts[5]), None)
+                if found and (payload.get("expected_collection_revision") != self.wake_collection_revision or payload.get("expected_schedule_revision") != found["schedule_revision"] or not payload.get("client_operation_id")):
+                    return 409, {"detail": "wake command changed"}
                 before = len(self.wakeups)
                 self.wakeups = [w for w in self.wakeups if not (w["project_id"] == pid and w["id"] == parts[5])]
-                return (200, {"deleted": True}) if len(self.wakeups) < before else (404, {"detail": "no such wake-up"})
+                if len(self.wakeups) < before:
+                    self.wake_collection_revision += 1
+                    return 200, {"deleted": True, "receipt_id": payload["client_operation_id"], "entity_revision": self.wake_collection_revision}
+                return 404, {"detail": "no such wake-up"}
         if path == "/api/terminals" and method == "GET" and params.get("project_id"):
             rows = [term for term in self.terminals if term["project_id"] == params["project_id"]]
             return 200, {**GATES["/api/terminals"], "terminals": rows}  # type: ignore[dict-item]
@@ -1886,7 +1903,7 @@ class FocusStub:
         ]
         schedules = [{"id": "wk1", "name": words["wake.name"], "run_in": "self", "cron": None, "run_at": "2026-09-24T12:00:00Z", "prompt": words["wake.note"], "enabled": 1, "next_run_at": "2026-09-24T12:00:00Z", "last_run_at": None, "last_summary": None, "kind": "lazy", "target_session": "orch-bakery", "failure_count": 0, "last_error": None, "authority_state": "needs_approval", "schedule_revision": 1, "project_id": None}]
         wakeups = [
-            {"id": "wk1", "project_id": pid, "note": words["wake.note"], "cron": None, "at": "2026-09-24T12:00:00Z", "next_run_at": "2026-09-24T12:00:00Z", "last_run_at": None, "enabled": True, "set_by": "orchestrator", "created_at": "2026-09-24T09:40:00Z"},
+            {"id": "wk1", "project_id": pid, "note": words["wake.note"], "cron": None, "at": "2026-09-24T12:00:00Z", "next_run_at": "2026-09-24T12:00:00Z", "last_run_at": None, "enabled": True, "set_by": "orchestrator", "created_at": "2026-09-24T09:40:00Z", "schedule_revision": 1},
         ]
         watches = [
             {"id": "w1", "project_id": pid, "when": {"event": "staff_finished", "staff": "Max", "staff_id": "st-max"}, "then": {"action": "wake"}, "cooldown_minutes": 10, "once": False, "note": words["watch.note"],

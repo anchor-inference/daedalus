@@ -1250,6 +1250,7 @@ export type Wakeup = {
   enabled: boolean;
   set_by: "orchestrator" | "operator";
   created_at: string;
+  schedule_revision?: number;
 };
 
 export type Schedule = {

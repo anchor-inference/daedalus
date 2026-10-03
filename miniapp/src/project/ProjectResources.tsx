@@ -9,6 +9,7 @@ type Profile = {
   profile_revision: number | null;
   state: "enabled" | "disabled";
   limits: Limits | null;
+  min_free_disk_bytes: number;
 };
 type Capability = { available: boolean; reason?: string; kind?: string; sandbox?: string };
 type Capabilities = {
@@ -40,35 +41,53 @@ export function ProjectResources({ projectId, write, canWrite }: {
   const [memory, setMemory] = useState("");
   const [cpu, setCpu] = useState("");
   const [processes, setProcesses] = useState("");
+  const [minFree, setMinFree] = useState("");
+  const [baseline, setBaseline] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const revision = `${data?.project_id ?? projectId}:${data?.profile_revision ?? 0}`;
+  const draft = JSON.stringify({ enabled, memory, cpu, processes, minFree });
+  const dirty = baseline !== null && draft !== baseline;
+  const sourceChanged = loaded !== "" && loaded !== revision;
+
+  function loadCurrent(profile: Profile) {
+    const current = { enabled: profile.state === "enabled",
+      memory: profile.limits ? String(profile.limits.memory_bytes / 1048576) : "",
+      cpu: profile.limits ? String(profile.limits.cpu_millis) : "",
+      processes: profile.limits ? String(profile.limits.process_count) : "",
+      minFree: profile.min_free_disk_bytes ? String(profile.min_free_disk_bytes / 1048576) : "" };
+    setEnabled(current.enabled);
+    setMemory(current.memory);
+    setCpu(current.cpu);
+    setProcesses(current.processes);
+    setMinFree(current.minFree);
+    setBaseline(JSON.stringify(current));
+    setLoaded(`${profile.project_id}:${profile.profile_revision ?? 0}`);
+  }
 
   useEffect(() => {
-    if (!data || loaded === revision) return;
-    setEnabled(data.state === "enabled");
-    setMemory(data.limits ? String(data.limits.memory_bytes / 1048576) : "");
-    setCpu(data.limits ? String(data.limits.cpu_millis) : "");
-    setProcesses(data.limits ? String(data.limits.process_count) : "");
-    setLoaded(revision);
-  }, [data, loaded, revision]);
+    if (!data || loaded === revision || dirty) return;
+    loadCurrent(data);
+  }, [data, loaded, revision, dirty]);
 
   const valid = !enabled || (positiveInteger(memory, 16, 1 << 30)
-    && positiveInteger(cpu, 10, 100000) && positiveInteger(processes, 1, 65536));
+    && positiveInteger(cpu, 10, 100000) && positiveInteger(processes, 1, 65536)
+    && (minFree === "" || positiveInteger(minFree, 1, 1 << 30)));
+  const minimum = minFree === "" ? 0 : Number(minFree) * 1048576;
   const next: Limits = {
     memory_bytes: positiveInteger(memory, 1, 1 << 30) ? Number(memory) * 1048576 : 0,
     cpu_millis: positiveInteger(cpu, 1, 100000) ? Number(cpu) : 0,
     process_count: positiveInteger(processes, 1, 65536) ? Number(processes) : 0,
     disk_bytes: 0,
   };
-  const changed = data && (data.state !== (enabled ? "enabled" : "disabled")
-    || (data.configured && JSON.stringify(data.limits) !== JSON.stringify(next)));
+  const changed = data && (dirty || (!data.configured && enabled));
 
   async function save() {
     if (!data || loaded !== revision || !valid || !changed || saving || !canWrite) return;
     setSaving(true);
     try {
-      await write("PUT", resourceProfileKey(projectId), { state: enabled ? "enabled" : "disabled", ...next },
-        t("resource.saved"), refresh);
+      await write("PUT", resourceProfileKey(projectId), { state: enabled ? "enabled" : "disabled", ...next,
+        min_free_disk_bytes: minimum, expected_profile_revision: data.profile_revision },
+        t("resource.saved"), () => { setBaseline(draft); refresh(); });
     } finally { setSaving(false); }
   }
 
@@ -83,6 +102,9 @@ export function ProjectResources({ projectId, write, canWrite }: {
     {!data && !error && <div className="sub">{t("common.loading")}</div>}
     {data && <>
       <p className="sub">{t("resource.scope")}</p>
+      <button type="button" className="linkbtn" onClick={refresh}>{t("resource.refresh")}</button>
+      {sourceChanged && <div className="sub" role="status">{t("resource.sourceChanged")}
+        <button type="button" className="linkbtn" onClick={() => loadCurrent(data)}>{t("resource.reviewCurrent")}</button></div>}
       <label className="toggle-row"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
         <span>{t("resource.enable")}</span></label>
       {enabled && <>
@@ -93,7 +115,10 @@ export function ProjectResources({ projectId, write, canWrite }: {
           <input id={`resource-cpu-${projectId}`} className="field" inputMode="numeric" value={cpu} onChange={(event) => setCpu(event.target.value)} />
           <label htmlFor={`resource-processes-${projectId}`}>{t("resource.processes")}</label>
           <input id={`resource-processes-${projectId}`} className="field" inputMode="numeric" value={processes} onChange={(event) => setProcesses(event.target.value)} />
+          <label htmlFor={`resource-min-free-${projectId}`}>{t("resource.minFree")}</label>
+          <input id={`resource-min-free-${projectId}`} className="field" inputMode="numeric" value={minFree} onChange={(event) => setMinFree(event.target.value)} />
         </div>
+        <div className="sub">{t("resource.minFreeHelp")}</div>
         <div className="sub">{t("resource.diskUnsupported")}</div>
         <div className="sub">{t("resource.nativeUnsupported")}</div>
         {capability.error && <div className="sub" role="status">{t("resource.capabilityUnknown")}</div>}

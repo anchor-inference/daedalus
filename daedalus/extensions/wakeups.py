@@ -138,6 +138,8 @@ async def set_wakeup(
     by_session: str | None = None,
     principal: Principal | None = None,
     client_operation_id: str | None = None,
+    expected_collection_revision: int | None = None,
+    expires_at: str | None = None,
 ) -> dict[str, Any]:
     """Set a wake-up for the project's orchestrator. ``by_session`` is the orchestrator that set it
     itself; without it the operator did. Returns the wake-up as :func:`view` shows it."""
@@ -153,7 +155,14 @@ async def set_wakeup(
     if len(text) > NOTE_MAX:
         raise WakeupRefused(f"a note is at most {NOTE_MAX} characters")
     limit = app.config.orchestrator.wakeups_max
-    if await count(app, project.id) >= limit:
+    previous = None
+    if principal is not None and client_operation_id:
+        previous = await app.db.fetchone(
+            "SELECT id FROM operation_receipts WHERE scope_kind='project' AND scope_id=? AND actor_id=?"
+            " AND operation_kind IN ('schedule.create','schedule.propose') AND client_operation_id=?",
+            (project.id, principal.actor_id, client_operation_id),
+        )
+    if previous is None and await count(app, project.id) >= limit:
         raise WakeupRefused(f"{project.name} already has {limit} wake-ups; cancel one first")
     run_at, recurring = resolve_when(app, at=at, in_minutes=in_minutes, cron=cron)
     if principal is not None and by_session is not None and run_at is not None:
@@ -183,18 +192,36 @@ async def set_wakeup(
         else:
             row = await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (created["id"],))
             return view(dict(row)) if row is not None else created
-    try:
-        created = await scheduler.create(
-            name=short_name(text),
-            prompt=text,
-            cron=recurring,
-            run_at=run_at,
-            kind="wake",
-            target_session=orchestrator.session_id,
-            created_by_session=by_session,
+    if by_session is not None:
+        if not client_operation_id:
+            raise WakeupRefused("the host must identify the wake-up command")
+        proposals: Any = app.extensions.get("schedule_proposals")
+        if proposals is None:
+            raise WakeupRefused("schedule proposals are unavailable")
+        created = await proposals.create(
+            source_session_id=by_session, source_run_id=None,
+            source_command_id=client_operation_id, name=short_name(text), prompt=text,
+            cron=recurring, run_at=run_at, files=[], model=None, kind="wake",
+            run_in="new", target_session=orchestrator.session_id,
+            requested_time={"at": at, "in_minutes": in_minutes, "cron": cron},
         )
-    except ValueError as exc:
-        raise WakeupRefused(str(exc)) from exc
+        return {"id": created["id"], "note": text, "cron": recurring, "at": run_at,
+                "next_run_at": created["next_run_at"], "enabled": False,
+                "authority_state": "needs_approval", "set_by": "orchestrator",
+                "proposal_revision": created["proposal_revision"]}
+    if (principal is None or principal.origin_class != "operator" or not client_operation_id
+            or expected_collection_revision is None or not expires_at):
+        raise WakeupRefused("operator wake-ups require a reviewed expiry and command identity")
+    service: Any = app.extensions.get("recurring")
+    if service is None:
+        raise WakeupRefused("durable scheduling is unavailable")
+    created = await service.create(
+        principal, name=short_name(text), prompt=text, cron=recurring, run_at=run_at,
+        kind="wake", target_session=orchestrator.session_id, project_id=project.id,
+        expires_at=expires_at, expected_collection_revision=expected_collection_revision,
+        client_operation_id=client_operation_id,
+        requested_time={"at": at, "in_minutes": in_minutes, "cron": cron},
+    )
     row = await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (created["id"],))
     return view(dict(row)) if row is not None else created
 
@@ -210,6 +237,7 @@ def view(row: dict[str, Any]) -> dict[str, Any]:
         "last_run_at": row.get("last_run_at"),
         "enabled": bool(row.get("enabled")),
         "authority_state": row.get("authority_state", "needs_approval"),
+        "schedule_revision": row.get("schedule_revision"),
         "set_by": "orchestrator" if row.get("created_by_session") else "operator",
         "created_at": row.get("created_at"),
     }
@@ -227,34 +255,31 @@ async def wakeups(app: Application, project_id: str, *, include_done: bool = Fal
 
 
 async def cancel(app: Application, project_id: str, wakeup_id: str, *,
-                 principal: Principal | None = None, by_session: str | None = None) -> bool:
+                 principal: Principal | None = None, by_session: str | None = None,
+                 expected_collection_revision: int | None = None,
+                 expected_schedule_revision: int | None = None,
+                 client_operation_id: str | None = None) -> dict[str, Any] | None:
     """Remove a wake through the operator's durable schedule command."""
     row = await app.db.fetchone(
         f"SELECT sc.id,sc.schedule_revision,sc.deleted_at FROM schedules sc JOIN sessions s ON s.id = sc.target_session WHERE sc.id = ? AND sc.kind = 'wake' AND {_OF_PROJECT}",
         (wakeup_id, project_id),
     )
     if row is None:
-        return False
-    if row["deleted_at"]:
-        return True
+        return None
     if by_session is not None or principal is None or principal.origin_class != "operator":
         raise WakeupRefused("removing a standing wake-up needs operator approval in the app")
     recurring: Any = app.extensions.get("recurring")
     if recurring is None:
         raise WakeupRefused("durable scheduling is unavailable")
-    revision = await app.db.fetchone(
-        "SELECT revision FROM domain_collection_revisions WHERE scope_kind='project' AND scope_id=?",
-        (project_id,),
-    )
-    if revision is None:
-        raise WakeupRefused("the project no longer exists")
-    await recurring.remove(
+    if (expected_collection_revision is None or expected_schedule_revision is None
+            or not client_operation_id):
+        raise WakeupRefused("removing a wake-up requires its current revision and command identity")
+    return await recurring.remove(
         principal, wakeup_id,
-        expected_collection_revision=int(revision["revision"]),
-        expected_schedule_revision=int(row["schedule_revision"]),
-        client_operation_id=f"wake-remove:{wakeup_id}:{row['schedule_revision']}",
+        expected_collection_revision=expected_collection_revision,
+        expected_schedule_revision=expected_schedule_revision,
+        client_operation_id=client_operation_id,
     )
-    return True
 
 
 async def repoint(app: Application, project_id: str, session_id: str) -> None:

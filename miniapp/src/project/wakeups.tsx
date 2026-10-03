@@ -3,7 +3,7 @@
 // a watch switched off and on, and a new one of either set from a sheet. One component serves the
 // centre of focus mode and the right panel's tab (`compact`), like every page of a project.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api, ApiError, type ProjectWatch, type Wakeup, type WatchList } from "../api";
 import { Skeleton } from "../ui/components";
 import { Sheet } from "../ui/dialogs";
@@ -24,16 +24,21 @@ type Props = { projectId: string; back?: string | null; compact?: boolean; toast
 export function WakeupsPage({ projectId, back, compact, toast }: Props) {
   const offline = useOffline();
   const { project } = useProject(projectId);
-  const { data, error, refresh } = useQuery<{ wakeups: Wakeup[]; max: number }>(wakeupsKey(projectId), { pollMs: 30000, staleMs: 5000 });
+  const { data, error, refresh } = useQuery<{ wakeups: Wakeup[]; max: number; collection_revision?: number }>(wakeupsKey(projectId), { pollMs: 30000, staleMs: 5000 });
   const [adding, setAdding] = useState(false);
+  const pendingDeletes = useRef<Record<string, { fingerprint: string; id: string }>>({});
   const say = toast ?? (() => undefined);
   const enabled = !!project?.settings.orchestrator?.enabled;
   const list = data?.wakeups ?? [];
 
   async function cancel(w: Wakeup) {
-    if (offline || error) return;
+    if (offline || error || !Number.isInteger(data?.collection_revision) || !Number.isInteger(w.schedule_revision)) return;
     try {
-      await api.delete(`${wakeupsKey(projectId)}/${enc(w.id)}`);
+      const body = { expected_collection_revision: data!.collection_revision!, expected_schedule_revision: w.schedule_revision! };
+      const fingerprint = JSON.stringify(body);
+      if (pendingDeletes.current[w.id]?.fingerprint !== fingerprint) pendingDeletes.current[w.id] = { fingerprint, id: crypto.randomUUID() };
+      await api.request("DELETE", `${wakeupsKey(projectId)}/${enc(w.id)}`, { ...body, client_operation_id: pendingDeletes.current[w.id].id });
+      delete pendingDeletes.current[w.id];
       say(t("focus.wakeups.cancelled"));
       invalidate(wakeupsKey(projectId));
     } catch (e) {
@@ -67,14 +72,14 @@ export function WakeupsPage({ projectId, back, compact, toast }: Props) {
                 {w.cron && <span className="mono"> · {w.cron} UTC</span>}
               </div>
             </div>
-            <button className="iconbtn small quiet" disabled={offline || !!error} onClick={() => void cancel(w)} title={t("focus.wakeups.cancel")} aria-label={t("focus.wakeups.cancel")}>
+            <button className="iconbtn small quiet" disabled={offline || !!error || !Number.isInteger(data?.collection_revision) || !Number.isInteger(w.schedule_revision)} onClick={() => void cancel(w)} title={t("focus.wakeups.cancel")} aria-label={t("focus.wakeups.cancel")}>
               <Icon name="close" size={16} />
             </button>
           </div>
         ))}
       </section>
       <WatchesSection projectId={projectId} toast={say} />
-      {adding && <WakeupSheet projectId={projectId} unverified={!!error} onClose={() => setAdding(false)} toast={say} />}
+      {adding && <WakeupSheet projectId={projectId} collectionRevision={data?.collection_revision} unverified={!!error} onClose={() => setAdding(false)} toast={say} />}
     </div>
   );
   if (compact) return body;
@@ -86,11 +91,13 @@ export function WakeupsPage({ projectId, back, compact, toast }: Props) {
   );
 }
 
-function WakeupSheet({ projectId, unverified, onClose, toast }: { projectId: string; unverified: boolean; onClose: () => void; toast: (text: string) => void }) {
+function WakeupSheet({ projectId, collectionRevision, unverified, onClose, toast }: { projectId: string; collectionRevision?: number; unverified: boolean; onClose: () => void; toast: (text: string) => void }) {
   const offline = useOffline();
   const soon = new Date(Date.now() + 3600000);
   const [draft, setDraft] = useState<WakeupDraft>({ note: "", when: "in", minutes: "30", date: soon.toLocaleDateString("en-CA"), time: soon.toTimeString().slice(0, 5), cron: "" });
   const [busy, setBusy] = useState(false);
+  const [approvalClock] = useState(() => Date.now());
+  const pending = useRef<{ fingerprint: string; id: string } | null>(null);
   const set = (patch: Partial<WakeupDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const request = wakeupBody(draft);
   // The moment is previewed before the note is written, so a time that will not do shows at once.
@@ -98,10 +105,17 @@ function WakeupSheet({ projectId, unverified, onClose, toast }: { projectId: str
   const preview = timing?.cron ? describeCron(timing.cron) : timing?.at ? t("fmt.once", { when: absTime(timing.at) }) : timing?.in_minutes ? untilShort(Date.now() + timing.in_minutes * 60000) : "";
 
   async function save() {
-    if (!request || offline || unverified) return;
+    if (!request || offline || unverified || !Number.isInteger(collectionRevision)) return;
     setBusy(true);
     try {
-      await api.post(wakeupsKey(projectId), request);
+      const due = request.at ? Date.parse(request.at) : request.in_minutes ? approvalClock + request.in_minutes * 60000 : 0;
+      const expiresAt = new Date(Math.max(approvalClock + 30 * 86400000,
+        Number.isFinite(due) ? due + 2 * 86400000 : 0)).toISOString();
+      const fields = { ...request, expires_at: expiresAt, expected_collection_revision: collectionRevision! };
+      const fingerprint = JSON.stringify(fields);
+      if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, id: crypto.randomUUID() };
+      await api.post(wakeupsKey(projectId), { ...fields, client_operation_id: pending.current.id });
+      pending.current = null;
       toast(t("focus.wakeups.added"));
       invalidate(wakeupsKey(projectId));
       onClose();
@@ -149,7 +163,7 @@ function WakeupSheet({ projectId, unverified, onClose, toast }: { projectId: str
       <div className="sub form-hint">{t("focus.wakeups.hint")}</div>
       <div className="sheet-foot">
         <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" disabled={busy || !request || offline || unverified} onClick={() => void save()}>{t("focus.wakeups.set")}</button>
+        <button className="btn primary" disabled={busy || !request || offline || unverified || !Number.isInteger(collectionRevision)} onClick={() => void save()}>{t("focus.wakeups.set")}</button>
       </div>
     </Sheet>
   );

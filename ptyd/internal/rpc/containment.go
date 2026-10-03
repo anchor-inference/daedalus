@@ -18,6 +18,8 @@ func (d *Daemon) preflightContainment(_ context.Context, _ *server.Conn, params 
 	var request struct {
 		Limits           containment.Limits `json:"limits"`
 		ExpectedInstance string             `json:"expected_instance"`
+		WorkspacePath    string             `json:"workspace_path"`
+		MinFreeDiskBytes int64              `json:"min_free_disk_bytes"`
 	}
 	if err := decode(params, &request); err != nil {
 		return nil, err
@@ -34,7 +36,14 @@ func (d *Daemon) preflightContainment(_ context.Context, _ *server.Conn, params 
 	if err := d.Containment.Preflight(request.Limits); err != nil {
 		return nil, wire.Errorf(wire.CodeUnsupported, "the requested ceilings cannot be installed: %v", err)
 	}
-	return map[string]any{"available": true, "instance": d.Instance}, nil
+	if request.MinFreeDiskBytes < 0 || request.MinFreeDiskBytes > 1<<50 {
+		return nil, wire.Errorf(wire.CodeInvalidParams, "selected workspace free-space minimum is outside supported bounds")
+	}
+	result := map[string]any{"available": true, "instance": d.Instance}
+	if request.MinFreeDiskBytes > 0 {
+		result["disk"] = diskPreflight(request.WorkspacePath)
+	}
+	return result, nil
 }
 
 func (d *Daemon) containment(_ context.Context, _ *server.Conn, params json.RawMessage) (any, error) {

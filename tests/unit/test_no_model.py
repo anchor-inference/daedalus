@@ -187,11 +187,27 @@ async def voice_concierge(i: Install) -> str:
     return str(raised.value)
 
 
+async def _operator_schedule(i: Install, cron: str, command_id: str) -> dict[str, Any]:
+    from daedalus.extensions.recurring import Recurring
+    from daedalus.stores.control import Principal
+
+    recurring = Recurring(i.app)
+    i.app.extensions["recurring"] = recurring
+    revision = await i.db.fetchone("SELECT revision FROM domain_collection_revisions"
+                                   " WHERE scope_kind='global' AND scope_id='global'")
+    return await recurring.create(
+        Principal("operator:1", "operator"), name="daily", prompt="check the mail",
+        cron=cron, run_at=None, kind="agent", target_session=None, project_id=None,
+        expires_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        expected_collection_revision=revision["revision"], client_operation_id=command_id,
+    )
+
+
 async def scheduled_run(i: Install) -> str:
     from daedalus.extensions.scheduler import Scheduler
 
     scheduler = Scheduler(i.app)
-    await scheduler.create(name="daily", prompt="check the mail", cron="0 9 * * *", run_at=None)
+    await _operator_schedule(i, "0 9 * * *", "scheduled-run")
     row = dict((await i.db.fetchall("SELECT * FROM schedules"))[0])
     with pytest.raises(NoModelConfigured) as raised:
         await scheduler.fire(row)
@@ -205,20 +221,10 @@ async def scheduled_tick_on_a_modelless_install(i: Install) -> str:
     means. Counted as a start failure, a fresh install would lose every schedule it ships before
     anyone had configured a model, and adding one later would not bring them back.
     """
-    from daedalus.extensions.recurring import Recurring
     from daedalus.extensions.scheduler import Scheduler
-    from daedalus.stores.control import Principal
 
     scheduler = Scheduler(i.app)
-    created = await scheduler.create(name="daily", prompt="check the mail", cron="* * * * *", run_at=None)
-    i.app.extensions["recurring"] = Recurring(i.app)
-    revision = await i.db.fetchone("SELECT revision FROM domain_collection_revisions WHERE scope_kind='global' AND scope_id='global'")
-    await i.app.extensions["recurring"].approve(
-        Principal("operator:1", "operator"), created["id"],
-        expires_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
-        expected_collection_revision=revision["revision"], expected_schedule_revision=1,
-        client_operation_id="no-model-approval",
-    )
+    await _operator_schedule(i, "* * * * *", "scheduled-tick")
     await i.db.execute("UPDATE schedules SET next_run_at = ?", ((datetime.now(UTC) - timedelta(minutes=1)).isoformat(),))
     for _ in range(i.config.scheduler.max_failures + 1):
         await i.db.execute("UPDATE schedules SET next_run_at = ?", ((datetime.now(UTC) - timedelta(minutes=1)).isoformat(),))

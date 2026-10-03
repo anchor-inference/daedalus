@@ -75,6 +75,19 @@ class RemoveInput(BaseModel):
     client_operation_id: str = Field(min_length=1, max_length=160)
 
 
+class ProposalDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_digest: str = Field(min_length=1, max_length=128)
+    expected_proposal_revision: int = Field(ge=1, strict=True)
+    expected_collection_revision: int = Field(ge=1, strict=True)
+    client_operation_id: str = Field(min_length=1, max_length=160)
+
+
+class ProposalAcceptance(ProposalDecision):
+    expires_at: str
+
+
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     def service() -> Any:
         recurring = app.extensions.get("recurring")
@@ -90,6 +103,61 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         if isinstance(exc, ControlDenied):
             return HTTPException(403, str(exc))
         return HTTPException(400, str(exc))
+
+    def proposals() -> Any:
+        found = app.extensions.get("schedule_proposals")
+        if found is None:
+            raise HTTPException(503, "schedule proposals are unavailable")
+        return found
+
+    @api.get("/api/recurring/proposals")
+    async def list_proposals(who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        Principal.operator(who)
+        entries = await proposals().list()
+        revisions = await app.db.fetchall("SELECT scope_kind,scope_id,revision FROM domain_collection_revisions"
+                                          " WHERE scope_kind='global' OR scope_kind='project'")
+        return {"entries": entries, "collection_revisions": {
+            f"{row['scope_kind']}:{row['scope_id']}": row["revision"] for row in revisions}}
+
+    @api.post("/api/recurring/proposals/{proposal_id}/accept")
+    async def accept_proposal(proposal_id: str, body: ProposalAcceptance,
+                              who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await proposals().accept(
+                Principal.operator(who), proposal_id, request_digest=body.request_digest,
+                expected_proposal_revision=body.expected_proposal_revision,
+                expires_at=body.expires_at,
+                expected_collection_revision=body.expected_collection_revision,
+                client_operation_id=body.client_operation_id,
+            )
+        except (KeyError, ValueError, ControlDenied) as exc:
+            raise refused(exc) from exc
+
+    @api.post("/api/recurring/proposals/{proposal_id}/review-files")
+    async def review_proposal_files(proposal_id: str, body: ProposalDecision,
+                                    who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await proposals().review_legacy_files(
+                Principal.operator(who), proposal_id, request_digest=body.request_digest,
+                expected_proposal_revision=body.expected_proposal_revision,
+                expected_collection_revision=body.expected_collection_revision,
+                client_operation_id=body.client_operation_id,
+            )
+        except (KeyError, ValueError, ControlDenied) as exc:
+            raise refused(exc) from exc
+
+    @api.post("/api/recurring/proposals/{proposal_id}/withdraw")
+    async def withdraw_proposal(proposal_id: str, body: ProposalDecision,
+                                who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await proposals().withdraw(
+                Principal.operator(who), proposal_id, request_digest=body.request_digest,
+                expected_proposal_revision=body.expected_proposal_revision,
+                expected_collection_revision=body.expected_collection_revision,
+                client_operation_id=body.client_operation_id,
+            )
+        except (KeyError, ValueError, ControlDenied) as exc:
+            raise refused(exc) from exc
 
     @api.get("/api/recurring/overview")
     async def overview(who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

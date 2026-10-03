@@ -23,18 +23,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import shutil
-import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from croniter import croniter
 from protocore.contracts.types import MessageRole, TextBlock
 
 from daedalus.config import NO_MODEL_MESSAGE, NoModelConfigured
 from daedalus.extensions.notifications import Category, Draft, Level, Tone
 from daedalus.extensions.recurring import Recurring
+from daedalus.extensions.schedule_proposals import ScheduleProposals
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -120,99 +118,37 @@ class Scheduler:
     # -- CRUD -----------------------------------------------------------------------
 
     async def create(
-        self,
-        *,
-        name: str,
-        prompt: str,
-        cron: str | None,
-        run_at: str | None,
-        files: list[str] | None = None,
-        model: str | None = None,
-        created_by_session: str | None = None,
-        kind: str = "agent",
-        target_session: str | None = None,
-        run_in: str = "new",
+        self, *, name: str, prompt: str, cron: str | None, run_at: str | None,
+        files: list[str] | None = None, model: str | None = None,
+        created_by_session: str, source_run_id: str | None, source_command_id: str,
+        kind: str = "agent", target_session: str | None = None, run_in: str = "new",
     ) -> dict[str, Any]:
-        if kind not in KINDS:
-            raise ValueError(f"kind must be one of {', '.join(KINDS)}")
-        if run_in not in RUN_IN:
-            raise ValueError(f"run_in must be one of {', '.join(RUN_IN)}")
-        if run_in == "self" and kind != "agent":
-            raise ValueError("run_in='self' applies to agent tasks only")
-        if run_in == "self" and not (target_session or created_by_session):
-            raise ValueError("a task that runs in its own session needs that session")
-        schedule_id = uuid.uuid4().hex[:8]
-        if cron:
-            if not croniter.is_valid(cron):
-                raise ValueError(f"invalid cron expression: {cron!r}")
-            next_run = croniter(cron, _now()).get_next(datetime)
-            recurring = 1
-        else:
-            if not run_at:
-                raise ValueError("give either cron or run_at")
-            try:
-                next_run = datetime.fromisoformat(run_at.replace("Z", "+00:00"))
-            except ValueError as exc:
-                raise ValueError(f"invalid run_at: {run_at!r} (use ISO 8601)") from exc
-            if next_run.tzinfo is None:
-                next_run = next_run.replace(tzinfo=UTC)
-            recurring = 0
-        if kind == "lazy" and not (target_session or created_by_session):
-            raise ValueError("a lazy reminder needs the session it belongs to")
-        if kind == "wake":
-            # Only an orchestrator is woken this way: any other session's wake-up would publish an event
-            # nobody turns into a turn, and the alarm would be silently nothing.
-            if await self.orchestrated_project(target_session or created_by_session) is None:
-                raise ValueError("a wake-up belongs to a project's orchestrator; for anything else use kind 'agent' or 'message'")
-            if not cron and next_run <= _now():
-                raise ValueError(f"{run_at} has already passed; give a moment in the future")
-        workspace = self.root / f"sched-{schedule_id}"
-        copied: list[str] = []
-        if kind == "wake":
-            workspace = Path()
-        project = await self._project_of(target_session or created_by_session)
-        if kind == "agent" and run_in == "self":
-            manager = self.app.manager
-            owner = await manager.get_state(target_session or created_by_session or "") if manager is not None else None
-            if owner is None:
-                raise ValueError("the session this task should run in does not exist")
-            workspace = owner.workspace
-            copied = [str(Path(f)) for f in files or [] if Path(f).is_file()]
-        elif kind == "agent" and project is not None:
-            # The files are already in the folder the task will run in; copying them into a directory
-            # of the task's own would take the operator's files out of the project they chose.
-            workspace = project.primary.path
-            copied = [str(Path(f)) for f in files or [] if Path(f).is_file()]
-        elif kind == "agent":
-            (workspace / "inbox").mkdir(parents=True, exist_ok=True)
-            for source in files or []:
-                src = Path(source)
-                if src.is_file():
-                    dst = workspace / "inbox" / src.name
-                    shutil.copy2(src, dst)
-                    copied.append(str(dst))
-        await self.app.db.execute(
-            "INSERT INTO schedules(id, name, cron, run_at, prompt, files, model, recurring, enabled, workspace,"
-            " next_run_at, created_by_session, created_at, kind, target_session, run_in, project_id)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                schedule_id, name, cron, run_at, prompt, json.dumps(copied), model, recurring,
-                str(workspace), next_run.isoformat(), created_by_session, _now().isoformat(), kind,
-                target_session or created_by_session, run_in, project.id if project is not None else None,
-            ),
+        """Tool calls save inert proposals; the operator grants execution separately."""
+        return await self.app.extensions["schedule_proposals"].create(
+            source_session_id=created_by_session, source_run_id=source_run_id,
+            source_command_id=source_command_id, name=name, prompt=prompt, cron=cron,
+            run_at=run_at, files=files or [], model=model, kind=kind, run_in=run_in,
+            target_session=target_session,
         )
-        return {"id": schedule_id, "name": name, "kind": kind, "run_in": run_in, "next_run_at": next_run.isoformat(),
-                "workspace": str(workspace), "authority_state": "needs_approval"}
 
     async def list(self) -> list[dict[str, Any]]:
-        rows = await self.app.db.fetchall("SELECT * FROM schedules WHERE deleted_at IS NULL ORDER BY next_run_at")
+        rows = await self.app.db.fetchall(
+            "SELECT * FROM schedules WHERE deleted_at IS NULL AND id NOT IN"
+            " (SELECT legacy_schedule_id FROM schedule_proposals"
+            " WHERE legacy_schedule_id IS NOT NULL AND status != 'accepted') ORDER BY next_run_at"
+        )
         return [dict(r) for r in rows]
 
     async def service(self, op: str, **kwargs: Any) -> Any:
         if op == "create":
             return await self.create(**kwargs)
         if op == "list":
+            if kwargs.get("source_session_id"):
+                return [*await self.list(), *await self.app.extensions["schedule_proposals"].list(
+                    source_session_id=kwargs["source_session_id"])]
             return await self.list()
+        if op == "withdraw":
+            return await self.app.extensions["schedule_proposals"].withdraw_agent(**kwargs)
         raise ValueError(op)
 
     # -- loop -----------------------------------------------------------------------
@@ -332,6 +268,9 @@ class Scheduler:
             raise RuntimeError(f"schedule {schedule['id']} already has a run in flight")
         if not advance:
             raise ValueError("a manual run requires an explicit operator command")
+        proposals = self.app.extensions.get("schedule_proposals")
+        if proposals is not None:
+            await proposals.verify_accepted_files(schedule)
         if (schedule.get("kind") or "agent") == "agent":
             project = await self._project_of(schedule.get("target_session") or schedule.get("created_by_session"))
             if project is None and not Path(schedule["workspace"]).is_dir():
@@ -629,6 +568,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     scheduler = Scheduler(app)
     app.extensions["scheduler"] = scheduler
     app.extensions["recurring"] = Recurring(app)
+    app.extensions["schedule_proposals"] = ScheduleProposals(app)
     assert app.manager is not None
     app.manager.service_hooks["schedule"] = scheduler.service
     app.manager.on_finished(scheduler.on_run_finished)

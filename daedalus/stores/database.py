@@ -36,11 +36,13 @@ from daedalus.stores.planning_schema import MIGRATION as PLANNING_MIGRATION
 from daedalus.stores.provider_hold_schema import MIGRATION as PROVIDER_HOLD_MIGRATION
 from daedalus.stores.receipt_request_schema import MIGRATION as RECEIPT_REQUEST_MIGRATION
 from daedalus.stores.recurring_schema import MIGRATION as RECURRING_MIGRATION
+from daedalus.stores.resource_disk_schema import MIGRATION as RESOURCE_DISK_MIGRATION
 from daedalus.stores.resource_schema import MIGRATION as RESOURCE_MIGRATION
 from daedalus.stores.result_anchor_schema import MIGRATION as RESULT_ANCHOR_MIGRATION
 from daedalus.stores.runtime_entry_schema import MIGRATION as RUNTIME_ENTRY_MIGRATION
 from daedalus.stores.runtime_observation_schema import MIGRATION as RUNTIME_OBSERVATION_MIGRATION
 from daedalus.stores.runtime_schema import RUNTIME_SCHEMA
+from daedalus.stores.schedule_proposal_schema import MIGRATION as SCHEDULE_PROPOSAL_MIGRATION
 from daedalus.stores.staff_context_schema import MIGRATION as STAFF_CONTEXT_SCHEMA
 from daedalus.stores.staff_report_schema import MIGRATION as STAFF_REPORT_MIGRATION
 from daedalus.stores.watch_authority_schema import MIGRATION as WATCH_AUTHORITY_MIGRATION
@@ -1747,6 +1749,8 @@ MIGRATIONS.append(HISTORICAL_BUDGET_MIGRATION)
 MIGRATIONS.append(RECURRING_MIGRATION)
 MIGRATIONS.append(COORDINATOR_HANDOFF_MIGRATION)
 MIGRATIONS.append(RESOURCE_MIGRATION)
+MIGRATIONS.append(SCHEDULE_PROPOSAL_MIGRATION)
+MIGRATIONS.append(RESOURCE_DISK_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
