@@ -15,6 +15,7 @@ import aiosqlite
 
 from daedalus.config import native_mode
 from daedalus.stores.control_schema import MIGRATION as CONTROL_MIGRATION
+from daedalus.stores.orchestrator_contract_schema import MIGRATION as ORCHESTRATOR_CONTRACT_MIGRATION
 
 logger = logging.getLogger(__name__)
 
@@ -1683,6 +1684,7 @@ ALTER TABLE staff_sessions ADD COLUMN launch_cwd TEXT;
 """, True))
 
 MIGRATIONS.append(CONTROL_MIGRATION)
+MIGRATIONS.append(ORCHESTRATOR_CONTRACT_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

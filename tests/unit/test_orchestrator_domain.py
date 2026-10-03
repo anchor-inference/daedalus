@@ -1,0 +1,224 @@
+"""Contract history, immutable report bytes, and exact-result acceptance."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+
+from daedalus.extensions.orchestrator_domain import (
+    DomainConflict,
+    OrchestratorDomain,
+    OriginalReports,
+    accept_result,
+    add_artifact_manifest,
+    add_review_evidence,
+    apply_goal_revision,
+    claim_handoff,
+    configure_workflow,
+    dependency_readiness,
+    next_action_readiness,
+    record_verdict,
+    replace_contract,
+    resolve_dependency,
+    scope_impact_preview,
+    set_next_action,
+    submit_result,
+    workflow_readiness,
+)
+from daedalus.stores.database import Database
+
+
+@pytest.fixture
+async def domain_db(tmp_path: Path) -> Database:
+    db = Database(tmp_path / "state.sqlite")
+    await db.open()
+    await db.execute(
+        "INSERT INTO board_tasks(id, title, status, priority, acceptance, checklist, depends_on,"
+        " created_at, updated_at, brief_json) VALUES"
+        " ('task1', 'Draft', 'review', 3, '', '[{\"text\":\"Clear result\",\"done\":false}]',"
+        " '[]', '2026-01-01', '2026-01-01', '{}')"
+    )
+    await db.execute("INSERT INTO task_contract_versions(task_id, contract_revision, origin_kind, origin_ref,"
+                     " snapshot_json, created_at) VALUES ('task1', 1, 'legacy', '',"
+                     " '{\"requirements\":[],\"checklist\":[{\"id\":\"C1\",\"text\":\"Clear result\"}],"
+                     "\"acceptance\":\"\",\"depends_on\":[],\"brief\":{}}', '2026-01-01')")
+    yield db
+    await db.close()
+
+
+async def test_unverified_legacy_contract_projection(domain_db: Database) -> None:
+    row = await domain_db.fetchone("SELECT snapshot_json FROM task_contract_versions WHERE task_id = 'task1'")
+    assert row is not None
+    assert json.loads(row["snapshot_json"])["checklist"][0]["text"] == "Clear result"
+    assert await domain_db.fetchall("SELECT id FROM result_receipts") == []
+    assert (await domain_db.fetchone("PRAGMA integrity_check"))[0] == "ok"
+    assert await domain_db.fetchall("PRAGMA foreign_key_check") == []
+
+
+async def test_editorial_edit_keeps_version_and_semantic_edit_invalidates_old_result(domain_db: Database) -> None:
+    async with domain_db.transaction() as conn:
+        original = await replace_contract(conn, task_id="task1", requirements=[],
+                                          checks=[{"text": "Clear result"}], acceptance="", brief={},
+                                          origin_kind="operator", origin_ref="message1", change_kind="editorial")
+    assert original["contract_revision"] == 1
+    async with domain_db.transaction() as conn:
+        revised = await replace_contract(conn, task_id="task1", requirements=[{"text": "No invented facts", "kind": "quality"}],
+                                         checks=[{"text": "Clear result"}], acceptance="", brief={},
+                                         origin_kind="operator", origin_ref="message2", change_kind="semantic")
+    assert revised["contract_revision"] == 2
+    assert (await OrchestratorDomain(domain_db).contract("task1"))["requirements"][0]["kind"] == "quality"
+    with pytest.raises(DomainConflict, match="semantically"):
+        async with domain_db.transaction() as conn:
+            await replace_contract(conn, task_id="task1", requirements=[], checks=[], acceptance="", brief={},
+                                   origin_kind="operator", origin_ref="message3", change_kind="editorial")
+
+
+async def test_result_review_and_acceptance_pin_exact_contract_and_evidence(domain_db: Database) -> None:
+    original = b"Complete report"
+    digest = hashlib.sha256(original).hexdigest()
+    async with domain_db.transaction() as conn:
+        await add_artifact_manifest(conn, manifest_id="manifest1", project_id=None, task_id="task1",
+                                    artifact_kind="document", artifact_key="report", artifact_revision=1,
+                                    digest=digest, size_bytes=len(original))
+        report = await submit_result(conn, result_id="result1", task_id="task1", attempt_id=None,
+                                     contract_revision=1, outcome="complete", original_text=original.decode(),
+                                     original_blob_ref=None, original_digest=digest, original_size_bytes=len(original),
+                                     actor_id="worker", manifest_ids=["manifest1"], checks=[], limitations=[])
+    assert report["verification"] == "unverified"
+    assert await OrchestratorDomain(domain_db).original("task1", "result1") == original
+    async with domain_db.transaction() as conn:
+        evidence = await add_review_evidence(conn, evidence_id="evidence1", result_id="result1", criterion_id="C1",
+                                             command="check", exit_code=0, environment_digest="env1",
+                                             manifest_digest_before=digest, manifest_digest_after=digest)
+        assert evidence["verification"] == "verified"
+        with pytest.raises(DomainConflict, match="worker"):
+            await record_verdict(conn, verdict_id="self", result_id="result1", reviewer_actor_id="worker",
+                                 verification="verified", accepted=True, head=None, base=None,
+                                 environment_digest="env1", evidence_ids=["evidence1"], reason="")
+        await record_verdict(conn, verdict_id="verdict1", result_id="result1", reviewer_actor_id="reviewer",
+                             verification="verified", accepted=True, head=None, base=None,
+                             environment_digest="env1", evidence_ids=["evidence1"], reason="checked")
+        await accept_result(conn, task_id="task1", result_id="result1", verdict_id="verdict1",
+                            contract_revision=1, current_head=None, current_base=None)
+    results = await OrchestratorDomain(domain_db).results("task1")
+    assert results[0]["accepted"] is True
+    assert results[0]["acceptance_state"] == "operator_approved"
+    assert (await domain_db.fetchone("SELECT status FROM board_tasks WHERE id = 'task1'"))["status"] == "done"
+
+
+async def test_changed_manifest_during_check_cannot_support_acceptance(domain_db: Database) -> None:
+    original = b"report"
+    digest = hashlib.sha256(original).hexdigest()
+    async with domain_db.transaction() as conn:
+        await add_artifact_manifest(conn, manifest_id="manifest1", project_id=None, task_id="task1",
+                                    artifact_kind="document", artifact_key="report", artifact_revision=1,
+                                    digest=digest, size_bytes=len(original))
+        await submit_result(conn, result_id="result1", task_id="task1", attempt_id=None,
+                            contract_revision=1, outcome="complete", original_text=original.decode(),
+                            original_blob_ref=None, original_digest=digest, original_size_bytes=len(original),
+                            actor_id="worker", manifest_ids=["manifest1"], checks=[], limitations=[])
+        observation = await add_review_evidence(conn, evidence_id="changed", result_id="result1", criterion_id="C1",
+                                                command="check", exit_code=0, environment_digest="env",
+                                                manifest_digest_before=digest, manifest_digest_after="new-digest")
+        assert observation["verification"] == "stale"
+        with pytest.raises(DomainConflict, match="stale or failed"):
+            await record_verdict(conn, verdict_id="verdict1", result_id="result1", reviewer_actor_id="reviewer",
+                                 verification="verified", accepted=True, head=None, base=None,
+                                 environment_digest="env", evidence_ids=["changed"], reason="")
+
+
+async def test_legacy_dependency_requires_resolution_and_claim_is_single(domain_db: Database) -> None:
+    await domain_db.execute("INSERT INTO board_tasks(id, title, status, priority, acceptance, checklist, depends_on,"
+                            " created_at, updated_at, brief_json, contract_revision) VALUES"
+                            " ('task2', 'Next', 'todo', 3, '', '[]', '[]', '2026-01-01', '2026-01-01', '{}', 1)")
+    await domain_db.execute("INSERT INTO task_contract_versions(task_id, contract_revision, origin_kind, origin_ref,"
+                            " snapshot_json, created_at) VALUES ('task2', 1, 'legacy', '',"
+                            " '{\"requirements\":[],\"checklist\":[],\"acceptance\":\"\",\"brief\":{}}', '2026-01-01')")
+    await domain_db.execute("INSERT INTO task_dependency_edges(id, successor_task_id, predecessor_task_id, kind,"
+                            " resolution_state, created_at) VALUES ('edge1', 'task2', 'task1', 'required',"
+                            " 'unresolved_legacy', '2026-01-01')")
+    await domain_db.execute("INSERT INTO operation_receipts(id,scope_kind,scope_id,actor_id,operation_kind,"
+                            " client_operation_id,payload_hash,entity_revision,state,response_json,created_at)"
+                            " VALUES ('waiver1','global','global','operator:1','dependency.waive','waiver',"
+                            " 'digest',1,'committed','{}','2026-01-01')")
+    async with domain_db.transaction() as conn:
+        assert (await dependency_readiness(conn, "task2"))["edges"][0]["state"] == "unknown_legacy"
+        with pytest.raises(DomainConflict, match="readiness"):
+            await claim_handoff(conn, claim_id="claim1", task_id="task2", operation_id="waiver1", reservation_id=None)
+        with pytest.raises(DomainConflict, match="waiver"):
+            await resolve_dependency(conn, edge_id="edge1", resolution="waived")
+        await resolve_dependency(conn, edge_id="edge1", resolution="waived", waiver_receipt_id="waiver1")
+        first = await claim_handoff(conn, claim_id="claim1", task_id="task2", operation_id="waiver1", reservation_id="r1")
+        second = await claim_handoff(conn, claim_id="claim2", task_id="task2", operation_id="waiver1", reservation_id="r2")
+        assert first["claim_id"] == second["claim_id"] == "claim1"
+        assert second["replayed"] is True
+
+
+async def test_workflow_rejects_cycle_and_uses_typed_gates(domain_db: Database) -> None:
+    await domain_db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = 'task1'")
+    async with domain_db.transaction() as conn:
+        steps = [{"id": "work", "kind": "work"}, {"id": "review", "kind": "review", "gate": {"human_ack_id": "ack"}}]
+        with pytest.raises(ValueError, match="cycle"):
+            await configure_workflow(conn, task_id="task1", steps=steps, edges=[("work", "review"), ("review", "work")])
+        with pytest.raises(ValueError, match="unsupported"):
+            await configure_workflow(conn, task_id="task1", steps=[{"id": "x", "kind": "work", "gate": {"javascript": "run()"}}], edges=[])
+        await configure_workflow(conn, task_id="task1", steps=steps, edges=[("work", "review")])
+        state = await workflow_readiness(conn, "task1")
+        assert state[0]["ready"] is False if state[0]["step_id"] == "review" else True
+        assert next(item for item in state if item["step_id"] == "review")["blockers"] == [
+            "predecessor_step_incomplete", "human_ack_missing"]
+
+
+async def test_next_action_requires_current_prerequisites_and_is_replaced_atomically(domain_db: Database) -> None:
+    async with domain_db.transaction() as conn:
+        await set_next_action(conn, action_id="action1", task_id="task1", kind="review",
+                              owner_kind="operator", owner_id=None,
+                              prerequisites=[{"kind": "artifact", "ref": "missing"}])
+        first = await next_action_readiness(conn, "task1")
+        assert first is not None and first["blockers"] == ["artifact_missing"]
+        await set_next_action(conn, action_id="action2", task_id="task1", kind="wait",
+                              owner_kind="system", owner_id=None, prerequisites=[])
+        second = await next_action_readiness(conn, "task1")
+        assert second is not None and second["action_id"] == "action2" and second["enabled"] is True
+        old = await conn.execute("SELECT state FROM next_actions WHERE id = 'action1'")
+        assert (await old.fetchone())[0] == "cancelled"
+        await old.close()
+
+
+async def test_goal_change_fences_only_named_dependency_closure(domain_db: Database) -> None:
+    await domain_db.execute("INSERT INTO projects(id,name,created_at,settings)"
+                            " VALUES ('project1','Example','2026-01-01','{}')")
+    await domain_db.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at)"
+                            " VALUES ('project1',1,'Old goal','legacy','2026-01-01')")
+    for task_id in ("root", "child", "unrelated"):
+        await domain_db.execute("INSERT INTO board_tasks(id,title,status,priority,acceptance,checklist,depends_on,"
+                                " created_at,updated_at,brief_json,project_id) VALUES"
+                                " (?,?, 'todo',3,'','[]','[]','2026-01-01','2026-01-01','{}','project1')",
+                                (task_id, task_id))
+    await domain_db.execute("INSERT INTO task_dependency_edges(id,successor_task_id,predecessor_task_id,kind,"
+                            " resolution_state,created_at) VALUES"
+                            " ('edge-child','child','root','required','awaiting_result','2026-01-01')")
+    async with domain_db.transaction() as conn:
+        preview = await scope_impact_preview(conn, "project1", ["root"])
+        assert preview["affected_task_ids"] == ["child", "root"]
+        applied = await apply_goal_revision(conn, project_id="project1", expected_goal_revision=1,
+                                            body="New goal", root_task_ids=["root"], origin_kind="operator", origin_ref="")
+        assert applied["goal_revision"] == 2
+    assert (await domain_db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'unrelated'"))[0] == 1
+    assert (await domain_db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'child'"))[0] == 2
+    assert len(await domain_db.fetchall("SELECT id FROM scope_impacts WHERE project_id = 'project1'")) == 2
+
+
+def test_original_report_storage_keeps_full_bytes_and_rejects_oversize(tmp_path: Path) -> None:
+    store = OriginalReports(tmp_path / "originals")
+    inline = store.stage(b"short")
+    assert inline[:2] == ("short", None)
+    large = b"x" * 65537
+    text, blob, digest, size = store.stage(large)
+    assert text is None and blob == digest and size == len(large)
+    assert store.read(blob, digest) == large
+    with pytest.raises(ValueError, match="4 MiB"):
+        store.stage(b"x" * (4 * 1024 * 1024 + 1))
