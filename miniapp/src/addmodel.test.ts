@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Preset } from "./api";
-import { BLANK, ON_DEMAND_CHOICES, onDemandGroups, orchestratorPreset, prefilled, presetIdFor, priceFor, retyped } from "./models";
+import { BLANK, ON_DEMAND_CHOICES, onDemandGroups, orchestratorPreset, prefilled, presetIdFor, priceFor, pricingFromDraft, retyped } from "./models";
 
 const OPUS: Preset = {
   provider: "openrouter",
@@ -48,6 +48,22 @@ describe("the price a model is recorded at", () => {
   it("is nothing when the endpoint published no price", () => {
     expect(priceFor("anthropic/claude-opus-5", { preset: OPUS, pricing: { input: 5 } })).toBe(null);
     expect(priceFor("anthropic/claude-opus-5", { preset: OPUS, pricing: null })).toBe(null);
+  });
+});
+
+describe("an operator-declared provider ceiling", () => {
+  const draft = { model: OPUS.model, input: "5", output: "25", cache_hit: "0.5", input_limit: "1048576", limit_source: "Provider contract" };
+
+  it("saves rates and a sourced bound only for the exact model", () => {
+    expect(pricingFromDraft(OPUS.model, draft)).toEqual({ entry: { input: 5, output: 25, cache_hit: 0.5, input_limit: 1048576, limit_source: "Provider contract" }, error: null });
+    expect(pricingFromDraft("another-model", draft)).toEqual({ entry: null, error: null });
+  });
+
+  it("rejects an incomplete bound and unknown rates without inventing a price", () => {
+    expect(pricingFromDraft(OPUS.model, { ...draft, limit_source: "" }).error).toBe("source");
+    expect(pricingFromDraft(OPUS.model, { ...draft, input_limit: "400000.5" }).error).toBe("ceiling");
+    expect(pricingFromDraft(OPUS.model, { ...draft, output: "" }).error).toBe("rates");
+    expect(pricingFromDraft(OPUS.model, { ...draft, input: "", output: "", cache_hit: "", input_limit: "", limit_source: "" }).entry).toBe(null);
   });
 });
 

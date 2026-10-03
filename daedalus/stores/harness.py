@@ -164,6 +164,10 @@ class HarnessStore:
     def __init__(self, db: Database) -> None:
         self._db = db
 
+    @property
+    def db(self) -> Database:
+        return self._db
+
     # -- catalog ---------------------------------------------------------------------------
 
     async def record_check(self, env: str, harness: str, *, install: InstallInfo, login: LoginState, catalog: Catalog | None = None, error: str = "") -> CatalogRow:

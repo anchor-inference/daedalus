@@ -32,6 +32,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from daedalus.config import HarnessConfig
+from daedalus.extensions.watch_egress import watch_message_guard
 from daedalus.harness import team as protocol
 from daedalus.harness.contract import (
     DIAL_DIR,
@@ -603,7 +604,10 @@ class CliStaffRuntime:
         for terminal_id in session.companions:
             self._by_terminal[terminal_id] = session
         name = f"harness-{self.kind}-{session.staff_session_id}"
-        session.worker = DeliveryWorker(self.adapter, session, self.lookup, self.ingress, self.store, self.config, self._in_transcript)
+        session.worker = DeliveryWorker(self.adapter, session, self.lookup, self.ingress, self.store,
+                                        self.config, self._in_transcript,
+                                        lambda message_id: watch_message_guard(
+                                            self.store.db, message_id, session.staff_session_id))
         session.tasks = [
             asyncio.create_task(self._pump_hooks(session), name=f"{name}-hooks"),
             asyncio.create_task(self._consume(session), name=f"{name}-events"),
@@ -1491,6 +1495,23 @@ class CliStaffRuntime:
             terminals = [t for t in (launch.terminal_id, launch.companion_terminal_id) if t]
             if live is None:
                 await self._end_launch(launch, terminals, actor=f"agent:{actor}")
+                # The host's daemon observer can close ownership before this runtime reconnects.
+                # Read that exact historical session only to finish its exit reason, never attach it.
+                proof = await self.store.db.fetchone(
+                    "SELECT 1 FROM runtime_exit_observations WHERE staff_session_id = ?"
+                    " AND runtime_kind = 'cli' AND provider_session_ref = ? LIMIT 1",
+                    (launch.staff_session_id, f"terminal:{launch.terminal_id}"),
+                )
+                if proof is not None:
+                    from daedalus.stores.staff import StaffStore  # Lazy: recovery needs only historical projection.
+
+                    staff = StaffStore(self.store.db)
+                    prior = await staff.session(launch.staff_session_id)
+                    member = await staff.get(prior.staff_id) if prior is not None else None
+                    if (prior is not None and member is not None and prior.ended_at
+                            and not prior.end_reason and prior.terminal_id == launch.terminal_id):
+                        await self.ingress.ended(LiveSession(member, prior),
+                                                f"{self.adapter.capabilities.label} ended while the host was away")
                 continue
             running = False
             if launch.terminal_id:

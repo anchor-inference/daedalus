@@ -6,6 +6,7 @@ message, and searching one conversation."""
 from __future__ import annotations
 
 import asyncio
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from tests.unit.test_board_rounds import task_of
 from tests.unit.test_orchestrator import Rig, rig
 from tests.unit.test_orchestrator_team import fake, office
 from tests.unit.test_session_runner import ScriptedProvider
+from tests.unit.test_staff_runtime import close_team
 from tests.unit.test_steer_queue import H, _await_run, _client, _manager
 from tests.unit.test_task_contract import SCRIPT
 
@@ -67,9 +69,9 @@ async def test_a_members_steps_reach_the_operator_word_for_word_and_the_orchestr
         await r.orch.stop_queue(r.project.id)
         task_id, live = await working_on(r, sid)
         with pytest.raises(ValueError, match="verified is"):
-            await r.team.ingress.report(live, "done", "the page works", operator_steps={"goal": "g", "steps": ["a"]})
-        told = await r.team.ingress.report(live, "done", "the admin page works through the tunnel", operator_steps=STEPS)
-        assert "your steps for the operator go to them word for word" in told and "marked as not checked on the running version" in told
+            await r.team.ingress.report(live, "done", "the page works", operator_steps={"goal": "g", "steps": ["a"]}, call_id=f"fixture-report:{uuid.uuid4().hex}")
+        told = await r.team.ingress.report(live, "done", "the admin page works through the tunnel", operator_steps=STEPS, call_id=f"fixture-report:{uuid.uuid4().hex}")
+        assert "reported done; report " in told and "operator-steps-" in told
         [note] = [m for m in await r.manager.sessions.list_transcript(sid) if m.metadata.get("daedalus.operator_steps")]
         text = "".join(b.text for b in note.content_blocks if isinstance(b, TextBlock))
         assert text.startswith("# Manage the team's mailboxes yourself") and "2. Sign in as admin@" in text and "Not checked on the running version" in text
@@ -83,6 +85,7 @@ async def test_a_members_steps_reach_the_operator_word_for_word_and_the_orchestr
         line = await r.orch.line(await r.refreshed(), event)
         assert "were put in front of the operator word for word" in line and "NOT checked on the running version (step 3 only on an older copy)" in line and "do not retell them" in line
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -124,7 +127,7 @@ async def test_the_orchestrator_is_told_a_message_came_during_a_turn_and_what_th
 
         await r.manager.sessions.append_transcript(sid, [Message(role=MessageRole.user, content_blocks=[TextBlock(text="[events · Bakery · 1 since 09:00]\n- 09:00 sol reported stuck on the updater")], metadata={"daedalus.origin": "events"})])
         _, live = await working_on(r, sid, "Webops")
-        await r.team.ingress.report(live, "done", "mail split; your steps are in the report")
+        await r.team.ingress.report(live, "done", "mail split; your steps are in the report", call_id=f"fixture-report:{uuid.uuid4().hex}")
         said = await r.orch.steer_note(sid, "why don't you pass on the instruction?")
         assert "— the latest reports: Webops — done on \"Mail admin page\"" in said
         assert said.startswith("(The operator wrote this while you were in the middle of a turn that began with: «[events · Bakery · 1 since 09:00] / - 09:00 sol reported stuck on the updater»")
@@ -132,6 +135,7 @@ async def test_the_orchestrator_is_told_a_message_came_during_a_turn_and_what_th
         ordinary = await r.manager.create_session("not an orchestrator")
         assert await r.orch.steer_note(ordinary.session.id, "hello") == "hello"
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -185,7 +189,7 @@ async def test_a_message_that_asks_several_things_is_kept_as_several_commitments
         assert [c["text"] for c in focus["commitments"]] == ["Clean up the drafts", "Answer what we publish next, from the plan"]
         assert [c["kind"] for c in focus["receipts"][str(seq)]] == ["commitment", "commitment"]
 
-        await r.team.ingress.report(live, "done", "drafts cleaned", evidence=[{"item": "C1", "how": "listed", "result": "ok"}])
+        await r.team.ingress.report(live, "done", "drafts cleaned", evidence=[{"item": "C1", "how": "listed", "result": "ok"}], call_id=f"fixture-report:{uuid.uuid4().hex}")
         await r.call(sid, "accept", task_id=task_id, checks=[{"item": "C1", "ok": True}, {"item": "C2", "ok": True}])
         [left] = (await r.orch.focus_state(await r.refreshed()))["commitments"]
         assert left["text"].startswith("Answer what we publish next")
@@ -194,6 +198,7 @@ async def test_a_message_that_asks_several_things_is_kept_as_several_commitments
         with pytest.raises(Refused, match="closed already"):
             await r.call(sid, "journal", op="keep", commitment=left["id"])
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -215,12 +220,13 @@ async def test_a_requirement_from_the_operators_message_carries_the_message_and_
         [receipt] = (await r.orch.focus_state(await r.refreshed()))["receipts"][str(seq)]
         assert (receipt["kind"], receipt["label"], receipt["task_id"]) == ("requirement", "R1", task_id)
         assert receipt["deliveries"] == [{"staff_name": "Leo", "acknowledged": False, "opened": False, "via": "message", "cli": False}]
-        await r.team.ingress.report(live, "checkpoint", "noted", acknowledged=["R1"])
+        await r.team.ingress.report(live, "checkpoint", "noted", acknowledged=["R1"], call_id=f"fixture-report:{uuid.uuid4().hex}")
         [receipt] = (await r.orch.focus_state(await r.refreshed()))["receipts"][str(seq)]
         assert receipt["deliveries"][0]["acknowledged"] is True
         focus = await r.orch.focus_state(await r.refreshed())
         assert focus["counts"]["in_work"] == 1 and focus["goals"][0]["owner"]["name"] == "Leo"
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -231,7 +237,7 @@ async def test_the_focus_state_lists_the_results_waiting_for_a_decision(settings
         sid = await office(r)
         await r.orch.stop_queue(r.project.id)
         task_id, live = await working_on(r, sid, "Sol")
-        await r.team.ingress.report(live, "stuck", "the supervisor races the swap")
+        await r.team.ingress.report(live, "stuck", "the supervisor races the swap", call_id=f"fixture-report:{uuid.uuid4().hex}")
         await r.call(sid, "tasks", op="move", task_id=task_id, status="blocked", note="x")
         focus = await r.orch.focus_state(await r.refreshed())
         [result] = focus["open_results"]
@@ -241,6 +247,7 @@ async def test_the_focus_state_lists_the_results_waiting_for_a_decision(settings
         focus = await r.orch.focus_state(await r.refreshed())
         assert focus["open_results"] == [] and focus["goals"][0]["next"] == "the operator's choice of supervisor"
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -321,4 +328,5 @@ async def test_what_the_operator_allowed_for_a_card_is_the_basis_of_a_grant_with
         assert await r.call(sid, "answer", request_id=ask.short_id, allow=True, basis="R2") == f"request {ask.short_id} granted"
         assert runtime.answered[-1][2].allow is True
     finally:
+        await close_team(r.manager)
         await r.manager.close()

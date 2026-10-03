@@ -774,7 +774,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, SETTINGS)
     if rel == "/api/limits/spend":
         # Settings → Limits reads it for the spend beside each cap; without it the whole section fails to draw.
-        return respond(route, {"since": "", "total": {"spent_usd": 3.42, "unmetered": 0, "cap_usd": 0}, "per_provider": {}})
+        return respond(route, {"since": "", "total": {"spent_usd": 3.42, "unmetered": 2, "cap_usd": 0, "reserved_usd": 1.12, "uncertain_usd": 0.35, "reserved_count": 3, "uncertain_count": 1}, "per_provider": {}})
     if rel == "/api/onboarding":
         return respond(route, FRESH if getattr(stub, "fresh", False) else ONBOARDING)
     if rel == "/api/modes":

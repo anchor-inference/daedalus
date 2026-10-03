@@ -157,6 +157,40 @@ async def test_suppressed_notification_is_not_a_delivered_watch(
         await r.manager.close()
 
 
+async def test_held_notification_is_recorded_but_not_reported_as_delivered(
+    settings: Settings, db: Database, tmp_path: Path,
+) -> None:
+    r = await rig(settings, db, tmp_path)
+    keeper = await with_watches(r)
+    try:
+        project = await r.orch.enable(r.project.id)
+        item = await keeper.create(project, when={"event": "staff_finished"},
+                                   then={"action": "notify", "title": "Check"})
+
+        class HeldNotification:
+            async def post(self, draft: object) -> dict[str, object]:
+                at = keeper.clock().isoformat()
+                await db.execute(
+                    "INSERT INTO notifications(at,updated_at,kind,category,title,body,project_id,source,"
+                    " dedupe_key,held_until,delivered_json)"
+                    " VALUES (?,?,'watch','orchestrator_report','Check','held',?,?,?,?,'{\"held\":\"waiting\"}')",
+                    (at, at, project.id, f"watch:{item.id}", draft.dedupe_key,
+                     (keeper.clock() + timedelta(minutes=5)).isoformat()),
+                )
+                row = await db.fetchone("SELECT id FROM notifications WHERE dedupe_key = ?", (draft.dedupe_key,))
+                return {"id": row["id"], "delivered": {"held": "waiting"}}
+
+        r.team.app.notifications = HeldNotification()
+        assert await keeper.fire(item, "finished", source_cursor="bus:held-notify")
+        delivery = await db.fetchone("SELECT status,receipt_id FROM watch_deliveries WHERE watch_id = ?", (item.id,))
+        assert delivery["status"] == "reconciling" and delivery["receipt_id"] is None
+        assert await keeper.deliveries.sweep() == 0
+        assert await events(r.manager, "watch.fired") == []
+    finally:
+        await keeper.close()
+        await r.manager.close()
+
+
 async def test_queued_staff_message_cannot_be_mistaken_for_delivery(
     settings: Settings, db: Database, tmp_path: Path,
 ) -> None:

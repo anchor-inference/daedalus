@@ -36,6 +36,37 @@ export const BLANK: Preset = { provider: "", model: "", label: "", thinking: tru
 /** What the endpoint said about the model that was picked, and what the form was filled in with from it. */
 export type Picked = { preset: Preset; pricing: ModelEntry["pricing"] | null };
 
+export type PricingDraft = {
+  model: string;
+  input: string;
+  output: string;
+  cache_hit: string;
+  input_limit: string;
+  limit_source: string;
+};
+
+export type PricingEntry = { input: number; output: number; cache_hit?: number; input_limit?: number; limit_source?: string };
+
+/** An edited rate or ceiling is useful only for the exact model it describes. */
+export function pricingFromDraft(model: string, draft: PricingDraft | null): { entry: PricingEntry | null; error: "rates" | "ceiling" | "source" | null } {
+  if (!draft || draft.model !== model) return { entry: null, error: null };
+  const fields = [draft.input, draft.output, draft.cache_hit, draft.input_limit, draft.limit_source];
+  if (fields.every((value) => !value.trim())) return { entry: null, error: null };
+  const rate = (value: string) => value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) >= 0;
+  if (!rate(draft.input) || !rate(draft.output) || (draft.cache_hit.trim() && !rate(draft.cache_hit)))
+    return { entry: null, error: "rates" };
+  const entry: PricingEntry = { input: Number(draft.input), output: Number(draft.output) };
+  if (draft.cache_hit.trim()) entry.cache_hit = Number(draft.cache_hit);
+  if (draft.input_limit.trim() || draft.limit_source.trim()) {
+    const limit = Number(draft.input_limit);
+    if (!draft.input_limit.trim() || !Number.isSafeInteger(limit) || limit <= 0) return { entry: null, error: "ceiling" };
+    if (!draft.limit_source.trim()) return { entry: null, error: "source" };
+    entry.input_limit = limit;
+    entry.limit_source = draft.limit_source.trim();
+  }
+  return { entry, error: null };
+}
+
 /** Fill the editable form from one model entry returned by the provider lookup API. */
 export function prefilled(entry: ModelEntry, current: Preset): Preset {
   return {

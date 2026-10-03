@@ -6,6 +6,7 @@ approve — each told apart, and a card accepted only with a mark for everything
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ from daedalus.stores.staff import Staff
 from tests.unit.test_board_rounds import task_of
 from tests.unit.test_orchestrator import Rig, rig
 from tests.unit.test_orchestrator_team import fake, office
-from tests.unit.test_staff_runtime import Capacity, task_row
+from tests.unit.test_staff_runtime import Capacity, close_team, task_row
 
 SCRIPT = {
     "objective": "Write a 45 to 60 second promo script at the level of the two reference videos",
@@ -73,17 +74,18 @@ async def test_inputs_and_the_operators_conditions_are_in_the_brief_and_an_unope
 
         session = await live(r, mira)
         with pytest.raises(ValueError, match="inputs you have not opened: R2 .*R3"):
-            await r.team.ingress.report(session, "done", "script.md written from the brief")
+            await r.team.ingress.report(session, "done", "script.md written from the brief", call_id=f"fixture-report:{uuid.uuid4().hex}")
         assert (await task_row(r.manager, task_id))["status"] == "doing", "a refused hand-in moves nothing"
 
         # A tool of the member pointed at the copy is what counts as opening it.
         rows = await r.manager.db.fetchall("SELECT path FROM requirement_deliveries WHERE staff_session_id = ? AND path != ''", (session.id,))
         for row in rows:
             await r.team.contracts.opened(session.id, '{"path": "' + row["path"].split("/", 3)[-1] + '"}')
-        told = await r.team.ingress.report(session, "done", "script.md: 52 seconds, six scenes", evidence=[{"item": "C1", "how": "read aloud with a timer", "result": "52 s"}])
+        told = await r.team.ingress.report(session, "done", "script.md: 52 seconds, six scenes", evidence=[{"item": "C1", "how": "read aloud with a timer", "result": "52 s"}], call_id=f"fixture-report:{uuid.uuid4().hex}")
         assert f"task {task_id} is handed in" in told and "you gave no evidence for C2, R1" in told
         assert (await task_row(r.manager, task_id))["acceptance_state"] == "handed_in"
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -104,10 +106,11 @@ async def test_a_command_line_member_confirms_its_inputs_in_words(settings: Sett
         brief = r.team.runtimes["claude"].started[-1].first_message  # type: ignore[attr-defined]
         assert 'confirm with Report(acknowledged=["R1"]) once you have read it' in brief
         with pytest.raises(ValueError, match="inputs you have not confirmed: R1"):
-            await r.team.ingress.report(session, "done", "done")
-        told = await r.team.ingress.report(session, "done", "script.md written after watching ref.mp4", acknowledged=["R1"])
+            await r.team.ingress.report(session, "done", "done", call_id=f"fixture-report:{uuid.uuid4().hex}")
+        told = await r.team.ingress.report(session, "done", "script.md written after watching ref.mp4", acknowledged=["R1"], call_id=f"fixture-report:{uuid.uuid4().hex}")
         assert "confirmed R1" in told and f"task {task_id} is handed in" in told
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -125,12 +128,13 @@ async def test_a_requirement_added_while_the_member_works_reaches_it_with_a_rece
         state = await r.orch.project_state(await r.refreshed(), session_id=sid)
         assert f"R1 of {task_id} sent to Mira" in state and "not confirmed: English only for now" in state
 
-        told = await r.team.ingress.report(await live(r, mira), "checkpoint", "noted: English cut only", acknowledged=["R1", "R9"])
+        told = await r.team.ingress.report(await live(r, mira), "checkpoint", "noted: English cut only", acknowledged=["R1", "R9"], call_id=f"fixture-report:{uuid.uuid4().hex}")
         assert "confirmed R1" in told and f"task {task_id} has no requirement R9 in force" in told
         state = await r.orch.project_state(await r.refreshed(), session_id=sid)
         assert "not confirmed" not in state
         assert "R1 [scope, from the operator] English only for now (Mira: confirmed)" in await r.call(sid, "tasks", op="get", task_id=task_id)
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -156,6 +160,7 @@ async def test_the_operators_requirement_is_changed_only_on_their_answer(setting
         states = {row["number"]: row["state"] for row in await r.manager.db.fetchall("SELECT number, state FROM task_requirements WHERE task_id = ?", (task_id,))}
         assert states == {1: "superseded", 2: "active"}
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -171,6 +176,7 @@ async def test_a_card_holds_a_bounded_number_of_requirements(settings: Settings,
         again = await r.call(sid, "require", task_id=task_id, text="point number 3")
         assert again.startswith("R4 is on"), "the same words again are the requirement already there"
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -187,7 +193,7 @@ def test_a_done_when_becomes_one_check_per_line_or_item() -> None:
 async def handed_in(r: Rig, sid: str, **extra: Any) -> tuple[str, Staff]:
     mira = await member(r)
     task_id = task_of(await r.call(sid, "assign", staff="Mira", title="Promo cut", **{**SCRIPT, **extra}))
-    await r.team.ingress.report(await live(r, mira), "done", "promo.mp4: 58 s, no sound", evidence=[{"item": "C1", "how": "ffprobe", "result": "58 s"}])
+    await r.team.ingress.report(await live(r, mira), "done", "promo.mp4: 58 s, no sound", evidence=[{"item": "C1", "how": "ffprobe", "result": "58 s"}], call_id=f"fixture-report:{uuid.uuid4().hex}")
     await r.team.ingress.status(await live(r, mira), "idle")
     return task_id, mira
 
@@ -213,6 +219,7 @@ async def test_a_card_is_accepted_only_with_a_mark_for_every_check_and_requireme
         card = await r.board.get(task_id)
         assert [c["done"] for c in card["checklist"]] == [True, True] and card["checklist"][0]["evidence"]["result"] == "58 s"
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -232,6 +239,7 @@ async def test_a_returned_result_goes_back_to_its_member_with_what_failed(settin
         card = await r.board.get(task_id)
         assert not any(c.get("evidence") or c.get("mark") for c in card["checklist"]), "a new round starts unmarked"
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -250,6 +258,7 @@ async def test_what_the_operator_uses_themselves_is_theirs_to_approve(settings: 
         await r.board.accept(task_id)
         assert (await task_row(r.manager, task_id))["acceptance_state"] == "operator_approved"
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -266,6 +275,7 @@ async def test_a_report_of_done_to_the_operator_says_when_nobody_checked_the_wor
         said = await r.call(sid, "project_report", text="The promo is ready to watch.", kind="done", task_id=task_id)
         assert "not checked" not in said
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -281,6 +291,7 @@ async def test_a_note_on_a_handed_in_card_is_not_refused_for_its_unmarked_checks
         with pytest.raises(ValueError, match="the checklist is not complete"):
             await r.board.update(task_id, check=[0])
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -325,7 +336,7 @@ async def test_a_card_made_without_checks_takes_the_ones_its_acceptance_marks(se
         mira = await member(r)
         task_id = task_of(await r.call(sid, "assign", staff="Mira", title="Clean the render folder", **SCRIPT))
         await r.manager.db.execute("UPDATE board_tasks SET checklist = '[]' WHERE id = ?", (task_id,))
-        await r.team.ingress.report(await live(r, mira), "done", "40,551 listed files deleted, finals intact")
+        await r.team.ingress.report(await live(r, mira), "done", "40,551 listed files deleted, finals intact", call_id=f"fixture-report:{uuid.uuid4().hex}")
         said = await r.call(sid, "accept", task_id=task_id, checks=[{"item": "The listed files are gone", "ok": True}, {"item": "The finals are intact", "ok": True, "note": "checksums"}])
         assert said.startswith(f'{task_id} "Clean the render folder" is accepted: C1 met; C2 met (checksums)')
         assert [c["text"] for c in (await r.board.get(task_id))["checklist"]] == ["The listed files are gone", "The finals are intact"]
@@ -334,6 +345,7 @@ async def test_a_card_made_without_checks_takes_the_ones_its_acceptance_marks(se
         created = await r.board.get(made.split()[0])
         assert [c["text"] for c in created["checklist"]] == ["script.md runs 45 to 60 seconds read aloud", "every scene names the screen it shows"]
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -347,4 +359,5 @@ async def test_a_folder_is_found_by_the_name_it_is_listed_by(settings: Settings,
         said = await r.call(sid, "hire", name="Rex", role="Review", folder=name)
         assert said.startswith("hired Rex")
     finally:
+        await close_team(r.manager)
         await r.manager.close()

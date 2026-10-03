@@ -1208,9 +1208,13 @@ export type ProjectWatch = {
   stopped: string;
   last_error: string;
   describe: string;
+  condition_revision?: number;
+  authority_state?: "current" | "needs_approval" | "capability_unavailable";
+  deadline_at?: string | null;
+  latest_delivery?: { id: string; status: "pending" | "reconciling" | "delivered" | "failed" | "cancelled"; receipt_id: string | null; last_error: string | null; created_at: string } | null;
 };
 
-export type WatchList = { watches: ProjectWatch[]; max: number; min_cooldown_minutes: number; providers: string[] };
+export type WatchList = { watches: ProjectWatch[]; max: number; min_cooldown_minutes: number; providers: string[]; collection_revision?: number; project_entity_revision?: number };
 
 /** A project orchestrator's wake-up (``/api/projects/{id}/wakeups``): a schedule that wakes it with a note. */
 export type Wakeup = {

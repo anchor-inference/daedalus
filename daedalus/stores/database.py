@@ -20,6 +20,7 @@ from daedalus.stores.control_schema import MIGRATION as CONTROL_MIGRATION
 from daedalus.stores.execution_schema import MIGRATION as EXECUTION_MIGRATION
 from daedalus.stores.extension_schema import EXTENSION_SCHEMA
 from daedalus.stores.grant_lineage_schema import MIGRATION as GRANT_LINEAGE_MIGRATION
+from daedalus.stores.inference_budget_schema import MIGRATION as INFERENCE_BUDGET_MIGRATION
 from daedalus.stores.issue_sync_schema import ISSUE_SYNC_MIGRATION
 from daedalus.stores.knowledge_invalidation_schema import MIGRATION as KNOWLEDGE_INVALIDATION_MIGRATION
 from daedalus.stores.lifecycle_ownership_schema import MIGRATION as LIFECYCLE_OWNERSHIP_MIGRATION
@@ -31,6 +32,7 @@ from daedalus.stores.result_anchor_schema import MIGRATION as RESULT_ANCHOR_MIGR
 from daedalus.stores.runtime_observation_schema import MIGRATION as RUNTIME_OBSERVATION_MIGRATION
 from daedalus.stores.runtime_schema import RUNTIME_SCHEMA
 from daedalus.stores.staff_report_schema import MIGRATION as STAFF_REPORT_MIGRATION
+from daedalus.stores.watch_authority_schema import MIGRATION as WATCH_AUTHORITY_MIGRATION
 from daedalus.stores.watch_delivery_schema import WATCH_DELIVERY_MIGRATION
 from daedalus.stores.workspace_archive_schema import MIGRATION as WORKSPACE_ARCHIVE_MIGRATION
 
@@ -1719,6 +1721,8 @@ MIGRATIONS.append(COMPARISON_MIGRATION)
 MIGRATIONS.append(CI_MIGRATION)
 MIGRATIONS.append(ISSUE_SYNC_MIGRATION)
 MIGRATIONS.append(WATCH_DELIVERY_MIGRATION)
+MIGRATIONS.append(INFERENCE_BUDGET_MIGRATION)
+MIGRATIONS.append(WATCH_AUTHORITY_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
@@ -1742,7 +1746,15 @@ class Database:
         into a project folder records it there: in a container the paths are the container's."""
         self._conn: aiosqlite.Connection | None = None
         self._lock = asyncio.Lock()
+        self._authority_effect_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._warned_about_freelist = False
+
+    def authority_effect_lock(self, scope_kind: str, scope_id: str) -> asyncio.Lock:
+        """Serialize a scope's approval changes with in-process effects, outside SQLite."""
+        key = (scope_kind, scope_id)
+        if key not in self._authority_effect_locks:
+            self._authority_effect_locks[key] = asyncio.Lock()
+        return self._authority_effect_locks[key]
 
     async def open(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

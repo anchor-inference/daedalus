@@ -132,7 +132,9 @@ class ControlStore:
             raise ValueError("unknown entity kind")
         return int(row["entity_revision"])
 
-    async def authorize(self, conn: aiosqlite.Connection, principal: Principal, scope: Scope, operation: str, *, task_id: str | None = None, effects: tuple[str, ...] = ()) -> None:
+    async def attest(self, conn: aiosqlite.Connection, principal: Principal, scope: Scope, *,
+                     task_id: str | None = None) -> aiosqlite.Row | None:
+        """Validate the current identity, approval scope and launch lineage without adding rights."""
         if not principal.actor_id:
             raise ControlDenied("missing host identity")
         if scope.kind == "project" and await one(conn, "SELECT 1 FROM projects WHERE id = ?", (scope.id,)) is None:
@@ -154,10 +156,6 @@ class ControlStore:
             raise ControlDenied("grant belongs to another project")
         if grant["scope_kind"] == "task" and (task_id != grant["task_id"] or grant["project_id"] != (scope.id if scope.kind == "project" else None)):
             raise ControlDenied("grant belongs to another task")
-        if operation not in json.loads(grant["operations_json"]):
-            raise ControlDenied("operation is outside the approved scope")
-        if not set(effects) <= set(json.loads(grant["effects_json"])):
-            raise ControlDenied("effect is outside the approved scope")
         if grant["staff_session_id"]:
             session = await one(conn, "SELECT staff_id,task_id,ended_at FROM staff_sessions WHERE id = ?",
                                 (grant["staff_session_id"],))
@@ -181,6 +179,16 @@ class ControlStore:
             await self._office(conn, parent["actor_id"], scope)
         if principal.origin_class == "agent":
             await self._office(conn, principal.actor_id, scope)
+        return grant
+
+    async def authorize(self, conn: aiosqlite.Connection, principal: Principal, scope: Scope, operation: str, *, task_id: str | None = None, effects: tuple[str, ...] = ()) -> None:
+        grant = await self.attest(conn, principal, scope, task_id=task_id)
+        if grant is None:
+            return
+        if operation not in json.loads(grant["operations_json"]):
+            raise ControlDenied("operation is outside the approved scope")
+        if not set(effects) <= set(json.loads(grant["effects_json"])):
+            raise ControlDenied("effect is outside the approved scope")
 
     async def mutate(self, principal: Principal, scope: Scope, operation: str, client_operation_id: str, expected_revision: int, entity: Entity, payload: dict[str, Any], effect: Effect, *, effects: tuple[str, ...] = ()) -> dict[str, Any]:
         if not client_operation_id or len(client_operation_id) > 160 or not re.fullmatch(r"[a-z][a-z0-9_.:-]{0,119}", operation):
@@ -276,8 +284,25 @@ class ControlStore:
                 "operations": ["result.submit", "staff.report"], "effects": [], "expires_at": expires.astimezone(UTC).isoformat()}
 
     async def revoke_grant(self, issuer: Principal, grant_id: str, *, reason: str) -> None:
-        async with self.db.transaction() as conn:
-            await self.revoke_grant_in(conn, issuer, grant_id, reason=reason)
+        if issuer.origin_class != "operator":
+            raise ControlDenied("only an operator can revoke authority")
+        if not reason.strip():
+            raise ValueError("a revocation reason is required")
+        row = await self.db.fetchone("SELECT scope_kind,project_id,scope_id FROM actor_grants WHERE id = ?", (grant_id,))
+        if row is None:
+            raise KeyError(grant_id)
+        scope_kind = "project" if row["project_id"] else row["scope_kind"]
+        scope_id = row["project_id"] or row["scope_id"]
+        # Do not hold a SQLite transaction while an already admitted send drains.
+        async with self.db.authority_effect_lock(scope_kind, scope_id):
+            async with self.db.transaction() as conn:
+                current = await one(conn, "SELECT scope_kind,project_id,scope_id FROM actor_grants WHERE id = ?", (grant_id,))
+                if current is None:
+                    raise KeyError(grant_id)
+                if (("project" if current["project_id"] else current["scope_kind"]) != scope_kind
+                        or (current["project_id"] or current["scope_id"]) != scope_id):
+                    raise ControlConflict("grant scope changed during withdrawal")
+                await self.revoke_grant_in(conn, issuer, grant_id, reason=reason)
 
     async def revoke_grant_in(self, conn: aiosqlite.Connection, issuer: Principal, grant_id: str, *, reason: str) -> None:
         """Withdraw an approval and its pending child effects inside the caller's receipt."""

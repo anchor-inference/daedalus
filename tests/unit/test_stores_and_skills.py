@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 
 import pytest
 from protocore.contracts.memory import MemoryScope
-from protocore.contracts.skills import SkillUpsertInput
+from protocore.contracts.skills import SkillNotFoundError, SkillUpsertInput
 from protocore.contracts.types import Event, Message, MessageRole, Run, RunStatus, Session, TextBlock
 
 from daedalus.extensions.api import validate_init_data
@@ -147,6 +147,10 @@ async def test_directory_skill_store(tmp_path: Path) -> None:
     await store.set_enabled("t", entry.id, enabled=False)
     assert await store.list("t") == []
     assert [e.id for e in await store.list_subset("t", ["demo"])] == [entry.id]
+    with pytest.raises(SkillNotFoundError):
+        await store.load("t", entry.id)
+    with pytest.raises(SkillNotFoundError):
+        await store.load("t", "demo")
 
 
 def _init_data(token: str, user_id: int, age: int = 0) -> str:

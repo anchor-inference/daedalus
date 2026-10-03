@@ -14,9 +14,13 @@ if TYPE_CHECKING:
 REVIEW_OPERATIONS = ("review.verdict", "review.return")
 AUTHORITY_BUNDLES = {
     "planning": {"operations": ["board.task.create", "board.task.update"], "effects": [], "scope_kind": "project"},
-    "execution": {"operations": ["task.launch"], "effects": ["execution.start"], "scope_kind": "task"},
-    "execution_project": {"operations": ["task.launch"], "effects": ["execution.start"], "scope_kind": "project"},
+    "execution": {"operations": ["task.launch", "staff.release"],
+                  "effects": ["execution.start", "execution.stop"], "scope_kind": "task"},
+    "execution_project": {"operations": ["task.launch", "staff.release"],
+                          "effects": ["execution.start", "execution.stop"], "scope_kind": "project"},
     "review": {"operations": list(REVIEW_OPERATIONS), "effects": [], "scope_kind": "project"},
+    "watches": {"operations": ["watch.create", "watch.change", "watch.remove", "watch.deliver"],
+                "effects": ["watch.wake", "watch.tell", "watch.notify"], "scope_kind": "project"},
 }
 
 
@@ -92,8 +96,9 @@ async def approve_authority(app: Application, project_id: str, principal: Princi
 
     payload = {"expected_coordinator_session_id": expected_coordinator_session_id, "bundle_id": bundle_id,
                "expires_at": expires_at, "task_id": task_id}
-    return await control.mutate(principal, scope, "orchestrator.authority.issue", client_operation_id,
-                                expected_entity_revision, Entity("project", project_id), payload, effect)
+    async with app.db.authority_effect_lock("project", project_id):
+        return await control.mutate(principal, scope, "orchestrator.authority.issue", client_operation_id,
+                                    expected_entity_revision, Entity("project", project_id), payload, effect)
 
 
 async def withdraw_authority(app: Application, project_id: str, principal: Principal, grant_id: str, *,
@@ -118,10 +123,11 @@ async def withdraw_authority(app: Application, project_id: str, principal: Princ
         return {"project_id": project_id, "grant_id": grant_id, "generation": updated["generation"],
                 "revoked_at": updated["revoked_at"]}
 
-    return await control.mutate(principal, scope, "orchestrator.authority.revoke", client_operation_id,
-                                expected_entity_revision, Entity("project", project_id),
-                                {"grant_id": grant_id, "expected_grant_generation": expected_grant_generation,
-                                 "expected_coordinator_session_id": expected_coordinator_session_id, "reason": reason}, effect)
+    async with app.db.authority_effect_lock("project", project_id):
+        return await control.mutate(principal, scope, "orchestrator.authority.revoke", client_operation_id,
+                                    expected_entity_revision, Entity("project", project_id),
+                                    {"grant_id": grant_id, "expected_grant_generation": expected_grant_generation,
+                                     "expected_coordinator_session_id": expected_coordinator_session_id, "reason": reason}, effect)
 
 
 async def current_office(conn: Any, project_id: str, session_id: str | None = None) -> str:

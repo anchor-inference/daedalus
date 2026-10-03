@@ -945,11 +945,14 @@ class StaffStore:
         return session if session is not None and session.live else None
 
     async def end_session(self, staff_session_id: str, reason: str) -> StaffSession | None:
-        """End a live session; ``None`` when it was not live. The row stays, for the chain and the spend."""
+        """End once, including an observed CLI exit whose final screen reason has not arrived yet."""
         at = _now()
         async with self._db.transaction() as conn:
             cursor = await conn.execute(
-                "UPDATE staff_sessions SET ended_at = ?, end_reason = ?, status = 'exited', status_at = ?, waiting_for = '' WHERE id = ? AND ended_at IS NULL",
+                "UPDATE staff_sessions SET ended_at = COALESCE(ended_at,?), end_reason = ?, status = 'exited',"
+                " status_at = ?, waiting_for = '' WHERE id = ? AND (ended_at IS NULL OR"
+                " (kind = 'cli' AND end_reason = '' AND EXISTS (SELECT 1 FROM runtime_exit_observations x"
+                " WHERE x.staff_session_id = staff_sessions.id AND x.runtime_kind = 'cli'))) ",
                 (at, _plain(reason, "the reason", 500), at, staff_session_id),
             )
             changed = cursor.rowcount

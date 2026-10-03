@@ -211,6 +211,21 @@ def test_pricing_prefers_the_longest_prefix_and_config_overrides() -> None:
     assert endpoint.pricing_for("deepseek-v4-ultra").input == 9.0
 
 
+def test_partial_price_edit_preserves_provider_bound_without_reusing_an_old_discount() -> None:
+    from datetime import UTC, datetime
+
+    from daedalus.providers.pricing import pricing_table
+
+    table = pricing_table("deepseek", {"deepseek-flash": {"input": 1}, "unknown-model": {"input": 1}})
+    known = table["deepseek-flash"]
+    assert known.input_limit == 1_048_576 and known.limit_source
+    assert known.output == 1.2
+    assert known.cost({"input_tokens": 1_000_000}, now=datetime(2026, 9, 6, 12, tzinfo=UTC)) == 1.0
+    assert table["unknown-model"].output is None and table["unknown-model"].input_limit is None
+    cleared = pricing_table("deepseek", {"deepseek-flash": {"input_limit": None}})
+    assert cleared["deepseek-flash"].input_limit is None
+
+
 def test_dsml_guard_keeps_prose_after_the_block_and_marker_mentions() -> None:
     from daedalus.providers.dsml import DsmlGuard, parse_dsml
 

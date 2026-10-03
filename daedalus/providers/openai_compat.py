@@ -13,6 +13,7 @@ import logging
 import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -32,9 +33,10 @@ from protocore.contracts.llm import (
 from protocore.contracts.types import Message, MessageRole, StopReason, TextBlock
 
 from daedalus import __version__
+from daedalus.providers.admission import InferenceAdmission
 from daedalus.providers.dsml import DsmlGuard
 from daedalus.providers.llamacpp import tools_to_llamacpp_wire
-from daedalus.providers.pricing import ModelPricing
+from daedalus.providers.pricing import ModelPricing, complete_usage
 from daedalus.providers.wire import messages_to_wire, parse_json_arguments, tools_to_wire
 
 logger = logging.getLogger(__name__)
@@ -255,6 +257,7 @@ class UsageRecord:
     duration_ms: int
     run_id: str | None
     session_id: str | None
+    inference_reservation_id: str | None = None
 
 
 class UsageSink(Protocol):
@@ -272,6 +275,7 @@ class OpenAICompatibleProvider(ILLMProvider):
         usage_sink: UsageSink | None = None,
         image_loader: ImageLoader | None = None,
         images_for: Callable[[str], bool] | None = None,
+        admission: InferenceAdmission | None = None,
     ) -> None:
         """``images_for(model)`` says whether that model takes image parts (a preset setting)."""
         self.endpoint = endpoint
@@ -281,6 +285,7 @@ class OpenAICompatibleProvider(ILLMProvider):
         )
         self._usage_sink = usage_sink
         self._image_loader = image_loader
+        self._admission = admission
 
     # -- ILLMProvider -----------------------------------------------------------
 
@@ -292,6 +297,16 @@ class OpenAICompatibleProvider(ILLMProvider):
         """
         body = await self._build_body(request, stream=True)
         started = time.monotonic()
+        reservation = await self._admit(request, body)
+        try:
+            async with aclosing(self._stream(request, body, started, reservation)) as stream:
+                async for delta in stream:
+                    yield delta
+        finally:
+            await self._interrupted(reservation)
+
+    async def _stream(self, request: LLMRequest, body: dict[str, Any], started: float,
+                      reservation: str | None) -> AsyncIterator[ProviderDelta]:
         usage_raw: dict[str, Any] | None = None
         open_tools: dict[int, dict[str, Any]] = {}
         finish_reason: str | None = None
@@ -351,7 +366,7 @@ class OpenAICompatibleProvider(ILLMProvider):
         for delta_out in self._close_tools(open_tools, resolved_finish):
             yield delta_out
         normalized = normalize_usage(usage_raw or {})
-        await self._record_usage(request, "stream", usage_raw or {}, normalized, started)
+        await self._record_usage(request, "stream", usage_raw or {}, normalized, started, reservation)
         yield ProviderDelta(kind=ProviderDeltaKind.usage, usage=normalized)
         yield ProviderDelta(kind=ProviderDeltaKind.finish, finish_reason=_map_finish(resolved_finish))
 
@@ -405,51 +420,59 @@ class OpenAICompatibleProvider(ILLMProvider):
         body = await self._build_body(request, stream=False)
         body["response_format"] = {"type": "json_object"}
         started = time.monotonic()
-        data = await self._post(body, request)
-        text = _message_text(data)
-        usage_raw = data.get("usage") or {}
-        normalized = normalize_usage(usage_raw)
-        cost = await self._record_usage(request, "structured", usage_raw, normalized, started)
-        finish = (data.get("choices") or [{}])[0].get("finish_reason") or "stop"
-        parsed = parse_json_text(text)
-        if parsed is None:
-            # The head and the tail are what tell a summary that outgrew its cap from a refusal or a loop.
-            logger.warning("%s: structured reply unusable (finish=%s, %s chars): head=%r tail=%r", self.endpoint.id, finish, len(text), text[:160], text[-160:])
-            raise LLMProviderError(
-                f"{self.endpoint.id}: structured response is not JSON"
-                + (" (output truncated by max_tokens)" if finish == "length" else "")
+        reservation = await self._admit(request, body)
+        try:
+            data = await self._post(body, request)
+            text = _message_text(data)
+            usage_raw = data.get("usage") or {}
+            normalized = normalize_usage(usage_raw)
+            cost = await self._record_usage(request, "structured", usage_raw, normalized, started, reservation)
+            finish = (data.get("choices") or [{}])[0].get("finish_reason") or "stop"
+            parsed = parse_json_text(text)
+            if parsed is None:
+                # The head and the tail are what tell a summary that outgrew its cap from a refusal or a loop.
+                logger.warning("%s: structured reply unusable (finish=%s, %s chars): head=%r tail=%r", self.endpoint.id, finish, len(text), text[:160], text[-160:])
+                raise LLMProviderError(
+                    f"{self.endpoint.id}: structured response is not JSON"
+                    + (" (output truncated by max_tokens)" if finish == "length" else "")
+                )
+            return LLMResponse(
+                message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=json.dumps(parsed, ensure_ascii=False))]),
+                stop_reason=StopReason.max_tokens if finish == "length" else StopReason.end_turn,
+                usage=LLMResponseUsage(
+                    input_tokens=normalized["input_tokens"],
+                    output_tokens=normalized["output_tokens"],
+                    cache_read_input_tokens=normalized["cache_read_input_tokens"],
+                    response_cost_usd=cost,
+                ),
             )
-        return LLMResponse(
-            message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=json.dumps(parsed, ensure_ascii=False))]),
-            stop_reason=StopReason.max_tokens if finish == "length" else StopReason.end_turn,
-            usage=LLMResponseUsage(
-                input_tokens=normalized["input_tokens"],
-                output_tokens=normalized["output_tokens"],
-                cache_read_input_tokens=normalized["cache_read_input_tokens"],
-                response_cost_usd=cost,
-            ),
-        )
+        finally:
+            await self._interrupted(reservation)
 
     async def complete_text(self, request: LLMRequest) -> LLMResponse:
         body = await self._build_body(request, stream=False)
         started = time.monotonic()
-        data = await self._post(body, request)
-        text = _message_text(data)
-        usage_raw = data.get("usage") or {}
-        normalized = normalize_usage(usage_raw)
-        cost = await self._record_usage(request, "text", usage_raw, normalized, started)
-        finish = (data.get("choices") or [{}])[0].get("finish_reason") or "stop"
-        return LLMResponse(
-            message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=text)]),
-            stop_reason=StopReason.max_tokens if finish == "length" else StopReason.end_turn,
-            usage=LLMResponseUsage(
-                input_tokens=normalized["input_tokens"],
-                output_tokens=normalized["output_tokens"],
-                cache_read_tokens=normalized["cache_read_tokens"],
-                cached_tokens=normalized["cache_read_tokens"],
-                response_cost_usd=cost,
-            ),
-        )
+        reservation = await self._admit(request, body)
+        try:
+            data = await self._post(body, request)
+            text = _message_text(data)
+            usage_raw = data.get("usage") or {}
+            normalized = normalize_usage(usage_raw)
+            cost = await self._record_usage(request, "text", usage_raw, normalized, started, reservation)
+            finish = (data.get("choices") or [{}])[0].get("finish_reason") or "stop"
+            return LLMResponse(
+                message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=text)]),
+                stop_reason=StopReason.max_tokens if finish == "length" else StopReason.end_turn,
+                usage=LLMResponseUsage(
+                    input_tokens=normalized["input_tokens"],
+                    output_tokens=normalized["output_tokens"],
+                    cache_read_tokens=normalized["cache_read_tokens"],
+                    cached_tokens=normalized["cache_read_tokens"],
+                    response_cost_usd=cost,
+                ),
+            )
+        finally:
+            await self._interrupted(reservation)
 
     def count_tokens(self, text: str, model: str | None = None) -> int:
         # A cheap estimate; the loop re-anchors on the provider's reported prompt size.
@@ -640,6 +663,16 @@ class OpenAICompatibleProvider(ILLMProvider):
         open_tools.clear()
         return out
 
+    async def _admit(self, request: LLMRequest, body: dict[str, Any]) -> str | None:
+        if self._admission is None:
+            return None
+        return await self._admission.start(self.endpoint, request, body)
+
+    async def _interrupted(self, reservation: str | None) -> None:
+        if reservation is not None:
+            assert self._admission is not None
+            await self._admission.interrupted(reservation, "the request ended without a settled usage observation")
+
     async def _record_usage(
         self,
         request: LLMRequest,
@@ -647,10 +680,14 @@ class OpenAICompatibleProvider(ILLMProvider):
         raw: dict[str, Any],
         normalized: dict[str, Any],
         started: float,
+        reservation: str | None = None,
     ) -> float | None:
         model = request.model
         cost: float | None = None
-        if self.endpoint.kind == "llamacpp":
+        if reservation is not None:
+            assert self._admission is not None
+            cost = await self._admission.cost(reservation, raw, normalized)
+        elif self.endpoint.kind == "llamacpp":
             # This is inference on the operator's own hardware, not a hosted token sale. Recording
             # zero rather than an unknown price keeps the usage ledger complete while ensuring every
             # spending cap treats the call as free.
@@ -659,7 +696,7 @@ class OpenAICompatibleProvider(ILLMProvider):
             cost = float(raw["cost"])
         else:
             pricing = self.endpoint.pricing_for(model)
-            if pricing is not None:
+            if pricing is not None and complete_usage(raw):
                 cost = pricing.cost(normalized)
         normalized["cost_usd"] = cost
         if self._usage_sink is not None:
@@ -675,6 +712,7 @@ class OpenAICompatibleProvider(ILLMProvider):
                     duration_ms=int((time.monotonic() - started) * 1000),
                     run_id=obs.run_id if obs else None,
                     session_id=obs.session_id if obs else None,
+                    inference_reservation_id=reservation,
                 )
             )
         return cost

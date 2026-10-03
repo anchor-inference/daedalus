@@ -911,15 +911,17 @@ class Orchestrators:
     async def classify(self, project_id: str, event: AppEvent) -> Wake | None:
         """Whether an event of the project wakes its orchestrator, and whether it cannot wait.
 
-        Its own doing is never news to it: an event it caused (``actor: orchestrator``, or its own
-        session's) is dropped at the source, so a message it sends a member cannot wake it again.
+        Its own doing is never news to it. The host-issued actor identity, rather than the
+        display class "agent", binds a board event to this office's session.
         """
         project = await self.manager.projects.get(project_id)
         if project is None or not project.settings.orchestrator.enabled:
             return None
         mine = project.settings.orchestrator.session_id
         p = event.payload
-        if p.get("actor") == "orchestrator" or (event.session_id and event.session_id == mine and event.type not in SELF_EVENTS_ALLOWED):
+        if p.get("actor_id") == f"orchestrator:{mine}" or (
+            event.session_id and event.session_id == mine and event.type not in SELF_EVENTS_ALLOWED
+        ):
             return None
         kind = event.type
         if kind == "staff.status":

@@ -21,7 +21,7 @@ import os
 import sys
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
@@ -42,6 +42,9 @@ class Host:
         self.settings["revision"] = "s1"
         self.settings["compaction"]["preset"] = preset
         self.puts: list[dict] = []
+        self.spend_failed = False
+        self.spend = {"since": "", "total": {"spent_usd": 3.42, "unmetered": 2, "cap_usd": 10, "reserved_usd": 1.12, "uncertain_usd": 0.35, "reserved_count": 3, "uncertain_count": 1},
+                      "per_provider": {"deepseek": {"spent_usd": 3.42, "unmetered": 2, "cap_usd": 5, "reserved_usd": 1.12, "uncertain_usd": 0.35, "reserved_count": 3, "uncertain_count": 1}}}
 
     def route(self, route) -> None:  # type: ignore[no-untyped-def]
         request = route.request
@@ -53,6 +56,12 @@ class Host:
 
         if rel == "/api/settings" and request.method == "GET":
             return answer(self.settings)
+        if rel == "/api/limits/spend" and request.method == "GET":
+            return answer({"detail": "balance unavailable"}, 503) if self.spend_failed else answer(self.spend)
+        if rel == "/api/limits/reset-total" and request.method == "POST":
+            self.spend["total"]["spent_usd"] = 0
+            self.spend["per_provider"]["deepseek"]["spent_usd"] = 0
+            return answer({"since": "2026-10-03T00:00:00Z"})
         if rel == "/api/settings/validate":
             body = json.loads(request.post_data or "{}")
             return answer({"valid": True, "stale": body.get("base_revision") != self.settings["revision"], "problems": []})
@@ -153,6 +162,33 @@ def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-u
     page.context.close()
 
 
+def spending(browser, lang: str) -> None:  # type: ignore[no-untyped-def]
+    host = Host()
+    host.settings["limits"]["usd_total"] = 4
+    host.settings["limits"]["usd_total_per_provider"] = {"deepseek": 5}
+    host.settings["providers"] = {"deepseek": {"kind": "deepseek", "pricing": {}}}
+    page = opened(browser, host, lang, {"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+    meter = page.locator(".spend-meter")
+    expect(meter).to_contain_text("$3.42")
+    expect(meter).to_contain_text("$1.12")
+    expect(meter).to_have_attribute("data-level", "bad")
+    page.get_by_text("How this cap is counted" if lang == "en" else "Как считается лимит").click()
+    expect(page.locator("details.sheet-section", has_text="$0.35")).to_contain_text("already included" if lang == "en" else "уже учтена")
+    expect(page.locator("details.sheet-section", has_text="$1.12")).to_contain_text("not the provider's final bill" if lang == "en" else "не окончательный счёт провайдера")
+    page.get_by_role("button", name="Reset counters" if lang == "en" else "Обнулить счётчики").click()
+    expect(meter).to_contain_text("$0.00")
+    expect(meter).to_contain_text("$1.12")
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "budget details overflow the phone"
+    host.spend_failed = True
+    page.reload()
+    expect(page.get_by_text("Charges and holds are unknown" if lang == "en" else "Списания и удержания неизвестны").first).to_be_visible()
+    expect(page.locator(".spend-meter")).to_have_count(0)
+    host.spend_failed = False
+    page.locator(".result-warning").get_by_role("button", name="Try again" if lang == "en" else "Ещё раз").click()
+    expect(page.locator(".spend-meter")).to_contain_text("$1.12")
+    page.context.close()
+
+
 def main() -> int:
     problems: list[str] = []
     with sync_playwright() as p:
@@ -160,6 +196,7 @@ def main() -> int:
         for lang in ([LANG] if LANG else ["en", "ru"]):
             desktop(browser, lang, problems)
             phone(browser, lang, problems)
+            spending(browser, lang)
         browser.close()
     print("problems:", problems or "none")
     return 1 if problems else 0

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.notifications import Draft
+from daedalus.extensions.watch_authority import authorized as watch_authorized
 from daedalus.stores.control import now
 from daedalus.stores.staff import StaffError
 
@@ -58,10 +59,12 @@ class WatchDeliveries:
             return event is not None
         if action == "notify":
             notification = await self.app.db.fetchone(
-                "SELECT id FROM notifications WHERE dedupe_key = ? ORDER BY id DESC LIMIT 1",
+                "SELECT id,event_seq,held_until,resolved_at FROM notifications"
+                " WHERE dedupe_key = ? ORDER BY id DESC LIMIT 1",
                 (f"watch-delivery:{delivery['id']}",),
             )
-            return notification is not None
+            return bool(notification is not None and notification["event_seq"] is not None
+                        and notification["held_until"] is None and notification["resolved_at"] is None)
         if action == "tell":
             message = await self.app.db.fetchone(
                 "SELECT state FROM staff_messages WHERE id = ?", (message_id(delivery["id"]),),
@@ -81,7 +84,7 @@ class WatchDeliveries:
                 await conn.execute("UPDATE watch_deliveries SET status = 'reconciling',updated_at = ? WHERE id = ?",
                                    (now(), delivery_id))
                 return None
-            watch = await conn.execute("SELECT enabled,condition_revision,deadline_at,state_json FROM watches WHERE id = ?",
+            watch = await conn.execute("SELECT enabled,condition_revision,deadline_at,state_json,project_id,action_json FROM watches WHERE id = ?",
                                        (delivery["watch_id"],))
             current = await watch.fetchone()
             await watch.close()
@@ -89,7 +92,14 @@ class WatchDeliveries:
             expired = bool(deadline and datetime.fromisoformat(deadline) <= datetime.now(UTC))
             once = bool(current and json.loads(current["state_json"] or "{}").get("stopped") == "once")
             if (current is None or int(current["condition_revision"]) != delivery["condition_revision"]
-                    or (not current["enabled"] and not once) or expired):
+                    or current["project_id"] != delivery["project_id"]
+                    or (not current["enabled"] and not once) or expired
+                    or not await watch_authorized(
+                        conn, self.app.db, watch_id=delivery["watch_id"],
+                        condition_revision=int(delivery["condition_revision"]),
+                        project_id=delivery["project_id"],
+                        action=json.loads(current["action_json"]),
+                    )):
                 await conn.execute("UPDATE watch_deliveries SET status = 'cancelled',updated_at = ? WHERE id = ?",
                                    (now(), delivery_id))
                 return None
@@ -98,6 +108,15 @@ class WatchDeliveries:
             return delivery
 
     async def _act(self, delivery: Any, snapshot: dict[str, Any]) -> tuple[str, str | None]:
+        # A grant can expire after reservation; the same exact version must still be approved
+        # at the boundary where the local wake or external message is attempted.
+        async with self.app.db.transaction() as conn:
+            if not await watch_authorized(
+                conn, self.app.db, watch_id=delivery["watch_id"],
+                condition_revision=int(delivery["condition_revision"]),
+                project_id=delivery["project_id"], action=snapshot["action"],
+            ):
+                return "watch standing approval is no longer current", None
         action = snapshot["action"]
         kind = action["action"]
         if kind == "wake":
@@ -120,6 +139,8 @@ class WatchDeliveries:
             ))
             if result is None:
                 return "notification was suppressed before persistence", None
+            if result.get("delivered", {}).get("held"):
+                return "", None
             return "", f"notification:{result['id']}"
         if kind == "tell":
             team = self.app.extensions.get("staff")
@@ -140,32 +161,45 @@ class WatchDeliveries:
 
     async def deliver(self, delivery_id: str) -> bool:
         async with self._lock:
-            delivery = await self._claim(delivery_id)
-            if delivery is None:
-                return False
-            snapshot = json.loads(delivery["action_json"])
-            try:
-                error, receipt_id = await self._act(delivery, snapshot)
-                kind = snapshot["action"]["action"]
-                if kind != "wake" and (error or receipt_id):
-                    event_seq = await self._event(delivery, snapshot, error)
-                    receipt_id = receipt_id or f"event:{event_seq}"
-            except Exception:  # noqa: BLE001 — the external send may have completed before its local receipt
-                logger.exception("watch delivery %s has an uncertain outcome", delivery_id)
-                await self.app.db.execute(
-                    "UPDATE watch_deliveries SET last_error = ?,updated_at = ?"
-                    " WHERE id = ? AND status = 'reconciling'",
-                    ("delivery outcome is being reconciled", now(), delivery_id),
-                )
-                return False
-            status = "failed" if error else ("delivered" if receipt_id else "reconciling")
-            await self.app.db.execute(
-                "UPDATE watch_deliveries SET status = ?,receipt_id = ?,last_error = ?,updated_at = ?"
-                " WHERE id = ? AND status = 'reconciling'",
-                (status, receipt_id, error[:500] if error else
-                 ("waiting for a confirmed delivery receipt" if status == "reconciling" else ""), now(), delivery_id),
+            source = await self.app.db.fetchone(
+                "SELECT project_id FROM watch_deliveries WHERE id = ?", (delivery_id,),
             )
-            return status == "delivered"
+            if source is None:
+                return False
+            # Withdrawal acquires the same project fence before committing the new grant
+            # generation. The database lock stays free while a local physical send awaits.
+            async with self.app.db.authority_effect_lock("project", source["project_id"]):
+                return await self._deliver_fenced(delivery_id, source["project_id"])
+
+    async def _deliver_fenced(self, delivery_id: str, project_id: str) -> bool:
+        delivery = await self._claim(delivery_id)
+        if delivery is None:
+            return False
+        if delivery["project_id"] != project_id:
+            raise RuntimeError("a watch delivery changed its owning project")
+        snapshot = json.loads(delivery["action_json"])
+        try:
+            error, receipt_id = await self._act(delivery, snapshot)
+            kind = snapshot["action"]["action"]
+            if kind != "wake" and (error or receipt_id):
+                event_seq = await self._event(delivery, snapshot, error)
+                receipt_id = receipt_id or f"event:{event_seq}"
+        except Exception:  # noqa: BLE001 — the external send may have completed before its local receipt
+            logger.exception("watch delivery %s has an uncertain outcome", delivery_id)
+            await self.app.db.execute(
+                "UPDATE watch_deliveries SET last_error = ?,updated_at = ?"
+                " WHERE id = ? AND status = 'reconciling'",
+                ("delivery outcome is being reconciled", now(), delivery_id),
+            )
+            return False
+        status = "failed" if error else ("delivered" if receipt_id else "reconciling")
+        await self.app.db.execute(
+            "UPDATE watch_deliveries SET status = ?,receipt_id = ?,last_error = ?,updated_at = ?"
+            " WHERE id = ? AND status = 'reconciling'",
+            (status, receipt_id, error[:500] if error else
+             ("waiting for a confirmed delivery receipt" if status == "reconciling" else ""), now(), delivery_id),
+        )
+        return status == "delivered"
 
     async def sweep(self, *, limit: int = 50) -> int:
         """Run new intents; inspect interrupted sends without repeating a possible effect."""
@@ -232,6 +266,22 @@ class WatchDeliveries:
                     if possible_send is not None:
                         # A queued or written message may already have reached the runtime; only
                         # its exact receipt or operator reconciliation can decide the outcome.
+                        continue
+                if kind == "notify":
+                    recorded = await self.app.db.fetchone(
+                        "SELECT held_until,resolved_at,event_seq FROM notifications WHERE dedupe_key = ?"
+                        " ORDER BY id DESC LIMIT 1", (f"watch-delivery:{latest['id']}",),
+                    )
+                    if recorded is not None:
+                        # Persistence is not delivery. A held row may be released only under
+                        # its standing approval; an interrupted channel send stays uncertain.
+                        if recorded["resolved_at"] and recorded["event_seq"] is None:
+                            await self.app.db.execute(
+                                "UPDATE watch_deliveries SET status = 'failed',last_error = ?,updated_at = ?"
+                                " WHERE id = ? AND status = 'reconciling'",
+                                ("notification closed before delivery", now(), latest["id"]),
+                            )
+                            changed += 1
                         continue
                 if kind in ("wake", "notify", "tell"):
                     await self.app.db.execute("UPDATE watch_deliveries SET status = 'pending',updated_at = ?"

@@ -201,6 +201,10 @@ class Team:
         self.app = app
         assert app.manager is not None
         self.manager: SessionManager = app.manager
+        if self.manager.execution_store is None:
+            self.manager.execution_store = app.executions
+        elif self.manager.execution_store is not app.executions:
+            raise RuntimeError("the staff runtime and model calls must share the same execution owner")
         self.runtimes: dict[str, StaffRuntime] = {"daedalus": DaedalusStaffRuntime(self.manager)}
         self._execution_locks: dict[str, asyncio.Lock] = {}
         # A host folder in Docker is worked in through the host terminal bridge; the service is
@@ -398,7 +402,7 @@ class Team:
             logger.warning("could not publish %s", event_type, exc_info=True)
             return None
 
-    async def _move_task(self, task: BoardTask, to: str, *, actor: str, assignee: str | None = "", branch: str | None = None, folder_id: str | None = None, merge_state: str | None = None) -> BoardTask:
+    async def _move_task(self, task: BoardTask, to: str, *, actor: str, actor_id: str | None = None, assignee: str | None = "", branch: str | None = None, folder_id: str | None = None, merge_state: str | None = None) -> BoardTask:
         """Move a task on the board and say so. ``assignee=""`` keeps the assignee; ``None`` clears it."""
         sets = ["status = ?", "updated_at = ?"]
         params: list[Any] = [to, _now()]
@@ -419,6 +423,8 @@ class Team:
         assert moved is not None
         if to != task.status:
             payload: dict[str, Any] = {"task_id": task.id, "title": task.title, "from": task.status, "to": to, "actor": actor}
+            if actor_id:
+                payload["actor_id"] = actor_id
             if moved.assignee_staff_id:
                 payload["assignee_staff_id"] = moved.assignee_staff_id
             await self.publish("task.moved", payload, project_id=moved.project_id)
@@ -698,14 +704,16 @@ class Team:
             (line, line, -NOTES_MAX_CHARS, _now(), task_id),
         )
 
-    async def free_card(self, member: Staff, task_id: str | None, why: str, *, by: str = "system") -> BoardTask | None:
+    async def free_card(self, member: Staff, task_id: str | None, why: str, *, by: str = "system",
+                        principal: Principal | None = None) -> BoardTask | None:
         """Put a card its member no longer works back to todo, unassigned, saying why on it; ``None``
         when there was no such card. What a release does for a live session, for one already over."""
         task = await self.task(task_id) if task_id else None
         if task is None or task.status != "doing" or task.assignee_staff_id != member.id:
             return None
         await self.note_on_card(task.id, f"{member.name} no longer works this card: {why}; it is back in todo, unassigned")
-        return await self._move_task(task, "todo", actor=by, assignee=None)
+        return await self._move_task(task, "todo", actor=by,
+                                     actor_id=principal.actor_id if principal else None, assignee=None)
 
     def execution_lock(self, staff_id: str) -> asyncio.Lock:
         """A stop and retasking share ownership: neither may overtake the other's external call."""
@@ -1047,7 +1055,9 @@ class Team:
             env = str(row["env"]) if row is not None else env
         return Worktree(path=path, branch=session.branch, base_ref=session.base_ref or "HEAD", folder=path.parent.parent.parent, env=env)
 
-    async def release(self, member: Staff, *, keep_worktree: bool = True, reason: str = "released", by: str = "operator") -> bool:
+    async def release(self, member: Staff, *, keep_worktree: bool = True, reason: str = "released",
+                      by: str = "operator", principal: Principal | None = None,
+                      check_authority: Callable[[], Awaitable[None]] | None = None) -> bool:
         """End the member's live session: its runtime stops it, the row ends, the task goes back to todo.
 
         The worktree stays unless asked otherwise, and even then an unmerged branch is kept: it is the
@@ -1056,12 +1066,17 @@ class Team:
         live = await self.live_of(member)
         if live is None:
             return False
-        await self._end(live, reason, stop=True, by=by)
+        if by == "orchestrator" and (principal is None or check_authority is None):
+            raise StaffError("coordinator release requires a current approved grant")
+        if check_authority is not None:
+            await check_authority()
+        await self._end(live, reason, stop=True, by=by, principal=principal)
         if live.session.task_id:
             task = await self.task(live.session.task_id)
             if task is not None and task.status == "doing":
                 # Named by who released, so the orchestrator is not woken by its own release.
-                await self._move_task(task, "todo", actor=by, assignee=None)
+                await self._move_task(task, "todo", actor=by,
+                                      actor_id=principal.actor_id if principal else None, assignee=None)
         if not keep_worktree:
             worktree = await self.worktree_of(live.session)
             if worktree is not None:
@@ -1072,7 +1087,8 @@ class Team:
         self.queue.pump_soon(member.project_id)
         return True
 
-    async def _end(self, live: LiveSession, reason: str, *, stop: bool, by: str | None = None) -> None:
+    async def _end(self, live: LiveSession, reason: str, *, stop: bool, by: str | None = None,
+                   principal: Principal | None = None) -> None:
         if stop:
             try:
                 await self.runtime(live.staff).stop(live)
@@ -1083,10 +1099,12 @@ class Team:
             payload: dict[str, Any] = {"status": "exited", "previous": live.session.status, "detail": reason[:500]}
             if by:
                 payload["actor"] = by
+            if principal:
+                payload["actor_id"] = principal.actor_id
             await self.publish("staff.status", payload, member=live.staff, session_id=live.session_id)
-            for ask in await self._open_asks(live.id):
-                if await self.manager.asks.resolve(ask.id, "system", {"closed": f"the session ended: {reason}"}):
-                    await self._withdrawn(ask)
+        for ask in await self._open_asks(live.id):
+            if await self.manager.asks.resolve(ask.id, "system", {"closed": f"the session ended: {reason}"}):
+                await self._withdrawn(ask)
 
     async def _open_asks(self, staff_session_id: str) -> list[Ask]:
         rows = await self.manager.db.fetchall("SELECT id FROM asks WHERE staff_session_id = ? AND resolved_at IS NULL ORDER BY created_at", (staff_session_id,))
@@ -1483,7 +1501,7 @@ class Team:
         staff_session_id = str(state.metadata.get("staff_session_id") or "") if state is not None else ""
         if staff_session_id and status in ("completed", "failed", "cancelled"):
             await observe_exit(self.app, staff_session_id=staff_session_id, runtime_ref=run_id,
-                               observed_status="error" if status == "failed" else status)
+                               observed_status="error" if status == "failed" else status, bus=self.manager.bus)
         live = await self.live_for_session(session_id)
         if live is None or status == "awaiting":
             return
@@ -1510,6 +1528,10 @@ class Team:
 
     async def on_bus(self, event: AppEvent) -> None:
         """The session-level events of staff sessions, and the board's moves."""
+        if event.type in ("task.changed", "task.moved", "staff.status", "terminal.exited"):
+            dispatcher = self.app.extensions.get("effects")
+            if dispatcher is not None:
+                dispatcher.notify()
         if event.type == "permission.pending" and event.session_id:
             live = await self.live_for_session(event.session_id)
             if live is not None:
@@ -1547,7 +1569,7 @@ class Team:
                 for row in rows:
                     await observe_exit(self.app, staff_session_id=row["staff_session_id"],
                                        runtime_ref=event.terminal_id, observed_status="exited",
-                                       runtime_instance=row["runtime_instance"])
+                                       runtime_instance=row["runtime_instance"], bus=self.manager.bus)
             if event.type == "terminal.exited" or event.payload.get("status") in ("exited", "idle", "turn_done_unseen", "error"):
                 self.queue.pump_soon(event.project_id if event.type == "staff.status" else None)
             if event.type == "staff.status" and event.staff_id and event.payload.get("status") in ("idle", "turn_done_unseen", "error"):

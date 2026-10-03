@@ -4,6 +4,7 @@ and never again; the decisions that close one are the ones that decide something
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from daedalus.stores.staff import Staff
 from tests.unit.test_board_rounds import task_of
 from tests.unit.test_orchestrator import Rig, rig
 from tests.unit.test_orchestrator_team import fake, office
+from tests.unit.test_staff_runtime import close_team
 from tests.unit.test_task_contract import SCRIPT
 
 UPDATER = {
@@ -45,7 +47,7 @@ async def started(r: Rig, sid: str, name: str = "Sol", title: str = "Updater pro
 async def report(r: Rig, member: Staff, kind: str, text: str) -> str:
     live = await r.team.live_of(member)
     assert live is not None
-    told = await r.team.ingress.report(live, kind, text)
+    told = await r.team.ingress.report(live, kind, text, call_id=f"fixture-report:{uuid.uuid4().hex}")
     await r.team.ingress.status((await r.team.live_of(member)) or live, "idle")
     return told
 
@@ -84,6 +86,7 @@ async def test_a_blocker_left_without_a_decision_is_said_once_and_stays_listed(s
         assert follow != task_id
         assert "Waiting for your decision" not in await r.orch.project_state(await r.refreshed(), session_id=sid)
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -98,6 +101,7 @@ async def test_a_result_the_orchestrator_had_not_been_given_yet_is_not_one_it_pa
         assert await r.orch.loops.turn_ended(r.project.id, datetime.now(UTC).isoformat(), delivered=before) == []
         assert len(await r.orch.loops.turn_ended(r.project.id, datetime.now(UTC).isoformat(), delivered=r.manager.bus.head)) == 1
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -130,6 +134,7 @@ async def test_each_decision_closes_the_result(settings: Settings, db: Database,
             await r.call(sid, "tasks", op="move", task_id=task_id, status="dropped", note="replaced by a new design")
         assert await r.orch.loops.open(r.project.id) == []
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -147,6 +152,7 @@ async def test_silence_decides_nothing(settings: Settings, db: Database, tmp_pat
         await r.call(sid, "accept", task_id=task_id, checks=[{"item": "C1", "ok": True, "note": "ran them"}])
         assert await r.orch.loops.open(r.project.id) == []
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -165,6 +171,7 @@ async def test_a_card_nobody_took_is_raised_after_a_turn_and_a_decided_one_is_no
         assert await r.orch.turn_ended(r.project.id, datetime.now(UTC).isoformat()) == []
         assert await r.orch.loops.open(r.project.id) == []
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -183,6 +190,7 @@ async def test_the_operator_acting_on_the_card_closes_its_result(settings: Setti
 
         await until_await(closed, "the operator's move closed the result")
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -201,7 +209,10 @@ async def test_the_end_of_a_real_turn_says_it_once_and_the_reminder_is_a_wake_up
         await report(r, sol, "stuck", "a race between the swap and the supervisor is proven")
 
         async def reminded_and_heard() -> bool:
-            return len(await reminders(r)) == 1 and len(r.provider.requests) >= 2
+            return len(await reminders(r)) == 1 and any(
+                "your last turn ended with no decision on these" in last_user_text(r.provider, index)
+                for index in range(len(r.provider.requests))
+            )
 
         await until_await(reminded_and_heard, "the reminder was published and delivered")
         assert "your last turn ended with no decision on these" in last_user_text(r.provider)
@@ -214,4 +225,5 @@ async def test_the_end_of_a_real_turn_says_it_once_and_the_reminder_is_a_wake_up
         await until_await(idle, "the reminded turn ended")
         assert len(await reminders(r)) == 1, "one reminder, whatever the next turn does"
     finally:
+        await close_team(r.manager)
         await r.manager.close()

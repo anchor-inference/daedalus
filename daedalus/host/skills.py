@@ -103,7 +103,11 @@ class DirectorySkillStore(ISkillStore):
         return [entry for entry, _ in self._entries(include_disabled=False)]
 
     async def load(self, tenant_id: str, skill_id: str) -> SkillBundle:
-        loaded = self._manifest(self._dir(skill_id))
+        skill_dir = self._dir(skill_id)
+        # Hiding a disabled skill from the catalogue is insufficient when its exact id is known.
+        if (skill_dir / DISABLED_MARKER).exists():
+            raise SkillNotFoundError(skill_id)
+        loaded = self._manifest(skill_dir)
         if loaded is None:
             loaded = self._by_name(skill_id)
         if loaded is None:
@@ -112,7 +116,7 @@ class DirectorySkillStore(ISkillStore):
         return SkillBundle(manifest=manifest, body=body)
 
     def _by_name(self, name: str) -> tuple[SkillManifest, str] | None:
-        for _, skill_dir in self._entries(include_disabled=True):
+        for _, skill_dir in self._entries(include_disabled=False):
             loaded = self._manifest(skill_dir)
             if loaded and loaded[0].name == name:
                 return loaded

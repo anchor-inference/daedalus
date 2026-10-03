@@ -88,9 +88,10 @@ def run() -> int:
                  "max_expires_at": (datetime.now(UTC) + timedelta(hours=24)).isoformat(), "blockers": []}
                 for name, scope, operations, effects in (
                     ("planning", "project", ["board.task.create", "board.task.update"], []),
-                    ("execution", "task", ["task.launch"], ["execution.start"]),
-                    ("execution_project", "project", ["task.launch"], ["execution.start"]),
+                    ("execution", "task", ["task.launch", "staff.release"], ["execution.start", "execution.stop"]),
+                    ("execution_project", "project", ["task.launch", "staff.release"], ["execution.start", "execution.stop"]),
                     ("review", "project", ["review.verdict", "review.return"], []),
+                    ("watch", "project", ["watch.create", "watch.change", "watch.remove", "watch.deliver"], ["watch.wake", "watch.tell", "watch.notify"]),
                 )
             ]
             return answer(route, {"project_id": "p1", "entity_revision": authority_revision[0], "current_coordinator_session_id": "coordinator-current",
@@ -106,8 +107,8 @@ def run() -> int:
                 return answer(route, {"detail": "project changed"}, status=409)
             bundle = payload["bundle_id"]
             task_id = payload.get("task_id")
-            operations = ["board.task.create", "board.task.update"] if bundle == "planning" else (["review.verdict", "review.return"] if bundle == "review" else ["task.launch"])
-            effects = ["execution.start"] if bundle.startswith("execution") else []
+            operations = ["board.task.create", "board.task.update"] if bundle == "planning" else (["review.verdict", "review.return"] if bundle == "review" else (["watch.create", "watch.change", "watch.remove", "watch.deliver"] if bundle == "watch" else ["task.launch", "staff.release"]))
+            effects = ["execution.start", "execution.stop"] if bundle.startswith("execution") else (["watch.wake", "watch.tell", "watch.notify"] if bundle == "watch" else [])
             grant = {"grant_id": f"grant-{len(authority_grants) + 1}", "generation": 1, "session_id": "coordinator-current",
                      "scope": {"kind": "task" if task_id else "project", "id": task_id or "p1"},
                      "operations": operations, "effects": effects, "expires_at": payload["expires_at"],
@@ -186,6 +187,7 @@ def run() -> int:
         page.get_by_role("button", name="existing", exact=True).click()
         expect(page.locator("#project-root")).to_have_value("/work/existing")
         page.get_by_role("button", name="Add", exact=True).click()
+        expect(page.locator(".sheet")).to_have_count(0)
         assert created[1] == {"name": "Existing", "folders": [{"path": "/work/existing"}]}, created[1]
         page.locator(".project-chip").click()
         page.locator(".project-row", has_text="Plain").get_by_role("button", name="Settings for Plain").click()
@@ -242,6 +244,7 @@ def run() -> int:
         expect(authority.get_by_role("button", name="Approve", exact=True)).to_be_disabled()
         authority.locator("select").nth(1).select_option("t-owned")
         authority.get_by_role("button", name="Approve", exact=True).click()
+        expect(page.locator(".sheet-backdrop.confirm .dialog")).to_contain_text("release its staff member or stop its bound execution")
         page.locator(".sheet-backdrop.confirm .dialog button").last.click()
         expect(authority).to_contain_text("Active approvals: 2", timeout=5000)
         assert authority_requests[2]["bundle_id"] == "execution" and authority_requests[2]["task_id"] == "t-owned"
@@ -252,6 +255,13 @@ def run() -> int:
         page.locator(".sheet-backdrop.confirm .dialog button").last.click()
         expect(authority).to_contain_text("Active approvals: 1", timeout=5000)
         assert authority_requests[-1]["expected_grant_generation"] == 1 and authority_requests[-1]["reason"] == "Reduce coordinator scope"
+        authority.locator("select").first.select_option("watch")
+        expect(authority).to_contain_text("matching events may wake the coordinator")
+        authority.get_by_role("button", name="Approve", exact=True).click()
+        expect(page.locator(".sheet-backdrop.confirm .dialog")).to_contain_text("without a new approval each time")
+        page.locator(".sheet-backdrop.confirm .dialog button").last.click()
+        expect(authority).to_contain_text("Active approvals: 2", timeout=5000)
+        assert authority_requests[-1]["bundle_id"] == "watch" and authority_requests[-1]["task_id"] is None
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "authority controls overflow the phone"
         host_list_item[0] = True
         hosts = page.locator("details.project-runtime-hosts")

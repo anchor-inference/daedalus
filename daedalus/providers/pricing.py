@@ -14,24 +14,34 @@ V4.1 Flash and billed at the Flash price. ``deepseek-v4-pro`` keeps its own pric
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any
+
+
+def complete_usage(raw: dict[str, Any]) -> bool:
+    counts = next((keys for keys in (("prompt_tokens", "completion_tokens"), ("input_tokens", "output_tokens"))
+                   if all(key in raw for key in keys)), None)
+    return counts is not None and all(type(raw[key]) is int and raw[key] >= 0 for key in counts)
+
 
 DEEPSEEK_PEAK_UTC = ("01:00-04:00", "06:00-10:00")
 
 
 @dataclass(slots=True)
 class ModelPricing:
-    input: float = 0.0
-    output: float = 0.0
-    cache_hit: float = 0.0
+    input: float | None = 0.0
+    output: float | None = 0.0
+    cache_hit: float | None = 0.0
     input_off_peak: float | None = None
     output_off_peak: float | None = None
     cache_hit_off_peak: float | None = None
     peak_utc: tuple[str, ...] = ()
     """Peak windows as ``HH:MM-HH:MM`` in UTC; empty means the base prices always apply."""
     peak_weekdays_only: bool = True
+    input_limit: int | None = None
+    limit_source: str = ""
+    """The provider-enforced billable input ceiling; a prompt size estimate cannot reserve money."""
 
     def off_peak_at(self, now: datetime) -> bool:
         if not self.peak_utc:
@@ -48,7 +58,7 @@ class ModelPricing:
                 return False
         return True
 
-    def cost(self, usage: dict[str, Any], *, now: datetime | None = None) -> float:
+    def cost(self, usage: dict[str, Any], *, now: datetime | None = None) -> float | None:
         cache_hit = int(usage.get("cache_read_tokens") or 0)
         prompt = int(usage.get("input_tokens") or 0)
         fresh = max(prompt - cache_hit, 0)
@@ -57,6 +67,10 @@ class ModelPricing:
         p_in = self.input_off_peak if off and self.input_off_peak is not None else self.input
         p_out = self.output_off_peak if off and self.output_off_peak is not None else self.output
         p_hit = self.cache_hit_off_peak if off and self.cache_hit_off_peak is not None else self.cache_hit
+        if p_in is None or p_out is None:
+            return None
+        # An omitted cache rate cannot make cached input free; reserve the fresh-input rate.
+        p_hit = p_in if p_hit is None else p_hit
         return (fresh * p_in + cache_hit * p_hit + output * p_out) / 1_000_000
 
     @classmethod
@@ -72,9 +86,11 @@ class ModelPricing:
             peak = (f"{end}-{start}",)
             weekdays_only = False
         return cls(
-            input=float(entry.get("input", 0.0)),
-            output=float(entry.get("output", 0.0)),
-            cache_hit=float(entry.get("cache_hit", 0.0)),
+            input_limit=int(entry["input_limit"]) if entry.get("input_limit") is not None else None,
+            limit_source=str(entry.get("limit_source") or ""),
+            input=_opt(entry.get("input")),
+            output=_opt(entry.get("output")),
+            cache_hit=_opt(entry.get("cache_hit")),
             input_off_peak=_opt(entry.get("input_off_peak")),
             output_off_peak=_opt(entry.get("output_off_peak")),
             cache_hit_off_peak=_opt(entry.get("cache_hit_off_peak")),
@@ -89,6 +105,8 @@ def _opt(value: Any) -> float | None:
 
 def _deepseek(input_: float, cache_hit: float, output: float) -> ModelPricing:
     return ModelPricing(
+        input_limit=1_048_576,
+        limit_source="https://api-docs.deepseek.com/quick_start/pricing/",
         input=input_,
         cache_hit=cache_hit,
         output=output,
@@ -116,7 +134,14 @@ def pricing_table(kind: str, configured: dict[str, dict[str, Any]]) -> dict[str,
     """Built-in prices for ``kind`` overlaid with the operator's ``pricing`` entries."""
     table = dict(BUILTIN.get(kind, {}))
     for model, entry in configured.items():
-        table[model] = ModelPricing.from_entry(entry)
+        merged = asdict(table[model]) if model in table else {}
+        for field in ("input", "output", "cache_hit"):
+            # A changed base price cannot retain the previous rate card's cheaper schedule.
+            # Unchanged prices and the independent provider input ceiling remain available.
+            scheduled = f"{field}_off_peak"
+            if field in entry and scheduled not in entry:
+                merged[scheduled] = None
+        table[model] = ModelPricing.from_entry({**merged, **entry})
     return table
 
 

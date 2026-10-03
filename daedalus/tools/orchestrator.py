@@ -9,6 +9,7 @@ office; a replaced orchestrator is refused with the name of its successor.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, ClassVar
 
 from protocore.contracts.tools import Tool, ToolContext
@@ -28,6 +29,13 @@ WATCH_EVENTS = (
 def _hook(context: ToolContext):  # type: ignore[no-untyped-def]
     manager = services_for(context).extra.get("manager")
     return manager.service_hooks.get("orchestrator") if manager is not None else None
+
+
+def _command_id(context: ToolContext) -> str:
+    call_id = context.metadata.get("tool_call_id")
+    if not isinstance(call_id, str) or not call_id:
+        raise ValueError("the host did not identify this watch command")
+    return "watch-tool:" + hashlib.sha256(f"{context.run_id}:{call_id}".encode()).hexdigest()
 
 
 async def _call(tool_context: ToolContext, operation: str, /, **kwargs: Any) -> ToolResult:
@@ -791,6 +799,10 @@ class Watch(Tool):
         )
 
     async def invoke(self, context: ToolContext, arguments: dict[str, Any]) -> ToolResult:
+        try:
+            command_id = _command_id(context)
+        except ValueError as exc:
+            return error(context, str(exc))
         return await _call(
             context,
             "watch",
@@ -800,6 +812,7 @@ class Watch(Tool):
             once=bool(arguments.get("once")),
             note=str(arguments.get("note") or ""),
             deadline_at=arguments.get("deadline_at"),
+            client_operation_id=command_id,
         )
 
 
@@ -812,7 +825,11 @@ class Watch(Tool):
     description="Cancel a wake-up or remove a watch, by the id the state block or WakeMe/Watch gave you.",
 )
 async def unwatch(context: ToolContext, id: str) -> ToolResult:
-    return await _call(context, "unwatch", id=id)
+    try:
+        command_id = _command_id(context)
+    except ValueError as exc:
+        return error(context, str(exc))
+    return await _call(context, "unwatch", id=id, client_operation_id=command_id)
 
 
 TOOLS = [

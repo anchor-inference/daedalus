@@ -129,6 +129,14 @@ class TaskLaunchEffect:
                 return EffectOutcome("failed", "the task brief is incomplete")
             project = await team.project(member.project_id)
             folder = team.folder_for(project, member, task)
+            if member.isolation == "worktree":
+                from daedalus.extensions.staff import no_worktree  # Lazy: staff installs the launch handler
+                from daedalus.host.worktrees import WorktreeRefused
+
+                try:
+                    await team.worktrees.check(folder)
+                except WorktreeRefused as exc:
+                    return EffectOutcome("failed", no_worktree(member, task, exc))
             if claim.payload["resume_from"]:
                 await team._resume_source(member, task, folder, claim.payload["resume_from"])
             async with self.app.db.transaction() as conn:

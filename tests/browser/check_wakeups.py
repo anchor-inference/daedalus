@@ -31,12 +31,12 @@ PID = "b4k3ry20f0c5"
 WORDS = {
     "en": {
         "tab": "Wake-ups", "add": "Wake-up", "note": "Look at the deploy log", "set": "Set", "by_orch": "set by the orchestrator", "by_you": "left by you", "daily": "Every day", "cancel": "Cancel this wake-up",
-        "watch": "Watch", "max": "When Max finishes a turn → wake the orchestrator", "budget": "fired too often within an hour", "off": "Switch this watch off", "remove": "Remove this watch",
+        "watch": "Watch", "max": "When Max finishes a turn → wake the orchestrator", "expired": "reached its end time", "off": "Switch this watch off", "remove": "Remove this watch", "approve": "Approve watch",
         "kind": "A CI result", "notify": "Notify me", "add_watch": "Add", "cooldown": "at most every 10 min",
     },
     "ru": {
         "tab": "Будильники", "add": "Будильник", "note": "Посмотреть журнал выкладки", "set": "Поставить", "by_orch": "поставил оркестратор", "by_you": "оставили вы", "daily": "Каждый день", "cancel": "Отменить будильник",
-        "watch": "Наблюдение", "max": "Max: ход закончен → разбудить оркестратор", "budget": "слишком часто срабатывало за час", "off": "Выключить наблюдение", "remove": "Снять наблюдение",
+        "watch": "Наблюдение", "max": "Max: ход закончен → разбудить оркестратор", "expired": "Срок наблюдения истёк", "off": "Выключить наблюдение", "remove": "Снять наблюдение", "approve": "Подтвердить наблюдение",
         "kind": "Результат CI", "notify": "Уведомить меня", "add_watch": "Добавить", "cooldown": "не чаще раза в 10 мин",
     },
 }
@@ -87,13 +87,19 @@ def panel(page: Page, lang: str) -> None:
 
     # The watches: each a sentence with its bounds; the one that stopped itself says why.
     rows = page.locator(".panel .watch-row")
-    expect(rows).to_have_count(2)
+    expect(rows).to_have_count(4)
     expect(rows.nth(0)).to_contain_text(words["max"])
     expect(rows.nth(0)).to_contain_text(words["cooldown"])
-    expect(rows.nth(1)).to_contain_text(words["budget"])
+    expect(rows.nth(1)).to_contain_text(words["expired"])
+    rows.nth(0).get_by_role("button", name=words["approve"]).click()
+    page.locator(".sheet-backdrop.confirm .dialog button").last.click()
+    expect(rows.nth(0).get_by_role("button", name=words["off"])).to_be_enabled()
+    approved = focus.watched[-1]
+    assert approved[0] == "update" and approved[1]["id"] == "w1" and approved[1]["enabled"] is True and approved[1]["expected_condition_revision"] == 1 and approved[1]["client_operation_id"], approved
     rows.nth(0).get_by_role("button", name=words["off"]).click()
     expect(rows.nth(0)).to_have_class(re.compile(r"\boff\b"))
-    assert focus.watched[-1] == ("update", {"id": "w1", "enabled": False}), focus.watched
+    paused = focus.watched[-1]
+    assert paused[0] == "update" and paused[1]["id"] == "w1" and paused[1]["enabled"] is False and paused[1]["expected_condition_revision"] == 2 and paused[1]["client_operation_id"], paused
 
     # A new watch sends only what its kind has.
     page.locator(".panel .wakeup-section-head button", has_text=words["watch"]).click()
@@ -106,11 +112,14 @@ def panel(page: Page, lang: str) -> None:
     sheet.locator("#watch-cooldown").fill("30")
     sheet.locator(".sheet-foot .btn.primary", has_text=words["add_watch"]).click()
     expect(sheet).to_have_count(0)
-    assert focus.watched[-1] == ("create", {"when": {"event": "ci", "provider": "github", "conclusion": "failure"}, "then": {"action": "notify", "title": "CI red", "text": "", "level": "normal"}, "cooldown_minutes": 30, "once": False, "note": ""}), focus.watched
-    expect(rows).to_have_count(3)
+    created = focus.watched[-1]
+    assert created[0] == "create" and created[1]["when"] == {"event": "ci", "provider": "github", "conclusion": "failure"} and created[1]["then"] == {"action": "notify", "title": "CI red", "text": "", "level": "normal"}, created
+    assert created[1]["cooldown_minutes"] == 30 and created[1]["once"] is False and created[1]["expected_collection_revision"] == 1 and created[1]["client_operation_id"], created
+    expect(rows).to_have_count(5)
     rows.nth(1).get_by_role("button", name=words["remove"]).click()
-    expect(rows).to_have_count(2)
-    assert focus.watched[-1] == ("delete", {"id": "w2"}), focus.watched
+    expect(rows).to_have_count(4)
+    removed = focus.watched[-1]
+    assert removed[0] == "delete" and removed[1]["id"] == "w2" and removed[1]["expected_condition_revision"] == 1 and removed[1]["client_operation_id"], removed
     fits(page, f"{lang} watches panel")
 
 
@@ -134,7 +143,7 @@ def phone(page: Page, lang: str) -> None:
     page.locator(".wakeup-section-head button", has_text=words["watch"]).click()
     sheet = page.locator(".sheet.watch-sheet")
     expect(sheet).to_be_visible()
-    for field in ("#watch-kind", "#watch-staff", "#watch-cooldown", "#watch-note"):
+    for field in ("#watch-kind", "#watch-staff", "#watch-cooldown", "#watch-deadline", "#watch-note"):
         size = page.evaluate(f"parseFloat(getComputedStyle(document.querySelector('{field}')).fontSize)")
         assert size >= 16, f"{lang} phone: {field} is {size}px, which makes Safari zoom"
     fits(page, f"{lang} phone watch sheet")

@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import mimetypes
 import os
 import re
@@ -125,6 +126,7 @@ from daedalus.staff_runtime import LiveSession
 from daedalus.stores import pairing, passkeys
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.harness import HarnessStore
+from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.media import MEDIA_TENANT
 from daedalus.stores.projects import Project
 from daedalus.stores.sqlite import ReceiptConflict, message_text
@@ -785,11 +787,13 @@ def per_million(pricing: Any) -> dict[str, float]:
         return {}
     out: dict[str, float] = {}
     for name, key in (("input", "prompt"), ("output", "completion"), ("cache_hit", "input_cache_read")):
+        if isinstance(pricing.get(key), bool):
+            continue
         try:
             value = float(pricing[key])
         except (KeyError, TypeError, ValueError):
             continue
-        if value >= 0:
+        if value >= 0 and math.isfinite(value * 1_000_000):
             out[name] = round(value * 1_000_000, 6)
     return out
 
@@ -807,10 +811,10 @@ def model_entry(raw: dict[str, Any]) -> dict[str, Any]:
         entry["name"] = name.strip()
     top = raw.get("top_provider") if isinstance(raw.get("top_provider"), dict) else {}
     context = raw.get("context_length") or top.get("context_length")
-    if isinstance(context, int | float) and context > 0:
+    if type(context) in (int, float) and 0 < context <= 2**63 - 1 and math.isfinite(context):
         entry["context_length"] = int(context)
     max_output = top.get("max_completion_tokens")
-    if isinstance(max_output, int | float) and max_output > 0:
+    if type(max_output) in (int, float) and 0 < max_output <= 2**63 - 1 and math.isfinite(max_output):
         entry["max_output_tokens"] = int(max_output)
     architecture = raw.get("architecture") if isinstance(raw.get("architecture"), dict) else {}
     modalities = architecture.get("input_modalities")
@@ -4173,18 +4177,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.get("/api/limits/spend")
     async def limits_spend(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """Priced spend per provider and in total since ``limits.total_since``, next to the caps."""
+        """Observed spend since the counter reset, with unreleased quotes from every date."""
         limits = app.config.limits
-        since = limits.total_since or None
-        rows = await app.db.fetchall(
-            "SELECT provider_id, sum(cost_usd) usd, sum(cost_usd IS NULL) unmetered FROM usage_events" + (" WHERE at >= ?" if since else "") + " GROUP BY provider_id",
-            (since,) if since else (),
+        return await InferenceBudget(app.db).spend_view(
+            since=limits.total_since or None, total_cap=limits.usd_total,
+            provider_caps=limits.usd_total_per_provider,
         )
-        per_provider = {r["provider_id"]: {"spent_usd": round(float(r["usd"] or 0.0), 4), "unmetered": int(r["unmetered"] or 0), "cap_usd": float(limits.usd_total_per_provider.get(r["provider_id"], 0) or 0)} for r in rows}
-        for pid, cap in limits.usd_total_per_provider.items():
-            per_provider.setdefault(pid, {"spent_usd": 0.0, "unmetered": 0, "cap_usd": float(cap or 0)})
-        total, unmetered = await manager.spend(since=since)
-        return {"since": limits.total_since, "total": {"spent_usd": round(total, 4), "unmetered": unmetered, "cap_usd": limits.usd_total}, "per_provider": per_provider}
 
     @api.post("/api/limits/reset-total")
     async def limits_reset_total(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

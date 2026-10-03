@@ -34,10 +34,17 @@ class ApprovalBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_entity_revision: int = Field(ge=1)
+    expected_step_revision: int = Field(ge=1)
+    expected_source_contract_revision: int = Field(ge=1)
+    expected_input_digest: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
     client_operation_id: str = Field(min_length=1, max_length=160)
 
 
-class CancelBody(ApprovalBody):
+class CancelBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_entity_revision: int = Field(ge=1)
+    client_operation_id: str = Field(min_length=1, max_length=160)
     reason: str = Field(min_length=1, max_length=1000)
 
 
@@ -84,6 +91,9 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             return await workflows().approve_command(
                 Principal.operator(who), run_id, node_id,
                 expected_entity_revision=body.expected_entity_revision,
+                expected_step_revision=body.expected_step_revision,
+                expected_source_contract_revision=body.expected_source_contract_revision,
+                expected_input_digest=body.expected_input_digest,
                 client_operation_id=body.client_operation_id,
             )
         except KeyError as exc:
@@ -93,16 +103,47 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         except ControlDenied as exc:
             raise HTTPException(403, str(exc)) from exc
 
-    @api.get("/api/board-workflows/runs/{run_id}")
-    async def get_workflow(run_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    @api.get("/api/board/{task_id}/board-workflows")
+    async def list_task_workflows(task_id: str, before: str = "",
+                                  who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            Principal.operator(who)
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
         workflows()
-        row = await app.db.fetchone("SELECT * FROM board_workflow_runs WHERE id = ?", (run_id,))
-        if row is None:
-            raise HTTPException(404, "no such workflow")
-        steps = await app.db.fetchall(
-            "SELECT * FROM board_workflow_steps WHERE run_id = ? ORDER BY node_id", (run_id,)
+        task = await app.db.fetchone("SELECT project_id,entity_revision FROM board_tasks WHERE id = ?", (task_id,))
+        if task is None or task["project_id"] is None:
+            raise HTTPException(404, "no such project task")
+        cursor_at = ""
+        cursor_id = ""
+        if before:
+            cursor = await app.db.fetchone(
+                "SELECT created_at,id FROM board_workflow_runs WHERE id = ? AND task_id = ?", (before, task_id),
+            )
+            if cursor is None:
+                raise HTTPException(404, "no such workflow cursor")
+            cursor_at, cursor_id = cursor["created_at"], cursor["id"]
+        rows = await app.db.fetchall(
+            "SELECT id,project_id,task_id,definition_digest,status,created_at,updated_at "
+            "FROM board_workflow_runs WHERE task_id = ? "
+            "AND (? = '' OR (created_at,id) < (?,?)) ORDER BY created_at DESC,id DESC LIMIT 21",
+            (task_id, before, cursor_at, cursor_id),
         )
-        return {**dict(row), "steps": [dict(step) for step in steps]}
+        items = [{**dict(row), "run_id": row["id"]} for row in rows[:20]]
+        return {"task_id": task_id, "project_id": task["project_id"],
+                "task_entity_revision": task["entity_revision"], "items": items,
+                "next_before": items[-1]["run_id"] if len(rows) > 20 else None}
+
+    @api.get("/api/board-workflows/runs/{run_id}")
+    async def get_workflow(run_id: str, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            Principal.operator(who)
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
+        try:
+            return await workflows().inspect(run_id)
+        except KeyError as exc:
+            raise HTTPException(404, "no such workflow") from exc
 
     @api.post("/api/board-workflows/runs/{run_id}/reconcile")
     async def reconcile_workflow(run_id: str, body: ReconcileBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

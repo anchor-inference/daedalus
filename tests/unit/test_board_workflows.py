@@ -67,6 +67,58 @@ async def test_workflow_start_is_receipted_and_replayed_once(tmp_path) -> None:
         await db.close()
 
 
+async def test_approval_requires_current_host_source_and_replays_exact_receipt(tmp_path) -> None:
+    db = Database(tmp_path / "state.sqlite")
+    await db.open()
+    try:
+        await db.execute("INSERT INTO projects(id,name,created_at) VALUES ('project','Project','now')")
+        await db.execute(
+            "INSERT INTO board_tasks(id,title,status,project_id,created_at,updated_at) "
+            "VALUES ('task-a','Task','todo','project','now','now')"
+        )
+        principal = Principal.operator({"via": "token", "user_id": 1})
+        workflows = BoardWorkflows(db)
+        definition = {
+            "nodes": [{"id": "operator", "kind": "approval", "task_id": "task-a"}],
+            "edges": [], "budget": {"max_steps": 1, "max_parallel": 1},
+        }
+        started = await workflows.start(
+            principal, "project", "task-a", definition,
+            expected_entity_revision=1, client_operation_id="start-approval",
+        )
+        run_id = started["run_id"]
+        await workflows.advance_run(run_id)
+        before = (await workflows.inspect(run_id))["steps"][0]
+        assert before["can_approve"] and before["current_input_digest"] == before["input_digest"]
+        await db.execute("UPDATE board_tasks SET contract_revision = 2 WHERE id = 'task-a'")
+        revision = (await db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'task-a'"))["entity_revision"]
+        stale = (await workflows.inspect(run_id))["steps"][0]
+        assert not stale["source_current"] and not stale["can_approve"]
+        with pytest.raises(WorkflowRefused, match="source or contract changed"):
+            await workflows.approve_command(
+                principal, run_id, "operator", expected_entity_revision=revision,
+                expected_step_revision=before["step_revision"],
+                expected_source_contract_revision=before["source_contract_revision"],
+                expected_input_digest=before["current_input_digest"], client_operation_id="old-approval",
+            )
+        await workflows.advance_run(run_id)
+        current = (await workflows.inspect(run_id))["steps"][0]
+        assert current["can_approve"] and current["step_revision"] > before["step_revision"]
+        assert current["source_contract_revision"] == 2
+        payload = {
+            "expected_entity_revision": revision, "expected_step_revision": current["step_revision"],
+            "expected_source_contract_revision": current["source_contract_revision"],
+            "expected_input_digest": current["current_input_digest"],
+            "client_operation_id": "current-approval",
+        }
+        approved = await workflows.approve_command(principal, run_id, "operator", **payload)
+        assert approved["status"] == "completed"
+        assert approved == await workflows.approve_command(principal, run_id, "operator", **payload)
+        assert (await workflows.inspect(run_id))["steps"][0]["receipt_id"] == approved["receipt_id"]
+    finally:
+        await db.close()
+
+
 async def test_cross_task_run_advances_from_accepted_result_and_explicit_approval(tmp_path) -> None:
     db = Database(tmp_path / "state.sqlite")
     await db.open()
@@ -104,8 +156,14 @@ async def test_cross_task_run_advances_from_accepted_result_and_explicit_approva
         progressed = await workflows.advance_run(started["run_id"])
         assert progressed["status"] == "running" and progressed["changed"] == 2
         revision = (await db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'task-a'"))["entity_revision"]
+        inspected = await workflows.inspect(started["run_id"])
+        gate = next(step for step in inspected["steps"] if step["node_id"] == "gate")
+        assert gate["can_approve"] and gate["source_current"]
         approved = await workflows.approve_command(
             principal, started["run_id"], "gate", expected_entity_revision=revision,
+            expected_step_revision=gate["step_revision"],
+            expected_source_contract_revision=gate["source_contract_revision"],
+            expected_input_digest=gate["current_input_digest"],
             client_operation_id="approve-cross-task-gate",
         )
         assert approved["status"] == "completed"

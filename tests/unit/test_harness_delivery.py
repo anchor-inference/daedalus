@@ -10,6 +10,7 @@ sessions against the fake CLIs in real terminals are in the adapters' own test m
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
@@ -138,7 +139,8 @@ class Rig:
         return await asyncio.wait_for(final(), timeout)
 
 
-def rig(prompt: Prompt, cfg: HarnessConfig, *, status: str = "idle", in_transcript: bool = False) -> Rig:
+def rig(prompt: Prompt, cfg: HarnessConfig, *, status: str = "idle", in_transcript: bool = False,
+        guard_send: Any = None) -> Rig:
     adapter: Any = GrokAdapter() if prompt.harness == "grok" else ClaudeCodeAdapter()
     current = [status]
     session: Any = SimpleNamespace(staff_session_id="ss-1", term=prompt, finished=False, open={}, changed=asyncio.Event(), launch=SimpleNamespace(launch_id="l1"))
@@ -150,7 +152,12 @@ def rig(prompt: Prompt, cfg: HarnessConfig, *, status: str = "idle", in_transcri
         return in_transcript
 
     receipts, facts = Receipts(), Facts()
-    worker = DeliveryWorker(adapter, session, lookup, receipts, facts, lambda: cfg, found)  # type: ignore[arg-type]
+    @asynccontextmanager
+    async def allow_send(_: str):
+        yield
+
+    worker = DeliveryWorker(adapter, session, lookup, receipts, facts, lambda: cfg, found,
+                            guard_send or allow_send)  # type: ignore[arg-type]
     prompt.worker = worker
     return Rig(prompt, worker, receipts, facts, current)
 
@@ -177,6 +184,30 @@ async def test_a_one_line_message_is_submitted_by_one_enter_and_never_retried(ha
     assert r.receipts.of("sm-1") == ["written", "submitted", "acknowledged"]
     assert r.prompt.enters == 1 and r.facts.enters == {"sm-1": 1}
     assert r.prompt.submitted == ["please also check the footer"]
+
+
+async def test_queued_message_rechecks_permission_between_paste_and_enter(running: Any) -> None:
+    revoked = False
+
+    class RevokingPrompt(Prompt):
+        async def write(self, **kwargs: Any) -> None:
+            nonlocal revoked
+            await super().write(**kwargs)
+            if kwargs.get("paste") is not None:
+                revoked = True
+
+    @asynccontextmanager
+    async def guard(_: str):
+        if revoked:
+            raise PermissionError("queued watch permission withdrawn")
+        yield
+
+    prompt = RevokingPrompt("claude")
+    r = running(rig(prompt, config(), guard_send=guard))
+    r.worker.put(Pending("sm-watch", "check the result", "after_turn", "orchestrator"))
+    assert await r.settled("sm-watch") == "failed"
+    assert prompt.pastes == 1 and prompt.enters == 0 and prompt.submitted == []
+    assert "permission withdrawn" in r.receipts.error("sm-watch")
 
 
 @pytest.mark.parametrize("harness", ["claude", "grok"])

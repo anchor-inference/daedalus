@@ -15,7 +15,7 @@ import { Icon } from "../icons";
 import { plural, t, useLang } from "../i18n";
 import { LangPicker, Switch } from "../ui/index";
 import { errorText, numInput } from "../ui";
-import { BLANK, ModelEntry, Picked, REASONING_EFFORTS, prefilled, presetIdFor, priceFor, retyped } from "../models";
+import { BLANK, ModelEntry, Picked, PricingDraft, REASONING_EFFORTS, prefilled, presetIdFor, priceFor, pricingFromDraft, retyped } from "../models";
 
 export type { ModelEntry, Picked } from "../models";
 export { presetIdFor } from "../models";
@@ -268,10 +268,14 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
   const [typed, setTyped] = useState("");
   const [preset, setPreset] = useState<Preset>(BLANK);
   const [pricing, setPricing] = useState<ModelEntry["pricing"] | null>(null);
+  const [priceDraft, setPriceDraft] = useState<PricingDraft | null>(null);
+  const [priceError, setPriceError] = useState("");
+  const [settings, setSettings] = useState<Settings | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.get<OnboardingState>("/api/onboarding").then(setState).catch((e) => toast(errorText(e)));
+    api.get<Settings>("/api/settings").then(setSettings).catch(() => setSettings(null));
   }, [toast]);
 
   async function lookup(id: string) {
@@ -296,6 +300,8 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
     setLookupError("");
     setTyped("");
     setPricing(null);
+    setPriceDraft(null);
+    setPriceError("");
     setPreset({ ...BLANK, provider: id === CUSTOM || id === LLAMACPP ? "" : id });
     if (id !== CUSTOM && id !== LLAMACPP) void lookup(id);
   }
@@ -316,11 +322,24 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
   function pickModel(entry: ModelEntry) {
     setTyped(entry.id);
     setPricing(entry.pricing ?? null);
+    setPriceDraft({
+      model: entry.id,
+      input: entry.pricing?.input === undefined ? "" : String(entry.pricing.input),
+      output: entry.pricing?.output === undefined ? "" : String(entry.pricing.output),
+      cache_hit: entry.pricing?.cache_hit === undefined ? "" : String(entry.pricing.cache_hit),
+      input_limit: "",
+      limit_source: "",
+    });
+    setPriceError("");
     setPreset((p) => prefilled(entry, p));
   }
 
   function typeModel(value: string) {
     setTyped(value);
+    if (value.trim() !== typed.trim()) {
+      setPriceDraft(null);
+      setPriceError("");
+    }
     const next = retyped(value, { preset, pricing });
     if (next.preset === preset) return;
     setPreset(next.preset);
@@ -330,18 +349,38 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
   const model = (typed.trim() || preset.model).trim();
   const onEndpoint = !!provider && provider !== CUSTOM && provider !== LLAMACPP;
   const ready = onEndpoint && !!model;
+  const providerKind = state?.providers.find((entry) => entry.id === provider)?.kind;
+  const hasSpendCap = !!settings && (settings.limits.usd_per_run > 0 || settings.limits.usd_total > 0
+    || (settings.limits.usd_total_per_provider?.[provider] ?? 0) > 0);
+  const visibleDraft = priceDraft?.model === model ? priceDraft : null;
+
+  function editPrice(field: Exclude<keyof PricingDraft, "model">, value: string) {
+    if (!model) return;
+    setPriceDraft((current) => ({
+      ...(current?.model === model ? current : { model, input: "", output: "", cache_hit: "", input_limit: "", limit_source: "" }),
+      [field]: value,
+    }));
+    setPriceError("");
+  }
 
   async function save() {
     if (!ready) return;
+    const parsed = pricingFromDraft(model, priceDraft);
+    if (parsed.error) {
+      setPriceError(t(`add.pricing.error.${parsed.error}`));
+      return;
+    }
     setBusy(true);
     const id = presetIdFor(provider, model);
     try {
-      // The price the endpoint published is stored on the provider, where costs are read from: a
-      // model with no price anywhere is recorded as unmetered and counts against no cap.
-      const price = priceFor(model, { preset, pricing });
+      // Discovery rates and an operator-declared provider ceiling belong to the exact model id;
+      // an editable preset context window cannot bound the provider's billable input.
+      const price = parsed.entry ?? priceFor(model, { preset, pricing });
       if (price) {
         const current = (await api.get<Settings>("/api/settings")).providers[provider]?.pricing ?? {};
-        await api.put<Settings>(`/api/providers/${encodeURIComponent(provider)}`, { pricing: { ...current, [model]: price } });
+        const previous = current[model];
+        const priorEntry = previous && typeof previous === "object" && !Array.isArray(previous) ? previous as Record<string, unknown> : {};
+        await api.put<Settings>(`/api/providers/${encodeURIComponent(provider)}`, { pricing: { ...current, [model]: { ...priorEntry, ...price } } });
       }
       const next = await api.put<Settings>(`/api/presets/${encodeURIComponent(id)}`, { ...preset, provider, model });
       onSaved(id, next);
@@ -403,6 +442,27 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
             <span>{t("add.images")}</span>
           </label>
         </div>
+        {onEndpoint && providerKind !== "llamacpp" && <>
+          {hasSpendCap && <p className="sub">{t("add.pricing.capHint")}</p>}
+          <details className="sheet-section addmodel-pricing">
+            <summary>{t("add.pricing.title")}</summary>
+            <p className="sub">{t("add.pricing.help")}</p>
+            <div className="mfields">
+              <label className="mfield"><span>{t("add.pricing.input")}</span>
+                <input className="field num" type="number" min={0} step="any" value={visibleDraft?.input ?? ""} onChange={(e) => editPrice("input", e.target.value)} /></label>
+              <label className="mfield"><span>{t("add.pricing.output")}</span>
+                <input className="field num" type="number" min={0} step="any" value={visibleDraft?.output ?? ""} onChange={(e) => editPrice("output", e.target.value)} /></label>
+              <label className="mfield"><span>{t("add.pricing.cache")}</span>
+                <input className="field num" type="number" min={0} step="any" value={visibleDraft?.cache_hit ?? ""} onChange={(e) => editPrice("cache_hit", e.target.value)} /></label>
+              <label className="mfield"><span>{t("add.pricing.ceiling")}</span>
+                <input className="field num" type="number" min={1} step={1} value={visibleDraft?.input_limit ?? ""} onChange={(e) => editPrice("input_limit", e.target.value)} /></label>
+              <label className="mfield wide"><span>{t("add.pricing.source")}</span>
+                <input className="field" value={visibleDraft?.limit_source ?? ""} onChange={(e) => editPrice("limit_source", e.target.value)} maxLength={500} placeholder={t("add.pricing.sourceHint")} /></label>
+            </div>
+            <p className="sub">{t("add.pricing.windowSeparate")}</p>
+          </details>
+          {priceError && <p className="result-warning" role="alert">{priceError}</p>}
+        </>}
       </Step>
 
       <div className="addmodel-foot">

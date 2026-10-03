@@ -420,36 +420,72 @@ function AddProviderRow({ kinds, onAdd, toast }: { kinds: string[]; onAdd: (id: 
   );
 }
 
-type SpendView = { since: string; total: { spent_usd: number; unmetered: number; cap_usd: number }; per_provider: Record<string, { spent_usd: number; unmetered: number; cap_usd: number }> };
+type SpendBalance = { spent_usd: number; unmetered: number; cap_usd: number; reserved_usd: number; uncertain_usd: number; reserved_count: number; uncertain_count: number };
+type SpendView = { since: string; total: SpendBalance; per_provider: Record<string, SpendBalance> };
+
+function spendBalance(value: unknown): value is SpendBalance {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Record<string, unknown>;
+  return ["spent_usd", "unmetered", "cap_usd", "reserved_usd", "uncertain_usd", "reserved_count", "uncertain_count"]
+    .every((field) => typeof entry[field] === "number" && Number.isFinite(entry[field]) && (entry[field] as number) >= 0);
+}
+
+function usd(value: number): string {
+  return `$${value.toFixed(value > 0 && value < 0.01 ? 6 : 2)}`;
+}
 
 function TotalCaps({ s, save }: { s: Settings; save: (patch: any) => Promise<void> }) {
   const [spend, setSpend] = useState<SpendView | null>(null);
+  const [spendState, setSpendState] = useState<"loading" | "ready" | "failed">("loading");
+  const requestSeq = useRef(0);
   const load = useCallback(() => {
-    api.get<SpendView>("/api/limits/spend").then(setSpend).catch(() => setSpend(null));
+    const sequence = ++requestSeq.current;
+    setSpend(null);
+    setSpendState("loading");
+    api.get<SpendView>("/api/limits/spend").then((result) => {
+      if (sequence !== requestSeq.current) return;
+      if (!spendBalance(result.total) || !result.per_provider || typeof result.per_provider !== "object"
+          || !Object.values(result.per_provider).every(spendBalance)) throw new Error("incomplete spend balance");
+      setSpend(result);
+      setSpendState("ready");
+    }).catch(() => { if (sequence === requestSeq.current) { setSpend(null); setSpendState("failed"); } });
   }, []);
   useEffect(load, [load, s.limits.total_since, s.limits.usd_total, s.limits.usd_total_per_provider]);
   const providers = Object.keys(s.providers ?? {});
   const caps = s.limits.usd_total_per_provider ?? {};
   const since = s.limits.total_since ? shortDateTime(s.limits.total_since) : t("settings.limits.since.start");
   const spent = spend?.total.spent_usd ?? 0;
+  const held = spend?.total.reserved_usd ?? 0;
+  const engaged = spent + held;
   const cap = s.limits.usd_total;
   return (
     <>
+      {spendState === "failed" && <div className="result-warning" role="status">{t("settings.limits.balance.failed")} <button type="button" className="linkbtn" onClick={load}>{t("common.retry")}</button></div>}
       {/* Only with a cap: "of $0, no cap" has no bar to draw and no share to read. */}
       {cap > 0 && spend && (
-        <div className="spend-meter" data-level={spent >= cap ? "bad" : spent >= cap * 0.8 ? "warn" : "ok"}>
+        <div className="spend-meter" data-level={engaged >= cap ? "bad" : engaged >= cap * 0.8 ? "warn" : "ok"}>
           <div className="spend-meter-line">
-            <b>{t("settings.limits.meter", { spent: `$${spent.toFixed(2)}`, cap: `$${cap.toFixed(2)}` })}</b>
+            <b>{held > 0 ? t("settings.limits.meter.held", { spent: usd(spent), held: usd(held), cap: usd(cap) })
+              : t("settings.limits.meter", { spent: usd(spent), cap: usd(cap) })}</b>
             <span className="sub">{t("settings.limits.since", { when: since })}</span>
           </div>
-          <span className="spend-meter-track" aria-hidden><span style={{ width: `${Math.min(100, (spent / cap) * 100)}%` }} /></span>
+          <span className="spend-meter-track" aria-hidden><span style={{ width: `${Math.min(100, (engaged / cap) * 100)}%` }} /></span>
         </div>
       )}
-      <Row title={t("settings.limits.total")} htmlFor="limits-total" desc={t("settings.limits.total.sub", { sum: spend ? `$${spent.toFixed(2)}` : "…" })} stack>
+      {spend && (held > 0 || spend.total.unmetered > 0) && <details className="sheet-section"><summary>{t("settings.limits.balance.details")}</summary>
+        {held > 0 && <p className="sub">{t("settings.limits.balance.held", { amount: usd(held), n: spend.total.reserved_count })}</p>}
+        {spend.total.uncertain_usd > 0 && <p className="sub">{t("settings.limits.balance.uncertain", { amount: usd(spend.total.uncertain_usd), n: spend.total.uncertain_count })}</p>}
+        {spend.total.unmetered > 0 && <p className="sub">{t("settings.limits.balance.unpriced", { n: spend.total.unmetered })}</p>}
+        {held > 0 && <p className="sub">{t("settings.limits.balance.reset")}</p>}
+      </details>}
+      <Row title={t("settings.limits.total")} htmlFor="limits-total" desc={spend ? t("settings.limits.total.sub", { sum: usd(spent) }) : t(spendState === "loading" ? "settings.limits.balance.loading" : "settings.limits.balance.unknown")} stack>
         <NumInput id="limits-total" label={t("settings.limits.total")} value={cap} min={0} step={1} unit="USD" onSave={(v) => save({ limits: { usd_total: v } })} />
       </Row>
       {providers.map((pid) => (
-        <Row key={pid} title={t("settings.limits.provider", { id: pid })} desc={t("settings.limits.spent", { sum: spend?.per_provider[pid] ? `$${spend.per_provider[pid].spent_usd.toFixed(2)}` : "$0.00" })} stack data-provider={pid}>
+        <Row key={pid} title={t("settings.limits.provider", { id: pid })} desc={spend ? spend.per_provider[pid]?.reserved_usd > 0
+          ? t("settings.limits.provider.held", { spent: usd(spend.per_provider[pid].spent_usd), held: usd(spend.per_provider[pid].reserved_usd) })
+          : t("settings.limits.spent", { sum: usd(spend.per_provider[pid]?.spent_usd ?? 0) })
+          : t(spendState === "loading" ? "settings.limits.balance.loading" : "settings.limits.balance.unknown")} stack data-provider={pid}>
           <NumInput label={t("settings.limits.provider", { id: pid })} value={caps[pid] ?? 0} min={0} step={1} unit="USD" onSave={(v) => save({ limits: { usd_total_per_provider: { [pid]: v } } })} />
         </Row>
       ))}

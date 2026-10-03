@@ -4,7 +4,7 @@
 // centre of focus mode and the right panel's tab (`compact`), like every page of a project.
 
 import { useState } from "react";
-import { api, type ProjectWatch, type Wakeup, type WatchList } from "../api";
+import { api, ApiError, type ProjectWatch, type Wakeup, type WatchList } from "../api";
 import { Skeleton } from "../ui/components";
 import { Sheet } from "../ui/dialogs";
 import { absTime, describeCron, relTime, relTimeLong, untilShort } from "../format";
@@ -12,7 +12,7 @@ import { t } from "../i18n";
 import { Icon } from "../icons";
 import { PageHeader } from "../shell";
 import { invalidate, useOffline, useQuery } from "../store";
-import { errorText } from "../ui";
+import { confirmAsync, errorText } from "../ui";
 import { useFocus, useProject, wakeupsKey, watchesKey } from "./data";
 import { NOTIFY_LEVELS, TASK_STATUSES, TELL_TIMINGS, WATCH_ACTIONS, WATCH_KINDS, emptyWatch, watchBody, watchThenText, watchWhenText, type WatchDraft, type WatchKind } from "./watchmodel";
 import { WAKEUP_WHENS, wakeupBody, wakeupWhen, type WakeupDraft, type WakeupWhen } from "./wakeupmodel";
@@ -158,39 +158,136 @@ function WakeupSheet({ projectId, unverified, onClose, toast }: { projectId: str
 // ── watches ──────────────────────────────────────────────────────────────────────────────────
 
 /** Why a watch switched itself off, as the host names it. */
-const STOPPED = ["once", "budget", "pattern", "slow_pattern"];
+const STOPPED = ["once", "budget", "pattern", "slow_pattern", "expired", "needs_approval"];
+const DELIVERY = ["pending", "reconciling", "delivered", "failed", "cancelled"];
+
+type WatchWrite = { method: "POST" | "PATCH" | "DELETE"; path: string; body: Record<string, unknown>; label: string };
+type WriteWatch = (method: WatchWrite["method"], path: string, fields: Record<string, unknown>, label: string, watch?: ProjectWatch, onSuccess?: () => void) => Promise<boolean>;
+
+function savedWatchWrite(projectId: string): WatchWrite | null {
+  const base = watchesKey(projectId);
+  try {
+    const value = JSON.parse(sessionStorage.getItem(`daedalus.watch.write.${projectId}`) ?? "null");
+    const suffix = typeof value?.path === "string" && value.path.startsWith(base) ? value.path.slice(base.length) : null;
+    return (suffix === "" || (typeof suffix === "string" && /^\/[^/]+$/.test(suffix)))
+      && ["POST", "PATCH", "DELETE"].includes(value.method)
+      && typeof value.body?.client_operation_id === "string" && typeof value.label === "string"
+      ? value as WatchWrite : null;
+  } catch { return null; }
+}
+
+function useWatchWrites(projectId: string, data: WatchList | undefined, failed: boolean, refresh: () => void, toast: (text: string) => void) {
+  const offline = useOffline();
+  const [pending, setPending] = useState<WatchWrite | null>(() => savedWatchWrite(projectId));
+  const [conflict, setConflict] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [needsRefresh, setNeedsRefresh] = useState(false);
+  const known = Number.isInteger(data?.collection_revision) && Number.isInteger(data?.project_entity_revision) && (data?.project_entity_revision ?? 0) > 0;
+  const ready = !offline && !failed && known && !pending && !conflict && !busy && !needsRefresh;
+
+  function remember(value: WatchWrite | null) {
+    setPending(value);
+    try {
+      if (value) sessionStorage.setItem(`daedalus.watch.write.${projectId}`, JSON.stringify(value));
+      else sessionStorage.removeItem(`daedalus.watch.write.${projectId}`);
+    } catch { /* the mounted form retains the same request until this page closes */ }
+  }
+
+  async function run(intent: WatchWrite, onSuccess?: () => void): Promise<boolean> {
+    if (offline || failed || busy) return false;
+    setBusy(true);
+    try {
+      const receipt = await api.request<{ receipt_id: string }>(intent.method, intent.path, intent.body);
+      if (!receipt || typeof receipt.receipt_id !== "string") throw new Error(t("focus.watches.badReceipt"));
+      remember(null);
+      setConflict(false);
+      setNeedsRefresh(true);
+      invalidate(watchesKey(projectId));
+      onSuccess?.();
+      toast(intent.label);
+      const fresh = await api.get<WatchList>(watchesKey(projectId));
+      if (!Number.isInteger(fresh.collection_revision) || !Number.isInteger(fresh.project_entity_revision))
+        throw new Error(t("focus.watches.unverified"));
+      await refresh();
+      setNeedsRefresh(false);
+      return true;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        remember(null);
+        setConflict(true);
+        refresh();
+      } else if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+        remember(null);
+      }
+      toast(errorText(error));
+      return false;
+    } finally { setBusy(false); }
+  }
+
+  const write: WriteWatch = (method, path, fields, label, watch, onSuccess) => {
+    if (!ready || !data) return Promise.resolve(false);
+    if (watch && !Number.isInteger(watch.condition_revision)) return Promise.resolve(false);
+    const body = { ...fields, client_operation_id: crypto.randomUUID(),
+      ...(method === "POST" ? { expected_collection_revision: data.collection_revision }
+        : { expected_entity_revision: data.project_entity_revision, expected_condition_revision: watch?.condition_revision }) };
+    const intent: WatchWrite = { method, path, body, label };
+    remember(intent);
+    return run(intent, onSuccess);
+  };
+
+  async function review() {
+    if (offline || busy) return;
+    setBusy(true);
+    try {
+      const fresh = await api.get<WatchList>(watchesKey(projectId));
+      if (!Number.isInteger(fresh.collection_revision) || !Number.isInteger(fresh.project_entity_revision)) return;
+      await refresh();
+      setConflict(false);
+      setNeedsRefresh(false);
+    } catch (error) { toast(errorText(error)); }
+    finally { setBusy(false); }
+  }
+
+  return { write, retry: () => pending ? run(pending) : Promise.resolve(false), review, pending, conflict, busy, needsRefresh, ready, offline, known };
+}
 
 function WatchesSection({ projectId, toast }: { projectId: string; toast: (text: string) => void }) {
   const offline = useOffline();
   const { data, error, refresh } = useQuery<WatchList>(watchesKey(projectId), { pollMs: 30000, staleMs: 5000 });
   const [adding, setAdding] = useState(false);
   const list = data?.watches ?? [];
+  const writes = useWatchWrites(projectId, data, !!error, refresh, toast);
 
   async function act(w: ProjectWatch, change: "toggle" | "remove") {
-    if (offline || error) return;
-    try {
-      if (change === "remove") await api.delete(`${watchesKey(projectId)}/${enc(w.id)}`);
-      else await api.patch(`${watchesKey(projectId)}/${enc(w.id)}`, { enabled: !w.enabled });
-      toast(t(change === "remove" ? "focus.watches.removed" : w.enabled ? "focus.watches.paused" : "focus.watches.resumed"));
-      invalidate(watchesKey(projectId));
-    } catch (e) {
-      toast(errorText(e));
-    }
+    if (!writes.ready || !Number.isInteger(w.condition_revision)) return;
+    if (change === "toggle" && (!w.authority_state || (w.authority_state === "capability_unavailable" && !w.enabled))) return;
+    const needsApproval = w.authority_state === "needs_approval" || w.stopped === "needs_approval";
+    if (change === "toggle" && needsApproval && !(await confirmAsync(t("focus.watches.approval.title"), {
+      body: t("focus.watches.approval.preview", { condition: watchWhenText(w.when), action: watchThenText(w.then),
+        cooldown: w.cooldown_minutes, until: w.deadline_at ? absTime(w.deadline_at) : t("focus.watches.deadline.none") }),
+      action: t("focus.watches.approval.action"),
+    }))) return;
+    await writes.write(change === "remove" ? "DELETE" : "PATCH", `${watchesKey(projectId)}/${enc(w.id)}`,
+      change === "remove" ? {} : { enabled: needsApproval ? true : !w.enabled }, t(change === "remove" ? "focus.watches.removed" : needsApproval ? "focus.watches.approval.recorded" : w.enabled ? "focus.watches.paused" : "focus.watches.resumed"), w);
   }
 
   return (
     <section className="wakeup-section" aria-label={t("focus.watches.title")}>
       {(offline || error) && <div className="result-warning" role="status">{t("focus.connectionRequired")}</div>}
+      {!error && data && !writes.known && <div className="result-warning" role="status">{t("focus.watches.unverified")}</div>}
+      {writes.pending && <div className="result-warning" role="status">{t("focus.watches.pendingWrite", { action: writes.pending.label })} <button type="button" className="linkbtn" disabled={offline || !!error || writes.busy} onClick={() => void writes.retry()}>{t("project.write.retry")}</button></div>}
+      {writes.conflict && <div className="result-warning" role="status">{t("focus.watches.conflict")} <button type="button" className="linkbtn" disabled={offline || writes.busy} onClick={() => void writes.review()}>{t("project.write.review")}</button></div>}
+      {writes.needsRefresh && <div className="result-warning" role="status">{t("focus.watches.unverified")} <button type="button" className="linkbtn" disabled={offline || writes.busy} onClick={() => void writes.review()}>{t("common.retry")}</button></div>}
       <div className="wakeup-section-head">
         <span className="wakeup-section-title">{t("focus.watches.title")}</span>
         <span className="grow" />
-        <button className="btn small" disabled={offline || !!error} onClick={() => setAdding(true)}><Icon name="plus" size={14} /> {t("focus.watches.add")}</button>
+        <button className="btn small" disabled={!writes.ready} onClick={() => setAdding(true)}><Icon name="plus" size={14} /> {t("focus.watches.add")}</button>
       </div>
       {!data && !error && <Skeleton rows={2} />}
       {error && !data && <div className="empty"><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
       {data && list.length === 0 && <div className="empty calm">{t("focus.watches.empty")}</div>}
       {list.map((w) => (
-        <div key={w.id} className={`wakeup-row watch-row ${w.enabled ? "" : "off"}`}>
+        <div key={w.id} className={`wakeup-row watch-row ${w.enabled && w.authority_state === "current" ? "" : "off"}`}>
           <Icon name="eye" size={16} />
           <div className="wakeup-main">
             <div className="wakeup-name">{watchWhenText(w.when)} → {watchThenText(w.then)}</div>
@@ -202,27 +299,37 @@ function WatchesSection({ projectId, toast }: { projectId: string; toast: (text:
               {w.fire_count ? t("focus.watches.fired", { n: w.fire_count, when: relTimeLong(w.last_fired_at) }) : t("focus.watches.notyet")}
             </div>
             <div className="wakeup-meta sub faint">{t(w.created_by === "operator" ? "focus.wakeups.by.operator" : "focus.wakeups.by.orchestrator")} · {relTime(w.created_at)}</div>
+            {w.deadline_at && <div className="wakeup-meta sub">{t("focus.watches.until", { when: absTime(w.deadline_at) })}</div>}
             {!w.enabled && w.stopped && <div className={`wakeup-meta ${w.stopped === "once" ? "sub" : "watch-stopped"}`}>{t(STOPPED.includes(w.stopped) ? `focus.watches.stopped.${w.stopped}` : "focus.watches.stopped.other")}</div>}
+            {w.authority_state === "needs_approval" && w.stopped !== "needs_approval" && <div className="wakeup-meta watch-stopped" role="status">{t("focus.watches.authorityBlocked")}</div>}
+            {w.authority_state === "capability_unavailable" && <div className="wakeup-meta watch-stopped" role="status">{t("focus.watches.capabilityUnavailable")}</div>}
+            {!w.authority_state && <div className="wakeup-meta watch-stopped" role="status">{t("focus.watches.authorityUnknown")}</div>}
             {w.last_error && !w.stopped && <div className="wakeup-meta watch-stopped">{t("focus.watches.error", { error: w.last_error })}</div>}
+            {w.latest_delivery && <div className={`wakeup-meta ${w.latest_delivery.status === "failed" ? "watch-stopped" : "sub"}`} role="status">
+              {t(DELIVERY.includes(w.latest_delivery.status) ? `focus.watches.delivery.${w.latest_delivery.status}` : "focus.watches.delivery.unknown")}
+              {w.latest_delivery.last_error && <details><summary>{t("focus.watches.delivery.reason")}</summary>{w.latest_delivery.last_error}</details>}
+            </div>}
           </div>
-          <button className="iconbtn small quiet" disabled={offline || !!error} onClick={() => void act(w, "toggle")} title={t(w.enabled ? "focus.watches.pause" : "focus.watches.resume")} aria-label={t(w.enabled ? "focus.watches.pause" : "focus.watches.resume")} aria-pressed={!w.enabled}>
-            <Icon name={w.enabled ? "pause" : "play"} size={16} />
+          <button className="iconbtn small quiet" disabled={!writes.ready || !Number.isInteger(w.condition_revision) || !w.authority_state || (w.authority_state === "capability_unavailable" && !w.enabled)} onClick={() => void act(w, "toggle")} title={t(w.authority_state === "needs_approval" || w.stopped === "needs_approval" ? "focus.watches.approval.action" : w.enabled ? "focus.watches.pause" : "focus.watches.resume")} aria-label={t(w.authority_state === "needs_approval" || w.stopped === "needs_approval" ? "focus.watches.approval.action" : w.enabled ? "focus.watches.pause" : "focus.watches.resume")} aria-pressed={!w.enabled || w.authority_state !== "current"}>
+            <Icon name={w.enabled && w.authority_state !== "needs_approval" ? "pause" : "play"} size={16} />
           </button>
-          <button className="iconbtn small quiet" disabled={offline || !!error} onClick={() => void act(w, "remove")} title={t("focus.watches.remove")} aria-label={t("focus.watches.remove")}>
+          <button className="iconbtn small quiet" disabled={!writes.ready || !Number.isInteger(w.condition_revision)} onClick={() => void act(w, "remove")} title={t("focus.watches.remove")} aria-label={t("focus.watches.remove")}>
             <Icon name="close" size={16} />
           </button>
         </div>
       ))}
-      {adding && <WatchSheet projectId={projectId} providers={data?.providers ?? []} minCooldown={data?.min_cooldown_minutes ?? 1} unverified={!!error} onClose={() => setAdding(false)} toast={toast} />}
+      {adding && <WatchSheet projectId={projectId} providers={data?.providers ?? []} minCooldown={data?.min_cooldown_minutes ?? 1} unverified={!!error} onClose={() => setAdding(false)} write={writes.write} canWrite={writes.ready} pending={writes.pending} retry={async () => { if (await writes.retry()) setAdding(false); }} conflict={writes.conflict} review={writes.review} needsRefresh={writes.needsRefresh} />}
     </section>
   );
 }
 
-function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, toast }: { projectId: string; providers: string[]; minCooldown: number; unverified: boolean; onClose: () => void; toast: (text: string) => void }) {
+function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, write, canWrite, pending, retry, conflict, review, needsRefresh }: { projectId: string; providers: string[]; minCooldown: number; unverified: boolean; onClose: () => void; write: WriteWatch; canWrite: boolean; pending: WatchWrite | null; retry: () => Promise<void>; conflict: boolean; review: () => Promise<void>; needsRefresh: boolean }) {
   const offline = useOffline();
   const { project } = useProject(projectId);
   const { team, board, terminals } = useFocus(projectId);
   const [draft, setDraft] = useState<WatchDraft>(() => ({ ...emptyWatch(), provider: providers[0] ?? "" }));
+  const [deadlineChoice, setDeadlineChoice] = useState("");
+  const [deadlineAt, setDeadlineAt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const set = (patch: Partial<WatchDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const staff = (team?.staff ?? []).filter((m) => !m.archived_at);
@@ -235,18 +342,10 @@ function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, to
   const staffKind = kind.startsWith("staff_");
 
   async function save() {
-    if (!request || offline || unverified) return;
+    if (!request || offline || unverified || !canWrite) return;
     setBusy(true);
-    try {
-      await api.post(watchesKey(projectId), request);
-      toast(t("focus.watches.added"));
-      invalidate(watchesKey(projectId));
-      onClose();
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      setBusy(false);
-    }
+    await write("POST", watchesKey(projectId), { ...request, deadline_at: deadlineAt }, t("focus.watches.added"), undefined, onClose);
+    setBusy(false);
   }
   const staffSelect = (id: string, value: string, onChange: (v: string) => void, anyone: boolean) => (
     <select id={id} className="field" value={value} onChange={(e) => onChange(e.target.value)}>
@@ -256,6 +355,9 @@ function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, to
   );
   return (
     <Sheet title={t("focus.watches.new")} onClose={onClose} size="narrow" className="watch-sheet">
+      {pending && <div className="result-warning" role="status">{t("focus.watches.pendingWrite", { action: pending.label })} <button type="button" className="linkbtn" disabled={offline || unverified || busy} onClick={() => void retry()}>{t("project.write.retry")}</button></div>}
+      {conflict && <div className="result-warning" role="status">{t("focus.watches.conflict")} <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => void review()}>{t("project.write.review")}</button></div>}
+      {needsRefresh && <div className="result-warning" role="status">{t("focus.watches.unverified")} <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => void review()}>{t("common.retry")}</button></div>}
       <label className="field" htmlFor="watch-kind">{t("focus.watches.when")}</label>
       <select id="watch-kind" className="field" value={kind} onChange={(e) => set({ kind: e.target.value as WatchKind })}>
         {WATCH_KINDS.map((k) => <option key={k} value={k}>{t(`focus.watches.kind.${k}`)}</option>)}
@@ -388,13 +490,25 @@ function WatchSheet({ projectId, providers, minCooldown, unverified, onClose, to
           <span>{t("focus.watches.once.field")}</span>
         </label>
       </div>
+      <label className="field" htmlFor="watch-deadline">{t("focus.watches.deadline")}</label>
+      <select id="watch-deadline" className="field" value={deadlineChoice} onChange={(e) => {
+        const choice = e.target.value;
+        setDeadlineChoice(choice);
+        setDeadlineAt(choice ? new Date(Date.now() + Number(choice) * 60 * 60 * 1000).toISOString() : null);
+      }}>
+        <option value="">{t("focus.watches.deadline.none")}</option>
+        <option value="24">{t("focus.watches.deadline.day")}</option>
+        <option value="168">{t("focus.watches.deadline.week")}</option>
+        <option value="720">{t("focus.watches.deadline.month")}</option>
+      </select>
+      {deadlineAt && <div className="sub form-hint">{t("focus.watches.until", { when: absTime(deadlineAt) })}</div>}
       <label className="field" htmlFor="watch-note">{t("focus.watches.note")}</label>
       <input id="watch-note" className="field" maxLength={300} value={draft.note} onChange={(e) => set({ note: e.target.value })} />
       {request && <div className="sub preview-line">{watchWhenText(request.when)} → {watchThenText(request.then)}</div>}
       <div className="sub form-hint">{t("focus.watches.hint")}</div>
       <div className="sheet-foot">
         <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" disabled={busy || !request || offline || unverified} onClick={() => void save()}>{t("focus.watches.set")}</button>
+        <button className="btn primary" disabled={busy || !request || offline || unverified || !canWrite} onClick={() => void save()}>{t("focus.watches.set")}</button>
       </div>
     </Sheet>
   );

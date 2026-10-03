@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from daedalus.config import ProviderConfig, RuntimeConfig, Settings
+from daedalus.providers.admission import InferenceAdmission
 from daedalus.providers.openai_compat import (
     ImageLoader,
     OpenAICompatibleProvider,
@@ -40,10 +41,12 @@ class ProviderRegistry:
         *,
         usage_sink: UsageSink | None = None,
         image_loader: ImageLoader | None = None,
+        admission: InferenceAdmission | None = None,
     ) -> None:
         self._settings = settings
         self._usage_sink = usage_sink
         self._image_loader = image_loader
+        self._admission = admission
         self._providers: dict[str, OpenAICompatibleProvider] = {}
         self._retired: list[OpenAICompatibleProvider] = []
         self._users: dict[OpenAICompatibleProvider, int] = {}
@@ -77,6 +80,7 @@ class ProviderRegistry:
                 usage_sink=self._usage_sink,
                 image_loader=self._image_loader,
                 images_for=lambda model, pid=provider_id: self._images_for(pid, model),
+                admission=self._admission,
             )
         self._config = config
         self._retired.extend(p for pid, p in self._providers.items() if pid not in fresh)

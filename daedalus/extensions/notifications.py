@@ -42,6 +42,7 @@ from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
 
 from daedalus.config import NotificationsConfig
+from daedalus.extensions.watch_egress import WatchEgressDenied, watch_notification_guard
 from daedalus.host.engine_factory import TENANT
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.notify_routing import (
@@ -601,6 +602,28 @@ class NotificationService:
 
     async def _release_row(self, row_id: int) -> None:
         """Announce a held row, routed as if it had just arrived: the operator may have sat down since."""
+        try:
+            async with watch_notification_guard(self.db, row_id):
+                await self._release_row_fenced(row_id)
+        except WatchEgressDenied as exc:
+            # A held watch record was never shown. Preserve its history but never release its
+            # channels after the exact standing grant or condition was withdrawn.
+            async with self.db.transaction() as conn:
+                cursor = await conn.execute(
+                    "UPDATE notifications SET held_until = NULL,resolved_at = ?,resolution = ?,updated_at = ?"
+                    " WHERE id = ? AND held_until IS NOT NULL AND event_seq IS NULL AND resolved_at IS NULL",
+                    (_now(), "watch approval withdrawn", _now(), row_id),
+                )
+                suppressed = cursor.rowcount > 0
+                await cursor.close()
+                if suppressed and exc.delivery_id:
+                    await conn.execute(
+                        "UPDATE watch_deliveries SET status = 'failed',last_error = ?,updated_at = ?"
+                        " WHERE id = ? AND status IN ('reconciling','delivered')",
+                        ("watch approval withdrawn before notification release", _now(), exc.delivery_id),
+                    )
+
+    async def _release_row_fenced(self, row_id: int) -> None:
         async with self.db.transaction() as conn:
             cursor = await conn.execute(
                 "UPDATE notifications SET held_until = NULL WHERE id = ? AND held_until IS NOT NULL AND resolved_at IS NULL", (row_id,),

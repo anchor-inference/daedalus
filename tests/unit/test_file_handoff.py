@@ -52,7 +52,7 @@ from tests.support.waiting import until_await
 from tests.unit.test_cli_staff_runtime import harness_config
 from tests.unit.test_orchestrator import Rig, _idle, events, events_messages, rig
 from tests.unit.test_session_runner import ScriptedProvider
-from tests.unit.test_staff_runtime import board_task
+from tests.unit.test_staff_runtime import board_task, close_team
 
 SPEC = "# Подсказки free/pro\nFree users get three hints a day; pro users get all of them.\n"
 SPEC_NAME = "подсказки-free-pro.md"
@@ -124,6 +124,7 @@ async def chain(settings: Settings, db: Database, tmp_path: Path) -> AsyncIterat
     daemon for its command-line staff — seen from a container installation."""
     r = await rig(settings, db, tmp_path)
     if r.manager.projects.local_env != "container":
+        await close_team(r.manager)
         await r.manager.close()
         pytest.skip("a host folder is out of reach only in a container installation")
     model = Routed()
@@ -171,6 +172,7 @@ async def chain(settings: Settings, db: Database, tmp_path: Path) -> AsyncIterat
         if runtime is not None:
             runtime.close()
         await terminals.close()
+        await close_team(r.manager)
         await r.manager.close()
         await ptyd.stop()
         shutil.rmtree(root, ignore_errors=True)
@@ -419,6 +421,7 @@ async def test_a_daedalus_member_in_the_container_gets_a_copy_in_its_worktree_an
         assert any("kept for the team: " + kept.handle in t for t in results), results
         await until_await(lambda: _idle(r.manager, sid), "the orchestrator's turn ended")
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -519,6 +522,7 @@ async def test_a_read_only_folder_takes_no_files(settings: Settings, db: Databas
         with pytest.raises(FileRefused, match="no host terminal bridge|has none"):
             handoff.host()
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -588,6 +592,7 @@ async def test_the_app_reads_a_file_by_handle_downloads_it_and_sees_its_audit(se
             projected = (await client.get(f"/api/projects/{r.project.id}/files", headers=headers)).json()
             assert [f["handle"] for f in projected["files"]] == [stored.handle]
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -617,4 +622,5 @@ async def test_a_local_delivery_is_atomic_named_by_its_bytes_and_never_follows_a
         with pytest.raises(FileRefused, match="nothing here reaches the moon"):
             await handoff.deliver([spec], env="moon", cwd=str(member), box="t1", actor="orchestrator")
     finally:
+        await close_team(r.manager)
         await r.manager.close()

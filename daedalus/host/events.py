@@ -279,6 +279,7 @@ class StaffStatus(TypedDict):
     waiting_for: NotRequired[str]
     detail: NotRequired[str]
     actor: NotRequired[str]
+    actor_id: NotRequired[str]
 
 
 class FileRef(TypedDict):
@@ -339,6 +340,7 @@ TaskChange = TypedDict(
         "to": NotRequired[str],
         "assignee_staff_id": NotRequired[str],
         "actor": NotRequired[str],
+        "actor_id": NotRequired[str],
         "error": NotRequired[str],
     },
 )

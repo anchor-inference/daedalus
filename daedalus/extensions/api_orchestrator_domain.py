@@ -35,6 +35,7 @@ from daedalus.extensions.orchestrator_domain import (
     workflow_readiness,
 )
 from daedalus.extensions.planning import create_plan, token_readiness
+from daedalus.host.events import AppEvent
 from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.outbox import OutboxStore
 
@@ -165,8 +166,45 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
             revision = body["expected_entity_revision"]
             if isinstance(revision, bool) or not isinstance(revision, int):
                 raise ValueError("expected_entity_revision must be an integer")
-            return await store().mutate(Principal.operator(who), scope, operation, command_id,
-                                      revision, Entity("task", task_id), body, effect)
+            principal = Principal.operator(who)
+            bus = app.manager.bus
+            events: list[AppEvent] = []
+
+            async def affected(conn: Any) -> dict[str, Any]:
+                cursor = await conn.execute(
+                    "WITH RECURSIVE affected(id) AS (SELECT ? UNION SELECT t.id FROM board_tasks t"
+                    " JOIN json_each(t.depends_on) d JOIN affected a ON d.value = a.id"
+                    " WHERE t.project_id IS ?) SELECT t.id,t.title,t.status,t.project_id,t.assignee_staff_id"
+                    " FROM board_tasks t JOIN affected a ON a.id = t.id", (task_id, scope.id if scope.kind == "project" else None),
+                )
+                rows = await cursor.fetchall()
+                await cursor.close()
+                return {row["id"]: row for row in rows}
+
+            async def commit(conn: Any, mutation: Any) -> dict[str, Any]:
+                before = await affected(conn)
+                response = await effect(conn, mutation)
+                for identity, task in (await affected(conn)).items():
+                    prior = before.get(identity)
+                    changed = prior is not None and prior["status"] != task["status"]
+                    if identity != task_id and not changed:
+                        continue
+                    payload = {"task_id": identity, "title": task["title"], "actor": principal.origin_class,
+                               "actor_id": principal.actor_id}
+                    events.append(await bus.persist_in(conn, "task.changed", payload,
+                                                       project_id=task["project_id"], staff_id=task["assignee_staff_id"]))
+                    if changed:
+                        events.append(await bus.persist_in(conn, "task.moved", {**payload, "from": prior["status"],
+                                                           "to": task["status"]}, project_id=task["project_id"],
+                                                           staff_id=task["assignee_staff_id"]))
+                return response
+
+            async with bus.transaction_guard():
+                response = await store().mutate(principal, scope, operation, command_id,
+                                               revision, Entity("task", task_id), body, commit)
+                for event in events:
+                    bus.announce_committed(event)
+            return response
         except KeyError as exc:
             if str(exc).strip("'") in ("client_operation_id", "expected_entity_revision"):
                 raise HTTPException(422, "client_operation_id and expected_entity_revision are required") from exc

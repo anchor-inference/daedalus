@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -18,19 +19,32 @@ from protocore.contracts.types import MessageRole, TextBlock
 from daedalus.config import ORCHESTRATOR_ONLY_TOOLS, ORCHESTRATOR_TOOLS, ModelPresetConfig, Settings
 from daedalus.extensions.api import build_app
 from daedalus.extensions.board import Board
+from daedalus.extensions.coordinator_authority import approve_authority, install_authority
 from daedalus.extensions.orchestrator import NotCurrent, Orchestrators, fit
+from daedalus.extensions.orchestrator_domain import apply_goal_revision
 from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.extensions.staff import Team
 from daedalus.host import prompts
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.session_runner import SessionManager
-from daedalus.staff_runtime import FakeStaffRuntime, ReadPage
+from daedalus.staff_runtime import ReadPage
+from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
+from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.projects import Project, ProjectError
+from tests.support.authorized_launch import operator_assignment
 from tests.support.models import DEFAULT_PRESET, FALLBACK_PRESET, VISION_PRESET
 from tests.support.waiting import until_await
 from tests.unit.test_session_runner import ScriptedProvider, _manager
-from tests.unit.test_staff_runtime import BRIEF, board_task, project_with, repository, team_for
+from tests.unit.test_staff_runtime import (
+    BRIEF,
+    ObservedFakeStaffRuntime,
+    board_task,
+    close_team,
+    project_with,
+    repository,
+    team_for,
+)
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -52,8 +66,36 @@ class Rig:
         assert found is not None
         return found
 
-    async def call(self, session_id: str, operation: str, /, **kwargs: Any) -> Any:
-        return await self.orch.service(operation, session_id=session_id, **kwargs)
+    async def call(self, session_id: str, operation: str, /, *, wait_for_admission: bool = True, **kwargs: Any) -> Any:
+        if operation in ("tasks", "assign") and (operation == "assign" or kwargs.get("op") in
+                                                   ("create", "update", "move")):
+            kwargs.setdefault("client_operation_id", f"fixture:{uuid.uuid4().hex}")
+            task_id = kwargs.get("task_id")
+            scope = Scope("project", self.project.id)
+            entity = Entity("task", task_id) if task_id and kwargs.get("op") != "create" else Entity("collection", self.project.id)
+            field = "expected_entity_revision" if entity.kind == "task" else "expected_collection_revision"
+            try:
+                revision = await ControlStore(self.manager.db).revision(scope, entity)
+            except KeyError:
+                revision = 1  # The production command still reports the unknown task.
+            kwargs.setdefault(field, revision)
+        response = await self.orch.service(operation, session_id=session_id, **kwargs)
+        if operation == "assign" and wait_for_admission:
+            action = await self.manager.db.fetchone(
+                "SELECT e.id FROM effect_outbox e JOIN operation_receipts r ON r.id = e.receipt_id"
+                " WHERE r.client_operation_id = ? AND r.scope_id = ? AND r.actor_id = ?",
+                (kwargs["client_operation_id"] + ":launch", self.project.id, f"orchestrator:{session_id}"),
+            )
+            assert action is not None, "assignment must leave its durable launch command"
+
+            async def settled() -> bool:
+                view = await OutboxStore(self.manager.db).view(action["id"])
+                if view["state"] in ("failed", "unknown", "cancelled"):
+                    raise AssertionError(f"fixture assignment was not admitted: {view}")
+                return view["state"] == "completed" or view.get("wait_reason") is not None
+
+            await until_await(settled, "the assignment was admitted or deferred for an observed reason")
+        return response
 
 
 async def rig(settings: Settings, db: Database, tmp_path: Path, script: list[dict[str, Any]] | None = None) -> Rig:
@@ -66,6 +108,7 @@ async def rig(settings: Settings, db: Database, tmp_path: Path, script: list[dic
     app.config = manager.config
     board = Board(app)
     app.extensions["board"] = board
+    install_authority(app)
     manager.service_hooks["board"] = board.service
     orch = Orchestrators(app)
     app.extensions["orchestrator"] = orch
@@ -85,6 +128,40 @@ async def events_messages(manager: SessionManager, session_id: str) -> list[str]
         if message.role is MessageRole.user and message.metadata.get("daedalus.origin") == "events":
             out.append(prompts.without_turn_context("".join(b.text for b in message.content_blocks if isinstance(b, TextBlock))))
     return out
+
+
+async def set_goal(r: Rig, body: str) -> None:
+    """Revise the goal through the operator's project CAS and durable scope record."""
+    scope = Scope("project", r.project.id)
+    control = ControlStore(r.manager.db)
+    principal = Principal.operator({"via": "token", "user_id": 1})
+    revision = await control.revision(scope, Entity("project", r.project.id))
+    row = await r.manager.db.fetchone("SELECT goal_revision FROM projects WHERE id = ?", (r.project.id,))
+    assert row is not None
+
+    async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
+        return await apply_goal_revision(conn, project_id=r.project.id,
+                                         expected_goal_revision=row["goal_revision"], body=body,
+                                         root_task_ids=[], origin_kind="operator", origin_ref="fixture",
+                                         control=control, principal=principal)
+
+    await control.mutate(principal, scope, "goal.revise", f"fixture-goal:{uuid.uuid4().hex}",
+                         revision, Entity("project", r.project.id), {"body": body,
+                         "expected_goal_revision": row["goal_revision"], "root_task_ids": []}, effect)
+
+
+async def approve_coordinator(r: Rig, session_id: str) -> None:
+    """Issue the fixture coordinator narrow grants from the operator."""
+    operator = Principal.operator({"via": "token", "user_id": 1})
+    scope = Scope("project", r.project.id)
+    expires_at = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    for bundle_id in ("planning", "execution_project", "review"):
+        revision = await ControlStore(r.manager.db).revision(scope, Entity("project", r.project.id))
+        await approve_authority(r.team.app, r.project.id, operator,
+                                client_operation_id=f"fixture-grant:{uuid.uuid4().hex}",
+                                expected_entity_revision=revision,
+                                expected_coordinator_session_id=session_id, bundle_id=bundle_id,
+                                expires_at=expires_at)
 
 
 def last_user_text(provider: ScriptedProvider, index: int = -1) -> str:
@@ -123,6 +200,7 @@ async def test_the_orchestrator_is_given_its_allowlist_and_nobody_else_its_tools
         mode = r.manager.mode_for(state)
         assert mode is not None and mode.max_iterations == r.manager.config.orchestrator.max_iterations
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -156,6 +234,7 @@ async def test_two_enables_at_once_make_one_orchestrator_from_the_installation_d
         with pytest.raises(ProjectError, match="scratch"):
             await r.orch.enable(scratch.project.id)
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -201,6 +280,7 @@ async def test_a_replacement_links_both_ways_retargets_wake_ups_and_retires_the_
         assert moved is not None and moved.routed_to == "operator"
         assert r.orch.queues == {}
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -211,7 +291,7 @@ async def test_the_state_block_shows_the_project_and_stays_within_its_bound(sett
     r = await rig(settings, db, tmp_path)
     try:
         project = await r.orch.enable(r.project.id, autonomy="normal")
-        await r.manager.projects.set_brief(r.project.id, "goals", "A bakery site with online orders", "operator")
+        await set_goal(r, "A bakery site with online orders")
         await r.manager.projects.set_brief(r.project.id, "allowed_without_operator", "npm install of listed packages", "operator")
         for name in ("Ira", "Max", "Naya"):
             await r.manager.staff.hire(r.project.id, name=name, role=f"{name} work")
@@ -230,6 +310,7 @@ async def test_the_state_block_shows_the_project_and_stays_within_its_bound(sett
         small = await r.orch.project_state(await r.refreshed())
         assert len(small) <= 1200 and small.startswith("Project: Bakery") and "more (" in small
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -261,6 +342,7 @@ async def test_compaction_of_an_orchestrator_is_told_what_to_keep(settings: Sett
             await r.manager.compact(session_id)
         assert told == {sid: prompts.ORCHESTRATOR_COMPACTION, ordinary.session.id: ""}
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -291,6 +373,7 @@ async def test_the_model_is_the_projects_then_the_settings_default_then_the_stro
         ordinary = await r.manager.create_session("work", project_id=r.project.id)
         assert r.orch.preset_for(ordinary) is None and not await r.orch.model_chosen(ordinary.session.id, FALLBACK_PRESET)
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -301,7 +384,9 @@ async def test_brief_keeps_the_allowances_the_operators_and_a_host_folder_needs_
     r = await rig(settings, db, tmp_path)
     try:
         sid = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
-        assert "written" in await r.call(sid, "brief", section="goals", body="Online orders")
+        with pytest.raises(Refused, match="scope revision"):
+            await r.call(sid, "brief", section="goals", body="Online orders")
+        await set_goal(r, "Online orders")
         assert "Online orders" in await r.call(sid, "brief")
         with pytest.raises(Refused, match="operator's alone"):
             await r.call(sid, "brief", section="allowed_without_operator", body="everything")
@@ -332,6 +417,7 @@ async def test_brief_keeps_the_allowances_the_operators_and_a_host_folder_needs_
         assert "files are untouched" in await r.call(sid, "folders", op="remove", folder="docs")
         assert docs.is_dir()
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -358,23 +444,28 @@ async def test_peek_reads_inside_the_walls_bounded_and_never_writes(settings: Se
         with pytest.raises(Refused, match="no folder"):
             await r.call(sid, "peek", op="ls", folder="nowhere")
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
 async def test_tasks_journal_team_and_report_act_for_the_project(settings: Settings, db: Database, tmp_path: Path) -> None:
     r = await rig(settings, db, tmp_path)
     try:
-        runtime = FakeStaffRuntime(kind="daedalus")
+        runtime = ObservedFakeStaffRuntime(kind="daedalus")
+        runtime.manager = r.manager
         r.team.runtimes["daedalus"] = runtime
         sid = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
+        await approve_coordinator(r, sid)
         await r.manager.staff.hire(r.project.id, name="Ada", role="Menu", isolation="shared")
         created = await r.call(sid, "tasks", op="create", title="Menu page", assignee="Ada", **BRIEF)
-        assert "Menu page (Ada)" in created and "Ada: started" in created
+        assert "Menu page (Ada)" in created
         task_id = created.split()[0]
         assert "objective: Add a menu page" in await r.call(sid, "tasks", op="get", task_id=task_id)
         [assigned] = [e for e in await events(r.manager, "task.created") if e.payload["task_id"] == task_id]
-        assert assigned.payload["actor"] == "orchestrator"
-        assert "Ada" in await r.call(sid, "team") and "session" in await r.call(sid, "team", staff="Ada")
+        assert assigned.payload["actor"] == "agent"
+        assert assigned.payload["actor_id"] == f"orchestrator:{sid}"
+        assert "Ada" in await r.call(sid, "team")
+        assert await r.team.live_of(await r.manager.staff.by_name(r.project.id, "Ada")) is None
         assert "concurrency is now 3 of 10" in await r.call(sid, "team", concurrency=3)
         with pytest.raises(Refused, match="cap of 10"):
             await r.call(sid, "team", concurrency=11)
@@ -388,6 +479,7 @@ async def test_tasks_journal_team_and_report_act_for_the_project(settings: Setti
         await r.orch.update(r.project.id, autonomy="ask")
         assert (await r.orch.notification_policy(r.project.id)).hold_seconds == 0
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -411,6 +503,7 @@ async def test_the_tools_answer_from_a_real_turn(settings: Settings, db: Databas
         [ask] = await r.manager.asks.open_for(r.project.id)
         assert "Context: the menu is ready" in ask.text
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -429,7 +522,7 @@ async def test_what_wakes_the_orchestrator_and_what_never_does(settings: Setting
             return await r.orch.classify(pid, await bus.publish(event_type, payload, project_id=pid, **ids))
 
         task = {"task_id": "t1", "title": "Menu"}
-        assert await wake("task.created", {**task, "actor": "orchestrator"}) is None, "its own doing is not news"
+        assert await wake("task.created", {**task, "actor": "agent", "actor_id": f"orchestrator:{sid}"}) is None, "its own doing is not news"
         assert await wake("task.moved", {**task, "from": "todo", "to": "doing", "actor": "operator"}) is not None
         assert (await wake("task.merge_failed", {**task, "actor": "system"})).urgent
         assert await wake("staff.status", {"status": "idle", "previous": "working"}, staff_id=ada.id) is None
@@ -454,6 +547,7 @@ async def test_what_wakes_the_orchestrator_and_what_never_does(settings: Setting
         await r.manager.asks.resolve(direct.id, "operator", {"text": "big"})
         assert await wake("ask.answered", {"request_id": "c2", "request_ref": "ask:s:c2", "via": "app"}, staff_id=ada.id) is None
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -463,14 +557,16 @@ async def test_a_finished_staff_turn_wakes_the_orchestrator_once_with_the_projec
     r = await rig(settings, db, tmp_path, [{"text": "Ada is done; I will look at her work."}])
     try:
         r.manager.config.orchestrator.batch_seconds = 1
-        runtime = FakeStaffRuntime(kind="daedalus", page=ReadPage("The menu page is committed on the branch.", None, False))
+        runtime = ObservedFakeStaffRuntime(kind="daedalus", page=ReadPage("The menu page is committed on the branch.", None, False))
+        runtime.manager = r.manager
         r.team.runtimes["daedalus"] = runtime
         sid = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
+        await approve_coordinator(r, sid)
         ada = await r.manager.staff.hire(r.project.id, name="Ada", role="Menu", isolation="shared")
         # Its own board work is not news to it, so this does not become part of the batch.
         await r.call(sid, "tasks", op="create", title="Photos", objective="o" * 10, deliverable="d" * 10, boundaries="b" * 10, done_when="w" * 10)
         task_id = await board_task(r.manager, r.project, "Menu page")
-        await r.team.assign(ada, task_id, by="operator")
+        await operator_assignment(r.team, ada, task_id)
         live = await r.team.live_of(ada)
         assert live is not None
         await r.team.ingress.status(live, "no_signal")
@@ -490,6 +586,7 @@ async def test_a_finished_staff_turn_wakes_the_orchestrator_once_with_the_projec
         cursor = await db.kv_get(f"orchestrator_cursor:{r.project.id}")
         assert isinstance(cursor, int) and cursor > 0
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -511,6 +608,7 @@ async def test_ask_operator_returns_at_once_and_its_answer_arrives_as_an_event(s
         [batch] = await events_messages(r.manager, sid)
         assert f"the operator answered your request [{ask.short_id}]" in batch and "Postgres" in batch
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -555,4 +653,5 @@ async def test_the_orchestrator_routes_and_the_model_chip(settings: Settings, db
             assert saved.status_code == 200, saved.text
             assert saved.json()["orchestrator"]["preset"] == VISION_PRESET
     finally:
+        await close_team(r.manager)
         await r.manager.close()

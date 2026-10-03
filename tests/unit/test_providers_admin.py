@@ -314,6 +314,17 @@ def test_model_entry_carries_what_the_endpoint_reports() -> None:
     assert model_entry({"id": "m", "object": "model"}) == {"id": "m"}
 
 
+def test_model_discovery_ignores_invalid_prices_and_token_bounds() -> None:
+    for value in (True, False, float("nan"), float("inf"), -1, 1e308):
+        entry = model_entry({"id": "m", "context_length": value,
+                             "top_provider": {"max_completion_tokens": value},
+                             "pricing": {"prompt": value, "completion": value}})
+        assert entry == {"id": "m"}
+    assert model_entry({"id": "free", "pricing": {"prompt": "0", "completion": "0"}})["pricing"] == {
+        "input": 0.0, "output": 0.0,
+    }
+
+
 async def test_lookup_fails_when_no_candidate_answers() -> None:
     import pytest
 

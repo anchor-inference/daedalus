@@ -27,6 +27,58 @@ async def native_session(db: Database) -> None:
                      " VALUES ('run','tenant','native','running','now','now')")
 
 
+async def bound_cli(db: Database, state: str = "running") -> None:
+    await db.execute("UPDATE staff_sessions SET kind = 'cli',terminal_id = 'terminal' WHERE id = 'staff-session'")
+    await db.execute("UPDATE execution_attempts SET runtime_kind = 'cli',provider_session_ref = 'terminal:terminal',"
+                     "runtime_instance = 'daemon-one',state = ?", (state,))
+    await db.execute("INSERT INTO terminals(id,env,owner_kind,cwd,status,created_at,ptyd_instance)"
+                     " VALUES ('terminal','container','staff','/tmp','exited','now','daemon-one')")
+    await db.execute("INSERT INTO terminal_exit_observations VALUES ('terminal','daemon-one','now')")
+
+
+async def test_unexpected_cli_exit_frees_an_unreported_attempt(db: Database) -> None:
+    store, identity, _ = await owner(db)
+    app = SimpleNamespace(db=db, executions=store)
+    try:
+        await bound_cli(db)
+        assert await observe_exit(app, staff_session_id="staff-session", runtime_ref="terminal",
+                                  observed_status="exited", runtime_instance="daemon-one")
+        row = await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,))
+        session = await db.fetchone("SELECT status,ended_at FROM staff_sessions WHERE id = 'staff-session'")
+        assert row is not None and row["state"] == "failed"
+        assert session is not None and session["status"] == "exited" and session["ended_at"]
+        assert (await db.fetchone("SELECT current_attempt_id FROM board_tasks WHERE id = 'task'"))[0] == identity.id
+        assert not await db.fetchall("SELECT * FROM result_receipts")
+    finally:
+        store.release()
+
+
+async def test_old_cli_exit_does_not_revive_a_superseded_attempt(db: Database) -> None:
+    store, identity, _ = await owner(db)
+    app = SimpleNamespace(db=db, executions=store)
+    try:
+        await bound_cli(db, "superseded")
+        await db.execute("UPDATE board_tasks SET current_attempt_id = NULL WHERE id = 'task'")
+        assert await observe_exit(app, staff_session_id="staff-session", runtime_ref="terminal",
+                                  observed_status="exited", runtime_instance="daemon-one")
+        assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "superseded"
+        assert (await db.fetchone("SELECT current_attempt_id FROM board_tasks WHERE id = 'task'"))[0] is None
+    finally:
+        store.release()
+
+
+async def test_cli_exit_preserves_a_completed_result(db: Database) -> None:
+    store, identity, _ = await owner(db)
+    app = SimpleNamespace(db=db, executions=store)
+    try:
+        await bound_cli(db, "completed")
+        assert await observe_exit(app, staff_session_id="staff-session", runtime_ref="terminal",
+                                  observed_status="exited", runtime_instance="daemon-one")
+        assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "completed"
+    finally:
+        store.release()
+
+
 async def test_done_report_and_ended_row_do_not_drain_owned_cancellation(db: Database) -> None:
     store, identity, _ = await owner(db)
     app = SimpleNamespace(db=db, executions=store, extensions={"effects": SimpleNamespace(notify=lambda: None)})

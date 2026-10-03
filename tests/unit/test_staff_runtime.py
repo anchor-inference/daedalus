@@ -90,8 +90,12 @@ class ObservedFakeStaffRuntime(FakeStaffRuntime):
 
     async def _session(self, req: Any) -> str:
         assert self.manager is not None
+        metadata = {"staff_id": req.staff.id, "staff_session_id": req.staff_session_id,
+                    "telegram_detached": True}
+        if req.worktree is not None:
+            metadata.update({"worktree": str(req.worktree.path), "worktree_cwd": str(req.worktree.cwd)})
         state = await self.manager.create_session(
-            "Fixture worker", project_id=req.project.id, folder_id=req.folder.id,
+            "Fixture worker", project_id=req.project.id, folder_id=req.folder.id, metadata=metadata,
         )
         return state.session.id
 
@@ -810,7 +814,11 @@ async def test_the_seventh_waits_for_a_slot_and_the_most_urgent_goes_first(setti
         async def urgent_started() -> bool:
             return (await OutboxStore(manager.db).view(urgent["effect_id"]))["state"] == "completed"
 
-        await until_await(urgent_started, "the urgent launch won the released project slot")
+        try:
+            await until_await(urgent_started, "the urgent launch won the released project slot")
+        except AssertionError as exc:
+            views = [await OutboxStore(manager.db).view(item["effect_id"]) for item in (late, urgent)]
+            raise AssertionError(f"{views}; statuses={[await status_of(manager, item) for item in members]}") from exc
         assert await status_of(manager, members[7]) == "starting"
         assert await status_of(manager, members[6]) == "off"
         assert runtime.started[-1].task.id == urgent_id

@@ -4,7 +4,7 @@ import { locale, t } from "../i18n";
 import { useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 
-type BundleId = "planning" | "execution" | "execution_project" | "review";
+type BundleId = "planning" | "execution" | "execution_project" | "review" | "watch";
 type Bundle = { id: string; operations: string[]; effects: string[]; scope_kind: "project" | "task"; max_expires_at: string; blockers: string[] };
 type Grant = { grant_id: string; generation: number; session_id: string; scope: { kind: string; id: string }; operations: string[]; effects: string[];
   expires_at: string; revoked_at: string | null; state: "active" | "expired" | "revoked" | "stale"; receipt_id: string | null;
@@ -13,12 +13,13 @@ type Authority = { project_id: string; entity_revision: number; current_coordina
   available_bundles: Bundle[]; grants: Grant[]; readiness_blockers: string[] };
 type Pending = { path: string; body: Record<string, unknown>; kind: "approve" | "revoke"; label: string };
 
-const bundleIds: BundleId[] = ["planning", "execution", "execution_project", "review"];
+const bundleIds: BundleId[] = ["planning", "execution", "execution_project", "review", "watch"];
 const rights: Record<BundleId, { scope_kind: "project" | "task"; operations: string[]; effects: string[] }> = {
   planning: { scope_kind: "project", operations: ["board.task.create", "board.task.update"], effects: [] },
-  execution: { scope_kind: "task", operations: ["task.launch"], effects: ["execution.start"] },
-  execution_project: { scope_kind: "project", operations: ["task.launch"], effects: ["execution.start"] },
+  execution: { scope_kind: "task", operations: ["task.launch", "staff.release"], effects: ["execution.start", "execution.stop"] },
+  execution_project: { scope_kind: "project", operations: ["task.launch", "staff.release"], effects: ["execution.start", "execution.stop"] },
   review: { scope_kind: "project", operations: ["review.verdict", "review.return"], effects: [] },
+  watch: { scope_kind: "project", operations: ["watch.create", "watch.change", "watch.remove", "watch.deliver"], effects: ["watch.wake", "watch.tell", "watch.notify"] },
 };
 
 function same(a: string[], b: string[]): boolean {
@@ -50,6 +51,7 @@ function grantName(grant: Grant): string {
     if (grant.scope.kind === rule.scope_kind && same(grant.operations, rule.operations) && same(grant.effects, rule.effects))
       return bundleName(id);
   }
+  if (same(grant.operations, ["task.launch"]) && same(grant.effects, ["execution.start"])) return t("authority.bundle.legacyExecution");
   return bundleName("");
 }
 
@@ -111,7 +113,8 @@ export function CoordinatorAuthority({ projectId, toast }: { projectId: string; 
     const expiry = new Date(Math.min(Date.now() + hours * 3600000, expiryLimit - 60000)).toISOString();
     const scope = bundle.scope_kind === "task" ? candidates.find((task) => task.id === taskId)?.title ?? "" : t("authority.scope.project");
     if (!(await confirmAsync(t("authority.approve.confirm"), {
-      body: t("authority.approve.preview", { bundle: bundleName(bundleId), scope, expiry: when(expiry), rights: [...bundle.operations, ...bundle.effects].join(", ") }),
+      body: t("authority.approve.preview", { bundle: bundleName(bundleId), scope, expiry: when(expiry), rights: [...bundle.operations, ...bundle.effects].join(", ") })
+        + (["execution", "execution_project", "watch"].includes(bundleId) ? `\n${t(`authority.bundle.help.${bundleId}`)}` : ""),
       action: t("authority.approve"),
     }))) return;
     const intent: Pending = { path: base, kind: "approve", label: bundleName(bundleId),

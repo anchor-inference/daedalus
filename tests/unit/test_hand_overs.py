@@ -6,6 +6,7 @@ without the operator hearing of it."""
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -21,7 +22,7 @@ from daedalus.stores.staff import Staff
 from tests.unit.test_board_rounds import task_of
 from tests.unit.test_orchestrator import Rig, events, rig
 from tests.unit.test_orchestrator_team import fake, office
-from tests.unit.test_staff_runtime import Capacity, task_row
+from tests.unit.test_staff_runtime import Capacity, close_team, task_row
 from tests.unit.test_task_contract import SCRIPT
 
 VIDEO = {
@@ -35,7 +36,7 @@ VIDEO = {
 async def hand_in(r: Rig, who: Staff, note: str = "both cuts rendered") -> None:
     live = await r.team.live_of(who)
     assert live is not None
-    await r.team.ingress.report(live, "done", note)
+    await r.team.ingress.report(live, "done", note, call_id=f"fixture-report:{uuid.uuid4().hex}")
     await r.team.ingress.status((await r.team.live_of(who)) or live, "idle")
 
 
@@ -74,6 +75,7 @@ async def test_rework_goes_back_to_who_made_it_and_elsewhere_only_with_a_reason(
         assert ("reassignment", f"Task {task_id} \"3D video, version H\" passed from Ira to Gleb: Ira is on leave today and the operator wants it before noon") in journal
         assert "Waiting for your decision" not in state or task_id not in state.split("Waiting for your decision")[0]
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -90,6 +92,7 @@ async def test_a_card_nobody_holds_says_whose_it_was_and_a_one_off_hire_names_wh
         said = await r.call(sid, "hire", name="Fixer", role="Small video fixes", one_off=True)
         assert f"Ira is free and worked on \"3D video, version H\" ({task_id})" in said and "Assign(task_id=…) without staff gives a card back" in said
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -144,6 +147,7 @@ async def test_the_state_block_lists_what_can_be_hired_with_the_operators_pick_f
         assert "modes read-only (reads only: no file writes and no network, whatever the task allows), workspace-write (writes in its own folder; the network stays off)" in state
         assert "Daedalus (presets): " in state
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -164,6 +168,7 @@ async def test_work_that_names_a_model_goes_to_a_member_that_runs_it(settings: S
         told = await r.call(sid, "tell", staff="Ada", text="If you can, raise a one-off reviewer on gpt-6-luna for the relay")
         assert "the message names gpt-6-luna, which Ada does not run and cannot hire" in told
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -185,6 +190,7 @@ async def test_a_card_someone_works_on_is_not_taken_to_other_work(settings: Sett
         said = await r.call(sid, "assign", staff="Ada", task_id=task_id, title="Update the post drafts with the short and long clips", reason="the operator asked for both clip lengths in the same drafts")
         assert "The card was renamed" in said
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -216,6 +222,7 @@ async def test_work_already_on_the_board_is_handed_on_rather_than_opened_twice(s
         await r.manager.db.execute("UPDATE board_tasks SET updated_at = ? WHERE project_id = ?", ((datetime.now(UTC) - timedelta(hours=8)).isoformat(), r.project.id))
         assert "Read-only audit" in await r.call(sid, "tasks", op="create", title="Read-only audit of the mail relay after the sandbox", **audit)
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -258,6 +265,7 @@ async def test_a_question_still_waiting_is_changed_in_place_never_asked_again(se
         with pytest.raises(Refused, match="already answered by the system"):
             await r.call(sid, "ask_operator", op="update", id=channels.id, text="again")
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -273,6 +281,7 @@ async def test_twins_already_asked_are_pointed_out_in_the_state_block(settings: 
         assert f"asks again what [{older.short_id}] asks: withdraw one" in state
         assert "AskOperator(op='update', id=…), never asked again" in state
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -302,6 +311,7 @@ async def test_a_condition_that_narrows_what_the_operator_allowed_needs_a_reason
         # The operator's own condition is theirs to add, and nobody's narrowing.
         await r.call(sid, "require", task_id=task_id, text="Do not touch DNS", kind="constraint", source="operator")
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -326,4 +336,5 @@ async def test_a_member_restricted_to_reading_is_widened_rather_than_the_operato
         await r.call(sid, "release", staff="Luna")
         assert (await r.call(sid, "assign", task_id=task_id)).startswith(f"Luna started on {task_id}")
     finally:
+        await close_team(r.manager)
         await r.manager.close()

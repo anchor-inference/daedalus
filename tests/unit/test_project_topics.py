@@ -19,13 +19,13 @@ from daedalus.extensions import project_topics
 from daedalus.extensions.notifications import ROUTED_EVENTS, NotificationRouter, NotificationService
 from daedalus.extensions.project_topics import ProjectTopics
 from daedalus.host.events import EventFilter
-from daedalus.staff_runtime import FakeStaffRuntime
 from daedalus.stores.database import Database
 from daedalus.transport.telegram.front import TelegramFront
+from tests.support.authorized_launch import operator_assignment
 from tests.support.waiting import until_await
 from tests.unit.test_front import OWNER, RecordingBot, _message
 from tests.unit.test_orchestrator import Rig, rig
-from tests.unit.test_staff_runtime import board_task
+from tests.unit.test_staff_runtime import ObservedFakeStaffRuntime, board_task, close_team
 
 FORUM = -100
 
@@ -77,6 +77,7 @@ class Setup:
             task.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await task
+        await close_team(self.r.manager)
         await self.r.manager.close()
 
     async def orchestrator(self) -> str:
@@ -201,16 +202,17 @@ async def test_a_report_appears_once_and_a_staff_member_never_posts(settings: Se
         assert "Menu page done" in post["text"] and "The menu page is merged." in post["text"] and post["text"].startswith("✅")
 
         # A staff member works, asks the orchestrator and reports: nothing of it reaches Telegram.
-        runtime = FakeStaffRuntime(kind="daedalus")
+        runtime = ObservedFakeStaffRuntime(kind="daedalus")
+        runtime.manager = s.r.manager
         s.r.team.runtimes["daedalus"] = runtime
         ada = await s.r.manager.staff.hire(s.r.project.id, name="Ada", isolation="shared")
         task_id = await board_task(s.r.manager, s.r.project, "Menu")
-        await s.r.team.assign(ada, task_id)
+        await operator_assignment(s.r.team, ada, task_id)
         live = await s.r.team.live_of(ada)
         assert live is not None
         staff_session = runtime.started[0]
         await s.r.team.ingress.question(live, "team:q1", "Euros or dollars?", ["Euros", "Dollars"])
-        await s.r.team.ingress.report(live, "checkpoint", "half way")
+        await s.r.team.ingress.report(live, "checkpoint", "half way", call_id="topic-staff-report")
         await asyncio.sleep(0.2)
         assert len(s.bot.sent) == 1, "a request the orchestrator answers is not the operator's, and a staff report is the orchestrator's"
         state = await s.r.manager.get_state(live.session_id) if live.session_id else None
@@ -287,10 +289,11 @@ async def test_an_escalated_permission_is_posted_and_decided_and_words_answer_a_
         await s.r.orch.enable(s.r.project.id)
         sid = await s.orchestrator()
         await until_await(lambda: _bound(s, sid), "the topic")
-        runtime = FakeStaffRuntime(kind="daedalus")
+        runtime = ObservedFakeStaffRuntime(kind="daedalus")
+        runtime.manager = s.r.manager
         s.r.team.runtimes["daedalus"] = runtime
         ada = await s.r.manager.staff.hire(s.r.project.id, name="Ada", isolation="shared")
-        await s.r.team.assign(ada, await board_task(s.r.manager, s.r.project, "Menu"))
+        await operator_assignment(s.r.team, ada, await board_task(s.r.manager, s.r.project, "Menu"))
         live = await s.r.team.live_of(ada)
         assert live is not None
         ask_id = await s.r.team.ingress.permission(live, "perm-1", "Exec", "npm install")

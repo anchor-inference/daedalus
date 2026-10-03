@@ -180,7 +180,8 @@ class BoardCommands:
             task = await _one(conn, "SELECT id,title,status,project_id,assignee_staff_id FROM board_tasks WHERE id = ?",
                               (response["task_id"],))
             assert task is not None
-            payload = {"task_id": task["id"], "title": task["title"], "actor": principal.origin_class}
+            payload = {"task_id": task["id"], "title": task["title"], "actor": principal.origin_class,
+                       "actor_id": principal.actor_id}
             announced = [(event_type, payload)]
             if prior is not None and prior["status"] != task["status"]:
                 announced.append(("task.moved", {**payload, "from": prior["status"], "to": task["status"]}))

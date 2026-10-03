@@ -69,6 +69,11 @@ class EffectDispatcher:
         return resolved
 
     async def step(self) -> bool:
+        # A freed slot or a new command invalidates the old deferred sweep. Otherwise a lower
+        # priority command can consume capacity while the urgent one is still excluded.
+        if self.wake.is_set():
+            self.wake.clear()
+            self.postponed.clear()
         claim = await self.store.claim(tuple(self.handlers), exclude=tuple(self.postponed))
         if claim is None:
             return False
@@ -76,6 +81,9 @@ class EffectDispatcher:
             await self.store.check(claim)
         except ControlDenied as exc:
             await self.store.finish(claim, state="failed", error=str(exc))
+            return True
+        if claim.kind == "task.launch" and self.wake.is_set():
+            await self.store.defer(claim, reason="launch admission changed before execution")
             return True
         try:
             outcome = await self.handlers[claim.kind].run(claim, self.store.check)

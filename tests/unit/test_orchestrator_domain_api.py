@@ -11,6 +11,7 @@ import pytest
 from fastapi import FastAPI, Header
 
 from daedalus.extensions.api_orchestrator_domain import install_routes
+from daedalus.host.events import EventBus
 from daedalus.stores.database import Database
 
 
@@ -31,9 +32,12 @@ async def domain_api(tmp_path: Path):  # type: ignore[no-untyped-def]
     async def authenticated(x_user: int = Header(1)) -> dict[str, int | str]:
         return {"via": "token", "user_id": x_user}
 
-    install_routes(api, SimpleNamespace(db=db, extensions={}), authenticated)
+    bus = EventBus(db)
+    await bus.start()
+    install_routes(api, SimpleNamespace(db=db, extensions={}, manager=SimpleNamespace(bus=bus)), authenticated)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
         yield db, client
+    await bus.close()
     await db.close()
 
 

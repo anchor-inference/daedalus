@@ -1086,6 +1086,10 @@ class FocusStub:
         self.woken: list[dict] = []
         self.watches = watches or []
         self.watched: list[tuple[str, dict]] = []
+        self.watch_collection_revision = 1
+        self.watch_project_revision = 1
+        self.watch_receipts: dict[str, tuple[dict, dict]] = {}
+        self.watch_lost_reply = False
         self.terminals = terminals
         self.messages = messages
         self.answers: list[tuple[str, dict]] = []
@@ -1270,28 +1274,47 @@ class FocusStub:
             parts = path.split("/")
             pid = parts[3]
             if len(parts) == 5 and method == "GET":
-                return 200, {"watches": [w for w in self.watches if w["project_id"] == pid], "max": 50, "min_cooldown_minutes": 1, "providers": ["github"]}
+                return 200, {"watches": [w for w in self.watches if w["project_id"] == pid], "max": 50, "min_cooldown_minutes": 1, "providers": ["github"], "collection_revision": self.watch_collection_revision, "project_entity_revision": self.watch_project_revision}
             if len(parts) == 5 and method == "POST":
                 payload = dict(body or {})
                 self.watched.append(("create", payload))
-                row = {"id": f"w{len(self.watches) + 1}", "project_id": pid, "when": payload.get("when", {}), "then": payload.get("then", {}), "cooldown_minutes": payload.get("cooldown_minutes", 10), "once": bool(payload.get("once")), "note": payload.get("note", ""),
-                       "created_by": "operator", "created_at": "2026-09-24T10:00:00Z", "last_fired_at": None, "fire_count": 0, "enabled": True, "stopped": "", "last_error": "", "describe": ""}
+                previous = self.watch_receipts.get(payload.get("client_operation_id", ""))
+                if previous:
+                    return (200, previous[1]) if previous[0] == payload else (409, {"detail": "intent changed"})
+                assert payload["expected_collection_revision"] == self.watch_collection_revision and payload["client_operation_id"]
+                row = {"id": f"w{len(self.watches) + 1}", "project_id": pid, "when": payload.get("when", {}), "then": payload.get("then", {}), "cooldown_minutes": payload.get("cooldown_minutes", 10), "once": bool(payload.get("once")), "note": payload.get("note", ""), "deadline_at": payload.get("deadline_at"), "latest_delivery": None,
+                       "created_by": "operator", "created_at": "2026-09-24T10:00:00Z", "last_fired_at": None, "fire_count": 0, "enabled": True, "stopped": "", "last_error": "", "describe": "", "condition_revision": 1, "authority_state": "current"}
                 self.watches.append(row)
-                return 200, row
+                self.watch_collection_revision += 1
+                self.watch_project_revision += 1
+                receipt = {**row, "receipt_id": payload["client_operation_id"], "entity_revision": self.watch_project_revision}
+                self.watch_receipts[payload["client_operation_id"]] = payload, receipt
+                if self.watch_lost_reply:
+                    self.watch_lost_reply = False
+                    return 503, {"detail": "response lost"}
+                return 200, receipt
             found = next((w for w in self.watches if w["project_id"] == pid and len(parts) == 6 and w["id"] == parts[5]), None)
             if found is None:
                 return 404, {"detail": "no such watch"}
             if method == "PATCH":
                 payload = dict(body or {})
                 self.watched.append(("update", {"id": found["id"], **payload}))
+                assert payload["expected_entity_revision"] == self.watch_project_revision and payload["expected_condition_revision"] == found["condition_revision"] and payload["client_operation_id"]
                 found.update({k: v for k, v in payload.items() if v is not None})
                 if payload.get("enabled"):
                     found["stopped"] = ""
-                return 200, found
+                    found["authority_state"] = "current"
+                found["condition_revision"] += 1
+                self.watch_project_revision += 1
+                return 200, {**found, "receipt_id": payload["client_operation_id"], "entity_revision": self.watch_project_revision}
             if method == "DELETE":
-                self.watched.append(("delete", {"id": found["id"]}))
+                payload = dict(body or {})
+                self.watched.append(("delete", {"id": found["id"], **payload}))
+                assert payload["expected_entity_revision"] == self.watch_project_revision and payload["expected_condition_revision"] == found["condition_revision"] and payload["client_operation_id"]
                 self.watches.remove(found)
-                return 200, {"deleted": True}
+                self.watch_collection_revision += 1
+                self.watch_project_revision += 1
+                return 200, {"deleted": True, "receipt_id": payload["client_operation_id"], "entity_revision": self.watch_project_revision}
         if path.startswith("/api/projects/") and "/wakeups" in path:
             parts = path.split("/")
             pid = parts[3]
@@ -1690,9 +1713,13 @@ class FocusStub:
         ]
         watches = [
             {"id": "w1", "project_id": pid, "when": {"event": "staff_finished", "staff": "Max", "staff_id": "st-max"}, "then": {"action": "wake"}, "cooldown_minutes": 10, "once": False, "note": words["watch.note"],
-             "created_by": "orchestrator", "created_at": "2026-09-24T09:40:12Z", "last_fired_at": "2026-09-24T09:51:00Z", "fire_count": 1, "enabled": True, "stopped": "", "last_error": "", "describe": "when Max finishes a turn → wake the orchestrator"},
+             "created_by": "orchestrator", "created_at": "2026-09-24T09:40:12Z", "last_fired_at": "2026-09-24T09:51:00Z", "fire_count": 1, "enabled": True, "stopped": "", "last_error": "", "describe": "when Max finishes a turn → wake the orchestrator", "condition_revision": 1, "authority_state": "needs_approval", "latest_delivery": {"id": "d1", "status": "pending", "receipt_id": None, "last_error": None, "created_at": "2026-09-24T09:51:00Z"}},
             {"id": "w2", "project_id": pid, "when": {"event": "ci", "provider": "github", "repo": "bakery/api", "conclusion": "failure"}, "then": {"action": "notify", "title": "CI", "level": "urgent"}, "cooldown_minutes": 30, "once": False, "note": "",
-             "created_by": "operator", "created_at": "2026-09-23T18:00:00Z", "last_fired_at": None, "fire_count": 0, "enabled": False, "stopped": "budget", "last_error": "", "describe": ""},
+             "created_by": "operator", "created_at": "2026-09-23T18:00:00Z", "last_fired_at": None, "fire_count": 0, "enabled": False, "stopped": "expired", "last_error": "", "describe": "", "condition_revision": 1, "authority_state": "current", "latest_delivery": {"id": "d2", "status": "failed", "receipt_id": None, "last_error": "delivery declined", "created_at": "2026-09-23T18:00:00Z"}},
+            {"id": "w3", "project_id": pid, "when": {"event": "staff_finished", "staff": "Lev"}, "then": {"action": "wake"}, "cooldown_minutes": 15, "once": False, "note": "",
+             "created_by": "operator", "created_at": "2026-09-23T18:01:00Z", "last_fired_at": None, "fire_count": 0, "enabled": False, "stopped": "needs_approval", "last_error": "", "describe": "", "condition_revision": 2, "authority_state": "needs_approval", "latest_delivery": None},
+            {"id": "w4", "project_id": pid, "when": {"event": "task_moved", "task": "t1", "to": "review"}, "then": {"action": "wake"}, "cooldown_minutes": 15, "once": False, "note": "",
+             "created_by": "operator", "created_at": "2026-09-23T18:02:00Z", "last_fired_at": None, "fire_count": 0, "enabled": False, "stopped": "", "last_error": "", "describe": "", "condition_revision": 1, "authority_state": "capability_unavailable", "latest_delivery": None},
         ]
         terminals = [
             {"id": "tm-api", "env": "container", "title": "bash · bakery-api", "owner": {"kind": "project", "id": pid}, "project_id": pid, "profile": "shell", "sandbox": False, "cwd": "/home/operator/work/bakery-api", "status": "running", "exit_code": None, "exit_signal": None, "created_at": "2026-09-24T09:00:00Z", "exited_at": None, "last_output_at": "2026-09-24T09:50:00Z", "last_input_at": None, "cols": 120, "rows": 30},

@@ -28,6 +28,7 @@ from protocore.contracts.types import (
 
 from daedalus.providers.openai_compat import UsageRecord, UsageSink
 from daedalus.stores.database import Database
+from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.projects import ProjectSettings
 
 UNFINISHED_RUN_STATUSES = ", ".join(f"'{status.value}'" for status in (RunStatus.queued, RunStatus.running, RunStatus.paused))
@@ -1139,26 +1140,22 @@ class SqliteUsageSink(UsageSink):
 
     async def record(self, record: UsageRecord) -> None:
         n = record.normalized
-        await self._db.execute(
-            "INSERT INTO usage_events(at, provider_id, model, purpose, run_id, session_id,"
-            " input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, cost_usd, duration_ms, raw)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                _now(),
-                record.provider_id,
-                record.model,
-                record.purpose,
-                record.run_id,
-                record.session_id,
-                int(n.get("input_tokens", 0)),
-                int(n.get("output_tokens", 0)),
-                int(n.get("cache_read_tokens", 0)),
-                int(n.get("reasoning_tokens", 0)),
-                record.cost_usd,
-                record.duration_ms,
-                json.dumps(record.raw),
-            ),
-        )
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "INSERT INTO usage_events(at,provider_id,model,purpose,run_id,session_id,input_tokens,"
+                " output_tokens,cache_read_tokens,reasoning_tokens,cost_usd,duration_ms,raw,inference_reservation_id)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (_now(), record.provider_id, record.model, record.purpose, record.run_id, record.session_id,
+                 int(n.get("input_tokens", 0)), int(n.get("output_tokens", 0)),
+                 int(n.get("cache_read_tokens", 0)), int(n.get("reasoning_tokens", 0)),
+                 record.cost_usd, record.duration_ms, json.dumps(record.raw), record.inference_reservation_id),
+            )
+            seq = cursor.lastrowid
+            await cursor.close()
+            if record.inference_reservation_id is not None:
+                assert seq is not None
+                await InferenceBudget(self._db).settle_in(conn, record.inference_reservation_id, seq)
+
 
 
 def _queue_item_id(item: dict[str, Any]) -> str:

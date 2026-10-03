@@ -35,6 +35,7 @@ TYPED = "z-ai/glm-5.3-flash"  # $0.15/$0.50, 200k, text only
 
 def run() -> int:
     sent: list[tuple[str, dict]] = []
+    declared: list[tuple[str, dict]] = []
     failures: list[str] = []
     stub.fresh = True  # type: ignore[attr-defined]
     with sync_playwright() as p:
@@ -49,10 +50,26 @@ def run() -> int:
         page.wait_for_selector(".modelgrid .pick", timeout=15000)
         page.locator(".modelgrid .pick", has_text=PICKED).first.click()
         page.wait_for_timeout(200)
+        page.locator(".addmodel-pricing summary").click()
+        page.get_by_label("Provider-enforced input ceiling (tokens)").fill("1048576")
+        page.get_by_label("Source for that ceiling").fill("Provider contract")
         page.locator("input.field.mono").fill(TYPED)
         page.wait_for_timeout(200)
         page.locator(".addmodel-foot .btn.primary").click()
         page.wait_for_timeout(600)
+        second = context.new_page()
+        second.route("**/api/**", stub)
+        second.on("request", lambda r: declared.append((r.url.split("/api/", 1)[1], json.loads(r.post_data or "{}"))) if r.method == "PUT" else None)
+        second.goto(f"{BASE}/agents?token=t")
+        second.wait_for_selector(".addmodel", timeout=15000)
+        second.locator(".pickgrid .pick", has_text="OpenRouter").first.click()
+        second.wait_for_selector(".modelgrid .pick", timeout=15000)
+        second.locator(".modelgrid .pick", has_text=PICKED).first.click()
+        second.locator(".addmodel-pricing summary").click()
+        second.get_by_label("Provider-enforced input ceiling (tokens)").fill("1048576")
+        second.get_by_label("Source for that ceiling").fill("Provider contract")
+        second.locator(".addmodel-foot .btn.primary").click()
+        second.wait_for_timeout(600)
         context.close()
         browser.close()
     stub.fresh = False  # type: ignore[attr-defined]
@@ -77,6 +94,10 @@ def run() -> int:
             failures.append("the preset says the typed model sees pictures, which is the picked model's answer")
         if preset.get("context_window") != 128000:
             failures.append(f"the preset carries a window from the picked model: {preset.get('context_window')}")
+    declared_prices = {k: v for path, body in declared for k, v in (body.get("pricing") or {}).items()}
+    declared_price = declared_prices.get("anthropic/claude-opus-5")
+    if not declared_price or declared_price.get("input_limit") != 1048576 or declared_price.get("limit_source") != "Provider contract":
+        failures.append(f"an exact picked model lost its operator-sourced input ceiling: {declared_price}")
     for line in failures:
         print("FAIL:", line)
     print("ok" if not failures else f"{len(failures)} problem(s)")

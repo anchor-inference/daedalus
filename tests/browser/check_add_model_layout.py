@@ -31,7 +31,7 @@ from screenshots import stub  # noqa: E402  the same invented installation the p
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 OUT = Path(os.environ.get("OUT", "/tmp/add-model-widths"))
-WIDTHS = (400, 1440, 2000, 2560)
+WIDTHS = (320, 390, 400, 1440, 2000, 2560)
 SLACK = 2.0
 """How far the two gutters may differ and still be one centred block: sub-pixel rounding, no more."""
 
@@ -78,6 +78,16 @@ def run() -> int:
             steps = page.locator(".addmodel .step").count()
             if steps != 3:
                 failures.append(f"{width}: {steps} step cards, not 3")
+            if width <= 400:
+                page.locator(".pickgrid .pick", has_text="OpenRouter").first.click()
+                page.wait_for_selector(".modelgrid .pick", timeout=15000)
+                page.locator(".modelgrid .pick").first.click()
+                page.locator(".addmodel-pricing summary").click()
+                expanded_scroll = page.evaluate(
+                    "() => { const gate = document.querySelector('.gate.tall'); return gate.scrollWidth > gate.clientWidth + 1; }"
+                )
+                if expanded_scroll:
+                    failures.append(f"{width}: the expanded price fields scroll sideways")
             context.close()
         browser.close()
     stub.fresh = False  # type: ignore[attr-defined]

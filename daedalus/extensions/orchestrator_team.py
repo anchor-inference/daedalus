@@ -35,8 +35,9 @@ from daedalus.extensions.task_contract import (
 from daedalus.harness.capabilities import MODE_MEANINGS, RESTRICTIVE_MODES
 from daedalus.host.events import EventFilter
 from daedalus.staff_runtime import LiveSession, ReadRequest
-from daedalus.stores.control import Scope
+from daedalus.stores.control import ControlStore, Principal, Scope
 from daedalus.stores.files import FileRefused, StoredFile
+from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.projects import Project, ProjectFolder
 from daedalus.stores.staff import HARNESS_NAMES, HARNESSES, ISOLATIONS, MESSAGE_MODES, Staff, StaffBusy, StaffError
 
@@ -313,7 +314,24 @@ async def staff_edit(
     return f"{updated.name}: {', '.join(names)} changed, in effect {when}"
 
 
-async def _free_cards(orch: Orchestrators, member: Staff, why: str) -> list[str]:
+async def _release_authority(orch: Orchestrators, project: Project, session_id: str,
+                             task_id: str | None, *, physical: bool) -> tuple[Principal, Callable[[], Awaitable[None]]]:
+    principal = await board_principal(orch, session_id, project.id, "staff.release", task_id)
+
+    async def check() -> None:
+        await orch.current(session_id)
+        async with orch.manager.db.transaction() as conn:
+            await ControlStore(orch.manager.db).authorize(
+                conn, principal, Scope("project", project.id), "staff.release", task_id=task_id,
+                effects=("execution.stop",) if physical else (),
+            )
+
+    await check()
+    return principal, check
+
+
+async def _free_cards(orch: Orchestrators, project: Project, session_id: str,
+                      member: Staff, why: str) -> list[str]:
     """Put back to todo the cards a member without a live session still holds in doing; their ids.
 
     Such a card is nobody's work, and it cannot be released the usual way, which ends a session."""
@@ -323,7 +341,9 @@ async def _free_cards(orch: Orchestrators, member: Staff, why: str) -> list[str]
     rows = await orch.manager.db.fetchall("SELECT id FROM board_tasks WHERE assignee_staff_id = ? AND status = 'doing' ORDER BY updated_at", (member.id,))
     freed = []
     for row in rows:
-        if await team.free_card(member, row["id"], why, by="orchestrator") is not None:
+        principal, check = await _release_authority(orch, project, session_id, row["id"], physical=False)
+        await check()
+        if await team.free_card(member, row["id"], why, by="orchestrator", principal=principal) is not None:
             freed.append(row["id"])
     return freed
 
@@ -337,7 +357,7 @@ async def dismiss(orch: Orchestrators, project: Project, session_id: str, *, sta
     if not member.active:
         # A one-off helper leaves the team with its task, and the operator may dismiss anyone from
         # the app: the orchestrator is told so, and what the member left in doing is freed.
-        freed = await _free_cards(orch, member, f"{member.name} was dismissed")
+        freed = await _free_cards(orch, project, session_id, member, f"{member.name} was dismissed")
         if freed:
             await _journal(orch, project, "control", f"The orchestrator freed {_cards(freed)} left in doing by {member.name}, who had been dismissed.", {"staff_id": member.id})
         return f"{member.name} was already dismissed" + (f"; the {_cards(freed)} they left in doing went back to todo, unassigned" if freed else "")
@@ -346,7 +366,10 @@ async def dismiss(orch: Orchestrators, project: Project, session_id: str, *, sta
     if live is not None:
         if not release:
             raise Refused(f"{member.name} has a live session ({live.status.replace('_', ' ')}); Dismiss(release=true) ends it first, or Release them and dismiss later")
-        await _team(orch).release(member, keep_worktree=keep_worktree, reason="dismissed by the orchestrator", by="orchestrator")
+        principal, check = await _release_authority(orch, project, session_id, live.task_id, physical=True)
+        await _team(orch).release(member, keep_worktree=keep_worktree,
+                                  reason="dismissed by the orchestrator", by="orchestrator",
+                                  principal=principal, check_authority=check)
         released = "; their session was ended" + ("" if keep_worktree else " and the worktree removed if it was clean")
     try:
         archived = await orch.manager.staff.archive(member.id, by="orchestrator")
@@ -556,7 +579,7 @@ async def assign(
             "task_id. If it is the same work under a better title, say so in reason"
         )
     try:
-        commands = BoardCommands(orch.manager.db)
+        commands = BoardCommands(orch.manager.db, bus=orch.manager.bus)
         scope = Scope("project", project.id)
         handoff_requirements = [{"text": text, "kind": kind, "source": source}
                                 for text, kind, source, _ in wanted_requirements]
@@ -622,10 +645,12 @@ async def assign(
     if added:
         notes.append(added)
     tail = "".join(" " + note for note in notes)
-    if launched.get("state") == "started":
-        return f"{member.name} started on {task['id']} \"{task['title']}\"" + await _delivered_note(orch, task["id"], handed) + tail
-    waits = " The files are copied to them when they start." if handed else ""
-    return f"{member.name} will start {task['id']} \"{task['title']}\" when it is their turn: queue position {launched.get('position')} — {launched.get('detail')}{waits}" + tail
+    admission = await OutboxStore(orch.manager.db).view(launched["effect_id"])
+    waiting = (f" queue position {admission['wait_position']} ({admission['wait_reason']})"
+               if admission.get("wait_position") is not None else " admission in progress")
+    files_wait = " The files are copied to them when they start." if handed else ""
+    return (f"{member.name} will start {task['id']} \"{task['title']}\" after admitted;"
+            f" effect {launched['effect_id']}: {admission['state']},{waiting}.{files_wait}" + tail)
 
 
 TWIN_WINDOW = timedelta(hours=6)
@@ -1076,11 +1101,19 @@ async def pause(orch: Orchestrators, project: Project, session_id: str, *, staff
 
 async def release(orch: Orchestrators, project: Project, session_id: str, *, staff: str, keep_worktree: bool = True) -> str:
     member = await _member(orch, project, staff, active=False)
-    ended = member.active and await _team(orch).release(member, keep_worktree=keep_worktree, reason="released by the orchestrator", by="orchestrator")
+    live = await orch.manager.staff.live(member.id) if member.active else None
+    ended = False
+    if live is not None:
+        principal, check = await _release_authority(orch, project, session_id, live.task_id, physical=True)
+        ended = await _team(orch).release(
+            member, keep_worktree=keep_worktree, reason="released by the orchestrator",
+            by="orchestrator", principal=principal, check_authority=check,
+        )
     if not ended:
         # Releasing is how a card is freed, so a member whose session is already over still frees
         # its cards: "no live session" once left a card in doing that nothing else could move.
-        freed = await _free_cards(orch, member, "released by the orchestrator after the session had ended")
+        freed = await _free_cards(orch, project, session_id, member,
+                                  "released by the orchestrator after the session had ended")
         if not freed:
             raise Refused(f"{member.name} has no live session and holds no card in doing")
         await _journal(orch, project, "control", f"The orchestrator freed {_cards(freed)} left in doing by {member.name}, whose session had ended.", {"staff_id": member.id})

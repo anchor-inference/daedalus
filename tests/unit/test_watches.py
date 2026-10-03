@@ -32,6 +32,7 @@ from daedalus.extensions.watches import (
 from daedalus.host.events import AppEvent
 from daedalus.staff_runtime import ReadPage
 from daedalus.stores.database import Database
+from daedalus.stores.projects import Project
 from daedalus.terminals.model import InvalidRequest
 from daedalus.tools.orchestrator import WATCH_EVENTS
 from tests.support.authorized_launch import operator_assignment
@@ -79,8 +80,8 @@ class WatchNotes(Notes):
         at = datetime.now(UTC).isoformat()
         async with self.db.transaction() as conn:
             cursor = await conn.execute(
-                "INSERT INTO notifications(at,updated_at,kind,category,title,body,project_id,dedupe_key)"
-                " VALUES (?,?,?,'orchestrator_report',?,?,?,?)",
+                "INSERT INTO notifications(at,updated_at,kind,category,title,body,project_id,dedupe_key,event_seq)"
+                " VALUES (?,?,?,'orchestrator_report',?,?,?,?,1)",
                 (at, at, draft.kind, draft.title, draft.body, draft.project_id, draft.dedupe_key),
             )
             notification_id = int(cursor.lastrowid)
@@ -90,6 +91,8 @@ class WatchNotes(Notes):
 
 async def with_watches(r: Rig, clock: Clock | None = None) -> Watches:
     app = r.team.app
+    from daedalus.extensions.watch_commands import WatchCommands
+    from daedalus.stores.control import ControlStore, Entity, Principal, Scope
     app.notifications = WatchNotes(r.manager.db)
     r.team._capacity = Capacity()
     keeper = Watches(app)
@@ -98,6 +101,82 @@ async def with_watches(r: Rig, clock: Clock | None = None) -> Watches:
         keeper.nap = _nap
     app.extensions["watches"] = keeper
     await keeper.start()
+    grants: dict[str, Principal] = {}
+    operator = Principal.operator({"via": "token", "user_id": 1})
+    command_number = 0
+
+    def next_command() -> str:
+        nonlocal command_number
+        command_number += 1
+        return f"fixture-watch-{command_number}"
+
+    async def test_principal(project_id: str, by: str) -> Principal:
+        if by == "operator":
+            return operator
+        if project_id not in grants:
+            grant = await ControlStore(r.manager.db).issue_grant(
+                operator, Principal(f"agent:test-watch:{project_id}", "agent"), Scope("project", project_id),
+                operations=["watch.create", "watch.change", "watch.remove", "watch.deliver"],
+                effects=["watch.wake", "watch.tell", "watch.notify"],
+                expires_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+            )
+            grants[project_id] = Principal(f"agent:test-watch:{project_id}", "agent",
+                                           grant["grant_id"], grant["generation"])
+        return grants[project_id]
+
+    async def create_with_approval(project: Project, **kwargs: Any) -> Watch:
+        principal = await test_principal(project.id, kwargs.pop("by", "orchestrator"))
+        fresh = await r.manager.projects.get(project.id)
+        assert fresh is not None
+        result = await WatchCommands(keeper).create(
+            principal, fresh, expected_collection_revision=await ControlStore(r.manager.db).revision(
+                Scope("project", project.id), Entity("collection", project.id)),
+            client_operation_id=next_command(), **kwargs,
+        )
+        made = keeper.get(project.id, result["id"])
+        assert made is not None
+        return made
+
+    async def update_with_approval(project_id: str, watch_id: str, **kwargs: Any) -> Watch:
+        before = keeper.get(project_id, watch_id)
+        assert before is not None
+        principal = await test_principal(project_id, kwargs.pop("by", "operator"))
+        project = await r.manager.projects.get(project_id)
+        assert project is not None
+        await WatchCommands(keeper).change(
+            principal, project, watch_id,
+            expected_entity_revision=await ControlStore(r.manager.db).revision(
+                Scope("project", project_id), Entity("project", project_id)),
+            expected_condition_revision=before.condition_revision,
+            client_operation_id=next_command(), **kwargs,
+        )
+        changed = keeper.get(project_id, watch_id)
+        assert changed is not None
+        return changed
+
+    async def remove_with_approval(project_id: str, watch_id: str, **kwargs: Any) -> bool:
+        before = keeper.get(project_id, watch_id)
+        if before is None:
+            return False
+        principal = await test_principal(project_id, kwargs.pop("by", "operator"))
+        await WatchCommands(keeper).remove(
+            principal, project_id, watch_id,
+            expected_entity_revision=await ControlStore(r.manager.db).revision(
+                Scope("project", project_id), Entity("project", project_id)),
+            expected_condition_revision=before.condition_revision,
+            client_operation_id=next_command(),
+        )
+        return True
+
+    async def approved_tool(session_id: str, operation: str, task_id: str | None = None) -> tuple[Principal, Scope]:
+        assert task_id is None and operation in {"watch.create", "watch.change", "watch.remove"}
+        project, _ = await r.orch.current(session_id)
+        return await test_principal(project.id, "orchestrator"), Scope("project", project.id)
+
+    keeper.create = create_with_approval  # type: ignore[method-assign]
+    keeper.update = update_with_approval  # type: ignore[method-assign]
+    keeper.remove = remove_with_approval  # type: ignore[method-assign]
+    app.extensions["board_tool_authority"] = approved_tool
     return keeper
 
 
@@ -436,7 +515,7 @@ async def test_terminal_output_is_waited_for_on_the_daemon_and_the_orchestrators
         with pytest.raises(WatchRefused, match="works without a terminal"):
             await keeper.create(project, when={"event": "terminal_output", "staff": (await r.manager.staff.hire(r.project.id, name="Ada")).name, "regex": "x"}, then={"action": "wake"})
 
-        said = await r.call(sid, "watch", when={"event": "terminal_output", "staff": "Max", "regex": "FAILED \\w+"}, then={"action": "wake"}, cooldown_minutes=2)
+        said = await r.call(sid, "watch", when={"event": "terminal_output", "staff": "Max", "regex": "FAILED \\w+"}, then={"action": "wake"}, cooldown_minutes=2, client_operation_id="terminal-watch-tool")
         watch_id = said.split()[1]
         await until_await(lambda: _asked(terminals, 1), "the watch waits on Max's terminal")
         assert terminals.calls[0] == {"terminal_id": live.session.terminal_id, "regex": "FAILED \\w+", "scope": "output", "since_seq": None, "timeout": 1500.0}
@@ -538,8 +617,8 @@ async def test_a_watch_wakes_the_orchestrator_once_per_cooldown_and_outlives_a_r
         wake = await r.orch.classify(r.project.id, (await fired(r))[-1])
         assert wake is not None and wake.urgent and new != sid
         with pytest.raises(Refused, match="has no wake-up or watch"):
-            await r.call(new, "unwatch", id="w0000000")
-        assert await r.call(new, "unwatch", id=made.id) == f"watch {made.id} removed"
+            await r.call(new, "unwatch", id="w0000000", client_operation_id="remove-missing-watch")
+        assert await r.call(new, "unwatch", id=made.id, client_operation_id="remove-existing-watch") == f"watch {made.id} removed"
         assert keeper.of_project(r.project.id) == []
     finally:
         await keeper.close()
@@ -565,20 +644,41 @@ async def test_the_watch_routes(settings: Settings, db: Database, tmp_path: Path
         base = f"/api/projects/{r.project.id}/watches"
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:  # type: ignore[arg-type]
             # Without an orchestrator there is nobody to wake, but the operator can still be told.
-            woken = await client.post(base, json={"when": {"event": "staff_finished"}, "then": {"action": "wake"}}, headers=headers)
+            initial = (await client.get(base, headers=headers)).json()
+            woken = await client.post(base, json={"when": {"event": "staff_finished"}, "then": {"action": "wake"},
+                                                  "expected_collection_revision": initial["collection_revision"],
+                                                  "client_operation_id": "watch-no-coordinator"}, headers=headers)
             assert woken.status_code == 400 and "no orchestrator" in woken.json()["detail"]
-            made = await client.post(base, json={"when": {"event": "staff_crashed", "staff": "Ada"}, "then": {"action": "notify", "title": "Ada crashed"}, "cooldown_minutes": 30, "note": "tell me"}, headers=headers)
+            made = await client.post(base, json={"when": {"event": "staff_crashed", "staff": "Ada"}, "then": {"action": "notify", "title": "Ada crashed"}, "cooldown_minutes": 30, "note": "tell me",
+                                                  "expected_collection_revision": initial["collection_revision"],
+                                                  "client_operation_id": "watch-notify-create"}, headers=headers)
             assert made.status_code == 200, made.text
             body = made.json()
             assert (body["created_by"], body["cooldown_minutes"], body["enabled"], body["note"]) == ("operator", 30, True, "tell me")
             listed = (await client.get(base, headers=headers)).json()
             assert [w["id"] for w in listed["watches"]] == [body["id"]] and listed["max"] == 50 and listed["min_cooldown_minutes"] == 1
-            off = await client.patch(f"{base}/{body['id']}", json={"enabled": False}, headers=headers)
+            off = await client.patch(f"{base}/{body['id']}", json={"enabled": False,
+                                "expected_entity_revision": listed["project_entity_revision"],
+                                "expected_condition_revision": body["condition_revision"],
+                                "client_operation_id": "watch-disable"}, headers=headers)
             assert off.status_code == 200 and off.json()["enabled"] is False
-            assert (await client.patch(f"{base}/nope", json={"enabled": False}, headers=headers)).status_code == 404
-            assert (await client.patch(f"{base}/{body['id']}", json={"cooldown_minutes": 0}, headers=headers)).status_code == 400
-            assert (await client.delete(f"{base}/{body['id']}", headers=headers)).json() == {"deleted": True}
-            assert (await client.delete(f"{base}/{body['id']}", headers=headers)).status_code == 404
+            assert (await client.patch(f"{base}/nope", json={"enabled": False,
+                                "expected_entity_revision": off.json()["entity_revision"],
+                                "expected_condition_revision": 1,
+                                "client_operation_id": "watch-missing"}, headers=headers)).status_code == 404
+            assert (await client.patch(f"{base}/{body['id']}", json={"cooldown_minutes": 0,
+                                "expected_entity_revision": off.json()["entity_revision"],
+                                "expected_condition_revision": off.json()["condition_revision"],
+                                "client_operation_id": "watch-invalid-cooldown"}, headers=headers)).status_code == 400
+            deleted = await client.request("DELETE", f"{base}/{body['id']}", json={
+                "expected_entity_revision": off.json()["entity_revision"],
+                "expected_condition_revision": off.json()["condition_revision"],
+                "client_operation_id": "watch-delete"}, headers=headers)
+            assert deleted.json()["deleted"] is True
+            assert (await client.request("DELETE", f"{base}/{body['id']}", json={
+                "expected_entity_revision": deleted.json()["entity_revision"],
+                "expected_condition_revision": off.json()["condition_revision"],
+                "client_operation_id": "watch-delete-again"}, headers=headers)).status_code == 404
         changes = [e.payload for e in await events(r.manager, "project.changed") if e.payload.get("change") == "watches"]
         assert [c["actor"] for c in changes] == ["operator", "operator", "operator"]
         assert keeper.of_project(r.project.id) == []

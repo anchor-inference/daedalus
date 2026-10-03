@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from daedalus.extensions.effects import EffectDispatcher, EffectOutcome
 from daedalus.stores.control import ControlStore, Entity, Principal, Scope, now
 from daedalus.stores.database import Database
 from daedalus.stores.outbox import OutboxStore
@@ -105,3 +106,63 @@ async def test_foreground_commands_are_bounded_so_launches_make_progress(db: Dat
         assert await store.finish(foreground, state="completed")
     admitted = await store.claim(("task.stop", "task.launch"))
     assert admitted is not None and admitted.id == launch
+
+
+async def test_capacity_wake_reconsiders_the_urgent_deferred_command_first(db: Database, tmp_path: Path) -> None:
+    await task(db, tmp_path, "project", "low", 4)
+    await task(db, tmp_path, "project", "urgent", 1)
+    await enqueue(db, "project", "low")
+    urgent = await enqueue(db, "project", "urgent")
+    ready, delivered = False, []
+
+    class Launch:
+        async def run(self, claim, check):
+            if not ready:
+                return EffectOutcome("deferred", "all project slots occupied")
+            await check(claim)
+            delivered.append(claim.task_id)
+            return EffectOutcome("completed")
+
+    dispatcher = EffectDispatcher(OutboxStore(db))
+    dispatcher.register("task.launch", Launch())
+    assert await dispatcher.step()
+    assert await dispatcher.step()
+    assert not await dispatcher.step()
+    ready = True
+    dispatcher.notify()
+    assert await dispatcher.step()
+    assert delivered == ["urgent"]
+    assert (await dispatcher.store.view(urgent))["state"] == "completed"
+
+
+async def test_new_urgent_command_between_claim_and_execution_preempts_an_unstarted_launch(db: Database, tmp_path: Path, monkeypatch) -> None:
+    await task(db, tmp_path, "project", "low", 4)
+    await task(db, tmp_path, "project", "urgent", 1)
+    low = await enqueue(db, "project", "low")
+    delivered = []
+
+    class Launch:
+        async def run(self, claim, check):
+            await check(claim)
+            delivered.append(claim.task_id)
+            return EffectOutcome("completed")
+
+    dispatcher = EffectDispatcher(OutboxStore(db))
+    dispatcher.register("task.launch", Launch())
+    original_claim = dispatcher.store.claim
+
+    async def arrival(*args, **kwargs):
+        claim = await original_claim(*args, **kwargs)
+        await enqueue(db, "project", "urgent")
+        dispatcher.notify()
+        monkeypatch.setattr(dispatcher.store, "claim", original_claim)
+        return claim
+
+    monkeypatch.setattr(dispatcher.store, "claim", arrival)
+    assert await dispatcher.step()
+    assert delivered == []
+    assert (await dispatcher.store.view(low))["state"] == "pending"
+    assert await dispatcher.step()
+    assert delivered == ["urgent"]
+    assert await dispatcher.step()
+    assert delivered == ["urgent", "low"]

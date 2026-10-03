@@ -72,6 +72,7 @@ from daedalus.host.containment import Walls, walls_for, worktree_writable_paths
 from daedalus.host.engine_factory import TENANT, EngineDeps, PolicyAdapter, build_engine
 from daedalus.host.events import AppEvent, EventBus, EventFilter
 from daedalus.host.hooks import DaedalusHookManager
+from daedalus.host.inference_admission import HostInferenceAdmission
 from daedalus.host.policy import Decision, Policy, Rule, canonical
 from daedalus.host.presence import Presence
 from daedalus.host.request_manifests import RequestManifestStore
@@ -88,6 +89,7 @@ from daedalus.security import redact
 from daedalus.stores.blobs import FileBlobStore
 from daedalus.stores.database import Database
 from daedalus.stores.dispatches import DispatchStore
+from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.files import MAIN as MAIN_FILES
 from daedalus.stores.files import FileRefused, FileStore
 from daedalus.stores.knowledge import KnowledgeStore
@@ -475,10 +477,12 @@ class SessionManager:
         *,
         db: Database,
         governance_path: Path | None = None,
+        execution_store: ExecutionStore | None = None,
     ) -> None:
         self.settings = settings
         self.config = config
         self.db = db
+        self.execution_store = execution_store
         self.blobs = FileBlobStore(settings.blobs_dir)
         self.media = MediaStore(db, self.blobs)
         self.sessions = SqliteSessionStore(db, view=TranscriptViewBuilder(), media=self.media)
@@ -537,7 +541,8 @@ class SessionManager:
         self.dispatcher_tools = ToolRegistry()
         """The main orchestrator's tools and the few shared ones it may call, and nothing else."""
         self.providers = ProviderRegistry(
-            settings, config, usage_sink=self.usage, image_loader=self._load_image
+            settings, config, usage_sink=self.usage, image_loader=self._load_image,
+            admission=HostInferenceAdmission(self),
         )
         self.mcp = McpManager(config.mcp.servers, self.tools, token_dir=settings.state_dir / "mcp")
         # A server's catalogue can change under running sessions — a re-listing, a reconnect, another

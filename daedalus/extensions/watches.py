@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from daedalus.extensions.inbound import _NESTED_QUANTIFIER, search_bounded
+from daedalus.extensions.watch_authority import authorized as watch_authorized
 from daedalus.extensions.watch_delivery import WatchDeliveries
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.gitrun import GitError, run_command
@@ -167,7 +168,7 @@ class Watch:
             "fire_count": self.fire_count, "enabled": self.enabled, "stopped": str(self.state.get("stopped") or ""),
             "condition_revision": self.condition_revision,
             "deadline_at": self.deadline_at,
-            # ``stopped`` is a code: once · budget · pattern · slow_pattern.
+            # ``stopped`` is a code: once · budget · pattern · slow_pattern · needs_approval.
             "last_error": str(self.state.get("last_error") or ""), "describe": describe(self),
         }
 
@@ -328,77 +329,6 @@ class Watches:
         )
 
     # -- setting one -------------------------------------------------------------------------------
-
-    async def create(self, project: Project, *, when: Any, then: Any, cooldown_minutes: Any = 10,
-                     once: bool = False, note: str = "", by: str = "orchestrator",
-                     deadline_at: str | None = None) -> Watch:
-        if by not in ("orchestrator", "operator"):
-            raise WatchRefused("a watch is set by the orchestrator or the operator")
-        live = [w for w in self.of_project(project.id, enabled_only=True)]
-        if len(live) >= self.config.max_per_project:
-            raise WatchRefused(f"{project.name} already has {self.config.max_per_project} watches; remove one first")
-        pattern = await self._check_when(project, when)
-        action = await self._check_then(project, then)
-        cooldown_s = self._check_cooldown(cooldown_minutes)
-        text = " ".join(str(note or "").split())
-        if len(text) > NOTE_MAX:
-            raise WatchRefused(f"a note is at most {NOTE_MAX} characters")
-        if deadline_at is not None:
-            deadline = _parse(deadline_at)
-            if deadline is None or deadline <= self.clock() or deadline > self.clock() + timedelta(days=365):
-                raise WatchRefused("watch deadline must be within the next year")
-            deadline_at = deadline.isoformat()
-        watch_id = "w" + uuid.uuid4().hex[:7]
-        now = self.clock().isoformat()
-        await self.manager.db.execute(
-            "INSERT INTO watches(id, project_id, pattern_json, action_json, cooldown_s, once, note, created_by, created_at, enabled, state_json, deadline_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '{}', ?)",
-            (watch_id, project.id, json.dumps(pattern), json.dumps(action), cooldown_s, int(bool(once)), text, by, now, deadline_at),
-        )
-        watch = await self._reload(watch_id)
-        assert watch is not None
-        if watch.event == "terminal_output":
-            self._follow(watch)
-        await self._changed(project.id, by)
-        return watch
-
-    async def update(self, project_id: str, watch_id: str, *, enabled: bool | None = None, note: str | None = None, cooldown_minutes: Any = None, by: str = "operator") -> Watch:
-        watch = self.get(project_id, watch_id)
-        if watch is None:
-            raise KeyError(watch_id)
-        if note is not None:
-            text = " ".join(note.split())
-            if len(text) > NOTE_MAX:
-                raise WatchRefused(f"a note is at most {NOTE_MAX} characters")
-            watch.note = text
-        if cooldown_minutes is not None:
-            watch.cooldown_s = self._check_cooldown(cooldown_minutes)
-        if enabled is not None and enabled != watch.enabled:
-            if enabled and len(self.of_project(project_id, enabled_only=True)) >= self.config.max_per_project:
-                raise WatchRefused(f"the project already has {self.config.max_per_project} watches switched on")
-            watch.enabled = enabled
-            if enabled:
-                # Switched on again by a person: it starts over, with a fresh hour and no old reason.
-                watch.state.pop("stopped", None)
-                watch.state.pop("fires", None)
-                watch.state.pop("last_error", None)
-        watch.condition_revision += 1
-        await self._save(watch)
-        if watch.event == "terminal_output":
-            if watch.enabled:
-                self._follow(watch)
-            else:
-                self._unfollow(watch.id)
-        await self._changed(project_id, by)
-        return watch
-
-    async def remove(self, project_id: str, watch_id: str, *, by: str = "operator") -> bool:
-        if self.get(project_id, watch_id) is None:
-            return False
-        await self.manager.db.execute("DELETE FROM watches WHERE id = ?", (watch_id,))
-        self._watches.pop(watch_id, None)
-        self._unfollow(watch_id)
-        await self._changed(project_id, by)
-        return True
 
     def _check_cooldown(self, minutes: Any) -> int:
         try:
@@ -584,6 +514,12 @@ class Watches:
                     stored = await cursor.fetchone()
                 if (stored is None or not stored["enabled"] or stored["condition_revision"] != watch.condition_revision
                         or stored["deadline_at"] != watch.deadline_at):
+                    return False
+                if not await watch_authorized(
+                    conn, self.manager.db, watch_id=watch.id,
+                    condition_revision=watch.condition_revision, project_id=watch.project_id,
+                    action=watch.action,
+                ):
                     return False
                 inserted = await conn.execute(
                     "INSERT OR IGNORE INTO watch_deliveries "

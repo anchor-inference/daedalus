@@ -17,6 +17,7 @@ from daedalus.extensions.orchestrator_domain import (
     add_artifact_manifest,
     add_review_comment,
     add_review_evidence,
+    advance_workflow_step,
     apply_goal_revision,
     capture_contract_change,
     claim_handoff,
@@ -261,7 +262,68 @@ async def test_workflow_rejects_cycle_and_uses_typed_gates(domain_db: Database) 
         state = await workflow_readiness(conn, "task1")
         assert state[0]["ready"] is False if state[0]["step_id"] == "review" else True
         assert next(item for item in state if item["step_id"] == "review")["blockers"] == [
-            "predecessor_step_incomplete", "not_before"]
+            "predecessor_step_incomplete", "not_before", "reviewed_result_missing"]
+
+
+async def test_workflow_review_cannot_complete_without_the_exact_accepted_result(domain_db: Database) -> None:
+    await domain_db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = 'task1'")
+    async with domain_db.transaction() as conn:
+        await configure_workflow(conn, task_id="task1", steps=[{"id": "review", "kind": "review"},
+                                                                {"id": "z_followup", "kind": "wait"}],
+                                 edges=[("review", "z_followup")])
+        with pytest.raises(DomainConflict, match="blocked"):
+            await advance_workflow_step(conn, task_id="task1", step_id="review", action="complete")
+    await domain_db.execute("INSERT INTO execution_attempts(id,task_id,contract_revision,host_generation,"
+                            "fence_token_hash,state,created_at,updated_at)"
+                            " VALUES ('attempt1','task1',1,1,'fence','completed','2026-01-01','2026-01-01')")
+    await domain_db.execute("UPDATE board_tasks SET current_attempt_id = 'attempt1',status = 'done'"
+                            " WHERE id = 'task1'")
+    await domain_db.execute("INSERT INTO result_receipts(id,task_id,contract_revision,attempt_id,outcome,"
+                            " original_text,original_digest,original_size_bytes,actor_id,created_at)"
+                            " VALUES ('result1','task1',1,'attempt1','complete','',?,0,'staff:worker','2026-01-01')",
+                            (hashlib.sha256(b"").hexdigest(),))
+    await domain_db.execute("UPDATE board_tasks SET accepted_result_id = 'result1',accepted_contract_revision = 1"
+                            " WHERE id = 'task1'")
+    async with domain_db.transaction() as conn:
+        with pytest.raises(DomainConflict, match="blocked"):
+            await advance_workflow_step(conn, task_id="task1", step_id="review", action="complete")
+    await domain_db.execute("INSERT INTO review_verdicts(id,result_id,contract_revision,reviewer_actor_id,"
+                            " verification,accepted,reason,created_at)"
+                            " VALUES ('verdict1','result1',1,'operator:1','verified',1,'checked','2026-01-01')")
+    async with domain_db.transaction() as conn:
+        readiness = await workflow_readiness(conn, "task1")
+        assert readiness[0]["ready"] is True
+        assert readiness[0]["review_binding"] == {"result_id": "result1", "verdict_id": "verdict1",
+                                                    "contract_revision": 1, "head": None, "base": None}
+        await conn.execute("UPDATE board_tasks SET branch = 'agent/work',merge_state = 'proposed'"
+                           " WHERE id = 'task1'")
+        assert (await workflow_readiness(conn, "task1"))[0]["blockers"] == ["reviewed_merge_missing"]
+        await conn.execute("UPDATE board_tasks SET branch = NULL,merge_state = '' WHERE id = 'task1'")
+        completed = await advance_workflow_step(conn, task_id="task1", step_id="review", action="complete")
+        assert completed["review_binding"] == readiness[0]["review_binding"]
+        assert (await workflow_readiness(conn, "task1"))[1]["ready"] is True
+    await domain_db.execute("INSERT INTO result_receipts(id,task_id,contract_revision,attempt_id,outcome,"
+                            " original_text,original_digest,original_size_bytes,actor_id,created_at)"
+                            " VALUES ('result2','task1',1,'attempt1','complete','',?,0,'staff:worker','2026-01-02')",
+                            (hashlib.sha256(b"").hexdigest(),))
+    async with domain_db.transaction() as conn:
+        stale = await workflow_readiness(conn, "task1")
+        assert "reviewed_result_superseded" in stale[0]["blockers"] and stale[0]["effective_complete"] is False
+        assert stale[1]["blockers"] == ["predecessor_step_incomplete"] and stale[1]["ready"] is False
+
+
+async def test_human_workflow_acknowledgement_rejects_a_new_contract(domain_db: Database) -> None:
+    await domain_db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = 'task1'")
+    async with domain_db.transaction() as conn:
+        await configure_workflow(conn, task_id="task1", steps=[{"id": "first", "kind": "human"},
+                                                                {"id": "later", "kind": "human"}], edges=[])
+        acknowledged = await advance_workflow_step(conn, task_id="task1", step_id="first", action="ack")
+        assert acknowledged["contract_revision"] == 1 and acknowledged["acknowledged"] is True
+        await replace_contract(conn, task_id="task1", requirements=[],
+                               checks=[{"text": "A different acceptance check"}], acceptance="", brief={},
+                               origin_kind="operator", origin_ref="edit", change_kind="semantic")
+        with pytest.raises(DomainConflict, match="blocked"):
+            await advance_workflow_step(conn, task_id="task1", step_id="later", action="ack")
 
 
 async def test_next_action_requires_current_prerequisites_and_is_replaced_atomically(domain_db: Database) -> None:

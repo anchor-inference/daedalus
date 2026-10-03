@@ -10,11 +10,13 @@ import asyncio
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.effects import EffectOutcome, EffectResolution
 from daedalus.host.skills import DirectorySkillStore, parse_skill_markdown
+from daedalus.host.toolchain import status as toolchain_status
 from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
 from daedalus.stores.outbox import Claim, OutboxStore
@@ -23,6 +25,15 @@ if TYPE_CHECKING:
     from daedalus.app import Application
 
 SKILL_ID = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
+TOOL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,79}$")
+
+
+def _declarations(markdown: str) -> tuple[list[str], list[str]]:
+    meta, _ = parse_skill_markdown(markdown)
+    return (
+        [item.strip() for item in meta.get("requires", "").split(",") if item.strip()],
+        [item.strip() for item in meta.get("tools", "").split(",") if item.strip()],
+    )
 
 
 class SkillRefused(ValueError):
@@ -40,6 +51,11 @@ def assess(skill_id: str, markdown: str, dependencies: list[dict[str, str]]) -> 
         errors.append("name and descriptive purpose are required")
     if "## When to use" not in body or "## Procedure" not in body or "## Checks" not in body:
         errors.append("usage, procedure and checks sections are required")
+    requirements, tools = _declarations(markdown)
+    if len(requirements) > 8 or len(set(requirements)) != len(requirements) or any(item not in {"browser", "node"} for item in requirements):
+        errors.append("requires must name unique supported host components")
+    if len(tools) > 32 or len(set(tools)) != len(tools) or any(not TOOL_NAME.fullmatch(item) for item in tools):
+        errors.append("tools must name unique registered tool identifiers")
     if not isinstance(dependencies, list) or len(dependencies) > 16:
         errors.append("too many dependencies")
     else:
@@ -51,11 +67,28 @@ def assess(skill_id: str, markdown: str, dependencies: list[dict[str, str]]) -> 
 
 
 class SkillQuality:
-    def __init__(self, db: Database, directory: DirectorySkillStore, dispatcher: Any = None) -> None:
+    def __init__(
+        self, db: Database, directory: DirectorySkillStore, dispatcher: Any = None, *,
+        available_tools: Callable[[], set[str]] | None = None,
+        requirement_status: Callable[[str], str] = toolchain_status,
+    ) -> None:
         self.db = db
         self.directory = directory
         self.dispatcher = dispatcher
         self.lifecycle = asyncio.Lock()
+        self.available_tools = available_tools
+        self.requirement_status = requirement_status
+
+    def _check_capabilities(self, markdown: str) -> None:
+        requirements, tools = _declarations(markdown)
+        for requirement in requirements:
+            if self.requirement_status(requirement) != "ok":
+                raise SkillRefused(f"required host component {requirement} is unavailable")
+        if tools:
+            available = self.available_tools() if self.available_tools is not None else set()
+            missing = sorted(set(tools) - available)
+            if missing:
+                raise SkillRefused(f"required tools are unavailable: {', '.join(missing)}")
 
     async def submit_command(
         self, principal: Principal, skill_id: str, version: str, markdown: str,
@@ -106,6 +139,7 @@ class SkillQuality:
                     raise SkillRefused("dependency pin is not active")
             if hashlib.sha256(manifest["markdown"].encode()).hexdigest() != expected_digest:
                 raise SkillRefused("stored skill body changed")
+            self._check_capabilities(manifest["markdown"])
             await conn.execute(
                 "UPDATE skill_manifests SET status = 'staged' WHERE id = ? AND version = ?",
                 (skill_id, version),
@@ -136,9 +170,24 @@ class SkillQuality:
         for row in completed:
             target = self.directory.root / row["id"]
             entry = target / "SKILL.md"
-            if (target / ".published").exists() or not entry.is_file():
+            if not entry.is_file():
                 continue
-            if hashlib.sha256(entry.read_bytes()).hexdigest() == row["digest"]:
+            unavailable = target / ".requires-unavailable"
+            markdown = json.loads(row["manifest"])["markdown"]
+            if (hashlib.sha256(entry.read_bytes()).hexdigest() != row["digest"]
+                    or hashlib.sha256(markdown.encode()).hexdigest() != row["digest"]):
+                (target / ".disabled").touch()
+                continue
+            try:
+                self._check_capabilities(markdown)
+            except SkillRefused:
+                unavailable.touch()
+                (target / ".disabled").touch()
+                continue
+            if unavailable.exists():
+                unavailable.unlink()
+                (target / ".disabled").unlink(missing_ok=True)
+            if not (target / ".published").exists():
                 (target / ".disabled").unlink(missing_ok=True)
                 (target / ".published").touch()
 
@@ -159,6 +208,10 @@ class SkillQuality:
             )
             if pinned is None:
                 return EffectOutcome("failed", "skill dependency pin is inactive")
+        try:
+            self._check_capabilities(manifest["markdown"])
+        except SkillRefused as exc:
+            return EffectOutcome("failed", str(exc))
         target = self.directory.root / skill_id
         if target.exists():
             return EffectOutcome("failed", "skill directory already exists")
@@ -172,6 +225,10 @@ class SkillQuality:
             if target.exists():
                 return EffectOutcome("failed", "skill directory already exists")
             await check(claim)
+            try:
+                self._check_capabilities(manifest["markdown"])
+            except SkillRefused as exc:
+                return EffectOutcome("failed", str(exc))
             try:
                 target.mkdir()
                 (target / ".disabled").touch()
@@ -208,7 +265,10 @@ async def install(app: Application) -> list[Any]:
     if manager is None:
         raise RuntimeError("skill store is unavailable")
     dispatcher = app.extensions["effects"]
-    service = SkillQuality(app.db, manager.skills, dispatcher)
+    service = SkillQuality(
+        app.db, manager.skills, dispatcher,
+        available_tools=lambda: {tool.name for tool in manager.tools.list_all()},
+    )
     await service.load_active()
     dispatcher.register("skill.publish", service)
     app.extensions["skill_quality"] = service

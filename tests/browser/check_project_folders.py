@@ -199,6 +199,7 @@ def scenario(page: Page, lang: str, unhandled: Unhandled, name: str) -> None:
     expect(page.locator("#project-rename")).to_have_value("Bakery revised")
     page.get_by_text("Read current version" if lang == "en" else "Прочитать текущую версию").click()
     page.get_by_role("button", name="Save" if lang == "en" else "Сохранить", exact=True).click()
+    expect(page.locator("#project-rename")).to_have_count(0)
     patches = [body for method, path, body in sent if method == "PATCH" and path == "/api/projects/p1"]
     assert len(patches) == 2 and patches[0]["expected_entity_revision"] == 4 and patches[1]["expected_entity_revision"] == 5
     assert patches[0]["client_operation_id"] != patches[1]["client_operation_id"] and state["project"]["name"] == "Bakery revised", patches

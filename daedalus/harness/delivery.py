@@ -35,6 +35,7 @@ import contextlib
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
@@ -112,6 +113,7 @@ class DeliveryWorker:
     store: HarnessStore
     config: Callable[[], HarnessConfig]
     in_transcript: Callable[[CliSession, str], Awaitable[bool]]
+    guard_send: Callable[[str], AbstractAsyncContextManager[None]]
     waiting: list[Pending] = field(default_factory=list)
     arrived: asyncio.Event = field(default_factory=asyncio.Event)
     inflight: Pending | None = None
@@ -248,7 +250,8 @@ class DeliveryWorker:
         pending.acknowledged = asyncio.get_running_loop().create_future()
         pending.sent_text = pending.text
         self.inflight = pending
-        delivery = await self.adapter.send(self.session.term, pending.message_id, pending.text, mode)
+        async with self.guard_send(pending.message_id):
+            delivery = await self.adapter.send(self.session.term, pending.message_id, pending.text, mode)
         await self._record(pending, delivery)
         if delivery.state in ("acknowledged", "failed"):
             await self._state(pending, delivery.state, error=delivery.error)
@@ -275,7 +278,7 @@ class DeliveryWorker:
         human = pending.origin == "operator"
         pastes = 0
         while True:
-            await self._write(paste=text, human=human, note=f"message {pending.message_id}".strip())
+            await self._write(pending, paste=text, human=human, note=f"message {pending.message_id}".strip())
             pastes += 1
             if pastes == 1:
                 await self._record(pending, Delivery(pending.message_id, "written", via=via))
@@ -309,7 +312,7 @@ class DeliveryWorker:
         enters = 0
         submitted = False
         while True:
-            await self._write(keys=["Enter"], human=human, note=note or f"submit {pending.message_id}".strip())
+            await self._write(pending, keys=["Enter"], human=human, note=note or f"submit {pending.message_id}".strip())
             enters += 1
             if pending.message_id:
                 with contextlib.suppress(Exception):
@@ -393,12 +396,14 @@ class DeliveryWorker:
         rules = self.adapter.capabilities.paste
         return max(delay, rules.burst_guard_ms if rules is not None else 0) / 1000
 
-    async def _write(self, *, paste: str | None = None, keys: list[str] | None = None, human: bool, note: str) -> None:
+    async def _write(self, pending: Pending, *, paste: str | None = None, keys: list[str] | None = None,
+                     human: bool, note: str) -> None:
         """A write that waits out a person typing: the operator's own message does not wait for
         the operator, anyone else's waits as long as the person keeps typing."""
         while True:
             try:
-                await self.session.term.write(paste=paste, keys=keys, note=note, wait_keyboard=not human)
+                async with self.guard_send(pending.message_id):
+                    await self.session.term.write(paste=paste, keys=keys, note=note, wait_keyboard=not human)
                 return
             except Conflict as exc:
                 if exc.details.get("reason") != "keyboard_held":

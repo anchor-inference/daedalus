@@ -16,9 +16,10 @@ from daedalus.config import Settings
 from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.stores.database import Database
 from daedalus.stores.projects import RULE_TEXT_MAX, RULES_CHARS, RULES_MAX
+from tests.support.waiting import until
 from tests.unit.test_orchestrator import rig
 from tests.unit.test_orchestrator_team import fake, office, working
-from tests.unit.test_staff_runtime import BRIEF, board_task
+from tests.unit.test_staff_runtime import BRIEF, close_team
 
 NOTES = "Earlier notes of the project, kept for the record. " * 30
 RULE = (
@@ -43,12 +44,7 @@ async def test_a_rule_is_shown_whole_every_turn_and_given_to_every_member_with_t
         await r.manager.projects.set_brief(r.project.id, "constraints", "Never push to the shared remote.", "operator")
         ada, ada_live = await working(r, "Ada", "Menu page")
         ben = await r.manager.staff.hire(r.project.id, name="Ben", role="Photos", isolation="shared")
-        await r.team.assign(ben, await board_task(r.manager, r.project, "Photos"), by="operator")
-        ben_live = await r.team.live_of(ben)
-        assert ben_live is not None
-        # Ben handed his task in and sits idle: he is not woken for the rule, his next brief has it.
-        await r.manager.db.execute("UPDATE board_tasks SET status = 'done' WHERE id = ?", (ben_live.session.task_id,))
-        await r.team.ingress.status(ben_live, "idle")
+        # Ben has no live turn, so the rule reaches him in his next task brief.
 
         said = await r.call(sid, "journal", kind="rule", text=RULE)
         rule_id = int(said.split("#")[1].split()[0])
@@ -64,6 +60,8 @@ async def test_a_rule_is_shown_whole_every_turn_and_given_to_every_member_with_t
 
         # The next brief of any member carries it, with the project's constraints.
         await r.call(sid, "assign", staff="Ben", title="Photos of the new menu", **BRIEF)
+        await until(lambda: bool(runtime.started and runtime.started[-1].staff.id == ben.id),
+                    "Ben's approved task launch")
         first = runtime.started[-1].first_message
         assert RULE in first and "The operator's rules for this project, in force for all work here:" in first
         assert "- The project's constraints: Never push to the shared remote." in first
@@ -81,6 +79,7 @@ async def test_a_rule_is_shown_whole_every_turn_and_given_to_every_member_with_t
             await r.call(sid, "journal", op="lift")
         assert ada_live is not None
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -111,4 +110,5 @@ async def test_rules_are_bounded_where_they_are_written_so_all_of_them_always_sh
         assert (await r.call(sid, "journal", text="Chose the smaller model for the scouts")).startswith("journal entry #")
         assert (await r.manager.projects.journal(r.project.id, limit=1))[0].kind == "decision"
     finally:
+        await close_team(r.manager)
         await r.manager.close()

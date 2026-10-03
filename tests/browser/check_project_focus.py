@@ -19,6 +19,7 @@ import json
 import os
 import re
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -38,6 +39,8 @@ WORDS = {
         "all": "All projects", "orchestrator": "Orchestrator", "team": "Team", "oneoff": "One-off", "terminals": "Terminals", "board": "Board", "brief": "Brief",
         "wakeups": "Wake-ups", "journal": "Journal", "folders": "Folders", "machine": "the machine's terminal limit is reached", "placeholder": "Write to the orchestrator…",
         "lev": "Write to Lev…", "folder": "Folder added", "created": "Task created", "assigned": "Assigned", "watch": "Watch set", "asked": "Asked you",
+        "watch_queued": "Action queued", "watch_failed": "Action delivery failed", "watch_expired": "The watch reached its end time.", "watch_add": "Watch", "watch_set": "Add",
+        "watch_blocked": "Approval is no longer current", "watch_approval": "Needs approval", "watch_approve": "Approve watch", "watch_capability": "no current orchestrator",
         "questions": "Questions", "events": "3 events since 09:51", "onlyyou": "edited by you only", "byorch": "changed by the orchestrator", "older": "Older entries",
         "note": "Add a note", "enable": "Switch the orchestrator on", "on": "Switch on", "cost": "total is not known", "pause": "Pause after the turn", "accepted": "accepted",
         "staff": "6 staff", "needs": "1 needs you", "autonomy": "autonomy: normal",
@@ -48,6 +51,8 @@ WORDS = {
         "all": "Все проекты", "orchestrator": "Оркестратор", "team": "Команда", "oneoff": "Разовые", "terminals": "Терминалы", "board": "Доска", "brief": "Бриф",
         "wakeups": "Будильники", "journal": "Журнал", "folders": "Папки", "machine": "достигнут предел терминалов машины", "placeholder": "Напишите оркестратору…",
         "lev": "Написать сотруднику Lev…", "folder": "Папка добавлена", "created": "Задача создана", "assigned": "Назначено", "watch": "Наблюдение поставлено", "asked": "Спросил вас",
+        "watch_queued": "Действие в очереди", "watch_failed": "Не удалось доставить действие", "watch_expired": "Срок наблюдения истёк.", "watch_add": "Наблюдение", "watch_set": "Добавить",
+        "watch_blocked": "Разрешение больше не действует", "watch_approval": "Требует подтверждения", "watch_approve": "Подтвердить наблюдение", "watch_capability": "нет оркестратора",
         "questions": "Вопросы", "events": "3 события с 09:51", "onlyyou": "правите только вы", "byorch": "изменено оркестратором", "older": "Более ранние записи",
         "note": "Добавить заметку", "enable": "Включить оркестратор", "on": "Включить", "cost": "итоговая сумма заранее неизвестна", "pause": "После хода — пауза", "accepted": "принято",
         "staff": "6 сотрудников", "needs": "1 ждёт вас", "autonomy": "самостоятельность: обычная",
@@ -67,7 +72,7 @@ def serve(page: Page, focus: FocusStub) -> None:
         request = route.request
         url = urlsplit(request.url)
         path = url.path[url.path.index("/api/"):] if "/api/" in url.path else ""
-        body = request.post_data_json if request.method in ("POST", "PUT", "PATCH") and request.post_data else None
+        body = request.post_data_json if request.method in ("POST", "PUT", "PATCH", "DELETE") and request.post_data else None
         answered = focus.answer(request.method, path, url.query, body)
         if answered is not None:
             status, payload = answered
@@ -81,6 +86,7 @@ def serve(page: Page, focus: FocusStub) -> None:
 def desktop(page: Page, lang: str, width: int) -> None:
     words, invented = WORDS[lang], FOCUS_WORDS[lang]
     focus = FocusStub.bakery(lang)
+    focus.watch_lost_reply = True
     serve(page, focus)
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
 
@@ -190,6 +196,29 @@ def desktop(page: Page, lang: str, width: int) -> None:
     assert f"/app/orchestration/project/{PID}?" in page.url and "panel=brief" in page.url, page.url
     page.locator(".panel .panel-tab[data-tab='wakeups']").click()
     expect(page.locator(".panel .wakeup-row").first).to_contain_text(invented["wake.note"])
+    watches = page.locator(".panel .watch-row")
+    expect(watches.first).to_contain_text(words["watch_queued"])
+    expect(watches.first).to_contain_text(words["watch_blocked"])
+    expect(watches.nth(1)).to_contain_text(words["watch_failed"])
+    expect(watches.nth(1)).to_contain_text(words["watch_expired"])
+    expect(watches.nth(2)).to_contain_text(words["watch_approval"])
+    expect(watches.nth(3)).to_contain_text(words["watch_capability"])
+    expect(watches.nth(3).get_by_role("button", name="Switch this watch on" if lang == "en" else "Включить наблюдение")).to_be_disabled()
+    watches.nth(2).get_by_role("button", name=words["watch_approve"]).click()
+    expect(page.locator(".sheet-backdrop.confirm .dialog")).to_contain_text("without another confirmation" if lang == "en" else "без нового подтверждения")
+    page.locator(".sheet-backdrop.confirm .dialog button").last.click()
+    expect(watches.nth(2)).not_to_contain_text(words["watch_approval"])
+    assert focus.watched[0][0] == "update" and focus.watched[0][1]["enabled"] is True and focus.watched[0][1]["expected_condition_revision"] == 2
+    page.locator(".panel .wakeup-section").last.get_by_role("button", name=words["watch_add"], exact=True).click()
+    page.locator("#watch-deadline").select_option("24")
+    page.get_by_role("button", name=words["watch_set"], exact=True).click()
+    expect(page.locator(".watch-sheet").get_by_text("Retry original request" if lang == "en" else "Повторить исходный запрос")).to_be_visible()
+    page.locator(".watch-sheet").get_by_text("Retry original request" if lang == "en" else "Повторить исходный запрос").click()
+    creates = [body for kind, body in focus.watched if kind == "create"]
+    assert len(creates) == 2 and creates[0] == creates[1] and creates[0]["deadline_at"], focus.watched
+    hours = (datetime.fromisoformat(creates[0]["deadline_at"]) - datetime.now(UTC)).total_seconds() / 3600
+    assert 23.9 < hours < 24.1, hours
+    expect(watches.last).to_contain_text("Until" if lang == "en" else "До")
     page.locator(".panel .panel-tab[data-tab='folders']").click()
     expect(page.locator(".panel .focus-folder")).to_have_count(3)
 
@@ -250,7 +279,7 @@ def phone(page: Page, lang: str) -> None:
     page.goto(f"{BASE}/project/{PID}?token=t&lang={lang}")
     expect(page.locator(".chat.in-project.orchestrator .event-card")).to_be_visible()
     fits(page, f"{lang} phone orchestrator")
-    for where in ("journal", "brief", "team", "board"):
+    for where in ("journal", "brief", "team", "board", "wakeups"):
         page.goto(f"{BASE}/project/{PID}/{where}?token=t&lang={lang}")
         expect(page.locator(".pagehead .iconbtn[href]").first).to_be_visible()
         if where == "team":
@@ -260,6 +289,14 @@ def phone(page: Page, lang: str) -> None:
             expect(rows.filter(has_text="Lev").locator(".staff-spend")).to_have_text(WORDS[lang]["levspend"])
             expect(rows.filter(has_text="Ira").locator(".staff-spend")).to_have_text(WORDS[lang]["iraspend"])
             expect(rows.filter(has_text="Max").locator(".staff-spend")).to_have_count(0)
+        if where == "wakeups":
+            expect(page.locator(".watch-row").first).to_contain_text(WORDS[lang]["watch_queued"])
+            expect(page.locator(".watch-row").first).to_contain_text(WORDS[lang]["watch_blocked"])
+            expect(page.locator(".watch-row").nth(1)).to_contain_text(WORDS[lang]["watch_failed"])
+            page.locator(".wakeup-section").last.get_by_role("button", name=WORDS[lang]["watch_add"], exact=True).click()
+            expect(page.locator("#watch-deadline")).to_be_visible()
+            fits(page, f"{lang} phone watch form")
+            page.keyboard.press("Escape")
         fits(page, f"{lang} phone {where}")
 
 

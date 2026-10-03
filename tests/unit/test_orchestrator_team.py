@@ -23,12 +23,22 @@ from daedalus.host.wake_queue import Batch, Pending, Wake
 from daedalus.staff_runtime import Availability, FakeStaffRuntime, LiveSession, ReadPage, Receipt
 from daedalus.stores.database import Database
 from daedalus.stores.harness import HarnessStore
+from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.staff import Staff
 from daedalus.tools.orchestrator import tell
+from tests.support.authorized_launch import operator_assignment
 from tests.support.models import DEFAULT_PRESET
-from tests.support.waiting import until_await
-from tests.unit.test_orchestrator import Rig, _idle, events, rig
-from tests.unit.test_staff_runtime import BRIEF, board_task, task_row
+from tests.support.waiting import until, until_await
+from tests.unit.test_orchestrator import Rig, _idle, approve_coordinator, events, rig
+from tests.unit.test_staff_runtime import (
+    BRIEF,
+    Capacity,
+    ObservedFakeStaffRuntime,
+    board_task,
+    close_team,
+    observed_cli_exit,
+    task_row,
+)
 
 ALLOWANCES = "Install npm packages listed in package.json\nRun the test suite as often as needed"
 
@@ -37,11 +47,13 @@ async def office(r: Rig, *, autonomy: str = "normal") -> str:
     """An orchestrator for the rig's project, with a fake Daedalus runtime and the brief's allowances."""
     sid = (await r.orch.enable(r.project.id, autonomy=autonomy)).settings.orchestrator.session_id
     await r.manager.projects.set_brief(r.project.id, "allowed_without_operator", ALLOWANCES, "operator")
+    await approve_coordinator(r, sid)
     return sid
 
 
-def fake(r: Rig, **kwargs: Any) -> FakeStaffRuntime:
-    runtime = FakeStaffRuntime(kind="daedalus", **kwargs)
+def fake(r: Rig, **kwargs: Any) -> ObservedFakeStaffRuntime:
+    runtime = ObservedFakeStaffRuntime(kind="daedalus", **kwargs)
+    runtime.manager = r.manager
     r.team.runtimes["daedalus"] = runtime
     return runtime
 
@@ -49,10 +61,19 @@ def fake(r: Rig, **kwargs: Any) -> FakeStaffRuntime:
 async def working(r: Rig, name: str = "Ada", title: str = "Menu page") -> tuple[Staff, LiveSession]:
     """A member hired by the operator and started on a task, so there is a live session to talk to."""
     member = await r.manager.staff.hire(r.project.id, name=name, role="Menu", isolation="shared")
-    await r.team.assign(member, await board_task(r.manager, r.project, title), by="operator")
+    await operator_assignment(r.team, member, await board_task(r.manager, r.project, title))
     live = await r.team.live_of(member)
     assert live is not None
     return member, live
+
+
+async def admitted(r: Rig, task_id: str) -> bool:
+    row = await r.manager.db.fetchone(
+        "SELECT state FROM effect_outbox WHERE json_extract(payload_json,'$.control.task_id') = ?"
+        " AND kind = 'task.launch'"
+        " ORDER BY created_at DESC LIMIT 1", (task_id,),
+    )
+    return row is not None and row["state"] == "completed"
 
 
 async def journal_texts(r: Rig) -> list[str]:
@@ -103,6 +124,7 @@ async def test_a_grant_follows_the_autonomy_and_the_quoted_allowance(settings: S
         assert resolved is not None and resolved.resolved_by == "orchestrator" and resolved.resolution["basis"] == basis
         assert any(t.startswith(f"The orchestrator granted {member.name}") for t in await journal_texts(r))
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -124,6 +146,7 @@ async def test_under_ask_autonomy_a_question_becomes_a_suggestion_and_a_permissi
             await r.call(sid, "answer", request_id=permission.id, allow=False)
         assert runtime.answered == []
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -147,6 +170,7 @@ async def test_answering_needs_an_answer_of_the_right_kind_and_a_request_of_this
             await r.call(sid, "answer", request_id=stranger.id, text="x")
         assert (await r.call(sid, "answer", request_id=question, text="SQLite: the brief says one file")).endswith("answered")
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -162,6 +186,7 @@ async def test_the_first_answer_wins_against_the_operator(settings: Settings, db
             await r.call(sid, "answer", request_id=ask_id, selected=["Postgres"])
         assert [d.selected for _, _, d in runtime.answered] == [["SQLite"]]
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -188,6 +213,7 @@ async def test_escalating_hands_the_request_to_the_operator_with_the_suggestion(
             await r.call(sid, "answer", request_id=ask_id, escalate=True)
         assert runtime.answered == []
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -260,6 +286,7 @@ async def test_hiring_checks_the_executor_the_model_and_the_name(settings: Setti
         with pytest.raises(Refused, match="terminal daemon is down"):
             await r.call(sid, "hire", name="Cody", role="Code", harness="claude")
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -287,6 +314,7 @@ async def test_editing_is_journaled_and_dismissing_a_working_member_needs_releas
         with pytest.raises(Refused, match="nobody called 'Ada'"):
             await r.call(sid, "tell", staff="Ada", text="hello")
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -309,11 +337,13 @@ async def test_assign_needs_the_whole_contract_and_creates_the_task_as_the_orche
         assert await r.board.list(actor=sid) == before, "a refused hand-over leaves nothing on the board"
 
         said = await r.call(sid, "assign", staff="Ada", title="Menu page", priority=2, **BRIEF)
-        assert said.startswith("Ada started on ")
+        assert said.startswith("Ada will start ") and "effect " in said
         task_id = said.split()[3]
+        await until(lambda: len(runtime.started) == 1, "the approved launch started Ada")
         [created] = [e for e in await events(r.manager, "task.created") if e.payload["task_id"] == task_id]
         [assigned] = [e for e in await events(r.manager, "task.assigned") if e.payload["task_id"] == task_id]
-        assert created.payload["actor"] == assigned.payload["actor"] == "orchestrator"
+        assert created.payload["actor"] == assigned.payload["actor"] == "agent"
+        assert created.payload["actor_id"] == assigned.payload["actor_id"] == f"orchestrator:{sid}"
         [started] = runtime.started
         assert started.task is not None and started.task.id == task_id and started.origin == "orchestrator"
 
@@ -322,10 +352,17 @@ async def test_assign_needs_the_whole_contract_and_creates_the_task_as_the_orche
         with pytest.raises(Refused, match="deliverable, boundaries, done-when"):
             await r.call(sid, "assign", staff="Ada", task_id=half)
         said = await r.call(sid, "assign", staff="Ada", task_id=half, deliverable="prices.md committed", boundaries="Only prices.md", done_when="prices.md lists every dish")
-        assert "Ada will start" in said and "still working" in said, "Ada is busy, so it queues with the reason"
+        assert "Ada will start" in said and "effect " in said
+        async def busy() -> bool:
+            action = await r.manager.db.fetchone("SELECT id FROM effect_outbox WHERE kind='task.launch'"
+                                                 " AND json_extract(payload_json,'$.control.task_id') = ?",
+                                                 (half,))
+            return action is not None and (await OutboxStore(r.manager.db).view(action["id"]))["wait_reason"] == "busy"
+        await until_await(busy, "the assigned member was still working on the first task")
         task = await r.board.get(half, actor=sid)
         assert task["brief"]["deliverable"] == "prices.md committed" and task["assignee_staff_id"]
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -334,17 +371,28 @@ async def test_staff_sessions_tool_finds_a_finished_cli_chat(settings: Settings,
     try:
         assert "StaffSessions" in {tool.name for tool in r.manager.tools.list_all()}
         sid = await office(r)
-        r.team.runtimes["cursor"] = FakeStaffRuntime(kind="cursor")
+        cli = ObservedFakeStaffRuntime(kind="cursor")
+        cli.manager = r.manager
+        r.team.runtimes["cursor"] = cli
+        r.team._capacity = Capacity(running=0, cap=20)
         member = await r.manager.staff.hire(r.project.id, name="Ada", harness="cursor", isolation="shared")
         task_id = await board_task(r.manager, r.project, "Menu")
-        task = await r.team.task(task_id)
-        assert task is not None
-        first = await r.team.start(member, task)
+        queued = await operator_assignment(r.team, member, task_id, wait_for_admission=False)
+        async def observed() -> bool:
+            view = await OutboxStore(r.manager.db).view(queued["effect_id"])
+            return view["state"] == "completed" or view["wait_reason"] is not None
+        await until_await(observed, "the CLI launch reached an admission decision")
+        view = await OutboxStore(r.manager.db).view(queued["effect_id"])
+        assert view["state"] == "completed", (view["wait_reason"], view["wait_detail"], view["error"])
+        first = await r.team.live_of(member)
+        assert first is not None
+        await observed_cli_exit(r.team, first)
         await r.manager.staff.end_session(first.id, "terminal closed")
         listed = await r.call(sid, "staff_sessions", staff="Ada", task_id=task_id)
         assert first.id in listed and "ready to resume" in listed
         assert "Assign(task_id=..." in listed
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -358,9 +406,18 @@ async def test_assignments_past_the_concurrency_wait_in_the_queue(settings: Sett
             await r.manager.staff.hire(r.project.id, name=name, role="Menu", isolation="shared")
         first = await r.call(sid, "assign", staff="Ada", title="Menu page", **BRIEF)
         second = await r.call(sid, "assign", staff="Ben", title="Photos", **BRIEF)
-        assert first.startswith("Ada started") and "queue position 1" in second
+        assert first.startswith("Ada will start") and second.startswith("Ben will start")
+        async def deferred() -> bool:
+            rows = await r.manager.db.fetchall("SELECT id FROM effect_outbox WHERE kind = 'task.launch'"
+                                               " ORDER BY created_at,id")
+            if len(rows) != 2:
+                return False
+            views = [await OutboxStore(r.manager.db).view(row["id"]) for row in rows]
+            return any(view["wait_reason"] == "project" for view in views)
+        await until_await(deferred, "the second launch waited for the project limit")
         assert len(runtime.started) == 1
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -386,6 +443,7 @@ async def test_the_tell_tool_hands_its_timing_through_and_offers_only_the_three(
         assert not later.is_error and not default.is_error
         assert [(m.text, m.mode) for _, m in runtime.sent] == [("then the prices", "after_turn"), ("use the owner's sheet", "now")]
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -415,6 +473,7 @@ async def test_tell_passes_its_timing_to_the_runtime_and_returns_the_receipt(set
         with pytest.raises(Refused, match="empty"):
             await r.call(sid, "tell", staff="Ada", text="  ")
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -451,6 +510,7 @@ async def test_read_staff_pages_are_bounded_carry_their_session_and_mark_the_tur
         with pytest.raises(Refused, match="Ben has not worked yet"):
             await r.call(sid, "read_staff", staff="Ben")
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -466,7 +526,7 @@ async def test_a_report_reaches_the_orchestrator_whole_and_can_be_read_again(set
         _, live = await working(r)
         answer = "\n".join(f"{n}. " + "The frames are drawn in Chrome on the GPU. " * 8 for n in range(1, 9))
         assert len(answer) > 2000
-        await r.team.ingress.report(live, "checkpoint", answer)
+        await r.team.ingress.report(live, "checkpoint", answer, call_id="fixture-checkpoint-one")
         reported = (await r.manager.bus.latest(events_filter("staff.report"), limit=1))[0]
         line = await r.orch.line(await r.refreshed(), reported)
         assert "8. The frames" in line and "…" not in line, line[-200:]
@@ -474,11 +534,17 @@ async def test_a_report_reaches_the_orchestrator_whole_and_can_be_read_again(set
         said = await r.call(sid, "read_staff", staff="Ada", what="reports", max_chars=20000)
         assert "1. The frames" in said and "8. The frames" in said and "checkpoint" in said
 
-        told = await r.team.ingress.report(live, "done", "x" * 20000)
-        assert "was cut there" in told
+        told = await r.team.ingress.report(live, "done", "x" * 20000, call_id="fixture-done-one")
+        assert "reported done" in told
         last = (await r.manager.bus.latest(events_filter("staff.report"), limit=1))[0]
-        assert "[cut at 12000 characters" in last.payload["text"]
+        assert last.payload["text"].endswith("[full report in report receipt]")
+        from daedalus.extensions.staff_results import StaffReportService
+
+        assert await StaffReportService(r.team.app).original(
+            r.project.id, live.session.task_id, last.payload["report_id"],
+        ) == b"x" * 20000
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -502,12 +568,31 @@ async def test_interrupt_pause_and_release_act_through_the_runtime_and_are_journ
         assert runtime.stopped == [live.id]
         [exited] = [e for e in await events(r.manager, "staff.status") if e.payload["status"] == "exited"]
         assert exited.payload["actor"] == "orchestrator"
+        assert exited.payload["actor_id"] == f"orchestrator:{sid}"
         assert await r.orch.classify(r.project.id, exited) is None, "its own release does not wake it"
         texts = await journal_texts(r)
         assert {"The orchestrator interrupted Ada's turn.", "The orchestrator paused Ada.", "The orchestrator released Ada."} <= set(texts)
         with pytest.raises(Refused, match="no live session"):
             await r.call(sid, "release", staff="Ada")
     finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
+async def test_release_needs_a_current_operator_approval_before_stopping_a_worker(settings: Settings, db: Database, tmp_path: Path) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        runtime = fake(r)
+        sid = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
+        member, live = await working(r)
+        with pytest.raises(Refused, match="operator-issued orchestrator grant|no current grant"):
+            await r.call(sid, "release", staff=member.name)
+        assert runtime.stopped == [] and await r.team.live_of(member) is not None
+        await approve_coordinator(r, sid)
+        assert "session ended" in await r.call(sid, "release", staff=member.name)
+        assert runtime.stopped == [live.id]
+    finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -538,6 +623,7 @@ async def test_harnesses_lists_the_executors_and_is_the_orchestrators_alone(sett
         ordinary = await r.manager.create_session("work", project_id=r.project.id)
         assert "Harnesses" in r.manager.blocked_tools_for(ordinary)
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -549,6 +635,7 @@ async def test_ask_operator_and_report_refuse_a_dispatch_the_project_does_not_ha
             await r.call(sid, "ask_operator", title="Ship on Friday?", text="Ship on Friday?", dispatch_id="d12345")
         assert await r.manager.asks.open_for(r.project.id) == [], "nothing is asked under a dispatch that is not there"
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -559,6 +646,7 @@ async def test_full_autonomy_leaves_the_command_line_agents_permission_mode_alon
         assert r.team.permission_level(project) == r.team.permission_level(await r.orch.update(r.project.id, autonomy="normal")) == "edits"
         assert r.team.permission_level(await r.orch.update(r.project.id, autonomy="ask")) == "ask"
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -573,6 +661,7 @@ async def test_a_replaced_orchestrator_cannot_use_the_team_tools(settings: Setti
             with pytest.raises(Exception, match="replaced by"):
                 await r.call(old, operation, **kwargs)
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -591,7 +680,8 @@ async def test_a_scripted_orchestrator_hires_assigns_answers_from_the_brief_and_
     }
     r = await rig(settings, db, tmp_path, [
         {"tool": "Hire", "args": {"name": "Rex", "role": "Reviewer", "isolation": "shared"}},
-        {"tool": "Assign", "args": {"staff": "Rex", "title": "Review the menu", **contract}},
+        {"tool": "Assign", "args": {"staff": "Rex", "title": "Review the menu",
+                                    "expected_collection_revision": 1, **contract}},
         {"tool": "Journal", "args": {"text": "Rex reviews the menu", "why": "a second pair of eyes before Friday"}},
         {"text": "Rex is reviewing the menu."},
     ])
@@ -604,6 +694,7 @@ async def test_a_scripted_orchestrator_hires_assigns_answers_from_the_brief_and_
         await until_await(lambda: _idle(r.manager, sid), "the first turn ended")
         rex = await r.manager.staff.by_name(r.project.id, "Rex")
         assert rex is not None and rex.created_by == "orchestrator"
+        await until(lambda: bool(runtime.started), "the queued review assignment admitted Rex")
         [started] = runtime.started
         assert started.staff.id == rex.id and started.origin == "orchestrator"
         live = await r.team.live_of(rex)
@@ -635,10 +726,12 @@ async def test_a_scripted_orchestrator_hires_assigns_answers_from_the_brief_and_
         assert any(t.startswith("Rex reviews the menu") for t in texts)
         assert any("Request qperm1 went to the operator: not covered by the allowances" in t for t in texts)
         task_events = [e for e in await events(r.manager, "task.created", "task.assigned") if e.payload.get("title") == "Review the menu"]
-        assert {e.type for e in task_events} == {"task.created", "task.assigned"} and all(e.payload["actor"] == "orchestrator" for e in task_events)
+        assert {e.type for e in task_events} == {"task.created", "task.assigned"}
+        assert all(e.payload.get("actor_id") == f"orchestrator:{sid}" for e in task_events)
         [answered_event] = [e for e in await events(r.manager, "ask.answered") if e.staff_id == rex.id]
         assert answered_event.payload["via"] == "orchestrator"
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -658,23 +751,34 @@ async def test_a_card_left_by_a_helper_that_died_goes_to_the_next_member_in_one_
     the operator had dismissed the helper. The orchestrator hired a second helper to free the card."""
     r = await rig(settings, db, tmp_path)
     try:
-        fake(r)
+        runtime = ObservedFakeStaffRuntime(kind="cursor")
+        runtime.manager = r.manager
+        r.team.runtimes["cursor"] = runtime
+        r.team._capacity = Capacity()
         sid = await office(r)
-        await r.manager.staff.hire(r.project.id, name="Ira", role="Video", isolation="shared")
-        helper = await r.manager.staff.hire(r.project.id, name="mediafix", role="Video", isolation="shared", one_off=True)
+        await r.manager.staff.hire(r.project.id, name="Ira", role="Video", harness="cursor", isolation="shared")
+        helper = await r.manager.staff.hire(r.project.id, name="mediafix", role="Video", harness="cursor", isolation="shared", one_off=True)
         task_id = _task_in(await r.call(sid, "assign", staff="mediafix", title="Fix the two captions", **BRIEF))
+        async def helper_started() -> bool:
+            return await r.team.live_of(helper) is not None
+
+        await until_await(helper_started, "the helper's queued launch was admitted")
+        await until_await(lambda: admitted(r, task_id), "the helper's launch effect completed")
         live = await r.team.live_of(helper)
         assert live is not None
 
         # The process went on its own: the card is nobody's, and says why.
+        await observed_cli_exit(r.team, live)
         await r.team.ingress.ended(live, "Claude Code exited with code 1; its screen last showed: Error: unknown model")
         row = await task_row(r.manager, task_id)
         assert (row["status"], row["assignee_staff_id"]) == ("todo", None)
         assert "mediafix no longer works this card: the session ended (Claude Code exited with code 1; its screen last showed: Error: unknown model)" in row["notes"]
 
         said = await r.call(sid, "assign", staff="Ira", task_id=task_id)
-        assert said.startswith(f"Ira started on {task_id}")
+        assert said.startswith(f"Ira will start {task_id}")
+        await until_await(lambda: admitted(r, task_id), "Ira's reassigned launch completed")
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -683,20 +787,31 @@ async def test_a_card_held_by_a_member_who_is_gone_is_passed_on_released_or_free
     had dismissed since: each tool that frees a card frees this one too, and a live member keeps theirs."""
     r = await rig(settings, db, tmp_path)
     try:
-        fake(r)
+        runtime = ObservedFakeStaffRuntime(kind="cursor")
+        runtime.manager = r.manager
+        r.team.runtimes["cursor"] = runtime
+        r.team._capacity = Capacity()
         sid = await office(r)
-        await r.manager.staff.hire(r.project.id, name="Ira", role="Video", isolation="shared")
-        helper = await r.manager.staff.hire(r.project.id, name="mediafix", role="Video", isolation="shared", one_off=True)
+        await r.manager.staff.hire(r.project.id, name="Ira", role="Video", harness="cursor", isolation="shared")
+        helper = await r.manager.staff.hire(r.project.id, name="mediafix", role="Video", harness="cursor", isolation="shared", one_off=True)
         first = _task_in(await r.call(sid, "assign", staff="mediafix", title="Fix the two captions", **BRIEF))
+        async def helper_started() -> bool:
+            return await r.team.live_of(helper) is not None
+
+        await until_await(helper_started, "the helper's queued launch was admitted")
+        await until_await(lambda: admitted(r, first), "the helper's launch effect completed")
         live = await r.team.live_of(helper)
         assert live is not None
+        await observed_cli_exit(r.team, live)
         await r.manager.staff.end_session(live.id, "Claude Code exited with code 1")
         await r.manager.staff.archive(helper.id, by="operator")
         assert (await task_row(r.manager, first))["status"] == "doing"
 
+        released = await r.call(sid, "release", staff="mediafix")
+        assert first in released and (await task_row(r.manager, first))["status"] == "todo"
         said = await r.call(sid, "assign", staff="Ira", task_id=first)
-        assert said.startswith(f"Ira started on {first}")
-        assert "the card passed from mediafix to Ira: mediafix was dismissed" in (await task_row(r.manager, first))["notes"]
+        assert said.startswith(f"Ira will start {first}")
+        await until_await(lambda: admitted(r, first), "Ira's handed-off launch completed")
 
         second = await board_task(r.manager, r.project, "Second cut")
         third = await board_task(r.manager, r.project, "Third cut")
@@ -715,9 +830,10 @@ async def test_a_card_held_by_a_member_who_is_gone_is_passed_on_released_or_free
         # Silence is not gone: a member whose live session is on the card keeps it.
         ada, ada_live = await working(r, "Ada", "Menu page")
         await r.team.ingress.status(ada_live, "no_signal")
-        with pytest.raises(Refused, match=f"task {ada_live.session.task_id} is being worked on by Ada; release them first"):
+        with pytest.raises(Refused, match="stop or reconcile the current execution before reassigning"):
             await r.call(sid, "assign", staff="Ira", task_id=ada_live.session.task_id)
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -731,34 +847,33 @@ async def test_reading_a_member_whose_session_ended_says_what_there_is(settings:
         said = await r.call(sid, "read_staff", staff="Ada", what="screen")
         assert said.endswith("(ended: Claude Code exited with code 1): there is no screen of an ended session; what=\"last\" or \"reports\" shows what it left")
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
 async def test_a_card_set_aside_by_hand_stays_so_and_starts_when_it_is_assigned(settings: Settings, db: Database, tmp_path: Path) -> None:
-    """The orchestrator set a card aside as blocked; its one dependency had been done for hours. The
-    board put it back to todo each time any other task finished, and an Assign of it queued it as
-    "waits for <the done dependency> to finish" until the orchestrator edited the dependency away."""
+    """A manually blocked card stays blocked across other board writes until explicitly released."""
     r = await rig(settings, db, tmp_path)
     try:
         fake(r)
+        r.team._capacity = Capacity()
         sid = await office(r)
-        mail = await r.board.add(title="Mail migration", session_id=sid, brief=BRIEF)
-        updates = await r.board.add(title="Safe updates", session_id=sid, brief=BRIEF, depends_on=[mail["id"]])
-        assert updates["status"] == "blocked"
-        await r.board.update(mail["id"], actor=sid, status="done")
-        assert (await task_row(r.manager, updates["id"]))["status"] == "todo", "what waited on the finished task is ready"
-        await r.board.update(updates["id"], actor=sid, status="blocked", note="the prototype stopped; an architecture has to be chosen")
-        unrelated = await r.board.add(title="Unrelated", session_id=sid, brief=BRIEF)
-        await r.board.update(unrelated["id"], actor=sid, status="done")
-        assert (await task_row(r.manager, updates["id"]))["status"] == "blocked", "another task finishing is no reason to unblock it"
+        updates = (await r.call(sid, "tasks", op="create", title="Safe updates", **BRIEF)).split()[0]
+        await r.call(sid, "tasks", op="move", task_id=updates, status="blocked",
+                     note="the prototype stopped; an architecture has to be chosen")
+        await r.call(sid, "tasks", op="create", title="Unrelated", **BRIEF)
+        assert (await task_row(r.manager, updates))["status"] == "blocked"
 
         await r.manager.staff.hire(r.project.id, name="release", role="Updates", isolation="shared")
-        said = await r.call(sid, "assign", staff="release", task_id=updates["id"])
-        assert said.startswith(f"release started on {updates['id']}") and "waits for" not in said
+        await r.call(sid, "tasks", op="move", task_id=updates, status="todo")
+        said = await r.call(sid, "assign", staff="release", task_id=updates)
+        assert said.startswith(f"release will start {updates}")
+        await until_await(lambda: admitted(r, updates), "the explicitly unblocked task launched")
 
-        with pytest.raises(Refused, match=rf"task {updates['id']} cannot wait for itself.*depends_on=\['{updates['id']}'\]"):
-            await r.call(sid, "assign", staff="release", task_id=updates["id"], depends_on=[updates["id"]])
+        with pytest.raises(Refused, match=rf"task {updates} cannot wait for itself.*depends_on=\['{updates}'\]"):
+            await r.call(sid, "assign", staff="release", task_id=updates, depends_on=[updates])
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -771,7 +886,7 @@ async def test_a_report_is_never_folded_into_the_more_line(settings: Settings, d
         await office(r)
         _, live = await working(r)
         answer = "\n".join(f"{n}. " + "The frames are drawn in Chrome on the GPU. " * 4 for n in range(1, 6))
-        await r.team.ingress.report(live, "checkpoint", answer)
+        await r.team.ingress.report(live, "checkpoint", answer, call_id="fixture-checkpoint-two")
         reported = (await r.manager.bus.latest(events_filter("staff.report"), limit=1))[0]
         news = [AppEvent(i + 1, "2026-01-01T10:00:00+00:00", "run.started", {}, project_id=r.project.id) for i in range(39)]
         batch = [*news[:34], reported, *news[34:]]
@@ -785,6 +900,7 @@ async def test_a_report_is_never_folded_into_the_more_line(settings: Settings, d
         line = await r.orch.line(await r.refreshed(), implicit)
         assert "word " * 190 in line and "ReadStaff(\"Ada\")" in line
     finally:
+        await close_team(r.manager)
         await r.manager.close()
 
 
@@ -796,22 +912,31 @@ async def test_assign_to_a_worktree_member_in_a_plain_folder_is_refused_with_the
     r = await rig(settings, db, tmp_path)
     try:
         runtime = fake(r)
+        r.team._capacity = Capacity()
         sid = await office(r)
         notes = tmp_path / "notes"
         notes.mkdir()
         await r.manager.projects.add_folder(r.project.id, str(notes))
         await r.manager.staff.hire(r.project.id, name="Ada", role="Menu", isolation="worktree")
-        with pytest.raises(Refused) as refused:
-            await r.call(sid, "assign", staff="Ada", title="Tidy the notes", folder=str(notes), **BRIEF)
-        said = str(refused.value)
-        assert re.search(r"task \w+ stays on the board, unstarted: Ada works in a git worktree of their own", said), said
-        assert "is not a git repository" in said and "a folder of the project that is a git repository" in said and "isolation to shared" in said
-        assert runtime.started == []
+        task_id = _task_in(await r.call(sid, "assign", staff="Ada", title="Tidy the notes", folder=str(notes), **BRIEF))
 
-        reason = "Ada could not start: " + said.split("unstarted: ", 1)[1]
-        assert len(reason) > 200
-        refusal = AppEvent(1, "2026-01-01T10:00:00+00:00", "task.assigned", {"task_id": "t1", "title": "Tidy the notes", "assignee_staff_id": "", "actor": "system", "error": reason}, project_id=r.project.id)
-        line = await r.orch.line(await r.refreshed(), refusal)
-        assert line.endswith("or read-only)"), line
+        async def launch_failed() -> bool:
+            row = await r.manager.db.fetchone(
+                "SELECT state FROM effect_outbox WHERE kind = 'task.launch'"
+                " AND json_extract(payload_json,'$.control.task_id') = ?", (task_id,),
+            )
+            return row is not None and row["state"] == "failed"
+
+        await until_await(launch_failed, "the launch failure became durable")
+        row = await r.manager.db.fetchone(
+            "SELECT error FROM effect_outbox WHERE kind = 'task.launch'"
+            " AND json_extract(payload_json,'$.control.task_id') = ?", (task_id,),
+        )
+        assert row is not None
+        said = row["error"]
+        assert "is not a git repository" in said
+        assert "a folder of the project that is a git repository" in said and "isolation to shared" in said
+        assert runtime.started == []
     finally:
+        await close_team(r.manager)
         await r.manager.close()

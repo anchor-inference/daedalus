@@ -144,6 +144,14 @@ class BoardWorkflows:
         await cursor.close()
         if task is None or task["project_id"] != project_id or task["status"] not in {"todo", "doing"}:
             raise WorkflowRefused("task is not ready on this project board")
+        cursor = await conn.execute(
+            "SELECT id FROM board_workflow_runs WHERE task_id = ? "
+            "AND status IN ('pending','running','blocked') LIMIT 1", (task_id,),
+        )
+        active = await cursor.fetchone()
+        await cursor.close()
+        if active is not None:
+            raise WorkflowRefused("the task already has an active workflow")
         if not (await dependency_readiness(conn, task_id))["ready"]:
             raise WorkflowRefused("root task has unresolved Board dependencies")
         for node in definition["nodes"]:
@@ -234,6 +242,17 @@ class BoardWorkflows:
                     if desired in {"ready", "running"} and row["status"] not in {"ready", "running"} and active >= parallel:
                         desired = "pending"
                 if desired == row["status"]:
+                    # A ready approval still needs its first host-derived input fingerprint. Without
+                    # it, a later approval could be recorded against an empty source and never stale.
+                    if fingerprint and fingerprint != row["input_digest"]:
+                        cursor = await conn.execute(
+                            "UPDATE board_workflow_steps SET input_digest = ?, step_revision = step_revision + 1 "
+                            "WHERE run_id = ? AND node_id = ? AND step_revision = ?",
+                            (fingerprint, run_id, node_id, row["step_revision"]),
+                        )
+                        if cursor.rowcount != 1:
+                            raise WorkflowRefused("workflow step revision changed")
+                        changed += 1
                     continue
                 if row["status"] in {"ready", "running"}:
                     active -= 1
@@ -415,6 +434,75 @@ class BoardWorkflows:
                 "current_input_hash": current_hash,
             }
 
+    async def inspect(self, run_id: str) -> dict[str, Any]:
+        """Read persisted steps with a current-source preview, without advancing a run on GET."""
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute("SELECT * FROM board_workflow_runs WHERE id = ?", (run_id,))
+            run = await cursor.fetchone()
+            await cursor.close()
+            if run is None:
+                raise KeyError(run_id)
+            definition = json.loads(run["definition"])
+            nodes = {node["id"]: node for node in definition["nodes"]}
+            cursor = await conn.execute(
+                "SELECT * FROM board_workflow_steps WHERE run_id = ? ORDER BY node_id", (run_id,),
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            steps_by_id = {row["node_id"]: row for row in rows}
+            views: list[dict[str, Any]] = []
+            all_current = True
+            for row in rows:
+                node = nodes[row["node_id"]]
+                projected, source_digest = await self._project_node(conn, node, row["status"])
+                cursor = await conn.execute(
+                    "SELECT contract_revision FROM board_tasks WHERE id = ?", (node["task_id"],),
+                )
+                source = await cursor.fetchone()
+                await cursor.close()
+                source_current = bool(source_digest and row["input_digest"] == source_digest
+                                      and (row["status"] != "completed" or row["reuse_fingerprint"] == source_digest))
+                if row["status"] in {"completed", "ready", "running"} and not source_current:
+                    all_current = False
+                reason = ""
+                can_approve = False
+                if node["kind"] == "approval":
+                    if run["status"] in {"cancelled", "failed"}:
+                        reason = "run_ended"
+                    elif row["status"] == "completed" and source_current:
+                        reason = "already_approved"
+                    elif not source_current:
+                        reason = "source_changed_or_reconciling"
+                    elif projected != "ready":
+                        reason = "source_blocked"
+                    elif not await self._predecessors_current(conn, definition, steps_by_id, row["node_id"]):
+                        reason = "predecessor_unready"
+                    elif row["status"] not in {"ready", "blocked"}:
+                        reason = "step_not_ready"
+                    else:
+                        can_approve = True
+                views.append({**dict(row), "source_contract_revision": source["contract_revision"] if source else None,
+                              "current_input_digest": source_digest, "source_current": source_current,
+                              "projected_state": projected, "can_approve": can_approve,
+                              "approval_blocker": reason or None})
+            return {**dict(run), "run_id": run["id"], "definition_value": definition,
+                    "projection_current": all_current, "steps": views}
+
+    async def _predecessors_current(
+        self, conn: Any, definition: dict[str, Any], steps: dict[str, Any], node_id: str,
+    ) -> bool:
+        nodes = {node["id"]: node for node in definition["nodes"]}
+        for source, target in definition["edges"]:
+            if target != node_id:
+                continue
+            prior = steps[source]
+            if prior["status"] != "completed":
+                return False
+            projected, source_digest = await self._project_node(conn, nodes[source], prior["status"])
+            if projected != "completed" or not source_digest or prior["reuse_fingerprint"] != source_digest:
+                return False
+        return True
+
     async def run(self, claim: Claim, check: Any) -> EffectOutcome:
         await check(claim)
         try:
@@ -427,34 +515,69 @@ class BoardWorkflows:
 
     async def approve_command(
         self, principal: Principal, run_id: str, node_id: str, *,
-        expected_entity_revision: int, client_operation_id: str,
+        expected_entity_revision: int, expected_step_revision: int,
+        expected_source_contract_revision: int, expected_input_digest: str,
+        client_operation_id: str,
     ) -> dict[str, Any]:
         run = await self.db.fetchone("SELECT project_id,task_id FROM board_workflow_runs WHERE id = ?", (run_id,))
         if run is None:
             raise KeyError(run_id)
 
         async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
+            cursor = await conn.execute("SELECT status,definition FROM board_workflow_runs WHERE id = ?", (run_id,))
+            run_row = await cursor.fetchone()
+            await cursor.close()
+            if run_row is None or run_row["status"] in {"cancelled", "failed"}:
+                raise WorkflowRefused("workflow is no longer active")
+            definition = json.loads(run_row["definition"])
+            node = next((item for item in definition["nodes"] if item["id"] == node_id), None)
+            if node is None or node["kind"] != "approval":
+                raise WorkflowRefused("the selected node is not an approval")
             cursor = await conn.execute(
-                "SELECT kind,status,step_revision FROM board_workflow_steps WHERE run_id = ? AND node_id = ?",
+                "SELECT * FROM board_workflow_steps WHERE run_id = ? AND node_id = ?",
                 (run_id, node_id),
             )
             step = await cursor.fetchone()
             await cursor.close()
-            if step is None or step["kind"] != "approval" or step["status"] != "ready":
-                raise WorkflowRefused("approval is not ready")
+            if step is None or step["status"] not in {"ready", "blocked"} or step["step_revision"] != expected_step_revision:
+                raise WorkflowRefused("approval state or revision changed")
+            cursor = await conn.execute(
+                "SELECT contract_revision FROM board_tasks WHERE id = ?", (node["task_id"],),
+            )
+            source = await cursor.fetchone()
+            await cursor.close()
+            projected, source_digest = await self._project_node(conn, node, step["status"])
+            if (source is None or source["contract_revision"] != expected_source_contract_revision
+                    or projected != "ready" or not source_digest or source_digest != expected_input_digest
+                    or step["input_digest"] != source_digest):
+                raise WorkflowRefused("approval source or contract changed")
+            cursor = await conn.execute("SELECT * FROM board_workflow_steps WHERE run_id = ?", (run_id,))
+            rows = {row["node_id"]: row for row in await cursor.fetchall()}
+            await cursor.close()
+            if not await self._predecessors_current(conn, definition, rows, node_id):
+                raise WorkflowRefused("approval predecessors changed")
             await conn.execute(
                 "UPDATE board_workflow_steps SET status = 'completed', step_revision = step_revision + 1, "
-                "receipt_id = ?, reuse_fingerprint = input_digest WHERE run_id = ? AND node_id = ? AND step_revision = ?",
-                (mutation.receipt_id, run_id, node_id, step["step_revision"]),
+                "receipt_id = ?, reuse_fingerprint = ? WHERE run_id = ? AND node_id = ? AND step_revision = ?",
+                (mutation.receipt_id, source_digest, run_id, node_id, step["step_revision"]),
             )
-            return {"run_id": run_id, "node_id": node_id, "status": "completed"}
+            return {"run_id": run_id, "node_id": node_id, "status": "completed",
+                    "source_contract_revision": expected_source_contract_revision,
+                    "source_digest": source_digest}
 
         response = await ControlStore(self.db).mutate(
             principal, Scope("project", run["project_id"]), "workflow.approve", client_operation_id,
             expected_entity_revision, Entity("task", run["task_id"]),
-            {"run_id": run_id, "node_id": node_id}, effect,
+            {"run_id": run_id, "node_id": node_id, "expected_step_revision": expected_step_revision,
+             "expected_source_contract_revision": expected_source_contract_revision,
+             "expected_input_digest": expected_input_digest}, effect,
         )
-        await self.advance_run(run_id)
+        try:
+            await self.advance_run(run_id)
+        except (KeyError, WorkflowRefused):
+            # The approval receipt has committed; the sweeper will reconcile the projection. A
+            # projection failure cannot be reported as if the approval write itself were refused.
+            logger.exception("approved workflow %s needs projection reconciliation", run_id)
         return response
 
     async def cancel_command(

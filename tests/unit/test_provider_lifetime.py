@@ -26,7 +26,8 @@ async def test_settings_reload_between_tool_rounds_keeps_the_run_alive(settings:
         nonlocal requests
         body = json.loads(request.content)
         if not body.get("stream"):
-            return httpx.Response(200, json={"choices": [{"message": {"content": "Result"}, "finish_reason": "stop"}]})
+            return httpx.Response(200, json={"choices": [{"message": {"content": "Result"}, "finish_reason": "stop"}],
+                                             "usage": {"prompt_tokens": 2, "completion_tokens": 1}})
         requests += 1
         if requests == 1:
             changed = config.model_copy(deep=True)
@@ -37,6 +38,7 @@ async def test_settings_reload_between_tool_rounds_keeps_the_run_alive(settings:
             chunks = [_chunk({"tool_calls": [{"index": 0, "id": "call_1", "type": "function", "function": {"name": "Exec", "arguments": '{"command":"printf result"}'}}]}, finish="tool_calls")]
         else:
             chunks = [_chunk({"content": "The command returned result."}, finish="stop")]
+        chunks.append({"choices": [], "usage": {"prompt_tokens": 2, "completion_tokens": 3}})
         return httpx.Response(200, text=_sse(chunks), headers={"content-type": "text/event-stream"})
 
     await provider._client.aclose()

@@ -112,7 +112,7 @@ class Application:
             self.executions.release()
             await self.db.close()
             raise
-        self.manager = SessionManager(self.settings, self.config, db=self.db)
+        self.manager = SessionManager(self.settings, self.config, db=self.db, execution_store=self.executions)
         await self.manager.start()
         self.search.manager = self.manager
         self.search.task = asyncio.create_task(self.search.run(), name="conversation-index")

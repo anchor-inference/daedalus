@@ -20,11 +20,12 @@ from daedalus.extensions.board_commands import BoardCommands
 from daedalus.extensions.likeness import same_question
 from daedalus.extensions.notifications import Draft
 from daedalus.extensions.task_contract import split_checks
+from daedalus.extensions.watch_commands import WatchCommands
 from daedalus.extensions.watches import WatchRefused
 from daedalus.host import prompts
 from daedalus.host.peek import LocalFolderAccess, PeekRefused
 from daedalus.staff_runtime import LiveSession
-from daedalus.stores.control import ControlStore, Entity, Principal, Scope
+from daedalus.stores.control import ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.files import HANDOVER_MAX_FILES, MAIN, FileRefused, human_size, parse_handle
 from daedalus.stores.projects import (
     BRIEF_SECTIONS,
@@ -61,7 +62,11 @@ async def board_principal(orch: Orchestrators, session_id: str, project_id: str,
     authority = orch.app.extensions.get("orchestrator_board_authority")
     if authority is None:
         raise Refused("board writes need an operator-issued orchestrator grant")
-    principal = await authority(session_id, operation, project_id, task_id=task_id)
+    try:
+        principal = await authority(session_id=session_id, operation=operation,
+                                    project_id=project_id, task_id=task_id)
+    except ControlDenied as exc:
+        raise Refused(str(exc)) from exc
     if not isinstance(principal, Principal):
         raise Refused("board authority did not return a host identity")
     return principal
@@ -379,7 +384,7 @@ async def tasks(
         raise Refused(f"op is one of {', '.join(TASK_OPS)}")
     names = {m.id: m.name for m in await orch.manager.staff.list(project.id, archived=True)}
     scope = Scope("project", project.id)
-    commands = BoardCommands(orch.manager.db)
+    commands = BoardCommands(orch.manager.db, bus=orch.manager.bus)
     if op == "list":
         rows = await board.list(status, include_done=status is not None, actor=session_id)
         revision = await ControlStore(orch.manager.db).revision(scope, Entity("collection", project.id))
@@ -928,22 +933,45 @@ def _watches(orch: Orchestrators) -> Any:
 
 async def watch(orch: Orchestrators, project: Project, session_id: str, *, when: Any, then: Any,
                 cooldown_minutes: Any = 10, once: bool = False, note: str = "",
-                deadline_at: str | None = None) -> str:
+                deadline_at: str | None = None, client_operation_id: str) -> str:
+    authority = orch.app.extensions.get("board_tool_authority")
+    if authority is None:
+        raise Refused("watch authority is unavailable")
     try:
-        made = await _watches(orch).create(project, when=when, then=then, cooldown_minutes=cooldown_minutes,
-                                          once=once, note=note, deadline_at=deadline_at, by="orchestrator")
-    except WatchRefused as exc:
+        principal, scope = await authority(session_id, "watch.create")
+        if scope != Scope("project", project.id):
+            raise ControlDenied("watch authority belongs to another project")
+        revision = await ControlStore(orch.manager.db).revision(scope, Entity("collection", project.id))
+        made = await WatchCommands(_watches(orch)).create(
+            principal, project, when=when, then=then, cooldown_minutes=cooldown_minutes,
+            once=once, note=note, deadline_at=deadline_at,
+            expected_collection_revision=revision, client_operation_id=client_operation_id,
+        )
+    except (WatchRefused, ControlDenied) as exc:
         raise Refused(str(exc)) from exc
-    view = made.view()
-    return f"watch {made.id} set: {view['describe']} (cooldown {view['cooldown_minutes']} min{', once' if made.once else ''}). Unwatch(\"{made.id}\") removes it."
+    return f"watch {made['id']} set: {made['describe']} (cooldown {made['cooldown_minutes']} min{', once' if made['once'] else ''}). Unwatch(\"{made['id']}\") removes it."
 
 
-async def unwatch(orch: Orchestrators, project: Project, session_id: str, *, id: str) -> str:
+async def unwatch(orch: Orchestrators, project: Project, session_id: str, *, id: str,
+                  client_operation_id: str) -> str:
     ref = (id or "").strip()
     if not ref:
         raise Refused("give the id of a wake-up or a watch; the state block lists them")
     watches: Any = orch.app.extensions.get("watches")
-    if watches is not None and await watches.remove(project.id, ref, by="orchestrator"):
+    current = watches.get(project.id, ref) if watches is not None else None
+    if current is not None:
+        authority = orch.app.extensions.get("board_tool_authority")
+        if authority is None:
+            raise Refused("watch authority is unavailable")
+        principal, scope = await authority(session_id, "watch.remove")
+        if scope != Scope("project", project.id):
+            raise Refused("watch authority belongs to another project")
+        revision = await ControlStore(orch.manager.db).revision(scope, Entity("project", project.id))
+        await WatchCommands(watches).remove(
+            principal, project.id, ref, expected_entity_revision=revision,
+            expected_condition_revision=current.condition_revision,
+            client_operation_id=client_operation_id,
+        )
         return f"watch {ref} removed"
     if await wakeups.cancel(orch.app, project.id, ref):
         await orch._changed(project.id, "wakeups", "orchestrator")

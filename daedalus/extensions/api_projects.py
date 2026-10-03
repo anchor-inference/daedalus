@@ -18,9 +18,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from daedalus.extensions import questions, wakeups
 from daedalus.extensions.project_commands import ProjectCommands
 from daedalus.extensions.project_usage import ProjectUsage
+from daedalus.extensions.watch_authority import status as watch_authority_status
+from daedalus.extensions.watch_commands import WatchCommands
 from daedalus.extensions.watches import WatchRefused
 from daedalus.host import prompts
-from daedalus.stores.control import ControlConflict, ControlDenied, Principal
+from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.projects import RULE_KIND, FolderSpec, Project, ProjectError, ProjectFolder, ProjectSettings
 
 if TYPE_CHECKING:
@@ -45,6 +47,8 @@ class WatchBody(BaseModel):
     once: bool = False
     note: str = ""
     deadline_at: str | None = None
+    expected_collection_revision: int = Field(ge=1)
+    client_operation_id: str = Field(min_length=1, max_length=160)
 
 
 class WatchPatch(BaseModel):
@@ -53,6 +57,20 @@ class WatchPatch(BaseModel):
     enabled: bool | None = None
     note: str | None = None
     cooldown_minutes: float | None = None
+    when: dict[str, Any] | None = None
+    then: dict[str, Any] | None = None
+    deadline_at: str | None = None
+    expected_entity_revision: int = Field(ge=1)
+    expected_condition_revision: int = Field(ge=1)
+    client_operation_id: str = Field(min_length=1, max_length=160)
+
+
+class WatchDelete(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_entity_revision: int = Field(ge=1)
+    expected_condition_revision: int = Field(ge=1)
+    client_operation_id: str = Field(min_length=1, max_length=160)
 
 
 class WakeupBody(BaseModel):
@@ -576,6 +594,9 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(503, "watches are not running on this installation")
         return found
 
+    def watch_commands() -> WatchCommands:
+        return WatchCommands(keeper())
+
     @api.get("/api/projects/{project_id}/watches")
     async def get_watches(project_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Every watch of the project, switched on or off, oldest first, with what bounds them."""
@@ -593,41 +614,81 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                 "id": row["id"], "status": row["status"], "receipt_id": row["receipt_id"],
                 "last_error": row["last_error"], "created_at": row["created_at"],
             })
+        watches = keeper().of_project(project_id)
+        authority: dict[str, str] = {}
+        async with manager.db.transaction() as conn:
+            for watched in watches:
+                authority[watched.id] = await watch_authority_status(
+                    conn, manager.db, watch_id=watched.id,
+                    condition_revision=watched.condition_revision, project_id=project_id,
+                    action=watched.action,
+                )
         return {
-            "watches": [{**w.view(), "latest_delivery": latest_delivery.get(w.id)}
-                        for w in keeper().of_project(project_id)],
+            "watches": [{**w.view(), "latest_delivery": latest_delivery.get(w.id),
+                         "authority_state": authority[w.id]} for w in watches],
+            "collection_revision": await ControlStore(manager.db).revision(
+                Scope("project", project_id), Entity("collection", project_id)),
+            "project_entity_revision": await ControlStore(manager.db).revision(
+                Scope("project", project_id), Entity("project", project_id)),
             "max": config.max_per_project,
             "min_cooldown_minutes": max(1, round(config.min_cooldown_seconds / 60)),
             "providers": sorted(manager.config.webhooks),
         }
 
     @api.post("/api/projects/{project_id}/watches")
-    async def post_watch(project_id: str, body: WatchBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def post_watch(project_id: str, body: WatchBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         project = await existing(project_id)
         try:
-            made = await keeper().create(project, when=body.when, then=body.then, cooldown_minutes=body.cooldown_minutes,
-                                         once=body.once, note=body.note, deadline_at=body.deadline_at, by="operator")
+            return await watch_commands().create(
+                Principal.operator(who), project, when=body.when, then=body.then,
+                cooldown_minutes=body.cooldown_minutes, once=body.once, note=body.note,
+                deadline_at=body.deadline_at, expected_collection_revision=body.expected_collection_revision,
+                client_operation_id=body.client_operation_id,
+            )
         except WatchRefused as exc:
             raise HTTPException(400, str(exc)) from exc
-        return dict(made.view())
+        except ControlConflict as exc:
+            raise HTTPException(409, {"reason": str(exc), "current_revision": exc.current_revision}) from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
 
     @api.patch("/api/projects/{project_id}/watches/{watch_id}")
-    async def patch_watch(project_id: str, watch_id: str, body: WatchPatch, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        await existing(project_id)
+    async def patch_watch(project_id: str, watch_id: str, body: WatchPatch, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        project = await existing(project_id)
         try:
-            changed = await keeper().update(project_id, watch_id, enabled=body.enabled, note=body.note, cooldown_minutes=body.cooldown_minutes, by="operator")
+            return await watch_commands().change(
+                Principal.operator(who), project, watch_id, enabled=body.enabled,
+                note=body.note, cooldown_minutes=body.cooldown_minutes, when=body.when,
+                then=body.then, deadline_at=body.deadline_at,
+                expected_entity_revision=body.expected_entity_revision,
+                expected_condition_revision=body.expected_condition_revision,
+                client_operation_id=body.client_operation_id,
+            )
         except KeyError as exc:
             raise HTTPException(404, "no such watch") from exc
         except WatchRefused as exc:
             raise HTTPException(400, str(exc)) from exc
-        return dict(changed.view())
+        except ControlConflict as exc:
+            raise HTTPException(409, {"reason": str(exc), "current_revision": exc.current_revision}) from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
 
     @api.delete("/api/projects/{project_id}/watches/{watch_id}")
-    async def delete_watch(project_id: str, watch_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def delete_watch(project_id: str, watch_id: str, body: WatchDelete, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         await existing(project_id)
-        if not await keeper().remove(project_id, watch_id, by="operator"):
-            raise HTTPException(404, "no such watch")
-        return {"deleted": True}
+        try:
+            return await watch_commands().remove(
+                Principal.operator(who), project_id, watch_id,
+                expected_entity_revision=body.expected_entity_revision,
+                expected_condition_revision=body.expected_condition_revision,
+                client_operation_id=body.client_operation_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(404, "no such watch") from exc
+        except ControlConflict as exc:
+            raise HTTPException(409, {"reason": str(exc), "current_revision": exc.current_revision}) from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
 
     # -- the main orchestrator -----------------------------------------------------------------
 

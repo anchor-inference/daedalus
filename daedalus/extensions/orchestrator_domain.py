@@ -158,6 +158,7 @@ async def replace_contract(
                             snapshot["acceptance"], _canonical(snapshot["brief"]), task_id))
         await conn.execute("UPDATE next_actions SET state = 'cancelled' WHERE task_id = ? AND contract_revision < ? AND state = 'active'",
                            (task_id, revision))
+        await reconcile_dependents(conn, task_id)
     return {"task_id": task_id, "contract_revision": revision, "semantic_change": changed}
 
 
@@ -214,6 +215,7 @@ async def capture_contract_change(conn: aiosqlite.Connection, task_id: str, *, o
                        (revision, task_id))
     await conn.execute("UPDATE next_actions SET state = 'cancelled' WHERE task_id = ? AND state = 'active'"
                        " AND contract_revision < ?", (task_id, revision))
+    await reconcile_dependents(conn, task_id)
     return revision
 
 
@@ -569,6 +571,7 @@ async def accept_result(
     await conn.execute("UPDATE board_tasks SET accepted_result_id = ?, accepted_contract_revision = ?,"
                        " acceptance_state = 'operator_approved', status = 'done', checklist = ? WHERE id = ?",
                        (result_id, contract_revision, _canonical(checked), task_id))
+    await reconcile_dependents(conn, task_id)
     return {"task_id": task_id, "result_id": result_id, "verdict_id": verdict_id,
             "contract_revision": contract_revision, "acceptance_state": "operator_approved"}
 
@@ -603,6 +606,7 @@ async def return_result(
     await conn.execute("UPDATE board_tasks SET status = 'todo',acceptance_state = 'returned',"
                        " current_attempt_id = NULL,notes = substr(notes || ?, -8000) WHERE id = ?",
                        (f"\n[{_now()[:16]}] returned: {reason.strip()}", task_id))
+    await reconcile_dependents(conn, task_id)
     return {"return_id": return_id, "task_id": task_id, "result_id": result_id,
             "verdict_id": verdict_id, "acceptance_state": "returned", "status": "todo"}
 
@@ -649,6 +653,24 @@ async def dependency_readiness(conn: aiosqlite.Connection, task_id: str) -> dict
     return {"task_id": task_id, "ready": all(edge["state"] == "ready" or edge["kind"] == "optional"
                                                 for edge in states), "edges": states,
             "dependency_fingerprint": fingerprint}
+
+
+async def reconcile_dependents(conn: aiosqlite.Connection, predecessor_task_id: str) -> list[dict[str, str]]:
+    """Keep queued card status aligned with accepted-result gates in the same transaction."""
+    successors = await _many(conn, "SELECT DISTINCT e.successor_task_id,t.status FROM task_dependency_edges e"
+                             " JOIN board_tasks t ON t.id = e.successor_task_id"
+                             " WHERE e.predecessor_task_id = ? AND e.resolution_state != 'cancelled'"
+                             " AND t.status IN ('todo','blocked') ORDER BY e.successor_task_id",
+                             (predecessor_task_id,))
+    moved = []
+    for successor in successors:
+        ready = (await dependency_readiness(conn, successor["successor_task_id"]))["ready"]
+        status = "todo" if ready else "blocked"
+        if status != successor["status"]:
+            await conn.execute("UPDATE board_tasks SET status = ?,updated_at = ? WHERE id = ?",
+                               (status, _now(), successor["successor_task_id"]))
+            moved.append({"task_id": successor["successor_task_id"], "status": status})
+    return moved
 
 
 async def resolve_dependency(
@@ -763,19 +785,21 @@ async def configure_workflow(
 
 async def workflow_readiness(conn: aiosqlite.Connection, task_id: str) -> list[dict[str, Any]]:
     """Project step readiness from current contract, predecessor steps, and typed gates."""
-    task = await _one(conn, "SELECT contract_revision, accepted_result_id FROM board_tasks WHERE id = ?", (task_id,))
+    task = await _one(conn, "SELECT contract_revision,accepted_contract_revision,accepted_result_id,"
+                      "current_attempt_id,branch,merge_state FROM board_tasks WHERE id = ?", (task_id,))
     if task is None:
         raise KeyError(task_id)
     steps = await _many(conn, "SELECT * FROM workflow_steps WHERE task_id = ? ORDER BY id", (task_id,))
     states = {step["id"]: step["state"] for step in steps}
-    result: list[dict[str, Any]] = []
+    intrinsic: dict[str, list[str]] = {}
+    incoming_by_step: dict[str, list[str]] = {}
+    bindings: dict[str, dict[str, Any]] = {}
     for step in steps:
         blockers: list[str] = []
         if step["contract_revision"] != task["contract_revision"]:
             blockers.append("stale_contract")
         incoming = await _many(conn, "SELECT source_step_id FROM workflow_edges WHERE target_step_id = ?", (step["id"],))
-        if any(states.get(edge["source_step_id"]) != "complete" for edge in incoming):
-            blockers.append("predecessor_step_incomplete")
+        incoming_by_step[step["id"]] = [edge["source_step_id"] for edge in incoming]
         gate = _json(step["gate_json"], {})
         if gate.get("accepted_result_id") and gate["accepted_result_id"] != task["accepted_result_id"]:
             blockers.append("accepted_result_missing")
@@ -787,9 +811,58 @@ async def workflow_readiness(conn: aiosqlite.Connection, task_id: str) -> list[d
                 blockers.append("artifact_missing")
         if gate.get("not_before") and gate["not_before"] > _now():
             blockers.append("not_before")
-        result.append({"step_id": step["id"], "kind": step["step_kind"], "state": step["state"],
-                       "ready": step["state"] in ("pending", "ready") and not blockers,
-                       "blockers": blockers})
+        binding = None
+        if step["step_kind"] == "review":
+            receipt = await _one(conn, "SELECT id,attempt_id,contract_revision,outcome FROM result_receipts"
+                                 " WHERE id = ? AND task_id = ?", (task["accepted_result_id"], task_id))
+            if (receipt is None or task["accepted_contract_revision"] != task["contract_revision"] or
+                    receipt["contract_revision"] != task["contract_revision"] or
+                    receipt["attempt_id"] != task["current_attempt_id"] or receipt["outcome"] != "complete"):
+                blockers.append("reviewed_result_missing")
+            else:
+                latest = await _one(conn, "SELECT id FROM result_receipts WHERE task_id = ?"
+                                    " AND contract_revision = ? AND attempt_id IS ?"
+                                    " ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                                    (task_id, task["contract_revision"], task["current_attempt_id"]))
+                verdict = await _one(conn, "SELECT id,verification,accepted,head,base FROM review_verdicts"
+                                     " WHERE result_id = ? ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                                     (receipt["id"],))
+                if latest is None or latest["id"] != receipt["id"]:
+                    blockers.append("reviewed_result_superseded")
+                if verdict is None or verdict["verification"] != "verified" or not verdict["accepted"]:
+                    blockers.append("approving_verdict_missing")
+                elif task["branch"]:
+                    merged = await _one(conn, "SELECT state,head_sha,base_sha FROM task_merge_receipts"
+                                        " WHERE task_id = ? AND result_id = ? AND verdict_id = ?",
+                                        (task_id, receipt["id"], verdict["id"]))
+                    if (task["merge_state"] != "merged" or merged is None or merged["state"] != "merged" or
+                            merged["head_sha"] != verdict["head"] or merged["base_sha"] != verdict["base"]):
+                        blockers.append("reviewed_merge_missing")
+                if verdict is not None:
+                    binding = {"result_id": receipt["id"], "verdict_id": verdict["id"],
+                               "contract_revision": task["contract_revision"],
+                               "head": verdict["head"], "base": verdict["base"]}
+        intrinsic[step["id"]] = blockers
+        if binding is not None:
+            bindings[step["id"]] = binding
+
+    def effective_complete(step_id: str, trail: frozenset[str] = frozenset()) -> bool:
+        if step_id in trail or states.get(step_id) != "complete" or intrinsic.get(step_id):
+            return False
+        return all(effective_complete(source, trail | {step_id})
+                   for source in incoming_by_step.get(step_id, []))
+
+    result: list[dict[str, Any]] = []
+    for step in steps:
+        blockers = (["predecessor_step_incomplete"] if any(not effective_complete(source)
+                    for source in incoming_by_step[step["id"]]) else []) + intrinsic[step["id"]]
+        item = {"step_id": step["id"], "kind": step["step_kind"], "state": step["state"],
+                "ready": step["state"] in ("pending", "ready") and not blockers,
+                "effective_complete": effective_complete(step["id"]),
+                "blockers": blockers, "contract_revision": step["contract_revision"]}
+        if step["id"] in bindings:
+            item["review_binding"] = bindings[step["id"]]
+        result.append(item)
     return result
 
 
@@ -811,7 +884,8 @@ async def advance_workflow_step(
             raise DomainConflict("the human step is blocked by an upstream gate")
         await conn.execute("UPDATE workflow_steps SET state = 'complete',entity_revision = entity_revision + 1"
                            " WHERE id = ? AND task_id = ?", (step_id, task_id))
-        return {"task_id": task_id, "step_id": step_id, "state": "complete", "acknowledged": True}
+        return {"task_id": task_id, "step_id": step_id, "state": "complete", "acknowledged": True,
+                "contract_revision": projected["contract_revision"]}
     if projected["blockers"] or (not projected["ready"] and not (action == "complete" and step["state"] == "running")):
         raise DomainConflict("workflow step is blocked by its current gates or predecessor")
     if action == "start" and step["step_kind"] not in ("work", "review"):
@@ -819,7 +893,11 @@ async def advance_workflow_step(
     state = "running" if action == "start" else "complete"
     await conn.execute("UPDATE workflow_steps SET state = ?,entity_revision = entity_revision + 1"
                        " WHERE id = ? AND task_id = ?", (state, step_id, task_id))
-    return {"task_id": task_id, "step_id": step_id, "state": state}
+    response = {"task_id": task_id, "step_id": step_id, "state": state,
+                "contract_revision": projected["contract_revision"]}
+    if step["step_kind"] == "review" and action == "complete":
+        response["review_binding"] = projected["review_binding"]
+    return response
 
 
 async def set_next_action(

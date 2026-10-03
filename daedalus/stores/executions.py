@@ -174,6 +174,72 @@ class ExecutionStore:
         _, identity = await self._check(conn, row["id"], operation=operation)
         return identity
 
+    async def check_inference(self, conn: aiosqlite.Connection, session_id: str,
+                              run_id: str | None) -> AttemptIdentity | None:
+        """An admitted native worker can infer only while its exact physical run remains owned.
+
+        A done report may precede the final model reply; that same run can finish its reply,
+        but cancellation, a new contract or a withdrawn approval cannot start another call.
+        """
+        original_session, identity = session_id, session_id
+        seen = set()
+        worker = None
+        while identity:
+            if identity in seen or len(seen) >= 256:
+                raise ControlDenied("the inference session ownership is cyclic or too deep")
+            seen.add(identity)
+            session = await one(conn, "SELECT metadata FROM sessions WHERE id = ?", (identity,))
+            if session is None:
+                raise ControlDenied("the inference session no longer exists")
+            metadata = json.loads(session["metadata"] or "{}")
+            async with conn.execute("SELECT id FROM staff_sessions WHERE session_id = ?", (identity,)) as cursor:
+                owners = await cursor.fetchall()
+            if len(owners) > 1:
+                raise ControlDenied("the inference session has ambiguous worker ownership")
+            if owners:
+                worker = owners[0]["id"]
+                if metadata.get("staff_session_id") not in (None, worker):
+                    raise ControlDenied("the inference session names another worker")
+                break
+            if metadata.get("staff_session_id"):
+                raise ControlDenied("the inference worker has no host binding")
+            identity = str(metadata.get("subagent_of") or "")
+        if worker is None:
+            return None
+        generation = await self._host(conn)
+        row = await one(conn, "SELECT a.*,t.project_id,t.current_attempt_id,t.contract_revision AS current_contract,"
+                        "s.staff_id,s.task_id AS session_task,s.session_id,s.ended_at FROM execution_attempts a"
+                        " JOIN board_tasks t ON t.id = a.task_id JOIN staff_sessions s ON s.id = a.staff_session_id"
+                        " WHERE a.staff_session_id = ? AND a.id = t.current_attempt_id", (worker,))
+        if (row is None or row["host_generation"] != generation or row["runtime_kind"] != "daedalus"
+                or row["state"] not in (*ACTIVE, "completed", "failed")
+                or row["current_contract"] != row["contract_revision"] or row["ended_at"]
+                or row["session_task"] != row["task_id"] or row["session_id"] != identity
+                or row["provider_session_ref"] != f"session:{identity}"):
+            raise ControlDenied("the inference worker or contract is no longer owned")
+        admitted = self._identity(row)
+        if admitted.principal.actor_id != f"staff:{row['staff_id']}":
+            raise ControlDenied("the inference actor does not own the worker")
+        await self.control.attest(conn, admitted.principal, self._scope(row["project_id"]), task_id=row["task_id"])
+        native = await one(conn, "SELECT session_id,status FROM runs WHERE id = ?", (row["native_run_id"],))
+        if native is None or native["session_id"] != identity or native["status"] != "running":
+            raise ControlDenied("the admitted native run is no longer running")
+        if original_session == identity:
+            if run_id is not None and row["native_run_id"] != run_id:
+                raise ControlDenied("the inference belongs to another native run")
+        else:
+            child = await one(conn, "SELECT session_id,status FROM runs WHERE id = ?", (run_id,))
+            if child is None or child["session_id"] != original_session or child["status"] != "running":
+                raise ControlDenied("the child inference has no current owned run")
+        exit_proof = await one(conn, "SELECT 1 FROM runtime_exit_observations WHERE attempt_id = ?"
+                               " AND runtime_ref = ? AND host_generation = ?",
+                               (admitted.id, row["native_run_id"], generation))
+        cancelled = await one(conn, "SELECT 1 FROM lifecycle_owners WHERE child_kind = 'execution_attempt'"
+                              " AND child_id = ? AND cancel_state != 'active' LIMIT 1", (admitted.id,))
+        if exit_proof is not None or cancelled is not None:
+            raise ControlDenied("the owned inference run has stopped or is cancelling")
+        return admitted
+
     async def bind(self, conn: aiosqlite.Connection, identity: AttemptIdentity, *, provider_session_ref: str,
                    state: str = "running") -> None:
         if not provider_session_ref or state not in ("starting", "running", "waiting"):

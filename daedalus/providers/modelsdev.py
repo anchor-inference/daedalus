@@ -32,17 +32,17 @@ def prices_from_catalog(catalog: dict[str, Any], provider_ids: tuple[str, ...]) 
         models = (catalog.get(provider_id) or {}).get("models") or {}
         for model_id, model in models.items():
             cost = model.get("cost") if isinstance(model, dict) else None
-            if not isinstance(cost, dict):
+            if not isinstance(cost, dict) or cost.get("input") is None or cost.get("output") is None:
                 continue
             table[str(model_id)] = ModelPricing(
-                input=float(cost.get("input") or 0.0),
-                output=float(cost.get("output") or 0.0),
-                cache_hit=float(cost.get("cache_read") or 0.0),
+                input=float(cost["input"]),
+                output=float(cost["output"]),
+                cache_hit=float(cost["cache_read"]) if cost.get("cache_read") is not None else None,
             )
     return table
 
 
-def entries_from_table(table: dict[str, ModelPricing]) -> dict[str, dict[str, float]]:
+def entries_from_table(table: dict[str, ModelPricing]) -> dict[str, dict[str, float | None]]:
     return {model: {"input": p.input, "output": p.output, "cache_hit": p.cache_hit} for model, p in table.items()}
 
 
