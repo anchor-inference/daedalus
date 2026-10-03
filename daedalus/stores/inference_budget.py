@@ -77,7 +77,10 @@ async def _historical(conn: aiosqlite.Connection, limit: Constraint) -> int:
 
 async def held_in(conn: aiosqlite.Connection, limit: Constraint) -> tuple[int, set[str]]:
     """Count a prepaid allocation once, including its unfinished descendant requests."""
-    from daedalus.stores.comparison_funding import pool_balances_in, pool_matches
+    from daedalus.stores.comparison_funding import (  # Lazy: funding uses budget constraints and historical usage.
+        pool_balances_in,
+        pool_matches,
+    )
 
     pools = [row for row in await pool_balances_in(conn) if pool_matches(row, limit)]
     covered = {row['id'] for row in pools}
@@ -147,7 +150,9 @@ class InferenceBudget:
                             reserved_count=int(row["count"]), uncertain_count=int(row["uncertain_count"]))
                 for field in ("reserved_usd", "uncertain_usd", "reserved_count", "uncertain_count"):
                     total[field] += view[field]
-            from daedalus.stores.comparison_funding import pool_balances_in
+            from daedalus.stores.comparison_funding import (
+                pool_balances_in,  # Lazy: funding uses budget constraints and historical usage.
+            )
 
             for row in await pool_balances_in(conn):
                 view = providers.setdefault(row['provider_id'], balance(0.0))
@@ -178,7 +183,9 @@ class InferenceBudget:
             raise BudgetRefused("this inference admission already exists")
         slot_id = None
         if execution_attempt_id is not None:
-            from daedalus.stores.comparison_funding import ComparisonFunding
+            from daedalus.stores.comparison_funding import (
+                ComparisonFunding,  # Lazy: funding uses budget constraints and historical usage.
+            )
 
             if await one(conn, 'SELECT 1 FROM execution_attempts WHERE id = ?', (execution_attempt_id,)) is None:
                 raise BudgetRefused('the inference has no host-attested execution attempt')

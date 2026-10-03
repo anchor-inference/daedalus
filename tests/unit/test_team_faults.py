@@ -30,6 +30,7 @@ from daedalus.harness.claude import ClaudeCodeAdapter
 from daedalus.stores.database import Database
 from daedalus.stores.harness import HarnessStore
 from daedalus.stores.staff import Ask
+from tests.support.authorized_launch import operator_assignment
 from tests.support.fake_cli.tui import read_log
 from tests.support.live_ptyd import LivePtyd
 from tests.unit.test_cli_staff_runtime import Stand, eventually, stand, terminals_service, trust
@@ -265,7 +266,7 @@ async def test_the_old_launchs_token_is_gone_once_the_member_runs_again(settings
         assert await s.team.release(ada)
         # Taken up again (a member's next session is always a launch of its own).
         task_id = await s.task("Next page;echo:back again;")
-        assert (await s.team.assign(ada, task_id))["state"] == "started"
+        assert (await operator_assignment(s.team, ada, task_id))["state"] == "queued"
         await s.status_event(ada, "turn_done_unseen")
 
         async def relaunched() -> bool:

@@ -168,6 +168,8 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     sheet.locator("#ptask-deliverable").fill("A zones page and a check at checkout")
     sheet.locator("#ptask-boundaries").fill("Only the site folder")
     sheet.locator("#ptask-done_when").fill("An address outside the zones is refused politely")
+    sheet.locator("details > summary").filter(has_text="Work folder" if lang == "en" else "Рабочая папка").click()
+    sheet.locator("#ptask-folder").select_option(project()["folders"][0]["id"])
     expect(sheet.locator(".sub.attn")).to_have_count(0)
     sheet.locator(".pboard-deps").get_by_role("button", name="Checkout").click()
     sheet.get_by_role("radio", name="P2", exact=True).click()
@@ -178,6 +180,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
         "title": "Delivery zones",
         "brief": {"objective": "Customers see whether we deliver to them", "deliverable": "A zones page and a check at checkout", "boundaries": "Only the site folder", "done_when": "An address outside the zones is refused politely"},
         "assignee_staff_id": "st-lev",
+        "folder_id": project()["folders"][0]["id"],
         "depends_on": ["t-checkout"],
         "priority": 2,
     }, made

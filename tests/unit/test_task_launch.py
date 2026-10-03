@@ -34,6 +34,9 @@ from tests.unit.test_staff_runtime import BRIEF, close_team, project_with, team_
 
 async def queued_fixture(db: Database):
     app, member, _, session = await launch_fixture(db)
+    app.manager = SimpleNamespace(projects=SimpleNamespace(local_env="container"))
+    await db.execute("INSERT INTO project_folders(id,project_id,path,env,position,created_at)"
+                     " VALUES ('folder','project','/tmp/fixture-worktree','container',0,'2026-01-01')")
     brief = {field: "An explicit task contract" for field in ("objective", "deliverable", "boundaries", "done_when")}
     await db.execute("UPDATE board_tasks SET status = 'todo',brief_json = ? WHERE id = 'task'", (json.dumps(brief),))
     dispatcher = EffectDispatcher(OutboxStore(db))
@@ -160,6 +163,8 @@ async def test_replacement_waits_for_physical_stop_proof(db: Database) -> None:
     state = SimpleNamespace(run_id="run", running=True)
 
     class Manager:
+        projects = SimpleNamespace(local_env="container")
+
         def live_state(self, session_id):
             return state if session_id == "native-session" else None
 

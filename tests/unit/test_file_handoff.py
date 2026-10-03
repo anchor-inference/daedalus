@@ -15,9 +15,11 @@ import json
 import os
 import shutil
 import tempfile
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -28,6 +30,8 @@ from protocore.contracts.types import MessageRole, TextBlock, ToolResultBlock
 
 from daedalus.config import Settings, TerminalsConfig
 from daedalus.extensions.api import build_app
+from daedalus.extensions.board_commands import BoardCommands
+from daedalus.extensions.coordinator_authority import approve_authority
 from daedalus.extensions.dispatcher import Dispatcher
 from daedalus.extensions.dispatcher_projects import ProjectMaker
 from daedalus.extensions.dispatches import Dispatches
@@ -38,19 +42,21 @@ from daedalus.harness.runtime import CliStaffRuntime
 from daedalus.host.handoff import Handoff
 from daedalus.host.session_runner import Attachment
 from daedalus.stores import files as files_module
+from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
 from daedalus.stores.files import MAIN, FileRefused
 from daedalus.stores.harness import HarnessStore
 from daedalus.stores.projects import FolderSpec, Project
-from daedalus.stores.staff import Staff, StaffError
+from daedalus.stores.staff import Staff
 from daedalus.terminals.owners import ManagerOwners
 from daedalus.terminals.service import Terminals
 from tests.support import fake_cli
+from tests.support.authorized_launch import operator_assignment
 from tests.support.fake_cli.tui import read_log
 from tests.support.live_ptyd import LivePtyd
 from tests.support.waiting import until_await
 from tests.unit.test_cli_staff_runtime import harness_config
-from tests.unit.test_orchestrator import Rig, _idle, events, events_messages, rig
+from tests.unit.test_orchestrator import Rig, _idle, approve_coordinator, events, events_messages, rig
 from tests.unit.test_session_runner import ScriptedProvider
 from tests.unit.test_staff_runtime import board_task, close_team
 
@@ -167,6 +173,17 @@ async def chain(settings: Settings, db: Database, tmp_path: Path) -> AsyncIterat
         r.team.runtimes["claude"] = runtime
         (home / ".claude.json").write_text(json.dumps({"projects": {str(work): {"hasTrustDialogAccepted": True}}}))
         project = await r.orch.enable(project.id)
+        coordinator = project.settings.orchestrator.session_id
+        operator = Principal.operator({"via": "token", "user_id": 1})
+        scope = Scope("project", project.id)
+        expires_at = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        for bundle_id in ("planning", "execution_project", "review"):
+            revision = await ControlStore(db).revision(scope, Entity("project", project.id))
+            await approve_authority(app, project.id, operator,
+                                    client_operation_id=f"handoff-grant:{uuid.uuid4().hex}",
+                                    expected_entity_revision=revision,
+                                    expected_coordinator_session_id=coordinator,
+                                    bundle_id=bundle_id, expires_at=expires_at)
         yield Chain(r, model, main, dispatches, ptyd, terminals, root, home, work, log, project)
     finally:
         if runtime is not None:
@@ -222,13 +239,18 @@ async def test_an_attachment_in_a_host_projects_chat_reaches_its_host_member_whe
         # The fake model reads ";"-separated steps from the brief: open the handed file, then report
         # done with the estimate as an artifact.
         brief = brief_task(f"Estimate the spec;cat:.agents/inbox/{task_id}/{SPEC_NAME};report:done:estimated|estimate.md;")
-        await c.manager.db.execute("UPDATE board_tasks SET brief_json = ? WHERE id = ?", (json.dumps(brief), task_id))
+        scope = Scope("project", c.project.id)
+        revision = await ControlStore(db).revision(scope, Entity("task", task_id))
+        await BoardCommands(db).update(Principal.operator({"via": "token", "user_id": 1}), scope, task_id,
+                                       client_operation_id=f"handoff-brief:{uuid.uuid4().hex}",
+                                       expected_entity_revision=revision, brief=brief)
 
         async def peek_args() -> dict[str, Any]:
             return {"op": "read", "path": await c.handle(c.project.id)}
 
         async def assign_args() -> dict[str, Any]:
-            return {"staff": "langpt", "task_id": task_id, "files": [await c.handle(c.project.id)]}
+            return {"staff": "langpt", "task_id": task_id, "files": [await c.handle(c.project.id)],
+                    "expected_entity_revision": await ControlStore(db).revision(scope, Entity("task", task_id))}
 
         async def report_args() -> dict[str, Any]:
             return {"text": "langpt estimated the hints spec", "kind": "done", "files": [await c.handle(c.project.id, origin="staff")]}
@@ -258,7 +280,8 @@ async def test_an_attachment_in_a_host_projects_chat_reaches_its_host_member_whe
         # The orchestrator read it through Peek by its handle.
         results = await tool_results(c.manager, sid)
         assert any("Free users get three hints a day" in r for r in results), results
-        assert any("langpt started on" in r and "copied where they can open it" in r for r in results), results
+        assert any("admission in progress" in r and "files are copied to them when they start" in r.lower()
+                   for r in results), results
         # The brief names the member-local path, which exists there, and nothing of the container.
         first = (await c.manager.staff.messages(langpt.id))[0]
         assert str(target) in first.text and handle in first.text
@@ -302,7 +325,11 @@ async def test_the_full_chain_from_the_main_chat_to_a_host_member_keeps_one_hand
         await c.langpt()
         task_id = await board_task(c.manager, c.project, "Estimate the hints spec", brief={})
         brief = brief_task(f"Estimate the spec;cat:.agents/inbox/{task_id}/{SPEC_NAME};echo:read it;")
-        await c.manager.db.execute("UPDATE board_tasks SET brief_json = ? WHERE id = ?", (json.dumps(brief), task_id))
+        scope = Scope("project", c.project.id)
+        revision = await ControlStore(db).revision(scope, Entity("task", task_id))
+        await BoardCommands(db).update(Principal.operator({"via": "token", "user_id": 1}), scope, task_id,
+                                       client_operation_id=f"handoff-brief:{uuid.uuid4().hex}",
+                                       expected_entity_revision=revision, brief=brief)
 
         async def read_args() -> dict[str, Any]:
             return {"op": "read", "file": await c.handle(MAIN)}
@@ -314,7 +341,8 @@ async def test_the_full_chain_from_the_main_chat_to_a_host_member_keeps_one_hand
             return {"op": "read", "path": await c.handle(c.project.id)}
 
         async def assign_args() -> dict[str, Any]:
-            return {"staff": "langpt", "task_id": task_id, "files": [await c.handle(c.project.id)]}
+            return {"staff": "langpt", "task_id": task_id, "files": [await c.handle(c.project.id)],
+                    "expected_entity_revision": await ControlStore(db).revision(scope, Entity("task", task_id))}
 
         c.model.scripts["main"] += [{"tool": "Files", "args": read_args}, {"tool": "Delegate", "args": delegate_args}, {"text": "Handed to Work."}]
         c.model.scripts["project"] += [{"tool": "Peek", "args": peek_args}, {"tool": "Assign", "args": assign_args}, {"text": "Handed to langpt."}]
@@ -361,8 +389,13 @@ async def test_a_new_project_starts_with_the_files_the_main_orchestrator_was_giv
         ask = await c.manager.asks.get(row["id"])
         assert ask is not None and SPEC_NAME in ask.text and ask.detail["files"] == [spec.id]
         maker: Any = c.r.team.app.extensions["dispatcher_projects"]
-        await maker.answer_own(ask, allow=True, text=None, selected=None, by="operator", via="app")
+        answer = await maker.answer_own(ask, allow=True, text=None, selected=None, by="operator", via="app")
+        assert answer["delivered"], answer["error"]
         project = next(p for p in await c.manager.projects.list() if p.name == "Hints")
+        async def shared() -> bool:
+            return project.id in await c.manager.files.scopes(spec.id)
+
+        await until_await(shared, "the approved project received its file handle")
         assert set(await c.manager.files.scopes(spec.id)) == {MAIN, project.id}
         created = [e for e in await events(c.manager, "dispatch.created") if e.project_id == project.id]
         assert created and created[0].payload["files"][0]["id"] == spec.id
@@ -380,6 +413,7 @@ async def test_a_daedalus_member_in_the_container_gets_a_copy_in_its_worktree_an
         r.manager.providers.rungs_for = lambda config, preset=None: [(model, "scripted-model")]  # type: ignore[method-assign]
         project = await r.orch.enable(r.project.id)
         sid = project.settings.orchestrator.session_id
+        await approve_coordinator(r, sid)
         ira = await r.manager.staff.hire(r.project.id, name="Ira", role="Menu")
         await r.manager.submit(sid, "Для Иры", [staging(tmp_path)])
         await until_await(lambda: _idle(r.manager, sid), "the orchestrator's turn ended")
@@ -391,7 +425,7 @@ async def test_a_daedalus_member_in_the_container_gets_a_copy_in_its_worktree_an
         ]
         said = await r.call(sid, "assign", staff="Ira", title="Estimate", objective="Estimate the spec", deliverable="estimate.md in the worktree",
                             boundaries="Touch nothing else", done_when="estimate.md exists", files=[handle])
-        assert "Ira started on" in said and "copied where they can open it" in said
+        assert "Ira will start" in said and "admission in progress" in said
         live = await r.team.live_of(ira)
         assert live is not None and live.session.worktree_path
         state = await r.manager.get_state(live.session.session_id)
@@ -418,7 +452,8 @@ async def test_a_daedalus_member_in_the_container_gets_a_copy_in_its_worktree_an
         assert (await r.manager.files.in_scope(kept.handle, r.project.id)).id == kept.id
         await until_await(lambda: _idle(r.manager, live.session.session_id), "the member's turn ended")
         results = await tool_results(r.manager, live.session.session_id)
-        assert any("kept for the team: " + kept.handle in t for t in results), results
+        assert any("reported checkpoint; report" in t and "kept for the team: estimate.md" in t
+                   for t in results), results
         await until_await(lambda: _idle(r.manager, sid), "the orchestrator's turn ended")
     finally:
         await close_team(r.manager)
@@ -490,8 +525,16 @@ async def test_refusals_are_said_before_anything_is_sent(settings: Settings, db:
         monkeypatch.setattr(c.r.team.host_bridge, "available", lambda: False)
         task_id = await board_task(c.manager, c.project, "Later", brief={"objective": "read the notes", "deliverable": "a summary", "boundaries": "read only", "done_when": "summary reported"})
         await c.manager.files.attach_to_task(task_id, [taken], actor="orchestrator")
-        with pytest.raises(StaffError, match="host terminal bridge"):
-            await c.r.team.assign(langpt, task_id, by="orchestrator")
+        queued = await operator_assignment(c.r.team, langpt, task_id, wait_for_admission=False)
+
+        async def launch_uncertain() -> bool:
+            row = await c.manager.db.fetchone("SELECT state FROM effect_outbox WHERE id = ?", (queued["effect_id"],))
+            return row is not None and row["state"] == "unknown"
+
+        await until_await(launch_uncertain, "the unavailable host bridge stayed unresolved in its receipt")
+        failure = await c.manager.db.fetchone("SELECT error FROM effect_outbox WHERE id = ?", (queued["effect_id"],))
+        assert failure is not None and "host terminal bridge" in failure["error"]
+        assert c.opened() == []
 
 
 async def test_an_old_host_daemon_without_fs_write_is_refused_with_how_to_update(settings: Settings, db: Database, tmp_path: Path) -> None:
@@ -548,14 +591,20 @@ async def test_an_open_brief_naming_the_orchestrators_inbox_gets_its_file_once(s
         task_id = await board_task(c.manager, c.project, "Оценка", brief={"objective": "оценить ТЗ;cat:.agents/inbox/{}/{};echo:ok;".format("TASK", SPEC_NAME), "deliverable": "отчёт оркестратору", "boundaries": named, "done_when": "отчёт с оценкой"})
         brief = json.loads((await db.fetchone("SELECT brief_json FROM board_tasks WHERE id = ?", (task_id,)))["brief_json"])
         brief["objective"] = brief["objective"].replace("TASK", task_id)
-        await db.execute("UPDATE board_tasks SET brief_json = ?, assignee_staff_id = ? WHERE id = ?", (json.dumps(brief), langpt.id, task_id))
+        scope = Scope("project", c.project.id)
+        revision = await ControlStore(db).revision(scope, Entity("task", task_id))
+        await BoardCommands(db).update(Principal.operator({"via": "token", "user_id": 1}), scope, task_id,
+                                       client_operation_id=f"recover-brief:{uuid.uuid4().hex}",
+                                       expected_entity_revision=revision,
+                                       brief={"objective": brief["objective"]}, assignee_staff_id=langpt.id)
 
         assert await c.r.team.recover_named_files() == 1
         [kept] = await c.manager.files.of_task(task_id)
         assert kept.name == SPEC_NAME and await c.manager.files.read(kept) == SPEC.encode()
         assert await c.r.team.recover_named_files() == 0, "once"
         # Its next start hands it over with the brief.
-        assert (await c.r.team.assign(langpt, task_id, by="orchestrator"))["state"] == "started"
+        launched = await operator_assignment(c.r.team, langpt, task_id)
+        assert launched["state"] == "queued"
 
         async def opened() -> bool:
             return bool(c.opened())

@@ -34,8 +34,9 @@ from protocore.runtime.events.types import EventType
 
 from daedalus.extensions.board import NOTES_MAX_CHARS
 from daedalus.extensions.notifications import ActionConflict, ActionOutcome, ActionRefused, Draft
-from daedalus.extensions.runtime_observations import admit_native_run, observe_exit
+from daedalus.extensions.runtime_observations import admit_native_run, enter_runtime, observe_exit, observe_no_entry
 from daedalus.extensions.staff_results import StaffReportService
+from daedalus.extensions.task_context import ContextUnavailable, assemble_task_context, render_task_context
 from daedalus.extensions.task_contract import RETURNED, Contracts
 from daedalus.harness.capabilities import CAPABILITIES
 from daedalus.harness.contract import mcp_server, standing_rule
@@ -68,6 +69,7 @@ from daedalus.staff_runtime import (
 from daedalus.stores.control import ControlDenied, Principal, one
 from daedalus.stores.files import FileRefused, StoredFile
 from daedalus.stores.projects import Project, ProjectFolder, ProjectSettings
+from daedalus.stores.runtime_release import physical_exit_in
 from daedalus.stores.staff import (
     ACTIVE_STATUSES,
     HARNESS_NAMES,
@@ -77,6 +79,7 @@ from daedalus.stores.staff import (
     StaffError,
     StaffSession,
 )
+from daedalus.stores.staff_context import ContextPinRefused, pin_staff_context
 from daedalus.terminals.bridge import HostBridge
 
 if TYPE_CHECKING:
@@ -465,7 +468,6 @@ class Team:
 
     async def _active_in(self, conn: Any, project_id: str) -> int:
         """Count physical workers and promised pair slots in the caller's admission snapshot."""
-        from daedalus.stores.comparison_funding import physical_exit_in
 
         async with conn.execute("SELECT s.id,a.id AS attempt_id FROM staff_sessions s JOIN staff m ON m.id = s.staff_id"
                                 " LEFT JOIN execution_attempts a ON a.staff_session_id = s.id"
@@ -491,7 +493,6 @@ class Team:
 
     async def _reserved_capacity(self, entry: Entry) -> bool:
         """Subtract only this entry's real unspent capacity claim, never an arbitrary slot ID."""
-        from daedalus.stores.comparison_funding import physical_exit_in
 
         async with self.app.db.transaction() as conn:
             generation = await self.app.executions._host(conn)
@@ -831,6 +832,12 @@ class Team:
         # Before the session exists: the brief names these copies, so a start whose files cannot be
         # put in place does not start at all.
         delivered = await self.hand_files(member, await self.manager.files.of_task(task.id), folder=folder, cwd=str(worktree.cwd if worktree else folder.path), task_id=task.id, by=by)
+        try:
+            context_packet = await assemble_task_context(self.app.db, task.id, role="worker",
+                                                         role_hint=member.role)
+        except ContextUnavailable as exc:
+            raise StaffError(f"the task context cannot be pinned: {exc}") from exc
+        context_text = render_task_context(context_packet)
         token = secrets.token_urlsafe(32)
         session = await self.manager.staff.claim_session(
             member.id,
@@ -844,10 +851,20 @@ class Team:
             predecessor_id=predecessor.id if predecessor else None,
             team_token_hash=_hash(token),
         )
+        try:
+            await pin_staff_context(self.app.db, session.id, context_packet, role_hint=member.role)
+        except ContextPinRefused as exc:
+            await self.manager.staff.end_session(session.id, str(exc))
+            raise StaffError(str(exc)) from exc
+        context_text += (f"\nTo recover this exact packet after history is shortened, read "
+                         f"http://127.0.0.1:{self.app.settings.api_port}/api/team/{session.id}/context "
+                         "with your existing team token. Its source_current field says whether to refresh the task.")
         await self.publish("staff.status", {"status": "starting", "previous": None, "actor": by}, member=member)
         fresh, earlier = await self.brief_files(delivered)
         contract = await self.contract_block(member, task, session.id, delivered)
-        first = self.first_message(member, task, folder, worktree, predecessor, by, fresh, earlier, rules=await self.rules_block(project.id), contract=contract)
+        first = self.first_message(member, task, folder, worktree, predecessor, by, fresh, earlier,
+                                   rules=await self.rules_block(project.id), contract=contract)
+        first += "\n\n" + context_text
         try:
             recorded = await self.manager.staff.add_message(member.id, first, origin=by, mode="after_turn", staff_session_id=session.id)
             first_id = recorded.id
@@ -866,7 +883,7 @@ class Team:
             worktree=worktree,
             task=moved,
             first_message=first,
-            brief_text=await self.brief(member, project, folder, worktree),
+            brief_text=(await self.brief(member, project, folder, worktree)) + "\n\n" + context_text,
             staff_session_id=session.id,
             env=folder.env,
             model=member.model,
@@ -892,17 +909,21 @@ class Team:
             identity = await prepare_attempt(self.app, principal, member, task, session, fence_token=token,
                                              capacity_slot_id=capacity_slot_id)
             await check_authority()
-            if capacity_slot_id is not None:
-                from daedalus.stores.comparison_funding import ComparisonFunding
-
-                async with self.app.db.transaction() as conn:
-                    await self.app.executions._check(conn, identity.id, operation='result.submit')
-                    await ComparisonFunding(self.app.db).start_launch_in(conn, capacity_slot_id, identity.id)
+            current_context = await assemble_task_context(self.app.db, task.id, role="worker",
+                                                          role_hint=member.role)
+            if current_context["packet_hash"] != context_packet["packet_hash"]:
+                raise StaffError("the task context changed before the worker started; retry the launch")
+            await enter_runtime(self.app, identity, capacity_slot_id=capacity_slot_id)
             entered_provider = True
             started = await runtime.resume(request, source) if source else await runtime.start(request)
             await self.manager.staff.started(session.id, session_id=started.session_id, terminal_id=started.terminal_id, cli_session_id=started.cli_session_id, transcript_ref=started.transcript_ref)
             await observe_bind(self.app, identity, session, started)
         except (Exception, asyncio.CancelledError) as exc:
+            if identity is not None and not entered_provider:
+                # Cancellation can arrive after the boundary committed but before await returned.
+                # Only the durable host observation can distinguish that from a refused launch.
+                entered_provider = not await observe_no_entry(self.app, identity, staff_session_id=session.id,
+                                                              reason=f"could not start: {exc}")
             if entered_provider:
                 # A provider can create the process before its response disappears. Keep its slot,
                 # task and session owned until an observation establishes what actually happened.
@@ -919,9 +940,6 @@ class Team:
                     await self.publish("staff.status", {"status": "no_signal", "previous": "starting",
                                        "detail": "the launch outcome is unknown; reconcile the original execution"}, member=member)
             else:
-                if identity is not None:
-                    await self.app.db.execute("UPDATE execution_attempts SET state = 'failed',updated_at = ?"
-                                              " WHERE id = ? AND state = 'queued'", (_now(), identity.id))
                 await self.manager.staff.end_session(session.id, f"could not start: {exc}"[:500])
                 await self.publish("staff.status", {"status": "exited", "previous": "starting", "detail": f"could not start: {exc}"[:500]}, member=member)
                 if capacity_slot_id is None:

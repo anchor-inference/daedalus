@@ -187,8 +187,8 @@ async def test_cancel_and_the_tool_refusals(settings: Settings, db: Database, tm
         assert said.startswith("wake-up set: [") and "Unwatch(" in said
         [wakeup] = await wakeups.wakeups(r.team.app, r.project.id)
         with pytest.raises(Refused, match="has no wake-up or watch 'nope'"):
-            await r.call(sid, "unwatch", id="nope")
-        assert await r.call(sid, "unwatch", id=wakeup["id"]) == f"wake-up {wakeup['id']} cancelled"
+            await r.call(sid, "unwatch", id="nope", client_operation_id="missing-wakeup")
+        assert await r.call(sid, "unwatch", id=wakeup["id"], client_operation_id="cancel-wakeup") == f"wake-up {wakeup['id']} cancelled"
         assert await wakeups.wakeups(r.team.app, r.project.id) == []
         with pytest.raises(Refused, match="already passed"):
             await r.call(sid, "wake_me", note="late", at="2000-01-01T00:00")

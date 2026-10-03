@@ -6,20 +6,21 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from daedalus.extensions.comparisons import (
-    ComparisonRefused,
-    choose_result,
-    comparison_readiness,
-    create_group,
-)
 from daedalus.extensions.orchestrator_domain import dependency_readiness, record_verdict
 from daedalus.extensions.task_launch import member_digest, task_digest
 from daedalus.host.events import AppEvent
 from daedalus.host.inference_admission import HostInferenceAdmission
 from daedalus.host.worktrees import staff_slug
-from daedalus.stores.comparison_funding import ComparisonFunding, physical_exit_in
+from daedalus.stores.comparison_funding import ComparisonFunding
+from daedalus.stores.comparisons import (
+    ComparisonRefused,
+    choose_result,
+    comparison_readiness,
+    create_group,
+)
 from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope, now, one
 from daedalus.stores.outbox import OutboxStore
+from daedalus.stores.runtime_release import attempt_released_in, physical_exit_in
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -101,7 +102,7 @@ async def queue_comparison(
         prior_attempts = await prior.fetchall()
         await prior.close()
         for row in prior_attempts:
-            if not await physical_exit_in(conn, row["id"]):
+            if not await attempt_released_in(conn, row["id"]):
                 raise ComparisonRefused("the previous task execution has no observed physical exit")
         pending_launch = await one(conn, "SELECT id FROM effect_outbox WHERE kind = 'task.launch'"
                                    " AND state IN ('pending','claimed','unknown')"
@@ -345,8 +346,27 @@ async def choose_comparison(
     funding = ComparisonFunding(app.db)
     bus = app.manager.bus
     events: list[AppEvent] = []
+    preflight = None
+    preflight_error = None
+    try:
+        member = await app.db.fetchone(
+            "SELECT m.slot FROM result_receipts r JOIN comparison_group_attempts m ON m.attempt_id = r.attempt_id"
+            " WHERE r.id = ? AND r.task_id = ? AND m.group_id = ?", (result_id, task_id, group_id),
+        )
+        if member is None:
+            raise ComparisonRefused("the winner is outside this comparison")
+        preflight = await comparison_slot_review(app, task_id=task_id, group_id=group_id,
+                                                 slot=member["slot"], principal=principal)
+        if (preflight["result_id"] != result_id or preflight["verdict_id"] != verdict_id or
+                not preflight["source_current"] or not preflight["can_choose"]):
+            raise ComparisonRefused("the reviewed contender branch or verdict changed before selection")
+    except (KeyError, ValueError, ControlDenied) as exc:
+        preflight_error = exc
 
     async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
+        if preflight_error is not None:
+            raise preflight_error
+        assert preflight is not None
         group = await one(conn, "SELECT task_id FROM comparison_groups WHERE id = ?", (group_id,))
         if group is None or group["task_id"] != task_id:
             raise ComparisonRefused("the comparison does not own this task")
@@ -362,6 +382,11 @@ async def choose_comparison(
                                        selection_receipt_id=mutation.object_id,
                                        observed_cost=funding.observed_cost_in,
                                        physical_exit=physical_exit_in)
+        receipt = await one(conn, "SELECT head_sha,base_sha FROM comparison_selection_receipts WHERE id = ?",
+                            (mutation.object_id,))
+        if (receipt is None or receipt["head_sha"] != preflight["head_sha"] or
+                receipt["base_sha"] != preflight["base_sha"]):
+            raise ComparisonRefused("the selected verdict no longer matches the observed branch")
         async with conn.execute("SELECT id FROM comparison_funding_slots WHERE group_id = ? ORDER BY slot",
                                 (group_id,)) as cursor:
             slots = await cursor.fetchall()

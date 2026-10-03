@@ -29,9 +29,9 @@ from daedalus.host.inference_admission import HostInferenceAdmission
 from daedalus.host.session_runner import SessionManager
 from daedalus.providers.openai_compat import OpenAICompatibleProvider, ProviderEndpoint
 from daedalus.providers.pricing import ModelPricing
-from daedalus.stores.comparison_funding import physical_exit_in
 from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
+from daedalus.stores.runtime_release import physical_exit_in
 from daedalus.stores.sqlite import SqliteUsageSink
 from tests.support.waiting import until_await
 from tests.unit.test_session_runner import ScriptedProvider, _manager
@@ -363,6 +363,45 @@ async def test_two_native_sessions_start_only_after_both_slots_exist(settings, d
                     f"/api/board/{task_id}/comparisons/{launched['group_id']}/slots/1/review",
                 )
                 assert winner_review.status_code == 200 and winner_review.json()["can_choose"]
+                winner_worktree = Path(winner_attempt["worktree_path"])
+                (winner_worktree / "follow-up.md").write_text("Updated contender\n")
+                git(winner_worktree, "add", "follow-up.md")
+                git(winner_worktree, "commit", "-qm", "follow-up")
+                revision = await ControlStore(db).revision(scope, Entity("task", task_id))
+                stale_choice = await client.post(
+                    f"/api/board/{task_id}/comparisons/{launched['group_id']}/choose",
+                    json={"client_operation_id": "choose-stale", "expected_entity_revision": revision,
+                          "result_id": winner_report["result_id"], "verdict_id": verdicts[0]},
+                )
+                assert stale_choice.status_code == 409, stale_choice.text
+                still_unselected = await db.fetchone(
+                    "SELECT current_attempt_id,status,entity_revision FROM board_tasks WHERE id = ?", (task_id,),
+                )
+                assert tuple(still_unselected) == (None, "todo", revision)
+                assert [row["state"] for row in await db.fetchall(
+                    "SELECT state FROM comparison_funding_slots WHERE group_id = ? ORDER BY slot",
+                    (launched["group_id"],),
+                )] == ["held", "held"]
+                stale_review = await client.get(
+                    f"/api/board/{task_id}/comparisons/{launched['group_id']}/slots/1/review",
+                )
+                assert stale_review.status_code == 200
+                assert stale_review.json()["source_current"] and not stale_review.json()["can_choose"]
+                assert any(item["code"] == "verdict_stale" for item in stale_review.json()["blockers"])
+                replacement_verdict = {**verdict_commands[0], "client_operation_id": "verdict-1-new-head",
+                                       "expected_entity_revision": revision}
+                replaced = await client.post(
+                    f"/api/board/{task_id}/comparisons/{launched['group_id']}/slots/1/verdicts",
+                    json=replacement_verdict,
+                )
+                assert replaced.status_code == 200, replaced.text
+                assert replaced.json()["head_sha"] != winner_review.json()["head_sha"]
+                verdicts[0] = replaced.json()["verdict_id"]
+                verdict_commands[0] = replacement_verdict
+                renewed_review = await client.get(
+                    f"/api/board/{task_id}/comparisons/{launched['group_id']}/slots/1/review",
+                )
+                assert renewed_review.status_code == 200 and renewed_review.json()["can_choose"]
                 revision = await ControlStore(db).revision(scope, Entity("task", task_id))
                 choice = await client.post(
                     f"/api/board/{task_id}/comparisons/{launched['group_id']}/choose",
@@ -377,10 +416,13 @@ async def test_two_native_sessions_start_only_after_both_slots_exist(settings, d
                 )
                 assert replayed_verdict.status_code == 200
                 assert replayed_verdict.json()["verdict_id"] == verdicts[0]
-                selected = await db.fetchone("SELECT current_attempt_id,status,branch FROM board_tasks WHERE id = ?",
+                selected = await db.fetchone("SELECT current_attempt_id,status,branch,acceptance_state,"
+                                             " accepted_result_id FROM board_tasks WHERE id = ?",
                                              (task_id,))
                 assert selected["current_attempt_id"] == winner_attempt["id"]
                 assert selected["status"] == "review"
+                assert selected["acceptance_state"] == "accepted"
+                assert selected["accepted_result_id"] is None
                 assert selected["branch"] == (await db.fetchone(
                     "SELECT branch FROM staff_sessions WHERE id = ?",
                     (winner_attempt["staff_session_id"],)))["branch"]

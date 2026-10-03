@@ -152,7 +152,7 @@ async def browsing(settings: Settings, db: Database, browser_dir: Path) -> Async
 
 async def _started(b: Browsing) -> Any:
     ada = await b.s.hire()
-    await b.s.team.assign(ada, await b.s.task())
+    await b.s.assign(ada, await b.s.task())
     for _ in range(600):
         if b.s.ptyd.launches:
             break

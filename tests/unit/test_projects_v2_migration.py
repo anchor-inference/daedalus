@@ -151,7 +151,10 @@ async def test_every_project_keeps_its_folder_and_every_session_its_directory(tm
         "watch_deliveries", "board_workflow_runs", "board_workflow_steps", "issue_links",
         "lifecycle_parents", "lifecycle_owners", "staff_report_records", "runtime_exit_observations", "terminal_exit_observations", "workspace_archive_imports",
         "execution_hosts", "execution_host_challenges", "execution_host_observations",
-        "execution_host_decisions", "artifact_transfers", "issue_sync_observations", "issue_sync_outbound",
+            "execution_host_decisions", "artifact_transfers", "issue_sync_observations", "issue_sync_outbound",
+            "watch_authorities", "inference_reservations", "inference_reservation_scopes",
+            "comparison_funding_slots", "comparison_funding_scopes", "contract_change_intents",
+            "staff_context_packets", "runtime_no_entry_observations",
     })
     assert new - later == {"project_folders", "project_briefs", "project_journal", "staff", "staff_sessions", "staff_messages", "asks", "watches"}
     assert after["project_folders"] == counts["projects"]

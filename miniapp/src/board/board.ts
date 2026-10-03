@@ -43,6 +43,8 @@ export type ProjectTask = {
   created_at: string;
   updated_at: string;
   project_id: string | null;
+  folder_id?: string | null;
+  contract_revision?: number;
   assignee_staff_id: string | null;
   brief: Brief;
   branch: string | null;

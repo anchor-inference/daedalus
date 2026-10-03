@@ -13,16 +13,17 @@ import pytest
 from protocore.contracts.llm import LLMObservabilityContext, LLMProviderError
 
 from daedalus.config import ModelPresetConfig, RuntimeConfig
-from daedalus.extensions.comparisons import create_group
 from daedalus.extensions.runtime_observations import admit_native_run, observe_exit
 from daedalus.extensions.staff import Team
 from daedalus.host.inference_admission import HostInferenceAdmission, model_quote
 from daedalus.host.launch_queue import Entry, LaunchQueue
-from daedalus.stores.comparison_funding import ComparisonFunding, PairAllocation, physical_exit_in
+from daedalus.stores.comparison_funding import ComparisonFunding, PairAllocation
+from daedalus.stores.comparisons import create_group
 from daedalus.stores.control import ControlStore, Principal, Scope, canonical
 from daedalus.stores.database import Database
 from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.inference_budget import BudgetRefused, Constraint, InferenceBudget
+from daedalus.stores.runtime_release import physical_exit_in
 from tests.unit.test_inference_admission import answer, endpoint, provider, request
 from tests.unit.test_inference_budget import reserve
 from tests.unit.test_runtime_observations import native_session

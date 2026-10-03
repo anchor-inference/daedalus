@@ -8,6 +8,7 @@ first call. The results are text for the model: short, with the ids it needs for
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from daedalus.extensions import wakeups
 from daedalus.extensions.board_commands import BoardCommands
 from daedalus.extensions.likeness import same_question
 from daedalus.extensions.notifications import Draft
+from daedalus.extensions.plugins import PluginRefused, PluginRegistry
 from daedalus.extensions.task_contract import split_checks
 from daedalus.extensions.watch_commands import WatchCommands
 from daedalus.extensions.watches import WatchRefused
@@ -979,6 +981,22 @@ async def unwatch(orch: Orchestrators, project: Project, session_id: str, *, id:
     raise Refused(f"{project.name} has no wake-up or watch {ref!r}; the state block lists them with their ids")
 
 
+async def plugin_read(orch: Orchestrators, project: Project, session_id: str, *,
+                      plugin_id: str, tool_name: str, arguments: dict[str, Any] | None = None) -> str:
+    registry = orch.app.extensions.get("plugin_registry")
+    if not isinstance(registry, PluginRegistry):
+        raise Refused("project extensions are unavailable")
+    try:
+        result = await registry.invoke_read(Principal(session_id, "agent"), project.id, plugin_id,
+                                            tool_name, arguments or {})
+    except PluginRefused as exc:
+        raise Refused(str(exc)) from exc
+    answer = json.dumps(result, ensure_ascii=False, sort_keys=True)
+    if len(answer) > 8000:
+        raise Refused("the extension result exceeds the project tool limit")
+    return answer
+
+
 OPS: dict[str, Callable[..., Awaitable[str]]] = {
     "brief": brief,
     "folders": folders,
@@ -992,6 +1010,7 @@ OPS: dict[str, Callable[..., Awaitable[str]]] = {
     "wake_me": wake_me,
     "watch": watch,
     "unwatch": unwatch,
+    "plugin_read": plugin_read,
 }
 
 __all__ = ["OPS", "Refused", "dispatch"]

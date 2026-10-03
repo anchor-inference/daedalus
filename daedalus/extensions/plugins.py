@@ -78,7 +78,7 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(extensions, list) or len(extensions) > 16:
         raise PluginRefused("too many UI extensions")
     for extension in extensions:
-        if not isinstance(extension, dict) or set(extension) != {"id", "slot", "schema_version", "component"} or not isinstance(extension["id"], str) or not IDENT.fullmatch(extension["id"]) or extension["slot"] not in ALLOWED_SLOTS or extension["schema_version"] != 1 or extension["component"] not in {"key_value", "status", "action"}:
+        if not isinstance(extension, dict) or set(extension) != {"id", "slot", "schema_version", "component", "tool"} or not isinstance(extension["id"], str) or not IDENT.fullmatch(extension["id"]) or extension["slot"] not in ALLOWED_SLOTS or extension["schema_version"] != 1 or extension["component"] not in {"key_value", "status", "action"} or extension["tool"] not in names:
             raise PluginRefused("unsupported UI extension descriptor")
     return {"valid": True, "digest": hashlib.sha256(canonical(manifest)).hexdigest(), "required_capabilities": caps, "ui_extensions": extensions}
 
@@ -88,6 +88,7 @@ class PluginRegistry:
         self.db = db
         self.adapters = adapters or {}
         self.active: dict[str, Any] = {}
+        self.active_versions: dict[str, tuple[str, str]] = {}
         self.safe_mode = False
         self.dispatcher = dispatcher
         self.lifecycle = asyncio.Lock()
@@ -155,8 +156,26 @@ class PluginRegistry:
         active_rows = await self.db.fetchall(
             "SELECT id, version, digest, manifest FROM plugin_manifests WHERE status = 'active' ORDER BY created_at"
         )
+        counts: dict[str, int] = {}
+        for row in active_rows:
+            counts[row["id"]] = counts.get(row["id"], 0) + 1
         for row in active_rows:
             plugin_id = str(row["id"])
+            if counts[plugin_id] != 1:
+                bound = self.active.pop(plugin_id, None)
+                self.active_versions.pop(plugin_id, None)
+                if bound is not None:
+                    try:
+                        bound.unregister()
+                    except Exception:
+                        # The binding is still barred from host calls; an adapter's own cleanup
+                        # may require operator repair and cannot make either version authoritative.
+                        pass
+                await self.db.execute(
+                    "UPDATE plugin_manifests SET health = 'ambiguous_active_version' WHERE id = ? AND status = 'active'",
+                    (plugin_id,),
+                )
+                continue
             if plugin_id in self.active:
                 continue
             factory = self.adapters.get(plugin_id)
@@ -185,6 +204,7 @@ class PluginRegistry:
                 )
                 continue
             self.active[plugin_id] = adapter
+            self.active_versions[plugin_id] = (row["version"], row["digest"])
 
     async def run(self, claim: Claim, check: Callable[[Claim], Any]) -> EffectOutcome:
         plugin_id, version = claim.payload["id"], claim.payload["version"]
@@ -212,11 +232,20 @@ class PluginRegistry:
                 return EffectOutcome("failed", "plugin lifecycle changed before registration")
             if await self.db.kv_get("plugin_safe_mode", False) or not await self.dependencies_active(manifest):
                 return EffectOutcome("failed", "plugin policy changed before registration")
+            if plugin_id in self.active or await self.db.fetchone(
+                "SELECT 1 FROM plugin_manifests WHERE id = ? AND status = 'active'", (plugin_id,)
+            ) is not None:
+                return EffectOutcome("failed", "another plugin version is already active")
             await check(claim)
             adapter = factory()
             try:
                 adapter.register(manifest)
                 async with self.db.transaction() as conn:
+                    async with conn.execute(
+                        "SELECT 1 FROM plugin_manifests WHERE id = ? AND status = 'active'", (plugin_id,)
+                    ) as cursor:
+                        if await cursor.fetchone() is not None:
+                            raise PluginRefused("another plugin version became active")
                     cursor = await conn.execute(
                         "UPDATE plugin_manifests SET status = 'active', health = 'unknown' WHERE id = ? AND version = ? AND status = 'staged'",
                         (plugin_id, version),
@@ -230,6 +259,7 @@ class PluginRegistry:
                     pass
                 return EffectOutcome("unknown", f"registration requires reconciliation: {type(exc).__name__}")
             self.active[plugin_id] = adapter
+            self.active_versions[plugin_id] = (version, row["digest"])
             return EffectOutcome("completed")
 
     async def reconcile(self, claim: Claim) -> EffectResolution | None:
@@ -240,7 +270,8 @@ class PluginRegistry:
         if row is None:
             return EffectResolution("failed", {"observed": "manifest_missing"})
         if row["status"] == "active":
-            if plugin_id in self.active and validate_manifest(json.loads(row["manifest"]))["digest"] == row["digest"]:
+            if (self.active_versions.get(plugin_id) == (version, row["digest"])
+                    and validate_manifest(json.loads(row["manifest"]))["digest"] == row["digest"]):
                 return EffectResolution("completed", {"observed": "active_registered_manifest", "digest": row["digest"]})
         if plugin_id == "project_status" and row["status"] == "staged" and plugin_id not in self.active:
             # This shipped adapter has no durable side effect; an interrupted process cannot retain its registration.
@@ -271,9 +302,11 @@ class PluginRegistry:
                 expected_collection_revision, Entity("collection", "global"),
                 {"id": plugin_id, "version": version}, effect,
             )
-            adapter = self.active.pop(plugin_id, None)
-            if adapter is not None:
-                adapter.unregister()
+            if self.active_versions.get(plugin_id, (None, None))[0] == version:
+                adapter = self.active.pop(plugin_id, None)
+                self.active_versions.pop(plugin_id, None)
+                if adapter is not None:
+                    adapter.unregister()
             return response
 
     async def health(self, plugin_id: str) -> dict[str, Any]:
@@ -282,38 +315,66 @@ class PluginRegistry:
         adapter = self.active.get(plugin_id)
         if adapter is None:
             return {"id": plugin_id, "state": "inactive"}
+        rows = await self.db.fetchall(
+            "SELECT version,digest FROM plugin_manifests WHERE id = ? AND status = 'active'", (plugin_id,)
+        )
+        if len(rows) != 1 or self.active_versions.get(plugin_id) != (rows[0]["version"], rows[0]["digest"]):
+            return {"id": plugin_id, "state": "unhealthy", "reason": "active_version_ambiguous"}
         try:
             result = adapter.health()
             return {"id": plugin_id, "state": "configured_unverified" if result else "unhealthy"}
         except Exception:
             return {"id": plugin_id, "state": "unhealthy", "reason": "adapter_error"}
 
-    async def invoke(self, plugin_id: str, tool_name: str, arguments: dict[str, Any], *, granted: set[str]) -> Any:
-        if self.safe_mode or await self.db.kv_get("plugin_safe_mode", False) or plugin_id not in self.active:
-            raise PluginRefused("plugin is inactive")
-        row = await self.db.fetchone(
-            "SELECT manifest FROM plugin_manifests WHERE id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
-            (plugin_id,),
-        )
-        if row is None:
-            raise PluginRefused("plugin has no active manifest")
-        manifest = json.loads(row["manifest"])
-        if not set(manifest["capabilities"]) <= granted:
-            raise PluginRefused("current grant does not cover plugin capabilities")
-        tool = next((item for item in manifest["tools"] if item["name"] == tool_name), None)
-        if tool is None:
-            raise PluginRefused("tool is not declared")
-        errors = list(Draft202012Validator(tool["input_schema"]).iter_errors(arguments))
-        if errors:
-            raise PluginRefused("tool input failed schema validation")
-        try:
-            return await self.active[plugin_id].invoke(tool_name, arguments)
-        except Exception as exc:
-            await self.db.execute(
-                "UPDATE plugin_manifests SET health = 'adapter_error' WHERE id = ? AND status = 'active'",
+    async def invoke_read(self, principal: Principal, project_id: str, plugin_id: str,
+                          tool_name: str, arguments: dict[str, Any]) -> Any:
+        # Registration and calls share the lock: revocation must wait for an entered host adapter
+        # call, then no later call may observe the old binding.
+        async with self.lifecycle:
+            scope = Scope("project", project_id)
+            async with self.db.transaction() as conn:
+                if principal.origin_class == "agent":
+                    await ControlStore(self.db)._office(conn, principal.actor_id, scope)
+                elif principal.origin_class == "operator":
+                    await ControlStore(self.db).attest(conn, principal, scope)
+                else:
+                    raise PluginRefused("only the operator or current project coordinator can read this plugin")
+            if self.safe_mode or await self.db.kv_get("plugin_safe_mode", False):
+                raise PluginRefused("plugin is inactive")
+            adapter = self.active.get(plugin_id)
+            binding = self.active_versions.get(plugin_id)
+            if adapter is None or binding is None:
+                raise PluginRefused("plugin is inactive")
+            rows = await self.db.fetchall(
+                "SELECT version,digest,manifest FROM plugin_manifests WHERE id = ? AND status = 'active'",
                 (plugin_id,),
             )
-            raise PluginRefused("plugin adapter failed") from exc
+            if len(rows) != 1 or binding != (rows[0]["version"], rows[0]["digest"]):
+                raise PluginRefused("the active plugin version is ambiguous or changed")
+            manifest = json.loads(rows[0]["manifest"])
+            if validate_manifest(manifest)["digest"] != rows[0]["digest"]:
+                raise PluginRefused("plugin digest changed")
+            if not await self.dependencies_active(manifest):
+                raise PluginRefused("plugin dependency pin is inactive")
+            if set(manifest["capabilities"]) != {"board.read"}:
+                raise PluginRefused("this shared read surface only permits board.read")
+            tool = next((item for item in manifest["tools"] if item["name"] == tool_name), None)
+            if tool is None:
+                raise PluginRefused("tool is not declared")
+            if "project_id" in arguments and arguments["project_id"] != project_id:
+                raise PluginRefused("tool arguments name another project")
+            arguments = {**arguments, "project_id": project_id}
+            errors = list(Draft202012Validator(tool["input_schema"]).iter_errors(arguments))
+            if errors:
+                raise PluginRefused("tool input failed schema validation")
+            try:
+                return await adapter.invoke(tool_name, arguments)
+            except Exception as exc:
+                await self.db.execute(
+                    "UPDATE plugin_manifests SET health = 'adapter_error' WHERE id = ? AND version = ?",
+                    (plugin_id, binding[0]),
+                )
+                raise PluginRefused("plugin adapter failed") from exc
 
     async def set_safe_mode_command(
         self, principal: Principal, enabled: bool, *, expected_collection_revision: int,
@@ -333,6 +394,17 @@ class PluginRegistry:
                 expected_collection_revision, Entity("collection", "global"), {"enabled": enabled}, effect,
             )
             self.safe_mode = bool(await self.db.kv_get("plugin_safe_mode", False))
+            if self.safe_mode:
+                for plugin_id, adapter in self.active.items():
+                    try:
+                        adapter.unregister()
+                    except Exception:
+                        await self.db.execute(
+                            "UPDATE plugin_manifests SET health = 'unregistration_failed' WHERE id = ? AND status = 'active'",
+                            (plugin_id,),
+                        )
+                self.active.clear()
+                self.active_versions.clear()
         if not self.safe_mode:
             await self.load_active()
         return response
@@ -355,7 +427,8 @@ PROJECT_STATUS_MANIFEST: dict[str, Any] = {
     }],
     "events": [],
     "dependencies": [],
-    "ui_extensions": [{"id": "project_status", "slot": "project.settings", "schema_version": 1, "component": "status"}],
+    "ui_extensions": [{"id": "project_status", "slot": "project.settings", "schema_version": 1,
+                       "component": "status", "tool": "inspect_project"}],
 }
 
 

@@ -69,6 +69,7 @@ from daedalus.stores.harness import HarnessStore
 from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.projects import FolderSpec, Project
 from daedalus.stores.staff import Staff
+from daedalus.stores.staff_context import staff_context_packet
 from daedalus.terminals.model import Owner, TerminalSpec
 from daedalus.terminals.owners import ManagerOwners
 from daedalus.terminals.service import Terminals
@@ -415,6 +416,8 @@ async def test_a_session_runs_from_the_trust_dialog_to_its_release(settings: Set
         assert row.transcript_ref and row.transcript_ref.endswith(f"{row.cli_session_id}.jsonl")
         first = [m for m in await s.manager.staff.messages(ada.id)]
         assert [m.state for m in first] == ["acknowledged"]
+        pinned = await staff_context_packet(db, row.id)
+        assert pinned is not None and pinned["packet_hash"] in first[0].text
 
         async def spent() -> bool:
             return bool((await s.session_row(ada)).usage)
@@ -428,6 +431,8 @@ async def test_a_session_runs_from_the_trust_dialog_to_its_release(settings: Set
         turns = await s.runtime.read(await s.team.live(row.id), ReadRequest("turns", turns=2))  # type: ignore[arg-type]
         # The protocol's line leads the first prompt, the task after it.
         assert turns.text.startswith("» [team] You are Ada, staff of Bakery") and "[task" in turns.text and "hello" in turns.text
+        planned = s.runtime.sessions[row.id].plan
+        assert planned is not None and pinned["packet_hash"] in planned.first_prompt
         screen = await s.runtime.read(await s.team.live(row.id), ReadRequest("screen"))  # type: ignore[arg-type]
         assert "? for shortcuts" in screen.text
 

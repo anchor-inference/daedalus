@@ -11,7 +11,7 @@ from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 
 
 async def operator_task(db: Any, project_id: str, title: str, *, priority: int = 3,
-                        brief: dict[str, str] | None = None) -> str:
+                        brief: dict[str, str] | None = None, folder_id: str | None = None) -> str:
     """Create a task whose contract snapshot exists before any worker can claim it."""
     scope = Scope("project", project_id)
     revision = await ControlStore(db).revision(scope, Entity("collection", project_id))
@@ -19,6 +19,7 @@ async def operator_task(db: Any, project_id: str, title: str, *, priority: int =
         Principal.operator({"via": "token", "user_id": 1}), scope,
         client_operation_id=f"test-task:{uuid.uuid4().hex}",
         expected_collection_revision=revision, title=title, priority=priority, brief=brief or {},
+        folder_id=folder_id,
     )
     return response["task_id"]
 

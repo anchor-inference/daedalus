@@ -11,9 +11,9 @@ import aiosqlite
 from daedalus.extensions.orchestrator_domain import DomainConflict, capture_contract_change, check_planning_capacity
 from daedalus.extensions.task_contract import REQUIREMENT_KINDS, REQUIREMENTS_MAX, check_items
 from daedalus.host.events import AppEvent, EventBus
-from daedalus.stores.comparison_funding import physical_exit_in
 from daedalus.stores.control import ControlConflict, ControlStore, Entity, Mutation, Principal, Scope, now
 from daedalus.stores.database import Database
+from daedalus.stores.runtime_release import attempt_released_in
 
 
 def _canonical(value: Any) -> str:
@@ -293,7 +293,7 @@ class BoardCommands:
             if semantic and row["current_attempt_id"]:
                 attempt = await _one(conn, "SELECT state FROM execution_attempts WHERE id = ?",
                                      (row["current_attempt_id"],))
-                if attempt is not None and not await physical_exit_in(conn, row["current_attempt_id"]):
+                if attempt is not None and not await attempt_released_in(conn, row["current_attempt_id"]):
                     raise DomainConflict("stop the active attempt before revising its contract")
             if semantic and await _one(conn, "SELECT 1 FROM effect_outbox WHERE kind = 'task.launch'"
                                        " AND state IN ('pending','claimed','unknown')"

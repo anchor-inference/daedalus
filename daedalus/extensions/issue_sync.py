@@ -11,6 +11,7 @@ from typing import Any
 import aiosqlite
 import httpx
 
+from daedalus.extensions.board_commands import insert_task
 from daedalus.extensions.effects import EffectOutcome, EffectResolution
 from daedalus.extensions.orchestrator_domain import capture_contract_change
 from daedalus.stores.control import (
@@ -213,7 +214,6 @@ class IssueSync:
             raise IssueSyncRefused("the issue exceeds the task contract limits")
 
         async def effect(conn: aiosqlite.Connection, mutation: Mutation) -> dict[str, Any]:
-            from daedalus.extensions.board_commands import insert_task
 
             if await one(conn, "SELECT id FROM issue_links WHERE provider = 'github' AND remote_id = ?", (preview["remote_id"],)):
                 raise ControlConflict("the issue was linked while the preview was open")

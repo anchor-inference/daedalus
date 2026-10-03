@@ -841,10 +841,28 @@ async def unwatch(context: ToolContext, id: str) -> ToolResult:
     return await _call(context, "unwatch", id=id, client_operation_id=command_id)
 
 
+@search_hint(
+    "installed project extension plugin inspect status custom read tool "
+    "расширение проекта плагин проверить статус прочитать инструмент"
+)
+@tool(
+    name="ProjectExtension",
+    description=(
+        "Run an installed project extension's read-only tool. Give its plugin_id and tool_name from the "
+        "operator-reviewed extension catalog; arguments follow that tool's schema. The host binds the "
+        "current project and refuses inactive, changed, or unapproved capabilities."
+    ),
+)
+async def project_extension(context: ToolContext, plugin_id: str, tool_name: str,
+                            arguments: dict[str, Any] | None = None) -> ToolResult:
+    return await _call(context, "plugin_read", plugin_id=plugin_id, tool_name=tool_name,
+                       arguments=arguments or {})
+
+
 TOOLS = [
     brief, folders, journal, team, tasks, peek, AskOperator, withdraw_questions, project_report,
     hire, staff_edit, dismiss, assign, staff_sessions, require, review_result, decide, tell, read_staff, answer, interrupt, pause, release, harnesses,
-    wake_me, Watch, unwatch,
+    wake_me, Watch, unwatch, project_extension,
 ]
 
 __all__ = ["TOOLS"]

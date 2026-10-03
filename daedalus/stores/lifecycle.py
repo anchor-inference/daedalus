@@ -13,6 +13,7 @@ from typing import Any
 import aiosqlite
 
 from daedalus.stores.control import ControlDenied, ControlStore, Principal, Scope, one
+from daedalus.stores.runtime_release import no_entry_in
 
 
 class LifecycleRefused(ValueError):
@@ -172,4 +173,22 @@ async def record_owned_exit(
     return True
 
 
-__all__ = ["LifecycleRefused", "admit_child", "record_owned_exit"]
+async def record_owned_no_entry(conn: aiosqlite.Connection, *, attempt_id: str) -> bool:
+    """Drain only the exact child the host proved never entered a runtime."""
+    if not await no_entry_in(conn, attempt_id):
+        return False
+    row = await one(conn, "SELECT o.parent_kind,o.parent_id,o.generation FROM lifecycle_owners o"
+                    " JOIN execution_attempts a ON a.id = o.child_id"
+                    " WHERE o.child_kind = 'execution_attempt' AND o.child_id = ?"
+                    " AND o.source_revision = a.contract_revision"
+                    " AND o.cancel_state IN ('requested','acknowledged','unknown')", (attempt_id,))
+    if row is None:
+        return False
+    await conn.execute("UPDATE lifecycle_owners SET cancel_state = 'drained',last_observed_at = ?,updated_at = ?"
+                       " WHERE parent_kind = ? AND parent_id = ? AND generation = ?"
+                       " AND child_kind = 'execution_attempt' AND child_id = ?",
+                       (_now(), _now(), row["parent_kind"], row["parent_id"], row["generation"], attempt_id))
+    return True
+
+
+__all__ = ["LifecycleRefused", "admit_child", "record_owned_exit", "record_owned_no_entry"]

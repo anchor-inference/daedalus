@@ -23,10 +23,11 @@ from daedalus.host.events import AppEvent
 from daedalus.host.session_runner import SessionManager, operator_passages, operator_quotes, operator_words_metadata
 from daedalus.host.wake_queue import Batch, Pending, Wake
 from daedalus.stores.database import Database
+from tests.support.authorized_launch import operator_assignment
 from tests.support.models import model_config
 from tests.support.waiting import until_await
 from tests.unit.test_orchestrator import events_messages, last_user_text, rig
-from tests.unit.test_staff_runtime import board_task, fake_team
+from tests.unit.test_staff_runtime import board_task, close_team, fake_team
 
 REMARKS = [f"{n}. Замечание номер {n}: анимации не ускорять, надписи не должны налезать на соседние блоки или вылезать за границы своего блока; проверить каждый ключевой кадр перед сдачей." for n in range(1, 21)]
 NOTE = "Также замечания по видео:\n" + "\n".join(REMARKS) + "\nИ последнее слово — конец."
@@ -94,7 +95,7 @@ async def test_a_refusals_reason_and_an_escalated_answer_are_whole_for_the_orche
     manager, team, runtime, project = await fake_team(settings, db, tmp_path)
     try:
         ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
-        await team.assign(ada, await board_task(manager, project, "Promo"))
+        await operator_assignment(team, ada, await board_task(manager, project, "Promo"))
         live = await team.live_of(ada)
         assert live is not None
         question = await team.ingress.question(live, "team:1", "Which track?", ["warm", "cold"])
@@ -116,6 +117,7 @@ async def test_a_refusals_reason_and_an_escalated_answer_are_whole_for_the_orche
             line = await orch._answer_line(ask)
             assert "you escalated" in line and carries_all(line)
     finally:
+        await close_team(manager)
         await manager.close()
 
 

@@ -18,9 +18,9 @@ from daedalus.extensions.comparison_commands import (
     review_comparison_slot,
 )
 from daedalus.extensions.comparison_stop import stop_comparison_slot
-from daedalus.extensions.comparisons import ComparisonRefused
 from daedalus.extensions.orchestrator_domain import DomainConflict
 from daedalus.extensions.review import ReviewRefused
+from daedalus.stores.comparisons import ComparisonRefused
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.inference_budget import BudgetRefused
 

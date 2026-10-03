@@ -17,12 +17,13 @@ from protocore.contracts.types import MessageRole, TextBlock
 from daedalus.config import Settings
 from daedalus.extensions.dispatches import Dispatches
 from daedalus.extensions.orchestrator_ops import Refused
+from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
 from daedalus.stores.projects import FolderSpec, Project
 from daedalus.stores.staff import StaffError
+from tests.support.authorized_launch import operator_task
 from tests.support.waiting import until_await
 from tests.unit.test_orchestrator import Rig, _idle, events, events_messages, git, rig
-from tests.unit.test_staff_runtime import board_task
 
 HOST_ROOT = "/home/someone/labs"
 HOME_NAME = "project-{project_id}"
@@ -359,11 +360,20 @@ async def test_a_daedalus_member_is_refused_a_host_folder_with_a_sentence_that_s
         mixed = await r.manager.projects.create("Mixed", [FolderSpec(str(r.repo.parent / "mixed")), FolderSpec("/home/someone/mixed", env="host")])
         (r.repo.parent / "mixed").mkdir()
         member = await r.manager.staff.hire(mixed.id, name="Bo", role="Docs", isolation="shared")
-        task_id = await board_task(r.manager, mixed, "Host docs")
         host_folder = mixed.folders[1]
-        await r.manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (host_folder.id, task_id))
+        task_id = await operator_task(r.manager.db, mixed.id, "Host docs", folder_id=host_folder.id,
+                                      brief={"objective": "Document the host folder", "deliverable": "docs.md",
+                                             "boundaries": "Read only this folder", "done_when": "Docs are reviewed"})
+        scope = Scope("project", mixed.id)
+        revision = await ControlStore(r.manager.db).revision(scope, Entity("task", task_id))
         with pytest.raises(StaffError, match=r"Bo cannot work on task .*/home/someone/mixed is on the host.*command-line member"):
-            await r.team.assign(member, task_id, by="operator")
+            await r.team.assign(member, task_id, principal=Principal.operator({"via": "token", "user_id": 1}),
+                                client_operation_id="host-folder-denied", expected_entity_revision=revision)
         assert r.team.queue.queue(mixed.id) == [], "nothing waits for a start that cannot happen"
+        assert await r.manager.db.fetchone(
+            "SELECT 1 FROM effect_outbox WHERE json_extract(payload_json,'$.control.task_id') = ?",
+            (task_id,)) is None
+        assert (await r.manager.db.fetchone("SELECT assignee_staff_id FROM board_tasks WHERE id = ?",
+                                            (task_id,)))["assignee_staff_id"] is None
     finally:
         await r.manager.close()

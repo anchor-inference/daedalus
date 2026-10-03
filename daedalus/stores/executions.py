@@ -16,9 +16,12 @@ from typing import Any
 
 import aiosqlite
 
+from daedalus.stores.comparison_funding import ComparisonFunding
+from daedalus.stores.comparisons import AdmissionProof, admit_attempt
 from daedalus.stores.control import ControlDenied, ControlStore, Principal, Scope, canonical, now, one
 from daedalus.stores.database import Database
 from daedalus.stores.lifecycle import admit_child
+from daedalus.stores.runtime_release import attempt_released_in
 
 ACTIVE = ("queued", "starting", "running", "waiting")
 
@@ -146,21 +149,16 @@ class ExecutionStore:
                     not member["worktree_path"] or not member["branch"] or runtime_kind != "daedalus"):
                 raise ControlDenied("the comparison attempt has no current funded isolated slot")
         async with conn.execute("SELECT a.id,a.state FROM execution_attempts a WHERE a.task_id = ?"
-                                " AND NOT EXISTS (SELECT 1 FROM runtime_exit_observations e"
-                                " WHERE e.attempt_id = a.id AND e.contract_revision = a.contract_revision"
-                                " AND e.host_generation = a.host_generation AND e.staff_session_id = a.staff_session_id"
-                                " AND e.provider_session_ref = a.provider_session_ref AND e.runtime_kind = a.runtime_kind"
-                                " AND ((a.runtime_kind = 'daedalus' AND e.runtime_ref = a.native_run_id)"
-                                " OR (a.runtime_kind = 'cli' AND e.runtime_instance = a.runtime_instance"
-                                " AND a.provider_session_ref = 'terminal:' || e.runtime_ref)))"
                                 " AND (? IS NULL OR NOT EXISTS (SELECT 1 FROM comparison_group_attempts m"
                                 " WHERE m.attempt_id = a.id AND m.group_id = ?))",
                                 (task_id, slot["group_id"] if slot else None, slot["group_id"] if slot else None)) as cursor:
-            previous = await cursor.fetchone()
-        if previous is not None:
-            if previous["state"] in (*ACTIVE, "recovering"):
+            previous = await cursor.fetchall()
+        for prior in previous:
+            if await attempt_released_in(conn, prior["id"]):
+                continue
+            if prior["state"] in (*ACTIVE, "recovering"):
                 raise ControlDenied("the previous execution must be stopped or reconciled first")
-            raise ControlDenied("the previous execution has no host-observed runtime exit")
+            raise ControlDenied("the previous execution has no host-observed runtime exit or no-entry proof")
         await conn.execute("INSERT INTO execution_attempts(id,task_id,contract_revision,host_generation,"
                            " fence_token_hash,state,created_at,updated_at,actor_id,grant_id,grant_generation,"
                            " staff_session_id,runtime_kind) VALUES (?,?,?,?,?,'queued',?,?,?,?,?,?,?)",
@@ -170,9 +168,6 @@ class ExecutionStore:
             await conn.execute("UPDATE board_tasks SET current_attempt_id = ?,accepted_result_id = NULL,"
                                " accepted_contract_revision = NULL,acceptance_state = '' WHERE id = ?", (attempt_id, task_id))
         else:
-            from daedalus.extensions.comparisons import AdmissionProof, admit_attempt
-            from daedalus.stores.comparison_funding import ComparisonFunding
-
             bound = await ComparisonFunding(self.db).bind_attempt_in(conn, comparison_slot_id, attempt_id)
             proof = AdmissionProof(comparison_slot_id, bound["allowance_microusd"], bound["rate_version"],
                                    hashlib.sha256(member["worktree_path"].encode()).hexdigest(), comparison_slot_id)

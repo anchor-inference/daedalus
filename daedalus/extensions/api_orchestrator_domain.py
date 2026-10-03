@@ -8,12 +8,14 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends, FastAPI, HTTPException
 
+from daedalus.extensions.board import Board
 from daedalus.extensions.orchestrator_domain import (
     DomainConflict,
     OrchestratorDomain,
     OriginalReports,
     accept_result,
     add_artifact_manifest,
+    add_operator_attestation,
     add_review_comment,
     add_review_evidence,
     advance_workflow_step,
@@ -21,8 +23,11 @@ from daedalus.extensions.orchestrator_domain import (
     claim_handoff,
     configure_workflow,
     dependency_readiness,
+    manual_review_readiness,
     next_action_readiness,
+    operator_attestation_in,
     record_verdict,
+    reopen_accepted_result,
     replace_contract,
     resolve_dependency,
     resolve_review_comment,
@@ -36,7 +41,7 @@ from daedalus.extensions.orchestrator_domain import (
 )
 from daedalus.extensions.planning import create_plan, token_readiness
 from daedalus.host.events import AppEvent
-from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope
+from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope, now
 from daedalus.stores.outbox import OutboxStore
 
 if TYPE_CHECKING:
@@ -50,6 +55,12 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
 
     def domain() -> OrchestratorDomain:
         return OrchestratorDomain(app.db)
+
+    async def refresh_plan(task_id: str) -> None:
+        row = await app.db.fetchone("SELECT origin_session_id FROM board_tasks WHERE id = ?", (task_id,))
+        if row is not None and row["origin_session_id"]:
+            # The board remains authoritative; this is its repairable workspace projection.
+            await Board(app).export_plan(row["origin_session_id"])
 
     async def task_scope(task_id: str) -> Scope:
         task = await app.db.fetchone("SELECT project_id FROM board_tasks WHERE id = ?", (task_id,))
@@ -248,7 +259,8 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
             actor = Principal.operator(who).actor_id
             for row in rows:
                 receipt = await app.db.fetchone("SELECT actor_id FROM result_receipts WHERE id = ?", (row["result_id"],))
-                row["self_review_waiver_required"] = receipt is not None and receipt["actor_id"] == actor
+                row["self_review_waiver_required"] = (receipt is not None and receipt["actor_id"] == actor
+                                                      and row["origin_kind"] != "operator_manual")
             return rows
         except KeyError as exc:
             raise HTTPException(404, "no such task") from exc
@@ -283,6 +295,8 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
 
     @api.post("/api/board/{task_id}/results")
     async def post_result(task_id: str, body: dict[str, Any], who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        if body.get("attempt_id") is not None:
+            raise HTTPException(422, "worker attempts report through their authenticated ingress")
         report = str(body.get("original_text") or "").encode("utf-8")
         try:
             original_text, blob_ref, digest, size = OriginalReports(domain().reports.root).stage(report)
@@ -290,15 +304,61 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
             raise HTTPException(413 if "4 MiB" in str(exc) else 422, str(exc)) from exc
 
         async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
-            return await submit_result(conn, result_id=mutation.object_id, task_id=task_id,
-                                       attempt_id=body.get("attempt_id"), contract_revision=int(body["contract_revision"]),
+            cursor = await conn.execute("SELECT status,branch,current_attempt_id,contract_revision FROM board_tasks"
+                                        " WHERE id = ?", (task_id,))
+            task = await cursor.fetchone()
+            await cursor.close()
+            if task is None:
+                raise KeyError(task_id)
+            readiness = await manual_review_readiness(conn, task_id)
+            if not readiness["eligible"] or task["contract_revision"] != int(body["contract_revision"]):
+                raise DomainConflict("manual review needs a current branchless task without a worker attempt")
+            manifests = list(body.get("manifest_ids") or [])
+            for manifest_id in manifests:
+                cursor = await conn.execute("SELECT m.file_id FROM artifact_manifests m"
+                                            " JOIN task_files f ON f.file_id = m.file_id"
+                                            " WHERE m.id = ? AND m.task_id = ? AND f.task_id = ?",
+                                            (manifest_id, task_id, task_id))
+                attached = await cursor.fetchone()
+                await cursor.close()
+                if attached is None:
+                    raise DomainConflict("manual result artifacts need attached immutable files")
+            await conn.execute("UPDATE board_tasks SET status = 'review',updated_at = ? WHERE id = ?",
+                               (now(), task_id))
+            response = await submit_result(conn, result_id=mutation.object_id, task_id=task_id,
+                                       attempt_id=None, contract_revision=int(body["contract_revision"]),
                                        outcome=body["outcome"], original_text=original_text, original_blob_ref=blob_ref,
                                        original_digest=digest, original_size_bytes=size,
                                        actor_id=Principal.operator(who).actor_id,
-                                       manifest_ids=list(body.get("manifest_ids") or []),
+                                       manifest_ids=manifests,
                                        checks=list(body.get("checks") or []),
-                                       limitations=list(body.get("limitations") or []))
-        return await mutate(task_id, who, body, "result.submit", effect)
+                                       limitations=list(body.get("limitations") or []),
+                                       allow_empty_manifest=True)
+            return {**response, "status": "review"}
+        return await mutate(task_id, who, body, "result.submit.manual", effect)
+
+    @api.get("/api/board/{task_id}/manual-review")
+    async def manual_review(task_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        async with app.db.transaction() as conn:
+            try:
+                return await manual_review_readiness(conn, task_id)
+            except KeyError as exc:
+                raise HTTPException(404, "no such task") from exc
+
+    @api.post("/api/board/{task_id}/results/{result_id}/attest")
+    async def attest_manual(task_id: str, result_id: str, body: dict[str, Any],
+                            who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
+            cursor = await conn.execute("SELECT task_id FROM result_receipts WHERE id = ?", (result_id,))
+            result = await cursor.fetchone()
+            await cursor.close()
+            if result is None or result["task_id"] != task_id:
+                raise KeyError(result_id)
+            return await add_operator_attestation(conn, evidence_id=mutation.object_id,
+                                                  result_id=result_id, actor_id=Principal.operator(who).actor_id,
+                                                  criterion_id=body["criterion_id"],
+                                                  observation=body["observation"])
+        return await mutate(task_id, who, body, "review.manual.attest", effect)
 
     @api.get("/api/board/{task_id}/dependencies")
     async def dependencies(task_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -372,15 +432,20 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
         rows = await app.db.fetchall("SELECT id,criterion_id,command,exit_code,environment_digest,"
                                      " manifest_digest_before,manifest_digest_after,observed_at"
                                      " FROM review_evidence WHERE result_id = ? ORDER BY observed_at,id", (result_id,))
-        return [{"evidence_id": row["id"], "criterion_id": row["criterion_id"],
+        projected = []
+        async with app.db.transaction() as conn:
+            for row in rows:
+                human = await operator_attestation_in(conn, row["id"])
+                projected.append({"evidence_id": row["id"], "criterion_id": row["criterion_id"],
                  "observation": row["command"], "exit_code": row["exit_code"],
                  "environment_digest": row["environment_digest"],
                  "manifest_digest_before": row["manifest_digest_before"],
                  "manifest_digest_after": row["manifest_digest_after"],
-                 "verification": "stale" if row["manifest_digest_before"] is None or
+                 "verification": "operator_attested" if human else "stale" if row["manifest_digest_before"] is None or
                  row["manifest_digest_before"] != row["manifest_digest_after"] else
                  "verified" if row["exit_code"] == 0 else "failed",
-                 "observed_at": row["observed_at"]} for row in rows]
+                 "observed_at": row["observed_at"]})
+        return projected
 
     @api.post("/api/board/{task_id}/results/{result_id}/comments")
     async def comment(task_id: str, result_id: str, body: dict[str, Any],
@@ -506,7 +571,9 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
             return await accept_result(conn, task_id=task_id, result_id=result_id, verdict_id=body["verdict_id"],
                                        contract_revision=int(body["contract_revision"]),
                                        current_head=head_sha, current_base=base_sha, current_merge_sha=merge_sha)
-        return await mutate(task_id, who, body, "result.accept", effect)
+        response = await mutate(task_id, who, body, "result.accept", effect)
+        await refresh_plan(task_id)
+        return response
 
     @api.post("/api/board/{task_id}/results/{result_id}/return")
     async def return_reviewed(task_id: str, result_id: str, body: dict[str, Any],
@@ -517,6 +584,20 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
                                        contract_revision=int(body["contract_revision"]),
                                        actor_id=Principal.operator(who).actor_id, reason=body["reason"])
         return await mutate(task_id, who, body, "result.return", effect)
+
+    @api.post("/api/board/{task_id}/results/{result_id}/reopen")
+    async def reopen_accepted(task_id: str, result_id: str, body: dict[str, Any],
+                              who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
+            return await reopen_accepted_result(conn, reopen_id=mutation.object_id,
+                                                task_id=task_id, result_id=result_id,
+                                                verdict_id=body["verdict_id"],
+                                                contract_revision=int(body["contract_revision"]),
+                                                actor_id=Principal.operator(who).actor_id,
+                                                reason=body["reason"])
+        response = await mutate(task_id, who, body, "result.reopen", effect)
+        await refresh_plan(task_id)
+        return response
 
     @api.post("/api/board/{task_id}/results/{result_id}/merge")
     async def queue_merge(task_id: str, result_id: str, body: dict[str, Any],

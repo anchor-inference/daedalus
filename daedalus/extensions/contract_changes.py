@@ -11,18 +11,14 @@ import aiosqlite
 from daedalus.extensions.orchestrator_domain import DomainConflict, capture_contract_change
 from daedalus.extensions.task_contract import REQUIREMENT_KINDS, REQUIREMENT_MAX_CHARS, REQUIREMENTS_MAX
 from daedalus.stores.control import Principal, canonical, now, one
+from daedalus.stores.runtime_release import attempt_released_in
 
 
 async def _exited_attempt(conn: aiosqlite.Connection, attempt_id: str) -> bool:
-    observed = await one(conn, "SELECT 1 FROM runtime_exit_observations e"
-                         " JOIN execution_attempts a ON a.id = e.attempt_id"
-                         " JOIN staff_sessions s ON s.id = a.staff_session_id"
-                         " WHERE e.attempt_id = ? AND e.host_generation = a.host_generation"
-                         " AND e.contract_revision = a.contract_revision"
-                         " AND e.staff_session_id = a.staff_session_id"
-                         " AND e.provider_session_ref = a.provider_session_ref"
-                         " AND s.ended_at IS NOT NULL", (attempt_id,))
-    return observed is not None
+    released = await attempt_released_in(conn, attempt_id)
+    ended = await one(conn, "SELECT 1 FROM execution_attempts a JOIN staff_sessions s ON s.id = a.staff_session_id"
+                      " WHERE a.id = ? AND s.ended_at IS NOT NULL", (attempt_id,))
+    return released and ended is not None
 
 
 async def stage_change_in(conn: aiosqlite.Connection, *, intent_id: str, receipt_id: str,

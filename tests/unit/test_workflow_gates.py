@@ -10,6 +10,7 @@ import pytest
 from fastapi import FastAPI, Header
 
 from daedalus.extensions.api_orchestrator_domain import install_routes
+from daedalus.host.events import EventBus
 from daedalus.stores.database import Database
 
 
@@ -26,7 +27,7 @@ async def test_human_ack_and_work_step_are_ordered_and_replayable(tmp_path: Path
         async def authenticated(x_user: int = Header(1)) -> dict[str, int | str]:
             return {"via": "token", "user_id": x_user}
 
-        install_routes(api, SimpleNamespace(db=db, extensions={}), authenticated)
+        install_routes(api, SimpleNamespace(db=db, manager=SimpleNamespace(bus=EventBus(db)), extensions={}), authenticated)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
             base = "/api/board/task1/workflow"
             configured = await client.put(base, json={

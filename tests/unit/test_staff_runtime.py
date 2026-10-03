@@ -33,6 +33,7 @@ from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.projects import FolderSpec, Project
 from daedalus.stores.staff import Staff, StaffError
+from daedalus.stores.staff_context import staff_context_packet
 from tests.support.authorized_launch import operator_assignment, operator_task
 from tests.support.waiting import until_await
 from tests.unit.test_session_runner import ScriptedProvider, _manager
@@ -431,6 +432,10 @@ async def test_a_dirty_worktree_refuses_done_and_a_pause_commits_it(settings: Se
         [req] = runtime.started
         assert req.worktree is not None and req.cwd == req.worktree.cwd and req.team_token and req.first_message_id.startswith("sm-")
         assert "Branch: agent/ada/" in req.first_message and "own git worktree" in req.brief_text
+        pinned = await staff_context_packet(db, req.staff_session_id)
+        assert pinned is not None and pinned["packet_hash"] in req.first_message
+        assert pinned["packet_hash"] in req.brief_text
+        assert "Touch nothing else" in req.brief_text
         live = await team.live_of(ada)
         assert live is not None
         (req.worktree.path / "menu.md").write_text("bread\n")

@@ -26,6 +26,7 @@ from daedalus.host.policy import ALLOW, ASK, DENY, Policy, browser_sensitive
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
 from daedalus.tools.browser import BROWSER_TOOLS
+from tests.support.authorized_launch import operator_assignment
 from tests.support.fake_browserd import Element, FakeBrowserd
 from tests.support.models import model_config
 from tests.unit.test_browser_service import wait_until
@@ -317,12 +318,16 @@ def test_sensitive_actions_by_the_operators_rules() -> None:
 
 
 async def test_a_member_request_can_name_the_operator_whatever_the_autonomy(settings: Settings, db: Database, tmp_path: Path) -> None:
-    from tests.unit.test_staff_runtime import board_task, fake_team
+    from tests.unit.test_staff_runtime import (  # Lazy: this test owns its worker fixture.
+        board_task,
+        close_team,
+        fake_team,
+    )
 
     manager, team, _runtime, project = await fake_team(settings, db, tmp_path)
     try:
         ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
-        await team.assign(ada, await board_task(manager, project, "Menu"))
+        await operator_assignment(team, ada, await board_task(manager, project, "Menu"))
         live = await team.live_of(ada)
         assert live is not None
         ordinary = await team.ingress.permission(live, "req-1", "Exec", "npm install")
@@ -330,6 +335,7 @@ async def test_a_member_request_can_name_the_operator_whatever_the_autonomy(sett
         assert (await manager.asks.get(ordinary)).routed_to == "orchestrator"  # type: ignore[union-attr]
         assert (await manager.asks.get(browser)).routed_to == "operator"  # type: ignore[union-attr]
     finally:
+        await close_team(manager)
         await manager.close()
 
 

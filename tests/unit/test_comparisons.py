@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from daedalus.extensions.comparisons import (
+from daedalus.extensions.orchestrator_domain import record_verdict, submit_result
+from daedalus.stores.comparisons import (
     AdmissionProof,
     ComparisonRefused,
     admit_attempt,
@@ -15,7 +16,6 @@ from daedalus.extensions.comparisons import (
     comparison_readiness,
     create_group,
 )
-from daedalus.extensions.orchestrator_domain import record_verdict, submit_result
 from daedalus.stores.database import Database
 
 
@@ -215,6 +215,22 @@ async def test_selection_projects_the_reviewed_worktree_and_keeps_the_loser(comp
 
         async def exited(_conn, _attempt):
             return True
+
+        async def excessive_cost(_conn, _attempt):
+            return 501
+
+        readiness = await comparison_readiness(conn, "group1", observed_cost=excessive_cost, physical_exit=exited)
+        assert readiness["blockers"] == ["cost_cap_exceeded"]
+        with pytest.raises(ComparisonRefused, match="cost_cap_exceeded"):
+            await choose_result(conn, group_id="group1", result_id="result2", verdict_id="verdict2",
+                                operation_receipt_id="op1", selection_receipt_id="over-budget",
+                                observed_cost=excessive_cost, physical_exit=exited)
+        assert (await (await conn.execute("SELECT count(*) FROM comparison_selection_receipts")).fetchone())[0] == 0
+
+        async def exact_cap(_conn, _attempt):
+            return 500
+
+        assert (await comparison_readiness(conn, "group1", observed_cost=exact_cap, physical_exit=exited))["blockers"] == []
 
         await conn.execute("UPDATE comparison_group_attempts SET worktree_identity = ?"
                            " WHERE group_id = 'group1' AND attempt_id = 'attempt2'", ("0" * 64,))

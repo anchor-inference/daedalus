@@ -24,6 +24,7 @@ from daedalus.stores.database import Database
 from daedalus.stores.knowledge import enqueue_artifact_change
 from daedalus.stores.lifecycle import admit_child
 from daedalus.stores.projects import keep_task_commitments_in
+from daedalus.stores.runtime_release import attempt_released_in
 
 RESULT_OUTCOMES = frozenset(("complete", "partial", "failed", "needs_input", "cancelled"))
 MANIFEST_KINDS = frozenset(("code", "document", "research", "export", "media", "other"))
@@ -310,11 +311,69 @@ async def _comparison_member(conn: aiosqlite.Connection, task_id: str, attempt_i
                       " AND g.state IN ('planned','active','ready')", (attempt_id, task_id, contract_revision))
 
 
+async def ensure_no_execution_ownership(conn: aiosqlite.Connection, task_id: str) -> None:
+    """A manual decision cannot replace a queued, live, or physically uncertain worker."""
+    if await _one(conn, "SELECT 1 FROM comparison_groups WHERE task_id = ?"
+                  " AND state IN ('planned','active','ready') LIMIT 1", (task_id,)):
+        raise DomainConflict("an undecided comparison owns this task")
+    async with conn.execute("SELECT id FROM execution_attempts WHERE task_id = ?", (task_id,)) as cursor:
+        attempts = await cursor.fetchall()
+    for attempt in attempts:
+        if not await attempt_released_in(conn, attempt["id"]):
+            raise DomainConflict("the task has an execution without exact physical exit or host no-entry proof")
+    if await _one(conn, "SELECT 1 FROM effect_outbox WHERE kind IN"
+                  " ('task.launch','comparison.launch.first','comparison.launch.second')"
+                  " AND state IN ('pending','claimed','unknown')"
+                  " AND json_extract(payload_json,'$.control.task_id') = ? LIMIT 1", (task_id,)):
+        raise DomainConflict("reconcile the pending launch before a manual decision")
+    if await _one(conn, "SELECT 1 FROM lifecycle_parents WHERE parent_kind = 'task' AND parent_id = ?"
+                  " AND cancel_state != 'active' LIMIT 1", (task_id,)):
+        raise DomainConflict("the task parent is cancelling or cancelled")
+
+
+async def manual_review_readiness(conn: aiosqlite.Connection, task_id: str) -> dict[str, Any]:
+    """Describe a human report's current gates and exact attached files in one snapshot."""
+    task = await _one(conn, "SELECT status,branch,current_attempt_id,entity_revision,contract_revision"
+                      " FROM board_tasks WHERE id = ?", (task_id,))
+    if task is None:
+        raise KeyError(task_id)
+    blockers = []
+    if task["status"] not in ("todo", "blocked", "review"):
+        blockers.append("status")
+    if task["branch"]:
+        blockers.append("branch")
+    if task["current_attempt_id"] is not None:
+        blockers.append("attempt_bound")
+    try:
+        await ensure_no_execution_ownership(conn, task_id)
+    except DomainConflict:
+        blockers.append("execution_owned")
+    if not (await dependency_readiness(conn, task_id))["ready"]:
+        blockers.append("dependencies")
+    if not await _one(conn, "SELECT 1 FROM task_contract_versions WHERE task_id = ? AND contract_revision = ?",
+                      (task_id, task["contract_revision"])):
+        blockers.append("missing_contract")
+    rows = await _many(conn, "SELECT f.id AS file_id,f.name AS label,f.sha256 AS digest,f.size AS size_bytes,"
+                      " m.id AS manifest_id FROM task_files tf JOIN files f ON f.id = tf.file_id"
+                      " LEFT JOIN artifact_manifests m ON m.task_id = tf.task_id AND m.file_id = f.id"
+                      " AND m.digest = f.sha256 AND m.size_bytes = f.size WHERE tf.task_id = ?"
+                      " ORDER BY f.name,f.id,m.created_at DESC,m.id DESC", (task_id,))
+    artifacts = []
+    seen = set()
+    for row in rows:
+        if row["file_id"] not in seen:
+            artifacts.append(dict(row))
+            seen.add(row["file_id"])
+    return {"eligible": not blockers, "blockers": blockers, "entity_revision": task["entity_revision"],
+            "contract_revision": task["contract_revision"], "attached_artifacts": artifacts}
+
+
 async def submit_result(
     conn: aiosqlite.Connection, *, result_id: str, task_id: str, attempt_id: str | None,
     contract_revision: int, outcome: str, original_text: str | None, original_blob_ref: str | None,
     original_digest: str, original_size_bytes: int, actor_id: str, manifest_ids: list[str],
     checks: list[dict[str, Any]], limitations: list[str], original_artifact_file_id: str | None = None,
+    allow_empty_manifest: bool = False,
 ) -> dict[str, Any]:
     """Insert a full immutable report for the current attempt or a bounded comparison member."""
     if outcome not in RESULT_OUTCOMES:
@@ -334,7 +393,7 @@ async def submit_result(
         original = original_text.encode("utf-8")
         if len(original) > INLINE_REPORT_MAX or len(original) != original_size_bytes or hashlib.sha256(original).hexdigest() != original_digest:
             raise DomainConflict("inline report digest or size does not match")
-    if not manifest_ids and outcome == "complete":
+    if not manifest_ids and outcome == "complete" and not allow_empty_manifest:
         raise DomainConflict("a complete result needs at least one artifact manifest")
     for manifest_id in manifest_ids:
         manifest = await _one(conn, "SELECT task_id FROM artifact_manifests WHERE id = ?", (manifest_id,))
@@ -379,6 +438,89 @@ async def add_review_evidence(
             "verification": "stale" if stale else "verified" if exit_code == 0 else "failed"}
 
 
+async def manual_result_origin(conn: aiosqlite.Connection, result_id: str, task_id: str,
+                               actor_id: str) -> bool:
+    """A human-authored report needs its committed authenticated command, not an actor string alone."""
+    task = await _one(conn, "SELECT project_id FROM board_tasks WHERE id = ?", (task_id,))
+    if task is None or not actor_id.startswith("operator:"):
+        return False
+    scope_kind = "project" if task["project_id"] else "global"
+    scope_id = task["project_id"] or "global"
+    return await _one(conn, "SELECT 1 FROM operation_receipts WHERE scope_kind = ? AND scope_id = ?"
+                      " AND actor_id = ? AND operation_kind = 'result.submit.manual' AND state = 'committed'"
+                      " AND json_extract(response_json,'$.result_id') = ? LIMIT 1",
+                      (scope_kind, scope_id, actor_id, result_id)) is not None
+
+
+async def add_operator_attestation(conn: aiosqlite.Connection, *, evidence_id: str,
+                                   result_id: str, actor_id: str, criterion_id: str,
+                                   observation: str) -> dict[str, Any]:
+    """Record a human's statement against the exact current manual result and criterion."""
+    result = await _one(conn, "SELECT task_id,contract_revision,attempt_id,actor_id"
+                        " FROM result_receipts WHERE id = ?", (result_id,))
+    if (result is None or result["attempt_id"] is not None or not actor_id.startswith("operator:")
+            or not await manual_result_origin(conn, result_id, result["task_id"], result["actor_id"])):
+        raise DomainConflict("human attestation needs an authenticated manual result")
+    task = await _one(conn, "SELECT contract_revision,current_attempt_id FROM board_tasks WHERE id = ?",
+                      (result["task_id"],))
+    if (task is None or task["contract_revision"] != result["contract_revision"]
+            or task["current_attempt_id"] is not None):
+        raise DomainConflict("the manual result is no longer current")
+    await ensure_no_execution_ownership(conn, result["task_id"])
+    latest = await _one(conn, "SELECT id FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
+                        " AND attempt_id IS NULL ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                        (result["task_id"], result["contract_revision"]))
+    if latest is None or latest["id"] != result_id:
+        raise DomainConflict("a newer manual result superseded this attestation")
+    body = observation.strip()
+    if not body or len(body) > 1000:
+        raise ValueError("human attestation needs a statement of at most 1000 characters")
+    contract = await _one(conn, "SELECT snapshot_json FROM task_contract_versions"
+                          " WHERE task_id = ? AND contract_revision = ?",
+                          (result["task_id"], result["contract_revision"]))
+    snapshot = _json(contract["snapshot_json"], {}) if contract is not None else {}
+    criteria = {item["id"]: item for item in [*snapshot.get("checklist", []),
+                                               *snapshot.get("requirements", [])]}
+    if criterion_id not in criteria and not (criterion_id == "completion" and not criteria):
+        raise DomainConflict("attestation criterion is outside the current contract")
+    if criterion_id in criteria and criteria[criterion_id].get("file_id"):
+        raise DomainConflict("this criterion needs its attached file evidence")
+    await conn.execute(
+        "INSERT INTO review_evidence(id,result_id,contract_revision,criterion_id,command,"
+        " exit_code,environment_digest,manifest_digest_before,manifest_digest_after,observed_at)"
+        " VALUES (?,?,?,?,?,NULL,NULL,NULL,NULL,?)",
+        (evidence_id, result_id, result["contract_revision"], criterion_id,
+         f"operator attestation: {body}", _now()),
+    )
+    return {"evidence_id": evidence_id, "result_id": result_id, "criterion_id": criterion_id,
+            "verification": "operator_attested"}
+
+
+async def operator_attestation_in(conn: aiosqlite.Connection, evidence_id: str) -> bool:
+    """A human statement needs its committed operator command and exact non-file criterion."""
+    row = await _one(conn, "SELECT e.*,r.task_id,r.actor_id,r.attempt_id,r.contract_revision AS result_contract"
+                    " FROM review_evidence e JOIN result_receipts r ON r.id = e.result_id WHERE e.id = ?",
+                    (evidence_id,))
+    if (row is None or row["attempt_id"] is not None or row["contract_revision"] != row["result_contract"]
+            or not row["command"].startswith("operator attestation: ") or row["exit_code"] is not None
+            or row["environment_digest"] is not None or row["manifest_digest_before"] is not None
+            or row["manifest_digest_after"] is not None
+            or not await manual_result_origin(conn, row["result_id"], row["task_id"], row["actor_id"])):
+        return False
+    if not await _one(conn, "SELECT 1 FROM operation_receipts WHERE operation_kind = 'review.manual.attest'"
+                      " AND state = 'committed' AND actor_id LIKE 'operator:%'"
+                      " AND json_extract(response_json,'$.evidence_id') = ?"
+                      " AND json_extract(response_json,'$.result_id') = ?"
+                      " AND json_extract(response_json,'$.criterion_id') = ?", (evidence_id, row["result_id"], row["criterion_id"])):
+        return False
+    contract = await _one(conn, "SELECT snapshot_json FROM task_contract_versions WHERE task_id = ?"
+                          " AND contract_revision = ?", (row["task_id"], row["contract_revision"]))
+    snapshot = _json(contract["snapshot_json"], {}) if contract else {}
+    criteria = {item["id"]: item for item in [*snapshot.get("checklist", []), *snapshot.get("requirements", [])]}
+    criterion = criteria.get(row["criterion_id"])
+    return (criterion is not None and not criterion.get("file_id")) or (not criteria and row["criterion_id"] == "completion")
+
+
 async def record_verdict(
     conn: aiosqlite.Connection, *, verdict_id: str, result_id: str, reviewer_actor_id: str,
     verification: str, accepted: bool, head: str | None, base: str | None,
@@ -404,7 +546,12 @@ async def record_verdict(
         raise DomainConflict("a newer result superseded the reviewed result")
     if verification not in ("verified", "failed", "stale"):
         raise ValueError("invalid verification state")
-    if reviewer_actor_id == result["actor_id"]:
+    manual_origin = (result["attempt_id"] is None and
+                     await manual_result_origin(conn, result_id, result["task_id"], result["actor_id"]))
+    if manual_origin:
+        await ensure_no_execution_ownership(conn, result["task_id"])
+    manual_self_review = reviewer_actor_id == result["actor_id"] and manual_origin
+    if reviewer_actor_id == result["actor_id"] and not manual_self_review:
         waiver = await _one(conn, "SELECT operation_kind, actor_id, response_json FROM operation_receipts WHERE id = ?",
                             (self_review_waiver_receipt_id,)) if self_review_waiver_receipt_id else None
         binding = _json(waiver["response_json"], {}) if waiver is not None else {}
@@ -423,12 +570,14 @@ async def record_verdict(
         raise DomainConflict("a result can be approved only while the task is in review")
     evidence = []
     for evidence_id in evidence_ids:
-        row = await _one(conn, "SELECT result_id, contract_revision, exit_code, manifest_digest_before,"
+        row = await _one(conn, "SELECT result_id, contract_revision, command, exit_code, manifest_digest_before,"
                          " manifest_digest_after FROM review_evidence WHERE id = ?", (evidence_id,))
         if row is None or row["result_id"] != result_id or row["contract_revision"] != result["contract_revision"]:
             raise DomainConflict("evidence does not bind to the reviewed result")
-        if accepted and (row["exit_code"] != 0 or row["manifest_digest_before"] is None or
-                         row["manifest_digest_before"] != row["manifest_digest_after"]):
+        human_statement = manual_origin and await operator_attestation_in(conn, evidence_id)
+        file_proof = (row["exit_code"] == 0 and row["manifest_digest_before"] is not None
+                      and row["manifest_digest_before"] == row["manifest_digest_after"])
+        if accepted and not (human_statement or file_proof):
             raise DomainConflict("stale or failed evidence cannot support acceptance")
         evidence.append(evidence_id)
     if accepted and not evidence:
@@ -450,6 +599,26 @@ async def record_verdict(
                     covered.add(row["criterion_id"])
             if not required.issubset(covered):
                 raise DomainConflict("not every acceptance check or requirement has applicable evidence")
+        for item in snapshot.get("requirements", []):
+            file_id = item.get("file_id")
+            if not file_id:
+                continue
+            attached = await _one(conn, "SELECT m.digest FROM result_artifacts a"
+                                  " JOIN artifact_manifests m ON m.id = a.manifest_id"
+                                  " WHERE a.result_id = ? AND m.file_id = ? LIMIT 1", (result_id, file_id))
+            if attached is None:
+                raise DomainConflict("a file-bound requirement needs its exact attached result artifact")
+            proven = False
+            for evidence_id in evidence:
+                row = await _one(conn, "SELECT criterion_id,exit_code,manifest_digest_before,"
+                                 " manifest_digest_after FROM review_evidence WHERE id = ?", (evidence_id,))
+                if (row is not None and row["criterion_id"] == item["id"] and row["exit_code"] == 0
+                        and row["manifest_digest_before"] == attached["digest"]
+                        and row["manifest_digest_after"] == attached["digest"]):
+                    proven = True
+                    break
+            if not proven:
+                raise DomainConflict("a file-bound requirement needs verified evidence for its exact file")
     await conn.execute(
         "INSERT INTO review_verdicts(id, result_id, contract_revision, reviewer_actor_id, verification, accepted,"
         " head, base, environment_digest, evidence_json, reason, self_review_waiver_receipt_id, created_at)"
@@ -550,6 +719,11 @@ async def accept_result(
                         (task_id, contract_revision, task["current_attempt_id"]))
     if result["attempt_id"] != task["current_attempt_id"] or latest is None or latest["id"] != result_id:
         raise DomainConflict("a newer result or attempt superseded the reviewed result")
+    if result["attempt_id"] is None:
+        await ensure_no_execution_ownership(conn, task_id)
+    if await _one(conn, "SELECT 1 FROM review_returns WHERE task_id = ? AND result_id = ? LIMIT 1",
+                  (task_id, result_id)):
+        raise DomainConflict("this result was returned or reopened and needs new work")
     verdict = await _one(conn, "SELECT result_id, contract_revision, verification, accepted, head, base FROM review_verdicts WHERE id = ?",
                          (verdict_id,))
     if verdict is None or verdict["result_id"] != result_id or verdict["contract_revision"] != contract_revision:
@@ -625,6 +799,48 @@ async def return_result(
     await reconcile_dependents(conn, task_id)
     return {"return_id": return_id, "task_id": task_id, "result_id": result_id,
             "verdict_id": verdict_id, "acceptance_state": "returned", "status": "todo"}
+
+
+async def reopen_accepted_result(
+    conn: aiosqlite.Connection, *, reopen_id: str, task_id: str, result_id: str,
+    verdict_id: str, contract_revision: int, actor_id: str, reason: str,
+) -> dict[str, Any]:
+    """Reopen an accepted result without erasing its decision or changing its contract."""
+    if not reason.strip() or len(reason) > 2000:
+        raise ValueError("reopen needs a reason of at most 2000 characters")
+    task = await _one(conn, "SELECT status,contract_revision,accepted_contract_revision,accepted_result_id,"
+                      " branch,checklist FROM board_tasks WHERE id = ?", (task_id,))
+    verdict = await _one(conn, "SELECT result_id,contract_revision,verification,accepted"
+                         " FROM review_verdicts WHERE id = ?", (verdict_id,))
+    if (task is None or task["status"] != "done" or task["contract_revision"] != contract_revision
+            or task["accepted_contract_revision"] != contract_revision or task["accepted_result_id"] != result_id
+            or verdict is None or verdict["result_id"] != result_id or verdict["contract_revision"] != contract_revision
+            or verdict["verification"] != "verified" or not verdict["accepted"]):
+        raise DomainConflict("reopen target is not the current accepted result and verdict")
+    if task["branch"]:
+        raise DomainConflict("a merged branch needs a new explicit follow-up task")
+    accepted = await _one(conn, "SELECT 1 FROM operation_receipts WHERE actor_id LIKE 'operator:%'"
+                          " AND operation_kind = 'result.accept' AND state = 'committed'"
+                          " AND json_extract(response_json,'$.task_id') = ?"
+                          " AND json_extract(response_json,'$.result_id') = ?"
+                          " AND json_extract(response_json,'$.verdict_id') = ? LIMIT 1",
+                          (task_id, result_id, verdict_id))
+    if accepted is None:
+        raise DomainConflict("the accepted result lacks its exact operator decision receipt")
+    await ensure_no_execution_ownership(conn, task_id)
+    await conn.execute("INSERT INTO review_returns(id,task_id,result_id,verdict_id,contract_revision,actor_id,reason,created_at)"
+                       " VALUES (?,?,?,?,?,?,?,?)",
+                       (reopen_id, task_id, result_id, verdict_id, contract_revision,
+                        actor_id, reason.strip(), _now()))
+    checks = [{**item, "done": False} for item in check_items(task["checklist"])]
+    await conn.execute("UPDATE board_tasks SET status = 'todo',acceptance_state = 'returned',"
+                       " accepted_result_id = NULL,accepted_contract_revision = NULL,current_attempt_id = NULL,"
+                       " checklist = ?,session_id = NULL,run_id = NULL,updated_at = ? WHERE id = ?",
+                       (_canonical(checks), _now(), task_id))
+    await reconcile_dependents(conn, task_id)
+    return {"reopen_id": reopen_id, "task_id": task_id, "result_id": result_id,
+            "verdict_id": verdict_id, "contract_revision": contract_revision,
+            "acceptance_state": "returned", "status": "todo", "reason": reason.strip()}
 
 
 async def dependency_readiness(conn: aiosqlite.Connection, task_id: str) -> dict[str, Any]:
@@ -1155,13 +1371,19 @@ class OrchestratorDomain:
                                   and row["attempt_id"] == task["current_attempt_id"]), None)
         out = []
         for row in rows:
+            async with self.db.transaction() as conn:
+                manual = (row["attempt_id"] is None and
+                          await manual_result_origin(conn, row["id"], task_id, row["actor_id"]))
             verdict = await self.db.fetchone("SELECT id, verification, accepted, contract_revision, head, base"
                                              " FROM review_verdicts WHERE result_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1", (row["id"],))
+            returned = await self.db.fetchone("SELECT id FROM review_returns WHERE result_id = ?"
+                                              " ORDER BY created_at DESC,rowid DESC LIMIT 1", (row["id"],))
             manifests = await self.db.fetchall("SELECT m.id, m.artifact_kind, m.artifact_key, m.artifact_revision,"
-                                               " m.digest, m.size_bytes FROM result_artifacts a JOIN artifact_manifests m"
+                                               " m.digest, m.size_bytes, m.file_id FROM result_artifacts a JOIN artifact_manifests m"
                                                " ON m.id = a.manifest_id WHERE a.result_id = ?", (row["id"],))
             stale = int(row["contract_revision"]) != int(task["contract_revision"])
             out.append({"result_id": row["id"], "task_id": task_id, "attempt_id": row["attempt_id"],
+                        "origin_kind": "operator_manual" if manual else "worker",
                         "contract_revision": int(row["contract_revision"]), "outcome": row["outcome"],
                         "original_digest": row["original_digest"], "original_size_bytes": row["original_size_bytes"],
                         "original_preview": (row["original_text"] or "")[:1000],
@@ -1173,7 +1395,9 @@ class OrchestratorDomain:
                         "verdict_head": verdict["head"] if verdict else None,
                         "verdict_base": verdict["base"] if verdict else None,
                         "current_result_id": current_result_id,
-                        "acceptance_state": task["acceptance_state"] if task["accepted_result_id"] == row["id"] else "handed_in",
+                        "acceptance_state": (task["acceptance_state"] if task["accepted_result_id"] == row["id"]
+                                             else "returned" if returned else "handed_in"),
+                        "returned_decision_id": returned["id"] if returned else None,
                         "accepted": task["accepted_result_id"] == row["id"], "created_at": row["created_at"]})
         return out
 

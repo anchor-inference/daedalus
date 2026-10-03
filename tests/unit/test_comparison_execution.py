@@ -6,10 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from daedalus.extensions.comparisons import create_group
 from daedalus.extensions.staff_results import StaffReportService
 from daedalus.host.events import EventBus
 from daedalus.stores.blobs import FileBlobStore
+from daedalus.stores.comparisons import create_group
 from daedalus.stores.control import ControlDenied, ControlStore, Principal, Scope
 from daedalus.stores.database import Database
 from daedalus.stores.executions import ExecutionStore

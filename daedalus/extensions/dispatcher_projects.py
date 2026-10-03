@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -235,19 +236,34 @@ class ProjectMaker:
     async def _create(self, ask: Ask) -> str:
         detail = ask.detail
         name = str(detail.get("name") or "").strip()
-        folders = [f for f in detail.get("folders") or [] if isinstance(f, dict)]
-        create_missing = bool(detail.get("create_missing"))
-        specs: list[FolderSpec] = []
-        # Checked again: the card may have waited a day, and a folder can appear or go meanwhile.
-        for folder in folders:
-            checked = await self.check_folder(str(folder.get("path") or ""), str(folder.get("env") or ""), create_missing=create_missing, create=True)
-            specs.append(FolderSpec(checked["path"], label=str(folder.get("label") or ""), env=checked["env"], readonly=bool(folder.get("readonly"))))
-        settings = ProjectSettings(snapshots=not specs, default_env=(specs[0].env or "") if specs else "")
-        project = await self.manager.projects.create(name, specs or None, settings=settings)
-        await self.dispatcher._publish("project.changed", {"change": "created", "actor": "dispatcher"}, project.id)
-        if detail.get("goal"):
-            await self.manager.projects.set_brief(project.id, "goals", str(detail["goal"]), "operator")
-        await self.manager.projects.record(project.id, "system", "setup", f"The main orchestrator created the project on the operator's confirmation [{ask.short_id}].", {"ask_id": ask.id})
+        confirmed = await self.manager.asks.get(ask.id)
+        if confirmed is None or confirmed.resolved_by != "operator" or not confirmed.resolution.get("allow"):
+            raise ProjectError("the project request has no operator confirmation")
+        project_id = uuid.uuid5(uuid.NAMESPACE_URL, f"confirmed-project:{ask.id}").hex[:12]
+        project = await self.manager.projects.get(project_id)
+        first_creation = project is None
+        if project is not None:
+            origin = await self.manager.db.fetchone(
+                "SELECT body,origin_ref FROM project_goal_revisions"
+                " WHERE project_id = ? AND goal_revision = 1", (project_id,))
+            if (project.name != name or origin is None or origin["origin_ref"] != ask.id
+                    or origin["body"] != str(detail.get("goal") or "")):
+                raise ProjectError("the confirmed project identity is already occupied")
+        else:
+            folders = [f for f in detail.get("folders") or [] if isinstance(f, dict)]
+            create_missing = bool(detail.get("create_missing"))
+            specs: list[FolderSpec] = []
+            # Checked again: the card may have waited a day, and a folder can appear or go meanwhile.
+            for folder in folders:
+                checked = await self.check_folder(str(folder.get("path") or ""), str(folder.get("env") or ""), create_missing=create_missing, create=True)
+                specs.append(FolderSpec(checked["path"], label=str(folder.get("label") or ""), env=checked["env"], readonly=bool(folder.get("readonly"))))
+            settings = ProjectSettings(snapshots=not specs, default_env=(specs[0].env or "") if specs else "")
+            project = await self.manager.projects.create(
+                name, specs or None, settings=settings, project_id=project_id,
+                initial_goal=str(detail.get("goal") or ""), confirmation_ask_id=ask.id)
+        if first_creation:
+            await self.dispatcher._publish("project.changed", {"change": "created", "actor": "dispatcher"}, project.id)
+            await self.manager.projects.record(project.id, "system", "setup", f"The main orchestrator created the project on the operator's confirmation [{ask.short_id}].", {"ask_id": ask.id})
         if not detail.get("start_orchestrator", True):
             return f"created {project.name} ({project.id}) without an orchestrator"
         orchestrators = self.dispatcher.orchestrators
@@ -261,6 +277,15 @@ class ProjectMaker:
         files = await self.manager.files.many(str(i) for i in detail.get("files") or [])
         if files:
             survey += "\nThe operator's files for it are yours now: read them with Peek(path='att:…')."
+        prior = await self.manager.db.fetchone("SELECT id,seq FROM dispatches WHERE project_id = ?"
+                                               " AND kind = 'setup' ORDER BY seq LIMIT 1", (project.id,))
+        if prior is not None:
+            for stored in files:
+                if project.id not in await self.manager.files.scopes(stored.id):
+                    await self.manager.files.grant(stored, project.id, actor="dispatcher",
+                                                   target=f"dispatch {prior['id']}")
+            return (f"created {project.name} ({project.id}), switched its orchestrator on and handed it"
+                    f" dispatch {prior['id']} (#{prior['seq']}): survey the folders and write the brief")
         dispatch = await self.dispatcher.dispatches.create(project, text=survey, title="Survey the folders and write the brief", from_session=await self.dispatcher.session_id(), kind="setup", files=files)
         return f"created {project.name} ({project.id}), switched its orchestrator on and handed it dispatch {dispatch.id} (#1): survey the folders and write the brief"
 

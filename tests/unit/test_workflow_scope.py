@@ -80,7 +80,7 @@ def test_archive_remaps_repeated_step_names_with_their_task() -> None:
     rows["knowledge_fact_versions"] = []
     archive = CheckedArchive(digest="a" * 64, source_project_id="source", rows=rows,
                              blobs={}, report_blobs={}, run_blobs={}, session_blobs={},
-                             counts={}, config_handles={}, folder_handles=[])
+                             counts={}, config_handles={}, folder_handles=[], selected_files=[], workspace_blobs={})
     mapping = WorkspaceArchive._identity_map(archive, "restored")
     first = WorkspaceArchive._remap_row(
         "workflow_edges", {"task_id": "one", "source_step_id": "work", "target_step_id": "review"},

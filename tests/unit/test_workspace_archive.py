@@ -190,11 +190,18 @@ async def archive_store(tmp_path):
 
 async def test_private_archive_roundtrips_transcript_contract_report_and_blob(archive_store) -> None:
     db, files, service = archive_store
+    await db.execute(
+        "INSERT INTO staff_context_packets(staff_session_id,task_id,role,role_hint,contract_revision,"
+        "packet_hash,packet_json,created_at) VALUES"
+        " ('member-session','task','worker','historical','1','sha256:historical',"
+        " '{\"task_id\":\"task\",\"source_refs\":[]}', '2026-01-01')"
+    )
     data = await service.export("source")
     assert b"must-never-export" not in data
     with zipfile.ZipFile(io.BytesIO(data)) as zipped:
         assert b"secret-location" not in zipped.read("workspace.json")
     checked = check_archive(data)
+    assert "staff_context_packets" not in checked.rows
     assert checked.counts["session_messages"] == 1
     assert checked.counts["task_contract_versions"] == 1
     assert checked.counts["board_workflow_runs"] == 1

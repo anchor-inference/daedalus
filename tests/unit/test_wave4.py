@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 from protocore.contracts.tools import ToolContext
 
 from daedalus.config import RuntimeConfig
 from daedalus.host.services import SessionServices, locator
 from daedalus.host.skills import DirectorySkillStore
+from tests.support.authorized_results import accept_branchless_result, reopen_accepted_result, submit_manual_result
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -108,10 +111,17 @@ async def test_the_board_writes_plan_md_into_the_sessions_workspace(settings, db
         await board.update(task["id"], check=[0], session_id=state.session.id)
         assert "- [x] scaffold" in (state.workspace / "PLAN.md").read_text()
         await board.update(task["id"], check=[1], session_id=state.session.id)
-        await board.update(task["id"], status="done", session_id=state.session.id)
+        await board.update(task["id"], status="review", session_id=state.session.id)
+        await submit_manual_result(app, task["id"], note="The adapter scaffold and smoke check are complete")
+        await accept_branchless_result(SimpleNamespace(app=app), task["id"])
         plan = (state.workspace / "PLAN.md").read_text()
         assert f"- [x] **{task['id']}** Write the adapter — done" in plan  # finishing a task releases it but keeps it on the plan
-        await board.delete(task["id"])
-        assert task["id"] not in (state.workspace / "PLAN.md").read_text()
+        await reopen_accepted_result(app, task["id"], reason="The smoke check needs another run")
+        assert f"- [ ] **{task['id']}** Write the adapter — todo" in (state.workspace / "PLAN.md").read_text()
+        with pytest.raises(ValueError, match="audited results"):
+            await board.delete(task["id"])
+        spare = await board.add(title="Unused note", session_id=state.session.id)
+        assert await board.delete(spare["id"])
+        assert spare["id"] not in (state.workspace / "PLAN.md").read_text()
     finally:
         await manager.close()

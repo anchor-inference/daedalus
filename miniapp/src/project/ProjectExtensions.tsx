@@ -7,8 +7,11 @@ import { t } from "../i18n";
 import { invalidate, useOffline, useQuery } from "../store";
 import { errorText } from "../ui";
 
-type Manifest = { id: string; version: string; display_name: string; description: string; capabilities: string[]; tools: { name: string }[] };
-type CatalogItem = { manifest: Manifest; valid: boolean; digest: string; required_capabilities: string[]; ui_extensions: { slot: string; component: string }[] };
+type InputField = { type?: string; title?: string; enum?: (string | number)[] };
+type PluginTool = { name: string; input_schema: { properties?: Record<string, InputField>; required?: string[] } };
+type UiExtension = { id: string; slot: string; component: string; tool: string };
+type Manifest = { id: string; version: string; display_name: string; description: string; capabilities: string[]; tools: PluginTool[]; ui_extensions: UiExtension[] };
+type CatalogItem = { manifest: Manifest; valid: boolean; digest: string; required_capabilities: string[]; ui_extensions: UiExtension[] };
 type InstalledItem = { id: string; version: string; digest: string; status: string; health: string; created_at: string };
 type Installed = { items: InstalledItem[]; collection_revision: number };
 type Health = { id: string; state: "healthy" | "configured_unverified" | "unhealthy" | "inactive" | "disabled"; reason?: string };
@@ -19,8 +22,13 @@ function ExtensionCard({ item, installed, revision, projectId, toast, safe }: { 
   const offline = useOffline();
   const [busy, setBusy] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [inputs, setInputs] = useState<Record<string, string>>({});
   const operation = useRef<{ digest: string; revision: number; id: string } | null>(null);
   const health = useQuery<Health>(installed ? `/api/plugins/${encodeURIComponent(item.manifest.id)}/health` : null, { staleMs: 3000 });
+  const extension = item.manifest.ui_extensions.find((entry) => entry.slot === "project.settings");
+  const tool = item.manifest.tools.find((entry) => entry.name === extension?.tool);
+  const fields = Object.entries(tool?.input_schema.properties ?? {}).filter(([name]) => name !== "project_id");
+  const supported = !!extension && !!tool && fields.every(([, field]) => ["string", "integer", "number", "boolean"].includes(field.type ?? ""));
   const active = installed?.status === "active" && (health.data?.state === "configured_unverified" || health.data?.state === "healthy") && !safe;
   const installBlocked = offline || !item.valid || !Number.isInteger(revision) || !!installed;
 
@@ -43,12 +51,24 @@ function ExtensionCard({ item, installed, revision, projectId, toast, safe }: { 
   }
 
   async function test() {
-    if (!active || busy) return;
+    if (!active || !supported || !tool || busy) return;
+    const arguments_: Record<string, string | number | boolean> = {};
+    for (const [name, field] of fields) {
+      const value = inputs[name] ?? "";
+      if (!value && !tool.input_schema.required?.includes(name)) continue;
+      if (!value) return;
+      if (field.type === "boolean") arguments_[name] = value === "true";
+      else if (field.type === "integer" || field.type === "number") {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || (field.type === "integer" && !Number.isInteger(parsed))) return;
+        arguments_[name] = parsed;
+      } else arguments_[name] = value;
+    }
     setBusy(true);
     setTestResult(null);
     try {
-      const response = await api.post<{ result: { project_id: string; name: string; tasks: Record<string, number> } }>(`/api/plugins/${encodeURIComponent(item.manifest.id)}/test`, { tool: "inspect_project", arguments: { project_id: projectId } });
-      setTestResult(t("extension.testResult", { name: response.result.name, count: Object.values(response.result.tasks ?? {}).reduce((sum, value) => sum + Number(value || 0), 0) }));
+      const response = await api.post<{ result: unknown }>(`/api/projects/${encodeURIComponent(projectId)}/plugins/${encodeURIComponent(item.manifest.id)}/invoke-read`, { tool: tool.name, arguments: arguments_ });
+      setTestResult(JSON.stringify(response.result, null, 2) ?? "null");
     } catch (error) { setTestResult(errorText(error)); }
     finally { setBusy(false); }
   }
@@ -63,9 +83,17 @@ function ExtensionCard({ item, installed, revision, projectId, toast, safe }: { 
     {installed && health.data && <div className={health.data.state === "healthy" || health.data.state === "configured_unverified" ? "sub" : "result-warning"} role="status">{t(`extension.health.${health.data.state}`)}{health.data.reason ? ` · ${health.data.reason}` : ""}</div>}
     {safe && installed && <div className="result-warning" role="status">{t("extension.safeBlocked")}</div>}
     {!installed && <button type="button" className="btn small" disabled={busy || installBlocked} onClick={() => void install()}>{t("extension.install")}</button>}
-    {installed && <button type="button" className="btn small" disabled={busy || !active} onClick={() => void test()}>{t("extension.test")}</button>}
+    {installed && fields.map(([name, field]) => <label key={name} className="field">
+      <span>{field.title || name}</span>
+      {field.type === "boolean" || field.enum ? <select value={inputs[name] ?? ""} disabled={busy || !active} onChange={(event) => setInputs({ ...inputs, [name]: event.target.value })}>
+        <option value=""></option>
+        {(field.enum ?? ["true", "false"]).map((value) => <option key={String(value)} value={String(value)}>{String(value)}</option>)}
+      </select> : <input type={field.type === "integer" || field.type === "number" ? "number" : "text"} value={inputs[name] ?? ""} disabled={busy || !active} onChange={(event) => setInputs({ ...inputs, [name]: event.target.value })} />}
+    </label>)}
+    {installed && <button type="button" className="btn small" disabled={busy || !active || !supported} onClick={() => void test()}>{t("extension.test")}</button>}
+    {installed && !supported && <div className="result-warning" role="status">{t("extension.unconfirmed")}</div>}
     {installed?.status === "staged" && <div className="sub" role="status">{t("extension.waitActive")}</div>}
-    {testResult && <div className="sub" role="status">{testResult}</div>}
+    {testResult && <pre className="sub" role="status">{testResult}</pre>}
     {(offline || !item.valid || (installed && !active && !safe && !health.data)) && <div className="result-warning" role="status">{t("extension.unconfirmed")}</div>}
   </article>;
 }

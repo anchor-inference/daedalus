@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,6 +13,13 @@ from daedalus.extensions.board import Board
 from daedalus.extensions.peers import Peers
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
+from daedalus.stores.files import MAIN
+from tests.support.authorized_results import (
+    accept_branchless_result,
+    operator_domain_client,
+    reopen_accepted_result,
+    submit_manual_result,
+)
 from tests.support.notifications import RecordingNotifications
 
 
@@ -41,7 +49,10 @@ async def test_board_dependencies_wip_and_checklist(app: Any) -> None:
     with pytest.raises(ValueError):  # checklist incomplete
         await board.update(a["id"], status="done")
     await board.update(a["id"], check=[0, 1], note="all sketched")
-    done = await board.update(a["id"], status="done")
+    await board.update(a["id"], status="review")
+    await submit_manual_result(app, a["id"], note="The design sketch and review are complete")
+    await accept_branchless_result(SimpleNamespace(app=app), a["id"])
+    done = await board.get(a["id"])
     assert done["status"] == "done" and "all sketched" in done["notes"]
     assert (await board.get(b["id"]))["status"] == "todo"  # promoted
     text = board.render(await board.list(None, include_done=True))
@@ -49,23 +60,20 @@ async def test_board_dependencies_wip_and_checklist(app: Any) -> None:
 
 
 async def test_board_done_applies_checklist_edits_before_the_gate(app: Any) -> None:
-    """Finishing the last item and closing the task is one call, not two.
-
-    The completeness gate used to test the checklist the call *arrived* to, so the one call a
-    finishing agent naturally makes — check=[...] together with status='done' — was refused, with a
-    message that named an operation the board does not have ("drop them").
-    """
+    """A direct completion request changes no checks; review accepts the exact submitted work."""
     board = Board(app)
     t = await board.add(title="ship it", checklist=["write", "test", "announce"])
     with pytest.raises(ValueError) as exc:
         await board.update(t["id"], status="done", check=[0, 1])
-    message = str(exc.value)
-    assert "2 (announce)" in message, message  # names what is still open
-    assert "Nothing was stored" in message, message  # and says the call changed nothing at all
+    assert "exact-result acceptance" in str(exc.value)
     refused = await board.get(t["id"])
     assert refused["status"] == "todo"  # a refused call changes nothing …
     assert [c["done"] for c in refused["checklist"]] == [False, False, False]  # … not even the checks it sent
-    done = await board.update(t["id"], status="done", check=[0, 1, 2], note="published")
+    await board.update(t["id"], check=[0, 1, 2], note="published")
+    await board.update(t["id"], status="review")
+    await submit_manual_result(app, t["id"], note="Written, tested, and announced")
+    await accept_branchless_result(SimpleNamespace(app=app), t["id"])
+    done = await board.get(t["id"])
     assert done["status"] == "done"
     assert all(c["done"] for c in done["checklist"])
     assert "published" in done["notes"]
@@ -77,54 +85,57 @@ async def test_board_done_applies_checklist_edits_before_the_gate(app: Any) -> N
 
 
 async def test_board_done_gate_reads_the_resulting_checklist(app: Any) -> None:
-    """Edge cases of the reordered gate, each one a way the ordering could have gone wrong."""
+    """Checklist edits stay precise while completion requires an exact operator decision."""
     board = Board(app)
 
-    # A task with no checklist, and one with an empty checklist, can still be closed.
-    assert (await board.update((await board.add(title="bare"))["id"], status="done"))["status"] == "done"
+    async def finish(task_id: str) -> dict[str, Any]:
+        await board.update(task_id, status="review")
+        await submit_manual_result(app, task_id, note="I completed and checked this task")
+        await accept_branchless_result(SimpleNamespace(app=app), task_id)
+        return await board.get(task_id)
+
+    # A task with no checklist still has a human completion statement.
+    assert (await finish((await board.add(title="bare"))["id"]))["status"] == "done"
     empty = await board.add(title="empty", checklist=[])
-    assert (await board.update(empty["id"], status="done"))["status"] == "done"
+    assert (await finish(empty["id"]))["status"] == "done"
 
-    # Indexes outside the list stay ignored, as they were before.
+    # Out-of-range indexes are ignored; the real decision covers the current criterion.
     ranges = await board.add(title="ranges", checklist=["a"])
-    done = await board.update(ranges["id"], status="done", check=[0, 5, -3])
-    assert [c["done"] for c in done["checklist"]] == [True]
+    await board.update(ranges["id"], check=[0, 5, -3])
     assert [c["done"] for c in (await board.update(ranges["id"], check=[7], uncheck=[7]))["checklist"]] == [True]
+    done = await finish(ranges["id"])
+    assert [c["done"] for c in done["checklist"]] == [True]
 
-    # An index in both lists ends up unchecked, so such a call leaves an item open and cannot close
-    # the task. The old gate tested the checklist the call arrived to, so it let this through and
-    # stored a finished task with an unchecked item.
+    # A direct terminal update cannot race an uncheck into an accepted result.
     both = await board.add(title="both", checklist=["a", "b", "c"])
     await board.update(both["id"], check=[0, 1, 2])
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="exact-result acceptance"):
         await board.update(both["id"], status="done", check=[1], uncheck=[1])
     assert (await board.get(both["id"]))["status"] != "done"  # the refused call changed nothing
     assert [c["done"] for c in (await board.get(both["id"]))["checklist"]] == [True, True, True]
+    assert (await finish(both["id"]))["status"] == "done"
 
     # A status other than 'done' is not gated at all.
     other = await board.add(title="review", checklist=["a", "b"])
     assert (await board.update(other["id"], status="review", note="half"))["status"] == "review"
 
-    # A finished task cannot be reopened from under its own status: an uncheck that left an item open
-    # while the task stayed done is the same inconsistent state the gate exists to prevent, so it is
-    # refused until the task itself is reopened.
+    # An accepted result cannot be edited or reopened by a board status shortcut.
     finished = await board.add(title="finished", checklist=["a", "b"])
-    await board.update(finished["id"], status="done", check=[0, 1])
-    with pytest.raises(ValueError) as exc:
+    await board.update(finished["id"], check=[0, 1])
+    await finish(finished["id"])
+    with pytest.raises(ValueError, match="exact-result reopen"):
         await board.update(finished["id"], uncheck=[0])
-    assert "Reopen the task first" in str(exc.value), str(exc.value)
     after = await board.get(finished["id"])
     assert after["status"] == "done" and [c["done"] for c in after["checklist"]] == [True, True]
-    reopened = await board.update(finished["id"], status="doing", uncheck=[0])
-    assert reopened["status"] == "doing" and [c["done"] for c in reopened["checklist"]] == [False, True]
+    with pytest.raises(ValueError, match="exact-result reopen"):
+        await board.update(finished["id"], status="doing", uncheck=[0])
 
-    # A long checklist names the first five open items and counts the rest.
-    long_task = await board.add(title="long", checklist=[f"item {i}" for i in range(400)])
-    with pytest.raises(ValueError) as exc:
-        await board.update(long_task["id"], status="done", check=list(range(393)))
-    message = str(exc.value)
-    assert "393 (item 393)" in message and "and 2 more" in message, message
-    final = await board.update(long_task["id"], status="done", check=list(range(400)))
+    # The operator can verify a larger checklist without a worker or synthetic file.
+    long_task = await board.add(title="long", checklist=[f"item {i}" for i in range(12)])
+    await board.update(long_task["id"], check=list(range(5)))
+    assert [item["done"] for item in (await board.get(long_task["id"]))["checklist"]] == [True] * 5 + [False] * 7
+    await board.update(long_task["id"], check=list(range(5, 12)))
+    final = await finish(long_task["id"])
     assert final["status"] == "done" and all(c["done"] for c in final["checklist"])
 
 
@@ -174,12 +185,230 @@ async def test_board_releases_the_claim_and_reblocks_on_reopen(app: Any) -> None
     await board.update(a["id"], status="doing", session_id="s1", run_id="r1")
     moved = await board.update(a["id"], status="review")
     assert moved["session_id"] is None and moved["run_id"] is None
-    await board.update(a["id"], status="done")
+    await submit_manual_result(app, a["id"], note="The first task is complete")
+    await accept_branchless_result(SimpleNamespace(app=app), a["id"])
     assert (await board.get(b["id"]))["status"] == "todo"
-    await board.update(a["id"], status="todo")
+    reopened = await reopen_accepted_result(app, a["id"], reason="The first task needs another review")
+    assert reopened["status"] == "todo"
     assert (await board.get(b["id"]))["status"] == "blocked"
-    await board.delete(a["id"])
-    assert (await board.get(b["id"]))["depends_on"] == [] and (await board.get(b["id"]))["status"] == "todo"
+    await board.update(a["id"], status="review")
+    async with operator_domain_client(app) as client:
+        old = await client.post(f"/api/board/{a['id']}/results/{reopened['result_id']}/accept", json={
+            "client_operation_id": "reaccept-old-work",
+            "expected_entity_revision": (await board.get(a["id"]))["entity_revision"],
+            "verdict_id": reopened["verdict_id"], "contract_revision": reopened["contract_revision"],
+        })
+        assert old.status_code == 409
+    with pytest.raises(ValueError, match="audited results"):
+        await board.delete(a["id"])
+    assert (await board.get(b["id"]))["depends_on"] == [a["id"]]
+    c = await board.add(title="unused predecessor")
+    d = await board.add(title="follows unused", depends_on=[c["id"]])
+    assert await board.delete(c["id"])
+    assert (await board.get(d["id"]))["depends_on"] == []
+
+
+async def test_manual_result_refuses_attempt_spoof_pair_and_stale_contract(app: Any) -> None:
+    board = Board(app)
+    task = await board.add(title="Manual decision", checklist=["Check the statement"])
+    await board.update(task["id"], status="review")
+    current = await board.get(task["id"])
+    base = f"/api/board/{task['id']}"
+    request = {"client_operation_id": "manual-first", "expected_entity_revision": current["entity_revision"],
+               "contract_revision": current["contract_revision"], "outcome": "complete",
+               "original_text": "I checked the statement", "manifest_ids": []}
+    async with operator_domain_client(app) as client:
+        spoofed = await client.post(base + "/results", json={**request, "attempt_id": "worker-owned"})
+        assert spoofed.status_code == 422
+        stale = await client.post(base + "/results", json={**request, "contract_revision": 99})
+        assert stale.status_code == 409
+        await app.db.execute("INSERT INTO comparison_groups(id,task_id,contract_revision,max_attempts,"
+                             "state,created_at) VALUES (?,?,?,?,?,datetime('now'))",
+                             (uuid.uuid4().hex, task["id"], current["contract_revision"], 2, "planned"))
+        pair = await client.post(base + "/results", json=request)
+        assert pair.status_code == 409
+        assert await app.db.fetchall("SELECT id FROM result_receipts WHERE task_id = ?", (task["id"],)) == []
+        await app.db.execute("DELETE FROM comparison_groups WHERE task_id = ?", (task["id"],))
+        report = await client.post(base + "/results", json=request)
+        assert report.status_code == 200, report.text
+        result_id = report.json()["result_id"]
+        listing = await client.get(base + "/results")
+        assert listing.json()[0]["origin_kind"] == "operator_manual"
+        assert listing.json()[0]["self_review_waiver_required"] is False
+        pair_id = uuid.uuid4().hex
+        await app.db.execute("INSERT INTO comparison_groups(id,task_id,contract_revision,max_attempts,"
+                             "state,created_at) VALUES (?,?,?,?,?,datetime('now'))",
+                             (pair_id, task["id"], current["contract_revision"], 2, "planned"))
+        blocked_attestation = await client.post(base + f"/results/{result_id}/attest", json={
+            "client_operation_id": "pair-blocks-attestation", "expected_entity_revision": report.json()["entity_revision"],
+            "criterion_id": "C1", "observation": "I checked the statement",
+        })
+        assert blocked_attestation.status_code == 409
+        unavailable = await client.get(base + "/manual-review")
+        assert not unavailable.json()["eligible"]
+        assert "execution_owned" in unavailable.json()["blockers"]
+        await app.db.execute("DELETE FROM comparison_groups WHERE id = ?", (pair_id,))
+        attestation = await client.post(base + f"/results/{result_id}/attest", json={
+            "client_operation_id": "valid-attestation", "expected_entity_revision": report.json()["entity_revision"],
+            "criterion_id": "C1", "observation": "I checked the statement",
+        })
+        assert attestation.status_code == 200, attestation.text
+        await app.db.execute("INSERT INTO comparison_groups(id,task_id,contract_revision,max_attempts,"
+                             "state,created_at) VALUES (?,?,?,?,?,datetime('now'))",
+                             (pair_id, task["id"], current["contract_revision"], 2, "planned"))
+        blocked_verdict = await client.post(base + f"/results/{result_id}/verdicts", json={
+            "client_operation_id": "pair-blocks-verdict", "expected_entity_revision": attestation.json()["entity_revision"],
+            "verification": "verified", "accepted": True, "head": None, "base": None,
+            "evidence_ids": [attestation.json()["evidence_id"]], "reason": "Checked",
+        })
+        assert blocked_verdict.status_code == 409
+        await app.db.execute("DELETE FROM comparison_groups WHERE id = ?", (pair_id,))
+        verdict = await client.post(base + f"/results/{result_id}/verdicts", json={
+            "client_operation_id": "valid-verdict", "expected_entity_revision": attestation.json()["entity_revision"],
+            "verification": "verified", "accepted": True, "head": None, "base": None,
+            "evidence_ids": [attestation.json()["evidence_id"]], "reason": "Checked",
+        })
+        assert verdict.status_code == 200, verdict.text
+        await app.db.execute("INSERT INTO comparison_groups(id,task_id,contract_revision,max_attempts,"
+                             "state,created_at) VALUES (?,?,?,?,?,datetime('now'))",
+                             (pair_id, task["id"], current["contract_revision"], 2, "planned"))
+        blocked_accept = await client.post(base + f"/results/{result_id}/accept", json={
+            "client_operation_id": "pair-blocks-accept", "expected_entity_revision": verdict.json()["entity_revision"],
+            "verdict_id": verdict.json()["verdict_id"], "contract_revision": current["contract_revision"],
+        })
+        assert blocked_accept.status_code == 409
+        await app.db.execute("DELETE FROM comparison_groups WHERE id = ?", (pair_id,))
+        replaced = await client.put(base + "/contract", json={
+            "client_operation_id": "new-criterion", "expected_entity_revision": verdict.json()["entity_revision"],
+            "requirements": [], "checks": [{"text": "Different statement"}], "acceptance": "",
+            "brief": {}, "change_kind": "semantic",
+        })
+        assert replaced.status_code == 200, replaced.text
+        old_criterion = await client.post(base + f"/results/{result_id}/attest", json={
+            "client_operation_id": "stale-attestation", "expected_entity_revision": replaced.json()["entity_revision"],
+            "criterion_id": "C1", "observation": "I checked the old statement",
+        })
+        assert old_criterion.status_code == 409
+
+
+async def test_human_report_enters_review_atomically_and_keeps_attestation_provenance(app: Any) -> None:
+    board = Board(app)
+    task = await board.add(title="Read the statement", checklist=["Statement read"])
+    base = f"/api/board/{task['id']}"
+    async with operator_domain_client(app) as client:
+        readiness = (await client.get(base + "/manual-review")).json()
+        assert readiness["eligible"] and readiness["attached_artifacts"] == []
+        payload = {"client_operation_id": "human-report", "expected_entity_revision": readiness["entity_revision"],
+                   "contract_revision": readiness["contract_revision"], "outcome": "complete",
+                   "original_text": "I read the statement and checked its contents", "manifest_ids": []}
+        response = await client.post(base + "/results", json=payload)
+        assert response.status_code == 200, response.text
+        report = response.json()
+        assert report["status"] == "review" and report["entity_revision"] == readiness["entity_revision"] + 1
+        assert (await board.get(task["id"]))["status"] == "review"
+        assert (await client.post(base + "/results", json=payload)).json() == report
+        assert (await app.db.fetchone("SELECT COUNT(*) FROM result_receipts WHERE task_id = ?", (task["id"],)))[0] == 1
+        result_id = report["result_id"]
+        proof = await client.post(base + f"/results/{result_id}/attest", json={
+            "client_operation_id": "human-proof", "expected_entity_revision": report["entity_revision"],
+            "criterion_id": "C1", "observation": "I checked the statement myself",
+        })
+        assert proof.status_code == 200, proof.text
+        # A matching text prefix and null digests are insufficient without the operator receipt.
+        await app.db.execute("INSERT INTO review_evidence(id,result_id,contract_revision,criterion_id,command,"
+                             "observed_at) VALUES ('unreceipted',? ,?,'C1','operator attestation: invented','now')",
+                             (result_id, readiness["contract_revision"]))
+        projected = (await client.get(base + f"/results/{result_id}/evidence")).json()
+        by_id = {item["evidence_id"]: item["verification"] for item in projected}
+        assert by_id[proof.json()["evidence_id"]] == "operator_attested"
+        assert by_id["unreceipted"] == "stale"
+        verdict_payload = {"client_operation_id": "fake-human-verdict", "expected_entity_revision": proof.json()["entity_revision"],
+                           "verification": "verified", "accepted": True, "head": None, "base": None,
+                           "evidence_ids": ["unreceipted"], "reason": "Read"}
+        assert (await client.post(base + f"/results/{result_id}/verdicts", json=verdict_payload)).status_code == 409
+        verdict_payload.update(client_operation_id="real-human-verdict", evidence_ids=[proof.json()["evidence_id"]])
+        verdict = await client.post(base + f"/results/{result_id}/verdicts", json=verdict_payload)
+        assert verdict.status_code == 200, verdict.text
+        accepted = await client.post(base + f"/results/{result_id}/accept", json={
+            "client_operation_id": "accept-human-report", "expected_entity_revision": verdict.json()["entity_revision"],
+            "contract_revision": readiness["contract_revision"], "verdict_id": verdict.json()["verdict_id"],
+        })
+        assert accepted.status_code == 200, accepted.text
+        assert (await board.get(task["id"]))["status"] == "done"
+
+
+async def test_manual_file_requirement_needs_the_exact_attached_source(app: Any) -> None:
+    board = Board(app)
+    task = await board.add(title="Use the supplied document")
+    source = await app.manager.files.add(b"Approved document", name="approved.txt", origin="operator",
+                                         scope=MAIN, actor="operator")
+    other = await app.manager.files.add(b"Another document", name="other.txt", origin="operator",
+                                        scope=MAIN, actor="operator")
+    await app.manager.files.attach_to_task(task["id"], [source, other], actor="operator")
+    base = f"/api/board/{task['id']}"
+    async with operator_domain_client(app) as client:
+        revision = (await board.get(task["id"]))["entity_revision"]
+        changed = await client.put(base + "/contract", json={
+            "client_operation_id": "pin-source", "expected_entity_revision": revision,
+            "requirements": [{"kind": "input", "text": "Use the approved document", "file_id": source.id}],
+            "checks": [], "acceptance": "", "brief": {}, "change_kind": "semantic",
+        })
+        assert changed.status_code == 200, changed.text
+        contract = (await client.get(base + "/contract")).json()
+        criterion = contract["requirements"][0]["id"]
+        await board.update(task["id"], status="review")
+        revision = (await board.get(task["id"]))["entity_revision"]
+        manifests = []
+        for index, stored in enumerate((other, source), 1):
+            made = await client.post(base + "/artifacts", json={
+                "client_operation_id": f"source-artifact-{index}", "expected_entity_revision": revision,
+                "artifact_kind": "document", "artifact_key": stored.name, "artifact_revision": 1,
+                "digest": stored.sha256, "size_bytes": stored.size, "file_id": stored.id,
+            })
+            assert made.status_code == 200, made.text
+            manifests.append(made.json()["id"])
+            revision = made.json()["entity_revision"]
+        readiness = (await client.get(base + "/manual-review")).json()
+        assert {item["file_id"] for item in readiness["attached_artifacts"]} == {source.id, other.id}
+        assert {item["manifest_id"] for item in readiness["attached_artifacts"]} == set(manifests)
+        for index, manifest_id in enumerate(manifests, 1):
+            report = await client.post(base + "/results", json={
+                "client_operation_id": f"source-result-{index}", "expected_entity_revision": revision,
+                "contract_revision": contract["contract_revision"], "outcome": "complete",
+                "original_text": "I used the supplied document", "manifest_ids": [manifest_id],
+            })
+            assert report.status_code == 200, report.text
+            result_id = report.json()["result_id"]
+            listing = (await client.get(base + "/results")).json()
+            assert listing[0]["artifacts"][0]["file_id"] == (other.id if index == 1 else source.id)
+            revision = report.json()["entity_revision"]
+            manual = await client.post(base + f"/results/{result_id}/attest", json={
+                "client_operation_id": f"source-manual-{index}", "expected_entity_revision": revision,
+                "criterion_id": criterion, "observation": "I read the file",
+            })
+            assert manual.status_code == 409
+            evidence = await client.post(base + f"/results/{result_id}/evidence", json={
+                "client_operation_id": f"source-evidence-{index}", "expected_entity_revision": revision,
+                "criterion_id": criterion, "manifest_id": manifest_id,
+                "observation": "I checked the attached document bytes",
+            })
+            assert evidence.status_code == 200, evidence.text
+            revision = evidence.json()["entity_revision"]
+            verdict = await client.post(base + f"/results/{result_id}/verdicts", json={
+                "client_operation_id": f"source-verdict-{index}", "expected_entity_revision": revision,
+                "verification": "verified", "accepted": True, "head": None, "base": None,
+                "evidence_ids": [evidence.json()["evidence_id"]], "reason": "Document reviewed",
+            })
+            if index == 1:
+                assert verdict.status_code == 409
+            else:
+                assert verdict.status_code == 200, verdict.text
+                accepted = await client.post(base + f"/results/{result_id}/accept", json={
+                    "client_operation_id": "source-accept", "expected_entity_revision": verdict.json()["entity_revision"],
+                    "verdict_id": verdict.json()["verdict_id"], "contract_revision": contract["contract_revision"],
+                })
+                assert accepted.status_code == 200, accepted.text
+    assert (await board.get(task["id"]))["status"] == "done"
 
 
 async def test_peer_answer_only_counts_what_came_after_the_question(app: Any) -> None:

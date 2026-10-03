@@ -169,6 +169,9 @@ async def comparison_readiness(
         blockers.append("alternatives_missing")
     if task is None or task["contract_revision"] != group["contract_revision"]:
         blockers.append("contract_stale")
+    # Known charges can already exceed the cap while another alternative is still unpriced.
+    if sum(item["observed_cost_microusd"] or 0 for item in alternatives) > group["budget_cap_microusd"]:
+        blockers.append("cost_cap_exceeded")
     return {"group_id": group_id, "task_id": group["task_id"],
             "contract_revision": group["contract_revision"], "state": group["state"],
             "budget_cap_microusd": group["budget_cap_microusd"],
@@ -245,8 +248,9 @@ async def choose_result(
     await conn.execute("UPDATE comparison_groups SET state = 'chosen',selected_result_id = ?,"
                        " selected_verdict_id = ?,selection_receipt_id = ?,selected_at = ? WHERE id = ?",
                        (result_id, verdict_id, selection_receipt_id, _now(), group_id))
+    # The selected verdict already passed independent verification; operator approval still follows merge.
     await conn.execute("UPDATE board_tasks SET current_attempt_id = ?,accepted_result_id = NULL,"
-                       " accepted_contract_revision = NULL,acceptance_state = 'handed_in',"
+                       " accepted_contract_revision = NULL,acceptance_state = 'accepted',"
                        " status = 'review',folder_id = ?,branch = ?,merge_state = 'proposed'"
                        " WHERE id = ?", (selected["attempt_id"], source["folder_id"],
                                         source["branch"], group["task_id"]))

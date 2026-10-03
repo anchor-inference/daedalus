@@ -308,6 +308,10 @@ class Board:
         replaces the brief fields it names, and ``depends_on`` replaces the dependencies."""
         task = await self.get(task_id, actor=actor)
         who = await self.actor_of(actor)
+        if task.get("accepted_result_id") and (
+                status is not None or check or uncheck or title is not None or acceptance is not None
+                or brief is not None or depends_on is not None or assignee_staff_id is not None):
+            raise ValueError("an accepted task needs its exact-result reopen decision")
         if status and status not in STATUSES:
             raise ValueError(f"status must be one of {', '.join(STATUSES)}")
         moving = status is not None and status != task["status"]
@@ -524,6 +528,12 @@ class Board:
         row = await self.app.db.fetchone("SELECT id FROM board_tasks WHERE id = ?", (task_id,))
         if row is None:
             return False
+        if await self.app.db.fetchone("SELECT 1 FROM result_receipts WHERE task_id = ? LIMIT 1", (task_id,)):
+            raise ValueError("a task with audited results cannot be deleted; archive it instead")
+        if await self.app.db.fetchone("SELECT 1 FROM execution_attempts WHERE task_id = ? LIMIT 1", (task_id,)):
+            raise ValueError("a task with execution history cannot be deleted; archive it instead")
+        if await self.app.db.fetchone("SELECT 1 FROM comparison_groups WHERE task_id = ? LIMIT 1", (task_id,)):
+            raise ValueError("a task with comparison history cannot be deleted; archive it instead")
         owner = await self.app.db.fetchone("SELECT origin_session_id FROM board_tasks WHERE id = ?", (task_id,))
         await self.app.db.execute("DELETE FROM board_tasks WHERE id = ?", (task_id,))
         await self.export_plan(owner["origin_session_id"] if owner else None)

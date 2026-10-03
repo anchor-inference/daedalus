@@ -15,6 +15,7 @@ from daedalus.host.worktrees import WorktreeError
 from daedalus.stores.control import ControlDenied, canonical, one
 from daedalus.stores.inference_budget import BudgetRefused
 from daedalus.stores.outbox import Claim
+from daedalus.stores.runtime_release import no_entry_in
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -94,6 +95,12 @@ class ComparisonLaunchEffect:
         slot_bound = launch_capacity_slot.set(claim.payload["slot_id"])
         try:
             admission = await team.queue.offer(entry)
+        except Exception:
+            async with self.app.db.transaction() as conn:
+                refused = await no_entry_in(conn, claim.payload["attempt_id"])
+            if refused:
+                return EffectOutcome("failed", "the host refused this launch before runtime entry")
+            raise
         finally:
             launch_capacity_slot.reset(slot_bound)
             launch_attempt.reset(attempt_bound)
@@ -104,6 +111,9 @@ class ComparisonLaunchEffect:
 
     async def reconcile(self, claim: Claim) -> EffectResolution | None:
         target = claim.payload
+        async with self.app.db.transaction() as conn:
+            if await no_entry_in(conn, target["attempt_id"]):
+                return EffectResolution("failed", {"attempt_id": target["attempt_id"], "proof": "host_no_entry"})
         row = await self.app.db.fetchone(
             "SELECT a.id,a.provider_session_ref,a.host_generation,s.attempt_id,s.group_id,s.slot"
             " FROM execution_attempts a JOIN comparison_funding_slots s ON s.attempt_id = a.id"

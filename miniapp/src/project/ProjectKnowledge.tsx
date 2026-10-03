@@ -9,7 +9,9 @@ type Fact = { fact_id: string; version: number; claim: string; kind: string; sta
   source_status?: "current" | "stale" | "missing"; actor: string; reason: string; created_at: string };
 type Inspection = { project_id: string; entity_revision: number; collection_revision: number; facts: Fact[]; next_before: string | null };
 type Source = { source_kind: "file" | "manifest"; source_id: string; label: string };
-type Pending = { path: string; body: Record<string, unknown> };
+type StaleEntry = { id: string; fact_id: string; fact_version: number; claim: string; source_id: string;
+  replacement_digest: string; observed_revision: number; created_at: string };
+type Pending = { path: string; body: Record<string, unknown>; collision?: boolean };
 type Draft = { claim: string; sourceId: string; reason: string; chosen: string; version: number | null };
 
 function draft(key: string): Draft {
@@ -25,7 +27,8 @@ function remembered(key: string, base: string): Pending | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(key) ?? "null");
     const reviewPath = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/[^/]+/review$`);
-    if (value?.path !== `${base}/candidates` && !(typeof value?.path === "string" && reviewPath.test(value.path))) return null;
+    const revalidatePath = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/[^/]+/revalidate$`);
+    if (value?.path !== `${base}/candidates` && !(typeof value?.path === "string" && (reviewPath.test(value.path) || revalidatePath.test(value.path)))) return null;
     return value && typeof value.body?.client_operation_id === "string" ? value as Pending : null;
   } catch { return null; }
 }
@@ -41,6 +44,7 @@ export function ProjectKnowledge({ projectId, toast }: { projectId: string; toas
 function KnowledgeContent({ projectId, toast }: { projectId: string; toast: (message: string) => void }) {
   const base = `/api/projects/${encodeURIComponent(projectId)}/knowledge`;
   const pendingKey = `daedalus.knowledge.pending.${projectId}`;
+  const conflictKey = `daedalus.knowledge.conflict.${projectId}`;
   const draftKey = `daedalus.knowledge.draft.${projectId}`;
   const [openedDraft] = useState(() => draft(draftKey));
   const [before, setBefore] = useState<string | null>(null);
@@ -48,15 +52,21 @@ function KnowledgeContent({ projectId, toast }: { projectId: string; toast: (mes
   const [chosenVersion, setChosenVersion] = useState(openedDraft.version);
   const [createOpen, setCreateOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [staleOpen, setStaleOpen] = useState(false);
   const [historyBefore, setHistoryBefore] = useState<number | null>(null);
   const [claim, setClaim] = useState(openedDraft.claim);
   const [sourceId, setSourceId] = useState(openedDraft.sourceId);
   const [reason, setReason] = useState(openedDraft.reason);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<Pending | null>(() => remembered(pendingKey, base));
+  const [conflict, setConflict] = useState(() => {
+    try { return sessionStorage.getItem(conflictKey) === "changed"; }
+    catch { return false; }
+  });
   const offline = useOffline();
   const inspection = useQuery<Inspection>(`${base}?limit=25${before ? `&before=${encodeURIComponent(before)}` : ""}`, { staleMs: 0 });
   const sources = useQuery<Source[]>(createOpen ? `${base}/sources` : null, { staleMs: 0 });
+  const stale = useQuery<StaleEntry[]>(staleOpen ? `${base}/stale` : null, { staleMs: 0 });
   const current = !inspection.error && inspection.data?.project_id === projectId ? inspection.data : null;
   const selected = current?.facts.find((fact) => fact.fact_id === chosen);
   const history = useQuery<Fact[]>(historyOpen && selected ? `${base}/${encodeURIComponent(selected.fact_id)}/history?limit=25${historyBefore ? `&before_version=${historyBefore}` : ""}` : null, { staleMs: 0 });
@@ -78,6 +88,12 @@ function KnowledgeContent({ projectId, toast }: { projectId: string; toast: (mes
     } catch { /* the mounted view still preserves the exact request */ }
   }
 
+  function markConflict(value: boolean) {
+    setConflict(value);
+    try { if (value) sessionStorage.setItem(conflictKey, "changed"); else sessionStorage.removeItem(conflictKey); }
+    catch { /* keep the current view's conflict warning */ }
+  }
+
   async function submit(intent: Pending) {
     if (busy || offline) return;
     setBusy(true);
@@ -87,11 +103,25 @@ function KnowledgeContent({ projectId, toast }: { projectId: string; toast: (mes
       if (response.fact_id && Number.isInteger(response.version)) { setChosen(response.fact_id); setChosenVersion(response.version!); }
       setReason("");
       if (intent.path.endsWith("/candidates")) { setClaim(""); setSourceId(""); }
-      toast(t("knowledge.recorded"));
+      markConflict(false);
+      toast(intent.path.endsWith("/revalidate") ? t("knowledge.rechecked") : t("knowledge.recorded"));
       await inspection.refresh();
+      if (staleOpen) await stale.refresh();
       if (historyOpen) await history.refresh();
     } catch (error) {
-      if (error instanceof ApiError && [400, 403, 404, 409, 422].includes(error.status)) {
+      if (intent.path.endsWith("/revalidate") && error instanceof ApiError && error.status === 409 &&
+          error.message.includes("command identity was reused with a different request")) {
+        remember({ ...intent, collision: true });
+        toast(t("knowledge.identityCollision"));
+        return;
+      }
+      if (intent.path.endsWith("/revalidate") && error instanceof ApiError && error.status === 409) {
+        remember(null);
+        markConflict(true);
+        setChosenVersion(null);
+        void inspection.refresh();
+        void stale.refresh();
+      } else if (error instanceof ApiError && [400, 403, 404, 409, 422].includes(error.status)) {
         remember(null);
         void inspection.refresh();
       }
@@ -115,13 +145,37 @@ function KnowledgeContent({ projectId, toast }: { projectId: string; toast: (mes
     void submit(intent);
   }
 
+  function revalidate(entry: StaleEntry) {
+    if (!writable || conflict || !current || !stale.data?.some((item) => item.id === entry.id)) return;
+    const intent = { path: `${base}/${encodeURIComponent(entry.fact_id)}/revalidate`, body: {
+      queue_id: entry.id, expected_version: entry.fact_version,
+      expected_entity_revision: current.entity_revision, client_operation_id: crypto.randomUUID(),
+    } };
+    remember(intent);
+    void submit(intent);
+  }
+
   return <div className="project-extension-list">
     <p className="sub">{t("knowledge.intro")}</p>
     {offline && <p className="result-warning" role="status">{t("knowledge.offline")}</p>}
     {inspection.error && <div className="result-warning" role="status">{t("knowledge.readFailed")} <button type="button" className="linkbtn" onClick={() => void inspection.refresh()}>{t("common.retry")}</button></div>}
     {!current && !inspection.error && <p className="sub">{t("common.loading")}</p>}
-    {pending && <div className="result-warning" role="status">{t("knowledge.pending")} <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => void submit(pending)}>{t("knowledge.retry")}</button></div>}
+    {pending && <div className="result-warning" role="status">{t(pending.collision ? "knowledge.identityCollision" : "knowledge.pending")} {!pending.collision && <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => void submit(pending)}>{t("knowledge.retry")}</button>}{pending.collision && <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => { remember(null); markConflict(true); void inspection.refresh(); void stale.refresh(); }}>{t("knowledge.discardPending")}</button>}</div>}
+    {conflict && <div className="result-warning" role="status">{t("knowledge.revisionChanged")} <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => { void inspection.refresh(); void stale.refresh(); markConflict(false); }}>{t("knowledge.reviewUpdated")}</button></div>}
     {current && <>
+      <details open={staleOpen} onToggle={(event) => setStaleOpen(event.currentTarget.open)}>
+        <summary>{t("knowledge.staleQueue")}{stale.data?.length ? ` · ${stale.data.length}` : ""}</summary>
+        <p className="sub">{t("knowledge.staleHelp")}</p>
+        {stale.error && <div className="result-warning" role="status">{t("knowledge.staleUnavailable")} <button type="button" className="linkbtn" onClick={() => void stale.refresh()}>{t("common.retry")}</button></div>}
+        {!stale.error && !stale.data && <p className="sub">{t("common.loading")}</p>}
+        {!stale.error && stale.data?.length === 0 && <p className="sub">{t("knowledge.staleEmpty")}</p>}
+        {!stale.error && stale.data?.map((entry) => <article className="project-extension" key={entry.id}>
+          <b>{entry.claim}</b>
+          <p className="result-warning">{t("knowledge.sourceChanged")}</p>
+          <details><summary>{t("knowledge.provenance")}</summary><p className="mono">{entry.source_id}</p><p className="mono">{entry.replacement_digest}</p></details>
+          <button type="button" className="btn small" disabled={!writable || conflict} onClick={() => revalidate(entry)}>{t("knowledge.recheck")}</button>
+        </article>)}
+      </details>
       {!current.facts.length && <p className="sub">{t("knowledge.empty")}</p>}
       <ul className="plain-list">{current.facts.map((fact) => <li key={fact.fact_id}>
         <button type="button" className="linkbtn" aria-pressed={chosen === fact.fact_id} onClick={() => { setChosen(fact.fact_id); setChosenVersion(fact.version); setReason(""); setHistoryOpen(false); setHistoryBefore(null); }}>{fact.claim}</button>

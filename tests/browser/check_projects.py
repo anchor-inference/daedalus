@@ -33,7 +33,7 @@ def run() -> int:
     host_list_failure = [False]
     host_list_item = [False]
     unhandled = Unhandled()
-    extension = {"id": "project_status", "version": "1.0.0", "display_name": "Project status", "description": "Read task counts by status for one selected project.", "capabilities": ["board.read"], "tools": [{"name": "inspect_project"}], "ui_extensions": [{"id": "project_status", "slot": "project.settings", "schema_version": 1, "component": "status"}]}
+    extension = {"id": "project_status", "version": "1.0.0", "display_name": "Project status", "description": "Read task counts by status for one selected project.", "capabilities": ["board.read"], "tools": [{"name": "inspect_project", "input_schema": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}], "ui_extensions": [{"id": "project_status", "slot": "project.settings", "schema_version": 1, "component": "status", "tool": "inspect_project"}]}
 
     def answer(route, body: object, status: int = 200) -> None:  # type: ignore[no-untyped-def]
         route.fulfill(status=status, content_type="application/json", body=json.dumps(body))
@@ -82,14 +82,18 @@ def run() -> int:
             return answer(route, {"id": "project_status", "state": "inactive"})
         if path == "/api/projects/p1/board" and request.method == "GET":
             return answer(route, {"tasks": [{"id": "t-owned", "title": "Owned task"}]})
+        if path == "/api/control/revisions" and request.method == "GET":
+            return answer(route, {"scope": {"kind": "global", "id": "global"}, "collection_revision": 1, "entity_revision": None})
+        if path == "/api/projects/p1/workspace-archive" and request.method == "GET":
+            return answer(route, {"latest": None, "available": False})
         if path == "/api/projects/p1/orchestrator/authority" and request.method == "GET":
             bundles = [
                 {"id": name, "scope_kind": scope, "operations": operations, "effects": effects,
                  "max_expires_at": (datetime.now(UTC) + timedelta(hours=24)).isoformat(), "blockers": []}
                 for name, scope, operations, effects in (
-                    ("planning", "project", ["board.task.create", "board.task.update"], []),
-                    ("execution", "task", ["task.launch", "staff.release"], ["execution.start", "execution.stop"]),
-                    ("execution_project", "project", ["task.launch", "staff.release"], ["execution.start", "execution.stop"]),
+                    ("planning", "project", ["board.task.create", "board.task.update", "contract.require", "contract.apply", "contract.withdraw"], []),
+                    ("execution", "task", ["task.launch", "task.stop", "staff.release"], ["execution.start", "execution.stop"]),
+                    ("execution_project", "project", ["task.launch", "task.stop", "staff.release"], ["execution.start", "execution.stop"]),
                     ("review", "project", ["review.verdict", "review.return"], []),
                     ("watch", "project", ["watch.create", "watch.change", "watch.remove", "watch.deliver"], ["watch.wake", "watch.tell", "watch.notify"]),
                 )
@@ -107,7 +111,7 @@ def run() -> int:
                 return answer(route, {"detail": "project changed"}, status=409)
             bundle = payload["bundle_id"]
             task_id = payload.get("task_id")
-            operations = ["board.task.create", "board.task.update"] if bundle == "planning" else (["review.verdict", "review.return"] if bundle == "review" else (["watch.create", "watch.change", "watch.remove", "watch.deliver"] if bundle == "watch" else ["task.launch", "staff.release"]))
+            operations = ["board.task.create", "board.task.update", "contract.require", "contract.apply", "contract.withdraw"] if bundle == "planning" else (["review.verdict", "review.return"] if bundle == "review" else (["watch.create", "watch.change", "watch.remove", "watch.deliver"] if bundle == "watch" else ["task.launch", "task.stop", "staff.release"]))
             effects = ["execution.start", "execution.stop"] if bundle.startswith("execution") else (["watch.wake", "watch.tell", "watch.notify"] if bundle == "watch" else [])
             grant = {"grant_id": f"grant-{len(authority_grants) + 1}", "generation": 1, "session_id": "coordinator-current",
                      "scope": {"kind": "task" if task_id else "project", "id": task_id or "p1"},

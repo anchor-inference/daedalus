@@ -116,12 +116,17 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def plugin_health(plugin_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         return await registry().health(plugin_id)
 
-    @api.post("/api/plugins/{plugin_id}/test")
-    async def test_plugin(plugin_id: str, body: TestBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        if plugin_id != "project_status" or body.tool != "inspect_project":
-            raise HTTPException(409, "only the shipped read-only inspector has a test endpoint")
+    @api.post("/api/projects/{project_id}/plugins/{plugin_id}/invoke-read")
+    async def invoke_project_plugin(project_id: str, plugin_id: str, body: TestBody,
+                                    who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return {"result": await registry().invoke(plugin_id, body.tool, body.arguments, granted={"board.read"})}
+            return {"result": await registry().invoke_read(
+                Principal.operator(who), project_id, plugin_id, body.tool, body.arguments,
+            )}
+        except KeyError as exc:
+            raise HTTPException(404, "no such project") from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
         except PluginRefused as exc:
             raise HTTPException(409, str(exc)) from exc
 

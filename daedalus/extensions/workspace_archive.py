@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import shutil
 import tempfile
 import uuid
 import zipfile
@@ -42,6 +43,7 @@ SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 # Every query is scoped through the project, its tasks, sessions, or results. The list is deliberately
 # explicit: a new credential or runtime table must be reviewed before it could enter an archive.
+# Staff context packets stay out: they pin an old launch, and restored staff sessions cannot resume it.
 QUERIES: dict[str, str] = {
     "projects": "SELECT * FROM projects WHERE id = ?",
     "project_briefs": "SELECT * FROM project_briefs WHERE project_id = ? ORDER BY section",
@@ -578,7 +580,6 @@ class WorkspaceArchive:
         created_folder_tree = False
         async def cleanup() -> None:
             if created_folder_tree and folder_tree is not None:
-                import shutil
                 shutil.rmtree(folder_tree)
             for kind, digest in staged:
                 tenant, ref = digest.split(":", 1) if kind == "run" else (FILES_TENANT, digest)

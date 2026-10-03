@@ -4,7 +4,7 @@
 // project by id and nothing else, so the project's focus panel and its phone tab can mount it as it is.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError } from "../api";
+import { api, ApiError, type Project } from "../api";
 import { Skeleton, copyText } from "../ui/components";
 import { OverflowMenu, Sheet } from "../ui/dialogs";
 import { useEvent, useStreamUp } from "../events";
@@ -19,6 +19,8 @@ import { LifecycleCancel } from "../project/LifecycleCancel";
 import { ReviewPanel } from "./ReviewPanel";
 import { ResultFlow } from "./ResultFlow";
 import { TaskWorkflow } from "./TaskWorkflow";
+import { TaskComparison } from "./TaskComparison";
+import { TaskContext } from "./TaskContext";
 import { Harness, statusTone } from "../team/team";
 import { confirmAsync, errorText } from "../ui";
 import {
@@ -454,6 +456,13 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
   const [title, setTitle] = useState(task?.title ?? "");
   const [brief, setBrief] = useState<Brief>(task?.brief ?? emptyBrief());
   const [assignee, setAssignee] = useState(task?.assignee_staff_id ?? "");
+  const [folderId, setFolderId] = useState(task?.folder_id ?? "");
+  const [folderOpen, setFolderOpen] = useState(false);
+  const projects = useQuery<Project[]>("/api/projects", { staleMs: 15000 });
+  const folders = projects.data?.find((project) => project.id === projectId)?.folders ?? [];
+  const comparisons = useQuery<{ groups: { state: string }[] }>(task && folderOpen ? `/api/board/${encodeURIComponent(task.id)}/comparisons?limit=20` : null, { staleMs: 0 });
+  const folderBlocked = !!task && (task.status !== "todo" || !comparisons.data || !!comparisons.error ||
+    comparisons.data.groups.some((group) => ["planned", "active", "ready", "unknown"].includes(group.state)));
   const [deps, setDeps] = useState<string[]>(task?.depends_on ?? []);
   const [priority, setPriority] = useState(task?.priority ?? 3);
   const [note, setNote] = useState("");
@@ -510,6 +519,7 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
     ? title.trim() !== task.title ||
       Object.keys(briefChanges(task.brief, brief)).length > 0 ||
       assignee !== (task.assignee_staff_id ?? "") ||
+      folderId !== (task.folder_id ?? "") ||
       deps.join(",") !== task.depends_on.join(",") ||
       priority !== task.priority ||
       note.trim() !== ""
@@ -565,7 +575,8 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
           if (!Number.isInteger(revisions.collection_revision)) { toast(t("result.block.unconfirmed")); return; }
           createRevision.current = revisions.collection_revision;
         }
-        const body = { title: title.trim(), brief, assignee_staff_id: assignee || null, depends_on: deps, priority, expected_collection_revision: createRevision.current };
+        const body = { title: title.trim(), brief, assignee_staff_id: assignee || null, folder_id: folderId || null,
+          depends_on: deps, priority, expected_collection_revision: createRevision.current };
         const made = await api.post<TaskCommand>(`${boardKey(projectId)}`, { ...body, client_operation_id: intentId(body) });
         operation.current = null;
         createRevision.current = null;
@@ -577,6 +588,7 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
         const briefDiff = briefChanges(task.brief, brief);
         if (Object.keys(briefDiff).length) body.brief = briefDiff;
         if (assignee !== (task.assignee_staff_id ?? "")) body.assignee_staff_id = assignee;
+        if (folderId !== (task.folder_id ?? "") && folderId) body.folder_id = folderId;
         if (deps.join(",") !== task.depends_on.join(",")) body.depends_on = deps;
         if (priority !== task.priority) body.priority = priority;
         if (note.trim()) body.note = note.trim();
@@ -690,6 +702,8 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
       {stopEffectId && <div className="result-warning" role="status">{t(stopEffect.error ? "result.stopTaskUnconfirmed" : stopEffect.data?.state === "completed" ? "result.stopTaskObserved" : stopEffect.data?.state === "unknown" ? "result.stopTaskUnconfirmed" : "result.stopTaskPending")} <button type="button" className="linkbtn" onClick={() => stopEffect.refresh()}>{t("common.retry")}</button></div>}
       {task && <LifecycleCancel kind="task" id={task.id} projectId={projectId} onDone={onDone} toast={toast} />}
       {task && <TaskWorkflow projectId={projectId} task={task} tasks={data.tasks} />}
+      {task && <TaskContext task={task} staff={data.staff} />}
+      {task && <TaskComparison task={task} staff={data.staff} onChanged={onDone} toast={toast} />}
 
       {task && hasAcceptance(task) && <AcceptanceSection task={task} />}
 
@@ -705,6 +719,20 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
           </div>
         ))}
       </fieldset>
+
+      <details open={folderOpen} onToggle={(event) => setFolderOpen(event.currentTarget.open)}>
+        <summary>{t("pboard.folder")}{folderId ? ` · ${folders.find((folder) => folder.id === folderId)?.label || folders.find((folder) => folder.id === folderId)?.path || t("pboard.folder.pinned")}` : ""}</summary>
+        <p className="sub">{t("pboard.folder.hint")}</p>
+        {projects.error && <div className="result-warning">{t("pboard.folder.unavailable")}</div>}
+        {folderOpen && task && comparisons.error && <div className="result-warning">{t("pboard.folder.unavailable")}</div>}
+        {folderOpen && folderBlocked && <div className="result-warning">{t("pboard.folder.blocked")}</div>}
+        <label className="field" htmlFor="ptask-folder">{t("pboard.folder.choose")}</label>
+        <select id="ptask-folder" className="field" value={folderId} disabled={busy || offline || !!projects.error || !projects.data || folderBlocked} onChange={(event) => setFolderId(event.target.value)}>
+          {!task?.folder_id && <option value="">{t("pboard.folder.none")}</option>}
+          {task?.folder_id && !folders.some((folder) => folder.id === task.folder_id) && <option value={task.folder_id}>{t("pboard.folder.pinned")}</option>}
+          {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.label || folder.path}{folder.readonly ? ` · ${t("pboard.folder.readonly")}` : ""}</option>)}
+        </select>
+      </details>
 
       {task && (task.requirements?.length ?? 0) > 0 && <RequirementsSection requirements={task.requirements!} />}
 

@@ -1216,6 +1216,7 @@ ORCHESTRATOR_ONLY_TOOLS = [
     "AskOperator",
     "WithdrawQuestions",
     "ProjectReport",
+    "ProjectExtension",
     "Harnesses",
 ]
 """The tools that exist for a project's orchestrator alone; every other session is blocked from them.

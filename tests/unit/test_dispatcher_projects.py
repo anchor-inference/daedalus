@@ -12,6 +12,7 @@ from daedalus.extensions.dispatcher_projects import ProjectMaker
 from daedalus.extensions.notifications import ActionRequest
 from daedalus.extensions.staff import AlreadyAnswered
 from daedalus.stores.database import Database
+from daedalus.stores.projects import ProjectError
 from daedalus.stores.staff import StaffError
 from daedalus.terminals.bridge import FolderCheck
 from tests.unit.test_dispatcher import Main, main_rig
@@ -86,7 +87,7 @@ async def test_a_folder_another_project_has_is_offered_with_that_said_and_shared
 
 
 async def test_nothing_is_created_until_the_operator_confirms_and_then_the_setup_starts(settings: Settings, db: Database, tmp_path: Path) -> None:
-    m, _maker, sid = await maker_rig(settings, db, tmp_path)
+    m, maker, sid = await maker_rig(settings, db, tmp_path)
     try:
         roots = tmp_path / "projects"
         roots.mkdir()
@@ -98,6 +99,10 @@ async def test_nothing_is_created_until_the_operator_confirms_and_then_the_setup
         assert [p.name for p in await m.r.manager.projects.list() if p.name == "Garden"] == []
         [card] = await m.r.manager.asks.of_origin("dispatcher")
         assert card.kind == "project" and card.project_id is None and card.detail["options"] == ["Create", "Don't create"]
+        with pytest.raises(ProjectError, match="no operator confirmation"):
+            await m.r.manager.projects.create("Garden", [str(target)], initial_goal="A planting calendar",
+                                              confirmation_ask_id=card.id)
+        assert [p.name for p in await m.r.manager.projects.list() if p.name == "Garden"] == []
         assert f"make the container folder {target}" in card.text and "Goal: A planting calendar" in card.text
         [pending] = [e for e in await events(m.r.manager, "ask.pending") if e.payload.get("kind") == "project"]
         assert pending.session_id == sid and [o["label"] for o in pending.payload["questions"][0]["options"]] == ["Create", "Don't create"]
@@ -112,6 +117,11 @@ async def test_nothing_is_created_until_the_operator_confirms_and_then_the_setup
         [garden] = [p for p in await m.r.manager.projects.list() if p.name == "Garden"]
         assert garden.setup_by == "dispatcher" and garden.settings.orchestrator.enabled
         assert (await m.r.manager.projects.brief(garden.id))["goals"].body == "A planting calendar"
+        goal = await db.fetchone("SELECT goal_revision,body,origin_kind,origin_ref"
+                                 " FROM project_goal_revisions WHERE project_id = ?", (garden.id,))
+        assert goal is not None and tuple(goal) == (1, "A planting calendar", "operator", card.id)
+        assert "handed it dispatch" in await maker._create(card)
+        assert len(await m.r.manager.dispatches.open_for(garden.id)) == 1
         [survey] = await m.r.manager.dispatches.open_for(garden.id)
         assert survey.seq == 1 and survey.kind == "setup" and "write its brief" in survey.text and "A planting calendar" in survey.text
         settled = await m.r.manager.asks.get(card.id)
@@ -120,6 +130,26 @@ async def test_nothing_is_created_until_the_operator_confirms_and_then_the_setup
         wake = await m.main.classify(told)
         assert wake is not None and wake.urgent, "the main orchestrator learns what its confirmation made"
         assert "switched its orchestrator on" in await m.main.line(told)
+    finally:
+        await m.r.manager.close()
+
+
+async def test_confirmed_project_cannot_change_its_folder_before_creation(
+    settings: Settings, db: Database, tmp_path: Path,
+) -> None:
+    m, _maker, sid = await maker_rig(settings, db, tmp_path)
+    try:
+        roots = tmp_path / "projects"
+        roots.mkdir()
+        m.r.manager.config.dispatcher.container_roots = [str(roots)]
+        await m.call(sid, "create_project", name="Garden", goal="A planting calendar",
+                     folders=[{"path": str(roots / "garden"), "env": "container"}], create_missing=True)
+        [card] = await m.r.manager.asks.of_origin("dispatcher")
+        assert await m.r.manager.asks.resolve(card.id, "operator", {"allow": True})
+        with pytest.raises(ProjectError, match="folders differ"):
+            await m.r.manager.projects.create("Garden", [str(roots / "other")],
+                                              initial_goal="A planting calendar", confirmation_ask_id=card.id)
+        assert not [project for project in await m.r.manager.projects.list() if project.name == "Garden"]
     finally:
         await m.r.manager.close()
 

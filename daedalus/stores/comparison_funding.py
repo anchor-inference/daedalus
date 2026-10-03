@@ -14,6 +14,7 @@ from daedalus.config import PROVIDER_KINDS
 from daedalus.stores.control import canonical, now, one
 from daedalus.stores.database import Database
 from daedalus.stores.inference_budget import BudgetRefused, Constraint, _historical
+from daedalus.stores.runtime_release import physical_exit_in
 
 
 @dataclass(frozen=True)
@@ -28,17 +29,6 @@ class PairAllocation:
     allowance_microusd: int
     rate_version: str
     quote: dict[str, Any]
-
-
-async def physical_exit_in(conn: aiosqlite.Connection, attempt_id: str) -> bool:
-    proof = await one(conn, "SELECT 1 FROM execution_attempts a JOIN runtime_exit_observations e"
-                      " ON e.attempt_id = a.id AND e.staff_session_id = a.staff_session_id"
-                      " AND e.contract_revision = a.contract_revision AND e.host_generation = a.host_generation"
-                      " AND e.provider_session_ref = a.provider_session_ref AND e.runtime_kind = a.runtime_kind"
-                      " WHERE a.id = ? AND ((a.runtime_kind = 'daedalus' AND e.runtime_ref = a.native_run_id)"
-                      " OR (a.runtime_kind = 'cli' AND e.runtime_instance = a.runtime_instance"
-                      " AND a.provider_session_ref = 'terminal:' || e.runtime_ref))", (attempt_id,))
-    return proof is not None
 
 
 async def pool_balances_in(conn: aiosqlite.Connection) -> list[dict[str, Any]]:
@@ -219,7 +209,7 @@ class ComparisonFunding:
         if slot['attempt_id'] is not None and not await physical_exit_in(conn, slot['attempt_id']):
             unsent = await one(conn, "SELECT 1 FROM execution_attempts a JOIN staff_sessions s ON s.id = a.staff_session_id"
                                " WHERE a.id = ? AND a.state IN ('failed','cancelled','superseded') AND s.ended_at IS NOT NULL"
-                               " AND a.provider_session_ref IS NULL AND a.native_run_id IS NULL"
+                               " AND a.provider_session_ref IS NULL AND a.native_run_id IS NULL AND a.runtime_entered_at IS NULL"
                                " AND NOT EXISTS (SELECT 1 FROM inference_reservations r WHERE r.execution_attempt_id = a.id OR r.comparison_slot_id = ?)",
                                (slot['attempt_id'], slot_id))
             if slot['launch_started_at'] is not None or unsent is None:

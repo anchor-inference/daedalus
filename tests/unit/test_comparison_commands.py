@@ -20,11 +20,11 @@ from daedalus.extensions.comparison_commands import (
 )
 from daedalus.extensions.comparison_launch import ComparisonLaunchEffect
 from daedalus.extensions.comparison_stop import stop_comparison_slot
-from daedalus.extensions.comparisons import ComparisonRefused
 from daedalus.extensions.staff import Team
 from daedalus.host.events import EventBus
 from daedalus.host.launch_queue import LaunchQueue
 from daedalus.providers.pricing import ModelPricing
+from daedalus.stores.comparisons import ComparisonRefused
 from daedalus.stores.control import ControlConflict, Principal
 from daedalus.stores.database import Database
 from daedalus.stores.inference_budget import BudgetRefused
@@ -54,6 +54,23 @@ class Dispatcher:
 
     def notify(self) -> None:
         self.notifications += 1
+
+
+class PairReview:
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    async def review(self, task_id: str, *, comparison_attempt_id: str | None = None):
+        result = await self.db.fetchone("SELECT id FROM result_receipts WHERE task_id = ? AND attempt_id = ?",
+                                        (task_id, comparison_attempt_id))
+        verdict = await self.db.fetchone("SELECT id,head,base,accepted FROM review_verdicts"
+                                         " WHERE result_id = ?", (result["id"],)) if result else None
+        return {"result_id": result["id"] if result else None,
+                "verdict_id": verdict["id"] if verdict else None,
+                "head_sha": verdict["head"] if verdict else None,
+                "base_sha": verdict["base"] if verdict else None,
+                "blockers": [] if verdict and verdict["accepted"] else [{"code": "verdict_missing"}],
+                "can_choose": bool(verdict and verdict["accepted"])}
 
 
 @pytest.fixture
@@ -91,7 +108,8 @@ async def pair_app(tmp_path: Path):
         return 1
 
     app = SimpleNamespace(db=db, manager=manager, executions=SimpleNamespace(_host=host),
-                          extensions={"staff": SimpleNamespace(queue=queue), "effects": dispatcher})
+                          extensions={"staff": SimpleNamespace(queue=queue, review=PairReview(db)),
+                                      "effects": dispatcher})
     yield app
     await db.close()
 
@@ -246,9 +264,11 @@ async def test_choose_releases_both_verified_allocations_and_replays(pair_app):
     assert await choose_comparison(pair_app, **command) == chosen
     slots = await pair_app.db.fetchall("SELECT state FROM comparison_funding_slots ORDER BY slot")
     assert [slot["state"] for slot in slots] == ["released", "released"]
-    task = await pair_app.db.fetchone("SELECT current_attempt_id,status,branch,entity_revision"
+    task = await pair_app.db.fetchone("SELECT current_attempt_id,status,branch,entity_revision,"
+                                     " acceptance_state,accepted_result_id"
                                      " FROM board_tasks WHERE id = 'task1'")
-    assert tuple(task) == (launched["slots"][0]["attempt_id"], "review", "branch-1", 3)
+    assert tuple(task) == (launched["slots"][0]["attempt_id"], "review", "branch-1", 3,
+                           "accepted", None)
     events = await pair_app.db.fetchall("SELECT type,payload_json FROM app_events ORDER BY seq")
     assert [row["type"] for row in events] == ["task.changed", "task.changed", "task.moved"]
     assert '"from": "todo"' in events[-1]["payload_json"]

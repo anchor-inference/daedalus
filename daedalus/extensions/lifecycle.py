@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.effects import EffectOutcome, EffectResolution
 from daedalus.stores.control import ControlConflict, ControlStore, Entity, Principal, Scope, one
-from daedalus.stores.lifecycle import LifecycleRefused, record_owned_exit
+from daedalus.stores.lifecycle import LifecycleRefused, record_owned_exit, record_owned_no_entry
 from daedalus.stores.outbox import Claim, OutboxStore
 
 if TYPE_CHECKING:
@@ -271,6 +271,8 @@ class Lifecycle:
                 return "unknown"
             if row["cancel_state"] == "drained":
                 return "drained"
+            if await record_owned_no_entry(conn, attempt_id=attempt_id):
+                return "drained"
             host = await one(conn, "SELECT value FROM kv WHERE key = 'execution_host_generation'")
             if host is None or int(json.loads(host["value"])) != row["host_generation"]:
                 return "unknown"
@@ -357,6 +359,11 @@ class Lifecycle:
         """Propagate observed child exits; a completed report is not proof its runtime ended."""
         changed = 0
         async with self.app.db.transaction() as conn:
+            async with conn.execute("SELECT child_id FROM lifecycle_owners WHERE child_kind = 'execution_attempt'"
+                                    " AND cancel_state IN ('requested','acknowledged','unknown')") as cursor:
+                unentered = await cursor.fetchall()
+            for child in unentered:
+                await record_owned_no_entry(conn, attempt_id=child["child_id"])
             cursor = await conn.execute(
                 "SELECT a.id,a.staff_session_id,a.host_generation,a.provider_session_ref FROM execution_attempts a"
                 " JOIN lifecycle_owners o ON o.child_kind = 'execution_attempt' AND o.child_id = a.id"

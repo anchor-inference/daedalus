@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from daedalus.extensions.task_context import ContextUnavailable, assemble_task_context
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.knowledge import KnowledgeConflict, KnowledgeStore
 from daedalus.stores.result_anchors import result_turn_refs
+from daedalus.stores.staff_context import staff_context_packet
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -170,43 +171,112 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(403, str(exc)) from exc
 
     @api.get("/api/board/{task_id}/context")
-    async def task_context(task_id: str, role: str = "worker", _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        if role not in {"worker", "reviewer", "orchestrator"}:
-            raise HTTPException(400, "unsupported role")
-        task = await app.db.fetchone("SELECT id, project_id, title, contract_revision FROM board_tasks WHERE id = ?", (task_id,))
+    async def task_context(task_id: str, role: str = "worker", staff_id: str | None = None,
+                           _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            role_hint = ""
+            if staff_id is not None:
+                member = await app.db.fetchone("SELECT m.role,m.project_id AS member_project,"
+                                               " t.project_id AS task_project FROM staff m"
+                                               " CROSS JOIN board_tasks t WHERE m.id = ? AND t.id = ?"
+                                               " AND m.archived_at IS NULL", (staff_id, task_id))
+                if member is None or member["member_project"] != member["task_project"]:
+                    raise HTTPException(404, "no such active member on this task")
+                role_hint = member["role"]
+            return await assemble_task_context(app.db, task_id, role=role, role_hint=role_hint)
+        except KeyError as exc:
+            raise HTTPException(404, "no such project task") from exc
+        except ContextUnavailable as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @api.get("/api/team/{staff_session_id}/context")
+    async def team_context(staff_session_id: str, request: Request) -> dict[str, Any]:
+        team = app.extensions.get("staff")
+        if team is None:
+            raise HTTPException(503, "the team service is unavailable")
+        try:
+            live = await team.authenticate(staff_session_id,
+                                           request.headers.get("x-daedalus-team-token", ""))
+        except PermissionError as exc:
+            raise HTTPException(401, str(exc)) from exc
+        pinned = await staff_context_packet(app.db, staff_session_id)
+        if pinned is None or pinned["task_id"] != live.session.task_id:
+            raise HTTPException(409, "this session has no pinned task context")
+        try:
+            current = await assemble_task_context(app.db, pinned["task_id"], role=pinned["role"],
+                                                  role_hint=pinned["role_hint"])
+        except (KeyError, ContextUnavailable):
+            return {"packet": pinned["packet"], "packet_hash": pinned["packet_hash"],
+                    "source_current": False, "current_packet_hash": None}
+        return {"packet": pinned["packet"], "packet_hash": pinned["packet_hash"],
+                "source_current": current["packet_hash"] == pinned["packet_hash"],
+                "current_packet_hash": current["packet_hash"]}
+
+    @api.get("/api/board/{task_id}/context-history")
+    async def context_history(task_id: str, limit: int = 25,
+                              _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        if not 1 <= limit <= 25:
+            raise HTTPException(400, "context history limit must be between 1 and 25")
+        task = await app.db.fetchone("SELECT project_id FROM board_tasks WHERE id = ?", (task_id,))
         if task is None or task["project_id"] is None:
             raise HTTPException(404, "no such project task")
-        contract = await app.db.fetchone(
-            "SELECT snapshot_json FROM task_contract_versions WHERE task_id = ? AND contract_revision = ?",
-            (task_id, task["contract_revision"]),
+        rows = await app.db.fetchall(
+            "SELECT p.staff_session_id,p.role,p.role_hint,p.contract_revision,p.packet_hash,"
+            " p.packet_json,p.created_at,s.staff_id,s.ended_at"
+            " FROM staff_context_packets p JOIN staff_sessions s ON s.id = p.staff_session_id"
+            " JOIN staff m ON m.id = s.staff_id"
+            " WHERE p.task_id = ? AND s.task_id = ? AND m.project_id = ?"
+            " ORDER BY p.created_at DESC,p.staff_session_id DESC LIMIT ?",
+            (task_id, task_id, task["project_id"], limit),
         )
-        if contract is None:
-            raise HTTPException(409, "task contract version is missing")
-        facts = await store().context_facts(str(task["project_id"]))
-        snapshot = json.loads(contract["snapshot_json"])
-        artifacts = await app.db.fetchall(
-            "SELECT id,artifact_key,artifact_revision,digest,artifact_kind FROM artifact_manifests "
-            "WHERE task_id = ? OR (task_id IS NULL AND project_id = ?) "
-            "ORDER BY created_at DESC,id DESC LIMIT 50", (task_id, task["project_id"]),
+        entries = []
+        for row in rows:
+            packet = json.loads(row["packet_json"])
+            try:
+                current = await assemble_task_context(app.db, task_id, role=row["role"],
+                                                      role_hint=row["role_hint"])
+                current_hash = current["packet_hash"]
+            except (KeyError, ContextUnavailable):
+                current_hash = None
+            entries.append({"staff_session_id": row["staff_session_id"], "staff_id": row["staff_id"],
+                            "role": row["role"], "role_hint": row["role_hint"],
+                            "contract_revision": row["contract_revision"],
+                            "packet_hash": row["packet_hash"], "source_refs": packet["source_refs"],
+                            "source_current": current_hash == row["packet_hash"],
+                            "current_packet_hash": current_hash, "created_at": row["created_at"],
+                            "session_ended_at": row["ended_at"]})
+        return {"task_id": task_id, "entries": entries}
+
+    @api.get("/api/board/{task_id}/context-history/{staff_session_id}")
+    async def context_history_entry(task_id: str, staff_session_id: str,
+                                    _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        row = await app.db.fetchone(
+            "SELECT p.packet_json,p.packet_hash,p.role,p.role_hint,p.contract_revision,p.created_at,"
+            " s.staff_id,s.ended_at FROM staff_context_packets p"
+            " JOIN staff_sessions s ON s.id = p.staff_session_id"
+            " JOIN staff m ON m.id = s.staff_id"
+            " JOIN board_tasks t ON t.id = p.task_id"
+            " WHERE p.task_id = ? AND p.staff_session_id = ? AND s.task_id = ?"
+            " AND m.project_id = t.project_id AND t.project_id IS NOT NULL",
+            (task_id, staff_session_id, task_id),
         )
-        packet = {
-            "task_id": task_id, "role": role, "title": task["title"],
-            "contract_revision": task["contract_revision"], "contract": snapshot,
-            "artifacts": [
-                {"id": row["id"], "key": row["artifact_key"], "revision": row["artifact_revision"],
-                 "kind": row["artifact_kind"], "digest": row["digest"]} for row in artifacts
-            ],
-            "facts": [
-                {"fact_id": row["fact_id"], "version": row["version"], "claim": row["claim"],
-                 "source": f"{row['source_kind']}:{row['source_id']}@{row['source_revision']}"}
-                for row in facts
-            ],
-        }
-        digest = hashlib.sha256(json.dumps(packet, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        refs = [f"task-contract:{task_id}@{task['contract_revision']}"]
-        refs.extend(f"manifest:{row['id']}@{row['revision']}#{row['digest']}" for row in packet["artifacts"])
-        refs.extend(item["source"] for item in packet["facts"])
-        return {**packet, "source_refs": refs, "packet_hash": "sha256:" + digest}
+        if row is None:
+            raise HTTPException(404, "no such task context packet")
+        try:
+            current = await assemble_task_context(app.db, task_id, role=row["role"],
+                                                  role_hint=row["role_hint"])
+            current_hash = current["packet_hash"]
+        except (KeyError, ContextUnavailable):
+            current_hash = None
+        packet = json.loads(row["packet_json"])
+        return {"staff_session_id": staff_session_id, "staff_id": row["staff_id"],
+                "role": row["role"], "role_hint": row["role_hint"],
+                "contract_revision": row["contract_revision"], "packet_hash": row["packet_hash"],
+                "source_refs": packet["source_refs"], "source_current": current_hash == row["packet_hash"],
+                "current_packet_hash": current_hash, "created_at": row["created_at"],
+                "session_ended_at": row["ended_at"], "packet": packet}
 
     @api.get("/api/board/{task_id}/results/{result_id}/turns")
     async def result_turns(task_id: str, result_id: str, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:

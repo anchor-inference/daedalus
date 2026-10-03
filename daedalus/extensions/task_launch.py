@@ -10,6 +10,7 @@ from daedalus.extensions.effects import EffectOutcome, EffectResolution
 from daedalus.extensions.launch_controls import launch_attempt
 from daedalus.extensions.orchestrator_domain import dependency_readiness
 from daedalus.host.launch_queue import Entry
+from daedalus.host.worktrees import WorktreeRefused
 from daedalus.stores.control import (
     ControlConflict,
     ControlDenied,
@@ -23,6 +24,8 @@ from daedalus.stores.control import (
 )
 from daedalus.stores.executions import ACTIVE
 from daedalus.stores.outbox import Claim, OutboxStore
+from daedalus.stores.runtime_release import no_entry_in
+from daedalus.stores.staff import StaffError, daedalus_cannot_reach
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -54,6 +57,23 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
         assert task is not None
         if member is None or member["project_id"] != task["project_id"] or member["archived_at"]:
             raise ControlDenied("the worker is not an active member of this project")
+        folder = None
+        for folder_id in (task["folder_id"], member["default_folder_id"]):
+            if folder_id:
+                folder = await one(conn, "SELECT path,env FROM project_folders"
+                                   " WHERE id = ? AND project_id = ?", (folder_id, task["project_id"]))
+                if folder is not None:
+                    break
+        if folder is None:
+            folder = await one(conn, "SELECT path,env FROM project_folders"
+                               " WHERE project_id = ? ORDER BY position LIMIT 1", (task["project_id"],))
+        if folder is None:
+            raise StaffError("the project has no folder to work in")
+        if member["harness"] == "daedalus" and folder["env"] != app.manager.projects.local_env:
+            # A queued command must refuse an unreachable folder before it records an assignment.
+            raise StaffError(f"{member['name']} cannot work on task {task_id}: "
+                             + daedalus_cannot_reach(folder["path"], folder["env"],
+                                                     app.manager.projects.local_env))
         if task["status"] not in ("todo", "blocked"):
             raise ControlConflict("reopen the task before launching a new attempt")
         if await one(conn, "SELECT 1 FROM comparison_groups WHERE task_id = ? AND state IN ('planned','active','ready')", (task_id,)):
@@ -133,7 +153,6 @@ class TaskLaunchEffect:
             folder = team.folder_for(project, member, task)
             if member.isolation == "worktree":
                 from daedalus.extensions.staff import no_worktree  # Lazy: staff installs the launch handler
-                from daedalus.host.worktrees import WorktreeRefused
 
                 try:
                     await team.worktrees.check(folder)
@@ -167,6 +186,12 @@ class TaskLaunchEffect:
         bound = launch_attempt.set(claim.payload["attempt_id"])
         try:
             admission = await team.queue.offer(entry)
+        except Exception:
+            async with self.app.db.transaction() as conn:
+                refused = await no_entry_in(conn, claim.payload["attempt_id"])
+            if refused:
+                return EffectOutcome("failed", "the host refused this launch before runtime entry")
+            raise
         finally:
             launch_attempt.reset(bound)
         if admission.state == "queued":
@@ -175,6 +200,9 @@ class TaskLaunchEffect:
         return EffectOutcome("completed")
 
     async def reconcile(self, claim: Claim) -> EffectResolution | None:
+        async with self.app.db.transaction() as conn:
+            if await no_entry_in(conn, claim.payload["attempt_id"]):
+                return EffectResolution("failed", {"attempt_id": claim.payload["attempt_id"], "proof": "host_no_entry"})
         attempt = await self.app.db.fetchone("SELECT id,provider_session_ref,state,staff_session_id FROM execution_attempts WHERE id = ? AND task_id = ?",
                                             (claim.payload["attempt_id"], claim.payload["task_id"]))
         if attempt is not None and attempt["provider_session_ref"]:

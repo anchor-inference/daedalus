@@ -514,6 +514,8 @@ class ProjectStore:
         *,
         settings: ProjectSettings | None = None,
         project_id: str | None = None,
+        initial_goal: str = "",
+        confirmation_ask_id: str | None = None,
     ) -> Project:
         """A project with the folders asked for, in that order; with none, a managed scratch folder of its own."""
         label = (name or "").strip()
@@ -540,7 +542,9 @@ class ProjectStore:
             for path, _, ours in planned:
                 if ours:
                     self._make_root(path)
-            project = await self._insert(project_id, label, settings or ProjectSettings(), [(path, spec) for path, spec, _ in planned])
+            project = await self._insert(project_id, label, settings or ProjectSettings(),
+                                         [(path, spec) for path, spec, _ in planned],
+                                         initial_goal=initial_goal, confirmation_ask_id=confirmation_ask_id)
             await self.list()
         return project
 
@@ -560,7 +564,9 @@ class ProjectStore:
             await self.list()
             return project
 
-    async def _insert(self, project_id: str, name: str, settings: ProjectSettings, folders: Sequence[tuple[Path, FolderSpec]]) -> Project:
+    async def _insert(self, project_id: str, name: str, settings: ProjectSettings,
+                      folders: Sequence[tuple[Path, FolderSpec]], *, initial_goal: str = "",
+                      confirmation_ask_id: str | None = None) -> Project:
         """One project row and its folders, in one transaction.
 
         The system flag is written to its own column as well as into the settings blob: the column
@@ -590,14 +596,45 @@ class ProjectStore:
                 )
             )
         async with self._db.transaction() as conn:
+            if initial_goal and not confirmation_ask_id:
+                raise ProjectError("an initial operator goal needs its confirmed project request")
+            if confirmation_ask_id:
+                ask = await (await conn.execute("SELECT kind,resolved_by,detail_json,resolution_json FROM asks"
+                                                " WHERE id = ?", (confirmation_ask_id,))).fetchone()
+                if ask is None or ask["kind"] != "project" or ask["resolved_by"] != "operator":
+                    raise ProjectError("the project request has no operator confirmation")
+                detail = json.loads(ask["detail_json"])
+                resolution = json.loads(ask["resolution_json"] or "{}")
+                if (resolution.get("allow") is not True or detail.get("name") != name
+                        or str(detail.get("goal") or "") != initial_goal):
+                    raise ProjectError("the confirmed project request changed before creation")
+                confirmed_folders = detail.get("folders") or []
+                if confirmed_folders:
+                    requested = [
+                        (normalise_root(str(folder.get("path") or "")),
+                         str(folder.get("env") or self.local_env),
+                         str(folder.get("label") or "").strip(), bool(folder.get("readonly")))
+                        for folder in confirmed_folders
+                    ]
+                    actual = [(folder.path, folder.env, folder.label, folder.readonly) for folder in made]
+                    if requested != actual:
+                        raise ProjectError("the project folders differ from the operator's confirmation")
+                elif folders and (self._managed_root is None or
+                                  not all(folder.path == self._managed_root / project_id for folder in made)):
+                    raise ProjectError("the project folders differ from the operator's confirmation")
             await conn.execute(
                 "INSERT INTO projects(id, name, created_at, settings, system) VALUES (?, ?, ?, ?, ?)",
                 (project_id, name, created.isoformat(), json.dumps(settings.dump()), settings.system),
             )
-            await conn.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at)"
-                               " VALUES (?,1,'','system',?)", (project_id, created.isoformat()))
+            await conn.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,origin_ref,created_at)"
+                               " VALUES (?,1,?,?,?,?)",
+                               (project_id, initial_goal, "operator" if confirmation_ask_id else "system",
+                                confirmation_ask_id or "", created.isoformat()))
             await conn.execute("INSERT INTO planning_budgets(project_id,goal_contract_revision,max_depth,max_tasks,max_tokens)"
                                " VALUES (?,1,3,50,100000)", (project_id,))
+            if initial_goal:
+                await conn.execute("INSERT INTO project_briefs(project_id,section,body,updated_at,updated_by)"
+                                   " VALUES (?,'goals',?,?,'operator')", (project_id, initial_goal, created.isoformat()))
             for folder in made:
                 await conn.execute(
                     "INSERT INTO project_folders(id, project_id, path, label, env, is_git, readonly, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",

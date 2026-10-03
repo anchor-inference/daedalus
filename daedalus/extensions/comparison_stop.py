@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.effects import EffectOutcome, EffectResolution
 from daedalus.host.events import AppEvent
-from daedalus.stores.comparison_funding import physical_exit_in
 from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope, now, one
 from daedalus.stores.outbox import Claim, OutboxStore
+from daedalus.stores.runtime_release import physical_exit_in
 
 if TYPE_CHECKING:
     from daedalus.app import Application

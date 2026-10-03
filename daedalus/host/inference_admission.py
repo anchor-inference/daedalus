@@ -14,6 +14,7 @@ from protocore.contracts.llm import LLMProviderError, LLMRequest
 
 from daedalus.providers.openai_compat import ProviderEndpoint, ProviderVerdict
 from daedalus.providers.pricing import ModelPricing, complete_usage
+from daedalus.stores.comparison_funding import PairAllocation
 from daedalus.stores.control import ControlDenied, canonical, one
 from daedalus.stores.inference_budget import BudgetRefused, Constraint, InferenceBudget, microusd
 
@@ -68,7 +69,6 @@ class HostInferenceAdmission:
     async def quote_for_member_in(self, conn: Any, staff_id: str, *, slot_id: str, slot: int,
                                   allowance_microusd: int) -> Any:
         """Resolve the selected staff preset once; a comparison cannot spend on a fallback rung."""
-        from daedalus.stores.comparison_funding import PairAllocation
 
         member = await one(conn, 'SELECT harness,model,archived_at FROM staff WHERE id = ?', (staff_id,))
         if member is None or member['harness'] != 'daedalus' or member['archived_at']:
