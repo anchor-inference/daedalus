@@ -17,9 +17,13 @@ from protocore.contracts.llm import LLMRequest, ProviderDelta
 from daedalus.config import Settings
 from daedalus.extensions import wakeups
 from daedalus.extensions.api import build_app
+from daedalus.extensions.effects import EffectDispatcher
 from daedalus.extensions.orchestrator_ops import Refused
+from daedalus.extensions.recurring import Recurring, RecurringEffect
 from daedalus.extensions.scheduler import Scheduler
+from daedalus.stores.control import Principal
 from daedalus.stores.database import Database
+from daedalus.stores.outbox import OutboxStore
 from tests.support.waiting import until_await
 from tests.unit.test_orchestrator import Rig, _idle, events, events_messages, rig
 from tests.unit.test_session_runner import ScriptedProvider
@@ -46,7 +50,28 @@ def with_scheduler(r: Rig) -> Scheduler:
     # The database housekeeping has its own tests; here it would only slow the tick down.
     scheduler._maintained_at = datetime.now(UTC)
     app.extensions["scheduler"] = scheduler
+    app.extensions["recurring"] = Recurring(app)
+    dispatcher = app.extensions.get("effects") or EffectDispatcher(OutboxStore(app.db))
+    effect = RecurringEffect(app)
+    for kind in ("agent", "message", "lazy", "wake"):
+        dispatcher.register(f"schedule.{kind}", effect)
+    app.extensions["effects"] = dispatcher
     return scheduler
+
+
+async def approve_wakeup(r: Rig, wakeup_id: str) -> None:
+    revision = await r.manager.db.fetchone(
+        "SELECT revision FROM domain_collection_revisions WHERE scope_kind='project' AND scope_id=?",
+        (r.project.id,),
+    )
+    schedule = await r.manager.db.fetchone("SELECT schedule_revision FROM schedules WHERE id = ?", (wakeup_id,))
+    await r.team.app.extensions["recurring"].approve(
+        Principal("operator:1", "operator"), wakeup_id,
+        expires_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        expected_collection_revision=revision["revision"],
+        expected_schedule_revision=schedule["schedule_revision"],
+        client_operation_id=f"approve-{wakeup_id}-{schedule['schedule_revision']}",
+    )
 
 
 async def make_due(db: Database, wakeup_id: str) -> None:
@@ -69,6 +94,8 @@ async def test_wake_me_wakes_the_scripted_orchestrator_with_its_note_once(settin
         await until_await(lambda: _idle(r.manager, sid), "the first turn ended")
         [wakeup] = await wakeups.wakeups(r.team.app, r.project.id)
         assert wakeup["note"] == "Check whether Ada's migration finished" and wakeup["set_by"] == "orchestrator"
+        assert wakeup["authority_state"] == "needs_approval"
+        await approve_wakeup(r, wakeup["id"])
         due = datetime.fromisoformat(wakeup["next_run_at"]) - datetime.now(UTC)
         assert timedelta(seconds=30) < due <= timedelta(minutes=1)
         assert f"[{wakeup['id']}]" in await r.orch.project_state(await r.refreshed(), session_id=sid)
@@ -78,9 +105,10 @@ async def test_wake_me_wakes_the_scripted_orchestrator_with_its_note_once(settin
         await make_due(db, wakeup["id"])
         await scheduler.tick()
         await scheduler.tick()
+        await until_await(lambda: events(r.manager, "schedule.fired"), "the approved wake effect completed")
         [fired] = await events(r.manager, "schedule.fired")
         assert fired.project_id == r.project.id and fired.session_id is None
-        assert fired.payload == {"schedule_id": wakeup["id"], "name": wakeup["note"], "kind": "wake", "note": wakeup["note"], "set_by": "orchestrator"}
+        assert fired.payload["schedule_id"] == wakeup["id"] and fired.payload["kind"] == "wake"
 
         async def woken() -> bool:
             return bool(await events_messages(r.manager, sid)) and await _idle(r.manager, sid)
@@ -120,10 +148,12 @@ async def test_a_wake_up_reaches_a_busy_orchestrator(settings: Settings, db: Dat
         sid = project.settings.orchestrator.session_id
         wakeup = await wakeups.set_wakeup(r.team.app, project, note="Is the build green?", in_minutes=5)
         assert wakeup["set_by"] == "operator"
+        await approve_wakeup(r, wakeup["id"])
         await r.manager.submit(sid, "Plan the week")
         await held.started.wait()
         await make_due(db, wakeup["id"])
         await scheduler.tick()
+        await until_await(lambda: events(r.manager, "schedule.fired"), "the approved wake effect completed")
         assert (await r.orch.target_state(r.project.id)) == "running"
 
         async def delivered() -> bool:
@@ -145,9 +175,11 @@ async def test_cron_advances_and_the_bounds_hold(settings: Settings, db: Databas
         sid = project.settings.orchestrator.session_id
         app = r.team.app
         daily = await wakeups.set_wakeup(app, project, note="Morning round", cron="0 7 * * *", by_session=sid)
+        await approve_wakeup(r, daily["id"])
         first = daily["next_run_at"]
         await make_due(db, daily["id"])
         await scheduler.tick()
+        await until_await(lambda: events(r.manager, "schedule.fired"), "the approved wake effect completed")
         [again] = await wakeups.wakeups(app, r.project.id)
         assert again["enabled"] and again["next_run_at"] > datetime.now(UTC).isoformat() and again["next_run_at"][:10] >= first[:10]
         assert len(await events(r.manager, "schedule.fired")) == 1
@@ -184,11 +216,13 @@ async def test_cancel_and_the_tool_refusals(settings: Settings, db: Database, tm
         project = await r.orch.enable(r.project.id)
         sid = project.settings.orchestrator.session_id
         said = await r.call(sid, "wake_me", note="Look at the queue", at=(datetime.now(UTC) + timedelta(hours=2)).isoformat())
-        assert said.startswith("wake-up set: [") and "Unwatch(" in said
+        assert said.startswith("wake-up saved: [") and "needs operator approval" in said
         [wakeup] = await wakeups.wakeups(r.team.app, r.project.id)
         with pytest.raises(Refused, match="has no wake-up or watch 'nope'"):
             await r.call(sid, "unwatch", id="nope", client_operation_id="missing-wakeup")
-        assert await r.call(sid, "unwatch", id=wakeup["id"], client_operation_id="cancel-wakeup") == f"wake-up {wakeup['id']} cancelled"
+        with pytest.raises(Refused, match="needs operator approval"):
+            await r.call(sid, "unwatch", id=wakeup["id"], client_operation_id="cancel-wakeup")
+        assert await wakeups.cancel(r.team.app, r.project.id, wakeup["id"], principal=Principal("operator:1", "operator"))
         assert await wakeups.wakeups(r.team.app, r.project.id) == []
         with pytest.raises(Refused, match="already passed"):
             await r.call(sid, "wake_me", note="late", at="2000-01-01T00:00")
@@ -216,19 +250,16 @@ async def test_a_replaced_or_restarted_orchestrator_receives_its_predecessors_wa
         assert [w["id"] for w in await wakeups.wakeups(r.team.app, r.project.id)] == [wakeup["id"]]
         second = await db.fetchone("SELECT * FROM schedules WHERE id = ?", (wakeup["id"],))
         assert second is not None
-        await scheduler.fire(dict(second), advance=False)
+        with pytest.raises(ValueError, match="explicit operator command"):
+            await scheduler.fire(dict(second), advance=False)
         assert await events(r.manager, "schedule.fired") == []
-        assert r.team.app.notifications.posted[-1].kind == "wake_dropped"
 
         # On again: the new holder of the office gets the wake-ups set before.
         third = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
         assert third not in (old, new)
         row = await db.fetchone("SELECT target_session FROM schedules WHERE id = ?", (wakeup["id"],))
         assert row is not None and row["target_session"] == third
-        await make_due(db, wakeup["id"])
-        await scheduler.tick()
-        [fired] = await events(r.manager, "schedule.fired")
-        assert fired.project_id == r.project.id and fired.payload["set_by"] == "orchestrator"
+        assert await events(r.manager, "schedule.fired") == []
     finally:
         await r.manager.close()
 

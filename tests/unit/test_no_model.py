@@ -205,10 +205,20 @@ async def scheduled_tick_on_a_modelless_install(i: Install) -> str:
     means. Counted as a start failure, a fresh install would lose every schedule it ships before
     anyone had configured a model, and adding one later would not bring them back.
     """
+    from daedalus.extensions.recurring import Recurring
     from daedalus.extensions.scheduler import Scheduler
+    from daedalus.stores.control import Principal
 
     scheduler = Scheduler(i.app)
-    await scheduler.create(name="daily", prompt="check the mail", cron="* * * * *", run_at=None)
+    created = await scheduler.create(name="daily", prompt="check the mail", cron="* * * * *", run_at=None)
+    i.app.extensions["recurring"] = Recurring(i.app)
+    revision = await i.db.fetchone("SELECT revision FROM domain_collection_revisions WHERE scope_kind='global' AND scope_id='global'")
+    await i.app.extensions["recurring"].approve(
+        Principal("operator:1", "operator"), created["id"],
+        expires_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        expected_collection_revision=revision["revision"], expected_schedule_revision=1,
+        client_operation_id="no-model-approval",
+    )
     await i.db.execute("UPDATE schedules SET next_run_at = ?", ((datetime.now(UTC) - timedelta(minutes=1)).isoformat(),))
     for _ in range(i.config.scheduler.max_failures + 1):
         await i.db.execute("UPDATE schedules SET next_run_at = ?", ((datetime.now(UTC) - timedelta(minutes=1)).isoformat(),))

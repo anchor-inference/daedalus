@@ -22,6 +22,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
 
+from daedalus.stores.control import Principal
+
 if TYPE_CHECKING:
     from daedalus.app import Application
     from daedalus.stores.projects import Project
@@ -178,6 +180,7 @@ def view(row: dict[str, Any]) -> dict[str, Any]:
         "next_run_at": row.get("next_run_at"),
         "last_run_at": row.get("last_run_at"),
         "enabled": bool(row.get("enabled")),
+        "authority_state": row.get("authority_state", "needs_approval"),
         "set_by": "orchestrator" if row.get("created_by_session") else "operator",
         "created_at": row.get("created_at"),
     }
@@ -194,18 +197,34 @@ async def wakeups(app: Application, project_id: str, *, include_done: bool = Fal
     return [view(dict(r)) for r in rows]
 
 
-async def cancel(app: Application, project_id: str, wakeup_id: str) -> bool:
-    """Remove one of the project's wake-ups; False when the project has no such wake-up."""
+async def cancel(app: Application, project_id: str, wakeup_id: str, *,
+                 principal: Principal | None = None, by_session: str | None = None) -> bool:
+    """Remove a wake through the operator's durable schedule command."""
     row = await app.db.fetchone(
-        f"SELECT sc.id FROM schedules sc JOIN sessions s ON s.id = sc.target_session WHERE sc.id = ? AND sc.kind = 'wake' AND {_OF_PROJECT}",
+        f"SELECT sc.id,sc.schedule_revision,sc.deleted_at FROM schedules sc JOIN sessions s ON s.id = sc.target_session WHERE sc.id = ? AND sc.kind = 'wake' AND {_OF_PROJECT}",
         (wakeup_id, project_id),
     )
     if row is None:
         return False
-    scheduler: Any = app.extensions.get("scheduler")
-    if scheduler is not None:
-        return bool(await scheduler.delete(wakeup_id))
-    await app.db.execute("DELETE FROM schedules WHERE id = ?", (wakeup_id,))
+    if row["deleted_at"]:
+        return True
+    if by_session is not None or principal is None or principal.origin_class != "operator":
+        raise WakeupRefused("removing a standing wake-up needs operator approval in the app")
+    recurring: Any = app.extensions.get("recurring")
+    if recurring is None:
+        raise WakeupRefused("durable scheduling is unavailable")
+    revision = await app.db.fetchone(
+        "SELECT revision FROM domain_collection_revisions WHERE scope_kind='project' AND scope_id=?",
+        (project_id,),
+    )
+    if revision is None:
+        raise WakeupRefused("the project no longer exists")
+    await recurring.remove(
+        principal, wakeup_id,
+        expected_collection_revision=int(revision["revision"]),
+        expected_schedule_revision=int(row["schedule_revision"]),
+        client_operation_id=f"wake-remove:{wakeup_id}:{row['schedule_revision']}",
+    )
     return True
 
 
@@ -222,7 +241,8 @@ async def repoint(app: Application, project_id: str, session_id: str) -> None:
 def describe(wakeup: dict[str, Any]) -> str:
     """One line for the orchestrator: id, when, note."""
     when = f"cron {wakeup['cron']} (UTC)" if wakeup.get("cron") else f"at {str(wakeup.get('next_run_at') or wakeup.get('at') or '')[:16].replace('T', ' ')} UTC"
-    return f"[{wakeup['id']}] {when} — {wakeup['note']} (set by the {wakeup['set_by']})"
+    approval = "ready" if wakeup.get("authority_state") == "current" else "needs operator approval"
+    return f"[{wakeup['id']}] {when} — {wakeup['note']} (set by the {wakeup['set_by']}; {approval})"
 
 
 __all__ = ["NOTE_MAX", "TICK_NOTE", "WakeupRefused", "cancel", "count", "describe", "repoint", "resolve_when", "set_wakeup", "view", "wakeups"]

@@ -923,7 +923,7 @@ async def wake_me(orch: Orchestrators, project: Project, session_id: str, *, not
     except wakeups.WakeupRefused as exc:
         raise Refused(str(exc)) from exc
     await orch._changed(project.id, "wakeups", "orchestrator")
-    return f"wake-up set: {wakeups.describe(wakeup)}. When it fires you are woken with the note; Unwatch(\"{wakeup['id']}\") cancels it."
+    return f"wake-up saved: {wakeups.describe(wakeup)}. It can fire only after the operator approves the standing schedule in the app."
 
 
 def _watches(orch: Orchestrators) -> Any:
@@ -975,7 +975,11 @@ async def unwatch(orch: Orchestrators, project: Project, session_id: str, *, id:
             client_operation_id=client_operation_id,
         )
         return f"watch {ref} removed"
-    if await wakeups.cancel(orch.app, project.id, ref):
+    try:
+        removed = await wakeups.cancel(orch.app, project.id, ref, by_session=session_id)
+    except wakeups.WakeupRefused as exc:
+        raise Refused(str(exc)) from exc
+    if removed:
         await orch._changed(project.id, "wakeups", "orchestrator")
         return f"wake-up {ref} cancelled"
     raise Refused(f"{project.name} has no wake-up or watch {ref!r}; the state block lists them with their ids")

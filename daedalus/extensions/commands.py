@@ -367,27 +367,9 @@ async def run_command(app: Application, session_id: str, line: str) -> str:  # n
             f" · next {s['next_run_at'] or '-'}" + (f" · failures {s['failure_count']}" if s.get("failure_count") else "") + (" · running" if s["id"] in scheduler._active else "")
             for s in items
         ]
-        return "\n".join(lines) + "\n\n/schedule delete <id> · /schedule on|off <id> · /schedule run <id>"
+        return "\n".join(lines) + "\n\nOpen Schedules in the app to review and change an action."
     if name == "schedule":
-        scheduler = app.extensions.get("scheduler")
-        if scheduler is None:
-            return "The scheduler is not installed."
-        parts = args.split()
-        if len(parts) == 2 and parts[0] == "delete":
-            return "deleted" if await scheduler.delete(parts[1]) else "no such schedule"
-        if len(parts) == 2 and parts[0] in ("on", "off"):
-            await scheduler.set_enabled(parts[1], parts[0] == "on")
-            return f"{parts[1]}: {parts[0]}"
-        if len(parts) == 2 and parts[0] == "run":
-            row = await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (parts[1],))
-            if row is None:
-                return "no such schedule"
-            try:
-                started = await scheduler.fire(dict(row), advance=False)
-            except RuntimeError as exc:
-                return str(exc)
-            return f"started session {started}" if started else "fired"
-        return "usage: /schedule delete <id> | on <id> | off <id> | run <id>"
+        return "Open Schedules in the app to approve, change or run an action with a receipt."
     if name == "intents":
         inbound = app.extensions.get("inbound")
         if inbound is None:

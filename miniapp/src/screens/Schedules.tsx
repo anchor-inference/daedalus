@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { api, Schedule } from "../api";
+import { useMemo, useRef, useState } from "react";
+import { api, ApiError, Schedule } from "../api";
 import { Pill, Skeleton } from "../ui/components";
 import { OverflowMenu, Sheet } from "../ui/dialogs";
 import { absTime, cronFor, describeCron, describeSchedule, relTime, untilShort } from "../format";
@@ -27,11 +27,26 @@ function lastOutcome(s: Schedule): { status: string; word: string } | null {
 
 const kindWord = (kind: Schedule["kind"]) => t(`sched.kind.${kind}`);
 
+type Cycle = { id: string; due_at: string; kind: string; effect_state: string | null; action_state: string; effect_error: string | null };
+type CycleHistory = { schedule_revision: number; authority_state: string; collection_revision: number | null; scope: { kind: string; id: string }; cycles: Cycle[] };
+
+function scheduleRevision(s: Schedule): number {
+  if (!Number.isInteger(s.schedule_revision)) throw new Error(t("sched.approval.refresh"));
+  return s.schedule_revision!;
+}
+
 export function SchedulesScreen({ toast, onOpen, selected }: { toast: (t: string) => void; onOpen: (id: string) => void; selected?: string | null }) {
   const { data: items, error, loading, refresh } = useQuery<Schedule[]>("/api/schedules", { pollMs: 30000, staleMs: 5000 });
   const titles = useSessionTitles();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Schedule | null>(null);
+  const pending = useRef<Record<string, { fingerprint: string; id: string }>>({});
+  const operationId = (key: string, body: unknown) => {
+    const fingerprint = JSON.stringify(body);
+    if (pending.current[key]?.fingerprint !== fingerprint) pending.current[key] = { fingerprint, id: crypto.randomUUID() };
+    return pending.current[key].id;
+  };
+  const history = async (s: Schedule) => api.get<CycleHistory>(`/api/recurring/${encodeURIComponent(s.id)}/cycles`);
   const reload = () => {
     refresh();
     invalidate("/api/schedules");
@@ -49,29 +64,43 @@ export function SchedulesScreen({ toast, onOpen, selected }: { toast: (t: string
   async function remove(s: Schedule) {
     if (!(await confirmAsync(t("sched.delete.title", { name: s.name }), { body: t(s.cron ? "sched.delete.body.cron" : "sched.delete.body.once"), action: t("sched.delete.action") }))) return;
     try {
-      await api.delete(`/api/schedules/${s.id}`);
+      const current = await history(s);
+      if (current.collection_revision == null) throw new Error(t("sched.approval.refresh"));
+      const body = { expected_schedule_revision: scheduleRevision(s), expected_collection_revision: current.collection_revision };
+      await api.post(`/api/recurring/${encodeURIComponent(s.id)}/remove`, { ...body, client_operation_id: operationId(`${s.id}:remove`, body) });
+      delete pending.current[`${s.id}:remove`];
       if (selected === s.id) navigate(pathFor("schedules"), { replace: true });
       reload();
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) { delete pending.current[`${s.id}:remove`]; reload(); }
       toast(errorText(e));
     }
   }
   async function runNow(s: Schedule) {
     try {
-      const r = await api.post<{ session_id: string }>(`/api/schedules/${s.id}/run`);
-      toast(t("sched.started"));
+      const current = await history(s);
+      if (current.collection_revision == null) throw new Error(t("sched.approval.refresh"));
+      const body = { expected_schedule_revision: scheduleRevision(s), expected_collection_revision: current.collection_revision };
+      await api.post(`/api/recurring/${encodeURIComponent(s.id)}/run`, { ...body, client_operation_id: operationId(`${s.id}:run`, body) });
+      delete pending.current[`${s.id}:run`];
+      toast(t("sched.queued"));
       reload();
-      if (r.session_id) onOpen(r.session_id);
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) { delete pending.current[`${s.id}:run`]; reload(); }
       toast(errorText(e));
     }
   }
   async function setEnabled(s: Schedule, enabled: boolean) {
     try {
-      await api.patch(`/api/schedules/${s.id}`, { enabled });
+      const current = await history(s);
+      if (current.collection_revision == null) throw new Error(t("sched.approval.refresh"));
+      const body = { enabled, expected_schedule_revision: scheduleRevision(s), expected_collection_revision: current.collection_revision };
+      await api.patch(`/api/recurring/${encodeURIComponent(s.id)}`, { ...body, client_operation_id: operationId(`${s.id}:enabled`, body) });
+      delete pending.current[`${s.id}:enabled`];
       toast(t(enabled ? "sched.resumed" : "sched.pausedtoast"));
       reload();
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) { delete pending.current[`${s.id}:enabled`]; reload(); }
       toast(errorText(e));
     }
   }
@@ -94,6 +123,7 @@ export function SchedulesScreen({ toast, onOpen, selected }: { toast: (t: string
           </div>
           <div className="erow-meta">
             <span>{kindWord(s.kind)}</span>
+            {s.authority_state === "needs_approval" && <><span className="sep">·</span><span>{t("sched.approval.needed")}</span></>}
             {s.run_in === "self" && target && <span className="sep">·</span>}
             {s.run_in === "self" && target && <span>{t("sched.in", { name: target })}</span>}
             {s.last_run_at && <span className="sep">·</span>}
@@ -161,6 +191,7 @@ export function SchedulesScreen({ toast, onOpen, selected }: { toast: (t: string
           {open.last_run_at && <div className="kv"><span>{t("sched.lastrun")}</span><b>{absTime(open.last_run_at)}{open.failure_count ? ` · ${t("sched.failed", { n: open.failure_count })}` : ""}</b></div>}
           <div className="kv"><span>{t("sched.kind")}</span><b>{kindWord(open.kind)}{open.run_in === "self" ? t("sched.kind.in", { name: (open.target_session && titles[open.target_session]) || t("sched.kind.itssession") }) : open.kind === "agent" ? t("sched.kind.own") : ""}</b></div>
           {open.last_error && <div className="kv"><span>{t("sched.lasterror")}</span><b style={{ color: "var(--bad)" }}>{open.last_error}</b></div>}
+          <RecurringInspection schedule={open} toast={toast} reload={reload} />
           <section className="sheet-section">
             <div className="sheet-section-title">{t(open.kind === "agent" ? "sched.instruction" : "sched.text")}</div>
             <div className="proposal-text">{open.prompt}</div>
@@ -181,6 +212,72 @@ export function SchedulesScreen({ toast, onOpen, selected }: { toast: (t: string
   );
 }
 
+function RecurringInspection({ schedule, toast, reload }: { schedule: Schedule; toast: (text: string) => void; reload: () => void }) {
+  const path = `/api/recurring/${encodeURIComponent(schedule.id)}/cycles`;
+  const { data, error, refresh } = useQuery<CycleHistory>(path, { pollMs: 30000, staleMs: 5000 });
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [expiresAt] = useState(() => new Date(Date.now() + 30 * 86400000).toISOString());
+  const pending = useRef<{ fingerprint: string; id: string } | null>(null);
+  const operationId = (body: unknown) => {
+    const fingerprint = JSON.stringify(body);
+    if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, id: crypto.randomUUID() };
+    return pending.current.id;
+  };
+  async function approve() {
+    if (!data?.collection_revision) return;
+    const body = { expires_at: expiresAt, expected_schedule_revision: data.schedule_revision, expected_collection_revision: data.collection_revision };
+    setBusy(true);
+    try {
+      await api.post(`/api/recurring/${encodeURIComponent(schedule.id)}/approve`, { ...body, client_operation_id: operationId(body) });
+      pending.current = null;
+      refresh(); reload();
+      toast(t("sched.approval.saved"));
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) { pending.current = null; refresh(); reload(); }
+      toast(errorText(e));
+    } finally { setBusy(false); }
+  }
+  async function reconcile(cycle: Cycle, outcome: "delivered" | "not_delivered") {
+    if (!data?.collection_revision || !reason.trim()) return;
+    const body = { outcome, reason: reason.trim(), expected_collection_revision: data.collection_revision };
+    setBusy(true);
+    try {
+      await api.post(`/api/recurring/${encodeURIComponent(schedule.id)}/cycles/${encodeURIComponent(cycle.id)}/reconcile`, { ...body, client_operation_id: operationId({ cycle_id: cycle.id, ...body }) });
+      pending.current = null;
+      setReason(""); refresh(); reload();
+      toast(t("sched.cycle.reconciled"));
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) { pending.current = null; refresh(); reload(); }
+      toast(errorText(e));
+    } finally { setBusy(false); }
+  }
+  return <section className="sheet-section">
+    <div className="sheet-section-title">{t("sched.approval.title")}</div>
+    {error && <div className="sub">{t("sched.approval.readfailed")}</div>}
+    {data && <>
+      <div className="kv"><span>{t("sched.approval.state")}</span><b>{t(data.authority_state === "current" ? "sched.approval.current" : "sched.approval.needed")}</b></div>
+      {data.authority_state === "needs_approval" && <>
+        <div className="sub">{t("sched.approval.expires", { at: absTime(expiresAt) })}</div>
+        <button className="btn primary" disabled={busy} onClick={approve}>{t("sched.approval.action")}</button>
+      </>}
+      <div className="sheet-section-title">{t("sched.cycle.title")}</div>
+      {data.cycles.length === 0 && <div className="sub">{t("sched.cycle.empty")}</div>}
+      {data.cycles.map((cycle) => <div key={cycle.id} className="schedule-cycle">
+        <div className="kv"><span>{absTime(cycle.due_at)}</span><b>{t(`sched.cycle.${cycle.effect_state === "unknown" ? "unknown" : cycle.effect_state === "completed" ? "completed" : cycle.effect_state === "failed" || cycle.effect_state === "cancelled" ? "failed" : cycle.action_state === "skipped" ? "skipped" : "pending"}`)}</b></div>
+        {cycle.effect_state === "unknown" && <>
+          <div className="sub">{t("sched.cycle.unknown.hint")}</div>
+          <input className="field" value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("sched.cycle.reason")} />
+          <div className="row-actions">
+            <button className="btn" disabled={busy || !reason.trim()} onClick={() => reconcile(cycle, "delivered")}>{t("sched.cycle.confirmed")}</button>
+            <button className="btn" disabled={busy || !reason.trim()} onClick={() => reconcile(cycle, "not_delivered")}>{t("sched.cycle.notdelivered")}</button>
+          </div>
+        </>}
+      </div>)}
+    </>}
+  </section>;
+}
+
 type When = "once" | "daily" | "weekdays" | "weekly" | "hours" | "cron";
 /** Monday first, the way a week is picked here; the cron field counts from Sunday. */
 const DAYS = [1, 2, 3, 4, 5, 6, 0];
@@ -188,7 +285,7 @@ const DAYS = [1, 2, 3, 4, 5, 6, 0];
 /** When, in the reader's own clock: a moment, a daily or weekly time, or every few hours; cron stays for the rest. */
 function ScheduleForm({ existing, onClose, onSaved, toast }: { existing?: Schedule; onClose: () => void; onSaved: () => void; toast: (t: string) => void }) {
   const [name, setName] = useState(existing?.name ?? "");
-  const [kind, setKind] = useState<"agent" | "message">(existing?.kind === "message" ? "message" : "agent");
+  const [kind, setKind] = useState<Schedule["kind"]>(existing?.kind ?? "agent");
   const [prompt, setPrompt] = useState(existing?.prompt ?? "");
   const [when, setWhen] = useState<When>(existing?.cron ? "cron" : "once");
   const [date, setDate] = useState(() => (existing?.run_at ? new Date(existing.run_at) : new Date(Date.now() + 3600000)).toLocaleDateString("en-CA"));
@@ -197,6 +294,8 @@ function ScheduleForm({ existing, onClose, onSaved, toast }: { existing?: Schedu
   const [every, setEvery] = useState("2");
   const [cron, setCron] = useState(existing?.cron ?? "");
   const [busy, setBusy] = useState(false);
+  const [expiresAt] = useState(() => new Date(Date.now() + 30 * 86400000).toISOString());
+  const pending = useRef<{ fingerprint: string; body: Record<string, unknown>; id: string; approvalId?: string } | null>(null);
   const [h, m] = time.split(":").map(Number);
 
   const built = (() => {
@@ -215,11 +314,33 @@ function ScheduleForm({ existing, onClose, onSaved, toast }: { existing?: Schedu
   async function save() {
     setBusy(true);
     try {
-      if (existing) await api.patch(`/api/schedules/${existing.id}`, { name: name.trim(), prompt: prompt.trim(), cron: built.cron, run_at: built.run_at });
-      else await api.post("/api/schedules", { name: name.trim(), prompt: prompt.trim(), cron: built.cron, run_at: built.run_at, kind });
+      const fields = { name: name.trim(), prompt: prompt.trim(), cron: built.cron, run_at: built.run_at };
+      const fingerprint = JSON.stringify({ ...fields, kind, schedule: existing?.id, expiresAt });
+      if (pending.current?.fingerprint !== fingerprint) {
+        await api.post("/api/recurring/preview", { ...fields, kind, project_id: existing?.project_id ?? null, target_session: existing?.target_session ?? null });
+        const revision = existing
+          ? (await api.get<CycleHistory>(`/api/recurring/${encodeURIComponent(existing.id)}/cycles`)).collection_revision
+          : (await api.get<{ global_collection_revision: number | null }>("/api/recurring/overview")).global_collection_revision;
+        if (!revision) throw new Error(t("sched.approval.refresh"));
+        pending.current = { fingerprint, body: { ...fields, expected_collection_revision: revision,
+          ...(existing ? { expected_schedule_revision: scheduleRevision(existing) } : { kind, project_id: null, target_session: null, expires_at: expiresAt }) }, id: crypto.randomUUID() };
+      }
+      const intent = pending.current;
+      if (existing) {
+        const changed = await api.patch<{ entity_revision: number; schedule_revision: number }>(`/api/recurring/${encodeURIComponent(existing.id)}`, { ...intent.body, client_operation_id: intent.id });
+        if (!intent.approvalId) intent.approvalId = crypto.randomUUID();
+        await api.post(`/api/recurring/${encodeURIComponent(existing.id)}/approve`, {
+          expires_at: expiresAt, expected_collection_revision: changed.entity_revision,
+          expected_schedule_revision: changed.schedule_revision, client_operation_id: intent.approvalId,
+        });
+      } else {
+        await api.post("/api/recurring", { ...intent.body, client_operation_id: intent.id });
+      }
+      pending.current = null;
       toast(t(existing ? "sched.saved" : "sched.created"));
       onSaved();
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) pending.current = null;
       toast(errorText(e));
     } finally {
       setBusy(false);
@@ -241,6 +362,7 @@ function ScheduleForm({ existing, onClose, onSaved, toast }: { existing?: Schedu
       )}
       <label className="field">{t(kind === "agent" ? "sched.instruction" : "sched.remindertext")}</label>
       <textarea className="field" rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      <div className="sub">{t("sched.approval.expires", { at: absTime(expiresAt) })}</div>
       <label className="field">{t("sched.when")}</label>
       {/* Wrapped, not scrolled: in one scrolling row a phone showed four and a half of the six, and
           an existing Cron schedule opened with its own choice out of sight. */}

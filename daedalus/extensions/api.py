@@ -80,6 +80,7 @@ from daedalus.extensions import (
     api_project_start,
     api_projects,
     api_provider_holds,
+    api_recurring,
     api_runtime,
     api_skill_quality,
     api_staff,
@@ -522,26 +523,6 @@ class LoopActionBody(BaseModel):
 class DecisionBody(BaseModel):
     decision: str
     reason: str = ""
-
-
-class ScheduleBody(BaseModel):
-    name: str
-    prompt: str
-    cron: str | None = None
-    run_at: str | None = None
-    model: str | None = None
-    kind: str = "agent"
-    target_session: str | None = None
-    run_in: str = "new"
-
-
-class SchedulePatchBody(BaseModel):
-    name: str | None = None
-    prompt: str | None = None
-    cron: str | None = None
-    run_at: str | None = None
-    enabled: bool | None = None
-    model_config = {"extra": "forbid"}
 
 
 class NotificationsSeenBody(BaseModel):
@@ -1520,6 +1501,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_goal_budget.register(api, app, auth)
     api_provider_holds.register(api, app, auth)
     api_knowledge.register(api, app, auth)
+    api_recurring.register(api, app, auth)
     api_runtime.register(api, app, auth)
     api_lifecycle.register(api, app, auth)
     api_staff_reports.register(api, app, auth)
@@ -5409,44 +5391,6 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     async def schedules(_: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
         scheduler = app.extensions.get("scheduler")
         return await scheduler.list() if scheduler is not None else []  # type: ignore[attr-defined]
-
-    @api.post("/api/schedules")
-    async def create_schedule(body: ScheduleBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        scheduler = app.extensions.get("scheduler")
-        if scheduler is None:
-            raise HTTPException(503, "scheduler is not installed")
-        try:
-            return await scheduler.create(name=body.name, prompt=body.prompt, cron=body.cron, run_at=body.run_at, model=body.model, kind=body.kind, target_session=body.target_session, run_in=body.run_in)  # type: ignore[attr-defined]
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
-
-    @api.patch("/api/schedules/{schedule_id}")
-    async def patch_schedule(schedule_id: str, body: SchedulePatchBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        scheduler = app.extensions.get("scheduler")
-        if scheduler is None:
-            raise HTTPException(503, "scheduler is not installed")
-        fields = body.model_dump(exclude_unset=True)
-        try:
-            return await scheduler.update(schedule_id, **fields)  # type: ignore[attr-defined]
-        except KeyError as exc:
-            raise HTTPException(404, "no such schedule") from exc
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
-
-    @api.delete("/api/schedules/{schedule_id}")
-    async def delete_schedule(schedule_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        scheduler = app.extensions.get("scheduler")
-        if scheduler is None:
-            raise HTTPException(503, "scheduler is not installed")
-        return {"deleted": await scheduler.delete(schedule_id)}  # type: ignore[attr-defined]
-
-    @api.post("/api/schedules/{schedule_id}/run")
-    async def run_schedule(schedule_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        scheduler = app.extensions.get("scheduler")
-        row = await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (schedule_id,))
-        if scheduler is None or row is None:
-            raise HTTPException(404, "no such schedule")
-        return {"session_id": await scheduler.fire(dict(row))}  # type: ignore[attr-defined]
 
     # -- settings -------------------------------------------------------------------
 

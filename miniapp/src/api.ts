@@ -1269,6 +1269,9 @@ export type Schedule = {
   active_session_id?: string | null;
   failure_count: number;
   last_error: string | null;
+  authority_state?: "current" | "needs_approval";
+  schedule_revision?: number;
+  project_id?: string | null;
 };
 
 export type HeartbeatStatus = {

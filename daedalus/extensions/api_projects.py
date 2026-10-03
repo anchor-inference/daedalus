@@ -581,8 +581,11 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.delete("/api/projects/{project_id}/wakeups/{wakeup_id}")
     async def delete_wakeup(project_id: str, wakeup_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         await existing(project_id)
-        if not await wakeups.cancel(app, project_id, wakeup_id):
-            raise HTTPException(404, "no such wake-up")
+        try:
+            if not await wakeups.cancel(app, project_id, wakeup_id, principal=Principal.operator(_)):
+                raise HTTPException(404, "no such wake-up")
+        except wakeups.WakeupRefused as exc:
+            raise HTTPException(409, str(exc)) from exc
         await manager.bus.publish("project.changed", {"change": "wakeups", "actor": "operator"}, project_id=project_id)
         return {"deleted": True}
 

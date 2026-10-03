@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import sys
+from datetime import UTC, datetime, timedelta
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
@@ -20,9 +21,11 @@ from daedalus import doctor
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions import install_all
 from daedalus.extensions.notifications import NotificationService
+from daedalus.extensions.recurring import Recurring
 from daedalus.extensions.scheduler import Scheduler
 from daedalus.extensions.services import Services
 from daedalus.host.session_runner import SessionManager
+from daedalus.stores.control import Principal
 from daedalus.stores.database import Database
 
 
@@ -123,6 +126,14 @@ async def test_a_session_whose_directory_left_its_project_is_reported_not_fatal(
 async def test_a_schedule_whose_folder_is_gone_records_a_failure_instead_of_making_it(app: Any) -> None:
     scheduler = Scheduler(app)
     created = await scheduler.create(name="nightly", prompt="check the feed", cron="0 3 * * *", run_at=None, created_by_session=None)
+    app.extensions["recurring"] = Recurring(app)
+    revision = await app.db.fetchone("SELECT revision FROM domain_collection_revisions WHERE scope_kind='global' AND scope_id='global'")
+    await app.extensions["recurring"].approve(
+        Principal("operator:1", "operator"), created["id"],
+        expires_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        expected_collection_revision=revision["revision"], expected_schedule_revision=1,
+        client_operation_id="folder-approval",
+    )
     gone = app.settings.workspaces_dir / "removed-by-the-operator"
     await app.db.execute("UPDATE schedules SET workspace = ?, next_run_at = '2020-01-01T00:00:00+00:00' WHERE id = ?", (str(gone), created["id"]))
 

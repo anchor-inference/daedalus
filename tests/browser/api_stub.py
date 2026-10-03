@@ -480,6 +480,9 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
                                                       "collection_revision": 1, "entity_revision": None})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "workspace-archive":
         return 200, "application/json", json.dumps({"latest": None, "available": False})
+    if method.upper() == "GET" and len(parts) == 6 and parts[2] == "projects" and parts[4:] == ["workspace-archive", "budget-history"]:
+        return 200, "application/json", json.dumps({"state": "not_in_source", "restored": False,
+                                                      "current_available_microusd": None})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "files":
         return 200, "application/json", json.dumps({"files": []})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "focus-state":
@@ -1350,6 +1353,57 @@ class FocusStub:
             return 200, {"entries": rows, "next_before": rows[-1]["id"] if len(rows) == limit else None, "rules": self.rules}
         if path == "/api/schedules" and method == "GET":
             return 200, self.schedules
+        if path == "/api/recurring/overview" and method == "GET":
+            return 200, {"global_collection_revision": 1}
+        if path == "/api/recurring/preview" and method == "POST":
+            payload = body or {}
+            return 200, {"next_run_at": payload.get("run_at") or "2026-09-25T09:00:00Z", "timezone": "UTC",
+                         "output_contract": {"kind": payload.get("kind", "message")}, "authority": "operator approval with expiry required"}
+        if path == "/api/recurring" and method == "POST":
+            payload = body or {}
+            if not payload.get("client_operation_id") or not payload.get("expected_collection_revision"):
+                return 400, {"detail": "a command identity and revision are required"}
+            created = {"id": "scheduled-new", "name": payload["name"], "prompt": payload["prompt"],
+                       "kind": payload["kind"], "run_in": "new", "cron": payload.get("cron"),
+                       "run_at": payload.get("run_at"), "enabled": 1, "next_run_at": payload.get("run_at") or "2026-09-25T09:00:00Z",
+                       "last_run_at": None, "last_summary": None, "target_session": None, "failure_count": 0,
+                       "last_error": None, "schedule_revision": 1, "authority_state": "current", "project_id": None}
+            self.schedules.append(created)
+            return 200, {"id": created["id"], "receipt_id": payload["client_operation_id"], "schedule_revision": 1,
+                         "authority_state": "current", "entity_revision": 2}
+        if path.startswith("/api/recurring/"):
+            parts = path.split("/")
+            schedule_id = parts[3]
+            schedule = next((item for item in self.schedules if item["id"] == schedule_id), None)
+            if schedule is None:
+                return 404, {"detail": "no such schedule"}
+            if len(parts) == 5 and parts[4] == "cycles" and method == "GET":
+                return 200, {"schedule_id": schedule_id, "schedule_revision": schedule.get("schedule_revision", 1),
+                             "authority_state": schedule.get("authority_state", "needs_approval"),
+                             "collection_revision": 1, "scope": {"kind": "global", "id": "global"},
+                             "cycles": []}
+            if len(parts) == 5 and parts[4] == "approve" and method == "POST":
+                schedule["authority_state"] = "current"
+                schedule["schedule_revision"] = schedule.get("schedule_revision", 1) + 1
+                return 200, {"id": schedule_id, "schedule_revision": schedule["schedule_revision"],
+                             "authority_state": "current", "receipt_id": (body or {}).get("client_operation_id")}
+            if len(parts) == 4 and method == "PATCH":
+                schedule.update({key: value for key, value in (body or {}).items() if key in {"name", "prompt", "cron", "run_at", "enabled"}})
+                schedule["schedule_revision"] = schedule.get("schedule_revision", 1) + 1
+                schedule["authority_state"] = "needs_approval"
+                return 200, {"id": schedule_id, "schedule_revision": schedule["schedule_revision"],
+                             "authority_state": "needs_approval", "entity_revision": 2,
+                             "receipt_id": (body or {}).get("client_operation_id")}
+            if len(parts) == 5 and parts[4] == "remove" and method == "POST":
+                self.schedules.remove(schedule)
+                return 200, {"id": schedule_id, "deleted": True, "receipt_id": (body or {}).get("client_operation_id")}
+            if len(parts) == 5 and parts[4] == "run" and method == "POST":
+                return 200, {"cycle_id": "manual-cycle", "effect_id": "manual-effect", "state": "pending",
+                             "receipt_id": (body or {}).get("client_operation_id")}
+            if len(parts) == 7 and parts[4] == "cycles" and parts[6] == "reconcile" and method == "POST":
+                return 200, {"cycle_id": parts[5], "outcome": (body or {}).get("outcome"),
+                             "evidence_kind": "operator_attestation", "receipt_id": (body or {}).get("client_operation_id")}
+            return 404, {"detail": "no such recurring action"}
         if path.startswith("/api/projects/") and "/watches" in path:
             parts = path.split("/")
             pid = parts[3]
@@ -1787,7 +1841,7 @@ class FocusStub:
             {"id": 100 - i, "at": f"2026-09-24T{9 - i // 12:02d}:{59 - (i % 12) * 5:02d}:00Z", "author": kinds[i % 4][0], "kind": kinds[i % 4][1], "text": f"{kinds[i % 4][2]} ({i + 1})" if i else kinds[0][2], "refs": kinds[i % 4][3]}
             for i in range(35)
         ]
-        schedules = [{"id": "wk1", "name": words["wake.name"], "run_in": "self", "cron": None, "run_at": "2026-09-24T12:00:00Z", "prompt": words["wake.note"], "enabled": 1, "next_run_at": "2026-09-24T12:00:00Z", "last_run_at": None, "last_summary": None, "kind": "lazy", "target_session": "orch-bakery", "failure_count": 0, "last_error": None}]
+        schedules = [{"id": "wk1", "name": words["wake.name"], "run_in": "self", "cron": None, "run_at": "2026-09-24T12:00:00Z", "prompt": words["wake.note"], "enabled": 1, "next_run_at": "2026-09-24T12:00:00Z", "last_run_at": None, "last_summary": None, "kind": "lazy", "target_session": "orch-bakery", "failure_count": 0, "last_error": None, "authority_state": "needs_approval", "schedule_revision": 1, "project_id": None}]
         wakeups = [
             {"id": "wk1", "project_id": pid, "note": words["wake.note"], "cron": None, "at": "2026-09-24T12:00:00Z", "next_run_at": "2026-09-24T12:00:00Z", "last_run_at": None, "enabled": True, "set_by": "orchestrator", "created_at": "2026-09-24T09:40:00Z"},
         ]

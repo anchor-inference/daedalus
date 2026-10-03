@@ -138,6 +138,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     from daedalus.extensions.provider_resume import (
         ProviderResumeEffect,  # Lazy: the handler imports the dispatcher outcome contracts.
     )
+    from daedalus.extensions.recurring import RecurringEffect  # Lazy: the scheduler installs after the dispatcher.
     from daedalus.extensions.runtime_transfers import (
         ArtifactTransferEffect,  # Lazy: the handler imports dispatcher outcomes.
     )
@@ -156,6 +157,9 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     dispatcher.register("review.merge", MergeEffect(app))
     dispatcher.register("artifact.transfer", ArtifactTransferEffect(app))
     dispatcher.register("provider.resume", ProviderResumeEffect(app))
+    recurring = RecurringEffect(app)
+    for kind in ("agent", "message", "lazy", "wake"):
+        dispatcher.register(f"schedule.{kind}", recurring)
     app.extensions["effects"] = dispatcher
     install_authority(app)
     return [asyncio.create_task(dispatcher.run(), name="effect-dispatcher")]

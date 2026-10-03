@@ -34,7 +34,7 @@ from protocore.contracts.types import MessageRole, TextBlock
 
 from daedalus.config import NO_MODEL_MESSAGE, NoModelConfigured
 from daedalus.extensions.notifications import Category, Draft, Level, Tone
-from daedalus.transport.telegram.front import is_subagent
+from daedalus.extensions.recurring import Recurring
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -193,93 +193,26 @@ class Scheduler:
                     copied.append(str(dst))
         await self.app.db.execute(
             "INSERT INTO schedules(id, name, cron, run_at, prompt, files, model, recurring, enabled, workspace,"
-            " next_run_at, created_by_session, created_at, kind, target_session, run_in) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
+            " next_run_at, created_by_session, created_at, kind, target_session, run_in, project_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 schedule_id, name, cron, run_at, prompt, json.dumps(copied), model, recurring,
                 str(workspace), next_run.isoformat(), created_by_session, _now().isoformat(), kind,
-                target_session or created_by_session, run_in,
+                target_session or created_by_session, run_in, project.id if project is not None else None,
             ),
         )
-        return {"id": schedule_id, "name": name, "kind": kind, "run_in": run_in, "next_run_at": next_run.isoformat(), "workspace": str(workspace)}
+        return {"id": schedule_id, "name": name, "kind": kind, "run_in": run_in, "next_run_at": next_run.isoformat(),
+                "workspace": str(workspace), "authority_state": "needs_approval"}
 
     async def list(self) -> list[dict[str, Any]]:
-        rows = await self.app.db.fetchall("SELECT * FROM schedules ORDER BY next_run_at")
+        rows = await self.app.db.fetchall("SELECT * FROM schedules WHERE deleted_at IS NULL ORDER BY next_run_at")
         return [dict(r) for r in rows]
-
-    async def delete(self, schedule_id: str) -> bool:
-        row = await self.app.db.fetchone("SELECT id FROM schedules WHERE id = ?", (schedule_id,))
-        if row is None:
-            return False
-        async with self.app.db.transaction() as conn:
-            await conn.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
-            await conn.execute("DELETE FROM lazy_notes WHERE schedule_id = ? AND delivered_at IS NULL AND promoted_at IS NULL", (schedule_id,))
-        self._active.pop(schedule_id, None)
-        self._active_runs.pop(schedule_id, None)
-        return True
-
-    async def update(self, schedule_id: str, **fields: Any) -> dict[str, Any]:
-        """Change a schedule in place: its name, prompt, cadence or moment; a new cadence moves the next run."""
-        row = await self.app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (schedule_id,))
-        if row is None:
-            raise KeyError(schedule_id)
-        current = dict(row)
-        sets: list[str] = []
-        values: list[Any] = []
-        if "name" in fields and fields["name"] is not None:
-            name = str(fields["name"]).strip()
-            if not name:
-                raise ValueError("the name cannot be empty")
-            sets.append("name = ?")
-            values.append(name)
-        if "prompt" in fields and fields["prompt"] is not None:
-            prompt = str(fields["prompt"]).strip()
-            if not prompt:
-                raise ValueError("the prompt cannot be empty")
-            sets.append("prompt = ?")
-            values.append(prompt)
-        # A new moment without a cadence turns a recurring schedule into a one-off; a cadence wins when both are given.
-        cron = fields["cron"] if "cron" in fields else (None if fields.get("run_at") else current["cron"])
-        run_at = fields["run_at"] if "run_at" in fields else current["run_at"]
-        if "cron" in fields or "run_at" in fields:
-            if cron:
-                if not croniter.is_valid(cron):
-                    raise ValueError(f"invalid cron expression: {cron!r}")
-                next_run = croniter(cron, _now()).get_next(datetime)
-                run_at = None
-                recurring = 1
-            else:
-                if not run_at:
-                    raise ValueError("give either cron or run_at")
-                try:
-                    next_run = datetime.fromisoformat(str(run_at).replace("Z", "+00:00"))
-                except ValueError as exc:
-                    raise ValueError(f"invalid run_at: {run_at!r} (use ISO 8601)") from exc
-                if next_run.tzinfo is None:
-                    next_run = next_run.replace(tzinfo=UTC)
-                recurring = 0
-            sets += ["cron = ?", "run_at = ?", "recurring = ?", "next_run_at = ?"]
-            values += [cron, run_at, recurring, next_run.isoformat()]
-        if sets:
-            values.append(schedule_id)
-            await self.app.db.execute(f"UPDATE schedules SET {', '.join(sets)} WHERE id = ?", tuple(values))
-        if "enabled" in fields and fields["enabled"] is not None:
-            await self.set_enabled(schedule_id, bool(fields["enabled"]))
-        fresh = await self.app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (schedule_id,))
-        return dict(fresh) if fresh is not None else current
-
-    async def set_enabled(self, schedule_id: str, enabled: bool) -> None:
-        await self.app.db.execute(
-            "UPDATE schedules SET enabled = ?, failure_count = CASE WHEN ? THEN 0 ELSE failure_count END WHERE id = ?",
-            (int(enabled), int(enabled), schedule_id),
-        )
 
     async def service(self, op: str, **kwargs: Any) -> Any:
         if op == "create":
             return await self.create(**kwargs)
         if op == "list":
             return await self.list()
-        if op == "delete":
-            return await self.delete(kwargs["schedule_id"])
         raise ValueError(op)
 
     # -- loop -----------------------------------------------------------------------
@@ -309,11 +242,14 @@ class Scheduler:
                 continue  # a recurring task never runs in parallel with itself
             schedule = dict(row)
             try:
+                if schedule["authority_state"] != "current":
+                    continue
                 due = datetime.fromisoformat(row["next_run_at"])
                 stale = now - due > timedelta(hours=1)
                 if stale and not self.app.config.scheduler.catch_up_missed:
-                    await self._advance(schedule, ran=False)
-                    await self._post("schedule_missed", f"Missed run of '{row['name']}' skipped", f"It was due {row['next_run_at']}; catch-up is off.")
+                    cycle = await self.app.extensions["recurring"].reserve(row["id"], skip=True)
+                    if cycle is not None:
+                        await self._post("schedule_missed", f"Missed run of '{row['name']}' skipped", f"It was due {row['next_run_at']}; catch-up is off.")
                     continue
                 if stale:
                     await self._post("schedule_missed", f"Late run of '{row['name']}'", f"It was due {row['next_run_at']} (the bot was down); running now.")
@@ -323,8 +259,10 @@ class Scheduler:
                 # against: the slot is skipped, the operator is told once, and the schedule is still
                 # there when a model is added. Counted as a failure, a fresh install would switch off
                 # every schedule it ships before anyone had configured a model.
-                await self._advance(schedule, ran=False)
                 await self._post("schedule_no_model", f"'{row['name']}' was skipped", NO_MODEL_MESSAGE)
+            except PermissionError:
+                # A prior occurrence still awaiting proof keeps the clock where it is.
+                continue
             except Exception as exc:  # noqa: BLE001 — one bad task must not skip the rest of the tick
                 logger.exception("schedule %s could not fire", row["id"])
                 await self._record_start_failure(schedule, f"{type(exc).__name__}: {exc}")
@@ -388,41 +326,40 @@ class Scheduler:
         if task is not None and not task.done():
             await asyncio.gather(task, return_exceptions=True)
 
+    async def fire(self, schedule: dict[str, Any], *, advance: bool = True) -> str:
+        """Reserve an occurrence before dispatch; a manual run needs its own receipted command."""
+        if schedule["id"] in self._active:
+            raise RuntimeError(f"schedule {schedule['id']} already has a run in flight")
+        if not advance:
+            raise ValueError("a manual run requires an explicit operator command")
+        if (schedule.get("kind") or "agent") == "agent":
+            project = await self._project_of(schedule.get("target_session") or schedule.get("created_by_session"))
+            if project is None and not Path(schedule["workspace"]).is_dir():
+                raise RuntimeError(f"the folder this task runs in ({schedule['workspace']}) is not there; re-create it or point the task at a project")
+            # A missing model cannot consume a durable occurrence and advance its clock.
+            self.app.config.preset(schedule.get("model"))
+        recurring = self.app.extensions.get("recurring")
+        if recurring is None:
+            raise RuntimeError("durable recurring scheduling is not installed")
+        cycle = await recurring.reserve(schedule["id"])
+        if cycle is None:
+            raise PermissionError("this schedule needs operator approval or changed before reservation")
+        return str(cycle["id"])
+
     async def _record_start_failure(self, schedule: dict[str, Any], error: str) -> None:
-        """A run that could not even start counts as a failure and is reported; the slot was consumed."""
+        """Record a preflight refusal without consuming the due occurrence."""
         failures = int(schedule.get("failure_count") or 0) + 1
         limit = self.app.config.scheduler.max_failures
         disable = bool(schedule.get("recurring")) and failures >= limit
         await self.app.db.execute(
-            "UPDATE schedules SET failure_count = ?, last_error = ?, enabled = CASE WHEN ? THEN 0 ELSE enabled END WHERE id = ?",
+            "UPDATE schedules SET failure_count = ?,last_error = ?,enabled = CASE WHEN ? THEN 0 ELSE enabled END WHERE id = ?",
             (failures, error[:500], int(disable), schedule["id"]),
         )
         await self._post(
-            "schedule_failed",
-            f"'{schedule['name']}' could not start ({failures}/{limit})" + (" — switched off" if disable else ""),
-            error[:2000],
+            "schedule_failed", f"'{schedule['name']}' could not start ({failures}/{limit})"
+            + (" — switched off" if disable else ""), error[:2000],
             tone="error" if disable else "warning",
         )
-
-    async def fire(self, schedule: dict[str, Any], *, advance: bool = True) -> str:
-        """Run a schedule now. ``advance=False`` (a manual run) leaves the next occurrence untouched."""
-        if schedule["id"] in self._active:
-            raise RuntimeError(f"schedule {schedule['id']} already has a run in flight")
-        kind = schedule.get("kind") or "agent"
-        await self.app.db.execute("UPDATE schedules SET last_run_at = ? WHERE id = ?", (_now().isoformat(), schedule["id"]))
-        # A wake-up's event is its whole delivery and carries its project; it is published below.
-        if self.app.manager is not None and kind != "wake":
-            await self.app.manager.bus.publish("schedule.fired", {"schedule_id": str(schedule["id"]), "name": str(schedule["name"]), "kind": kind})
-        if advance:
-            # The next occurrence is fixed before dispatch so a restart cannot fire the same slot twice.
-            await self._advance(schedule, ran=True)
-        if kind == "message":
-            return await self._fire_message(schedule)
-        if kind == "lazy":
-            return await self._fire_lazy(schedule)
-        if kind == "wake":
-            return await self._fire_wake(schedule)
-        return await self._fire_agent(schedule)
 
     async def orchestrated_project(self, session_id: str | None) -> str | None:
         """The project a session is or was the orchestrator of, read from the stored row.
@@ -437,68 +374,6 @@ class Scheduler:
             (session_id,),
         )
         return str(row["project_id"]) if row is not None and row["project_id"] else None
-
-    async def _fire_wake(self, schedule: dict[str, Any]) -> str:
-        """Publish the wake-up on its project. Its orchestrator's queue delivers it at once, as a steer
-        if a turn is running; a project whose orchestrator is off has nobody to wake, and says so."""
-        manager = self.app.manager
-        assert manager is not None
-        project_id = await self.orchestrated_project(schedule.get("target_session"))
-        project = await manager.projects.get(project_id) if project_id else None
-        if project is None or not project.settings.orchestrator.enabled:
-            await self._post(
-                "wake_dropped",
-                f"A wake-up was not delivered: '{schedule['name']}'",
-                "The orchestrator it was set for is switched off." if project is not None else "The project it was set for is gone.",
-                level="quiet",
-            )
-            return ""
-        await manager.bus.publish(
-            "schedule.fired",
-            {
-                "schedule_id": str(schedule["id"]),
-                "name": str(schedule["name"]),
-                "kind": "wake",
-                "note": str(schedule.get("prompt") or ""),
-                "set_by": "orchestrator" if schedule.get("created_by_session") else "operator",
-            },
-            project_id=project.id,
-        )
-        return ""
-
-    async def _fire_message(self, schedule: dict[str, Any]) -> str:
-        """A plain reminder: deliver the text where the task was created, or to the operator channel."""
-        front = self.app.front
-        text = f"⏰ **{schedule['name']}**\n\n{schedule['prompt']}"
-        delivered = False
-        target = await self.app.manager.get_state(schedule["target_session"]) if schedule.get("target_session") and self.app.manager is not None else None
-        # A subagent's reminder stays off Telegram: the operator channel would be the chat by the
-        # back door, and a subagent speaks only through its leader. The inbox entry below records it.
-        if target is not None and is_subagent(target.metadata):
-            front = None
-        if front is not None:
-            outbox = await front.outbox_for_session(schedule["target_session"]) if schedule.get("target_session") else None
-            try:
-                if outbox is not None:
-                    await outbox.send_text(text)
-                else:
-                    await front.notify(text)
-                delivered = True
-            except Exception:  # noqa: BLE001
-                logger.warning("reminder delivery failed", exc_info=True)
-        await self._post(
-            "reminder", schedule["name"], schedule["prompt"], category="reminder", tone="info" if delivered or front is None else "warning",
-            session_id=schedule.get("target_session"), handled=frozenset({"telegram"}) if delivered else frozenset(),
-        )
-        return ""
-
-    async def _fire_lazy(self, schedule: dict[str, Any]) -> str:
-        """A silent note: it rides along with the operator's next message in the target session."""
-        await self.app.db.execute(
-            "INSERT INTO lazy_notes(schedule_id, session_id, text, fired_at) VALUES (?, ?, ?, ?)",
-            (schedule["id"], schedule["target_session"], schedule["prompt"], _now().isoformat()),
-        )
-        return ""
 
     async def pending_lazy_notes(self, session_id: str) -> list[dict[str, Any]]:
         rows = await self.app.db.fetchall("SELECT * FROM lazy_notes WHERE session_id = ? AND delivered_at IS NULL AND promoted_at IS NULL ORDER BY id", (session_id,))
@@ -621,6 +496,8 @@ class Scheduler:
             project = await manager.projects.adopt_directory(schedule["name"], workspace)
         project_id = project.id
         metadata: dict[str, Any] = {"schedule_id": schedule["id"], "unattended": True}
+        if schedule.get("cycle_id"):
+            metadata["schedule_cycle_id"] = schedule["cycle_id"]
         if schedule.get("model"):
             metadata["model"] = schedule["model"]
         per_task = self.app.config.scheduler.topic_mode == "per_task"
@@ -746,17 +623,12 @@ class Scheduler:
                     return text[-8000:]
         return ""
 
-    async def _advance(self, schedule: dict[str, Any], *, ran: bool) -> None:
-        if schedule.get("cron"):
-            next_run = croniter(schedule["cron"], _now()).get_next(datetime)
-            await self.app.db.execute("UPDATE schedules SET next_run_at = ? WHERE id = ?", (next_run.isoformat(), schedule["id"]))
-        else:
-            await self.app.db.execute("UPDATE schedules SET enabled = 0, next_run_at = NULL WHERE id = ?", (schedule["id"],))
 
 
 async def install(app: Application) -> list[asyncio.Task[None]]:
     scheduler = Scheduler(app)
     app.extensions["scheduler"] = scheduler
+    app.extensions["recurring"] = Recurring(app)
     assert app.manager is not None
     app.manager.service_hooks["schedule"] = scheduler.service
     app.manager.on_finished(scheduler.on_run_finished)
@@ -776,28 +648,10 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
                 f" · next {s['next_run_at'] or '-'}" + (f" · failures {s['failure_count']}" if s.get("failure_count") else "") + (" · running" if s["id"] in scheduler._active else "")
                 for s in items
             ]
-            await message.answer("\n".join(lines) + "\n\n/schedule delete <id> · /schedule on|off <id> · /schedule run <id>")
+            await message.answer("\n".join(lines) + "\n\nOpen Schedules in the app to review and change an action.")
 
         async def cmd_schedule(message, command) -> None:  # type: ignore[no-untyped-def]
-            parts = (command.args or "").split()
-            if len(parts) == 2 and parts[0] == "delete":
-                await message.answer("deleted" if await scheduler.delete(parts[1]) else "no such schedule")
-            elif len(parts) == 2 and parts[0] in ("on", "off"):
-                await scheduler.set_enabled(parts[1], parts[0] == "on")
-                await message.answer(f"{parts[1]}: {parts[0]}")
-            elif len(parts) == 2 and parts[0] == "run":
-                row = await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (parts[1],))
-                if row is None:
-                    await message.answer("no such schedule")
-                    return
-                try:
-                    sid = await scheduler.fire(dict(row), advance=False)
-                except RuntimeError as exc:
-                    await message.answer(str(exc))
-                    return
-                await message.answer(f"started session {sid}" if sid else "fired")
-            else:
-                await message.answer("usage: /schedule delete <id> | on <id> | off <id> | run <id>")
+            await message.answer("Open Schedules in the app to approve, change or run an action with a receipt.")
 
         front.command_hooks["schedules"] = cmd_schedules
         front.command_hooks["schedule"] = cmd_schedule

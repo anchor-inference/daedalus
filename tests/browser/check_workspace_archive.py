@@ -59,7 +59,12 @@ def scenario(page: Page, lang: str, unhandled: Unhandled) -> None:
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w") as zipped:
         zipped.writestr("workspace.json", "{}")
-    state: dict[str, object] = {"lost": True, "sent": [], "exports": {}, "applied": []}
+    state: dict[str, object] = {"lost": True, "sent": [], "exports": {}, "applied": [], "history_reads": 0}
+    historical_budget = {"state": "historical_not_restored", "restored": False,
+                         "historical_observed_spent_microusd": 3_123_456,
+                         "historical_total_microusd": None, "unresolved_charge_count": 1,
+                         "unreleased_allocation_count": 1, "current_available_microusd": None,
+                         "archive_digest": "b" * 64}
 
     def answer(route, body: object, status: int = 200) -> None:  # type: ignore[no-untyped-def]
         route.fulfill(status=status, content_type="application/json", body=json.dumps(body))
@@ -82,6 +87,11 @@ def scenario(page: Page, lang: str, unhandled: Unhandled) -> None:
             exports = state["exports"]
             latest = next(reversed(exports.values()), None) if isinstance(exports, dict) and exports else None
             return answer(route, {"latest": latest, "available": latest is not None})
+        if path == "/api/projects/p1/workspace-archive/budget-history" and method == "GET":
+            state["history_reads"] += 1
+            if state["history_reads"] == 1:
+                return answer(route, {"detail": "history read failed"}, 503)
+            return answer(route, historical_budget)
         if path == "/api/projects/p1/workspace-archive" and method == "POST":
             state["sent"].append(body)
             exports = state["exports"]
@@ -91,7 +101,7 @@ def scenario(page: Page, lang: str, unhandled: Unhandled) -> None:
                 assert body["expected_entity_revision"] == 1
                 assert body["selected_paths"] == [{"folder_id": "f-site", "path": "notes/draft.txt"}]
                 exports[key] = {"receipt_id": "receipt-export", "archive_artifact_id": "a" * 64,
-                                "archive_digest": "a" * 64, "format_version": 2, "size_bytes": len(archive.getvalue()),
+                                "archive_digest": "a" * 64, "format_version": 4, "size_bytes": len(archive.getvalue()),
                                 "selected_files": body["selected_paths"], "row_counts": {"projects": 1}, "private": True}
                 if state["lost"]:
                     state["lost"] = False
@@ -102,11 +112,12 @@ def scenario(page: Page, lang: str, unhandled: Unhandled) -> None:
         if path == "/api/import/archive" and method == "POST":
             assert request.post_data_buffer == archive.getvalue()
             return answer(route, {"archive_artifact_id": "a" * 64, "private": True, "preview": {
-                "valid": True, "archive_digest": "a" * 64, "format_version": 2, "row_counts": {"projects": 1},
+                "valid": True, "archive_digest": "a" * 64, "format_version": 4, "row_counts": {"projects": 1},
                 "selected_files": [{"folder_id": "f-site", "path": "notes/draft.txt"}], "selected_file_count": 1,
                 "capability_handles": ["board.read"],
                 "collision": False, "conflicts": [], "missing_secrets": ["provider credentials"],
-                "reconnect_required": ["provider credentials"], "restores_runtime": False}})
+                "reconnect_required": ["provider credentials"], "restores_runtime": False,
+                "historical_goal_budget": historical_budget}})
         if path == "/api/import/apply" and method == "POST":
             state["applied"].append(body)
             assert isinstance(body, dict) and body["archive_artifact_id"] == "a" * 64
@@ -126,8 +137,15 @@ def scenario(page: Page, lang: str, unhandled: Unhandled) -> None:
     page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{words['projects']}']:visible").first.click()
     page.locator(f".project-row .iconbtn[aria-label='{words['settings']}']").click()
     section = page.locator(".sheet-section", has=page.get_by_text(words["archive"])).last
+    assert state["history_reads"] == 0
     if section.get_attribute("open") is None:
         section.locator("summary").first.click()
+    expect(section.get_by_text("Imported spending history is unavailable." if lang == "en" else "Импортированная история расходов недоступна.", exact=False)).to_be_visible()
+    section.get_by_role("button", name=words["retry"]).click()
+    history = section.locator(".archive-budget-history")
+    expect(history).to_contain_text("$3.123456")
+    expect(history).to_contain_text("Historical total: unknown" if lang == "en" else "Историческая сумма: неизвестно")
+    expect(history).to_contain_text("No remaining balance" if lang == "en" else "Остаток бюджета и разрешение на расходы не восстановлены")
     section.get_by_text("Include files from folders" if lang == "en" else "Добавить файлы из папок").click()
     section.locator("#archive-relative-path").fill("notes/draft.txt")
     section.get_by_role("button", name="Include file" if lang == "en" else "Добавить файл").click()
@@ -150,6 +168,7 @@ def scenario(page: Page, lang: str, unhandled: Unhandled) -> None:
     upload_file = {"name": "workspace.zip", "mimeType": "application/zip", "buffer": archive.getvalue()}
     section.locator("#archive-import").set_input_files(upload_file)
     expect(section.get_by_role("button", name=words["restore"])).to_be_visible()
+    expect(section.locator(".archive-budget-history")).to_have_count(2)
     section.get_by_role("button", name=words["restore"]).click()
     expect(section.get_by_text("Restored as a new inactive project." if lang == "en" else "Создан новый неактивный проект.", exact=False)).to_be_visible()
     expect(section.get_by_role("button", name="Open restored project" if lang == "en" else "Открыть восстановленный проект")).to_be_visible()

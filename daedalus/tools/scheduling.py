@@ -18,7 +18,7 @@ from daedalus.tools._common import error, ok, services_for
 @tool(
     name="ScheduleCreate",
     description=(
-        "Create a scheduled task. Give either cron (5-field crontab expression, UTC) for a "
+        "Propose a scheduled task for operator approval. Give either cron (5-field crontab expression, UTC) for a "
         "recurring task, or run_at (ISO 8601 datetime, UTC) for a one-shot. The prompt is "
         "what the future agent session will be asked to do; files from the current "
         "workspace can be attached and are copied into the task's own persistent workspace. "
@@ -67,7 +67,7 @@ async def schedule_create(
     except ValueError as exc:
         return error(context, str(exc))
     where = " in this session" if created.get("run_in") == "self" else ""
-    return ok(context, f"scheduled {created['id']} '{name}' ({created.get('kind', kind)}{where}), next at {created.get('next_run_at')}", schedule_id=created["id"])
+    return ok(context, f"schedule {created['id']} '{name}' ({created.get('kind', kind)}{where}) awaits operator approval; proposed next at {created.get('next_run_at')}", schedule_id=created["id"])
 
 
 @tool_group("scheduling")
@@ -97,13 +97,12 @@ async def schedule_list(context: ToolContext) -> ToolResult:
     "delete scheduled job cancel cron reminder unschedule stop recurring "
     "удалить удали отменить отмени напоминалку напоминание расписание снять сними регулярное"
 )
-@tool(name="ScheduleDelete", description="Delete a scheduled task by id.")
+@tool(name="ScheduleDelete", description="Explain how to remove a scheduled task with operator approval.")
 async def schedule_delete(context: ToolContext, schedule_id: str) -> ToolResult:
     services = services_for(context)
     if services.schedule is None:
         return error(context, "scheduling is not available in this session")
-    removed = await services.schedule("delete", schedule_id=schedule_id)
-    return ok(context, f"deleted {schedule_id}" if removed else f"no schedule {schedule_id}")
+    return error(context, "Open Schedules in the app to remove an approved action with a receipt")
 
 
 TOOLS = [schedule_create, schedule_list, schedule_delete]

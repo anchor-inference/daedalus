@@ -34,6 +34,7 @@ from daedalus.stores.orchestrator_contract_schema import MIGRATION as ORCHESTRAT
 from daedalus.stores.planning_schema import MIGRATION as PLANNING_MIGRATION
 from daedalus.stores.provider_hold_schema import MIGRATION as PROVIDER_HOLD_MIGRATION
 from daedalus.stores.receipt_request_schema import MIGRATION as RECEIPT_REQUEST_MIGRATION
+from daedalus.stores.recurring_schema import MIGRATION as RECURRING_MIGRATION
 from daedalus.stores.result_anchor_schema import MIGRATION as RESULT_ANCHOR_MIGRATION
 from daedalus.stores.runtime_entry_schema import MIGRATION as RUNTIME_ENTRY_MIGRATION
 from daedalus.stores.runtime_observation_schema import MIGRATION as RUNTIME_OBSERVATION_MIGRATION
@@ -1741,6 +1742,7 @@ MIGRATIONS.append(GOAL_BUDGET_MIGRATION)
 MIGRATIONS.append(HISTORICAL_CONTEXT_MIGRATION)
 MIGRATIONS.append(PROVIDER_HOLD_MIGRATION)
 MIGRATIONS.append(HISTORICAL_BUDGET_MIGRATION)
+MIGRATIONS.append(RECURRING_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

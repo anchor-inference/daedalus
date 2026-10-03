@@ -926,6 +926,13 @@ class ProjectStore:
             raise ProjectError(f"{project.name} is the installation's own project and cannot be removed")
         if await self.sessions_of(project_id):
             raise ProjectError(f"{project.name if project else 'this project'} still has sessions")
+        history = await self._db.fetchone(
+            "SELECT id FROM schedules WHERE project_id = ? UNION ALL"
+            " SELECT id FROM recurring_cycles WHERE project_id = ? LIMIT 1",
+            (project_id, project_id),
+        )
+        if history is not None:
+            raise ProjectError("this project contains automation history; deletion is unavailable")
         await self._db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         await self.list()
 

@@ -7,13 +7,18 @@ and prove nothing reaches it on the subagent's behalf, whatever the leader's sta
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from aiogram.filters import CommandObject
 from aiogram.types import Message
 
+from daedalus.extensions.effects import EffectDispatcher
 from daedalus.extensions.notifications import NotificationService
+from daedalus.extensions.recurring import Recurring, RecurringEffect
 from daedalus.extensions.scheduler import Scheduler
+from daedalus.stores.control import Principal
+from daedalus.stores.outbox import OutboxStore
 from daedalus.transport.telegram.front import TelegramFront
 from tests.unit.test_front import RecordingBot, _message, front  # noqa: F401 — the fixture is reused here
 from tests.unit.test_heartbeat_scheduler import FakeFront, app  # noqa: F401 — the fixture is reused here
@@ -127,8 +132,26 @@ async def test_a_subagent_s_reminder_goes_to_the_inbox_and_not_to_the_chat(app: 
     app.notifications = NotificationService(app.db, app.manager.bus, front=lambda: app.front, session_metadata=metadata)
     scheduler = Scheduler(app)
     created = await scheduler.create(name="check", prompt="look again", cron=None, run_at="2026-01-01T00:00:00Z", kind="message", created_by_session=worker.session.id)
+    app.extensions["recurring"] = Recurring(app)
+    app.extensions["scheduler"] = scheduler
+    dispatcher = EffectDispatcher(OutboxStore(app.db))
+    dispatcher.register("schedule.message", RecurringEffect(app))
+    app.extensions["effects"] = dispatcher
+    schedule = await app.db.fetchone("SELECT project_id FROM schedules WHERE id = ?", (created["id"],))
+    scope = "project" if schedule["project_id"] else "global"
+    revision = await app.db.fetchone(
+        "SELECT revision FROM domain_collection_revisions WHERE scope_kind=? AND scope_id=?",
+        (scope, schedule["project_id"] or "global"),
+    )
+    await app.extensions["recurring"].approve(
+        Principal("operator:1", "operator"), created["id"],
+        expires_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        expected_collection_revision=revision["revision"], expected_schedule_revision=1,
+        client_operation_id="reminder-approval",
+    )
     row = await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (created["id"],))
     await scheduler.fire(dict(row))
+    assert await dispatcher.step()
     fake: FakeFront = app.front
     assert fake.outbox.sent == [] and fake.notified == []
     entries = (await app.notifications.list())["entries"]

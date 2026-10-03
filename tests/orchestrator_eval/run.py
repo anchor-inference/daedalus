@@ -115,6 +115,7 @@ class Model:
     name: str
     cap: float
     spent: float = 0.0
+    unknown_cost: bool = False
     session: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     @property
@@ -141,14 +142,14 @@ class Model:
             headers["x-opencode-session"] = self.session
         return headers
 
-    def cost(self, usage: dict[str, Any]) -> float:
+    def cost(self, usage: dict[str, Any]) -> float | None:
         if self.upstream in SUBSCRIPTIONS:
             return 0.0
         if usage.get("cost") is not None:
             return float(usage["cost"])
         price = PRICES.get(self.label)
-        if price is None:
-            return 0.0
+        if price is None or usage.get("prompt_tokens") is None or usage.get("completion_tokens") is None:
+            return None
         prompt = int(usage.get("prompt_tokens") or 0)
         hit = cached_tokens(usage)
         return ((prompt - hit) * price[0] + hit * price[1] + int(usage.get("completion_tokens") or 0) * price[2]) / 1e6
@@ -166,6 +167,8 @@ class OutOfBudget(Exception):
 
 async def complete(http: httpx.AsyncClient, model: Model, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
     """One chat completion, retried on the provider's transient answers."""
+    if model.upstream not in SUBSCRIPTIONS and model.unknown_cost:
+        raise OutOfBudget(f"{model.label} has unknown cost; its spend cap cannot be checked")
     if model.upstream not in SUBSCRIPTIONS and model.spent >= model.cap:
         raise OutOfBudget(f"{model.label} reached its cap of ${model.cap:.2f}")
     last = ""
@@ -209,7 +212,7 @@ class Episode:
     tokens_in: int = 0
     tokens_cached: int = 0
     tokens_out: int = 0
-    cost: float = 0.0
+    cost: float | None = 0.0
     seconds: float = 0.0
     stopped: str = ""
 
@@ -270,8 +273,11 @@ class Runner:
                         usage = data.get("usage") or {}
                         cost = model.cost(usage)
                         async with self.lock:
-                            model.spent += cost
-                        result.cost += cost
+                            if cost is None:
+                                model.unknown_cost = True
+                            else:
+                                model.spent += cost
+                        result.cost = None if cost is None or result.cost is None else result.cost + cost
                         result.model_calls += 1
                         result.tokens_in += int(usage.get("prompt_tokens") or 0)
                         result.tokens_cached += cached_tokens(usage)
@@ -349,7 +355,8 @@ class Runner:
             if result.stopped and not result.success:
                 result.why = f"{result.stopped}; {result.why}"
             result.tools = dict(tools_used)
-            result.cost = round(result.cost, 6)
+            if result.cost is not None:
+                result.cost = round(result.cost, 6)
             shutil.rmtree(root, ignore_errors=True)
         return result
 
@@ -401,9 +408,10 @@ def summary(results: list[Episode], models: list[Model], scenarios: list[Scenari
         if not mine:
             continue
         n = len(mine)
+        total_cost = "UNKNOWN" if any(r.cost is None for r in mine) else f"{sum(r.cost or 0 for r in mine):.3f}"
         lines.append(
             f"| {model.label} | {sum(r.success for r in mine)}/{n} | {sum(r.turns for r in mine) / n:.2f} | {sum(r.tool_calls for r in mine) / n:.1f} | "
-            f"{sum(r.refused for r in mine)} | {sum(r.asked_operator for r in mine)} | {sum(r.tokens_in for r in mine) // 1000}k / {sum(r.tokens_out for r in mine) // 1000}k | {sum(r.cost for r in mine):.3f} |"
+            f"{sum(r.refused for r in mine)} | {sum(r.asked_operator for r in mine)} | {sum(r.tokens_in for r in mine) // 1000}k / {sum(r.tokens_out for r in mine) // 1000}k | {total_cost} |"
         )
     lines += ["", "## Failures", ""]
     for r in results:

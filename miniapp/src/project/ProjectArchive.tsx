@@ -6,7 +6,8 @@ import { errorText } from "../ui";
 
 type SelectedPath = { folder_id: string; path: string };
 type ExportReceipt = { receipt_id: string; archive_artifact_id: string; archive_digest: string; format_version: number; size_bytes: number; selected_files: SelectedPath[]; row_counts: Record<string, number>; private: boolean };
-type ImportPreview = { valid: boolean; archive_digest: string; format_version: number; row_counts: Record<string, number>; selected_files: SelectedPath[]; selected_file_count: number; capability_handles: string[]; collision: boolean; conflicts: string[]; missing_secrets: string[]; reconnect_required: string[]; restores_runtime: boolean };
+type BudgetHistory = { state: "not_in_source" | "historical_not_restored"; restored: false; historical_observed_spent_microusd?: number; historical_total_microusd?: number | null; unresolved_charge_count?: number; unreleased_allocation_count?: number; current_available_microusd: null; archive_digest?: string };
+type ImportPreview = { valid: boolean; archive_digest: string; format_version: number; row_counts: Record<string, number>; selected_files: SelectedPath[]; selected_file_count: number; capability_handles: string[]; collision: boolean; conflicts: string[]; missing_secrets: string[]; reconnect_required: string[]; restores_runtime: boolean; historical_goal_budget: BudgetHistory };
 type Upload = { archive_artifact_id: string; private: boolean; preview: ImportPreview };
 type ApplyReceipt = { receipt_id: string; project_id: string; archive_digest: string; runtime_state: string };
 type Intent<T> = { body: T };
@@ -29,7 +30,32 @@ function archiveName(project: Project): string {
   return `${project.name.replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(0, 60) || "workspace"}.zip`;
 }
 
+function historicalMoney(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? `$${(value / 1_000_000).toFixed(6).replace(/\.?0+$/, "")}` : t("budget.unknown");
+}
+
+function ArchivedBudget({ history }: { history: BudgetHistory }) {
+  if (history.state !== "historical_not_restored") return null;
+  return <div className="archive-budget-history">
+    <b>{t("archive.budget.title")}</b>
+    <div>{t("archive.budget.observed", { amount: historicalMoney(history.historical_observed_spent_microusd) })}</div>
+    <div>{t("archive.budget.total", { amount: historicalMoney(history.historical_total_microusd) })}</div>
+    {!!history.unresolved_charge_count && <div>{t("archive.budget.unresolved", { count: history.unresolved_charge_count })}</div>}
+    {!!history.unreleased_allocation_count && <div>{t("archive.budget.allocations", { count: history.unreleased_allocation_count })}</div>}
+    <div className="result-warning">{t("archive.budget.inactive")}</div>
+    {history.archive_digest && <details><summary>{t("archive.details")}</summary><code style={{ overflowWrap: "anywhere" }}>{history.archive_digest}</code></details>}
+  </div>;
+}
+
+function ImportedBudget({ projectId }: { projectId: string }) {
+  const history = useQuery<BudgetHistory>(`/api/projects/${encodeURIComponent(projectId)}/workspace-archive/budget-history`, { staleMs: 0 });
+  if (history.error) return <div className="result-warning" role="status">{t("archive.budget.readError")} <button type="button" className="linkbtn" onClick={history.refresh}>{t("common.retry")}</button></div>;
+  return history.data ? <ArchivedBudget history={history.data} /> : null;
+}
+
 export function ProjectArchive({ project, toast, onChanged, onOpenRestored, readFailed }: { project: Project; toast: (message: string) => void; onChanged: () => void; onOpenRestored: (id: string) => void; readFailed: boolean }) {
+  const [opened, setOpened] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<SelectedPath[]>([]);
   const [folderId, setFolderId] = useState(project.folders[0]?.id ?? "");
@@ -142,11 +168,12 @@ export function ProjectArchive({ project, toast, onChanged, onOpenRestored, read
     } finally { setBusy(false); }
   }
 
-  return <details className="sheet-section">
+  return <details className="sheet-section" onToggle={(event) => { if (event.target === event.currentTarget) setOpened(event.currentTarget.open); }}>
     <summary>{t("archive.title")}</summary>
     <div className="project-extension-list">
       <p className="sub">{t("archive.intro")}</p>
       <div className="sub">{t("archive.default")}</div>
+      {opened && <ImportedBudget projectId={project.id} />}
       <details><summary>{t("archive.files.title")}</summary>
         <p className="sub">{t("archive.files.hint")}</p>
         {readableFolders.length > 0 ? <>
@@ -169,6 +196,7 @@ export function ProjectArchive({ project, toast, onChanged, onOpenRestored, read
       {upload && <div className="sub" role="status">
         <div>{t("archive.preview", { count: upload.preview.selected_file_count, rows: Object.values(upload.preview.row_counts).reduce((sum, n) => sum + n, 0) })}</div>
         <div>{t("archive.inactive")}</div>
+        <ArchivedBudget history={upload.preview.historical_goal_budget} />
         <div>{t("archive.reconnect")}: {upload.preview.reconnect_required.join(" · ")}</div>
         {upload.preview.missing_secrets.length > 0 && <div>{t("archive.secrets")}: {upload.preview.missing_secrets.join(" · ")}</div>}
         {upload.preview.capability_handles?.length > 0 && <div>{t("archive.capabilities")}: {upload.preview.capability_handles.join(" · ")}</div>}

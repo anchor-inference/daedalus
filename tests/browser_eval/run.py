@@ -196,6 +196,7 @@ class Model:
     name: str
     cap: float
     spent: float = 0.0
+    unknown_cost: bool = False
 
     @property
     def label(self) -> str:
@@ -214,14 +215,14 @@ class Model:
             body["usage"] = {"include": True}
         return body
 
-    def cost(self, usage: dict[str, Any]) -> float:
+    def cost(self, usage: dict[str, Any]) -> float | None:
         if self.upstream in SUBSCRIPTIONS:
             return 0.0
         if usage.get("cost") is not None:
             return float(usage["cost"])
         price = PRICES.get(self.label)
-        if price is None:
-            return 0.0
+        if price is None or usage.get("prompt_tokens") is None or usage.get("completion_tokens") is None:
+            return None
         prompt = int(usage.get("prompt_tokens") or 0)
         hit = cached_tokens(usage)
         return ((prompt - hit) * price[0] + hit * price[1] + int(usage.get("completion_tokens") or 0) * price[2]) / 1e6
@@ -239,6 +240,8 @@ class OutOfBudget(Exception):
 
 async def complete(http: httpx.AsyncClient, model: Model, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
     """One chat completion, retried on the provider's transient answers."""
+    if model.upstream not in SUBSCRIPTIONS and model.unknown_cost:
+        raise OutOfBudget(f"{model.label} has unknown cost; its spend cap cannot be checked")
     if model.upstream not in SUBSCRIPTIONS and model.spent >= model.cap:
         raise OutOfBudget(f"{model.label} reached its cap of ${model.cap:.2f}")
     last = ""
@@ -284,7 +287,7 @@ class Episode:
     tokens_cached: int = 0
     tokens_out: int = 0
     tokens_reasoning: int = 0
-    cost: float = 0.0
+    cost: float | None = 0.0
     seconds: float = 0.0
     stopped: str = ""
     """Why the loop ended when it was not the model's own final answer: steps, time, budget, error."""
@@ -341,8 +344,11 @@ class Runner:
                     usage = data.get("usage") or {}
                     cost = model.cost(usage)
                     async with self.lock:
-                        model.spent += cost
-                    result.cost += cost
+                        if cost is None:
+                            model.unknown_cost = True
+                        else:
+                            model.spent += cost
+                    result.cost = None if cost is None or result.cost is None else result.cost + cost
                     result.model_calls += 1
                     result.tokens_in += int(usage.get("prompt_tokens") or 0)
                     result.tokens_cached += cached_tokens(usage)
@@ -412,7 +418,8 @@ class Runner:
                 result.why = f"{result.stopped}; {result.why}"
             result.tools = dict(tools_used)
             result.errors = dict(errors)
-            result.cost = round(result.cost, 6)
+            if result.cost is not None:
+                result.cost = round(result.cost, 6)
             shutil.rmtree(work, ignore_errors=True)
         return result
 
@@ -443,10 +450,11 @@ def summary(episodes: list[Episode], models: list[Model], tasks: list[Task], sta
             continue
         n = len(mine)
         ok = sum(e.success for e in mine)
+        total_cost = "UNKNOWN" if any(e.cost is None for e in mine) else f"${sum(e.cost or 0 for e in mine):.3f}"
         lines.append(
             f"| {model.label} | {ok}/{n} ({ok / n:.0%}) | {sum(e.tool_calls for e in mine) / n:.1f} | {sum(e.model_calls for e in mine) / n:.1f} | "
             f"{sum(e.tokens_in for e in mine) / n / 1000:.1f}k ({sum(e.tokens_cached for e in mine) / n / 1000:.1f}k) / {sum(e.tokens_out for e in mine) / n / 1000:.1f}k | "
-            f"${sum(e.cost for e in mine):.3f} | {sum(e.seconds for e in mine) / n:.0f} |"
+            f"{total_cost} | {sum(e.seconds for e in mine) / n:.0f} |"
         )
     lines += ["", "## Error kinds in tool results", "", "| model | " + " | ".join(k for k, _ in ERROR_KINDS) + " | invented ref | frame ref | other | truncated | operator asks |", "|---" * (len(ERROR_KINDS) + 7) + "|"]
     for model in models:
@@ -586,7 +594,8 @@ async def main(argv: list[str] | None = None) -> int:
                     async with limit:
                         episode = await runner.episode(http, model, task, repeat)
                     mark = "ok  " if episode.success else "FAIL"
-                    print(f"{mark} {model.label:40} {task.id:18} calls={episode.tool_calls:2} ${episode.cost:.4f} {episode.seconds:5.0f}s {'' if episode.success else episode.why[:110]}", flush=True)
+                    cost_label = "UNKNOWN" if episode.cost is None else f"${episode.cost:.4f}"
+                    print(f"{mark} {model.label:40} {task.id:18} calls={episode.tool_calls:2} {cost_label} {episode.seconds:5.0f}s {'' if episode.success else episode.why[:110]}", flush=True)
                     return episode
 
                 episodes += await asyncio.gather(*(one(t, r) for r in range(args.repeats) for t in tasks))
@@ -602,7 +611,7 @@ async def main(argv: list[str] | None = None) -> int:
         sites.close()
         shutil.rmtree(base, ignore_errors=True)
 
-    spend = {m.label: round(m.spent, 4) for m in models}
+    spend = {m.label: None if m.unknown_cost else round(m.spent, 4) for m in models}
     report = summary(episodes, models, tasks, started)
     if before:
         report += f"\nDeepSeek balance before ${before}, after ${after}.\n"

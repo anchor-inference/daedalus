@@ -9,11 +9,15 @@ from typing import Any
 import pytest
 
 from daedalus.config import RuntimeConfig, Settings
+from daedalus.extensions.effects import EffectDispatcher
 from daedalus.extensions.heartbeat import Heartbeat, in_active_hours
 from daedalus.extensions.notifications import NotificationService
+from daedalus.extensions.recurring import Recurring, RecurringEffect
 from daedalus.extensions.scheduler import Scheduler
 from daedalus.host.session_runner import SessionManager
+from daedalus.stores.control import Principal
 from daedalus.stores.database import Database
+from daedalus.stores.outbox import OutboxStore
 
 
 class FakeOutbox:
@@ -52,6 +56,38 @@ async def app(settings: Settings, db: Database) -> Any:
     await manager.close()
 
 
+async def _durable(app: Any, scheduler: Scheduler) -> None:
+    app.extensions["scheduler"] = scheduler
+    app.extensions["recurring"] = Recurring(app)
+    dispatcher = EffectDispatcher(OutboxStore(app.db))
+    effect = RecurringEffect(app)
+    for kind in ("message", "lazy", "wake", "agent"):
+        dispatcher.register(f"schedule.{kind}", effect)
+    app.extensions["effects"] = dispatcher
+
+
+async def _approve(app: Any, schedule_id: str) -> None:
+    rev = await app.db.fetchone("SELECT revision FROM domain_collection_revisions WHERE scope_kind='global' AND scope_id='global'")
+    await app.extensions["recurring"].approve(
+        Principal("operator:1", "operator"), schedule_id,
+        expires_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        expected_collection_revision=rev["revision"], expected_schedule_revision=1,
+        client_operation_id=f"approve-{schedule_id}",
+    )
+
+
+async def _change(app: Any, schedule_id: str, revision: int, fields: dict[str, Any]) -> dict[str, Any]:
+    schedule = await app.db.fetchone("SELECT project_id FROM schedules WHERE id = ?", (schedule_id,))
+    project_id = schedule["project_id"] if schedule is not None else None
+    scope, scope_id = ("project", project_id) if project_id else ("global", "global")
+    row = await app.db.fetchone("SELECT revision FROM domain_collection_revisions WHERE scope_kind = ? AND scope_id = ?", (scope, scope_id))
+    return await app.extensions["recurring"].change(
+        Principal("operator:1", "operator"), schedule_id, fields=fields,
+        expected_collection_revision=row["revision"], expected_schedule_revision=revision,
+        client_operation_id=f"change-{schedule_id}-{revision}",
+    )
+
+
 def test_active_hours_windows() -> None:
     at = lambda h, m=0: datetime(2026, 9, 6, h, m, tzinfo=UTC)  # noqa: E731
     assert in_active_hours(at(9), "08:00-23:00") and not in_active_hours(at(7, 59), "08:00-23:00")
@@ -78,10 +114,13 @@ async def test_heartbeat_is_off_without_text_and_respects_interval(app: Any, tmp
 
 async def test_message_reminder_is_delivered_without_a_model_call(app: Any) -> None:
     scheduler = Scheduler(app)
+    await _durable(app, scheduler)
     created = await scheduler.create(name="pills", prompt="take the pills", cron=None, run_at="2026-01-01T00:00:00Z", kind="message", created_by_session="s1")
     assert created["kind"] == "message"
+    await _approve(app, created["id"])
     row = await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (created["id"],))
     await scheduler.fire(dict(row))
+    assert await app.extensions["effects"].step()
     assert app.front.outbox.sent and "take the pills" in app.front.outbox.sent[0]
     [entry] = (await app.notifications.list())["entries"]
     assert (entry["kind"], entry["category"]) == ("reminder", "reminder")
@@ -95,9 +134,12 @@ async def test_message_reminder_is_delivered_without_a_model_call(app: Any) -> N
 
 async def test_lazy_note_rides_with_the_next_message_and_is_promoted_when_ignored(app: Any) -> None:
     scheduler = Scheduler(app)
+    await _durable(app, scheduler)
     created = await scheduler.create(name="ask", prompt="ask about the invoice", cron=None, run_at="2026-01-01T00:00:00Z", kind="lazy", created_by_session="s1")
+    await _approve(app, created["id"])
     row = await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (created["id"],))
     await scheduler.fire(dict(row))
+    assert await app.extensions["effects"].step()
     assert app.front.outbox.sent == []
     decorated = await scheduler.decorate_prompt("s1", "hi again")
     assert decorated.startswith("[Reminder fired") and decorated.endswith("\n\nhi again") and "ask about the invoice" in decorated
@@ -124,6 +166,7 @@ async def test_lazy_note_rides_with_the_next_message_and_is_promoted_when_ignore
 
 async def test_failed_recurring_task_is_switched_off_after_max_failures(app: Any) -> None:
     scheduler = Scheduler(app)
+    await _durable(app, scheduler)
     app.config.scheduler.max_failures = 2
     created = await scheduler.create(name="nightly", prompt="do it", cron="0 3 * * *", run_at=None, kind="agent")
     for n in (1, 2):
@@ -134,7 +177,7 @@ async def test_failed_recurring_task_is_switched_off_after_max_failures(app: Any
     assert row["enabled"] == 0
     titles = [e["title"] for e in (await app.notifications.list())["entries"]]
     assert any("switched off" in t for t in titles)
-    await scheduler.set_enabled(created["id"], True)
+    await _change(app, created["id"], 1, {"enabled": True})
     row = await app.db.fetchone("SELECT failure_count, enabled FROM schedules WHERE id = ?", (created["id"],))
     assert row["enabled"] == 1 and row["failure_count"] == 0
 
@@ -160,6 +203,7 @@ async def test_stay_silent_is_refused_outside_unattended_runs(app: Any) -> None:
 
 async def test_agent_task_can_run_in_its_own_session(app: Any) -> None:
     scheduler = Scheduler(app)
+    await _durable(app, scheduler)
     manager = app.manager
     owner = await manager.create_session("owner")
     submitted: list[tuple[str, str, str]] = []
@@ -176,7 +220,12 @@ async def test_agent_task_can_run_in_its_own_session(app: Any) -> None:
     created = await scheduler.create(name="ping", prompt="check the board", cron="*/20 * * * *", run_at=None, kind="agent", run_in="self", created_by_session=owner.session.id)
     assert created["run_in"] == "self" and created["workspace"] == str(owner.workspace)
     row = dict(await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (created["id"],)))
-    assert await scheduler.fire(row) == owner.session.id
+    rev = await app.db.fetchone("SELECT revision FROM domain_collection_revisions WHERE scope_kind='project' AND scope_id=?", (row["project_id"],))
+    await app.extensions["recurring"].run_now(
+        Principal("operator:1", "operator"), created["id"], expected_collection_revision=rev["revision"],
+        expected_schedule_revision=1, client_operation_id="run-own-session",
+    )
+    assert await app.extensions["effects"].step()
     assert submitted and submitted[0][0] == owner.session.id and submitted[0][2] == "schedule" and "in this session" in submitted[0][1]
     assert scheduler._active[created["id"]] == owner.session.id and scheduler._active_runs[created["id"]] == "run-self"
     # another turn of the same session ending is not the task ending
@@ -190,18 +239,23 @@ async def test_agent_task_can_run_in_its_own_session(app: Any) -> None:
 
 async def test_schedule_update_moves_the_next_run_and_pauses(app: Any) -> None:
     scheduler = Scheduler(app)
+    await _durable(app, scheduler)
     created = await scheduler.create(name="digest", prompt="sum up", cron="0 4 * * *", run_at=None, kind="agent")
-    changed = await scheduler.update(created["id"], name="daily digest", cron="30 5 * * 1-5")
+    await _change(app, created["id"], 1, {"name": "daily digest", "cron": "30 5 * * 1-5"})
+    changed = await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (created["id"],))
     assert changed["name"] == "daily digest"
     assert changed["cron"] == "30 5 * * 1-5"
     assert changed["next_run_at"].endswith("05:30:00+00:00")
-    paused = await scheduler.update(created["id"], enabled=False)
+    await _change(app, created["id"], 2, {"enabled": False})
+    paused = await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (created["id"],))
     assert paused["enabled"] == 0
-    once = await scheduler.update(created["id"], run_at="2030-01-01T09:00:00Z")
+    await _change(app, created["id"], 3, {"run_at": "2030-01-01T09:00:00Z"})
+    once = await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (created["id"],))
     assert once["cron"] is None and once["recurring"] == 0 and once["next_run_at"].startswith("2030-01-01T09:00:00")
-    back = await scheduler.update(created["id"], cron="0 4 * * *")
+    await _change(app, created["id"], 4, {"cron": "0 4 * * *"})
+    back = await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (created["id"],))
     assert back["cron"] == "0 4 * * *" and back["run_at"] is None and back["recurring"] == 1
     with pytest.raises(ValueError):
-        await scheduler.update(created["id"], cron="not a cron")
+        await _change(app, created["id"], 5, {"cron": "not a cron"})
     with pytest.raises(KeyError):
-        await scheduler.update("nope", name="x")
+        await _change(app, "nope", 1, {"name": "x"})
