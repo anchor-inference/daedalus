@@ -7,15 +7,37 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends, FastAPI, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 
-from daedalus.stores.control import ControlStore, Entity, Principal, Scope
+from daedalus.extensions.task_controls import queue_stop
+from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.outbox import OutboxStore
 
 if TYPE_CHECKING:
     from daedalus.app import Application
 
 
+class StopBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    client_operation_id: str = Field(min_length=1, max_length=200)
+    expected_entity_revision: int = Field(ge=1)
+    reason: str = Field(default="", max_length=2000)
+
+
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
+    @api.post("/api/board/{task_id}/stop")
+    async def stop_task(task_id: str, body: StopBody, authenticated: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        if "effects" not in app.extensions:
+            raise HTTPException(503, "execution controls are not available")
+        try:
+            return await queue_stop(app, task_id, Principal.operator(authenticated), **body.model_dump())
+        except KeyError:
+            raise HTTPException(404, "no such task") from None
+        except ControlConflict as exc:
+            raise HTTPException(409, {"reason": str(exc), "current_revision": exc.current_revision}) from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
+
     @api.get("/api/control/revisions")
     async def revisions(project: str | None = None, authenticated: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         Principal.operator(authenticated)

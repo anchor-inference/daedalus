@@ -39,6 +39,7 @@ class EffectDispatcher:
         self.store = store
         self.handlers: dict[str, Handler] = {}
         self.wake = asyncio.Event()
+        self.delivery_ready = asyncio.Event()
 
     def register(self, kind: str, handler: Handler) -> None:
         if kind in self.handlers:
@@ -48,6 +49,10 @@ class EffectDispatcher:
 
     def notify(self) -> None:
         self.wake.set()
+
+    def enable(self) -> None:
+        """The application opened its runtimes and finished recovering their previous work."""
+        self.delivery_ready.set()
 
     async def reconcile(self) -> int:
         """Ask handlers for physical proof; an unknown outcome never re-enters delivery."""
@@ -86,6 +91,9 @@ class EffectDispatcher:
 
     async def run(self) -> None:
         await self.store.recover()
+        # Extensions install asynchronously. A retained stop cannot be inspected against an empty
+        # runtime map before recovery, and a retained merge must find its registered executor.
+        await self.delivery_ready.wait()
         while True:
             self.wake.clear()
             try:
@@ -103,6 +111,9 @@ class EffectDispatcher:
 
 
 async def install(app: Application) -> list[asyncio.Task[None]]:
+    from daedalus.extensions.task_controls import TaskStopEffect
+
     dispatcher = EffectDispatcher(OutboxStore(app.db))
+    dispatcher.register("task.stop", TaskStopEffect(app))
     app.extensions["effects"] = dispatcher
     return [asyncio.create_task(dispatcher.run(), name="effect-dispatcher")]

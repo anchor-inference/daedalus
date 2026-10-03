@@ -130,6 +130,8 @@ class Application:
                     "system", "Boot recovery skipped after repeated crashes", note, kind="boot_guard", level="urgent", tone="error",
                     handled=frozenset({"telegram"}) if self.front is not None else frozenset(),
                 ))
+            if effects := self.extensions.get("effects"):
+                effects.enable()
             return
         resumed = await self.manager.resume_unfinished()
         if resumed:
@@ -148,6 +150,8 @@ class Application:
             resent = await self.front.redeliver_pending()
             if resent:
                 await self.front.notify(f"Re-sent {resent} answer(s) the previous process had not confirmed as delivered.", markdown=False)
+        if effects := self.extensions.get("effects"):
+            effects.enable()
 
     async def _log_llamacpp_startup(self) -> None:
         """Record what each configured local server says before the first run needs it."""

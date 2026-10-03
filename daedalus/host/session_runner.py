@@ -2961,6 +2961,14 @@ class SessionManager:
         state.engine.stop()
         return True
 
+    async def stop_run(self, session_id: str, run_id: str) -> bool:
+        """Stop only the observed run; checking before an awaited authorization leaves a race."""
+        state = self._states.get(session_id)
+        if state is None or state.run_id != run_id or not state.running or state.engine is None:
+            return False
+        state.engine.stop()
+        return True
+
     async def set_model(
         self,
         session_id: str,

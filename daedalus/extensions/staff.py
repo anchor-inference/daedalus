@@ -214,6 +214,7 @@ class Team:
         assert app.manager is not None
         self.manager: SessionManager = app.manager
         self.runtimes: dict[str, StaffRuntime] = {"daedalus": DaedalusStaffRuntime(self.manager)}
+        self._execution_locks: dict[str, asyncio.Lock] = {}
         # A host folder in Docker is worked in through the host terminal bridge; the service is
         # looked up per call, so a bridge installed after the start is used without a restart.
         self.host_bridge = HostBridge(lambda: cast("Terminals | None", app.extensions.get("terminals")))
@@ -786,7 +787,15 @@ class Team:
         await self.note_on_card(task.id, f"{member.name} no longer works this card: {why}; it is back in todo, unassigned")
         return await self._move_task(task, "todo", actor=by, assignee=None)
 
+    def execution_lock(self, staff_id: str) -> asyncio.Lock:
+        """A stop and retasking share ownership: neither may overtake the other's external call."""
+        return self._execution_locks.setdefault(staff_id, asyncio.Lock())
+
     async def start(self, member: Staff, task: BoardTask, *, by: str = "operator", resume_from: str | None = None) -> LiveSession:
+        async with self.execution_lock(member.id):
+            return await self._start(member, task, by=by, resume_from=resume_from)
+
+    async def _start(self, member: Staff, task: BoardTask, *, by: str, resume_from: str | None) -> LiveSession:
         """Start a session of ``member`` for ``task`` now; the launch queue calls this once it admits it."""
         runtime = self.runtime(member)
         project = await self.project(member.project_id)

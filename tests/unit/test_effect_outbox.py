@@ -195,3 +195,39 @@ async def test_outbox_cannot_change_the_committed_operation(db: Database) -> Non
     row = await store.view(action_id)
     assert row["state"] == "cancelled"
     assert "committed operation" in row["error"]
+
+
+async def test_retained_command_waits_for_runtime_recovery_before_dispatch(db: Database) -> None:
+    action_id = await enqueue(db)
+    store = OutboxStore(db)
+    recovered = asyncio.Event()
+    finished = asyncio.Event()
+    recover = store.recover
+
+    async def observe_recovery() -> int:
+        count = await recover()
+        recovered.set()
+        return count
+
+    store.recover = observe_recovery
+
+    class Handler:
+        async def run(self, claim: Any, check: Any) -> EffectOutcome:
+            await check(claim)
+            finished.set()
+            return EffectOutcome("completed")
+
+    dispatcher = EffectDispatcher(store)
+    dispatcher.register("test.effect", Handler())
+    running = asyncio.create_task(dispatcher.run())
+    try:
+        await asyncio.wait_for(recovered.wait(), 10)
+        dispatcher.notify()
+        assert not finished.is_set()
+        assert (await store.view(action_id))["state"] == "pending"
+        dispatcher.enable()
+        await asyncio.wait_for(finished.wait(), 10)
+    finally:
+        running.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await running
