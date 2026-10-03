@@ -134,10 +134,11 @@ async def team(context: ToolContext, staff: str | None = None, concurrency: int 
     description=(
         "The project's board. op='list' (open tasks; status narrows it), 'get' (task_id: brief, branch, notes), "
         "'create' (title and the four brief parts: objective, deliverable, boundaries, done_when; priority 1-5, "
-        "depends_on, assignee to hand it over at once), 'update' (task_id and what changes, assignee='' unassigns), "
-        "'move' (task_id, status: todo|doing|review|done|blocked|dropped; with blocked, waiting_on says who or what it "
-        "waits for — the operator, someone outside, a date, another task). A task with an unmerged branch reaches done "
-        "only through the operator's review; review is for what the operator has to look at. 'get' shows the card's "
+        "depends_on, assignee to queue it), 'update' (task_id and what changes), "
+        "'move' (task_id, status: todo|blocked|dropped; with blocked, waiting_on says who or what it "
+        "waits for — the operator, someone outside, a date, another task). Execution, review and completion "
+        "use their exact receipt commands. 'list' and 'get' show the collection and entity revisions required "
+        "for writes; 'get' also shows the card's "
         "checks (C…), requirements (R…) and acceptance. A new card for work already on the board is refused with "
         "that card's id — hand the card on instead, or new=true with a reason saying how the work differs."
     ),
@@ -159,11 +160,15 @@ async def tasks(
     waiting_on: str = "",
     new: bool = False,
     reason: str = "",
+    expected_entity_revision: int | None = None,
+    expected_collection_revision: int | None = None,
 ) -> ToolResult:
     return await _call(
         context, "tasks", op=op, task_id=task_id, title=title, objective=objective, deliverable=deliverable, boundaries=boundaries,
         done_when=done_when, status=status, priority=priority, depends_on=depends_on, assignee=assignee, note=note, waiting_on=waiting_on,
-        new=new, reason=reason,
+        new=new, reason=reason, client_operation_id=call_id(context),
+        expected_entity_revision=expected_entity_revision,
+        expected_collection_revision=expected_collection_revision,
     )
 
 
@@ -413,7 +418,9 @@ async def dismiss(context: ToolContext, staff: str, release: bool = False, keep_
         "hand the work in. folder, priority (1 first … 5) and depends_on are optional. files: handles (att:…) or "
         "paths in the project's folders; the host copies each where the member can open it before the brief is sent, "
         "and the brief names that copy — never put a path of your own into a brief. It starts now or waits in the "
-        "project's queue; the answer says which and why. resume_from is an optional session id from StaffSessions: "
+        "project's durable queue; the answer says which and why. Give the collection revision from Tasks(list) "
+        "for a new card or entity revision from Tasks(get) for an existing card. resume_from is an optional "
+        "session id from StaffSessions: "
         "it resumes that CLI conversation only in the same launch folder and worktree branch."
     ),
 )
@@ -436,11 +443,15 @@ async def assign(
     checks: list[str] | None = None,
     reason: str = "",
     resume_from: str | None = None,
+    expected_entity_revision: int | None = None,
+    expected_collection_revision: int | None = None,
 ) -> ToolResult:
     return await _call(
         context, "assign", staff=staff, task_id=task_id, title=title, objective=objective, deliverable=deliverable, boundaries=boundaries,
         done_when=done_when, folder=folder, priority=priority, depends_on=depends_on, files=files, new=new,
         requirements=requirements, inputs=inputs, checks=checks, reason=reason, resume_from=resume_from,
+        client_operation_id=call_id(context), expected_entity_revision=expected_entity_revision,
+        expected_collection_revision=expected_collection_revision,
     )
 
 

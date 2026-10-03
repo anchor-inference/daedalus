@@ -3406,6 +3406,10 @@ class SessionManager:
         else:
             run_id = state.run_id or uuid.uuid4().hex[:12]
             engine = state.engine
+        admission = self.service_hooks.get("execution_run_admission")
+        staff_session_id = state.metadata.get("staff_session_id")
+        if staff_session_id and admission is not None:
+            await admission(str(staff_session_id), state.session.id, run_id)
         state.run_id = run_id
         if message is not None:
             message.metadata["daedalus.run_id"] = run_id

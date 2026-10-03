@@ -62,7 +62,7 @@ def check(lang: str, width: int, browser: object, unhandled: Unhandled) -> None:
     chooser.select_option("ss-old")
     page.locator(".sheet-foot .btn.primary").click()
     expect(page.locator(".sheet")).to_have_count(0)
-    assert board.updated[-1][1]["resume_from"] == "ss-old"
+    assert board.launched[-1][0] == "t-menu" and board.launched[-1][1]["resume_from"] == "ss-old"
     page.get_by_role("button", name="New task" if lang == "en" else "Новая задача").first.click()
     page.locator("#ptask-title").fill("Another menu")
     page.locator("#ptask-assignee").select_option("st-ada")
@@ -71,7 +71,8 @@ def check(lang: str, width: int, browser: object, unhandled: Unhandled) -> None:
     chooser.select_option("ss-old")
     page.locator(".sheet-foot .btn.primary").click()
     expect(page.locator(".sheet")).to_have_count(0)
-    assert board.created[-1]["resume_from"] == "ss-old"
+    assert "resume_from" not in board.created[-1]
+    assert board.launched[-1][1]["resume_from"] == "ss-old"
     assert page.evaluate("document.documentElement.scrollWidth - window.innerWidth") <= 0
     context.close()
 

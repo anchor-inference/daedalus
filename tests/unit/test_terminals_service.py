@@ -166,6 +166,21 @@ async def test_an_exit_event_ends_the_row_with_its_code_and_keeps_the_last_scree
     assert shown["preview"] == [[{"t": "bye"}]]
 
 
+async def test_a_late_daemon_exit_proves_a_previously_lost_terminal_once(service: Terminals, db: Database) -> None:
+    view = await service.create(TerminalSpec(env="container", owner=Owner("free"), cwd="/tmp"))
+    row = await _row(db, view["id"])
+    assert await service._end(row, status="lost", exit_code=None, signal=None)
+    assert not await db.fetchall("SELECT * FROM terminal_exit_observations")
+    assert not await service._end(row, status="exited", exit_code=0, signal=None, observed_instance="another-daemon")
+    assert (await _row(db, view["id"]))["status"] == "lost"
+    assert await service._end(row, status="exited", exit_code=0, signal=None, observed_instance=row["ptyd_instance"])
+    assert (await _row(db, view["id"]))["status"] == "exited"
+    assert len(await db.fetchall("SELECT * FROM terminal_exit_observations")) == 1
+    published = len(service.bus.published)
+    assert not await service._end(row, status="exited", exit_code=0, signal=None, observed_instance=row["ptyd_instance"])
+    assert len(service.bus.published) == published
+
+
 async def test_a_shells_commands_are_mirrored_and_listed(service: Terminals, daemon: FakePtyd, db: Database) -> None:
     shell = await service.create(TerminalSpec(env="container", owner=Owner("free"), cwd="/tmp"))
     program = await service.create(TerminalSpec(env="container", owner=Owner("free"), cwd="/tmp", argv=["cat"]))

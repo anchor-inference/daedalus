@@ -95,6 +95,19 @@ class ControlStore:
     def __init__(self, db: Database) -> None:
         self.db = db
 
+    async def _office(self, conn: aiosqlite.Connection, actor_id: str, scope: Scope) -> None:
+        if not actor_id.startswith("orchestrator:"):
+            return
+        if scope.kind != "project":
+            raise ControlDenied("a coordinator acts only within its project")
+        session_id = actor_id.partition(":")[2]
+        project = await one(conn, "SELECT settings FROM projects WHERE id = ?", (scope.id,))
+        office = json.loads(project["settings"]).get("orchestrator", {}) if project else {}
+        session = await one(conn, "SELECT project_id,metadata FROM sessions WHERE id = ?", (session_id,))
+        if (not office.get("enabled") or office.get("session_id") != session_id or session is None
+                or session["project_id"] != scope.id or json.loads(session["metadata"]).get("orchestrator_of") != scope.id):
+            raise ControlDenied("the coordinator was disabled or replaced")
+
     async def _entity(self, conn: aiosqlite.Connection, scope: Scope, entity: Entity) -> int:
         if entity.kind == "collection":
             if entity.id != scope.id:
@@ -135,6 +148,8 @@ class ControlStore:
             raise ControlDenied("grant was revoked or replaced")
         if datetime.fromisoformat(grant["expires_at"]) <= datetime.now(UTC):
             raise ControlDenied("grant has expired")
+        if grant["scope_kind"] == "global" and scope.kind != "global":
+            raise ControlDenied("grant belongs to the global board")
         if grant["scope_kind"] == "project" and (scope.kind != "project" or grant["scope_id"] != scope.id):
             raise ControlDenied("grant belongs to another project")
         if grant["scope_kind"] == "task" and (task_id != grant["task_id"] or grant["project_id"] != (scope.id if scope.kind == "project" else None)):
@@ -143,13 +158,29 @@ class ControlStore:
             raise ControlDenied("operation is outside the approved scope")
         if not set(effects) <= set(json.loads(grant["effects_json"])):
             raise ControlDenied("effect is outside the approved scope")
-        if principal.origin_class == "agent" and principal.actor_id.startswith("orchestrator:"):
-            if scope.kind != "project":
-                raise ControlDenied("a coordinator acts only within its project")
-            project = await one(conn, "SELECT settings FROM projects WHERE id = ?", (scope.id,))
-            office = json.loads(project["settings"]).get("orchestrator", {}) if project else {}
-            if not office.get("enabled") or office.get("session_id") != principal.actor_id.partition(":")[2]:
-                raise ControlDenied("the coordinator was disabled or replaced")
+        if grant["staff_session_id"]:
+            session = await one(conn, "SELECT staff_id,task_id,ended_at FROM staff_sessions WHERE id = ?",
+                                (grant["staff_session_id"],))
+            if (session is None or session["ended_at"] or session["task_id"] != task_id
+                    or principal.actor_id != f"staff:{session['staff_id']}"):
+                raise ControlDenied("the grant's worker session is no longer owned")
+        if grant["parent_grant_id"]:
+            parent = await one(conn, "SELECT * FROM actor_grants WHERE id = ?", (grant["parent_grant_id"],))
+            if (parent is None or parent["revoked_at"] or parent["generation"] != grant["parent_grant_generation"]
+                    or datetime.fromisoformat(parent["expires_at"]) <= datetime.now(UTC)):
+                raise ControlDenied("the launch approval was revoked, replaced or expired")
+            if (parent["parent_grant_id"] is not None or parent["actor_id"] != grant["issuer_id"]
+                    or parent["origin_class"] != "agent" or parent["project_id"] != grant["project_id"]
+                    or parent["scope_kind"] not in ("project", "task")
+                    or (parent["scope_kind"] == "task" and parent["task_id"] != task_id)
+                    or "task.launch" not in json.loads(parent["operations_json"])
+                    or "execution.start" not in json.loads(parent["effects_json"])
+                    or set(json.loads(grant["operations_json"])) != {"result.submit", "staff.report"}
+                    or json.loads(grant["effects_json"])):
+                raise ControlDenied("the worker's authority exceeds its launch approval")
+            await self._office(conn, parent["actor_id"], scope)
+        if principal.origin_class == "agent":
+            await self._office(conn, principal.actor_id, scope)
 
     async def mutate(self, principal: Principal, scope: Scope, operation: str, client_operation_id: str, expected_revision: int, entity: Entity, payload: dict[str, Any], effect: Effect, *, effects: tuple[str, ...] = ()) -> dict[str, Any]:
         if not client_operation_id or len(client_operation_id) > 160 or not re.fullmatch(r"[a-z][a-z0-9_.:-]{0,119}", operation):
@@ -211,21 +242,60 @@ class ControlStore:
         await conn.execute("INSERT INTO grant_events(grant_id,actor_id,generation,event,at) VALUES (?,?,1,'issued',?)", (grant_id, issuer.actor_id, now()))
         return {"grant_id": grant_id, "generation": 1, "scope": {"kind": "task" if task_id else scope.kind, "id": task_id or scope.id}, "operations": sorted(set(operations)), "effects": sorted(set(effects)), "expires_at": expires.astimezone(UTC).isoformat()}
 
+    async def issue_worker_grant_in(self, conn: aiosqlite.Connection, issuer: Principal, scope: Scope, *,
+                                    staff_session_id: str, expires_at: str) -> dict[str, Any]:
+        """An approved launch conveys only report rights, never generic grant-issuing authority."""
+        session = await one(conn, "SELECT s.staff_id,s.task_id,s.ended_at,m.project_id FROM staff_sessions s"
+                            " JOIN staff m ON m.id = s.staff_id WHERE s.id = ?", (staff_session_id,))
+        if session is None or session["ended_at"] or scope.kind != "project" or session["project_id"] != scope.id:
+            raise ControlDenied("a current worker session in this project is required")
+        task_id = session["task_id"]
+        await self._entity(conn, scope, Entity("task", task_id))
+        await self.authorize(conn, issuer, scope, "task.launch", task_id=task_id, effects=("execution.start",))
+        expires = datetime.fromisoformat(expires_at)
+        if expires.tzinfo is None or expires <= datetime.now(UTC):
+            raise ValueError("a future timezone-aware expiry is required")
+        parent_id, parent_generation = None, None
+        if issuer.origin_class != "operator":
+            parent = await one(conn, "SELECT * FROM actor_grants WHERE id = ?", (issuer.grant_id,))
+            if issuer.origin_class != "agent" or parent is None or parent["parent_grant_id"] is not None:
+                raise ControlDenied("only a directly approved agent can convey worker report rights")
+            expires = min(expires, datetime.fromisoformat(parent["expires_at"]))
+            parent_id, parent_generation = parent["id"], parent["generation"]
+        grant_id = uuid.uuid4().hex
+        await conn.execute("INSERT INTO actor_grants(id,actor_id,origin_class,issuer_id,scope_kind,scope_id,"
+                           "project_id,task_id,operations_json,effects_json,expires_at,created_at,"
+                           "parent_grant_id,parent_grant_generation,staff_session_id)"
+                           " VALUES (?,?,'agent',?,'task',?,?,?,?,?, ?,?,?,?,?)",
+                           (grant_id, f"staff:{session['staff_id']}", issuer.actor_id, task_id, scope.id, task_id,
+                            canonical(["result.submit", "staff.report"]), "[]", expires.astimezone(UTC).isoformat(), now(),
+                            parent_id, parent_generation, staff_session_id))
+        await conn.execute("INSERT INTO grant_events(grant_id,actor_id,generation,event,at) VALUES (?,?,1,'issued',?)",
+                           (grant_id, issuer.actor_id, now()))
+        return {"grant_id": grant_id, "generation": 1, "scope": {"kind": "task", "id": task_id},
+                "operations": ["result.submit", "staff.report"], "effects": [], "expires_at": expires.astimezone(UTC).isoformat()}
+
     async def revoke_grant(self, issuer: Principal, grant_id: str, *, reason: str) -> None:
+        async with self.db.transaction() as conn:
+            await self.revoke_grant_in(conn, issuer, grant_id, reason=reason)
+
+    async def revoke_grant_in(self, conn: aiosqlite.Connection, issuer: Principal, grant_id: str, *, reason: str) -> None:
+        """Withdraw an approval and its pending child effects inside the caller's receipt."""
         if issuer.origin_class != "operator":
             raise ControlDenied("only an operator can revoke authority")
         if not reason.strip():
             raise ValueError("a revocation reason is required")
-        async with self.db.transaction() as conn:
-            grant = await one(conn, "SELECT generation,revoked_at FROM actor_grants WHERE id = ?", (grant_id,))
-            if grant is None:
-                raise KeyError(grant_id)
-            if grant["revoked_at"]:
-                return
-            generation = int(grant["generation"]) + 1
-            await conn.execute("UPDATE actor_grants SET revoked_at = ?,generation = ? WHERE id = ?", (now(), generation, grant_id))
-            await conn.execute("INSERT INTO grant_events(grant_id,actor_id,generation,event,reason,at) VALUES (?,?,?,'revoked',?,?)", (grant_id, issuer.actor_id, generation, reason, now()))
-            await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ? WHERE grant_id = ? AND state = 'pending'", (reason, grant_id))
+        grant = await one(conn, "SELECT generation,revoked_at FROM actor_grants WHERE id = ?", (grant_id,))
+        if grant is None:
+            raise KeyError(grant_id)
+        if grant["revoked_at"]:
+            return
+        generation = int(grant["generation"]) + 1
+        await conn.execute("UPDATE actor_grants SET revoked_at = ?,generation = ? WHERE id = ?", (now(), generation, grant_id))
+        await conn.execute("INSERT INTO grant_events(grant_id,actor_id,generation,event,reason,at) VALUES (?,?,?,'revoked',?,?)", (grant_id, issuer.actor_id, generation, reason, now()))
+        await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ? WHERE grant_id = ? AND state = 'pending'", (reason, grant_id))
+        await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ? WHERE state = 'pending'"
+                           " AND grant_id IN (SELECT id FROM actor_grants WHERE parent_grant_id = ?)", (reason, grant_id))
 
     async def revision(self, scope: Scope, entity: Entity) -> int:
         async with self.db.transaction() as conn:

@@ -45,6 +45,9 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
             raise ControlDenied("the worker is not an active member of this project")
         if task["status"] not in ("todo", "blocked"):
             raise ControlConflict("reopen the task before launching a new attempt")
+        parent = await one(conn, "SELECT cancel_state FROM lifecycle_parents WHERE parent_kind = 'task' AND parent_id = ?", (task_id,))
+        if parent is not None and parent["cancel_state"] != "active":
+            raise ControlConflict("the task parent was cancelled; revise its contract before admitting new work")
         if await one(conn, "SELECT 1 FROM task_contract_versions WHERE task_id = ? AND contract_revision = ?",
                      (task_id, task["contract_revision"])) is None:
             raise ControlConflict("the task needs an immutable contract before launch")
@@ -113,6 +116,14 @@ class TaskLaunchEffect:
         async def authorized() -> None:
             await check(claim)
             await self.validate(claim)
+            async with self.app.db.transaction() as conn:
+                parent = await one(conn, "SELECT cancel_state FROM lifecycle_parents WHERE parent_kind = 'task' AND parent_id = ?",
+                                   (claim.payload["task_id"],))
+                if parent is not None and parent["cancel_state"] != "active":
+                    raise ControlDenied("the parent cancelled this launch before provider admission")
+                attempt = await one(conn, "SELECT id FROM execution_attempts WHERE id = ?", (claim.payload["attempt_id"],))
+                if attempt is not None:
+                    await self.app.executions._check(conn, attempt["id"], operation="result.submit")
 
         entry = Entry(project.id, member.id, member.name, task.id, task.priority,
                       member.harness != "daedalus", "operator" if claim.principal.origin_class == "operator" else "orchestrator",

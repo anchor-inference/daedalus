@@ -15,6 +15,7 @@ import { confirmAsync, errorText } from "./ui";
 import { plural, t } from "./i18n";
 import { ProjectExtensions } from "./project/ProjectExtensions";
 import { ExecutionHosts } from "./project/ExecutionHosts";
+import { LifecycleCancel } from "./project/LifecycleCancel";
 
 const PICKED = "daedalus.project";
 
@@ -435,6 +436,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
       </label>
       <ProjectExtensions projectId={project.id} toast={toast} />
       <ExecutionHosts toast={toast} />
+      <LifecycleCancel kind="project_goal" id={project.id} projectId={project.id} onDone={afterChange} toast={toast} />
       {project.sessions.length > 0 && (
         <>
           <label className="field">{t("project.agents.in")}</label>

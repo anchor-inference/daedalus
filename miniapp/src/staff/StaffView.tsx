@@ -25,7 +25,7 @@ import { AskAnswers } from "../project/phone";
 import { useFocus } from "../project/data";
 import { MessageRow, StaffHeader, useMember, useStaffMessages } from "../project/staff";
 import { navigate, pathFor, projectPagePath } from "../router";
-import { invalidate, useQuery } from "../store";
+import { invalidate, useOffline, useQuery } from "../store";
 import { HarnessBadge } from "../team/parts";
 import { HARNESS_NAMES, type Staff } from "../team/team";
 import { TerminalView } from "../terminal/view";
@@ -361,19 +361,35 @@ function PermissionBar({ projectId, staffId, caps, toast }: { projectId: string;
 
 /** "Write to Ira…", with the choice of when it goes in: now or after the turn (see ``composerWhen``). */
 function StaffComposer({ staffId, name, caps, live, toast }: { staffId: string; name: string; caps: HarnessCapabilities | null; live: boolean; toast: (text: string) => void }) {
-  const [text, setText] = useState("");
-  const [picked, setWhen] = useState<"now" | "after_turn" | null>(null);
+  const draftKey = `daedalus.staff.draft.${staffId}`;
+  const [draft, setDraft] = useState<{ text: string; when: "now" | "after_turn" | null }>(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(draftKey) ?? "null");
+      return { text: typeof saved?.text === "string" ? saved.text.slice(0, 64000) : "",
+        when: saved?.when === "now" || saved?.when === "after_turn" ? saved.when : null };
+    } catch { return { text: "", when: null }; }
+  });
   const [busy, setBusy] = useState(false);
+  const offline = useOffline();
+  const draftRef = useRef(draft);
+  const text = draft.text;
   const now = nowChoice(caps);
-  const chosen = composerWhen(now, picked);
+  const chosen = composerWhen(now, draft.when);
+  function change(next: typeof draft) {
+    draftRef.current = next;
+    setDraft(next);
+    try { sessionStorage.setItem(draftKey, JSON.stringify(next)); }
+    catch { /* the draft remains available for this mounted view */ }
+  }
   async function send(e?: FormEvent) {
     e?.preventDefault();
     const words = text.trim();
-    if (!words || busy) return;
+    if (!words || busy || offline || !live) return;
     setBusy(true);
     try {
       await api.post(`/api/staff/${enc(staffId)}/messages`, { text: words, when: chosen });
-      setText("");
+      if (draftRef.current.text.trim() === words && composerWhen(now, draftRef.current.when) === chosen)
+        change({ ...draftRef.current, text: "" });
       toast(t("phone.told", { name }));
       invalidate(`/api/staff/${enc(staffId)}/messages`);
     } catch (err) {
@@ -382,7 +398,8 @@ function StaffComposer({ staffId, name, caps, live, toast }: { staffId: string; 
       setBusy(false);
     }
   }
-  return (
+  return <>
+    {offline && <div className="result-warning" role="status">{t("staff.compose.offline")}</div>}
     <form className="staff-compose" onSubmit={(e) => void send(e)}>
       <textarea
         className="staff-compose-field"
@@ -392,23 +409,23 @@ function StaffComposer({ staffId, name, caps, live, toast }: { staffId: string; 
         placeholder={t("focus.composer.staff", { name })}
         aria-label={t("focus.composer.staff", { name })}
         disabled={!live}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => change({ ...draft, text: e.target.value })}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && window.matchMedia("(hover: hover)").matches) {
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !offline && live && window.matchMedia("(hover: hover)").matches) {
             e.preventDefault();
             void send();
           }
         }}
       />
       <div className="segmented inline staff-when" role="group" aria-label={t("staff.when")}>
-        <button type="button" className={chosen === "after_turn" ? "on" : ""} aria-pressed={chosen === "after_turn"} data-when="after_turn" onClick={() => setWhen("after_turn")}>{t("staff.when.after_turn")}</button>
-        <button type="button" className={chosen === "now" ? "on" : ""} aria-pressed={chosen === "now"} data-when="now" disabled={!now.enabled} title={now.hint ? t(now.hint, { cli: caps?.label ?? "" }) : undefined} onClick={() => setWhen("now")}>{t("staff.when.now")}</button>
+        <button type="button" className={chosen === "after_turn" ? "on" : ""} aria-pressed={chosen === "after_turn"} data-when="after_turn" onClick={() => change({ ...draft, when: "after_turn" })}>{t("staff.when.after_turn")}</button>
+        <button type="button" className={chosen === "now" ? "on" : ""} aria-pressed={chosen === "now"} data-when="now" disabled={!now.enabled} title={now.hint ? t(now.hint, { cli: caps?.label ?? "" }) : undefined} onClick={() => change({ ...draft, when: "now" })}>{t("staff.when.now")}</button>
       </div>
-      <button className="iconbtn primary staff-compose-send" type="submit" disabled={busy || !text.trim() || !live} aria-label={t("staff.send")} title={t("staff.send")}>
+      <button className="iconbtn primary staff-compose-send" type="submit" disabled={busy || !text.trim() || !live || offline} aria-label={t("staff.send")} title={offline ? t("staff.compose.offline") : t("staff.send")}>
         <Icon name="send" />
       </button>
     </form>
-  );
+  </>;
 }
 
 type SideTab = "session" | "details" | "changes" | "notes" | "browser";
@@ -563,16 +580,54 @@ function SessionTab({ staffId, view, messages, toast }: { staffId: string; view:
         <div className="staff-aside-label">{t("staff.events")}</div>
         {events.length === 0 && <div className="staff-aside-line sub">—</div>}
         <ul className="staff-events">
-          {events.slice(0, 30).map((event) => (
+          {events.slice(0, 30).map((event) => event.type === "staff.report" ?
+            <ReportEvent key={event.seq} event={event} /> :
             <li key={event.seq} className="staff-event" data-type={event.type}>
               <span className="staff-event-at mono">{relTime(event.at)}</span>
               <span className="staff-event-text truncate">{eventLine(event)}</span>
             </li>
-          ))}
+          )}
         </ul>
       </section>
     </div>
   );
+}
+
+function ReportEvent({ event }: { event: StaffEventRow }) {
+  const taskId = typeof event.payload.task_id === "string" ? event.payload.task_id : "";
+  const reportId = typeof event.payload.report_id === "string" ? event.payload.report_id : "";
+  const [original, setOriginal] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const offline = useOffline();
+
+  async function toggle() {
+    if (open) { setOpen(false); return; }
+    if (original !== null) { setOpen(true); return; }
+    if (busy || offline || !taskId || !reportId) return;
+    setBusy(true);
+    setError("");
+    try {
+      const text = await api.getText(`/api/board/${enc(taskId)}/staff-reports/${enc(reportId)}/original`);
+      setOriginal(text);
+      setOpen(true);
+    } catch (caught) { setError(errorText(caught)); }
+    finally { setBusy(false); }
+  }
+
+  return <li className="staff-event staff-event-report" data-type="staff.report">
+    <span className="staff-event-at mono">{relTime(event.at)}</span>
+    <div className="staff-event-report-body">
+      <div className="staff-event-text truncate" title={eventLine(event)}>{eventLine(event)}</div>
+      {taskId && reportId && <button type="button" className="linkbtn" aria-expanded={open} disabled={busy || (offline && !open && original === null)} onClick={() => void toggle()}>
+        {busy ? t("staff.report.loading") : t(open ? "staff.report.hide" : "staff.report.show")}
+      </button>}
+      {offline && original === null && <div className="sub" role="status">{t("staff.report.offline")}</div>}
+      {error && <div className="result-warning" role="alert">{error}</div>}
+      {open && original !== null && <pre className="result-original">{original}</pre>}
+    </div>
+  </li>;
 }
 
 /** The operator's standing grants to the member ("Always"), each revocable. A revoked one leaves the

@@ -17,13 +17,18 @@ from daedalus.config import native_mode
 from daedalus.stores.control_schema import MIGRATION as CONTROL_MIGRATION
 from daedalus.stores.execution_schema import MIGRATION as EXECUTION_MIGRATION
 from daedalus.stores.extension_schema import EXTENSION_SCHEMA
+from daedalus.stores.grant_lineage_schema import MIGRATION as GRANT_LINEAGE_MIGRATION
 from daedalus.stores.knowledge_invalidation_schema import MIGRATION as KNOWLEDGE_INVALIDATION_MIGRATION
+from daedalus.stores.lifecycle_ownership_schema import MIGRATION as LIFECYCLE_OWNERSHIP_MIGRATION
 from daedalus.stores.lifecycle_schema import MIGRATION as LIFECYCLE_MIGRATION
 from daedalus.stores.orchestrator_contract_schema import MIGRATION as ORCHESTRATOR_CONTRACT_MIGRATION
 from daedalus.stores.planning_schema import MIGRATION as PLANNING_MIGRATION
 from daedalus.stores.receipt_request_schema import MIGRATION as RECEIPT_REQUEST_MIGRATION
 from daedalus.stores.result_anchor_schema import MIGRATION as RESULT_ANCHOR_MIGRATION
+from daedalus.stores.runtime_observation_schema import MIGRATION as RUNTIME_OBSERVATION_MIGRATION
 from daedalus.stores.runtime_schema import RUNTIME_SCHEMA
+from daedalus.stores.staff_report_schema import MIGRATION as STAFF_REPORT_MIGRATION
+from daedalus.stores.workspace_archive_schema import MIGRATION as WORKSPACE_ARCHIVE_MIGRATION
 
 logger = logging.getLogger(__name__)
 
@@ -1701,6 +1706,11 @@ MIGRATIONS.append(RUNTIME_SCHEMA)
 MIGRATIONS.append(PLANNING_MIGRATION)
 MIGRATIONS.append(KNOWLEDGE_INVALIDATION_MIGRATION)
 MIGRATIONS.append(LIFECYCLE_MIGRATION)
+MIGRATIONS.append(LIFECYCLE_OWNERSHIP_MIGRATION)
+MIGRATIONS.append(STAFF_REPORT_MIGRATION)
+MIGRATIONS.append(RUNTIME_OBSERVATION_MIGRATION)
+MIGRATIONS.append(WORKSPACE_ARCHIVE_MIGRATION)
+MIGRATIONS.append(GRANT_LINEAGE_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

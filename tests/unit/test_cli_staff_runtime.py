@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,8 +26,11 @@ from typing import Any
 import pytest
 
 from daedalus.config import HarnessConfig, Settings, TerminalsConfig
+from daedalus.extensions.board_commands import BoardCommands
+from daedalus.extensions.effects import EffectDispatcher
 from daedalus.extensions.harness import catalog_roots
 from daedalus.extensions.staff import Team
+from daedalus.extensions.task_launch import TaskLaunchEffect
 from daedalus.harness.capabilities import capabilities
 from daedalus.harness.contract import (
     LAUNCH_DIR,
@@ -59,8 +62,11 @@ from daedalus.harness.runtime import CliStaffRuntime, install_runtimes
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.session_runner import SessionManager
 from daedalus.staff_runtime import LiveSession, ReadRequest
+from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
+from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.harness import HarnessStore
+from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.projects import FolderSpec, Project
 from daedalus.stores.staff import Staff
 from daedalus.terminals.model import Owner, TerminalSpec
@@ -258,14 +264,23 @@ class Stand:
     async def hire(self, name: str = "Ada") -> Staff:
         return await self.manager.staff.hire(self.project.id, name=name, harness=getattr(self.adapter, "name", "claude"), isolation="shared")
 
-    async def task(self, title: str = "Menu page") -> str:
-        task_id = f"t{uuid.uuid4().hex[:6]}"
-        now = "2026-09-24T00:00:00+00:00"
-        await self.manager.db.execute(
-            "INSERT INTO board_tasks(id, title, status, priority, created_at, updated_at, project_id, brief_json) VALUES (?, ?, 'todo', 3, ?, ?, ?, ?)",
-            (task_id, title, now, now, self.project.id, json.dumps(BRIEF)),
-        )
-        return task_id
+    async def task(self, title: str = "Menu page", *,
+                   requirements: list[dict[str, str]] | None = None) -> str:
+        scope = Scope("project", self.project.id)
+        revision = await ControlStore(self.manager.db).revision(scope, Entity("collection", self.project.id))
+        result = await BoardCommands(self.manager.db).create(
+            Principal.operator({"via": "token", "user_id": 1}), scope,
+            client_operation_id=f"test-task:{uuid.uuid4().hex}", expected_collection_revision=revision,
+            title=title, brief=BRIEF, requirements=requirements)
+        return result["task_id"]
+
+    async def assign(self, member: Staff, task_id: str, *, resume_from: str | None = None) -> dict[str, Any]:
+        scope = Scope("project", self.project.id)
+        revision = await ControlStore(self.manager.db).revision(scope, Entity("task", task_id))
+        return await self.team.assign(member, task_id,
+                                      principal=Principal.operator({"via": "token", "user_id": 1}),
+                                      client_operation_id=f"test-launch:{uuid.uuid4().hex}",
+                                      expected_entity_revision=revision, resume_from=resume_from)
 
     async def events(self, *types: str, **ids: str) -> list[AppEvent]:
         return await self.manager.bus.replay(0, EventFilter(types=types, **ids), limit=5000)
@@ -322,10 +337,19 @@ async def stand(settings: Settings, db: Database, *, adapter: Any = None, extra_
         await terminals.start()
         assert await terminals.wait_available("container")
         manager.config.staff.launch_stagger_seconds = 0
-        app = SimpleNamespace(manager=manager, extensions={"terminals": terminals}, settings=settings, notifications=Notes(), db=db)
+        executions = ExecutionStore(db)
+        executions.acquire()
+        await executions.boot()
+        app = SimpleNamespace(manager=manager, extensions={"terminals": terminals}, settings=settings,
+                              notifications=Notes(), db=db, executions=executions)
         team = Team(app)  # type: ignore[arg-type]
         app.extensions["staff"] = team
         team.attach()
+        dispatcher = EffectDispatcher(OutboxStore(db))
+        dispatcher.register("task.launch", TaskLaunchEffect(app))
+        app.extensions["effects"] = dispatcher
+        dispatch_task = asyncio.create_task(dispatcher.run())
+        dispatcher.enable()
         project = await manager.projects.create("Bakery", [FolderSpec(str(work), env="container")])
         await manager.projects.update_orchestrator(project.id, enabled=True, autonomy="normal")
         project = await manager.projects.get(project.id) or project
@@ -336,6 +360,14 @@ async def stand(settings: Settings, db: Database, *, adapter: Any = None, extra_
         made = Stand(root, home, work, log, ptyd, terminals, manager, team, runtime, chosen, project, cfg)
         yield made
     finally:
+        active_dispatch = locals().get("dispatch_task")
+        if active_dispatch is not None:
+            active_dispatch.cancel()
+            with suppress(asyncio.CancelledError):
+                await active_dispatch
+        active_executions = locals().get("executions")
+        if active_executions is not None:
+            active_executions.release()
         made_runtime = locals().get("made")
         if made_runtime is not None:
             made_runtime.runtime.close()
@@ -363,8 +395,8 @@ async def test_a_session_runs_from_the_trust_dialog_to_its_release(settings: Set
     async with stand(settings, db) as s:
         ada = await s.hire()
         task_id = await s.task()
-        assigned = await s.team.assign(ada, task_id)
-        assert assigned["state"] == "started"
+        assigned = await s.assign(ada, task_id)
+        assert assigned["state"] == "queued"
         await s.status_event(ada, "turn_done_unseen")
         assert await s.statuses(ada) == ["starting", "working", "turn_done_unseen"]
 
@@ -413,7 +445,7 @@ async def test_a_session_that_is_not_signed_in_fails_with_the_screen_it_shows(se
     async with stand(settings, db, extra_env={"FAKE_CLAUDE_LOGGED_IN": "0"}) as s:
         trust(s)
         ada = await s.hire()
-        await s.team.assign(ada, await s.task())
+        await s.assign(ada, await s.task())
         failed = await s.status_event(ada, "error")
         assert failed.payload["detail"].startswith("Claude Code is not signed in") and "Select login method" in failed.payload["detail"]
         row = await s.session_row(ada)
@@ -424,7 +456,7 @@ async def test_a_session_that_is_not_signed_in_fails_with_the_screen_it_shows(se
 async def test_a_dialog_the_adapter_does_not_know_is_waited_on_and_never_answered(settings: Settings, db: Database) -> None:
     async with stand(settings, db, adapter=StubClaude(knows_trust=False), ready_timeout_s=1.0) as s:
         ada = await s.hire()
-        await s.team.assign(ada, await s.task())
+        await s.assign(ada, await s.task())
         failed = await s.status_event(ada, "error")
         assert failed.payload["detail"].startswith("not ready after 1 s") and "Quick safety check" in failed.payload["detail"]
         row = await s.session_row(ada)
@@ -438,7 +470,7 @@ async def test_a_permission_becomes_a_request_and_its_answer_reaches_the_dialog(
     async with stand(settings, db, adapter=StubClaude("perm:npm install grammy")) as s:
         trust(s)
         ada = await s.hire()
-        await s.team.assign(ada, await s.task())
+        await s.assign(ada, await s.task())
         waiting = await s.status_event(ada, "permission")
         [ask] = await s.manager.asks.open_for(s.project.id)
         assert waiting.payload["waiting_for"] == f"permission [{ask.short_id}]: Bash"
@@ -459,7 +491,7 @@ async def test_a_permission_answered_in_the_terminal_closes_its_request(settings
     async with stand(settings, db, adapter=StubClaude("perm:make build")) as s:
         trust(s)
         ada = await s.hire()
-        await s.team.assign(ada, await s.task())
+        await s.assign(ada, await s.task())
         await s.status_event(ada, "permission")
         row = await s.session_row(ada)
         await s.terminals.wait_for(row.terminal_id, regex="Do you want to proceed", timeout=10)
@@ -477,7 +509,7 @@ async def test_the_team_tools_are_answered_by_the_host(settings: Settings, db: D
         trust(s)
         ada = await s.hire()
         task_id = await s.task()
-        await s.team.assign(ada, task_id)
+        await s.assign(ada, task_id)
         asked = await s.status_event(ada, "question")
         assert "Euros or dollars?" in asked.payload["waiting_for"]
         [ask] = await s.manager.asks.open_for(s.project.id)
@@ -491,7 +523,7 @@ async def test_the_team_tools_are_answered_by_the_host(settings: Settings, db: D
         # report came back to the worker as an error with the reason.
         assert "AskOrchestrator: euros" in screen
         assert "Report: reported checkpoint" in screen
-        assert "Report: kind is checkpoint, needs_input, stuck or done" in screen
+        assert "Report: a report needs a supported kind and nonempty note" in screen
         [report] = await s.events("staff.report", staff_id=ada.id)
         assert (report.payload["kind"], report.payload["text"], report.payload["task_id"]) == ("checkpoint", "menu drafted", task_id)
         assert await s.statuses(ada) == ["starting", "working", "question", "working", "turn_done_unseen"]
@@ -504,7 +536,7 @@ async def test_a_held_question_gets_the_option_and_the_operators_whole_note(sett
     async with stand(settings, db, adapter=StubClaude("askorch:Euros or dollars?|euros|dollars")) as s:
         trust(s)
         ada = await s.hire()
-        await s.team.assign(ada, await s.task())
+        await s.assign(ada, await s.task())
         await s.status_event(ada, "question")
         [ask] = await s.manager.asks.open_for(s.project.id)
         await s.team.answer(ask.short_id, selected=["euros"], note=NOTE, by="operator")
@@ -516,7 +548,7 @@ async def test_an_answer_after_the_hold_expired_arrives_as_a_message(settings: S
     async with stand(settings, db, adapter=StubClaude("askorch:Which oven?|left|right")) as s:
         trust(s)
         ada = await s.hire()
-        await s.team.assign(ada, await s.task())
+        await s.assign(ada, await s.task())
         await s.status_event(ada, "question")
         [ask] = await s.manager.asks.open_for(s.project.id)
         reply_id = ask.request_ref.removeprefix("team:")
@@ -540,7 +572,7 @@ async def test_silence_is_shown_as_no_signal_and_the_idle_composer_ends_the_turn
     async with stand(settings, db, adapter=StubClaude("silent"), extra_env={"FAKE_CLI_TIME_SCALE": "1"}, no_signal_after_s=0.5, reconcile_gap_ms=200) as s:
         trust(s)
         ada = await s.hire()
-        await s.team.assign(ada, await s.task())
+        await s.assign(ada, await s.task())
         silent = await s.status_event(ada, "no_signal")
         assert silent.payload["detail"] == "read from the screen"
         done = await s.status_event(ada, "turn_done_unseen")
@@ -554,7 +586,7 @@ async def test_a_member_whose_task_is_handed_in_is_never_called_silent(settings:
         trust(s)
         ada = await s.hire()
         task_id = await s.task()
-        await s.team.assign(ada, task_id)
+        await s.assign(ada, task_id)
         await s.status_event(ada, "working")
         await s.manager.db.execute("UPDATE board_tasks SET status = 'review' WHERE id = ?", (task_id,))
         await asyncio.sleep(3)
@@ -565,7 +597,7 @@ async def test_a_cli_that_exits_by_itself_ends_its_session(settings: Settings, d
     async with stand(settings, db, extra_env={"FAKE_CLI_FAULTS": "exit_after:1"}) as s:
         trust(s)
         ada = await s.hire()
-        await s.team.assign(ada, await s.task())
+        await s.assign(ada, await s.task())
         ended = await s.status_event(ada, "exited")
         assert ended.payload["detail"].startswith("Claude Code exited with code 3; its screen last showed: ")
         assert await s.manager.staff.live(ada.id) is None
@@ -589,7 +621,7 @@ async def test_a_cli_that_fails_at_its_start_says_why_and_leaves_its_card_free(s
         trust(s)
         ada = await s.hire()
         task_id = await s.task()
-        await s.team.assign(ada, task_id, by="orchestrator")
+        await s.assign(ada, task_id)
         ended = await s.status_event(ada, "exited")
         assert ended.payload["detail"].startswith("Claude Code exited with code 1; its screen last showed: ")
         assert "Error: the model given with --model is not available to this account" in ended.payload["detail"]
@@ -611,7 +643,7 @@ async def test_a_cli_that_fails_at_its_start_says_why_and_leaves_its_card_free(s
 async def test_a_companion_that_dies_takes_the_side_channel_with_it(settings: Settings, db: Database) -> None:
     async with stand(settings, db, adapter=StubClaude(companion=True)) as s:
         ada = await s.hire()
-        await s.team.assign(ada, await s.task())
+        await s.assign(ada, await s.task())
         await s.status_event(ada, "turn_done_unseen")
         launch = await HarnessStore(db).open_launch_for((await s.session_row(ada)).id)
         assert launch is not None and launch.companion_terminal_id
@@ -635,14 +667,13 @@ async def test_a_launch_at_the_machine_cap_waits_for_a_place(settings: Settings,
         trust(s)
         s.team._capacity = SimpleNamespace(running=_zero, cap=lambda: 20, waiting=lambda: 0, unavailable=lambda env: None)
         ada = await s.hire()
-        assigning = asyncio.create_task(s.team.assign(ada, await s.task()))
+        assigning = asyncio.create_task(s.assign(ada, await s.task()))
         # Woken by the line moving rather than by a poll racing the machine's load.
         assert await s.terminals.wait_queue(bool, timeout=120), "the launch never joined the terminals' line"
         [waiter] = s.terminals.queue()
         assert waiter["actor"].startswith("agent:staff:") and waiter["profile"] == "harness:claude"
-        assert not assigning.done()
+        assert (await assigning)["state"] == "queued"
         await s.terminals.kill(mine["id"])
-        assert (await asyncio.wait_for(assigning, 120))["state"] == "started"
         await s.status_event(ada, "turn_done_unseen", timeout=120)
 
 
@@ -657,7 +688,7 @@ async def test_a_restarted_host_takes_the_session_up_and_loses_no_event(settings
     async with stand(settings, db, adapter=StubClaude("slow:40")) as s:
         trust(s)
         ada = await s.hire()
-        await s.team.assign(ada, await s.task())
+        await s.assign(ada, await s.task())
         await s.status_event(ada, "working")
         row = await s.session_row(ada)
         # The host goes away mid-turn; the CLI goes on and finishes while nobody listens.
@@ -689,7 +720,7 @@ async def test_a_restarted_host_ends_what_ended_while_it_was_away(settings: Sett
     async with stand(settings, db) as s:
         trust(s)
         ada = await s.hire()
-        await s.team.assign(ada, await s.task())
+        await s.assign(ada, await s.task())
         await s.status_event(ada, "turn_done_unseen")
         row = await s.session_row(ada)
         s.runtime.close()
@@ -710,7 +741,7 @@ async def test_a_post_for_an_ended_launch_moves_nothing(settings: Settings, db: 
     async with stand(settings, db) as s:
         trust(s)
         ada = await s.hire()
-        await s.team.assign(ada, await s.task())
+        await s.assign(ada, await s.task())
         await s.status_event(ada, "turn_done_unseen")
         row = await s.session_row(ada)
         launch = await HarnessStore(db).open_launch_for(row.id)

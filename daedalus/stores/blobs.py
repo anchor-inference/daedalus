@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,6 +13,24 @@ from typing import Any
 
 from protocore.contracts.blob import BlobNotFoundError, IBlobStore
 from protocore.contracts.types import BlobMetadata
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    descriptor, temporary = tempfile.mkstemp(prefix=".blob-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 class FileBlobStore(IBlobStore):
@@ -35,7 +55,9 @@ class FileBlobStore(IBlobStore):
         data_path, meta_path = self._paths(tenant_id, ref)
         data_path.parent.mkdir(parents=True, exist_ok=True)
         if not data_path.exists():
-            data_path.write_bytes(content)
+            _atomic_write(data_path, content)
+        elif hashlib.sha256(data_path.read_bytes()).hexdigest() != ref:
+            raise ValueError("a stored blob no longer matches its digest")
         meta = BlobMetadata(
             ref=ref,
             sha256=ref,
@@ -45,7 +67,7 @@ class FileBlobStore(IBlobStore):
             created_at=datetime.now(UTC),
             metadata=dict(metadata or {}),
         )
-        meta_path.write_text(meta.model_dump_json())
+        _atomic_write(meta_path, meta.model_dump_json().encode("utf-8"))
         return meta
 
     async def get(self, tenant_id: str, ref: str) -> bytes:

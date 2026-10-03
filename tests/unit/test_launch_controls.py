@@ -45,7 +45,7 @@ async def test_attempt_and_its_report_grant_commit_together(db: Database) -> Non
         grant = await db.fetchone("SELECT * FROM actor_grants")
         assert grant["actor_id"] == "staff:worker"
         assert grant["task_id"] == task.id
-        assert grant["operations_json"] == '["result.submit"]'
+        assert grant["operations_json"] == '["result.submit","staff.report"]'
         assert grant["effects_json"] == "[]"
         owner = await db.fetchone("SELECT * FROM lifecycle_owners WHERE child_id = ?", (identity.id,))
         assert (owner["parent_kind"], owner["parent_id"], owner["child_kind"], owner["source_revision"]) == ("task", task.id, "execution_attempt", 1)

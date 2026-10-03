@@ -31,9 +31,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from daedalus.extensions.board_commands import BoardCommands
 from daedalus.extensions.notifications import Draft
 from daedalus.extensions.orchestrator_domain import capture_contract_change, check_planning_capacity
 from daedalus.extensions.task_contract import Contracts
+from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -650,18 +652,12 @@ class Board:
         return "\n".join(lines) or "(the board is empty)"
 
     async def service(self, op: str, **kwargs: Any) -> Any:
-        if op == "add":
-            return await self.add(**kwargs)
-        if op == "update":
-            return await self.update(kwargs.pop("task_id"), **kwargs)
         if op == "list":
             return await self.list(kwargs.get("status"), include_done=bool(kwargs.get("include_done", False)), actor=kwargs.get("actor"), project_id=kwargs.get("project_id"))
         if op == "needs_you":
             return await self.needs_you(kwargs["project_id"])
         if op == "get":
             return await self.get(kwargs["task_id"], actor=kwargs.get("actor"))
-        if op == "delete":
-            return await self.delete(kwargs["task_id"])
         if op == "render":
             return self.render(await self.list(kwargs.get("status"), include_done=bool(kwargs.get("include_done", False)), actor=kwargs.get("actor")))
         raise ValueError(op)
@@ -672,6 +668,37 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     app.extensions["board"] = board
     assert app.manager is not None
     app.manager.service_hooks["board"] = board.service
+
+    async def command_service(op: str, *, session_id: str, task_id: str | None = None,
+                              client_operation_id: str = "", expected_collection_revision: int | None = None,
+                              expected_entity_revision: int | None = None, **kwargs: Any) -> Any:
+        authority = app.extensions.get("board_tool_authority")
+        if authority is None or (op != "revision" and not client_operation_id):
+            raise PermissionError("board writes require a host grant and trusted call id")
+        principal, scope = await authority(session_id, "board.task.create" if op in ("add", "revision") else "board.task.update",
+                                           task_id=task_id)
+        if not isinstance(principal, Principal) or not isinstance(scope, Scope):
+            raise PermissionError("board authority did not return a host identity and scope")
+        if op == "revision":
+            return await ControlStore(app.db).revision(scope, Entity("collection", scope.id))
+        commands = BoardCommands(app.db, bus=app.manager.bus)
+        if op == "add":
+            if expected_collection_revision is None:
+                raise ValueError("expected_collection_revision is required")
+            created = await commands.create(principal, scope, client_operation_id=client_operation_id,
+                                            expected_collection_revision=expected_collection_revision,
+                                            source_session_id=session_id, **kwargs)
+            return await board.get(created["task_id"], actor=session_id)
+        if op == "update":
+            if task_id is None or expected_entity_revision is None:
+                raise ValueError("task_id and expected_entity_revision are required")
+            updated = await commands.update(principal, scope, task_id,
+                                            client_operation_id=client_operation_id,
+                                            expected_entity_revision=expected_entity_revision, **kwargs)
+            return await board.get(updated["task_id"], actor=session_id)
+        raise ValueError(op)
+
+    app.manager.service_hooks["board_commands"] = command_service
 
     async def touch_on_finish(session_id: str, run_id: str, status: str) -> None:
         await board.touch(session_id)

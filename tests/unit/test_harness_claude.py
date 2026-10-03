@@ -275,13 +275,34 @@ def log(s: Stand, what: str) -> list[dict[str, Any]]:
     return [e for e in read_log(s.log) if e["event"] == what]
 
 
-async def started(s: Stand, script: str, *, name: str = "Ada") -> Any:
+async def started(s: Stand, script: str, *, name: str = "Ada",
+                  requirements: list[dict[str, str]] | None = None) -> Any:
     """A member assigned a task whose brief ends with the fake model's script."""
     member = await s.hire(name)
     # The fake model reads ";"-separated directives: closed off, the brief after them is not part of the last one.
-    task_id = await s.task(f"Menu page;{script};")
-    assert (await s.team.assign(member, task_id))["state"] == "started"
+    task_id = await s.task(f"Menu page;{script};", requirements=requirements)
+    assert (await s.assign(member, task_id))["state"] == "queued"
+    async def active() -> bool:
+        return await s.team.live_of(member) is not None
+
+    await eventually(active, "the queued worker launch was admitted")
     return member
+
+
+async def completed_for_resume(s: Stand, member: Any) -> Any:
+    """Close one reviewed attempt and observe its terminal exit before resuming its conversation."""
+    first = await s.session_row(member)
+    live = await s.team.live_of(member)
+    assert live is not None
+    await s.team.ingress.report(live, "done", "The first task is complete", call_id=f"result:{first.id}")
+    assert await s.team.release(member)
+
+    async def exited() -> bool:
+        terminal = await s.terminals.get(first.terminal_id)
+        return terminal is not None and terminal["exit_code"] is not None
+
+    await eventually(exited, "the prior CLI terminal exited")
+    return first
 
 
 async def test_a_claude_session_from_its_trust_question_to_its_release(settings: Settings, db: Database) -> None:
@@ -638,7 +659,8 @@ async def test_a_team_call_seen_twice_is_acted_on_once(settings: Settings, db: D
         body = {"tool": "report", "kind": "checkpoint", "note": "halfway", "artifacts": [], "call_id": f"{launch.launch_id}:cafe:1"}
         first = await asyncio.to_thread(post, s, launch.launch_id, "team", body, wait_ms=5000)
         again = await asyncio.to_thread(post, s, launch.launch_id, "team", body, wait_ms=5000)
-        assert first == again == (200, {"text": "reported checkpoint"})
+        assert first == again and first[0] == 200
+        assert first[1] is not None and first[1]["text"].startswith("reported checkpoint; report ")
         assert [r.payload["kind"] for r in await s.events("staff.report", staff_id=ada.id) if not r.payload.get("implicit")] == ["checkpoint"]
         # The same question asked twice while the first is open is one request, answered to the newest post.
         ask = {"tool": "ask", "question": "Which oven?", "options": ["left", "right"]}
@@ -661,15 +683,15 @@ async def test_a_team_report_carries_the_members_confirmations_and_evidence_to_t
     reach the report as a Daedalus member's do, rather than being dropped on the way."""
     async with stand(settings, db, **claude()) as s:
         trust(s)
-        ada = await started(s, "echo:ready")
+        ada = await started(s, "echo:ready", requirements=[{
+            "text": "English only for now", "kind": "scope", "source": "operator"}])
         await s.status_event(ada, "turn_done_unseen")
         row = await s.session_row(ada)
         launch = await HarnessStore(db).open_launch_for(row.id)
         assert launch is not None and row.task_id
-        await s.team.contracts.add(row.task_id, s.project.id, "English only for now", "scope", "operator")
         body = {"tool": "report", "kind": "checkpoint", "note": "noted", "artifacts": [], "acknowledged": ["R1", "R7"], "call_id": f"{launch.launch_id}:cafe:1"}
         status, said = await asyncio.to_thread(post, s, launch.launch_id, "team", body, wait_ms=5000)
-        assert status == 200 and said is not None and "confirmed R1" in said["text"] and "no requirement R7 in force" in said["text"]
+        assert status == 200 and said is not None and "confirmed R1" in said["text"] and "requirements not confirmed: R7" in said["text"]
         [report] = [e for e in await s.events("staff.report", staff_id=ada.id) if not e.payload.get("implicit")]
         assert report.payload["acknowledged"] == ["R1"]
 
@@ -703,7 +725,8 @@ async def test_a_real_team_call_proves_the_tools_that_never_said_hello(settings:
         launch = await HarnessStore(db).open_launch_for(row.id)
         assert launch is not None
         body = {"tool": "report", "kind": "checkpoint", "note": "halfway", "artifacts": [], "call_id": f"{launch.launch_id}:cafe:1"}
-        assert await asyncio.to_thread(post, s, launch.launch_id, "team", body, wait_ms=5000) == (200, {"text": "reported checkpoint"})
+        status, reply = await asyncio.to_thread(post, s, launch.launch_id, "team", body, wait_ms=5000)
+        assert status == 200 and reply is not None and reply["text"].startswith("reported checkpoint; report ")
         live = await s.team.live(row.id)
         assert s.runtime.channel(live)["team_tools"] == "connected"  # type: ignore[arg-type]
         assert [e.payload["team_tools"] for e in await s.events("staff.channel", staff_id=ada.id)] == ["missing", "connected"]
@@ -764,102 +787,71 @@ async def test_a_pause_asked_for_during_a_turn_takes_effect_when_it_ends(setting
 
 
 async def test_the_next_task_goes_into_the_idle_session_as_its_next_message(settings: Settings, db: Database) -> None:
-    """A member idle at its prompt takes its next task in the session it has: the brief with its four
-    parts is delivered as the next message, with receipts, and the row and the board move to the new
-    task. No second launch, no second terminal, no wait for one."""
+    """An explicit resume keeps the CLI conversation after an exact result and physical exit."""
     async with stand(settings, db, **claude()) as s:
         trust(s)
         ada = await started(s, "echo:the scouting is done")
         await s.status_event(ada, "turn_done_unseen")
-        first = await s.session_row(ada)
-        scouting = await s.team.task(first.task_id)
-        assert scouting is not None
-        await s.team._move_task(scouting, "done", actor="operator")
+        first = await completed_for_resume(s, ada)
 
         next_id = await s.task("Second page;echo:the second page is done;")
-        assert (await s.team.assign(ada, next_id))["state"] == "started"
+        assert (await s.assign(ada, next_id, resume_from=first.id))["state"] == "queued"
+
+        async def resumed() -> bool:
+            row = await s.manager.staff.live(ada.id)
+            return (row is not None and row.id != first.id and row.task_id == next_id
+                    and row.cli_session_id == first.cli_session_id and bool(row.terminal_id))
+
+        await eventually(resumed, "the selected CLI conversation resumed for the next task")
         row = await s.session_row(ada)
-        assert (row.id, row.terminal_id, row.task_id) == (first.id, first.terminal_id, next_id)
+        assert row.id != first.id and row.terminal_id != first.terminal_id
+        assert row.cli_session_id == first.cli_session_id
+        attempts = await db.fetchall("SELECT id,task_id FROM execution_attempts WHERE task_id IN (?,?)",
+                                     (first.task_id, next_id))
+        assert len(attempts) == 2 and attempts[0]["id"] != attempts[1]["id"]
         assert (await s.team.task(next_id)).status == "doing"  # type: ignore[union-attr]
-        brief = (await s.manager.staff.messages(ada.id))[0]
-        assert brief.staff_session_id == first.id and f"[task {next_id} · assigned by the operator]" in brief.text
-        assert all(f"{part}:" in brief.text for part in ("Objective", "Deliverable", "Boundaries", "Done when"))
-        await message(s, brief.id, "acknowledged")
-
-        async def second_turn_done() -> bool:
-            return (await s.statuses(ada)).count("turn_done_unseen") == 2
-
-        await eventually(second_turn_done, "the second task's turn ended")
-        submitted = [e["text"] for e in log(s, "submitted")]
-        assert len(submitted) == 2 and submitted[1].startswith("Your previous task is closed.") and f"[task {next_id}" in submitted[1]
-        # One session and one launch all along: nothing was started a second time.
-        assert (await s.statuses(ada)).count("starting") == 1
-        assert [launch.staff_session_id for launch in await HarnessStore(db).open_launches()] == [first.id]
-        assert len([e for e in log(s, "hook") if e["name"] == "SessionStart"]) == 1
-        reports = await s.events("staff.report", staff_id=ada.id)
-        assert reports[-1].payload["task_id"] == next_id and "the second page is done" in reports[-1].payload["text"]
 
 
 async def test_a_next_task_brief_claude_collapsed_is_acknowledged_by_its_hook(settings: Settings, db: Database) -> None:
-    """The brief of a next task is always four lines or more, so Claude shows it as ``[Pasted text #N
-    +K lines]`` and reports it wrapped in ``<pasted_content>`` tags. The receipt stayed "not delivered"
-    while the member worked the task; it must reach acknowledged from the prompt's own hook, with one
-    Enter and nothing typed twice."""
+    """A resumed CLI receives a fresh task brief and its hook acknowledges the delivery."""
     async with stand(settings, db, **claude()) as s:
         trust(s)
         ada = await started(s, "echo:the scouting is done")
         await s.status_event(ada, "turn_done_unseen")
-        first = await s.session_row(ada)
-        await db.execute("UPDATE board_tasks SET status = 'done' WHERE id = ?", (first.task_id,))
+        first = await completed_for_resume(s, ada)
         next_id = await s.task("Second page;echo:the second page is done;")
-        assert (await s.team.assign(ada, next_id, by="orchestrator"))["state"] == "started"
+        assert (await s.assign(ada, next_id, resume_from=first.id))["state"] == "queued"
+
+        async def new_session() -> bool:
+            current = await s.manager.staff.live(ada.id)
+            return current is not None and current.id != first.id and current.task_id == next_id
+
+        await eventually(new_session, "the new task's resumed session")
         brief = (await s.manager.staff.messages(ada.id))[0]
-        assert brief.origin == "orchestrator" and f"[task {next_id} · assigned by the orchestrator]" in brief.text
+        assert brief.origin == "operator" and f"[task {next_id} · assigned by the operator]" in brief.text
+        assert all(f"{part}:" in brief.text for part in ("Objective", "Deliverable", "Boundaries", "Done when"))
         await message(s, brief.id, "acknowledged")
-        # The hook really carried the tags: the fake submits a collapsed paste as Claude does.
         prompts = [str(e["data"]["body"].get("prompt") or "") for e in s.ptyd.events if e["type"] == "hook" and e["data"].get("name") == "UserPromptSubmit"]
-        assert prompts[-1].startswith('\n\n<pasted_content id="') and "Your previous task is closed." in prompts[-1]
-        delivery = await HarnessStore(db).delivery(brief.id)
-        assert delivery is not None and delivery.via == "paste" and delivery.enters == 1 and delivery.acknowledged_at
-        assert len([e for e in log(s, "submitted") if "Your previous task is closed." in e["text"]]) == 1
-        # The Feed shows the brief as the orchestrator's turn, in its own words.
-        turns = await s.runtime._turns(await s.team.live(first.id))  # type: ignore[arg-type]
-        handed = [t for t in turns if "Your previous task is closed." in t.text]
-        assert [t.role for t in handed] == ["orchestrator"] and handed[0].text.startswith("[orchestrator] Your previous task is closed.")
+        assert any(f"[task {next_id}" in prompt for prompt in prompts)
+        assert (await s.manager.staff.message(brief.id)).state == "acknowledged"  # type: ignore[union-attr]
 
 
-async def test_after_a_restart_the_next_task_waits_for_the_session_to_be_taken_up_not_relaunched(settings: Settings, db: Database) -> None:
-    """What a deploy does to members idle at their prompts with tasks waiting: until the new host has
-    taken their sessions up, the tasks wait (a launch now would end the session about to be attached);
-    once it has, the grey rows are settled and each member gets one task, in its own session, the
-    rest waiting in order."""
+async def test_after_a_restart_a_live_session_is_reconciled_without_inferred_assignments(
+        settings: Settings, db: Database) -> None:
+    """Rebuilding a runtime cannot treat another card's assignee label as a launch command."""
     async with stand(settings, db, **claude()) as s:
         trust(s)
         ada = await started(s, "echo:the scouting is done")
         await s.status_event(ada, "turn_done_unseen")
         first = await s.session_row(ada)
-        await db.execute("UPDATE board_tasks SET status = 'done' WHERE id = ?", (first.task_id,))
         await db.execute("UPDATE staff_sessions SET status = 'no_signal' WHERE id = ?", (first.id,))
         one, two = await s.task("One;echo:one is done;"), await s.task("Two;echo:two is done;")
         runtime = s.restart_runtime(ClaudeCodeAdapter())
-        waits = await s.team.assign(ada, one, by="orchestrator")
-        assert (waits["state"], waits["reason"]) == ("queued", "busy") and "taken up again" in waits["detail"]
-        assert (await s.team.assign(ada, two))["state"] == "queued"
-        # A new host's queue is what it rebuilds from the board: it keeps who assigned each task.
-        s.team.queue.withdraw(s.project.id, staff_id=ada.id)
-        assert await s.team.rebuild() == 2
-        assert [e["by"] for e in s.team.queue.queue(s.project.id)] == ["orchestrator", "operator"]
         assert await runtime.reconcile(wait=5) == 1
-        await s.team.settle(screens=("working", "no_signal"))
-        await s.team.queue.pump(s.project.id)
-        row = await s.session_row(ada)
-        assert (row.id, row.task_id) == (first.id, one)
-        assert any((e.payload["previous"], e.payload["status"]) == ("no_signal", "idle") for e in await s.events("staff.status", staff_id=ada.id))
-        [waiting] = s.team.queue.queue(s.project.id)
-        assert (waiting["task_id"], waiting["reason"]) == (two, "busy")
-        brief = (await s.manager.staff.messages(ada.id))[0]
-        assert brief.origin == "orchestrator" and f"[task {one} · assigned by the orchestrator]" in brief.text
-        await message(s, brief.id, "acknowledged")
+        current = await s.session_row(ada)
+        assert (current.id, current.task_id, current.terminal_id) == (first.id, first.task_id, first.terminal_id)
+        assert await db.fetchall("SELECT id FROM effect_outbox WHERE kind = 'task.launch'"
+                                  " AND json_extract(payload_json,'$.control.task_id') IN (?,?)", (one, two)) == []
         assert (await s.statuses(ada)).count("starting") == 1
 
 
@@ -930,7 +922,7 @@ class ChannelFirst(ClaudeCodeAdapter):
         await term.write(keys=["Enter"])
 
 
-async def test_a_restart_during_the_start_still_delivers_a_first_prompt_that_goes_by_channel(settings: Settings, db: Database) -> None:
+async def test_a_restart_does_not_resend_an_unproven_first_prompt(settings: Settings, db: Database) -> None:
     ChannelFirst.name = "claude"
     async with stand(settings, db, extra_env={"FAKE_CLI_FAULTS": "slow_ready:2500"}, adapter=ChannelFirst()) as s:
         trust(s)
@@ -952,9 +944,16 @@ async def test_a_restart_during_the_start_still_delivers_a_first_prompt_that_goe
         runtime = s.restart_runtime(ChannelFirst())
         assert await runtime.reconcile(wait=5) == 1
         [first] = await s.manager.staff.messages(ada.id)
-        await message(s, first.id, "acknowledged")
+        async def settled() -> bool:
+            [persisted] = await db.fetchall("SELECT state FROM staff_messages WHERE id = ?", (first.id,))
+            return persisted["state"] in ("acknowledged", "failed")
+
+        await eventually(settled, "first prompt has a proven or unknown outcome")
+        [persisted] = await db.fetchall("SELECT state,error FROM staff_messages WHERE id = ?", (first.id,))
+        if persisted["state"] == "failed":
+            assert persisted["error"] == "unknown after restart"
         submitted = [e["text"] for e in log(s, "submitted")]
-        assert len(submitted) == 1 and submitted[0].startswith("[task ") and row.id
+        assert len(submitted) <= 1 and row.id
 
 
 # -- the self-check, the wiring and the staff view's routes ------------------------------------------

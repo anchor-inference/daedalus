@@ -96,8 +96,11 @@ def _host_error(exc: Exception) -> HTTPException:
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
-    hosts = RuntimeHosts(app.db, identity_file=app.settings.remote_ssh_identity_file)
-    transfers = RuntimeTransfers(app)
+    def hosts() -> RuntimeHosts:
+        return RuntimeHosts(app.db, identity_file=app.settings.remote_ssh_identity_file)
+
+    def transfers() -> RuntimeTransfers:
+        return RuntimeTransfers(app)
 
     def wake_effects() -> None:
         dispatcher = app.extensions.get("effects")
@@ -107,21 +110,21 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.get("/api/artifact-manifests/{manifest_id}/transfer-readiness")
     async def transfer_readiness(manifest_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await transfers.readiness(manifest_id)
+            return await transfers().readiness(manifest_id)
         except KeyError as exc:
             raise HTTPException(404, "no such artifact") from exc
 
     @api.get("/api/artifact-transfers/{transfer_id}")
     async def transfer_view(transfer_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await transfers.view(transfer_id)
+            return await transfers().view(transfer_id)
         except KeyError as exc:
             raise HTTPException(404, "no such transfer") from exc
 
     @api.post("/api/projects/{project_id}/artifact-transfers")
     async def start_transfer(project_id: str, body: TransferStartBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            result = await transfers.start(Principal.operator(who), project_id, **body.model_dump())
+            result = await transfers().start(Principal.operator(who), project_id, **body.model_dump())
         except (ControlDenied, ControlConflict, KeyError, ValueError) as exc:
             raise _host_error(exc) from exc
         wake_effects()
@@ -130,7 +133,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.post("/api/artifact-transfers/{transfer_id}/retry")
     async def retry_transfer(transfer_id: str, body: TransferRetryBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            result = await transfers.retry(Principal.operator(who), transfer_id, **body.model_dump())
+            result = await transfers().retry(Principal.operator(who), transfer_id, **body.model_dump())
         except (ControlDenied, ControlConflict, KeyError, ValueError) as exc:
             raise _host_error(exc) from exc
         wake_effects()
@@ -138,40 +141,40 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
 
     @api.get("/api/runtime/hosts")
     async def list_hosts(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        return await hosts.list()
+        return await hosts().list()
 
     @api.post("/api/runtime/hosts")
     async def enroll_host(body: HostEnrollBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await hosts.enroll(Principal.operator(who), **body.model_dump())
+            return await hosts().enroll(Principal.operator(who), **body.model_dump())
         except (ControlDenied, ControlConflict, KeyError, ValueError) as exc:
             raise _host_error(exc) from exc
 
     @api.post("/api/runtime/hosts/{host_id}/challenge")
     async def challenge_host(host_id: str, body: HostChallengeBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await hosts.challenge(Principal.operator(who), host_id, **body.model_dump())
+            return await hosts().challenge(Principal.operator(who), host_id, **body.model_dump())
         except (ControlDenied, ControlConflict, KeyError, ValueError) as exc:
             raise _host_error(exc) from exc
 
     @api.post("/api/runtime/hosts/{host_id}/probe")
     async def probe_host(host_id: str, body: HostProbeBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await hosts.probe(Principal.operator(who), host_id, **body.model_dump())
+            return await hosts().probe(Principal.operator(who), host_id, **body.model_dump())
         except (ControlDenied, ControlConflict, KeyError, ValueError) as exc:
             raise _host_error(exc) from exc
 
     @api.post("/api/runtime/hosts/{host_id}/observe")
     async def observe_host(host_id: str, body: HostObservationBody) -> dict[str, Any]:
         try:
-            return await hosts.observe(host_id, **body.model_dump())
+            return await hosts().observe(host_id, **body.model_dump())
         except (ControlDenied, ControlConflict, KeyError, ValueError) as exc:
             raise _host_error(exc) from exc
 
     @api.post("/api/runtime/hosts/{host_id}/decision")
     async def decide_host(host_id: str, body: HostDecisionBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await hosts.decide(Principal.operator(who), host_id, **body.model_dump())
+            return await hosts().decide(Principal.operator(who), host_id, **body.model_dump())
         except (ControlDenied, ControlConflict, KeyError, ValueError) as exc:
             raise _host_error(exc) from exc
 

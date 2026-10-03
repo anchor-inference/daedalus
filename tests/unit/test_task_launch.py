@@ -16,6 +16,7 @@ from daedalus.extensions.api_control import register
 from daedalus.extensions.board import Board
 from daedalus.extensions.effects import EffectDispatcher
 from daedalus.extensions.launch_controls import observe_bind, prepare_attempt
+from daedalus.extensions.lifecycle import Lifecycle
 from daedalus.extensions.task_controls import TaskStopEffect, queue_stop
 from daedalus.extensions.task_launch import TaskLaunchEffect, queue_launch
 from daedalus.host.launch_queue import LaunchQueue
@@ -172,6 +173,7 @@ async def test_replacement_waits_for_physical_stop_proof(db: Database) -> None:
         assert await dispatcher.step()
         await db.execute("INSERT INTO runs(id,tenant_id,session_id,status,created_at,updated_at)"
                          " VALUES ('run','tenant','native-session','running','2026-01-01','2026-01-01')")
+        await db.execute("UPDATE execution_attempts SET native_run_id = 'run'")
         current = (await db.fetchone("SELECT entity_revision FROM board_tasks"))[0]
         stop = await queue_stop(app, "task", OPERATOR, client_operation_id="stop", expected_entity_revision=current)
         assert (await db.fetchone("SELECT state FROM execution_attempts"))[0] == "recovering"
@@ -183,6 +185,12 @@ async def test_replacement_waits_for_physical_stop_proof(db: Database) -> None:
         assert (await dispatcher.store.view(stop["effect_id"]))["state"] == "unknown"
         assert (await db.fetchone("SELECT state FROM execution_attempts"))[0] == "recovering"
         await db.execute("UPDATE runs SET status = 'cancelled' WHERE id = 'run'")
+        assert await dispatcher.reconcile() == 0
+        from daedalus.extensions.runtime_observations import observe_exit
+
+        session = await db.fetchone("SELECT staff_session_id FROM execution_attempts")
+        assert await observe_exit(app, staff_session_id=session["staff_session_id"], runtime_ref="run",
+                                  observed_status="cancelled")
         assert await dispatcher.reconcile() == 1
         assert (await db.fetchone("SELECT state FROM execution_attempts"))[0] == "cancelled"
         assert (await db.fetchone("SELECT status FROM board_tasks"))[0] != "done"
@@ -267,6 +275,15 @@ async def test_actual_native_worker_launch_and_report_preserve_the_full_original
         assert await OrchestratorDomain(db).original(task["id"], result["id"]) == original.encode()
         assert (await db.fetchone("SELECT state FROM execution_attempts WHERE task_id = ?", (task["id"],)))[0] == "completed"
         assert (await db.fetchone("SELECT status FROM board_tasks WHERE id = ?", (task["id"],)))[0] == "review"
+
+        async def physically_finished():
+            return await db.fetchone("SELECT o.runtime_ref FROM runtime_exit_observations o"
+                                     " JOIN execution_attempts a ON a.id = o.attempt_id"
+                                     " WHERE a.task_id = ? AND o.runtime_ref = a.native_run_id"
+                                     " AND o.staff_session_id = a.staff_session_id"
+                                     " AND o.host_generation = a.host_generation", (task["id"],))
+
+        await until_await(physically_finished, "the host observed the exact native run finish")
         assert await team.assign(member, task, **args) == receipt
         assert (await db.fetchone("SELECT count(*) FROM staff_sessions WHERE task_id = ?", (task["id"],)))[0] == 1
     finally:
@@ -319,3 +336,68 @@ async def test_lost_provider_start_response_keeps_the_worker_owned(settings: Set
         team.queue.close()
         await manager.close()
         executions.release()
+
+
+async def test_lifecycle_cancellation_removes_a_pending_launch_before_admission(db: Database) -> None:
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    service = Lifecycle(app)
+    app.extensions["lifecycle"] = service
+    dispatcher.register("lifecycle.stop", service)
+    try:
+        receipt = await queue_launch(app, "task", OPERATOR, staff_id="worker", client_operation_id="pending",
+                                     expected_entity_revision=revision)
+        stopped = await service.cancel_command(OPERATOR, "task", "task", "stop the planned work",
+                                               expected_entity_revision=receipt["entity_revision"],
+                                               expected_source_revision=1, client_operation_id="cancel-parent",
+                                               preview_fingerprint=(await service.preview("task", "task"))["preview_fingerprint"])
+        assert stopped["cancel_state"] == "requested"
+        assert (await dispatcher.store.view(receipt["effect_id"]))["state"] == "cancelled"
+        assert await dispatcher.step()
+        assert starts == []
+        assert not await dispatcher.step()
+        current = (await db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'task'"))[0]
+        with pytest.raises(ControlConflict, match="parent was cancelled"):
+            await queue_launch(app, "task", OPERATOR, staff_id="worker", client_operation_id="new-launch",
+                               expected_entity_revision=current)
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
+async def test_parent_cancellation_between_attempt_claim_and_provider_call_fences_launch(db: Database) -> None:
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    service = Lifecycle(app)
+    app.extensions["lifecycle"] = service
+    dispatcher.register("lifecycle.stop", service)
+    member = await team.member("worker")
+    session = await StaffStore(db).session("staff-session")
+
+    async def raced(entry):
+        await entry.check_authority()
+        task = await team.task("task")
+        identity = await prepare_attempt(app, entry.principal, member, task, session, fence_token=secrets.token_urlsafe(32))
+        current = (await db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'task'"))[0]
+        await service.cancel_command(OPERATOR, "task", "task", "cancel before provider call",
+                                     expected_entity_revision=current, expected_source_revision=1,
+                                     client_operation_id="cancel-during-launch",
+                                     preview_fingerprint=(await service.preview("task", "task"))["preview_fingerprint"])
+        await entry.check_authority()
+        starts.append(identity)
+
+    team.queue._launch = raced
+    try:
+        receipt = await queue_launch(app, "task", OPERATOR, staff_id="worker", client_operation_id="raced",
+                                     expected_entity_revision=revision)
+        assert await dispatcher.step()
+        assert starts == []
+        assert (await dispatcher.store.view(receipt["effect_id"]))["state"] == "unknown"
+        assert await dispatcher.step()
+        attempt = await db.fetchone("SELECT state FROM execution_attempts WHERE task_id = 'task'")
+        assert attempt["state"] == "recovering"
+        assert await dispatcher.reconcile() == 0
+        assert not await dispatcher.step()
+        owner = await db.fetchone("SELECT cancel_state FROM lifecycle_owners WHERE child_kind = 'execution_attempt'")
+        assert owner["cancel_state"] == "unknown"
+    finally:
+        team.queue.close()
+        app.executions.release()

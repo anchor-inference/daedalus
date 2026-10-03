@@ -795,15 +795,16 @@ class Terminals(SideChannels):
         if row["status"] != "running":
             return await self.get(terminal_id)
         grace = self.config().kill_grace_ms
+        observed_instance = self.links[row["env"]].instance
         try:
             result = await self._call(row["env"], "terminal.kill", {"id": terminal_id, "grace_ms": grace}, what="ending the terminal", timeout=grace / 1000 + 15)
         except NotFound:
             result = None
         await self.audit(terminal_id, row["env"], actor, "kill", {"exit_code": result.get("exit_code"), "signal": result.get("signal")} if result else {"gone": True})
         if result is None:
-            await self._end(row, status="exited", exit_code=None, signal=None)
+            await self._end(row, status="exited", exit_code=None, signal=None, observed_instance=observed_instance)
         else:
-            await self._end(row, status="exited", exit_code=result.get("exit_code"), signal=result.get("signal"))
+            await self._end(row, status="exited", exit_code=result.get("exit_code"), signal=result.get("signal"), observed_instance=observed_instance)
         return await self.get(terminal_id)
 
     async def signal(self, terminal_id: str, sig: str, *, actor: str = "operator") -> None:
@@ -896,12 +897,25 @@ class Terminals(SideChannels):
         await self.db.execute("DELETE FROM terminal_audit WHERE at < ?", (audit_before,))
         return len(old), int(before["n"]) if before else 0
 
-    async def _end(self, row: dict[str, Any], *, status: str, exit_code: Any, signal: Any, exited_at: str | None = None) -> bool:
-        """Mark a running row ended, keep its last screen, and tell whoever listens; False if it already was."""
+    async def _end(self, row: dict[str, Any], *, status: str, exit_code: Any, signal: Any, exited_at: str | None = None, observed_instance: str | None = None) -> bool:
+        """Publish a newly ended or physically verified terminal; repeated observations return False."""
         async with self._state_lock:
-            current = await self.db.fetchone("SELECT status FROM terminals WHERE id = ?", (row["id"],))
-            if current is None or current["status"] != "running":
+            current = await self.db.fetchone("SELECT * FROM terminals WHERE id = ?", (row["id"],))
+            if current is None:
                 return False
+            row = dict(current)
+            physical_exit = (status == "exited" and observed_instance and row["ptyd_instance"] == observed_instance
+                             and self.links[row["env"]].instance == observed_instance)
+            if current["status"] != "running":
+                if not physical_exit:
+                    return False
+                proof = await self.db.fetchone("SELECT 1 FROM terminal_exit_observations"
+                                               " WHERE terminal_id = ? AND runtime_instance = ?",
+                                               (row["id"], observed_instance))
+                if proof is not None:
+                    return False
+                # A bookkeeping loss can precede the daemon's actual exit. Preserve the later
+                # evidence so cancellation does not remain stuck behind the earlier logical row.
             preview = None
             if status == "exited" and self.links[row["env"]].available:
                 with contextlib.suppress(TerminalError):
@@ -909,10 +923,15 @@ class Terminals(SideChannels):
                     for info in listing.get("terminals") or []:
                         if info.get("preview") is not None:
                             preview = json.dumps(info["preview"], ensure_ascii=False)
-            await self.db.execute(
-                "UPDATE terminals SET status = ?, exit_code = ?, exit_signal = ?, exited_at = ?, final_preview_json = COALESCE(?, final_preview_json) WHERE id = ?",
-                (status, exit_code if isinstance(exit_code, int) else None, str(signal) if signal else None, exited_at or now_iso(), preview, row["id"]),
-            )
+            async with self.db.transaction() as conn:
+                await conn.execute(
+                    "UPDATE terminals SET status = ?, exit_code = ?, exit_signal = ?, exited_at = ?, final_preview_json = COALESCE(?, final_preview_json) WHERE id = ?",
+                    (status, exit_code if isinstance(exit_code, int) else None, str(signal) if signal else None,
+                     exited_at or now_iso(), preview, row["id"]),
+                )
+                if physical_exit:
+                    await conn.execute("INSERT OR IGNORE INTO terminal_exit_observations(terminal_id,runtime_instance,observed_at)"
+                                       " VALUES (?,?,?)", (row["id"], observed_instance, now_iso()))
         self._wake_waiters()
         payload: dict[str, Any] = {"exit_code": exit_code if isinstance(exit_code, int) else None}
         if signal:
@@ -968,10 +987,10 @@ class Terminals(SideChannels):
                 else:
                     # Same daemon, and it no longer knows the terminal: it ended and was forgotten
                     # while this host was away (a daemon forgets an ended terminal after an hour).
-                    await self._end(row, status="exited", exit_code=None, signal=None)
+                    await self._end(row, status="exited", exit_code=None, signal=None, observed_instance=instance)
                 continue
             if info.get("status") == "exited":
-                await self._end(row, status="exited", exit_code=info.get("exit_code"), signal=info.get("exit_signal"), exited_at=iso(info.get("exited_at")))
+                await self._end(row, status="exited", exit_code=info.get("exit_code"), signal=info.get("exit_signal"), exited_at=iso(info.get("exited_at")), observed_instance=instance)
                 continue
             await self.db.execute(
                 "UPDATE terminals SET ptyd_instance = ?, cwd = ?, cols = ?, rows = ?, last_output_at = COALESCE(?, last_output_at), last_input_at = COALESCE(?, last_input_at) WHERE id = ?",
@@ -1084,7 +1103,10 @@ class Terminals(SideChannels):
             return
         row = dict(row_found)
         if kind == "terminal.exited":
-            await self._end(row, status="exited", exit_code=data.get("exit_code"), signal=data.get("signal"))
+            if row["env"] != link.env:
+                return
+            await self._end(row, status="exited", exit_code=data.get("exit_code"), signal=data.get("signal"),
+                            observed_instance=link.instance)
         elif kind == "terminal.cwd" and data.get("cwd"):
             await self.db.execute("UPDATE terminals SET cwd = ? WHERE id = ?", (str(data["cwd"]), terminal_id))
         elif kind == "terminal.command":

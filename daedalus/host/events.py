@@ -29,10 +29,12 @@ import json
 import logging
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, NotRequired, TypedDict
+
+import aiosqlite
 
 from daedalus.security import redact
 from daedalus.stores.database import Database
@@ -554,6 +556,7 @@ REGISTRY: dict[str, EventSpec] = {
     "staff.message": EventSpec(StaffMessage),
     "staff.channel": EventSpec(StaffChannel),
     "task.created": EventSpec(TaskChange),
+    "task.changed": EventSpec(TaskChange),
     "task.moved": EventSpec(TaskChange),
     "task.assigned": EventSpec(TaskChange),
     "task.accepted": EventSpec(TaskChange),
@@ -858,6 +861,42 @@ class EventBus:
         self._head = int(row["seq"]) if row else 0
         row = await self.db.fetchone("SELECT min(seq) AS oldest FROM app_events")
         self._oldest = int(row["oldest"]) if row and row["oldest"] is not None else self._head + 1
+
+    @asynccontextmanager
+    async def transaction_guard(self) -> AsyncIterator[None]:
+        """Hold event sequence ordering across a caller-owned domain transaction and its announcement."""
+        async with self._order:
+            yield
+
+    async def persist_in(self, conn: aiosqlite.Connection, event_type: str,
+                         payload: Mapping[str, Any], *, project_id: str | None = None,
+                         session_id: str | None = None, staff_id: str | None = None,
+                         terminal_id: str | None = None) -> AppEvent:
+        """Insert a durable event in the caller's transaction, with no subscriber side effect yet."""
+        ids = {"project_id": project_id, "session_id": session_id,
+               "staff_id": staff_id, "terminal_id": terminal_id}
+        spec, cleaned, encoded = self._validated(event_type, payload, ids)
+        if not spec.persist:
+            raise EventPayloadError("a transactional event must be durable")
+        at = _now()
+        cursor = await conn.execute(
+            "INSERT INTO app_events(at,type,project_id,session_id,staff_id,terminal_id,payload_json)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (at, event_type, project_id, session_id, staff_id, terminal_id, encoded))
+        seq = int(cursor.lastrowid or 0)
+        await cursor.close()
+        return AppEvent(seq=seq, at=at, type=event_type, payload=cleaned, **ids)
+
+    def announce_committed(self, event: AppEvent) -> None:
+        """Fan out an already committed event while its transaction guard still holds ordering."""
+        if not self._order.locked():
+            raise RuntimeError("an event transaction guard is required")
+        self._head = max(self._head, event.seq)
+        if self._oldest > event.seq:
+            self._oldest = event.seq
+        if not self.closed:
+            for subscription in list(self._subscriptions):
+                subscription._offer(event)
 
     # -- publishing ------------------------------------------------------------------------
 

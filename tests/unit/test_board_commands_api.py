@@ -8,13 +8,14 @@ import httpx
 from fastapi import FastAPI
 
 from daedalus.extensions.api_board import register
+from daedalus.host.events import EventBus
 from daedalus.stores.database import Database
 
 
 async def test_card_command_replay_keeps_its_receipt_and_current_projection_separate(db: Database) -> None:
     await db.execute("INSERT INTO projects(id,name,created_at,settings) VALUES ('project','Work','2026-01-01','{}')")
     await db.execute("INSERT INTO planning_budgets(project_id,max_depth,max_tasks,max_tokens) VALUES ('project',3,20,100000)")
-    app = SimpleNamespace(db=db, manager=None, extensions={})
+    app = SimpleNamespace(db=db, manager=SimpleNamespace(bus=EventBus(db)), extensions={})
     api = FastAPI()
 
     def auth():
@@ -61,7 +62,7 @@ async def test_source_session_cannot_cross_a_board_scope(db: Database) -> None:
     await db.execute("INSERT INTO sessions(id,tenant_id,project_id,title,created_at,last_message_at)"
                      " VALUES ('source','tenant','project','Work','2026-01-01','2026-01-01')")
     api = FastAPI()
-    register(api, SimpleNamespace(db=db, manager=None, extensions={}), lambda: {"via": "cookie", "user_id": 1})
+    register(api, SimpleNamespace(db=db, manager=SimpleNamespace(bus=EventBus(db)), extensions={}), lambda: {"via": "cookie", "user_id": 1})
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
         body = {"title": "Task", "session_id": "source", "client_operation_id": "create", "expected_collection_revision": 1}
         assert (await client.post("/api/board", json=body)).status_code == 403

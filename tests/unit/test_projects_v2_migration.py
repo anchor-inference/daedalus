@@ -145,11 +145,12 @@ async def test_every_project_keeps_its_folder_and_every_session_its_directory(tm
         "next_actions", "staff_role_versions", "planning_budgets", "replan_fingerprints",
         "comparison_groups", "comparison_group_attempts",
         "knowledge_fact_versions", "knowledge_reviews", "knowledge_dependencies",
-        "compaction_captures", "result_turn_anchors", "skill_manifests", "plugin_manifests",
+        "knowledge_invalidation_queue", "compaction_captures", "result_turn_anchors",
+        "skill_manifests", "plugin_manifests",
         "watch_deliveries", "board_workflow_runs", "board_workflow_steps", "issue_links",
-        "lifecycle_parents", "lifecycle_owners",
+        "lifecycle_parents", "lifecycle_owners", "staff_report_records", "runtime_exit_observations", "terminal_exit_observations", "workspace_archive_imports",
         "execution_hosts", "execution_host_challenges", "execution_host_observations",
-        "execution_host_decisions", "artifact_transfers", "knowledge_invalidation_queue",
+        "execution_host_decisions", "artifact_transfers",
     })
     assert new - later == {"project_folders", "project_briefs", "project_journal", "staff", "staff_sessions", "staff_messages", "asks", "watches"}
     assert after["project_folders"] == counts["projects"]

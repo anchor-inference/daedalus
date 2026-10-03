@@ -326,22 +326,17 @@ class Handoff:
 
     # -- from a member ------------------------------------------------------------------------------------------
 
-    async def fetch(
+    async def read_artifacts(
         self,
         refs: Sequence[str] | None,
         *,
         env: str,
         cwd: str,
         project: Project,
-        actor: str,
-        origin_ref: str = "",
         check: Callable[[Path], str] | None = None,
-    ) -> tuple[list[StoredFile], list[str]]:
-        """Take a member's artifacts in: each entry that names a file in the project's folders (relative
-        to the member's working folder, or absolute) becomes a project file. Links and names that are
-        not files (a branch, a URL) are left as they are. Returns the files and, for the member, a
-        sentence for each path that named a file but could not be taken."""
-        stored: list[StoredFile] = []
+    ) -> tuple[list[tuple[str, str, bytes]], list[str]]:
+        """Read allowed artifact bytes without creating durable file or access rows."""
+        staged: list[tuple[str, str, bytes]] = []
         notes: list[str] = []
         allowed = [str(f.path) for f in project.folders if f.env == env]
         for raw in [str(r).strip() for r in refs or [] if str(r or "").strip()][:HANDOVER_MAX_FILES]:
@@ -355,10 +350,32 @@ class Handoff:
             except FileRefused as exc:
                 notes.append(f"{raw}: {exc}")
                 continue
+            if len(data) > FILE_MAX_BYTES:
+                notes.append(f"{raw}: file exceeds the handoff size limit")
+                continue
+            staged.append((safe_name(PurePosixPath(path).name), path, data))
+        return staged, notes
+
+    async def fetch(
+        self,
+        refs: Sequence[str] | None,
+        *,
+        env: str,
+        cwd: str,
+        project: Project,
+        actor: str,
+        origin_ref: str = "",
+        check: Callable[[Path], str] | None = None,
+    ) -> tuple[list[StoredFile], list[str]]:
+        """Keep a member's allowed artifact bytes as project files."""
+        staged, notes = await self.read_artifacts(refs, env=env, cwd=cwd, project=project, check=check)
+        stored: list[StoredFile] = []
+        for name, path, data in staged:
             try:
-                stored.append(await self.files.add(data, name=PurePosixPath(path).name, origin="staff", origin_ref=origin_ref or path, scope=project.id, actor=actor))
+                stored.append(await self.files.add(data, name=name, origin="staff",
+                                                   origin_ref=origin_ref or path, scope=project.id, actor=actor))
             except FileRefused as exc:
-                notes.append(f"{raw}: {exc}")
+                notes.append(f"{path}: {exc}")
         return stored, notes
 
 

@@ -34,8 +34,9 @@ from protocore.runtime.events.types import EventType
 
 from daedalus.extensions.board import NOTES_MAX_CHARS
 from daedalus.extensions.notifications import ActionConflict, ActionOutcome, ActionRefused, Draft
-from daedalus.extensions.operator_steps import normalise as normalise_steps
-from daedalus.extensions.task_contract import RETURNED, Contracts, Requirement
+from daedalus.extensions.runtime_observations import admit_native_run, observe_exit
+from daedalus.extensions.staff_results import StaffReportService
+from daedalus.extensions.task_contract import RETURNED, Contracts
 from daedalus.harness.capabilities import CAPABILITIES
 from daedalus.harness.contract import mcp_server, standing_rule
 from daedalus.harness.health import ChannelHealth, channel_health
@@ -65,7 +66,7 @@ from daedalus.staff_runtime import (
     UsageSnapshot,
 )
 from daedalus.stores.control import ControlDenied, Principal
-from daedalus.stores.files import FileRefused, StoredFile, file_ref
+from daedalus.stores.files import FileRefused, StoredFile
 from daedalus.stores.projects import Project, ProjectFolder
 from daedalus.stores.staff import (
     ACTIVE_STATUSES,
@@ -209,6 +210,7 @@ class Team:
         self.handoff = Handoff(self.manager.files, local_env=self.manager.projects.local_env, host=self._host_files)
         """Files handed to members before the brief that names them, and their artifacts taken back."""
         self.ingress = Ingress(self)
+        self.manager.service_hooks["execution_run_admission"] = self.admit_run
         self._capacity = capacity
         """A fixed :class:`MachineCapacity` for tests; otherwise the terminals service is asked each time."""
         self.queue = LaunchQueue(
@@ -1466,12 +1468,20 @@ class Team:
                 if str(message_id).startswith("sm-"):
                     await self.ingress.message_state(str(message_id), "acknowledged")
 
+    async def admit_run(self, staff_session_id: str, session_id: str, run_id: str) -> None:
+        await admit_native_run(self.app, staff_session_id, session_id, run_id)
+
     async def on_run_started(self, session_id: str, run_id: str) -> None:
         live = await self.live_for_session(session_id)
         if live is not None and live.session.status != "working":
             await self.ingress.status(live, "working")
 
     async def on_run_finished(self, session_id: str, run_id: str, status: str) -> None:
+        state = self.manager.live_state(session_id)
+        staff_session_id = str(state.metadata.get("staff_session_id") or "") if state is not None else ""
+        if staff_session_id and status in ("completed", "failed", "cancelled"):
+            await observe_exit(self.app, staff_session_id=staff_session_id, runtime_ref=run_id,
+                               observed_status="error" if status == "failed" else status)
         live = await self.live_for_session(session_id)
         if live is None or status == "awaiting":
             return
@@ -1526,6 +1536,16 @@ class Team:
             # its task in, and its next one may go now rather than at the next tick.
             self.queue.pump_soon(event.project_id)
         elif event.type in ("staff.status", "terminal.exited"):
+            if event.type == "terminal.exited" and event.terminal_id:
+                rows = await self.app.db.fetchall(
+                    "SELECT a.staff_session_id,a.runtime_instance FROM execution_attempts a"
+                    " JOIN staff_sessions s ON s.id = a.staff_session_id WHERE s.terminal_id = ?",
+                    (event.terminal_id,),
+                )
+                for row in rows:
+                    await observe_exit(self.app, staff_session_id=row["staff_session_id"],
+                                       runtime_ref=event.terminal_id, observed_status="exited",
+                                       runtime_instance=row["runtime_instance"])
             if event.type == "terminal.exited" or event.payload.get("status") in ("exited", "idle", "turn_done_unseen", "error"):
                 self.queue.pump_soon(event.project_id if event.type == "staff.status" else None)
             if event.type == "staff.status" and event.staff_id and event.payload.get("status") in ("idle", "turn_done_unseen", "error"):
@@ -1864,111 +1884,25 @@ class Ingress:
         call_id: str | None = None, evidence: list[dict[str, str]] | None = None, acknowledged: list[str] | None = None,
         operator_steps: dict[str, Any] | None = None,
     ) -> str:
-        if call_id and await self._reported(live, call_id):
-            return f"reported {kind}"
-        if kind not in ("checkpoint", "needs_input", "stuck", "done"):
-            raise ValueError("kind is checkpoint, needs_input, stuck or done")
-        note = (note or "").strip()
-        if not note:
-            raise ValueError("a report needs a note")
-        original_note = note
-        # Checked before anything moves, so steps that cannot be carried refuse the whole report.
-        steps = normalise_steps(operator_steps) if operator_steps else None
-        task = await self.team.task(live.session.task_id) if live.session.task_id else None
-        contracts = self.team.contracts
-        told = f"reported {kind}"
-        confirmed: list[str] = []
-        if task is not None and acknowledged:
-            confirmed, unknown = await contracts.acknowledge(task.id, live.id, [str(a) for a in acknowledged if isinstance(a, str | int)][:40])
-            if confirmed:
-                told += f"; confirmed {', '.join(confirmed)}"
-            if unknown:
-                told += f"; task {task.id} has no requirement {', '.join(unknown)} in force"
-        proven: list[dict[str, str]] = []
-        unproven: list[str] = []
-        if kind == "done":
-            worktree = await self.team.worktree_of(live.session)
-            if worktree is not None:
-                try:
-                    status = await self.team.worktrees.status(worktree)
-                except WorktreeError as exc:
-                    raise RuntimeError(f"the worktree could not be checked: {exc}") from exc
-                if status.dirty:
-                    raise ValueError(f"{worktree.path} has uncommitted changes; commit them on {worktree.branch} and report again")
-            if task is not None:
-                cli = live.staff.harness != "daedalus"
-                missing = await contracts.unmet_inputs(task.id, live.staff.id, cli=cli)
-                if missing:
-                    # A scriptwriter reported a script "at the level of the references" and said in the
-                    # same report that no reference had reached it: the files were the start of the
-                    # work, and a hand-in that skipped them is not one.
-                    named = "; ".join(f"{r.label} ({path or r.text})" for r, path in missing)
-                    how = f"confirm each with acknowledged=[{', '.join(repr(r.label) for r, _ in missing)}] once you have read it" if cli else "open each one"
-                    raise ValueError(f"task {task.id} starts from inputs you have not {'confirmed' if cli else 'opened'}: {named}. {how.capitalize()} and report done again, or Report(kind='needs_input') saying why you cannot")
-                proven, unproven, stray = await self._evidence(task, live.staff, evidence)
-                if stray:
-                    told += f"; evidence for {', '.join(stray)} matched no check or requirement of the task"
-        if remember and remember.strip():
-            await self.manager.staff.append_notes(live.staff.id, remember.strip())
-            told += "; noted for your next sessions"
-        # A report is the member's answer, so it is kept whole up to a generous bound; past it the cut is
-        # said in the text, since a report sliced at 2000 characters once reached the orchestrator
-        # mid-sentence with nothing to show that more had been written.
-        if len(note) > NOTE_MAX:
-            note = note[:NOTE_MAX].rstrip() + f"\n[cut at {NOTE_MAX} characters; the rest is in the member's session]"
-            told += f"; your report was longer than {NOTE_MAX} characters and was cut there"
-        payload: dict[str, Any] = {"kind": kind, "text": note, "actor": "staff"}
-        refs = [str(a)[:300] for a in (artifacts or []) if str(a).strip()][:20]
-        kept: list[StoredFile] = []
-        if refs:
-            payload["refs"] = refs
-            kept, notes = await self._take_in(live, refs)
-            if kept:
-                payload["files"] = [file_ref(f) for f in kept]
-                told += "; kept for the team: " + ", ".join(f.short() for f in kept)
-            if notes:
-                told += "; not kept: " + "; ".join(notes)
-        if kind == "done" and task is not None:
-            from daedalus.extensions.staff_results import (
-                submit_staff_report,  # Lazy: hand-in requires a claimed attempt.
-            )
-
-            await submit_staff_report(self.team.app, live, original_note, kept, proven, call_id)
-            await self.team.record_result(task, live.staff, original_note)
-            if task.status in ("doing", "todo", "blocked"):
-                to = await self.team.hand_in_to(task, worktree)
-                await self.team._move_task(task, to, actor="staff", merge_state="proposed" if worktree is not None else "")
-                told += f"; task {task.id} is in review"
-            if unproven:
-                told += f"; you gave no evidence for {', '.join(unproven)}"
-        if task is not None:
-            payload["task_id"] = task.id
-        if confirmed:
-            payload["acknowledged"] = confirmed
-        if proven:
-            payload["evidence"] = proven
-        if unproven:
-            payload["unproven"] = unproven
-        if call_id:
-            payload["call_id"] = call_id
-        if steps is not None:
-            kept_steps = await self._keep_steps(live, task, steps)
-            payload["operator_steps"] = {**steps.view(), "file": file_ref(kept_steps)}
-            told += f"; your steps for the operator go to them word for word ({kept_steps.short()})" + ("" if steps.walked else ", marked as not checked on the running version")
-        await self._published(await self.team.publish("staff.report", payload, member=live.staff, session_id=live.session_id))
-        return told
-
-    async def _keep_steps(self, live: LiveSession, task: BoardTask | None, steps: Any) -> StoredFile:
-        """The steps as a file of the project, so they stay where the operator can open them again."""
-        number = 1 + int((await self.manager.db.fetchone(
-            "SELECT count(*) AS n FROM files f JOIN file_access a ON a.file_id = f.id WHERE a.scope = ? AND f.name LIKE 'operator-steps-%'", (live.staff.project_id,),
-        ) or {"n": 0})["n"])
-        name = f"operator-steps-{task.id if task is not None else live.staff.name}-{number}.md"
-        text = steps.markdown(member=live.staff.name, task=task.id if task is not None else "")
-        return await self.manager.files.add(
-            text.encode("utf-8"), name=name, mime="text/markdown", origin="staff", origin_ref=f"{live.staff.name}:{task.id if task else ''}",
-            scope=live.staff.project_id, actor=f"staff:{live.staff.name}",
+        response, event = await StaffReportService(self.team.app).submit(
+            live, kind, note, artifacts=artifacts, remember=remember, evidence=evidence,
+            acknowledged=acknowledged, operator_steps=operator_steps, call_id=call_id or "",
         )
+        await self._published(event)
+        told = f"reported {kind}; report {response['report_id']}"
+        if response["confirmed"]:
+            told += "; confirmed " + ", ".join(response["confirmed"])
+        if response["unknown"]:
+            told += "; requirements not confirmed: " + ", ".join(response["unknown"])
+        if response["kept_files"]:
+            told += "; kept for the team: " + ", ".join(item["name"] for item in response["kept_files"])
+        if response["not_kept"]:
+            told += "; not kept: " + "; ".join(response["not_kept"])
+        if kind == "done":
+            told += "; task is in review"
+            if response["unproven"]:
+                told += "; you gave no evidence for " + ", ".join(response["unproven"])
+        return told
 
     async def _published(self, event: AppEvent | None) -> None:
         if event is None:
@@ -1978,71 +1912,6 @@ class Ingress:
                 await hook(event)
             except Exception:  # noqa: BLE001 — the report stands; a follower that fails is logged
                 logger.exception("a report hook failed on %s", event.seq)
-
-    async def _evidence(self, task: BoardTask, member: Staff, evidence: list[dict[str, str]] | None) -> tuple[list[dict[str, str]], list[str], list[str]]:
-        """A done report's evidence, kept on the checks and requirements it names: ``(what it proved,
-        the items with none, what matched nothing)``. The host does not judge the evidence; it keeps
-        it where the orchestrator marks the item, and says which items have none."""
-        contracts = self.team.contracts
-        checks = await contracts.checks(task.id)
-        requirements = await contracts.requirements(task.id)
-        proven: list[dict[str, str]] = []
-        stray: list[str] = []
-        now = _now()
-        for entry in [e for e in evidence or [] if isinstance(e, dict)][:40]:
-            item = str(entry.get("item") or entry.get("check") or "").strip()
-            how, result = str(entry.get("how") or "").strip()[:500], str(entry.get("result") or "").strip()[:500]
-            target = contracts.match(item, checks, requirements)
-            if target is None:
-                stray.append(item[:60] or "(unnamed)")
-                continue
-            kept = {"how": how, "result": result, "by": member.name, "at": now}
-            if target[0] == "C":
-                index = int(target[1])  # type: ignore[arg-type]
-                checks[index]["evidence"] = kept
-                label = f"C{index + 1}"
-            else:
-                requirement = cast(Requirement, target[1])
-                await contracts.set_evidence(requirement, kept)
-                label = requirement.label
-            proven.append({"item": label, "how": how, "result": result})
-        if checks:
-            await contracts.set_checks(task.id, checks)
-        shown = {p["item"] for p in proven}
-        unproven = [f"C{i}" for i in range(1, len(checks) + 1) if f"C{i}" not in shown]
-        unproven += [r.label for r in requirements if r.kind != "input" and r.label not in shown]
-        return proven, unproven, stray
-
-    async def _take_in(self, live: LiveSession, refs: list[str]) -> tuple[list[StoredFile], list[str]]:
-        """A member's artifacts that are files in the project's folders, taken into the project's store
-        so the orchestrator can read them and pass them on and the operator can download them — the
-        member's folder may be on a machine neither of them reaches. What cannot be taken is said."""
-        folder, cwd = await self.team.cwd_of(live)
-        project = await self.team.project(live.staff.project_id)
-        check = None
-        if live.staff.harness == "daedalus":
-            services = self.manager.locator_services(live.session.session_id or "")
-
-            def check(path: Path) -> str:
-                if services is None:
-                    return ""
-                if not services.contains(path) or services.is_protected(path):
-                    return f"{path} is outside what {live.staff.name} may read"
-                return ""
-
-        try:
-            return await self.team.handoff.fetch(refs, env=folder.env, cwd=cwd, project=project, actor=f"staff:{live.staff.name}", origin_ref=f"{live.staff.name}:{live.session.task_id or ''}", check=check)
-        except FileRefused as exc:
-            return [], [str(exc)]
-
-    async def _reported(self, live: LiveSession, call_id: str) -> bool:
-        """Whether a report with this call id was already published: the host restarted after acting
-        on the post and before the daemon heard it was taken, and the daemon replayed it."""
-        row = await self.manager.db.fetchone(
-            "SELECT 1 FROM app_events WHERE project_id = ? AND type = 'staff.report' AND staff_id = ? AND json_extract(payload_json, '$.call_id') = ? LIMIT 1",
-            (live.staff.project_id, live.staff.id, call_id),
-        )
-        return row is not None
 
     async def implicit_report(self, live: LiveSession, kind: str, text: str) -> None:
         task = await self.team.task(live.session.task_id) if live.session.task_id else None

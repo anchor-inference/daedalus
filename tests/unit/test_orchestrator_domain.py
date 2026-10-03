@@ -296,12 +296,23 @@ async def test_goal_change_fences_only_named_dependency_closure(domain_db: Datab
     async with domain_db.transaction() as conn:
         preview = await scope_impact_preview(conn, "project1", ["root"])
         assert preview["affected_task_ids"] == ["child", "root"]
+        principal = Principal.operator({"via": "token", "user_id": 1})
         applied = await apply_goal_revision(conn, project_id="project1", expected_goal_revision=1,
-                                            body="New goal", root_task_ids=["root"], origin_kind="operator", origin_ref="")
+                                            body="New goal", root_task_ids=["root"], origin_kind="operator", origin_ref="",
+                                            control=ControlStore(domain_db), principal=principal)
         assert applied["goal_revision"] == 2
+    async with domain_db.transaction() as conn:
+        revised = await apply_goal_revision(conn, project_id="project1", expected_goal_revision=2,
+                                            body="Refined goal", root_task_ids=["root"], origin_kind="operator",
+                                            origin_ref="", control=ControlStore(domain_db), principal=principal)
+        assert revised["goal_revision"] == 3
+    owners = await domain_db.fetchall("SELECT generation,source_revision,cancel_state FROM lifecycle_owners"
+                                      " WHERE child_kind = 'task' AND child_id = 'root' ORDER BY generation")
+    assert [(row["generation"], row["source_revision"], row["cancel_state"]) for row in owners] == [
+        (1, 2, "transferred"), (2, 3, "active")]
     assert (await domain_db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'unrelated'"))[0] == 1
-    assert (await domain_db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'child'"))[0] == 2
-    assert len(await domain_db.fetchall("SELECT id FROM scope_impacts WHERE project_id = 'project1'")) == 2
+    assert (await domain_db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'child'"))[0] == 3
+    assert len(await domain_db.fetchall("SELECT id FROM scope_impacts WHERE project_id = 'project1'")) == 4
 
 
 def test_original_report_storage_keeps_full_bytes_and_rejects_oversize(tmp_path: Path) -> None:

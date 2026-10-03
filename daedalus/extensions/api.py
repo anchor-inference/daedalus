@@ -65,16 +65,20 @@ from daedalus.extensions import (
     api_board,
     api_browsers,
     api_control,
+    api_coordinator_authority,
     api_files,
     api_harnesses,
     api_integrations,
     api_knowledge,
+    api_lifecycle,
     api_plugins,
     api_projects,
     api_runtime,
     api_skill_quality,
     api_staff,
+    api_staff_reports,
     api_workflows,
+    api_workspace_archive,
     launcher_updates,
 )
 from daedalus.extensions import commands as slash
@@ -1495,10 +1499,14 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     install_routes(api, app, auth)
     api_board.register(api, app, auth)
     api_control.register(api, app, auth)
+    api_coordinator_authority.register(api, app, auth)
     api_projects.register(api, app, auth)
     api_knowledge.register(api, app, auth)
     api_runtime.register(api, app, auth)
+    api_lifecycle.register(api, app, auth)
+    api_staff_reports.register(api, app, auth)
     api_workflows.register(api, app, auth)
+    api_workspace_archive.register(api, app, auth)
     api_plugins.register(api, app, auth)
     api_skill_quality.register(api, app, auth)
     api_integrations.register(api, app, auth)

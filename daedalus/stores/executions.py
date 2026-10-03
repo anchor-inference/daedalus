@@ -125,9 +125,15 @@ class ExecutionStore:
                                      task_id=task_id, effects=("execution.start",))
         await self.control.authorize(conn, worker, self._scope(task["project_id"]), "result.submit", task_id=task_id)
         if task["current_attempt_id"]:
-            previous = await one(conn, "SELECT state FROM execution_attempts WHERE id = ?", (task["current_attempt_id"],))
+            previous = await one(conn, "SELECT state,native_run_id,runtime_instance FROM execution_attempts WHERE id = ?", (task["current_attempt_id"],))
             if previous is not None and previous["state"] in (*ACTIVE, "recovering"):
                 raise ControlDenied("the previous execution must be stopped or reconciled first")
+            if previous is not None:
+                proof = await one(conn, "SELECT 1 FROM runtime_exit_observations WHERE attempt_id = ?"
+                                  " AND (runtime_ref = ? OR runtime_instance = ?) LIMIT 1",
+                                  (task["current_attempt_id"], previous["native_run_id"], previous["runtime_instance"]))
+                if proof is None:
+                    raise ControlDenied("the previous execution has no host-observed runtime exit")
         await conn.execute("INSERT INTO execution_attempts(id,task_id,contract_revision,host_generation,"
                            " fence_token_hash,state,created_at,updated_at,actor_id,grant_id,grant_generation,"
                            " staff_session_id,runtime_kind) VALUES (?,?,?,?,?,'queued',?,?,?,?,?,?,?)",

@@ -28,12 +28,12 @@ WORDS = {
     "en": {
         "title": "Board · Bakery", "needs": "Needs you", "doing": "In progress", "review": "Review", "queue": "Queue", "done": "Done",
         "answer": "Answer", "accept": "Accept", "merge": "Merge", "new": "New task", "create": "Create", "save": "Save", "working": "working",
-        "after": "after “Checkout”", "accepted": "is done", "queued": "number 1 in the queue", "missing": "Missing", "started": "Assigned and started",
+        "after": "after “Checkout”", "accepted": "is done", "queued": "Launch requested", "missing": "Missing", "started": "Launch requested",
     },
     "ru": {
         "title": "Доска · Bakery", "needs": "Нужны вы", "doing": "В работе", "review": "Проверка", "queue": "Очередь", "done": "Готово",
         "answer": "Ответить", "accept": "Принять", "merge": "Слить", "new": "Новая задача", "create": "Создать", "save": "Сохранить", "working": "работает",
-        "after": "после «Checkout»", "accepted": "готово", "queued": "1-я в очереди", "missing": "Не заполнено", "started": "Назначено и запущено",
+        "after": "после «Checkout»", "accepted": "готово", "queued": "Запуск запрошен", "missing": "Не заполнено", "started": "Запуск запрошен",
     },
 }
 
@@ -146,6 +146,15 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     expect(page.locator(".toast")).to_contain_text("Stop requested" if lang == "en" else "Остановка запрошена")
     assert stub.stops and stub.stops[-1][0] == "t-checkout" and stub.stops[-1][1]["client_operation_id"], stub.stops
     expect(cols.locator(".pboard-col.doing .pcard", has_text="Checkout")).to_be_visible()
+    owned = sheet.locator("details.sheet-section", has_text="Stop work owned by this task" if lang == "en" else "Остановить связанную работу задачи")
+    owned.locator("summary").first.click()
+    expect(owned).to_contain_text("Owned run" if lang == "en" else "Связанный запуск")
+    owned.locator("textarea").fill("Operator requested a clean stop")
+    owned.get_by_role("button", name="Request stop" if lang == "en" else "Запросить остановку").click()
+    page.locator(".sheet-backdrop.confirm .dialog button").last.click()
+    assert stub.cancellations[-1][0] == "task:t-checkout"
+    assert stub.cancellations[-1][1]["preview_fingerprint"] == "a" * 64
+    expect(owned).to_contain_text("Stop requested" if lang == "en" else "Остановка запрошена")
     page.keyboard.press("Escape")
 
     # A new task with its brief, an assignee and what it waits for.
@@ -171,9 +180,9 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
         "assignee_staff_id": "st-lev",
         "depends_on": ["t-checkout"],
         "priority": 2,
-        "resume_from": None,
     }, made
     assert made["expected_collection_revision"] == 5 and made["client_operation_id"], made
+    assert stub.launched[-1][1]["staff_id"] == "st-lev" and stub.launched[-1][1]["resume_from"] is None
     expect(page.locator(".toast")).to_contain_text(words["queued"])
     expect(cols.locator(".pboard-col.queue .pcard", has_text="Delivery zones")).to_be_visible()
 
@@ -186,7 +195,40 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     expect(sheet).to_have_count(0)
     edited_id, edited = stub.updated[-1]
     assert edited_id == "t-photos" and edited["assignee_staff_id"] == "st-max" and edited["expected_entity_revision"] == 1 and edited["client_operation_id"], stub.updated[-1]
+    assert stub.launched[-1][0] == "t-photos" and stub.launched[-1][1]["staff_id"] == "st-max"
     expect(page.locator(".toast")).to_contain_text(words["started"])
+
+    # The task command is durable even if the distinct launch command is refused. A later Start
+    # uses the saved card's current revision rather than creating a duplicate task.
+    stub.launch_failures = 1
+    page.get_by_role("button", name=words["new"]).first.click()
+    sheet.locator("#ptask-title").fill("Retry launch")
+    sheet.locator("#ptask-assignee").select_option("st-lev")
+    sheet.locator(".sheet-foot").get_by_role("button", name=words["create"]).click()
+    expect(sheet).to_have_count(0)
+    assert sum(task["title"] == "Retry launch" for task in stub.tasks) == 1
+    expect(page.locator(".toast")).to_contain_text("Task saved; launch outcome unconfirmed" if lang == "en" else "Задача сохранена; результат запроса на запуск не подтверждён")
+    cols.locator(".pcard", has_text="Retry launch").click()
+    sheet.get_by_role("button", name="Start task" if lang == "en" else "Запустить задачу").click()
+    expect(page.locator(".toast")).to_contain_text(words["queued"])
+    assert stub.launched[-1][0] == next(task["id"] for task in stub.tasks if task["title"] == "Retry launch")
+    page.keyboard.press("Escape")
+
+    stub.launch_unknowns = 1
+    page.get_by_role("button", name=words["new"]).first.click()
+    sheet.locator("#ptask-title").fill("Unknown launch")
+    sheet.locator("#ptask-assignee").select_option("st-lev")
+    sheet.locator(".sheet-foot").get_by_role("button", name=words["create"]).click()
+    expect(sheet).to_have_count(0)
+    unknown_id, unknown_body = stub.unknown_launches[-1]
+    cols.locator(".pcard", has_text="Unknown launch").click()
+    sheet.get_by_role("button", name="Retry launch request" if lang == "en" else "Повторить запрос на запуск").click()
+    assert stub.launched[-1][0] == unknown_id
+    assert stub.launched[-1][1]["client_operation_id"] == unknown_body["client_operation_id"]
+    assert stub.launched[-1][1]["expected_entity_revision"] == unknown_body["expected_entity_revision"]
+    expect(sheet.locator(".result-warning", has_text="pending" if lang == "en" else "ожидает")).to_be_visible()
+    expect(sheet.get_by_role("button", name="Start task" if lang == "en" else "Запустить задачу")).to_be_disabled()
+    page.keyboard.press("Escape")
     fits(page, f"{lang} desktop")
 
     # The request is answered where it was asked: the staff member's session, inside the project.

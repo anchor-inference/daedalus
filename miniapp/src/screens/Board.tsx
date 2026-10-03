@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, Project, SessionList, SessionSummary } from "../api";
+import { api, ApiError, Project, SessionList, SessionSummary } from "../api";
 import { Skeleton, copyText } from "../ui/components";
 import { OverflowMenu, Sheet } from "../ui/dialogs";
 import { absTime, relTime } from "../format";
@@ -7,7 +7,7 @@ import { useEdgeFade } from "../edgefade";
 import { Icon } from "../icons";
 import { navigate, pathFor, projectPagePath } from "../router";
 import { PageHeader, screenTitle } from "../ui/index";
-import { invalidate, useQuery } from "../store";
+import { invalidate, useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 // `t` is also the name every task on this screen goes by, so the translator is imported twice: the
 // plain name where there is no task in scope, and `t2` inside the functions that take one.
@@ -21,7 +21,8 @@ type Task = {
   status: Status;
   priority: number;
   acceptance: string;
-  checklist: { text: string; done: boolean }[];
+  checklist: { id?: string; text: string; done: boolean }[];
+  entity_revision?: number;
   depends_on: string[];
   session_id: string | null;
   origin_session_id: string | null;
@@ -41,9 +42,10 @@ const BRIEF_FIELDS: BriefField[] = ["objective", "deliverable", "boundaries", "d
 const COLUMNS: Status[] = ["todo", "doing", "review", "blocked"];
 const FINISHED: Status[] = ["done", "dropped"];
 const columnLabel = (s: Status) => t(`board.col.${s}`);
-const NEXT: Record<Status, Status[]> = { todo: ["doing", "blocked", "dropped"], doing: ["review", "done", "blocked", "todo"], review: ["done", "doing"], blocked: ["todo", "doing"], done: ["todo"], dropped: ["todo"] };
+const NEXT: Record<Status, Status[]> = { todo: ["blocked", "dropped"], doing: [], review: [], blocked: ["todo", "dropped"], done: [], dropped: ["todo"] };
 
 export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: string) => void; onOpen: (id: string) => void; selected?: string | null; project?: Project | null }) {
+  const offline = useOffline();
   const [showDone, setShowDone] = useState(false);
   // The shell's project lens narrows this board as it narrows the list of agents.
   const key = `/api/board?include_done=${showDone ? 1 : 0}${project ? `&project=${encodeURIComponent(project.id)}` : ""}`;
@@ -52,37 +54,59 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
   const [creating, setCreating] = useState(false);
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<Status | null>(null);
+  const pending = useRef<{ fingerprint: string; id: string } | null>(null);
+  const operationId = (fingerprint: string) => {
+    if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, id: crypto.randomUUID() };
+    return pending.current.id;
+  };
 
   const reload = () => {
     refresh();
     invalidate("/api/board");
   };
   async function move(t: Task, status: Status) {
-    if (t.status === status) return;
+    if (t.status === status || !NEXT[t.status].includes(status)) return;
+    if (offline || !Number.isInteger(t.entity_revision)) { toast(t2("result.block.unconfirmed")); return; }
+    const body = { status, expected_entity_revision: t.entity_revision };
     try {
-      await api.put(`/api/board/${t.id}`, { status });
+      await api.put(`/api/board/${encodeURIComponent(t.id)}`, { ...body, client_operation_id: operationId(`${t.id}:${JSON.stringify(body)}`) });
+      pending.current = null;
       reload();
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) { pending.current = null; reload(); }
       toast(errorText(e));
     }
   }
   async function check(t: Task, i: number) {
-    // The board refuses a checklist edit that would leave a finished task with an item open; the
-    // refusal shows as a toast, not as a dead checkbox.
+    if (offline || !Number.isInteger(t.entity_revision)) { toast(t2("result.block.unconfirmed")); return; }
     try {
-      await api.put(`/api/board/${t.id}`, t.checklist[i].done ? { uncheck: [i] } : { check: [i] });
+      const contract = await api.get<{ checklist: { id: string; text: string }[] }>(`/api/board/${encodeURIComponent(t.id)}/contract`);
+      const criterion = contract.checklist[i];
+      if (!criterion || criterion.text !== t.checklist[i].text || (t.checklist[i].id && t.checklist[i].id !== criterion.id)) {
+        toast(t2("board.check.stale"));
+        reload();
+        return;
+      }
+      const body = { [t.checklist[i].done ? "uncheck_ids" : "check_ids"]: [criterion.id], expected_entity_revision: t.entity_revision };
+      await api.put(`/api/board/${encodeURIComponent(t.id)}`, { ...body, client_operation_id: operationId(`${t.id}:${JSON.stringify(body)}`) });
+      pending.current = null;
       reload();
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) { pending.current = null; reload(); }
       toast(errorText(e));
     }
   }
   async function remove(t: Task) {
-    if (!(await confirmAsync(t2("board.delete.title", { title: t.title }), { body: t2("board.delete.body"), action: t2("board.delete.action") }))) return;
+    if (offline || !Number.isInteger(t.entity_revision)) { toast(t2("result.block.unconfirmed")); return; }
+    if (!(await confirmAsync(t2("pboard.archive.title", { title: t.title }), { body: t2("pboard.archive.body"), action: t2("pboard.archive.action"), danger: true }))) return;
+    const id = operationId(`${t.id}:archive:${t.entity_revision}`);
     try {
-      await api.delete(`/api/board/${t.id}`);
+      await api.delete(`/api/board/${encodeURIComponent(t.id)}?client_operation_id=${encodeURIComponent(id)}&expected_entity_revision=${t.entity_revision}`);
+      pending.current = null;
       if (selected === t.id) navigate(pathFor("board"), { replace: true });
       reload();
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) { pending.current = null; reload(); }
       toast(errorText(e));
     }
   }
@@ -97,11 +121,13 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
   }, [selected, tasks, open, showDone]);
   const column = (status: Status) => all.filter((t) => t.status === status).sort((a, b) => a.priority - b.priority || Date.parse(b.updated_at) - Date.parse(a.updated_at));
   const card = (t: Task) => (
-    <TaskRow key={t.id} t={t} owner={t.session_id ? titles[t.session_id] : undefined} onOpen={() => navigate(pathFor("board", t.id))} onDragStart={() => setDragging(t.id)} onDragEnd={() => { setDragging(null); setOver(null); }} dragging={dragging === t.id} />
+    <TaskRow key={t.id} t={t} owner={t.session_id ? titles[t.session_id] : undefined} onOpen={() => navigate(pathFor("board", t.id))} onDragStart={() => setDragging(t.id)} onDragEnd={() => { setDragging(null); setOver(null); }} dragging={dragging === t.id} canDrag={!offline && Number.isInteger(t.entity_revision) && NEXT[t.status].length > 0} />
   );
   const dropProps = (status: Status) => ({
     onDragOver: (e: React.DragEvent) => {
       if (!dragging) return;
+      const source = all.find((task) => task.id === dragging);
+      if (!source || !NEXT[source.status].includes(status)) return;
       e.preventDefault();
       if (over !== status) setOver(status);
     },
@@ -115,7 +141,7 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
       const t = all.find((x) => x.id === id);
       setDragging(null);
       setOver(null);
-      if (t) void move(t, status);
+      if (t && NEXT[t.status].includes(status)) void move(t, status);
     },
   });
 
@@ -178,12 +204,12 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
   );
 }
 
-function TaskRow({ t, owner, onOpen, onDragStart, onDragEnd, dragging }: { t: Task; owner?: string; onOpen: () => void; onDragStart: () => void; onDragEnd: () => void; dragging: boolean }) {
+function TaskRow({ t, owner, onOpen, onDragStart, onDragEnd, dragging, canDrag }: { t: Task; owner?: string; onOpen: () => void; onDragStart: () => void; onDragEnd: () => void; dragging: boolean; canDrag: boolean }) {
   const done = t.checklist.filter((c) => c.done).length;
   const next = t.checklist.find((c) => !c.done);
   const pct = t.checklist.length ? Math.round((100 * done) / t.checklist.length) : 0;
   return (
-    <div className={`erow task p${Math.min(t.priority, 4)} ${dragging ? "dragging" : ""}`} role="link" tabIndex={0} draggable onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", t.id); onDragStart(); }} onDragEnd={onDragEnd} onClick={onOpen} onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}>
+    <div className={`erow task p${Math.min(t.priority, 4)} ${dragging ? "dragging" : ""}`} role="link" tabIndex={0} draggable={canDrag} onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", t.id); onDragStart(); }} onDragEnd={onDragEnd} onClick={onOpen} onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}>
       <div className="erow-main">
         <div className="erow-head">
           <span className="erow-title clamp-3">{t.title}</span>
@@ -210,6 +236,8 @@ function TaskRow({ t, owner, onOpen, onDragStart, onDragEnd, dragging }: { t: Ta
 }
 
 function TaskSheet({ t, owner, board, onClose, onMove, onCheck, onRemove, onOpenSession, toast }: { t: Task; owner?: string; board?: string; onClose: () => void; onMove: (t: Task, s: Status) => void; onCheck: (t: Task, i: number) => void; onRemove: (t: Task) => void; onOpenSession: (id: string) => void; toast: (t: string) => void }) {
+  const offline = useOffline();
+  const writeBlocked = offline || !Number.isInteger(t.entity_revision);
   const done = t.checklist.filter((c) => c.done).length;
   // Acceptance that only restates the brief's "Done when" is one section, not two: the pair, one under
   // the other and a clause apart, left nobody able to say what set them apart. The longer words stay.
@@ -227,7 +255,7 @@ function TaskSheet({ t, owner, board, onClose, onMove, onCheck, onRemove, onOpen
             ...(t.session_id ? [{ label: owner ? t2("board.open.owner", { name: owner }) : t2("board.open.session"), icon: "bots" as const, onSelect: () => onOpenSession(t.session_id!) }] : []),
             { label: t2("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(t.id)) ? t2("board.copied") : t.id) },
             "-",
-            { label: t2("board.delete.menu"), icon: "trash", danger: true, onSelect: () => onRemove(t) },
+            { label: t2("pboard.archive.action"), icon: "trash", danger: true, disabled: writeBlocked || !["todo", "blocked"].includes(t.status), hint: t2("pboard.archive.unavailable"), onSelect: () => onRemove(t) },
           ]}
         />
       }
@@ -275,7 +303,7 @@ function TaskSheet({ t, owner, board, onClose, onMove, onCheck, onRemove, onOpen
           <div className="sheet-section-title">{t2("board.checklist")} <span className="sub">{done}/{t.checklist.length}</span></div>
           {t.checklist.map((c, i) => (
             <label key={i} className="toggle-row check-row">
-              <input type="checkbox" checked={c.done} onChange={() => onCheck(t, i)} />
+              <input type="checkbox" checked={c.done} disabled={writeBlocked || t.status === "done"} onChange={() => onCheck(t, i)} />
               <span className={c.done ? "done" : ""}>{c.text}</span>
             </label>
           ))}
@@ -293,41 +321,55 @@ function TaskSheet({ t, owner, board, onClose, onMove, onCheck, onRemove, onOpen
           <pre className="inbox-text">{t.notes}</pre>
         </section>
       )}
-      <section className="sheet-section">
+      {NEXT[t.status].length > 0 && <section className="sheet-section">
         <div className="sheet-section-title">{t2("board.moveto")}</div>
         <div className="btnrow" style={{ marginTop: 0 }}>
-          {/* "Done" is filled only once the checklist is closed: filled on every task it read as the
-              state the task was already in, beside a status chip saying "Doing" and a checklist at 2/3.
-              A task without a checklist gives no such sign, so its "Done" stays plain too. */}
           {NEXT[t.status].map((s) => (
-            <button key={s} className={`btn small ${s === "done" && t.checklist.length > 0 && done === t.checklist.length ? "primary" : ""}`} onClick={() => onMove(t, s)}>
+            <button key={s} className="btn small" disabled={writeBlocked} onClick={() => onMove(t, s)}>
               {columnLabel(s)}
             </button>
           ))}
         </div>
-      </section>
+      </section>}
+      {writeBlocked && <div className="result-warning" role="status">{t2("result.block.unconfirmed")}</div>}
     </Sheet>
   );
 }
 
 function NewTaskSheet({ onClose, onCreated, toast }: { onClose: () => void; onCreated: () => void; toast: (t: string) => void }) {
+  const offline = useOffline();
+  const operation = useRef<{ fingerprint: string; id: string } | null>(null);
+  const collectionRevision = useRef<number | null>(null);
   const [form, setForm] = useState({ title: "", acceptance: "", checklist: "", priority: 3, session_id: "" });
   const [busy, setBusy] = useState(false);
   const { data: listing } = useQuery<SessionList>("/api/sessions", { staleMs: 15000 });
   const sessions = listing?.sessions;
   const agents = (sessions ?? []).filter((s) => !s.title.startsWith("[sub]"));
   async function create() {
+    if (offline) { toast(t("result.block.unconfirmed")); return; }
     setBusy(true);
     try {
-      await api.post("/api/board", {
+      if (collectionRevision.current === null) {
+        const revisions = await api.get<{ collection_revision: number }>("/api/control/revisions");
+        if (!Number.isInteger(revisions.collection_revision)) { toast(t("result.block.unconfirmed")); return; }
+        collectionRevision.current = revisions.collection_revision;
+      }
+      const body = {
         title: form.title,
         acceptance: form.acceptance,
         priority: form.priority,
         checklist: form.checklist.split("\n").map((l) => l.trim()).filter(Boolean),
         session_id: form.session_id || null,
-      });
+        expected_collection_revision: collectionRevision.current,
+      };
+      const fingerprint = JSON.stringify(body);
+      if (operation.current?.fingerprint !== fingerprint) operation.current = { fingerprint, id: crypto.randomUUID() };
+      await api.post("/api/board", { ...body, client_operation_id: operation.current.id });
+      operation.current = null;
+      collectionRevision.current = null;
       onCreated();
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) { operation.current = null; collectionRevision.current = null; }
       toast(errorText(e));
     } finally {
       setBusy(false);
@@ -358,8 +400,9 @@ function NewTaskSheet({ onClose, onCreated, toast }: { onClose: () => void; onCr
       <div className="sub" style={{ marginTop: 4 }}>{t("board.board.hint")}</div>
       <div className="sheet-foot">
         <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" disabled={busy || !form.title.trim()} onClick={create}>{t("common.create")}</button>
+        <button className="btn primary" disabled={busy || offline || !form.title.trim()} onClick={create}>{t("common.create")}</button>
       </div>
+      {offline && <div className="result-warning" role="status">{t("result.block.unconfirmed")}</div>}
     </Sheet>
   );
 }

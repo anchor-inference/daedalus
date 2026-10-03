@@ -3,14 +3,125 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from daedalus.stores.control import ControlDenied, ControlStore, Entity, Principal, Scope, now, one
+from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope, now, one
 
 if TYPE_CHECKING:
     from daedalus.app import Application
 
 REVIEW_OPERATIONS = ("review.verdict", "review.return")
+AUTHORITY_BUNDLES = {
+    "planning": {"operations": ["board.task.create", "board.task.update"], "effects": [], "scope_kind": "project"},
+    "execution": {"operations": ["task.launch"], "effects": ["execution.start"], "scope_kind": "task"},
+    "execution_project": {"operations": ["task.launch"], "effects": ["execution.start"], "scope_kind": "project"},
+    "review": {"operations": list(REVIEW_OPERATIONS), "effects": [], "scope_kind": "project"},
+}
+
+
+async def _office_or_none(conn: Any, project_id: str) -> str | None:
+    try:
+        return await current_office(conn, project_id)
+    except ControlDenied:
+        return None
+
+
+async def authority_view(app: Application, project_id: str) -> dict[str, Any]:
+    """Describe actual approvals, including stale ones that the operator can still withdraw."""
+    async with app.db.transaction() as conn:
+        row = await one(conn, "SELECT entity_revision FROM projects WHERE id = ?", (project_id,))
+        if row is None:
+            raise KeyError(project_id)
+        session_id = await _office_or_none(conn, project_id)
+        blockers = [] if session_id else ["no_current_coordinator"]
+        async with conn.execute("SELECT g.*,(SELECT id FROM operation_receipts r"
+                                " WHERE r.project_id = g.project_id AND json_extract(r.response_json,'$.grant_id') = g.id"
+                                " ORDER BY r.created_at,r.id LIMIT 1) AS receipt_id FROM actor_grants g"
+                                " WHERE g.project_id = ? AND g.actor_id LIKE 'orchestrator:%' AND g.parent_grant_id IS NULL"
+                                " ORDER BY g.created_at DESC,g.id DESC", (project_id,)) as cursor:
+            rows = await cursor.fetchall()
+        grants = []
+        for grant in rows:
+            owner = grant["actor_id"].partition(":")[2]
+            state = "revoked" if grant["revoked_at"] else "expired" if datetime.fromisoformat(grant["expires_at"]) <= datetime.now(UTC) else "stale" if owner != session_id else "active"
+            grants.append({"grant_id": grant["id"], "generation": grant["generation"], "session_id": owner,
+                           "scope": {"kind": grant["scope_kind"], "id": grant["scope_id"]},
+                           "operations": json.loads(grant["operations_json"]), "effects": json.loads(grant["effects_json"]),
+                           "expires_at": grant["expires_at"], "revoked_at": grant["revoked_at"], "created_at": grant["created_at"],
+                           "receipt_id": grant["receipt_id"], "state": state, "parent_grant_id": grant["parent_grant_id"],
+                           "parent_grant_generation": grant["parent_grant_generation"]})
+        return {"project_id": project_id, "entity_revision": row["entity_revision"],
+                "current_coordinator_session_id": session_id, "readiness_blockers": blockers, "grants": grants,
+                "available_bundles": [{"id": name, **bundle, "blockers": blockers,
+                                       "max_expires_at": (datetime.now(UTC) + timedelta(hours=24)).isoformat()}
+                                      for name, bundle in AUTHORITY_BUNDLES.items()]}
+
+
+async def approve_authority(app: Application, project_id: str, principal: Principal, *,
+                            client_operation_id: str, expected_entity_revision: int,
+                            expected_coordinator_session_id: str, bundle_id: str,
+                            expires_at: str, task_id: str | None = None) -> dict[str, Any]:
+    scope = Scope("project", project_id)
+    control = ControlStore(app.db)
+    bundle = AUTHORITY_BUNDLES.get(bundle_id)
+    if bundle is None or (bundle["scope_kind"] == "task") != bool(task_id):
+        raise ValueError("the bundle and its explicit task scope must agree")
+    async def effect(conn: Any, _: Any) -> dict[str, Any]:
+        expiry = datetime.fromisoformat(expires_at)
+        if expiry.tzinfo is None or not datetime.now(UTC) < expiry <= datetime.now(UTC) + timedelta(hours=24):
+            raise ValueError("approval requires a timezone-aware expiry within twenty-four hours")
+        session_id = await current_office(conn, project_id)
+        if session_id != expected_coordinator_session_id:
+            raise ControlConflict("the coordinator changed after the approval preview")
+        if task_id:
+            await control._entity(conn, scope, Entity("task", task_id))
+        actor_id = f"orchestrator:{session_id}"
+        async with conn.execute("SELECT id,operations_json,effects_json FROM actor_grants WHERE actor_id = ?"
+                                " AND project_id = ? AND task_id IS ? AND revoked_at IS NULL",
+                                (actor_id, project_id, task_id)) as cursor:
+            earlier = await cursor.fetchall()
+        for row in earlier:
+            if (set(json.loads(row["operations_json"])) == set(bundle["operations"])
+                    and set(json.loads(row["effects_json"])) == set(bundle["effects"])):
+                await control.revoke_grant_in(conn, principal, row["id"], reason="approval replaced")
+        granted = await control.issue_grant_in(conn, principal, Principal(actor_id, "agent"), scope,
+                                               operations=bundle["operations"], effects=bundle["effects"],
+                                               expires_at=expiry.isoformat(), task_id=task_id)
+        return {"project_id": project_id, "session_id": session_id, "bundle_id": bundle_id, **granted}
+
+    payload = {"expected_coordinator_session_id": expected_coordinator_session_id, "bundle_id": bundle_id,
+               "expires_at": expires_at, "task_id": task_id}
+    return await control.mutate(principal, scope, "orchestrator.authority.issue", client_operation_id,
+                                expected_entity_revision, Entity("project", project_id), payload, effect)
+
+
+async def withdraw_authority(app: Application, project_id: str, principal: Principal, grant_id: str, *,
+                             client_operation_id: str, expected_entity_revision: int,
+                             expected_grant_generation: int, expected_coordinator_session_id: str | None,
+                             reason: str) -> dict[str, Any]:
+    if not reason.strip():
+        raise ValueError("an approval withdrawal needs a reason")
+    scope = Scope("project", project_id)
+    control = ControlStore(app.db)
+
+    async def effect(conn: Any, _: Any) -> dict[str, Any]:
+        if await _office_or_none(conn, project_id) != expected_coordinator_session_id:
+            raise ControlConflict("the coordinator changed after the withdrawal preview")
+        grant = await one(conn, "SELECT * FROM actor_grants WHERE id = ?", (grant_id,))
+        if grant is None or grant["project_id"] != project_id or not grant["actor_id"].startswith("orchestrator:"):
+            raise KeyError(grant_id)
+        if grant["generation"] != expected_grant_generation:
+            raise ControlConflict("the approval generation has changed")
+        await control.revoke_grant_in(conn, principal, grant_id, reason=reason)
+        updated = await one(conn, "SELECT generation,revoked_at FROM actor_grants WHERE id = ?", (grant_id,))
+        return {"project_id": project_id, "grant_id": grant_id, "generation": updated["generation"],
+                "revoked_at": updated["revoked_at"]}
+
+    return await control.mutate(principal, scope, "orchestrator.authority.revoke", client_operation_id,
+                                expected_entity_revision, Entity("project", project_id),
+                                {"grant_id": grant_id, "expected_grant_generation": expected_grant_generation,
+                                 "expected_coordinator_session_id": expected_coordinator_session_id, "reason": reason}, effect)
 
 
 async def current_office(conn: Any, project_id: str, session_id: str | None = None) -> str:
@@ -37,8 +148,9 @@ async def resolve_authority(app: Application, *, session_id: str, project_id: st
         if task_id is not None:
             await ControlStore(app.db)._entity(conn, scope, Entity("task", task_id))
         async with conn.execute("SELECT id,generation FROM actor_grants WHERE actor_id = ? AND origin_class = 'agent'"
-                                " AND scope_kind = 'project' AND project_id = ? AND revoked_at IS NULL"
-                                " ORDER BY created_at DESC,id DESC", (f"orchestrator:{session_id}", project_id)) as cursor:
+                                " AND project_id = ? AND revoked_at IS NULL"
+                                " AND (scope_kind = 'project' OR (scope_kind = 'task' AND task_id = ?))"
+                                " ORDER BY created_at DESC,id DESC", (f"orchestrator:{session_id}", project_id, task_id)) as cursor:
             grants = await cursor.fetchall()
         for row in grants:
             principal = Principal(f"orchestrator:{session_id}", "agent", row["id"], row["generation"])

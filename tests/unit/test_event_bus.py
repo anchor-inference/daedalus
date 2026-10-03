@@ -89,6 +89,25 @@ async def test_seq_only_grows_across_a_new_bus_and_a_prune_that_emptied_the_tabl
     await third.close()
 
 
+async def test_domain_event_is_visible_only_after_its_transaction_commits(bus: EventBus, db: Database) -> None:
+    async with bus.subscribe() as subscription:
+        async with bus.transaction_guard():
+            async with db.transaction() as conn:
+                event = await bus.persist_in(conn, "terminal.title", title("ready"), terminal_id="t1")
+            bus.announce_committed(event)
+        delivered = await _take(subscription, 1)
+        assert delivered[0].seq == event.seq
+        assert bus.head == event.seq
+
+        with pytest.raises(ValueError, match="abort"):
+            async with bus.transaction_guard():
+                async with db.transaction() as conn:
+                    await bus.persist_in(conn, "terminal.title", title("discard"), terminal_id="t1")
+                    raise ValueError("abort")
+        assert [row["payload_json"] for row in await _rows(db)] == ['{"title": "ready"}']
+        assert bus.head == event.seq
+
+
 async def test_publish_refuses_what_is_not_the_contract(bus: EventBus) -> None:
     with pytest.raises(UnknownEventType):
         await bus.publish("terminal.exploded", {})

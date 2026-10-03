@@ -78,7 +78,8 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
                 return await apply_goal_revision(conn, project_id=project_id,
                                                  expected_goal_revision=int(body["expected_goal_revision"]),
                                                  body=body["body"], root_task_ids=list(body["root_task_ids"]),
-                                                 origin_kind="operator", origin_ref="")
+                                                 origin_kind="operator", origin_ref="",
+                                                 control=store, principal=principal)
 
             return await store().mutate(principal, Scope("project", project_id), "goal.revise",
                                       str(body["client_operation_id"]), revision, Entity("project", project_id),

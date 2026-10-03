@@ -21,9 +21,10 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from daedalus.extensions.board_commands import BoardCommands
 from daedalus.extensions.likeness import same_card
-from daedalus.extensions.orchestrator_contract import bound, narrowed, narrowing_refusal, source_of
-from daedalus.extensions.orchestrator_ops import Refused, _folder
+from daedalus.extensions.orchestrator_contract import bound, narrowing_refusal, source_of
+from daedalus.extensions.orchestrator_ops import Refused, _folder, board_principal
 from daedalus.extensions.task_contract import (
     CHECK_MAX_CHARS,
     CHECKS_MAX,
@@ -34,6 +35,7 @@ from daedalus.extensions.task_contract import (
 from daedalus.harness.capabilities import MODE_MEANINGS, RESTRICTIVE_MODES
 from daedalus.host.events import EventFilter
 from daedalus.staff_runtime import LiveSession, ReadRequest
+from daedalus.stores.control import Scope
 from daedalus.stores.files import FileRefused, StoredFile
 from daedalus.stores.projects import Project, ProjectFolder
 from daedalus.stores.staff import HARNESS_NAMES, HARNESSES, ISOLATIONS, MESSAGE_MODES, Staff, StaffBusy, StaffError
@@ -51,8 +53,6 @@ round of it that forgot its task_id."""
 SAME_TITLE_MIN = 8
 """The least a title may be, normalised, for another to read as the same work by starting with it:
 "Fix" begins too many unrelated titles to mean anything."""
-ROUND_RE = re.compile(r"\] round \d+ begins")
-"""A round's line in a card's notes, as ``_round_note`` writes it after the board's timestamp."""
 CONTRACT_FIELDS = ("objective", "deliverable", "boundaries", "done_when")
 CONTRACT_MIN = 8
 """The least each part of a task's brief may be: enough to be a sentence, so "tbd" is not a contract."""
@@ -440,11 +440,16 @@ async def assign(
     checks: list[str] | None = None,
     reason: str = "",
     resume_from: str | None = None,
+    client_operation_id: str = "",
+    expected_entity_revision: int | None = None,
+    expected_collection_revision: int | None = None,
 ) -> str:
     team = _team(orch)
     board = orch.board
     if board is None:
         raise Refused("the board is not available on this installation")
+    if not client_operation_id:
+        raise Refused("Assign requires a trusted tool call id")
     handed = await _files(orch, project, session_id, files)
     wanted_inputs = await _inputs(orch, project, session_id, inputs)
     wanted_requirements = await _requirements(orch, project, session_id, requirements)
@@ -538,6 +543,8 @@ async def assign(
         )
     renamed = wanted if existing is not None and wanted and wanted != existing["title"] else None
     reopened = existing is not None and existing["status"] in HANDED_IN
+    if reopened:
+        raise Refused("return the exact reviewed result before assigning another round")
     if existing is not None and renamed is not None and not reopened and not _same_work(renamed, existing["title"]) and len(" ".join((reason or "").split())) < 8:
         # A card a member was at work on was renamed into an unrelated check of a mail service by an
         # Assign that named it: the work it held left the board half done, under another title, and
@@ -549,38 +556,52 @@ async def assign(
             "task_id. If it is the same work under a better title, say so in reason"
         )
     try:
+        commands = BoardCommands(orch.manager.db)
+        scope = Scope("project", project.id)
+        handoff_requirements = [{"text": text, "kind": kind, "source": source}
+                                for text, kind, source, _ in wanted_requirements]
+        handoff_requirements.extend({"text": why or f"{stored.name}: the work starts from it",
+                                     "kind": "input", "source": "operator" if stored.origin == "operator" else "orchestrator",
+                                     "file_id": stored.id} for stored, why in wanted_inputs)
+        handed = handed + [stored for stored, _ in wanted_inputs if stored.id not in {file.id for file in handed}]
+        file_ids = [stored.id for stored in handed]
         if existing is None:
-            task = await board.add(title=wanted, session_id=session_id, brief=merged, depends_on=depends_on, priority=int(priority or 3))
-        elif reopened:
-            # The next round of work already on the board: the same card is reopened with the new brief,
-            # and the round it replaces is kept in its notes, rather than a new card per round.
-            task = await board.update(
-                existing["id"], actor=session_id, status="todo", note=_round_note(existing), title=renamed, brief=given or None, depends_on=depends_on, priority=priority,
-            )
+            if expected_collection_revision is None:
+                raise Refused("new assignments need expected_collection_revision from Tasks(list)")
+            principal = await board_principal(orch, session_id, project.id, "board.task.create")
+            created = await commands.create(principal, scope, client_operation_id=client_operation_id,
+                                            expected_collection_revision=expected_collection_revision,
+                                            title=wanted, brief=merged, checklist=wanted_checks or split_checks(merged["done_when"]),
+                                            depends_on=depends_on, priority=int(priority or 3),
+                                            source_session_id=session_id, assignee_staff_id=member.id,
+                                            folder_id=target.id if target else None,
+                                            file_ids=file_ids, requirements=handoff_requirements)
+            task = await board.get(created["task_id"], actor=session_id)
         else:
             task = existing
-            if given or renamed or depends_on is not None or priority is not None:
-                task = await board.update(task["id"], actor=session_id, title=renamed, brief=given or None, depends_on=depends_on, priority=priority)
+            if expected_entity_revision is None:
+                raise Refused("existing assignments need expected_entity_revision from Tasks(get)")
+            principal = await board_principal(orch, session_id, project.id, "board.task.update", task["id"])
+            changed = await commands.update(principal, scope, task["id"], client_operation_id=client_operation_id,
+                                            expected_entity_revision=expected_entity_revision,
+                                            title=renamed, brief=given or None, depends_on=depends_on, priority=priority,
+                                            checklist=wanted_checks or (split_checks(merged["done_when"])
+                                                                          if "done_when" in given else None),
+                                            note=(f"reassigned from {owner.name}: {handover}" if handover and owner else ""),
+                                            assignee_staff_id=member.id, folder_id=target.id if target else None,
+                                            file_ids=file_ids, requirements=handoff_requirements)
+            task = await board.get(changed["task_id"], actor=session_id)
     except KeyError as exc:
         raise Refused(f"no task {exc.args[0] if exc.args else ''} on {project.name}'s board") from exc
     except ValueError as exc:
         raise Refused(str(exc)) from exc
-    if target is not None and task.get("folder_id") != target.id:
-        if task.get("status") == "doing":
-            raise Refused(f"task {task['id']} is being worked on in its folder; release its worker before moving it")
-        # The board has no folder of its own to set; the team reads the task's folder at the start.
-        await orch.manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (target.id, task["id"]))
-    added = await _contract(orch, project, task, reopened=reopened, done_when_changed="done_when" in given, checks=wanted_checks, requirements=wanted_requirements, inputs=wanted_inputs)
-    handed = handed + [stored for stored, _ in wanted_inputs if stored.id not in {f.id for f in handed}]
-    if handed:
-        # On the task, not on this call: a task that waits in the queue, or is started again after a
-        # crash, is handed its files at every start.
-        await orch.manager.files.attach_to_task(task["id"], handed, actor="orchestrator")
-    if handover:
-        await team.note_on_card(task["id"], f"the work passed from {owner.name} to {member.name}: {handover}")  # type: ignore[union-attr]
-        await _journal(orch, project, "reassignment", f"Task {task['id']} \"{task['title']}\" passed from {owner.name} to {member.name}: {handover}", {"task_id": task["id"], "from": owner.id, "to": member.id})  # type: ignore[union-attr]
+    added = f"{len(handoff_requirements)} requirements are on the card." if handoff_requirements else ""
     try:
-        launched = await team.assign(member, task["id"], by="orchestrator", **({"resume_from": resume_from} if resume_from else {}))
+        principal = await board_principal(orch, session_id, project.id, "task.launch", task["id"])
+        launched = await team.assign(member, task["id"], principal=principal,
+                                     client_operation_id=client_operation_id + ":launch",
+                                     expected_entity_revision=task["entity_revision"],
+                                     **({"resume_from": resume_from} if resume_from else {}))
     except KeyError as exc:
         raise Refused(f"no task {task['id']} on {project.name}'s board") from exc
     except StaffError as exc:
@@ -734,52 +755,6 @@ def _checks(raw: list[str] | None) -> list[str]:
     return items
 
 
-async def _contract(
-    orch: Orchestrators,
-    project: Project,
-    task: dict[str, Any],
-    *,
-    reopened: bool,
-    done_when_changed: bool,
-    checks: list[str],
-    requirements: list[tuple[str, str, str, str]],
-    inputs: list[tuple[StoredFile, str]],
-) -> str:
-    """Put a hand-over's checks and requirements on the card; a sentence for the answer when there are any.
-
-    A round that reopens the card starts unmarked: the evidence and the marks were about the work it
-    replaces. The checks follow the done-when unless they are given; a round that keeps the done-when
-    keeps them."""
-    contracts = _team(orch).contracts
-    if reopened:
-        await contracts.clear_marks(task["id"])
-        if await contracts.acceptance(task["id"]) != "returned":
-            await contracts.set_acceptance(task["id"], "")
-    items = await contracts.checks(task["id"])
-    if checks or done_when_changed or not items or reopened:
-        texts = checks or ([str(i.get("text")) for i in items] if items and not done_when_changed else split_checks(str(task["brief"].get("done_when") or "")))
-        await contracts.set_checks(task["id"], [{"text": text, "done": False} for text in texts])
-    made: list[str] = []
-    added: list[tuple[Any, str]] = []
-    for text, kind, source, why in requirements:
-        try:
-            requirement = await contracts.add(task["id"], project.id, text, kind, source)
-        except ValueError as exc:
-            raise Refused(str(exc)) from exc
-        made.append(requirement.label)
-        added.append((requirement, why))
-    grants = [r for r in await contracts.requirements(task["id"]) if r.kind == "scope" and r.from_operator]
-    for requirement, why in added:
-        if grants and requirement.kind == "constraint" and requirement.source == "orchestrator":
-            await narrowed(orch, project, task, requirement, grants[0], why)
-    for stored, why in inputs:
-        body = why or f"{stored.name}: the work starts from it"
-        made.append((await contracts.add(task["id"], project.id, body, "input", "operator" if stored.origin == "operator" else "orchestrator", file_id=stored.id)).label)
-    if not made:
-        return ""
-    return f"Requirements {', '.join(made)} are on the card; they go in the brief, and an input must be opened before the work is handed in."
-
-
 async def _last_handed_in(orch: Orchestrators, project: Project, member: Staff, session_id: str) -> dict[str, Any] | None:
     """The card a member handed in last, when it is recent enough that a new assignment could be its
     next round: one the orchestrator wrote, without a branch, handed in within ``FOLLOW_UP_WINDOW``.
@@ -835,14 +810,6 @@ def _minutes_ago(task: dict[str, Any]) -> str:
     then = then if then.tzinfo else then.replace(tzinfo=UTC)
     minutes = int((datetime.now(UTC) - then).total_seconds() // 60)
     return "a moment ago" if minutes < 1 else f"{minutes} minute{'s' if minutes != 1 else ''} ago"
-
-
-def _round_note(task: dict[str, Any]) -> str:
-    """The history line a reopened card keeps: which round begins and what the one before it asked,
-    since the new brief replaces the old one on the card."""
-    rounds = len(ROUND_RE.findall(str(task.get("notes") or ""))) + 2
-    before = " ".join(str(task.get("brief", {}).get("objective") or "").split())[:300]
-    return f"round {rounds} begins, reopened from {task['status']} by the orchestrator; round {rounds - 1} was \"{task['title']}\"" + (f": {before}" if before else "")
 
 
 async def _files(orch: Orchestrators, project: Project, session_id: str, refs: list[str] | None) -> list[StoredFile]:

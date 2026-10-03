@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from daedalus.extensions.board import OPERATOR, Board
+from daedalus.extensions.board import Board
 from daedalus.extensions.board_commands import BoardCommands
 from daedalus.extensions.orchestrator_domain import DomainConflict
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal, Scope
@@ -40,6 +40,7 @@ class CreateBody(BaseModel):
     notes: str = Field(default="", max_length=4000)
     brief: Brief = Field(default_factory=Brief)
     session_id: str | None = Field(default=None, max_length=200)
+    assignee_staff_id: str | None = Field(default=None, max_length=200)
 
 
 class UpdateBody(BaseModel):
@@ -54,17 +55,20 @@ class UpdateBody(BaseModel):
     brief: Brief | None = None
     note: str = Field(default="", max_length=1000)
     status: str | None = None
+    assignee_staff_id: str | None = Field(default=None, max_length=200)
+    check_ids: list[str] | None = Field(default=None, max_length=12)
+    uncheck_ids: list[str] | None = Field(default=None, max_length=12)
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
-    commands = BoardCommands(app.db)
+    def commands() -> BoardCommands:
+        return BoardCommands(app.db, bus=app.manager.bus)
 
-    async def projection(result: dict[str, Any], event: str) -> dict[str, Any]:
+    async def projection(result: dict[str, Any]) -> dict[str, Any]:
         board = app.extensions.get("board")
         if board is None:
             board = Board(app)
         task = await board.get(result["task_id"])
-        await board._publish(event, task, OPERATOR)
         # A replay returns the original command even when another editor has since changed the card.
         # Keeping the current projection separate prevents its version from rewriting the receipt.
         return {"command": result, "task": task}
@@ -90,9 +94,9 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                 if session["project_id"] != project_id:
                     raise ControlDenied("the source session belongs to another board")
             fields = body.model_dump(exclude={"brief", "session_id"})
-            result = await commands.create(Principal.operator(authenticated), scope, **fields,
+            result = await commands().create(Principal.operator(authenticated), scope, **fields,
                                             brief=body.brief.fields(), source_session_id=body.session_id)
-            return await projection(result, "task.added")
+            return await projection(result)
         except (ControlConflict, ControlDenied, KeyError, ValueError) as exc:
             raise rejected(exc) from exc
 
@@ -111,9 +115,9 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                 raise KeyError(task_id)
             scope = Scope("project", task["project_id"]) if task["project_id"] else Scope("global", "global")
             fields = body.model_dump(exclude={"brief"})
-            result = await commands.update(Principal.operator(authenticated), scope, task_id, **fields,
+            result = await commands().update(Principal.operator(authenticated), scope, task_id, **fields,
                                             brief=body.brief.fields() if body.brief is not None else None)
-            return await projection(result, "task.changed")
+            return await projection(result)
         except (ControlConflict, ControlDenied, KeyError, ValueError) as exc:
             raise rejected(exc) from exc
 

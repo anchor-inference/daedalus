@@ -53,6 +53,13 @@ async def queue_stop(app: Application, task_id: str, principal: Principal, *, cl
                 raise ControlConflict("this task has no active native run to stop")
             if not staff and task["run_id"] != state.run_id:
                 raise ControlConflict("the session is running other work; this task cannot stop it")
+            if target["attempt_id"]:
+                attempt = await one(conn, "SELECT native_run_id,staff_session_id,provider_session_ref FROM execution_attempts WHERE id = ?",
+                                    (target["attempt_id"],))
+                if (attempt is None or attempt["native_run_id"] != state.run_id
+                        or attempt["staff_session_id"] != target["staff_session_id"]
+                        or attempt["provider_session_ref"] != f"session:{target['session_id']}"):
+                    raise ControlConflict("the task's exact native run cannot be reached")
             target["run_id"] = state.run_id
         elif target["kind"] == "cli":
             if not target["terminal_id"] or app.extensions.get("staff") is None:
@@ -79,9 +86,21 @@ class TaskStopEffect:
     def __init__(self, app: Application) -> None:
         self.app = app
 
-    async def completed(self, target: dict[str, Any], evidence: dict[str, Any]) -> EffectResolution:
+    async def completed(self, target: dict[str, Any], evidence: dict[str, Any]) -> EffectResolution | None:
         if target.get("attempt_id"):
             async with self.app.db.transaction() as conn:
+                generation = await self.app.executions._host(conn)
+                proof = await one(conn, "SELECT e.attempt_id FROM runtime_exit_observations e"
+                                  " JOIN execution_attempts a ON a.id = e.attempt_id"
+                                  " JOIN board_tasks t ON t.current_attempt_id = a.id"
+                                  " WHERE e.attempt_id = ? AND e.host_generation = ?"
+                                  " AND e.contract_revision = a.contract_revision AND t.contract_revision = a.contract_revision"
+                                  " AND e.staff_session_id = ? AND e.provider_session_ref = a.provider_session_ref"
+                                  " AND e.runtime_ref = ?",
+                                  (target["attempt_id"], generation, target["staff_session_id"],
+                                   target.get("run_id") if target["kind"] == "daedalus" else target["terminal_id"]))
+                if proof is None:
+                    return None
                 await conn.execute("UPDATE execution_attempts SET state = 'cancelled',updated_at = ?"
                                    " WHERE id = ? AND task_id = ? AND state = 'recovering'"
                                    " AND EXISTS(SELECT 1 FROM board_tasks WHERE id = ? AND current_attempt_id = ?)",

@@ -21,6 +21,9 @@ def run() -> int:
     created: list[dict] = []
     installed: list[dict] = []
     staged: list[dict] = []
+    lifecycle_commands: list[dict] = []
+    lifecycle_attempts: list[dict] = []
+    lifecycle_fingerprint = ["b" * 64]
     unhandled = Unhandled()
     extension = {"id": "project_status", "version": "1.0.0", "display_name": "Project status", "description": "Read task counts by status for one selected project.", "capabilities": ["board.read"], "tools": [{"name": "inspect_project"}], "ui_extensions": [{"id": "project_status", "slot": "project.settings", "schema_version": 1, "component": "status"}]}
 
@@ -60,6 +63,24 @@ def run() -> int:
             return answer(route, {"id": "project_status", "status": "staged", "receipt_id": "receipt", "entity_revision": 1})
         if path == "/api/plugins/project_status/health":
             return answer(route, {"id": "project_status", "state": "inactive"})
+        if path == "/api/projects/p1/board" and request.method == "GET":
+            return answer(route, {"tasks": [{"id": "t-owned", "title": "Owned task"}]})
+        if path == "/api/lifecycle/project_goal/p1" and request.method == "GET":
+            task = {"parent_kind": "project_goal", "parent_id": "p1", "child_kind": "task", "child_id": "t-owned", "generation": 1, "source_revision": 1, "cancel_state": "active"}
+            attempt = {"parent_kind": "task", "parent_id": "t-owned", "child_kind": "execution_attempt", "child_id": "a-owned", "generation": 1, "source_revision": 1, "cancel_state": "active"}
+            return answer(route, {"parent_kind": "project_goal", "parent_id": "p1", "project_id": "p1", "entity_revision": 1,
+                                  "source_revision": 1, "generation": 1, "cancel_state": "requested" if lifecycle_commands else "active",
+                                  "children": [task], "owned_descendants": [task, attempt], "preview_fingerprint": lifecycle_fingerprint[0]})
+        if path == "/api/lifecycle/project_goal/p1/cancel" and request.method == "POST":
+            payload = request.post_data_json
+            lifecycle_attempts.append(payload)
+            if len(lifecycle_attempts) == 1:
+                lifecycle_fingerprint[0] = "c" * 64
+                return answer(route, {"detail": "owned work changed since preview"}, status=409)
+            if payload["preview_fingerprint"] != lifecycle_fingerprint[0]:
+                return answer(route, {"detail": "owned work changed since preview"}, status=409)
+            lifecycle_commands.append(payload)
+            return answer(route, {"parent_kind": "project_goal", "parent_id": "p1", "cancel_state": "requested", "generation": 1, "children": [], "receipt_id": "lifecycle-receipt", "entity_revision": 2})
         if path == "/api/project-directories":
             query = parse_qs(url.query)
             if not query:
@@ -110,6 +131,25 @@ def run() -> int:
         expect(hosts).to_contain_text("No remote host identities recorded")
         page.set_viewport_size({"width": 320, "height": 560})
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "host settings overflow the phone"
+        lifecycle = page.locator("details.sheet-section", has_text="Stop work owned by this goal")
+        lifecycle.locator("summary").first.click()
+        expect(lifecycle).to_contain_text("Owned task")
+        expect(lifecycle).to_contain_text("Owned run")
+        lifecycle.get_by_text("Technical identity").first.click()
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "ownership identity overflows the phone"
+        lifecycle.locator("textarea").fill("Stop the owned work")
+        lifecycle.get_by_role("button", name="Request stop").click()
+        with page.expect_response(lambda response: urlsplit(response.url).path == "/api/lifecycle/project_goal/p1" and response.request.method == "GET"):
+            page.locator(".sheet-backdrop.confirm .dialog button").last.click()
+        expect(lifecycle.locator("textarea")).to_have_value("Stop the owned work")
+        expect(lifecycle).to_contain_text("Active")
+        lifecycle.get_by_role("button", name="Request stop").click()
+        page.locator(".sheet-backdrop.confirm .dialog button").last.click()
+        assert lifecycle_attempts[0]["preview_fingerprint"] == "b" * 64
+        assert lifecycle_commands and lifecycle_commands[-1]["preview_fingerprint"] == "c" * 64
+        assert lifecycle_commands[-1]["expected_entity_revision"] == 1 and lifecycle_commands[-1]["expected_source_revision"] == 1
+        expect(lifecycle).to_contain_text("Stop requested")
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "lifecycle settings overflow the phone"
         page.set_viewport_size({"width": 1440, "height": 900})
         expect(extensions.locator(".project-extension")).to_have_count(0)
         extensions.locator("summary").first.click()

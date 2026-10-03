@@ -15,6 +15,7 @@ import { navigate, pathFor, projectHome, projectPagePath, projectSessionPath } f
 import { PageHeader, useMedia } from "../shell";
 import { invalidate, useOffline, useQuery } from "../store";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
+import { LifecycleCancel } from "../project/LifecycleCancel";
 import { ReviewPanel } from "./ReviewPanel";
 import { ResultFlow } from "./ResultFlow";
 import { Harness, statusTone } from "../team/team";
@@ -47,17 +48,25 @@ import {
 } from "./board";
 
 type BoardResponse = ProjectBoardData & { project: { id: string; name: string } };
-type Launch = { state: string; position?: number; detail?: string } | null;
+type TaskCommand = { task: { id: string; entity_revision: number } };
+type LaunchReceipt = { effect_id: string; state: "queued"; entity_revision: number };
+type LaunchIntent = { id: string; body: { staff_id: string; resume_from: string | null; expected_entity_revision: number } };
 type ResumeSession = { id: string; started_at: string; owner_name: string; task_title: string; can_resume: boolean; resume_reason: string };
 
 const boardKey = (projectId: string) => `/api/projects/${encodeURIComponent(projectId)}/board`;
+const launchIntentKey = (taskId: string) => `task-launch-intent:${taskId}`;
+const launchEffectKey = (taskId: string) => `task-launch-effect:${taskId}`;
 
-/** What the staff runtime did with a newly assigned task, in words. */
-function launchText(launch: Launch): string | null {
-  if (!launch) return null;
-  if (launch.state === "started") return t("pboard.launch.started");
-  if (launch.state === "queued") return launch.position ? t("pboard.launch.queued.at", { n: launch.position }) : t("pboard.launch.queued");
-  return launch.detail ? t("pboard.launch.refused", { detail: launch.detail }) : t("pboard.launch.other", { state: launch.state });
+function storedLaunchIntent(taskId: string): LaunchIntent | null {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(launchIntentKey(taskId)) ?? "null");
+    return value && typeof value.id === "string" && typeof value.body?.staff_id === "string" && Number.isInteger(value.body.expected_entity_revision) ? value as LaunchIntent : null;
+  } catch { return null; }
+}
+
+function storedLaunchEffect(taskId: string): string | null {
+  try { return sessionStorage.getItem(launchEffectKey(taskId)); }
+  catch { return null; }
 }
 
 /**
@@ -207,7 +216,7 @@ export function ProjectBoard({ projectId, toast, selected, layout = "auto", embe
         )}
       </div>
       {creating && data && <TaskSheet projectId={projectId} data={data} onClose={() => setCreating(false)} onDone={reload} toast={toast} />}
-      {open && data && <TaskSheet projectId={projectId} data={data} task={open} onClose={closeTask} onDone={reload} toast={toast} />}
+      {open && data && <TaskSheet key={open.id} projectId={projectId} data={data} task={open} onClose={closeTask} onDone={reload} toast={toast} />}
     </>
   );
 }
@@ -432,6 +441,8 @@ function RequirementsSection({ requirements }: { requirements: Requirement[] }) 
 function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectId: string; data: BoardResponse; task?: ProjectTask; onClose: () => void; onDone: () => void; toast: (text: string) => void }) {
   const offline = useOffline();
   const operation = useRef<{ fingerprint: string; id: string } | null>(null);
+  const launchOperation = useRef<{ fingerprint: string; id: string } | null>(null);
+  const archiveOperation = useRef<string | null>(null);
   const stopOperation = useRef<string | null>(null);
   const createRevision = useRef<number | null>(null);
   const intentId = (body: Record<string, unknown>) => {
@@ -453,7 +464,11 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
   const [resumeError, setResumeError] = useState("");
   const [stopEffectId, setStopEffectId] = useState<string | null>(null);
   const stopEffect = useQuery<{ state: string }>(stopEffectId ? `/api/control/effects/${encodeURIComponent(stopEffectId)}` : null, { pollMs: 5000, staleMs: 0 });
+  const [launchEffectId, setLaunchEffectId] = useState<string | null>(() => task ? storedLaunchEffect(task.id) : null);
+  const launchEffect = useQuery<{ state: string }>(launchEffectId ? `/api/control/effects/${encodeURIComponent(launchEffectId)}` : null, { pollMs: 5000, staleMs: 0 });
+  useEffect(() => { setLaunchEffectId(task ? storedLaunchEffect(task.id) : null); }, [task?.id]);
   const writeBlocked = offline || (!!task && !Number.isInteger(task.entity_revision));
+  const launchPending = !!launchEffectId && (!!launchEffect.error || !launchEffect.data || ["pending", "claimed", "unknown"].includes(launchEffect.data.state));
 
   // Only tasks still open can be waited for; a dependency already listed stays offered so it can be removed.
   const candidates = data.tasks.filter((other) => other.id !== task?.id && ((other.status !== "done" && other.status !== "dropped") || deps.includes(other.id)));
@@ -490,19 +505,53 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
   }
   const gone = task?.assignee && !team.some((m) => m.id === task.assignee!.id) ? task.assignee : null;
   const missing = missingBrief(brief);
-  const changed = task
+  const editorChanged = task
     ? title.trim() !== task.title ||
       Object.keys(briefChanges(task.brief, brief)).length > 0 ||
       assignee !== (task.assignee_staff_id ?? "") ||
       deps.join(",") !== task.depends_on.join(",") ||
       priority !== task.priority ||
-      note.trim() !== "" ||
-      resumeFrom !== ""
+      note.trim() !== ""
     : title.trim() !== "";
+  const changed = editorChanged || !!resumeFrom;
 
-  function report(result: { launch?: Launch }) {
-    const text = launchText(result.launch ?? null);
-    if (text) toast(text);
+  async function launch(taskId: string, revision: number) {
+    const chosen = { staff_id: assignee, resume_from: resumeFrom || null };
+    const previous = storedLaunchIntent(taskId);
+    if (previous && (previous.body.staff_id !== chosen.staff_id || previous.body.resume_from !== chosen.resume_from)) {
+      throw new Error(t("pboard.launch.reconcileFirst"));
+    }
+    const body = previous?.body ?? { ...chosen, expected_entity_revision: revision };
+    const fingerprint = `${taskId}:${JSON.stringify(body)}`;
+    if (launchOperation.current?.fingerprint !== fingerprint) launchOperation.current = { fingerprint, id: crypto.randomUUID() };
+    const intent = previous ?? { id: launchOperation.current.id, body };
+    try { sessionStorage.setItem(launchIntentKey(taskId), JSON.stringify(intent)); } catch { /* no site data */ }
+    let receipt: LaunchReceipt;
+    try {
+      receipt = await api.post<LaunchReceipt>(`/api/board/${encodeURIComponent(taskId)}/launch`, { ...intent.body, client_operation_id: intent.id });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        try { sessionStorage.removeItem(launchIntentKey(taskId)); } catch { /* no site data */ }
+      }
+      throw error;
+    }
+    try {
+      sessionStorage.removeItem(launchIntentKey(taskId));
+      sessionStorage.setItem(launchEffectKey(taskId), receipt.effect_id);
+    } catch { /* no site data */ }
+    launchOperation.current = null;
+    setLaunchEffectId(receipt.effect_id);
+    toast(t("pboard.launch.queued"));
+  }
+
+  async function launchAfterSave(saved: TaskCommand) {
+    if (!assignee) return;
+    try {
+      await launch(saved.task.id, saved.task.entity_revision);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) launchOperation.current = null;
+      toast(t("pboard.launch.failed", { detail: errorText(error) }));
+    }
   }
 
   async function save() {
@@ -515,11 +564,12 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
           if (!Number.isInteger(revisions.collection_revision)) { toast(t("result.block.unconfirmed")); return; }
           createRevision.current = revisions.collection_revision;
         }
-        const body = { title: title.trim(), brief, assignee_staff_id: assignee || null, depends_on: deps, priority, resume_from: resumeFrom || null, expected_collection_revision: createRevision.current };
-        const made = await api.post<{ launch?: Launch }>(`${boardKey(projectId)}`, { ...body, client_operation_id: intentId(body) });
+        const body = { title: title.trim(), brief, assignee_staff_id: assignee || null, depends_on: deps, priority, expected_collection_revision: createRevision.current };
+        const made = await api.post<TaskCommand>(`${boardKey(projectId)}`, { ...body, client_operation_id: intentId(body) });
         operation.current = null;
         createRevision.current = null;
-        report(made);
+        toast(t("pboard.saved"));
+        await launchAfterSave(made);
       } else {
         const body: Record<string, unknown> = {};
         if (title.trim() !== task.title) body.title = title.trim();
@@ -529,11 +579,16 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
         if (deps.join(",") !== task.depends_on.join(",")) body.depends_on = deps;
         if (priority !== task.priority) body.priority = priority;
         if (note.trim()) body.note = note.trim();
-        if (resumeFrom) body.resume_from = resumeFrom;
-        if (!Number.isInteger(task.entity_revision)) { toast(t("result.block.unconfirmed")); return; }
-        body.expected_entity_revision = task.entity_revision;
-        report(await api.put<{ launch?: Launch }>(`/api/board/${encodeURIComponent(task.id)}`, { ...body, client_operation_id: intentId(body) }));
-        operation.current = null;
+        const revision = task.entity_revision;
+        if (typeof revision !== "number" || !Number.isInteger(revision)) { toast(t("result.block.unconfirmed")); return; }
+        let saved: TaskCommand = { task: { id: task.id, entity_revision: revision } };
+        if (editorChanged) {
+          body.expected_entity_revision = revision;
+          saved = await api.put<TaskCommand>(`/api/board/${encodeURIComponent(task.id)}`, { ...body, client_operation_id: intentId(body) });
+          operation.current = null;
+          toast(t("pboard.saved"));
+        }
+        if (assignee && (assignee !== (task.assignee_staff_id ?? "") || !!resumeFrom)) await launchAfterSave(saved);
       }
       onDone();
       onClose();
@@ -571,6 +626,23 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
       toast(errorText(error));
     } finally { setBusy(false); }
   }
+  async function archiveTask() {
+    if (!task || writeBlocked || busy) return;
+    if (!(await confirmAsync(t("pboard.archive.title", { title: task.title }), { body: t("pboard.archive.body"), action: t("pboard.archive.action"), danger: true }))) return;
+    const id = archiveOperation.current ?? crypto.randomUUID();
+    archiveOperation.current = id;
+    setBusy(true);
+    try {
+      await api.delete(`/api/board/${encodeURIComponent(task.id)}?client_operation_id=${encodeURIComponent(id)}&expected_entity_revision=${task.entity_revision}`);
+      archiveOperation.current = null;
+      toast(t("pboard.archive.saved"));
+      onDone();
+      onClose();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) archiveOperation.current = null;
+      toast(errorText(error));
+    } finally { setBusy(false); }
+  }
   const toggleDep = (id: string) => setDeps(deps.includes(id) ? deps.filter((d) => d !== id) : [...deps, id]);
 
   return (
@@ -587,7 +659,7 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
               ...(task.assignee?.session_id ? [{ label: t("pboard.open.staff", { name: task.assignee.name }), icon: "bots" as const, onSelect: () => navigate(projectSessionPath(projectId, task.assignee!.session_id!)) }] : []),
               { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
               "-",
-              { label: t("board.delete.menu"), icon: "trash", danger: true, disabled: true, hint: t("result.deleteUnavailable"), onSelect: () => {} },
+              { label: t("pboard.archive.action"), icon: "trash", danger: true, disabled: writeBlocked || busy || !["todo", "blocked"].includes(task.status), hint: t("pboard.archive.unavailable"), onSelect: () => void archiveTask() },
             ]}
           />
         )
@@ -615,6 +687,7 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
       )}
       {task?.status === "doing" && <div className="btnrow"><button type="button" className="btn small warn" disabled={writeBlocked || busy || !!stopEffectId} onClick={() => void stopTask()}>{t("result.stopTaskAction")}</button><span className="sub">{t("result.stopTaskScope")}</span></div>}
       {stopEffectId && <div className="result-warning" role="status">{t(stopEffect.error ? "result.stopTaskUnconfirmed" : stopEffect.data?.state === "completed" ? "result.stopTaskObserved" : stopEffect.data?.state === "unknown" ? "result.stopTaskUnconfirmed" : "result.stopTaskPending")} <button type="button" className="linkbtn" onClick={() => stopEffect.refresh()}>{t("common.retry")}</button></div>}
+      {task && <LifecycleCancel kind="task" id={task.id} projectId={projectId} onDone={onDone} toast={toast} />}
 
       {task && hasAcceptance(task) && <AcceptanceSection task={task} />}
 
@@ -662,6 +735,22 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
           {resumeError && <div className="sub attn">{resumeError}</div>}
         </>
       )}
+      {task && assignee && (task.status === "todo" || task.status === "blocked") && (
+        <div className="btnrow">
+          <button type="button" className="btn small" disabled={busy || writeBlocked || editorChanged || launchPending} onClick={async () => {
+            if (typeof task.entity_revision !== "number") return;
+            setBusy(true);
+            try { await launch(task.id, task.entity_revision); onDone(); }
+            catch (error) { if (error instanceof ApiError && error.status === 409) launchOperation.current = null; toast(errorText(error)); }
+            finally { setBusy(false); }
+          }}>{t(storedLaunchIntent(task.id) ? "pboard.launch.retry" : "pboard.launch.action")}</button>
+          {editorChanged && <span className="sub">{t("pboard.launch.saveFirst")}</span>}
+        </div>
+      )}
+      {task && launchEffectId && <div className="result-warning" role="status">
+        {t(launchEffect.error || !launchEffect.data ? "pboard.launch.unconfirmed" : launchEffect.data.state === "completed" ? "pboard.launch.dispatched" : launchEffect.data.state === "pending" || launchEffect.data.state === "claimed" ? "pboard.launch.pending" : "pboard.launch.unconfirmed")}
+        <button type="button" className="linkbtn" onClick={() => launchEffect.refresh()}>{t("common.retry")}</button>
+      </div>}
 
       <label className="field">{t("pboard.depends")}</label>
       {candidates.length === 0 ? (

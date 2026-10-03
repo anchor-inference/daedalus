@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions import wakeups
+from daedalus.extensions.board_commands import BoardCommands
 from daedalus.extensions.likeness import same_question
 from daedalus.extensions.notifications import Draft
 from daedalus.extensions.task_contract import split_checks
@@ -23,6 +24,7 @@ from daedalus.extensions.watches import WatchRefused
 from daedalus.host import prompts
 from daedalus.host.peek import LocalFolderAccess, PeekRefused
 from daedalus.staff_runtime import LiveSession
+from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.files import HANDOVER_MAX_FILES, MAIN, FileRefused, human_size, parse_handle
 from daedalus.stores.projects import (
     BRIEF_SECTIONS,
@@ -51,6 +53,18 @@ TEAM_MESSAGES = 5
 
 class Refused(ValueError):
     """What an orchestrator tool will not do, said so the orchestrator can do something else."""
+
+
+async def board_principal(orch: Orchestrators, session_id: str, project_id: str,
+                          operation: str, task_id: str | None = None) -> Principal:
+    """The current office alone is insufficient; the host checks a live delegated grant."""
+    authority = orch.app.extensions.get("orchestrator_board_authority")
+    if authority is None:
+        raise Refused("board writes need an operator-issued orchestrator grant")
+    principal = await authority(session_id, operation, project_id, task_id=task_id)
+    if not isinstance(principal, Principal):
+        raise Refused("board authority did not return a host identity")
+    return principal
 
 
 async def dispatch(orch: Orchestrators, operation: str, ops: Mapping[str, Callable[..., Awaitable[str]]] | None = None, /, **kwargs: Any) -> Any:
@@ -354,6 +368,9 @@ async def tasks(
     waiting_on: str = "",
     new: bool = False,
     reason: str = "",
+    client_operation_id: str = "",
+    expected_entity_revision: int | None = None,
+    expected_collection_revision: int | None = None,
 ) -> str:
     board = orch.board
     if board is None:
@@ -361,9 +378,12 @@ async def tasks(
     if op not in TASK_OPS:
         raise Refused(f"op is one of {', '.join(TASK_OPS)}")
     names = {m.id: m.name for m in await orch.manager.staff.list(project.id, archived=True)}
+    scope = Scope("project", project.id)
+    commands = BoardCommands(orch.manager.db)
     if op == "list":
         rows = await board.list(status, include_done=status is not None, actor=session_id)
-        return "\n".join(_task_line(t, names) for t in rows) or "(the board is empty)"
+        revision = await ControlStore(orch.manager.db).revision(scope, Entity("collection", project.id))
+        return f"collection revision {revision}\n" + ("\n".join(_task_line(t, names) for t in rows) or "(the board is empty)")
     brief = {k: v for k, v in (("objective", objective), ("deliverable", deliverable), ("boundaries", boundaries), ("done_when", done_when)) if v is not None}
     member_id: str | None = None
     if assignee is not None and assignee != "":
@@ -375,17 +395,26 @@ async def tasks(
         if op == "create":
             if not title:
                 raise Refused("a task needs a title")
+            if not client_operation_id or expected_collection_revision is None:
+                raise Refused("create needs its trusted call id and expected_collection_revision from Tasks(list)")
             from daedalus.extensions.orchestrator_team import refuse_twin  # Lazy: the team's module imports this one
 
             await refuse_twin(orch, project, " ".join(title.split()), objective or "", new=new, reason=reason)
             # Its done-when becomes its checks, as a card made by Assign gets them.
             checklist = split_checks(done_when or "")
-            task = await board.add(title=title, session_id=session_id, brief=brief or None, depends_on=depends_on, priority=priority or 3, notes=note, assignee_staff_id=member_id, checklist=checklist)
+            principal = await board_principal(orch, session_id, project.id, "board.task.create")
+            created = await commands.create(principal, scope, client_operation_id=client_operation_id,
+                                            expected_collection_revision=expected_collection_revision,
+                                            title=title, acceptance=done_when or "", checklist=checklist,
+                                            depends_on=depends_on, priority=priority or 3, notes=note,
+                                            brief=brief, source_session_id=session_id,
+                                            assignee_staff_id=member_id)
+            task = await board.get(created["task_id"], actor=session_id)
         elif not task_id:
             raise Refused(f"{op} needs a task_id")
         elif op == "get":
             task = await board.get(task_id, actor=session_id)
-            parts = [_task_line(task, names)]
+            parts = [_task_line(task, names), f"entity revision {task['entity_revision']}"]
             parts += [f"{k.replace('_', ' ')}: {v}" for k, v in task["brief"].items() if v]
             parts += await _contract_lines(orch, task)
             if task.get("branch"):
@@ -394,19 +423,26 @@ async def tasks(
                 parts.append("notes:\n" + task["notes"][-1500:])
             return "\n".join(parts)
         else:
+            if not client_operation_id or expected_entity_revision is None:
+                raise Refused("update needs its trusted call id and expected_entity_revision from Tasks(get)")
             if op == "move" and not status:
                 raise Refused("move needs a status")
-            if op == "move" and status == "done":
-                current = await board.get(task_id, actor=session_id)
-                open_checks = [f"C{i}" for i, c in enumerate(current["checklist"], start=1) if not c.get("done")]
-                if open_checks and current["status"] != "done":
-                    raise Refused(f"task {task_id} has unchecked criteria ({', '.join(open_checks)}): review the current result with bound evidence, then the operator accepts it")
+            if status in ("doing", "review", "done"):
+                raise Refused("launch, review and completion require their exact receipt commands")
+            if assignee is not None and assignee == "":
+                raise Refused("unassignment requires stopping or reconciling the current execution")
             waits = " ".join((waiting_on or "").split())
             if waits:
                 if status != "blocked":
                     raise Refused("waiting_on goes with status='blocked': what the card waits for")
                 note = (note + " " if note else "") + f"waits on: {waits}"
-            task = await board.update(task_id, status=status, note=note, title=title if op == "update" else None, priority=priority, actor=session_id, brief=brief or None, depends_on=depends_on, assignee_staff_id=(member_id if member_id else ("" if assignee == "" else None)))
+            principal = await board_principal(orch, session_id, project.id, "board.task.update", task_id)
+            updated = await commands.update(principal, scope, task_id, client_operation_id=client_operation_id,
+                                            expected_entity_revision=expected_entity_revision,
+                                            status=status, note=note, title=title if op == "update" else None,
+                                            priority=priority, brief=brief or None, depends_on=depends_on,
+                                            assignee_staff_id=member_id)
+            task = await board.get(updated["task_id"], actor=session_id)
     except KeyError as exc:
         raise Refused(f"no task {exc.args[0] if exc.args else task_id} on {project.name}'s board") from exc
     except ValueError as exc:
@@ -425,7 +461,10 @@ async def tasks(
     if member_id and orch.team is not None:
         member = await orch.manager.staff.get(member_id)
         try:
-            launched = await orch.team.assign(member, task, by="orchestrator")
+            principal = await board_principal(orch, session_id, project.id, "task.launch", task["id"])
+            launched = await orch.team.assign(member, task["id"], principal=principal,
+                                              client_operation_id=client_operation_id + ":launch",
+                                              expected_entity_revision=task["entity_revision"])
         except (StaffError, KeyError) as exc:
             return f"{line}\nassigned, but it cannot start: {exc}"
         state = launched.get("state")

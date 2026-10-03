@@ -18,7 +18,10 @@ from typing import Any
 import aiosqlite
 
 from daedalus.extensions.task_contract import REQUIREMENT_KINDS, check_items
+from daedalus.stores.control import ControlStore, Principal
 from daedalus.stores.database import Database
+from daedalus.stores.knowledge import enqueue_artifact_change
+from daedalus.stores.lifecycle import admit_child
 
 RESULT_OUTCOMES = frozenset(("complete", "partial", "failed", "needs_input", "cancelled"))
 MANIFEST_KINDS = frozenset(("code", "document", "research", "export", "media", "other"))
@@ -96,7 +99,8 @@ async def replace_contract(
     origin_kind: str, origin_ref: str, change_kind: str,
 ) -> dict[str, Any]:
     """Append a semantic version; a display-only edit keeps the contract revision."""
-    task = await _one(conn, "SELECT id, project_id, contract_revision, depends_on FROM board_tasks WHERE id = ?", (task_id,))
+    task = await _one(conn, "SELECT id, project_id, contract_revision, depends_on,folder_id"
+                      " FROM board_tasks WHERE id = ?", (task_id,))
     if task is None:
         raise KeyError(task_id)
     old = await _one(conn, "SELECT snapshot_json FROM task_contract_versions WHERE task_id = ? AND contract_revision = ?",
@@ -104,9 +108,13 @@ async def replace_contract(
     if old is None:
         raise DomainConflict("the current contract version is missing")
     current = _json(old["snapshot_json"], {})
+    attached = await _many(conn, "SELECT file_id FROM task_files WHERE task_id = ? ORDER BY file_id", (task_id,))
     snapshot = {"requirements": _requirements(requirements), "checklist": _checks(checks),
                 "acceptance": acceptance.strip(), "depends_on": _json(task["depends_on"], []),
-                "brief": {key: str(value).strip() for key, value in brief.items()}}
+                "brief": {key: str(value).strip() for key, value in brief.items()},
+                "folder_id": task["folder_id"], "file_ids": [row["file_id"] for row in attached]}
+    current.setdefault("folder_id", None)
+    current.setdefault("file_ids", [])
     prior = {key: current.get(key) for key in snapshot}
     changed = _canonical(snapshot) != _canonical(prior)
     if change_kind not in ("semantic", "editorial"):
@@ -138,7 +146,8 @@ async def replace_contract(
         )
         await conn.execute("UPDATE board_tasks SET contract_revision = ?, acceptance_state = 'returned',"
                            " checklist = ?, acceptance = ?, brief_json = ? WHERE id = ?",
-                           (revision, _canonical([{"text": item["text"], "done": False} for item in snapshot["checklist"]]),
+                           (revision, _canonical([{"id": item["id"], "text": item["text"], "done": False}
+                                                  for item in snapshot["checklist"]]),
                             snapshot["acceptance"], _canonical(snapshot["brief"]), task_id))
         await conn.execute("UPDATE next_actions SET state = 'cancelled' WHERE task_id = ? AND contract_revision < ? AND state = 'active'",
                            (task_id, revision))
@@ -148,7 +157,7 @@ async def replace_contract(
 async def capture_contract_change(conn: aiosqlite.Connection, task_id: str, *, origin_kind: str,
                                   origin_ref: str = "") -> int:
     """Version a legacy card edit in its own transaction when its requirements or scope changed."""
-    task = await _one(conn, "SELECT contract_revision, checklist, acceptance, brief_json, depends_on FROM board_tasks WHERE id = ?",
+    task = await _one(conn, "SELECT contract_revision, checklist, acceptance, brief_json, depends_on,folder_id FROM board_tasks WHERE id = ?",
                       (task_id,))
     if task is None:
         raise KeyError(task_id)
@@ -158,8 +167,11 @@ async def capture_contract_change(conn: aiosqlite.Connection, task_id: str, *, o
         raise DomainConflict("the current contract version is missing")
     requirements = await _many(conn, "SELECT id, text, kind, source, file_id FROM task_requirements"
                                " WHERE task_id = ? AND state = 'active' ORDER BY number", (task_id,))
+    attached = await _many(conn, "SELECT file_id FROM task_files WHERE task_id = ? ORDER BY file_id", (task_id,))
     checks = check_items(task["checklist"])
     old = _json(current["snapshot_json"], {})
+    old.setdefault("folder_id", None)
+    old.setdefault("file_ids", [])
     old_checks = old.get("checklist", [])
     old_by_text: dict[str, list[str]] = {}
     for old_item in old_checks:
@@ -179,7 +191,8 @@ async def capture_contract_change(conn: aiosqlite.Connection, task_id: str, *, o
     check_snapshot = _checks(check_snapshot)
     snapshot = {"requirements": [dict(row) for row in requirements], "checklist": check_snapshot,
                 "acceptance": task["acceptance"], "depends_on": _json(task["depends_on"], []),
-                "brief": _json(task["brief_json"], {})}
+                "brief": _json(task["brief_json"], {}), "folder_id": task["folder_id"],
+                "file_ids": [row["file_id"] for row in attached]}
     if _canonical(snapshot) == _canonical(old):
         return int(task["contract_revision"])
     revision = int(task["contract_revision"]) + 1
@@ -224,6 +237,8 @@ async def add_artifact_manifest(
         (manifest_id, project_id, task_id, artifact_kind, artifact_key, artifact_revision,
          digest, size_bytes, file_id, _canonical(provenance or {}), _now()),
     )
+    await enqueue_artifact_change(conn, task_id=task_id, project_id=project_id,
+                                  artifact_key=artifact_key, artifact_revision=artifact_revision)
     return {"id": manifest_id, "digest": digest, "artifact_revision": artifact_revision}
 
 
@@ -873,6 +888,7 @@ async def scope_impact_preview(conn: aiosqlite.Connection, project_id: str,
 async def apply_goal_revision(
     conn: aiosqlite.Connection, *, project_id: str, expected_goal_revision: int,
     body: str, root_task_ids: list[str], origin_kind: str, origin_ref: str,
+    control: ControlStore, principal: Principal,
 ) -> dict[str, Any]:
     """Advance a project goal and fence only its explicit dependency closure."""
     project = await _one(conn, "SELECT goal_revision FROM projects WHERE id = ?", (project_id,))
@@ -892,6 +908,12 @@ async def apply_goal_revision(
     await conn.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,origin_ref,created_at)"
                        " VALUES (?,?,?,?,?,?)", (project_id, revision, body, origin_kind, origin_ref, _now()))
     await conn.execute("UPDATE projects SET goal_revision = ? WHERE id = ?", (revision, project_id))
+    if root_task_ids:
+        for task_id in root_task_ids:
+            await admit_child(conn, control=control, principal=principal,
+                              parent_kind="project_goal", parent_id=project_id,
+                              project_id=project_id, goal_revision=revision,
+                              child_kind="task", child_id=task_id)
     await conn.execute("UPDATE planning_budgets SET goal_contract_revision = ?,entity_revision = entity_revision + 1"
                        " WHERE project_id = ?", (revision, project_id))
     await conn.execute("INSERT INTO project_briefs(project_id,section,body,updated_at,updated_by)"

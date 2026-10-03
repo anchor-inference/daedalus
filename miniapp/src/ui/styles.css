@@ -3716,6 +3716,9 @@ button.staff-row:hover { background: var(--surface-2); }
 .staff-event { display: flex; gap: var(--space-2); min-width: 0; min-height: var(--row-h-dense); align-items: center; }
 .staff-event-at { flex: none; color: var(--fg-3); font-size: var(--fs-11); }
 .staff-event-text { min-width: 0; }
+.staff-event-report { align-items: flex-start; }
+.staff-event-report-body { flex: 1; min-width: 0; }
+.staff-event-report-body .result-original { margin-top: var(--space-2); }
 .staff-changes-head { display: flex; align-items: center; gap: var(--space-2); justify-content: space-between; }
 .staff-files { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: 2px; }
 .staff-file { display: flex; gap: var(--space-2); align-items: center; min-width: 0; min-height: var(--row-h-dense); }

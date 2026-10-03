@@ -46,6 +46,7 @@ BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 DESK = {"width": 1440, "height": 900}
 PHONE = {"width": 390, "height": 844}
+FULL_REPORT = "Complete report\n" + ("Evidence and operator steps remain available.\n" * 1700) + "END OF ORIGINAL"
 
 WORDS = {
     "en": {"working": "working", "turn": r"turn 3 · (18|19|20) min", "runs": "Claude Code 2.1.281 · opus · acceptEdits", "worktree": "branch agent/ira/checkout", "task": "Checkout",
@@ -91,6 +92,8 @@ def open_page(context, focus: FocusStub, term: TerminalStub, feed: EventFeed, ur
         request = route.request
         parts = urlsplit(request.url)
         path = parts.path[parts.path.index("/api/"):]
+        if path.endswith("/staff-reports/report-checkout/original"):
+            return route.fulfill(status=200, content_type="text/plain; charset=utf-8", body=FULL_REPORT)
         body = request.post_data_json if request.method in ("POST", "PUT", "PATCH") and request.post_data else None
         answered = focus.answer(request.method, path, parts.query, body)
         if answered is not None:
@@ -272,10 +275,24 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     expected = [("st-ira", {"text": "use the owner's sheet", "when": "now"}), ("st-ira", {"text": "then the prices", "when": "after_turn"})]
     check.that(focus.sent == expected, f"{lang}: the composer sent {focus.sent}")
     check.that(len(term.inputs("tm-ira")) == 0, f"{lang}: the message was typed into the program")
+    field.fill("unsent details for the next turn")
+    page.reload()
+    field = page.locator(".staff-compose-field")
+    expect(field).to_have_value("unsent details for the next turn", timeout=5000)
+    check.that(page.locator(".staff-when button[data-when='after_turn']").get_attribute("aria-pressed") == "true", f"{lang}: the draft lost its delivery time")
+    check.that(focus.sent == expected, f"{lang}: restoring a draft sent another message")
+    field.fill("")
 
     # The column beside: events, changes, notes.
     side = page.locator(".staff-aside")
     expect(side.locator(".staff-event")).to_have_count(7, timeout=5000)
+    report = side.locator(".staff-event-report")
+    report.locator("button").click()
+    expect(report.locator(".result-original")).to_contain_text("END OF ORIGINAL", timeout=5000)
+    check.that(report.locator(".result-original").inner_text() == FULL_REPORT, f"{lang}: report original was shortened")
+    check.that(sideways(page) <= 0, f"{lang}: the long report causes sideways scrolling")
+    report.locator("button").click()
+    expect(report.locator(".result-original")).to_have_count(0)
     side.locator(".panel-tab[data-tab='changes']").click()
     expect(side.locator(".staff-changes-summary")).to_have_text(words["changes"], timeout=5000)
     check.that(side.locator(".staff-file").count() == 4, f"{lang}: the changes list {side.locator('.staff-file').count()} files, not three and one new")
@@ -283,6 +300,7 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     expect(side.locator(".staff-notes")).to_be_visible()
 
     # OpenCode cannot take a message into a running turn: "now" is offered disabled, and says why.
+    page.locator(".focus-advanced summary").click()
     page.locator(".focus-staff", has_text="Naya").click()
     page.wait_for_url(f"**/project/{pid}/staff/st-naya**")
     now = page.locator(".staff-when button[data-when='now']")
@@ -335,6 +353,10 @@ def phone(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     # The column beside is a sheet on a phone.
     page.locator(".staff-cli .chat-head .head-actions .iconbtn").tap()
     expect(page.locator(".sheet .staff-panel")).to_be_visible(timeout=5000)
+    report = page.locator(".sheet .staff-event-report")
+    report.locator("button").tap()
+    expect(report.locator(".result-original")).to_contain_text("END OF ORIGINAL", timeout=5000)
+    check.that(sideways(page) <= 0, f"{lang} phone: the full report scrolls sideways by {sideways(page)} px")
     page.keyboard.press("Escape")
     expect(page.locator(".sheet .staff-panel")).to_have_count(0, timeout=3000)
     # Terminal: the phone's own, with the request and "Always" above the keys.

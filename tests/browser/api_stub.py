@@ -694,6 +694,12 @@ class BoardStub:
         self.needs_you = [dict(n) for n in needs_you or []]
         self.created: list[dict] = []
         self.updated: list[tuple[str, dict]] = []
+        self.launched: list[tuple[str, dict]] = []
+        self.launch_failures = 0
+        self.launch_unknowns = 0
+        self.unknown_launches: list[tuple[str, dict]] = []
+        self.cancellations: list[tuple[str, dict]] = []
+        self.cancel_states: dict[str, str] = {}
         self.accepted: list[str] = []
         self.reviews: dict[str, dict] = {}
         """A task's review as the host would read it from git; a branch task without one gets :meth:`review`."""
@@ -760,8 +766,43 @@ class BoardStub:
         base = f"/api/projects/{self.project['id']}/board"
         if path == "/api/control/effects/stop-1" and method == "GET":
             return 200, {"effect_id": "stop-1", "state": "pending"}
+        if path.startswith("/api/control/effects/launch-") and method == "GET":
+            return 200, {"effect_id": path.rsplit("/", 1)[-1], "state": "pending"}
         if path == "/api/control/revisions" and method == "GET":
             return 200, {"scope": {"kind": "project", "id": self.project["id"]}, "entity_revision": 1, "collection_revision": len(self.tasks) + 1}
+        if path.startswith("/api/lifecycle/"):
+            parts = path.split("/")
+            if len(parts) < 5:
+                return 404, {"detail": "no such parent"}
+            kind, parent_id = parts[3], parts[4]
+            name = f"{kind}:{parent_id}"
+            if kind == "task":
+                row = next((task for task in self.tasks if task["id"] == parent_id), None)
+                if row is None:
+                    return 404, {"detail": "no such task"}
+                children = ([{"parent_kind": "task", "parent_id": parent_id, "child_kind": "execution_attempt", "child_id": f"a-{parent_id}", "generation": 1, "source_revision": 1, "cancel_state": "active"}]
+                            if row["status"] == "doing" else [])
+                entity_revision = row["entity_revision"]
+            elif kind == "project_goal" and parent_id == self.project["id"]:
+                children = [{"parent_kind": "project_goal", "parent_id": parent_id, "child_kind": "task", "child_id": "t-checkout", "generation": 1, "source_revision": 1, "cancel_state": "active"}]
+                entity_revision = 1
+            else:
+                return 404, {"detail": "no such parent"}
+            descendants = children + ([{"parent_kind": "task", "parent_id": "t-checkout", "child_kind": "execution_attempt", "child_id": "a-t-checkout", "generation": 1, "source_revision": 1, "cancel_state": "active"}]
+                                      if kind == "project_goal" else [])
+            if method == "GET" and len(parts) == 5:
+                return 200, {"parent_kind": kind, "parent_id": parent_id, "project_id": self.project["id"], "entity_revision": entity_revision,
+                             "source_revision": 1, "generation": 1, "cancel_state": self.cancel_states.get(name, "active"),
+                             "children": children, "owned_descendants": descendants, "preview_fingerprint": "a" * 64}
+            if method == "POST" and path.endswith("/cancel"):
+                payload = dict(body or {})
+                if payload.get("preview_fingerprint") != "a" * 64 or payload.get("expected_source_revision") != 1 or payload.get("expected_entity_revision") != entity_revision:
+                    return 409, {"detail": "ownership changed"}
+                self.cancellations.append((name, payload))
+                self.cancel_states[name] = "requested"
+                return 200, {"parent_kind": kind, "parent_id": parent_id, "cancel_state": "requested", "generation": 1,
+                             "children": [{"kind": child["child_kind"], "id": child["child_id"], "status": "draining"} for child in descendants],
+                             "receipt_id": "cancel-receipt", "entity_revision": entity_revision + 1}
         if path == base and method == "GET":
             return 200, self.listing("include_done=1" in query)
         if path == base and method == "POST":
@@ -772,8 +813,14 @@ class BoardStub:
             row = self.task(f"n{len(self.tasks) + 1}", payload["title"], priority=int(payload.get("priority", 3)), brief=brief, depends_on=payload.get("depends_on") or [], project_id=self.project["id"])
             self._assign(row, payload.get("assignee_staff_id"))
             self.tasks.append(row)
-            launch = {"state": "queued", "position": 1} if row["assignee_staff_id"] else None
-            return 201, {**row, "launch": launch}
+            return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
+        if path == "/api/board" and method == "POST":
+            payload = dict(body or {})
+            self.created.append(payload)
+            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], priority=int(payload.get("priority", 3)), project_id=None,
+                            acceptance=payload.get("acceptance") or "", checklist=[{"text": text, "done": False} for text in payload.get("checklist") or []])
+            self.tasks.append(row)
+            return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
         if path == "/api/board" and method == "GET":
             # The host names a project's task's project on this listing, as the Board screen's card reads it.
             listed = [t for t in self.tasks if "include_done=1" in query or t["status"] not in ("done", "dropped")]
@@ -784,7 +831,8 @@ class BoardStub:
             if row is None:
                 return 404, {"detail": "no such task"}
             if path.endswith("/contract") and method == "GET":
-                return 200, {"task_id": row["id"], "contract_revision": 1, "entity_revision": row["entity_revision"]}
+                return 200, {"task_id": row["id"], "contract_revision": 1, "entity_revision": row["entity_revision"],
+                             "checklist": [{"id": f"C{index}", "text": item["text"]} for index, item in enumerate(row["checklist"], 1)]}
             if path.endswith("/results") and method == "GET":
                 return 200, []
             if len(parts) == 7 and parts[4] == "results" and parts[6] == "comments" and method == "GET":
@@ -806,6 +854,21 @@ class BoardStub:
             if path.endswith("/stop") and method == "POST":
                 self.stops.append((row["id"], dict(body or {})))
                 return 200, {"effect_id": "stop-1", "task_id": row["id"], "state": "queued", "receipt_id": "receipt", "entity_revision": row["entity_revision"] + 1}
+            if path.endswith("/launch") and method == "POST":
+                payload = dict(body or {})
+                if self.launch_unknowns:
+                    self.launch_unknowns -= 1
+                    self.unknown_launches.append((row["id"], payload))
+                    return 503, {"detail": "connection interrupted after submission"}
+                if self.launch_failures:
+                    self.launch_failures -= 1
+                    return 409, {"detail": "launch policy changed"}
+                if payload.get("expected_entity_revision") != row["entity_revision"]:
+                    return 409, {"detail": "the task changed before launch"}
+                self.launched.append((row["id"], payload))
+                self._assign(row, payload.get("staff_id"))
+                row["entity_revision"] += 1
+                return 200, {"task_id": row["id"], "effect_id": f"launch-{row['id']}", "state": "queued", "receipt_id": "receipt", "entity_revision": row["entity_revision"]}
             if path.endswith("/merge") and method == "POST":
                 review = self._review_of(row)
                 if row["status"] != "review" or not review["can_merge"]:
@@ -823,7 +886,6 @@ class BoardStub:
             if method == "PUT":
                 payload = dict(body or {})
                 self.updated.append((row["id"], payload))
-                before = row.get("assignee_staff_id")
                 if "assignee_staff_id" in payload:
                     self._assign(row, payload["assignee_staff_id"] or None)
                 if "brief" in payload:
@@ -831,13 +893,18 @@ class BoardStub:
                 for key in ("title", "status", "priority", "depends_on"):
                     if key in payload:
                         row[key] = payload[key]
+                for key, done in (("check_ids", True), ("uncheck_ids", False)):
+                    for criterion_id in payload.get(key) or []:
+                        index = int(criterion_id[1:]) - 1
+                        row["checklist"][index]["done"] = done
                 if payload.get("note"):
                     row["notes"] = (row["notes"] + "\n" if row["notes"] else "") + payload["note"]
-                launched = row["assignee_staff_id"] and row["assignee_staff_id"] != before
-                return 200, {**row, "launch": {"state": "started"} if launched else None}
+                row["entity_revision"] += 1
+                return 200, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
             if method == "DELETE":
-                self.tasks.remove(row)
-                return 200, {"deleted": True}
+                row["status"] = "dropped"
+                row["entity_revision"] += 1
+                return 200, {"archived": True, "command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
         return None
 
 
@@ -1360,7 +1427,7 @@ class FocusStub:
             {"seq": 59, "at": at(minutes=4), "type": "staff.message", "payload": {"message_id": "mi2", "state": "submitted"}},
             {"seq": 58, "at": at(minutes=20), "type": "staff.status", "payload": {"status": "turn_done_unseen", "waiting_for": ""}},
             {"seq": 57, "at": at(minutes=25), "type": "staff.message", "payload": {"message_id": "mi1", "state": "acknowledged"}},
-            {"seq": 56, "at": at(minutes=40), "type": "staff.report", "payload": {"kind": "checkpoint", "text": "cart discount fixed, tests green"}},
+            {"seq": 56, "at": at(minutes=40), "type": "staff.report", "payload": {"kind": "checkpoint", "text": "cart discount fixed\n[full report in report receipt]", "task_id": "t-checkout", "report_id": "report-checkout"}},
             {"seq": 55, "at": at(minutes=58), "type": "staff.channel", "payload": {"team_tools": "connected"}},
             {"seq": 54, "at": at(minutes=58), "type": "staff.status", "payload": {"status": "working", "waiting_for": ""}},
         ]

@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+from daedalus.extensions.runtime_observations import observe_exit
 from daedalus.staff_runtime import BoardTask, Started
 from daedalus.stores.control import ControlDenied, ControlStore, Principal, Scope, one
 from daedalus.stores.executions import ACTIVE, AttemptIdentity
@@ -30,11 +31,9 @@ async def prepare_attempt(app: Application, principal: Principal, member: Staff,
         row = await one(conn, "SELECT contract_revision FROM board_tasks WHERE id = ?", (task.id,))
         if row is None:
             raise KeyError(task.id)
-        subject = Principal(f"staff:{member.id}", "agent")
-        grant = await control.issue_grant_in(conn, principal, subject, scope, operations=["result.submit"],
-                                            effects=[], task_id=task.id,
-                                            expires_at=(datetime.now(UTC) + timedelta(hours=24)).isoformat())
-        worker = Principal(subject.actor_id, "agent", grant["grant_id"], grant["generation"])
+        grant = await control.issue_worker_grant_in(conn, principal, scope, staff_session_id=session.id,
+                                                   expires_at=(datetime.now(UTC) + timedelta(hours=24)).isoformat())
+        worker = Principal(f"staff:{member.id}", "agent", grant["grant_id"], grant["generation"])
         return await app.executions.create(conn, attempt_id=launch_attempt.get() or uuid.uuid4().hex, task_id=task.id,
                                            contract_revision=row["contract_revision"], launcher=principal,
                                            worker=worker, staff_session_id=session.id, runtime_kind=session.kind,
@@ -60,12 +59,23 @@ async def observe_bind(app: Application, identity: AttemptIdentity, session: Sta
             raise ControlDenied("the observed reference is not bound to this staff session")
         if row["provider_session_ref"] and row["provider_session_ref"] != reference:
             raise ControlDenied("the execution reference cannot be replaced")
+        if session.kind == "cli":
+            terminal = await one(conn, "SELECT ptyd_instance FROM terminals WHERE id = ?", (started.terminal_id,))
+            if terminal is not None and terminal["ptyd_instance"]:
+                await conn.execute("UPDATE execution_attempts SET runtime_instance = ? WHERE id = ? AND runtime_instance IS NULL",
+                                   (terminal["ptyd_instance"], identity.id))
         if row["state"] in ACTIVE:
             await app.executions.bind(conn, identity, provider_session_ref=reference)
-        elif row["state"] in ("completed", "failed", "cancelled") and row["host_generation"] == identity.host_generation:
-            # A report can commit inside runtime.start before Started is returned. This records the
-            # observed reference without reviving the worker or granting a second delivery.
+        elif row["state"] in ("completed", "failed", "cancelled", "recovering") and row["host_generation"] == identity.host_generation:
+            # A report or cancellation can commit inside runtime.start before Started is returned.
+            # Record the observed reference without reviving the worker or granting another delivery.
             await conn.execute("UPDATE execution_attempts SET provider_session_ref = ? WHERE id = ?",
                                (reference, identity.id))
         else:
             raise ControlDenied("the execution needs explicit recovery before binding")
+
+    if session.kind == "cli":
+        terminal = await app.db.fetchone("SELECT ptyd_instance FROM terminals WHERE id = ?", (started.terminal_id,))
+        if terminal is not None:
+            await observe_exit(app, staff_session_id=session.id, runtime_ref=started.terminal_id,
+                               observed_status="exited", runtime_instance=terminal["ptyd_instance"])

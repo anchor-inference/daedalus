@@ -73,7 +73,8 @@ def serve(page: Page, stub: BoardStub, unhandled: Unhandled) -> None:
 
 def check(page: Page, lang: str, unhandled: Unhandled) -> None:
     words = WORDS[lang]
-    serve(page, board(), unhandled)
+    stub = board()
+    serve(page, stub, unhandled)
     page.goto(f"{BASE}/board/t-plan?token=t&lang={lang}")
     sheet = page.locator(".sheet")
     expect(sheet).to_contain_text("Delivery limits plan")
@@ -96,6 +97,25 @@ def check(page: Page, lang: str, unhandled: Unhandled) -> None:
     expect(own).to_contain_text("Every pot is wet.")
     expect(own.locator(".board-task-brief")).to_have_count(0)
     expect(own.locator(".board-task-where")).to_have_count(0)
+
+    page.goto(f"{BASE}/board?token=t&lang={lang}")
+    page.get_by_role("button", name="New task" if lang == "en" else "Новая задача").first.click()
+    created = page.locator(".sheet")
+    created.locator("input.field").first.fill("Check plants")
+    created.locator("textarea.field").nth(1).fill("Each pot inspected")
+    created.get_by_role("button", name="Create" if lang == "en" else "Создать").click()
+    expect(created).to_have_count(0)
+    assert stub.created[-1]["client_operation_id"] and stub.created[-1]["expected_collection_revision"] == 3
+    page.locator(".task", has_text="Check plants").click()
+    task_sheet = page.locator(".sheet")
+    task_id = next(task["id"] for task in stub.tasks if task["title"] == "Check plants")
+    with page.expect_response(lambda response: urlsplit(response.url).path.endswith(f"/api/board/{task_id}") and response.request.method == "PUT"):
+        task_sheet.get_by_role("checkbox").click()
+    assert stub.updated[-1][1]["check_ids"] == ["C1"] and stub.updated[-1][1]["client_operation_id"]
+    task_sheet.get_by_role("button", name="Actions" if lang == "en" else "Действия").click()
+    page.get_by_role("menuitem", name="Archive task…" if lang == "en" else "Архивировать задачу…").click()
+    page.locator(".sheet-backdrop.confirm .dialog button").last.click()
+    assert next(task for task in stub.tasks if task["title"] == "Check plants")["status"] == "dropped"
 
 
 def run() -> int:

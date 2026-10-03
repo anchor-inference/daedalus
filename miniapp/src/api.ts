@@ -90,7 +90,7 @@ export class ApiError extends Error {
   }
 }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function call<T>(method: string, path: string, body?: unknown, responseType: "json" | "text" = "json"): Promise<T> {
   const response = await fetch(path, {
     method,
     headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -110,7 +110,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     const text = typeof detail === "string" && detail ? detail : response.status >= 500 ? `Server unavailable (${response.status})` : `Request failed (${response.status})`;
     throw new ApiError(response.status, text, data);
   }
-  return (await response.json()) as T;
+  return (responseType === "text" ? await response.text() : await response.json()) as T;
 }
 
 /** A message with its files, sent with progress.
@@ -143,6 +143,7 @@ function upload<T>(path: string, form: FormData, onProgress?: (fraction: number)
 
 export const api = {
   get: <T>(path: string) => call<T>("GET", path),
+  getText: (path: string) => call<string>("GET", path, undefined, "text"),
   post: <T>(path: string, body?: unknown) => call<T>("POST", path, body),
   put: <T>(path: string, body?: unknown) => call<T>("PUT", path, body),
   patch: <T>(path: string, body?: unknown) => call<T>("PATCH", path, body),

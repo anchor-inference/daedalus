@@ -281,36 +281,46 @@ async def test_the_board_over_http(app: Any, tmp_path: Path) -> None:
         assert (await client.get(base)).status_code == 401
         assert (await client.get("/api/projects/nope/board", headers=HEADERS)).status_code == 404
 
-        made = await client.post(base, headers=HEADERS, json={"title": "Checkout", "brief": {"objective": "pay by card", "done_when": "a test order goes through"}, "priority": 2})
+        collection = (await client.get(f"/api/control/revisions?project={team.project}", headers=HEADERS)).json()["collection_revision"]
+        create = {"title": "Checkout", "brief": {"objective": "pay by card", "done_when": "a test order goes through"},
+                  "priority": 2, "client_operation_id": "checkout-create", "expected_collection_revision": collection}
+        made = await client.post(base, headers=HEADERS, json=create)
         assert made.status_code == 201, made.text
-        task = made.json()
-        assert task["project_id"] == team.project and task["brief"]["objective"] == "pay by card" and task["launch"] is None
-        assert (await client.post(base, headers=HEADERS, json={"title": "x", "brief": {"surprise": "1"}})).status_code == 422
-        assert (await client.post(base, headers=HEADERS, json={"title": "x", "assignee_staff_id": "nobody"})).status_code == 400
+        task = made.json()["task"]
+        assert task["project_id"] == team.project and task["brief"]["objective"] == "pay by card"
+        assert runtime.assigned == []
+        assert (await client.post(base, headers=HEADERS, json=create)).json()["command"] == made.json()["command"]
+        invalid = {**create, "client_operation_id": "invalid", "brief": {"surprise": "1"}}
+        assert (await client.post(base, headers=HEADERS, json=invalid)).status_code == 422
+        unknown = {**create, "client_operation_id": "unknown-worker", "expected_collection_revision": collection + 1,
+                   "assignee_staff_id": "nobody"}
+        assert (await client.post(base, headers=HEADERS, json=unknown)).status_code == 409
 
-        # Assigning hands the task to the staff runtime, and its answer comes back with the task.
-        put = await client.put(f"/api/board/{task['id']}", headers=HEADERS, json={"assignee_staff_id": team.ada.id, "brief": {"boundaries": "only the checkout folder"}})
+        # Saving an assignee edits metadata; only the separate launch command contacts its runtime.
+        edit = {"assignee_staff_id": team.ada.id, "brief": {"boundaries": "only the checkout folder"},
+                "client_operation_id": "checkout-edit", "expected_entity_revision": task["entity_revision"]}
+        put = await client.put(f"/api/board/{task['id']}", headers=HEADERS, json=edit)
         assert put.status_code == 200, put.text
-        body = put.json()
-        assert body["launch"] == {"state": "queued", "position": 1} and runtime.assigned == [("Ada", task["id"], "operator")]
-        assert body["brief"] == {"objective": "pay by card", "deliverable": "", "boundaries": "only the checkout folder", "done_when": "a test order goes through"}
-        # An edit that keeps the assignee does not launch again.
-        assert (await client.put(f"/api/board/{task['id']}", headers=HEADERS, json={"priority": 1})).json()["launch"] is None
-        assert len(runtime.assigned) == 1
-
+        task = put.json()["task"]
+        assert runtime.assigned == []
+        assert task["brief"] == {"objective": "pay by card", "deliverable": "", "boundaries": "only the checkout folder", "done_when": "a test order goes through"}
+        assert (await client.put(f"/api/board/{task['id']}", headers=HEADERS, json=edit)).json()["command"] == put.json()["command"]
         listing = (await client.get(base, headers=HEADERS)).json()
         assert [t["id"] for t in listing["tasks"]] == [task["id"]] and listing["tasks"][0]["assignee"]["name"] == "Ada"
         assert listing["needs_you"] == [] and listing["counts"]["todo"] == 1
+        for status in ("done", "review"):
+            refused = await client.put(f"/api/board/{task['id']}", headers=HEADERS,
+                                      json={"status": status, "expected_entity_revision": task["entity_revision"],
+                                            "client_operation_id": f"direct-{status}"})
+            assert refused.status_code == 409
 
-        assert (await client.put(f"/api/board/{task['id']}", headers=HEADERS,
-                                 json={"status": "done"})).status_code == 400
-        await client.put(f"/api/board/{task['id']}", headers=HEADERS, json={"status": "review"})
-
-        # The shell's project lens over the global board.
         await board.add(title="elsewhere", session_id=team.outsider)
         lens = (await client.get(f"/api/board?include_done=1&project={team.project}", headers=HEADERS)).json()
         assert [t["title"] for t in lens] == ["Checkout"]
         assert len((await client.get("/api/board?include_done=1", headers=HEADERS)).json()) == 2
-        in_review = (await client.get(base, headers=HEADERS)).json()
-        assert [task["title"] for task in in_review["tasks"]] == ["Checkout"]
-        assert in_review["counts"]["done"] == 0
+        archived = await client.delete(f"/api/board/{task['id']}", headers=HEADERS,
+                                       params={"client_operation_id": "checkout-archive",
+                                               "expected_entity_revision": task["entity_revision"]})
+        assert archived.status_code == 200
+        assert await app.db.fetchone("SELECT id FROM board_tasks WHERE id = ?", (task["id"],))
+        assert await app.db.fetchone("SELECT task_id FROM task_contract_versions WHERE task_id = ?", (task["id"],))
