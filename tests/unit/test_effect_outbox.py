@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from daedalus.extensions.effects import EffectDispatcher, EffectOutcome
+from daedalus.extensions.effects import EffectDispatcher, EffectOutcome, EffectResolution
 from daedalus.stores.control import ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
 from daedalus.stores.outbox import OutboxStore
@@ -134,3 +134,64 @@ async def test_stopping_a_handler_records_unknown_before_database_close(db: Data
     with pytest.raises(asyncio.CancelledError):
         await running
     assert (await dispatcher.store.view(action_id))["state"] == "unknown"
+
+
+async def test_revoked_unknown_effect_is_observed_without_running_it_again(db: Database) -> None:
+    control = ControlStore(db)
+    subject = Principal("agent:worker", "agent")
+    grant = await control.issue_grant(OPERATOR, subject, SCOPE, operations=["test.queue"], effects=[], expires_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat())
+    action_id = await enqueue(db, principal=Principal(subject.actor_id, "agent", grant["grant_id"], 1))
+    store = OutboxStore(db)
+    claim = await store.claim(("test.effect",))
+    assert claim is not None
+    await store.recover()
+    await control.revoke_grant(OPERATOR, grant["grant_id"], reason="permission withdrawn after an interrupted effect")
+    observed = []
+
+    class ReadOnlyReconciler:
+        async def run(self, claim: Any, check: Any) -> EffectOutcome:
+            pytest.fail("an uncertain command was delivered twice")
+
+        async def reconcile(self, claim: Any) -> EffectResolution:
+            with pytest.raises(ControlDenied):
+                await store.check(claim)
+            observed.append(claim.id)
+            return EffectResolution("completed", {"observed_commit": "exact", "command": claim.id})
+
+    dispatcher = EffectDispatcher(store)
+    dispatcher.register("test.effect", ReadOnlyReconciler())
+    assert await dispatcher.reconcile() == 1
+    assert await dispatcher.reconcile() == 0
+    assert not await dispatcher.step()
+    assert observed == [action_id]
+    assert (await store.view(action_id))["state"] == "completed"
+
+
+async def test_no_physical_proof_keeps_outcome_unknown(db: Database) -> None:
+    action_id = await enqueue(db)
+    store = OutboxStore(db)
+    await store.claim(("test.effect",))
+    await store.recover()
+
+    class UncertainHandler:
+        async def run(self, claim: Any, check: Any) -> EffectOutcome:
+            pytest.fail("unknown is not pending")
+
+        async def reconcile(self, claim: Any) -> None:
+            return None
+
+    dispatcher = EffectDispatcher(store)
+    dispatcher.register("test.effect", UncertainHandler())
+    assert await dispatcher.reconcile() == 0
+    assert not await dispatcher.step()
+    assert (await store.view(action_id))["state"] == "unknown"
+
+
+async def test_outbox_cannot_change_the_committed_operation(db: Database) -> None:
+    action_id = await enqueue(db)
+    await db.execute("UPDATE effect_outbox SET payload_json = json_set(payload_json, '$.control.operation', 'different.command') WHERE id = ?", (action_id,))
+    store = OutboxStore(db)
+    assert await store.claim(("test.effect",)) is None
+    row = await store.view(action_id)
+    assert row["state"] == "cancelled"
+    assert "committed operation" in row["error"]

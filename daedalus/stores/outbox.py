@@ -49,31 +49,47 @@ class OutboxStore:
         )
         return action_id
 
-    async def _authorize(self, conn: aiosqlite.Connection, row: aiosqlite.Row) -> Claim:
+    async def _decode(self, conn: aiosqlite.Connection, row: aiosqlite.Row) -> Claim:
         receipt = await one(conn, "SELECT * FROM operation_receipts WHERE id = ?", (row["receipt_id"],))
         if receipt is None:
             raise ControlDenied("the effect has no committed command")
         envelope = json.loads(row["payload_json"])
         metadata = envelope["control"]
+        if metadata["operation"] != receipt["operation_kind"]:
+            raise ControlDenied("the effect does not belong to its committed operation")
         scope = Scope(receipt["scope_kind"], receipt["scope_id"])
         if row["grant_id"]:
             grant = await one(conn, "SELECT origin_class FROM actor_grants WHERE id = ?", (row["grant_id"],))
-            if grant is None:
-                raise ControlDenied("the effect's authority no longer exists")
-            principal = Principal(receipt["actor_id"], grant["origin_class"], row["grant_id"], row["grant_generation"])
+            principal = Principal(receipt["actor_id"], grant["origin_class"] if grant is not None else "system", row["grant_id"], row["grant_generation"])
         else:
-            if not receipt["actor_id"].startswith("operator:"):
-                raise ControlDenied("an ungranted actor cannot dispatch an effect")
-            principal = Principal(receipt["actor_id"], "operator")
-        await self.control.authorize(conn, principal, scope, metadata["operation"], task_id=metadata["task_id"], effects=tuple(metadata["effects"]))
+            principal = Principal(receipt["actor_id"], "operator" if receipt["actor_id"].startswith("operator:") else "system")
+        return Claim(row["id"], row["receipt_id"], row["kind"], int(row["claim_generation"]), principal, scope, metadata["task_id"], row["attempt_id"], tuple(metadata["effects"]), metadata["operation"], envelope["data"])
+
+    async def _authorize(self, conn: aiosqlite.Connection, row: aiosqlite.Row) -> Claim:
+        claim = await self._decode(conn, row)
+        await self.control.authorize(conn, claim.principal, claim.scope, claim.operation, task_id=claim.task_id, effects=claim.effects)
         if row["attempt_id"]:
             attempt = await one(conn, "SELECT a.task_id,a.state,a.host_generation,t.current_attempt_id FROM execution_attempts a JOIN board_tasks t ON t.id=a.task_id WHERE a.id = ?", (row["attempt_id"],))
             host = await one(conn, "SELECT value FROM kv WHERE key = 'execution_host_generation'")
-            if attempt is None or attempt["task_id"] != metadata["task_id"] or attempt["current_attempt_id"] != row["attempt_id"]:
+            if attempt is None or attempt["task_id"] != claim.task_id or attempt["current_attempt_id"] != row["attempt_id"]:
                 raise ControlDenied("the execution attempt has been superseded")
             if attempt["state"] not in ("queued", "starting", "running", "waiting") or host is None or int(json.loads(host["value"])) != attempt["host_generation"]:
                 raise ControlDenied("the execution attempt is no longer active on this host generation")
-        return Claim(row["id"], row["receipt_id"], row["kind"], int(row["claim_generation"]), principal, scope, metadata["task_id"], row["attempt_id"], tuple(metadata["effects"]), metadata["operation"], envelope["data"])
+        return claim
+
+    async def unknown(self, kinds: tuple[str, ...], *, limit: int = 100) -> list[Claim]:
+        """Commands needing an observed outcome, even if permission to repeat them was revoked.
+
+        These claims cannot pass ``check`` or reach ``run``. They allow a trusted handler to read
+        the physical outcome of an earlier command, without authorizing another external effect.
+        """
+        if not kinds:
+            return []
+        async with self.db.transaction() as conn:
+            placeholders = ",".join("?" for _ in kinds)
+            async with conn.execute(f"SELECT * FROM effect_outbox WHERE state = 'unknown' AND kind IN ({placeholders}) ORDER BY created_at,id LIMIT ?", (*kinds, limit)) as cursor:
+                rows = await cursor.fetchall()
+            return [await self._decode(conn, row) for row in rows]
 
     async def claim(self, kinds: tuple[str, ...]) -> Claim | None:
         if not kinds:
