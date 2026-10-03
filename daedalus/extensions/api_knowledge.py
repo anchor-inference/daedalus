@@ -247,7 +247,25 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                             "source_current": current_hash == row["packet_hash"],
                             "current_packet_hash": current_hash, "created_at": row["created_at"],
                             "session_ended_at": row["ended_at"]})
-        return {"task_id": task_id, "entries": entries}
+        historical = await app.db.fetchall(
+            "SELECT id,source_staff_session_id,source_packet_hash,source_packet_json,source_role,"
+            "source_role_hint,source_contract_revision,source_created_at,archive_digest"
+            " FROM historical_staff_context_packets WHERE task_id = ? AND project_id = ?"
+            " ORDER BY source_created_at DESC,id DESC LIMIT ?",
+            (task_id, task["project_id"], limit),
+        )
+        for row in historical:
+            packet = json.loads(row["source_packet_json"])
+            entries.append({"staff_session_id": row["id"], "staff_id": None,
+                            "role": row["source_role"], "role_hint": row["source_role_hint"],
+                            "contract_revision": row["source_contract_revision"],
+                            "packet_hash": row["source_packet_hash"], "source_refs": packet["source_refs"],
+                            "source_current": False, "current_packet_hash": None,
+                            "created_at": row["source_created_at"], "session_ended_at": None,
+                            "historical": True, "archive_digest": row["archive_digest"],
+                            "source_staff_session_id": row["source_staff_session_id"]})
+        entries.sort(key=lambda item: (item["created_at"], item["staff_session_id"]), reverse=True)
+        return {"task_id": task_id, "entries": entries[:limit]}
 
     @api.get("/api/board/{task_id}/context-history/{staff_session_id}")
     async def context_history_entry(task_id: str, staff_session_id: str,
@@ -263,7 +281,25 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             (task_id, staff_session_id, task_id),
         )
         if row is None:
-            raise HTTPException(404, "no such task context packet")
+            historical = await app.db.fetchone(
+                "SELECT p.source_packet_json,p.source_packet_hash,p.source_role,p.source_role_hint,"
+                "p.source_contract_revision,p.source_created_at,p.archive_digest,p.source_staff_session_id"
+                " FROM historical_staff_context_packets p JOIN board_tasks t ON t.id = p.task_id"
+                " WHERE p.id = ? AND p.task_id = ? AND p.project_id = t.project_id",
+                (staff_session_id, task_id),
+            )
+            if historical is None:
+                raise HTTPException(404, "no such task context packet")
+            packet = json.loads(historical["source_packet_json"])
+            return {"staff_session_id": staff_session_id, "staff_id": None,
+                    "role": historical["source_role"], "role_hint": historical["source_role_hint"],
+                    "contract_revision": historical["source_contract_revision"],
+                    "packet_hash": historical["source_packet_hash"],
+                    "source_refs": packet["source_refs"], "source_current": False,
+                    "current_packet_hash": None, "created_at": historical["source_created_at"],
+                    "session_ended_at": None, "packet": packet, "historical": True,
+                    "archive_digest": historical["archive_digest"],
+                    "source_staff_session_id": historical["source_staff_session_id"]}
         try:
             current = await assemble_task_context(app.db, task_id, role=row["role"],
                                                   role_hint=row["role_hint"])

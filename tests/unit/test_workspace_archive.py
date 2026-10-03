@@ -9,11 +9,14 @@ import sqlite3
 import uuid
 import zipfile
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
-from daedalus.extensions import workspace_archive
+from daedalus.extensions import api_knowledge, workspace_archive
 from daedalus.extensions.api_workspace_archive import ImportInput
 from daedalus.extensions.orchestrator_domain import OriginalReports
 from daedalus.extensions.workspace_archive import ArchiveRefused, WorkspaceArchive, _archive_bytes, check_archive
@@ -22,6 +25,24 @@ from daedalus.stores.blobs import FileBlobStore
 from daedalus.stores.control import ControlConflict, ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
 from daedalus.stores.files import FileStore
+
+
+async def _pin_source_packet(db: Database) -> tuple[dict, str]:
+    packet = {"task_id": "task", "role": "worker", "role_hint": "historical",
+              "title": "Build the report", "contract_revision": 1,
+              "contract": {"requirements": [], "depends_on": []},
+              "dependencies": [], "facts": [], "artifacts": [],
+              "source_refs": ["contract:task@1"]}
+    digest = "sha256:" + hashlib.sha256(json.dumps(packet, ensure_ascii=False, sort_keys=True,
+                                                separators=(",", ":")).encode()).hexdigest()
+    packet["packet_hash"] = digest
+    await db.execute(
+        "INSERT INTO staff_context_packets(staff_session_id,task_id,role,role_hint,contract_revision,"
+        "packet_hash,packet_json,created_at) VALUES (?,?,?,?,?,?,?,?)",
+        ("member-session", "task", "worker", "historical", 1, digest,
+         json.dumps(packet, ensure_ascii=False, sort_keys=True, separators=(",", ":")), "2026-01-01"),
+    )
+    return packet, digest
 
 
 def test_import_revision_requires_an_integer() -> None:
@@ -190,18 +211,13 @@ async def archive_store(tmp_path):
 
 async def test_private_archive_roundtrips_transcript_contract_report_and_blob(archive_store) -> None:
     db, files, service = archive_store
-    await db.execute(
-        "INSERT INTO staff_context_packets(staff_session_id,task_id,role,role_hint,contract_revision,"
-        "packet_hash,packet_json,created_at) VALUES"
-        " ('member-session','task','worker','historical','1','sha256:historical',"
-        " '{\"task_id\":\"task\",\"source_refs\":[]}', '2026-01-01')"
-    )
+    packet, digest = await _pin_source_packet(db)
     data = await service.export("source")
     assert b"must-never-export" not in data
     with zipfile.ZipFile(io.BytesIO(data)) as zipped:
         assert b"secret-location" not in zipped.read("workspace.json")
     checked = check_archive(data)
-    assert "staff_context_packets" not in checked.rows
+    assert checked.counts["staff_context_packets"] == 1
     assert checked.counts["session_messages"] == 1
     assert checked.counts["task_contract_versions"] == 1
     assert checked.counts["board_workflow_runs"] == 1
@@ -222,6 +238,7 @@ async def test_private_archive_roundtrips_transcript_contract_report_and_blob(ar
     assert result["runtime_state"] == "inactive"
     assert result["archived_only"]["app_events"] == 1
     assert result["archived_only"]["board_workflow_runs"] == 1
+    assert result["archived_only"]["staff_context_packets"] == 1
     assert await db.fetchall("PRAGMA foreign_key_check") == []
     task = await db.fetchone("SELECT id,status,current_attempt_id,accepted_result_id FROM board_tasks WHERE project_id = ?", (restored,))
     assert task["status"] == "blocked" and task["current_attempt_id"] is None
@@ -240,6 +257,25 @@ async def test_private_archive_roundtrips_transcript_contract_report_and_blob(ar
     assert await files.blobs.get(TENANT, run["detail_blob_ref"]) == b"saved run detail"
     member_session = await db.fetchone("SELECT ss.status,ss.team_token_hash,ss.ended_at FROM staff_sessions ss JOIN staff s ON s.id = ss.staff_id WHERE s.project_id = ?", (restored,))
     assert member_session["status"] == "exited" and not member_session["team_token_hash"] and member_session["ended_at"]
+    historical = await db.fetchone("SELECT * FROM historical_staff_context_packets WHERE project_id = ?", (restored,))
+    assert historical["source_staff_session_id"] == "member-session"
+    assert historical["source_task_id"] == "task"
+    assert historical["source_packet_hash"] == digest
+    assert json.loads(historical["source_packet_json"]) == packet
+    assert historical["task_id"] == task["id"]
+    assert await db.fetchone("SELECT 1 FROM staff_context_packets WHERE task_id = ?", (task["id"],)) is None
+    api = FastAPI()
+    api_knowledge.register(api, SimpleNamespace(db=db, extensions={}),
+                           lambda: {"via": "token", "user_id": 1})
+    async with AsyncClient(transport=ASGITransport(app=api), base_url="http://test") as client:
+        history = await client.get(f"/api/board/{task['id']}/context-history")
+        assert history.status_code == 200
+        entry = history.json()["entries"][0]
+        assert entry["historical"] is True and entry["source_current"] is False
+        assert entry["packet_hash"] == digest and entry["current_packet_hash"] is None
+        detail = await client.get(f"/api/board/{task['id']}/context-history/{entry['staff_session_id']}")
+        assert detail.status_code == 200 and detail.json()["packet"] == packet
+        assert (await client.get(f"/api/board/task/context-history/{entry['staff_session_id']}")).status_code == 404
     assert await db.fetchone("SELECT 1 FROM asks WHERE project_id = ? AND resolved_at IS NOT NULL", (restored,))
     anchor = await db.fetchone("SELECT a.* FROM result_turn_anchors a JOIN result_receipts r ON r.id = a.result_id JOIN board_tasks t ON t.id = r.task_id WHERE t.project_id = ?", (restored,))
     assert await db.fetchone("SELECT 1 FROM session_messages WHERE session_id = ? AND seq = ?", (anchor["session_id"], anchor["turn_seq"]))
@@ -256,9 +292,32 @@ async def test_private_archive_roundtrips_transcript_contract_report_and_blob(ar
     assert (await service.preview(checked))["capability_handles"] == ["board.read"]
     assert (await service.preview(checked))["id_map"]["board_tasks"]["task"] == task["id"]
     assert await service.import_command(principal, checked, expected_collection_revision=revision, client_operation_id="restore-one") == result
+    assert (await db.fetchone("SELECT COUNT(*) AS n FROM historical_staff_context_packets WHERE project_id = ?",
+                             (restored,)))["n"] == 1
     with pytest.raises(ControlConflict):
         await service.import_command(principal, checked, expected_collection_revision=revision, client_operation_id="restore-two")
     assert (await service.preview(checked))["collision"] is True
+
+
+async def test_context_packet_tamper_is_rejected_before_import(archive_store) -> None:
+    db, _, service = archive_store
+    await _pin_source_packet(db)
+    checked = check_archive(await service.export("source"))
+    rows = deepcopy(checked.rows)
+    packet = json.loads(rows["staff_context_packets"][0]["packet_json"])
+    packet["title"] = "Altered after launch"
+    rows["staff_context_packets"][0]["packet_json"] = json.dumps(packet)
+    with pytest.raises(ArchiveRefused, match="does not match"):
+        check_archive(_archive_bytes(rows, checked.blobs, checked.report_blobs,
+                                     checked.config_handles, checked.run_blobs,
+                                     checked.folder_handles, checked.session_blobs))
+    rows = deepcopy(checked.rows)
+    rows["staff_context_packets"][0]["staff_session_id"] = "foreign-session"
+    with pytest.raises(ArchiveRefused, match="does not match"):
+        check_archive(_archive_bytes(rows, checked.blobs, checked.report_blobs,
+                                     checked.config_handles, checked.run_blobs,
+                                     checked.folder_handles, checked.session_blobs))
+    assert await db.fetchone("SELECT 1 FROM workspace_archive_imports") is None
 
 
 async def test_corrupt_archive_and_failed_restore_leave_no_project(archive_store) -> None:

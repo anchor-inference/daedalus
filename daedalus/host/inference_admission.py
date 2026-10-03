@@ -16,6 +16,7 @@ from daedalus.providers.openai_compat import ProviderEndpoint, ProviderVerdict
 from daedalus.providers.pricing import ModelPricing, complete_usage
 from daedalus.stores.comparison_funding import PairAllocation
 from daedalus.stores.control import ControlDenied, canonical, one
+from daedalus.stores.goal_budget import charge_for_session_in, goal_constraints_in, pin_reservation_in
 from daedalus.stores.inference_budget import BudgetRefused, Constraint, InferenceBudget, microusd
 
 if TYPE_CHECKING:
@@ -161,8 +162,13 @@ class HostInferenceAdmission:
                                            (observer.session_id,))
                         if worker is not None:
                             raise ControlDenied("worker inference requires the current host execution owner")
+                charge = (await charge_for_session_in(conn, observer.session_id)
+                          if observer is not None and observer.session_id else None)
                 free = endpoint.kind == "llamacpp"
                 constraints = () if free else await self._constraints(conn, endpoint, request)
+                if charge is not None:
+                    constraints += await goal_constraints_in(conn, charge.project_id,
+                                                              coordinator=charge.coordinator)
                 price = endpoint.pricing.get(request.model)
                 if not free and (price is None or price.input is None or price.output is None
                                  or price.input_limit is None or not price.limit_source):
@@ -185,6 +191,8 @@ class HostInferenceAdmission:
                     constraints=constraints,
                     execution_attempt_id=attempt.id if attempt is not None else None,
                 )
+                if charge is not None:
+                    await pin_reservation_in(conn, reservation, charge)
                 await self.store.start_in(conn, reservation)
                 return reservation
         except BudgetRefused as exc:

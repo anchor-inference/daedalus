@@ -843,7 +843,7 @@ async def unwatch(context: ToolContext, id: str) -> ToolResult:
 
 @search_hint(
     "installed project extension plugin inspect status custom read tool "
-    "расширение проекта плагин проверить статус прочитать инструмент"
+    "расширение проекта плагин проверить статус прочитать инструмент вызвать"
 )
 @tool(
     name="ProjectExtension",

@@ -31,6 +31,7 @@ import { boardKey, staffKey, terminalsKey, useProject, useUsage } from "./data";
 import { firstWait, oldestOpen, PHONE_TABS, type PhoneTab, splitTeam, staffTone, teamCounts, waitKey } from "./focus";
 import { useMember } from "./staff";
 import { spendLine, staffUsage } from "./usage";
+import { budgetCompact, useGoalBudget } from "./ProjectBudget";
 
 const enc = encodeURIComponent;
 const operatorAsksKey = (projectId: string) => `/api/asks?project=${enc(projectId)}&routed_to=operator`;
@@ -94,6 +95,8 @@ export function ProjectTabs({ projectId, current }: { projectId: string; current
  *  environment it runs in, and its other pages behind a menu. */
 export function ProjectPhoneHead({ projectId, title, subtitle, actions, extra }: { projectId: string; title?: string; subtitle?: string; actions?: ReactNode; extra?: MenuItem[] }) {
   const { project } = useProject(projectId);
+  const { data: budget } = useGoalBudget(projectId);
+  const remaining = budgetCompact(budget);
   const { team, board } = useTeamAndBoard(projectId);
   const counts = teamCounts(team?.staff ?? [], board?.tasks ?? []);
   const env: TerminalEnvName = project?.settings.default_env ?? project?.folders[0]?.env ?? "container";
@@ -117,6 +120,7 @@ export function ProjectPhoneHead({ projectId, title, subtitle, actions, extra }:
       actions={
         <>
           {actions}
+          {remaining && <span className="chip tiny" title={t("budget.summaryHint")}>{remaining}</span>}
           {project && <EnvPill env={env} tiny />}
           <OverflowMenu items={pages} label={t("phone.pages")} />
         </>

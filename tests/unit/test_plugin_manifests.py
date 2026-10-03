@@ -14,6 +14,7 @@ from daedalus.extensions import api_plugins, plugins, skill_quality
 from daedalus.extensions.effects import EffectDispatcher
 from daedalus.extensions.plugins import (
     PROJECT_STATUS_MANIFEST,
+    READ_MODELS,
     PluginRefused,
     PluginRegistry,
     ProjectStatusAdapter,
@@ -35,6 +36,42 @@ def _manifest() -> dict:
         "ui_extensions": [{"id": "detail", "slot": "task.detail", "schema_version": 1,
                            "component": "status", "tool": "inspect"}],
     }
+
+
+def _declarative(version: str, model: str) -> dict:
+    return {
+        "id": "custom_status", "version": version, "display_name": "Custom project read card",
+        "description": "Read a reviewed, bounded view of this project's current board.",
+        "host_api": "1", "capabilities": ["board.read"],
+        "tools": [{"name": "read_card", "input_schema": READ_MODELS[model], "read_model": model}],
+        "events": [], "dependencies": [],
+        "ui_extensions": [{"id": "custom_card", "slot": "project.settings", "schema_version": 1,
+                           "component": "status", "tool": "read_card"}],
+    }
+
+
+def test_declarative_model_must_be_a_scalar_supported_name() -> None:
+    manifest = _declarative("1.0.0", "task_counts")
+    manifest["tools"][0]["read_model"] = ["task_counts"]
+    with pytest.raises(PluginRefused, match="read model"):
+        validate_manifest(manifest)
+
+
+async def test_authored_card_cannot_replace_a_host_adapter_identity(tmp_path) -> None:
+    db = Database(tmp_path / "state.sqlite")
+    await db.open()
+    try:
+        registry = PluginRegistry(db, {"project_status": lambda: ProjectStatusAdapter(db)})
+        manifest = _declarative("1.0.0", "task_counts")
+        manifest["id"] = "project_status"
+        digest = validate_manifest(manifest)["digest"]
+        with pytest.raises(PluginRefused, match="trusted host adapter"):
+            await registry.install_command(
+                Principal.operator({"via": "token", "user_id": 1}), manifest, digest,
+                expected_collection_revision=1, client_operation_id="reserved-id",
+            )
+    finally:
+        await db.close()
 
 
 def test_manifest_is_typed_and_digest_pinned() -> None:
@@ -299,5 +336,103 @@ async def test_operator_route_uses_the_same_host_bound_read_call(tmp_path) -> No
             denied = await client.post(path, json={"tool": "inspect_project",
                                                    "arguments": {"project_id": "foreign"}})
             assert denied.status_code == 409 and "another project" in denied.json()["detail"]
+    finally:
+        await db.close()
+
+
+async def test_authored_read_card_preview_upgrade_and_receipted_rollback(tmp_path) -> None:
+    db = Database(tmp_path / "state.sqlite")
+    await db.open()
+    try:
+        await db.execute("INSERT INTO projects(id,name,created_at) VALUES ('project','Project','now')")
+        principal = Principal.operator({"via": "token", "user_id": 1})
+        dispatcher = EffectDispatcher(OutboxStore(db))
+        registry = PluginRegistry(db, {"project_status": lambda: ProjectStatusAdapter(db)}, dispatcher)
+        dispatcher.register("plugin.register", registry)
+        first = _declarative("1.0.0", "task_counts")
+        second = _declarative("2.0.0", "accepted_results")
+        preview = await registry.preview_read(principal, "project", first,
+                                              validate_manifest(first)["digest"], "read_card", {})
+        assert preview["preview_only"] and preview["result"]["project_id"] == "project"
+        with pytest.raises(PluginRefused, match="digest changed"):
+            await registry.preview_read(principal, "project", first, "0" * 64, "read_card", {})
+        revision = await ControlStore(db).revision(Scope("global", "global"), Entity("collection", "global"))
+        await registry.install_command(principal, first, validate_manifest(first)["digest"],
+                                       expected_collection_revision=revision, client_operation_id="custom-first")
+        assert await dispatcher.step()
+        assert (await registry.invoke_read(principal, "project", "custom_status", "read_card", {}))["name"] == "Project"
+        revision = await ControlStore(db).revision(Scope("global", "global"), Entity("collection", "global"))
+        await registry.install_command(principal, second, validate_manifest(second)["digest"],
+                                       expected_collection_revision=revision, client_operation_id="custom-upgrade",
+                                       replaces_version="1.0.0")
+        assert await dispatcher.step()
+        assert (await registry.invoke_read(principal, "project", "custom_status", "read_card",
+                                           {"limit": 3}))["items"] == []
+        versions = await db.fetchall("SELECT version,status FROM plugin_manifests WHERE id = 'custom_status' ORDER BY version")
+        assert [(row["version"], row["status"]) for row in versions] == [("1.0.0", "revoked"), ("2.0.0", "active")]
+        revision = await ControlStore(db).revision(Scope("global", "global"), Entity("collection", "global"))
+        restored = await registry.rollback_command(principal, "custom_status", "1.0.0", "2.0.0",
+                                                   expected_collection_revision=revision,
+                                                   client_operation_id="custom-rollback")
+        assert restored == await registry.rollback_command(
+            principal, "custom_status", "1.0.0", "2.0.0",
+            expected_collection_revision=revision, client_operation_id="custom-rollback")
+        assert await dispatcher.step()
+        assert (await registry.invoke_read(principal, "project", "custom_status", "read_card", {}))["name"] == "Project"
+        versions = await db.fetchall("SELECT version,status FROM plugin_manifests WHERE id = 'custom_status' ORDER BY version")
+        assert [(row["version"], row["status"]) for row in versions] == [("1.0.0", "active"), ("2.0.0", "revoked")]
+        invalid = _declarative("3.0.0", "task_counts")
+        invalid["tools"][0]["input_schema"] = {"type": "object"}
+        with pytest.raises(PluginRefused, match="bounded schema"):
+            validate_manifest(invalid)
+    finally:
+        await db.close()
+
+
+async def test_failed_activation_is_visible_and_retry_is_receipted_after_restart(tmp_path) -> None:
+    db = Database(tmp_path / "state.sqlite")
+    await db.open()
+    try:
+        principal = Principal.operator({"via": "token", "user_id": 1})
+        dispatcher = EffectDispatcher(OutboxStore(db))
+        registry = PluginRegistry(db, {"project_status": lambda: ProjectStatusAdapter(db)}, dispatcher)
+        dispatcher.register("plugin.register", registry)
+        manifest = _declarative("1.0.0", "task_counts")
+        await registry.install_command(
+            principal, manifest, validate_manifest(manifest)["digest"],
+            expected_collection_revision=1, client_operation_id="first-activation",
+        )
+        await db.kv_set("plugin_safe_mode", True)
+        assert await dispatcher.step()
+        assert (await registry.activation("custom_status", "1.0.0"))["state"] == "failed"
+        app = FastAPI()
+        host = SimpleNamespace(db=db, extensions={"plugin_registry": registry})
+        api_plugins.register(app, host, lambda: {"via": "token", "user_id": 1})
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            listed = await client.get("/api/plugins")
+            assert listed.status_code == 200
+            assert listed.json()["items"][0]["status"] == "failed"
+            assert listed.json()["items"][0]["activation_state"] == "failed"
+        await db.kv_set("plugin_safe_mode", False)
+        restarted = PluginRegistry(db, {"project_status": lambda: ProjectStatusAdapter(db)}, dispatcher)
+        dispatcher.handlers["plugin.register"] = restarted
+        revision = await ControlStore(db).revision(Scope("global", "global"), Entity("collection", "global"))
+        retried = await restarted.retry_command(
+            principal, "custom_status", "1.0.0", expected_collection_revision=revision,
+            client_operation_id="retry-activation",
+        )
+        assert retried == await restarted.retry_command(
+            principal, "custom_status", "1.0.0", expected_collection_revision=revision,
+            client_operation_id="retry-activation",
+        )
+        assert (await restarted.activation("custom_status", "1.0.0"))["state"] == "pending"
+        assert await dispatcher.step()
+        assert (await restarted.activation("custom_status", "1.0.0"))["state"] == "completed"
+        assert (await restarted.health("custom_status"))["state"] == "configured_unverified"
+        revision = await ControlStore(db).revision(Scope("global", "global"), Entity("collection", "global"))
+        with pytest.raises(PluginRefused, match="terminal failed"):
+            await restarted.retry_command(principal, "custom_status", "1.0.0",
+                                          expected_collection_revision=revision,
+                                          client_operation_id="invalid-repeat")
     finally:
         await db.close()

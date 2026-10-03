@@ -31,6 +31,7 @@ from daedalus.providers.openai_compat import OpenAICompatibleProvider, ProviderE
 from daedalus.providers.pricing import ModelPricing
 from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
+from daedalus.stores.goal_budget import set_budget_in, view_in
 from daedalus.stores.runtime_release import physical_exit_in
 from daedalus.stores.sqlite import SqliteUsageSink
 from tests.support.waiting import until_await
@@ -63,13 +64,15 @@ class HeldProvider(InspectingProvider):
             await self.release.wait()
 
 
-@pytest.mark.parametrize("priced_transport,child_call,reviewed,stopped,cancel_group", [
-    (False, False, False, False, False),
-    (True, False, False, False, False),
-    (True, True, False, False, False),
-    (True, False, True, False, False),
-    (False, False, False, True, False),
-    (False, False, False, False, True),
+@pytest.mark.parametrize("priced_transport,child_call,reviewed,stopped,cancel_group,goal_capped", [
+    (False, False, False, False, False, False),
+    (True, False, False, False, False, False),
+    (True, True, False, False, False, False),
+    (True, False, True, False, False, False),
+    (False, False, False, True, False, False),
+    (False, False, False, False, True, False),
+    (True, False, False, False, False, True),
+    (True, True, False, False, False, True),
 ])
 async def test_two_native_sessions_start_only_after_both_slots_exist(settings, db: Database,
                                                                      tmp_path: Path,
@@ -77,7 +80,8 @@ async def test_two_native_sessions_start_only_after_both_slots_exist(settings, d
                                                                      child_call: bool,
                                                                      reviewed: bool,
                                                                      stopped: bool,
-                                                                     cancel_group: bool) -> None:
+                                                                     cancel_group: bool,
+                                                                     goal_capped: bool) -> None:
     repo = repository(tmp_path)
     provider = HeldProvider(db) if stopped or cancel_group else InspectingProvider(db)
     manager: SessionManager = await _manager(settings, db, provider)
@@ -159,6 +163,11 @@ async def test_two_native_sessions_start_only_after_both_slots_exist(settings, d
             team.review = Review(team.app, team)
             dispatcher.register("review.merge", MergeEffect(team.app))
         project = await project_with(manager, repo, concurrency=2)
+        if goal_capped:
+            async with db.transaction() as conn:
+                await set_budget_in(conn, project_id=project.id, budget_id="comparison-goal-budget",
+                                    expected_goal_revision=1, limit_usd="0.100000",
+                                    coordination_limit_usd="0.010000")
         folder = await db.fetchone("SELECT id FROM project_folders WHERE project_id = ?", (project.id,))
         assert folder is not None
         first = await manager.staff.hire(project.id, name="Ada", role="First alternative", isolation="worktree")
@@ -223,6 +232,18 @@ async def test_two_native_sessions_start_only_after_both_slots_exist(settings, d
                 first_slot = launched["slots"][0]
                 assert sum(item["comparison_slot_id"] == first_slot["slot_id"] for item in charges) == 2
                 assert sum(item["execution_attempt_id"] == first_slot["attempt_id"] for item in charges) == 2
+            if goal_capped:
+                allocations = await db.fetchall("SELECT goal_revision FROM goal_budget_allocations")
+                admissions = await db.fetchall("SELECT goal_revision,charge_class FROM goal_budget_admissions")
+                assert [row["goal_revision"] for row in allocations] == [1, 1]
+                assert [tuple(row) for row in admissions] == [(1, "work")] * len(charges)
+                async with db.transaction() as conn:
+                    balance = await view_in(conn, project.id)
+                assert balance is not None
+                assert balance["total"]["spent_usd"] == f"{len(charges) * 5 / 1_000_000:.6f}"
+                assert balance["total"]["held_usd"] == f"{(74_020 - len(charges) * 5) / 1_000_000:.6f}"
+                assert balance["total"]["available_usd"] == "0.025980"
+                assert balance["coordination"]["spent_usd"] == "0.000000"
         else:
             assert provider.reserved_at_send == [2, 2]
         if stopped:

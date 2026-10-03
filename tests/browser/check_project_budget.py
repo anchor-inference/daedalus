@@ -1,0 +1,143 @@
+"""A project cap keeps one exact command across a lost reply and refreshes a stale project revision."""
+
+from __future__ import annotations
+
+import copy
+import json
+import os
+import sys
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from playwright.sync_api import Page, expect, sync_playwright
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from api_stub import DEFAULT_APP, Unhandled, expect_app, folder, fulfil_shared  # noqa: E402
+
+BASE = os.environ.get("APP_URL", DEFAULT_APP)
+CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
+PROJECT = {
+    "id": "p1", "entity_revision": 1, "name": "Bakery", "created_at": "2026-09-19T00:00:00Z", "system": "",
+    "settings": {"snapshots": False, "system": "", "ephemeral": False, "default_env": "container"},
+    "folders": [folder("/work/site", is_git=True)], "sessions": [],
+}
+
+
+def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
+    project = copy.deepcopy(PROJECT)
+    state = {"cap": None, "lost": True, "conflict": True}
+    sent: list[dict] = []
+    receipts: dict[str, dict] = {}
+
+    def answer(route, body: object, status: int = 200) -> None:  # type: ignore[no-untyped-def]
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(body))
+
+    def balance(limit: str, *, uncertain: bool = False) -> dict:
+        return {"limit_usd": limit, "spent_usd": "0.100000", "held_usd": "0.200000",
+                "uncertain_usd": "0.100000" if uncertain else "0.000000",
+                "available_usd": f"{float(limit) - 0.3:.6f}", "state": "uncertain" if uncertain else "known"}
+
+    def budget() -> dict:
+        if not state["cap"]:
+            return {"configured": False, "project_id": "p1", "goal_revision": 1,
+                    "entity_revision": project["entity_revision"]}
+        total, coordination = state["cap"]
+        return {"configured": True, "project_id": "p1", "budget_id": "budget", "goal_revision": 1,
+                "current_goal_revision": 1, "activated_goal_revision": 1,
+                "entity_revision": project["entity_revision"], "total": balance(total, uncertain=True),
+                "coordination": balance(coordination)}
+
+    def stub(route) -> None:  # type: ignore[no-untyped-def]
+        request = route.request
+        url = urlsplit(request.url)
+        path = url.path[url.path.index("/api/"):] if "/api/" in url.path else ""
+        body = request.post_data_json if request.method in ("POST", "PATCH", "PUT", "DELETE") else None
+        if path == "/api/projects" and request.method == "GET":
+            return answer(route, [project])
+        if path == "/api/projects/p1/budget" and request.method == "GET":
+            return answer(route, budget())
+        if path == "/api/projects/p1/budget" and request.method == "PUT":
+            sent.append(body)
+            operation_id = body["client_operation_id"]
+            if operation_id in receipts:
+                return answer(route, receipts[operation_id])
+            if state["conflict"] and len(receipts) == 1:
+                state["conflict"] = False
+                project["entity_revision"] += 1
+                return answer(route, {"detail": "project changed", "current_revision": project["entity_revision"]}, 409)
+            assert body["expected_entity_revision"] == project["entity_revision"]
+            assert body["expected_goal_revision"] == 1
+            state["cap"] = (body["limit_usd"], body["coordination_limit_usd"])
+            project["entity_revision"] += 1
+            receipt = {**budget(), "receipt_id": operation_id}
+            receipts[operation_id] = receipt
+            if state["lost"]:
+                state["lost"] = False
+                return answer(route, {"detail": "response lost"}, 503)
+            return answer(route, receipt)
+        if path == "/api/sessions":
+            listed = {**project, "total": 0, "active": 0, "loops": 0, "last_message_at": ""}
+            return answer(route, {"sessions": [], "projects": [listed]})
+        if path == "/api/project-environments":
+            return answer(route, {"local": "container", "available": ["container"], "host_bridge": False, "docker": True})
+        if path == "/api/control/revisions":
+            return answer(route, {"scope": {"kind": "global", "id": "global"}, "collection_revision": 1,
+                                  "entity_revision": None})
+        if path == "/api/projects/p1/workspace-archive":
+            return answer(route, {"latest": None, "available": False})
+        if path == "/api/settings":
+            return answer(route, {"presets": {}, "model": {}})
+        if path == "/api/project-directories":
+            return answer(route, {"roots": [], "docker": True})
+        if fulfil_shared(route):
+            return None
+        unhandled.record(path)
+        answer(route, [])
+
+    page.route("**/api/**", stub)
+    page.goto(f"{BASE}/agents?token=t&lang={language}")
+    projects = "Projects" if language == "en" else "Проекты"
+    settings = "Settings for Bakery" if language == "en" else "Настройки: Bakery"
+    page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{projects}']:visible").first.click()
+    page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
+    block = page.locator(".project-budget")
+    expect(block).to_be_visible()
+    block.locator("summary").click()
+    block.locator("input").first.fill("1.000000")
+    block.locator("input").last.fill("0.500000")
+    block.locator("button").last.click()
+    page.reload()
+    page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{projects}']:visible").first.click()
+    page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
+    retry = "Retry original request" if language == "en" else "Повторить исходный запрос"
+    page.get_by_text(retry).click()
+    expect(block.locator("summary")).to_contain_text("$0.700000")
+    expect(block).to_contain_text("$0.100000")
+    assert sent[0] == sent[1] and len(receipts) == 1
+    block.locator("summary").click()
+    block.locator("input").first.fill("2.000000")
+    block.locator("button").last.click()
+    review = "Read current version" if language == "en" else "Прочитать текущую версию"
+    page.get_by_text(review).click()
+    expect(block.locator("input").first).to_have_value("2.000000")
+    block.locator("button").last.click()
+    expect(block.locator("summary")).to_contain_text("$1.700000")
+    assert sent[2]["client_operation_id"] != sent[3]["client_operation_id"]
+    assert sent[3]["expected_entity_revision"] == sent[2]["expected_entity_revision"] + 1
+
+
+def run() -> int:
+    unhandled = Unhandled()
+    expect_app(BASE)
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(executable_path=CHROMIUM)
+        for language in ("en", "ru"):
+            page = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+            scenario(page, language, unhandled)
+            page.close()
+        browser.close()
+    return unhandled.report()
+
+
+if __name__ == "__main__":
+    raise SystemExit(run())

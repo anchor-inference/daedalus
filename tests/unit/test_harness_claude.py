@@ -929,6 +929,13 @@ async def test_a_restart_does_not_resend_an_unproven_first_prompt(settings: Sett
         ada = await started(s, "echo:first things first")
         await s.status_event(ada, "starting")
         row = await s.session_row(ada)
+        async def spawned() -> bool:
+            launch = await HarnessStore(db).open_launch_for(row.id)
+            return bool(launch and launch.terminal_id)
+
+        # Queued admission claims the staff session before creating a physical terminal. Closing
+        # the host at that earlier point tests a refused launch, not recovery of an existing CLI.
+        await eventually(spawned, "the physical CLI exists before the host disconnects")
         # The host goes while the CLI is still starting; it gets ready with nobody listening.
         s.runtime.close()
         await s.terminals.close()

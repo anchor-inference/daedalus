@@ -12,16 +12,19 @@ import { mergeBlock, type ProjectTask, type Review } from "./board";
 import { reviewKey } from "./ReviewPanel";
 import { EvidenceReview, type ResultContract } from "./EvidenceReview";
 import { ResultTransfer } from "./ResultTransfer";
+import { ManualEvidenceReview } from "./ManualEvidenceReview";
+import { ManualReopen } from "./ManualReopen";
 
 export type ResultReceipt = {
   result_id: string;
   task_id: string;
   contract_revision: number;
   outcome: string;
+  origin_kind?: "operator_manual" | "worker";
   original_preview: string;
   original_digest: string;
   original_size_bytes: number;
-  artifacts: { id: string; artifact_kind: string; artifact_key: string; artifact_revision: number; digest: string; size_bytes: number }[];
+  artifacts: { id: string; artifact_kind: string; artifact_key: string; artifact_revision: number; digest: string; size_bytes: number; file_id?: string | null }[];
   checks: unknown[];
   limitations: unknown[];
   verification: "verified" | "failed" | "stale" | "unverified";
@@ -276,6 +279,7 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
     {!result && !results.error && <p className="sub">{t(results.loading ? "result.loading" : "result.none")}</p>}
     {result && <>
       <div className="result-summary">{result.original_preview?.split("\n")[0] || t("result.noSummary")}</div>
+      {result.origin_kind === "operator_manual" && <p className="sub">{t("manual.origin")}</p>}
       <p className="result-state">{t("result.state", { outcome: t(`result.outcome.${result.outcome}`), verification: t(`result.verification.${result.verification}`), acceptance: t(`result.acceptance.${task.acceptance_state || "open"}`) })}</p>
       {(result.limitations ?? []).length > 0 && <div className="result-warning" role="status"><b>{t("result.limitations")}</b><ul>{result.limitations.map((item, index) => <li key={index}>{detail(item)}</li>)}</ul></div>}
       {(result.checks ?? []).length > 0 && <div className="result-checks"><b>{t("result.checks")}</b><ul>{result.checks.map((item, index) => <li key={index}>{detail(item)}</li>)}</ul></div>}
@@ -312,7 +316,10 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
           </section>)}
         </div>
       </details>}
-      {contract.data && task.status === "review" && <EvidenceReview task={task} result={result} contract={contract.data} review={review.data ?? null} blockingComments={blockingComments.length} toast={toast} onChanged={() => { results.refresh(); contract.refresh(); review.refresh(); onAccepted(); }} />}
+      {contract.data && task.status === "review" && (result.origin_kind === "operator_manual"
+        ? <ManualEvidenceReview task={task} result={result} contract={contract.data} blockingComments={blockingComments.length} toast={toast} onChanged={() => { results.refresh(); contract.refresh(); onAccepted(); }} />
+        : <EvidenceReview task={task} result={result} contract={contract.data} review={review.data ?? null} blockingComments={blockingComments.length} toast={toast} onChanged={() => { results.refresh(); contract.refresh(); review.refresh(); onAccepted(); }} />)}
+      {contract.data && task.status === "done" && result.origin_kind === "operator_manual" && <ManualReopen task={task} result={result} contract={contract.data} onChanged={() => { results.refresh(); contract.refresh(); onAccepted(); }} toast={toast} />}
       <details className="result-details">
         <summary>{t("result.annotations", { count: (comments.data ?? []).length })}</summary>
         {comments.error && <div className="result-warning" role="status">{t("result.block.unconfirmed")} <button type="button" className="linkbtn" onClick={() => comments.refresh()}>{t("common.retry")}</button></div>}

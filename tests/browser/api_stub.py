@@ -473,11 +473,19 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
         # Handles a harness did not invent name no file: the chat draws no card for them.
         return 200, "application/json", json.dumps({"files": []})
     parts = path.split("/")
+    if method.upper() == "GET" and path == "/api/control/revisions":
+        return 200, "application/json", json.dumps({"scope": {"kind": "global", "id": "global"},
+                                                      "collection_revision": 1, "entity_revision": None})
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "workspace-archive":
+        return 200, "application/json", json.dumps({"latest": None, "available": False})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "files":
         return 200, "application/json", json.dumps({"files": []})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "focus-state":
         # An orchestrator's chat nobody invented a project for has nothing in hand, and no goal line.
         return 200, "application/json", json.dumps(empty_focus_state(parts[3]))
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "budget":
+        return 200, "application/json", json.dumps({"configured": False, "project_id": parts[3],
+                                                      "entity_revision": 1, "goal_revision": 1})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "usage":
         # A project nobody invented spend for spent nothing; a harness with a team answers it itself.
         nothing = {w: {"usd": 0.0, "tokens": 0, "unpriced": 0} for w in ("today", "week", "all")}

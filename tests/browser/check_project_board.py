@@ -152,9 +152,9 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     owned.locator("textarea").fill("Operator requested a clean stop")
     owned.get_by_role("button", name="Request stop" if lang == "en" else "Запросить остановку").click()
     page.locator(".sheet-backdrop.confirm .dialog button").last.click()
+    expect(owned).to_contain_text("Stop requested" if lang == "en" else "Остановка запрошена")
     assert stub.cancellations[-1][0] == "task:t-checkout"
     assert stub.cancellations[-1][1]["preview_fingerprint"] == "a" * 64
-    expect(owned).to_contain_text("Stop requested" if lang == "en" else "Остановка запрошена")
     page.keyboard.press("Escape")
 
     # A new task with its brief, an assignee and what it waits for.

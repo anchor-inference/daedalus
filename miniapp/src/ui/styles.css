@@ -4407,6 +4407,11 @@ button.staff-row:hover { background: var(--surface-2); }
 .focus-enable-advanced[open] > summary { margin-bottom: 12px; }
 .project-extensions, .project-runtime-hosts { margin: 14px 0; padding: 12px 0; border-top: 1px solid var(--line); }
 .project-extensions > summary, .project-runtime-hosts > summary { cursor: pointer; font-weight: 600; }
+.project-budget { margin: 14px 0; padding: 12px 0; border-top: 1px solid var(--line); }
+.project-budget > summary { cursor: pointer; font-weight: 600; }
+.project-budget-balances { display: grid; gap: 5px; margin: 10px 0; font-size: var(--fs-13); }
+.project-budget-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 10px; margin: 10px 0; }
+.project-budget-fields input { min-width: 0; }
 .project-extension-list { display: grid; gap: 12px; margin-top: 12px; }
 .project-extension { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 12px; min-width: 0; }
 .project-extension-head { display: flex; justify-content: space-between; gap: 8px; }

@@ -23,6 +23,7 @@ from daedalus.stores.control import (
     one,
 )
 from daedalus.stores.executions import ACTIVE
+from daedalus.stores.goal_budget import requires_priced_native_in
 from daedalus.stores.outbox import Claim, OutboxStore
 from daedalus.stores.runtime_release import no_entry_in
 from daedalus.stores.staff import StaffError, daedalus_cannot_reach
@@ -74,6 +75,8 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
             raise StaffError(f"{member['name']} cannot work on task {task_id}: "
                              + daedalus_cannot_reach(folder["path"], folder["env"],
                                                      app.manager.projects.local_env))
+        if member["harness"] != "daedalus" and await requires_priced_native_in(conn, task["project_id"]):
+            raise ControlConflict("a dollar-capped project needs priced native worker admission")
         if task["status"] not in ("todo", "blocked"):
             raise ControlConflict("reopen the task before launching a new attempt")
         if await one(conn, "SELECT 1 FROM comparison_groups WHERE task_id = ? AND state IN ('planned','active','ready')", (task_id,)):

@@ -44,10 +44,14 @@ class Constraint:
     run_id: str | None = None
     session_ids: tuple[str, ...] = ()
     since: str | None = None
+    scope_only: bool = False
 
 
 async def _historical(conn: aiosqlite.Connection, limit: Constraint) -> int:
     clauses, args = [], []
+    if limit.scope_only:
+        clauses.append("s.scope_key = ?")
+        args.append(limit.key)
     for column, value in (("provider_id", limit.provider_id), ("run_id", limit.run_id), ("at", limit.since)):
         if value is not None:
             clauses.append(f"{column} {'>=' if column == 'at' else '='} ?")
@@ -56,7 +60,10 @@ async def _historical(conn: aiosqlite.Connection, limit: Constraint) -> int:
         clauses.append("session_id IN (" + ",".join("?" for _ in limit.session_ids) + ")")
         args.extend(limit.session_ids)
     where = " WHERE " + " AND ".join(clauses) if clauses else ""
-    cursor = await conn.execute("SELECT cost_usd,inference_reservation_id,provider_id,model,session_id,run_id FROM usage_events" + where, tuple(args))
+    source = ("usage_events u JOIN inference_reservation_scopes s"
+              " ON s.reservation_id = u.inference_reservation_id") if limit.scope_only else "usage_events u"
+    cursor = await conn.execute("SELECT u.cost_usd,u.inference_reservation_id,u.provider_id,u.model,u.session_id,u.run_id"
+                                " FROM " + source + where, tuple(args))
     total = 0
     try:
         async for row in cursor:
@@ -82,11 +89,15 @@ async def held_in(conn: aiosqlite.Connection, limit: Constraint) -> tuple[int, s
         pool_matches,
     )
 
-    pools = [row for row in await pool_balances_in(conn) if pool_matches(row, limit)]
+    pools = [row for row in await pool_balances_in(conn)
+             if (limit.key in row["scopes"] if limit.scope_only else pool_matches(row, limit))]
     covered = {row['id'] for row in pools}
     total = sum(row['held'] for row in pools)
     clauses = ["r.state IN ('reserved','inflight','unknown')"]
     args: list[Any] = []
+    if limit.scope_only:
+        clauses.append("s.scope_key = ?")
+        args.append(limit.key)
     for column, value in (("provider_id", limit.provider_id), ("run_id", limit.run_id)):
         if value is not None:
             clauses.append(f"r.{column} = ?")
@@ -96,8 +107,10 @@ async def held_in(conn: aiosqlite.Connection, limit: Constraint) -> tuple[int, s
                        " OR EXISTS (SELECT 1 FROM inference_reservation_scopes s"
                        " WHERE s.reservation_id = r.id AND s.scope_key = ?))")
         args.extend((*limit.session_ids, limit.key))
-    async with conn.execute("SELECT r.comparison_slot_id,r.quoted_microusd FROM inference_reservations r"
-                            " WHERE " + " AND ".join(clauses), tuple(args)) as cursor:
+    source = ("inference_reservations r JOIN inference_reservation_scopes s"
+              " ON s.reservation_id = r.id") if limit.scope_only else "inference_reservations r"
+    async with conn.execute("SELECT r.comparison_slot_id,r.quoted_microusd FROM " + source
+                            + " WHERE " + " AND ".join(clauses), tuple(args)) as cursor:
         for row in await cursor.fetchall():
             if row['comparison_slot_id'] not in covered:
                 total += row['quoted_microusd']

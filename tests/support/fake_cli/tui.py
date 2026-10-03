@@ -283,10 +283,25 @@ class Step:
 def script_of(prompt: str) -> list[Step]:
     """The steps a prompt asks for. A pointer prompt is replaced by the file it points at, as a model
     would read it first."""
+    def instructions(text: str) -> str:
+        prefix, marker, payload = text.rpartition("\n\nCurrent task context (pinned sources; recheck if the task changes):\n")
+        if marker:
+            try:
+                packet, end = json.JSONDecoder().raw_decode(payload)
+            except ValueError:
+                return text
+            if isinstance(packet, dict) and all(key in packet for key in ("task_id", "contract", "source_refs", "packet_hash")):
+                # The pinned contract repeats the title and may quote fixture scripts in facts.
+                # It is reference data, not another request for the fake model to execute.
+                return prefix + payload[end:]
+        return text
+
+    prompt = instructions(prompt)
     pointer = _POINTER.search(prompt)
     if pointer:
         with contextlib.suppress(OSError):
             prompt = Path(pointer.group(1)).read_text(encoding="utf-8")
+            prompt = instructions(prompt)
     if SELF_CHECK in " ".join(prompt.split()):
         # The harness manager's self-check prompt is plain words for a real model; the fake model
         # understands this one sentence the way a real one does.

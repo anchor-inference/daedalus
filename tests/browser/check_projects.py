@@ -176,6 +176,7 @@ def run() -> int:
         name = page.locator("#project-name")
         expect(name).to_be_visible()
         name.fill("Plain")
+        page.get_by_role("button", name="Start with a clear first task").click()
         page.get_by_role("button", name="Add", exact=True).click()
         expect(page.locator(".sheet")).to_have_count(0)
         assert created[0] == {"name": "Plain"}, created[0]

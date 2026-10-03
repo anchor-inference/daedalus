@@ -34,7 +34,7 @@ from daedalus.stores.control import ControlConflict, ControlStore, Entity, Princ
 from daedalus.stores.database import Database
 from daedalus.stores.files import FILES_TENANT, FileStore
 
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 MAX_ARCHIVE_BYTES = 256 << 20
 MAX_ENTRY_BYTES = 64 << 20
 MAX_ROWS = 100_000
@@ -43,7 +43,8 @@ SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 # Every query is scoped through the project, its tasks, sessions, or results. The list is deliberately
 # explicit: a new credential or runtime table must be reviewed before it could enter an archive.
-# Staff context packets stay out: they pin an old launch, and restored staff sessions cannot resume it.
+# Supplied context packets are retained only as immutable historical provenance. Their original
+# identities and hash cannot be rewritten into a restored staff session's live packet table.
 QUERIES: dict[str, str] = {
     "projects": "SELECT * FROM projects WHERE id = ?",
     "project_briefs": "SELECT * FROM project_briefs WHERE project_id = ? ORDER BY section",
@@ -55,6 +56,7 @@ QUERIES: dict[str, str] = {
     "events": "SELECT e.* FROM events e JOIN runs r ON r.id = e.run_id JOIN sessions s ON s.id = r.session_id WHERE s.project_id = ? ORDER BY e.seq",
     "staff": "SELECT * FROM staff WHERE project_id = ? ORDER BY created_at,id",
     "staff_sessions": "SELECT ss.* FROM staff_sessions ss JOIN staff s ON s.id = ss.staff_id WHERE s.project_id = ? ORDER BY ss.started_at,ss.id",
+    "staff_context_packets": "SELECT p.* FROM staff_context_packets p JOIN staff_sessions ss ON ss.id = p.staff_session_id JOIN staff s ON s.id = ss.staff_id WHERE s.project_id = ? ORDER BY p.created_at,p.staff_session_id",
     "staff_messages": "SELECT sm.* FROM staff_messages sm JOIN staff s ON s.id = sm.staff_id WHERE s.project_id = ? ORDER BY sm.created_at,sm.id",
     "staff_role_versions": "SELECT v.* FROM staff_role_versions v JOIN staff s ON s.id = v.staff_id WHERE s.project_id = ? ORDER BY v.staff_id,v.role_revision",
     "dispatches": "SELECT * FROM dispatches WHERE project_id = ? ORDER BY seq",
@@ -94,7 +96,7 @@ QUERIES: dict[str, str] = {
     "scope_impacts": "SELECT * FROM scope_impacts WHERE project_id = ? ORDER BY created_at,id",
 }
 
-ARCHIVED_ONLY = frozenset({"app_events", "replan_fingerprints", "scope_impacts", "board_workflow_runs", "board_workflow_steps"})
+ARCHIVED_ONLY = frozenset({"app_events", "replan_fingerprints", "scope_impacts", "board_workflow_runs", "board_workflow_steps", "staff_context_packets"})
 
 # These columns would carry local locations, resumable authority, or mutable runtime state. They are
 # omitted rather than masked inside an otherwise plausible live object.
@@ -168,6 +170,30 @@ class CheckedArchive:
 
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _validate_historical_packet(row: dict[str, Any], sessions: dict[str, str]) -> None:
+    try:
+        source = row["packet_json"]
+        if not isinstance(source, str) or len(source) > 64_000:
+            raise ArchiveRefused("historical context packet exceeds its bound")
+        packet = json.loads(source)
+        if not isinstance(packet, dict) or set(packet) != {
+                "task_id", "role", "role_hint", "title", "contract_revision", "contract",
+                "dependencies", "facts", "artifacts", "source_refs", "packet_hash"}:
+            raise ArchiveRefused("historical context packet has an invalid shape")
+        body = {key: value for key, value in packet.items() if key != "packet_hash"}
+        digest = "sha256:" + _sha(canonical(body).encode())
+        if (packet["packet_hash"] != digest or row["packet_hash"] != digest
+                or row["task_id"] != packet["task_id"] or row["role"] != packet["role"]
+                or row["role_hint"] != packet["role_hint"]
+                or row["contract_revision"] != packet["contract_revision"]
+                or sessions.get(row["staff_session_id"]) != row["task_id"]):
+            raise ArchiveRefused("historical context packet does not match its source launch")
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        if isinstance(exc, ArchiveRefused):
+            raise
+        raise ArchiveRefused("historical context packet is invalid") from exc
 
 
 def _now() -> str:
@@ -275,6 +301,12 @@ def check_archive(data: bytes) -> CheckedArchive:
             raise ArchiveRefused("archive contains forbidden fields")
         if sum(map(len, rows.values())) > MAX_ROWS:
             raise ArchiveRefused("archive has too many rows")
+        sessions = {row["id"]: row["task_id"] for row in rows["staff_sessions"]}
+        task_ids = {row["id"] for row in rows["board_tasks"]}
+        for row in rows["staff_context_packets"]:
+            if row.get("task_id") not in task_ids:
+                raise ArchiveRefused("historical context packet names a task outside the archive")
+            _validate_historical_packet(row, sessions)
         blobs = {name[6:]: value for name, value in entries.items() if name.startswith("files/")}
         reports = {name[8:]: value for name, value in entries.items() if name.startswith("reports/")}
         run_blobs = {name[12:]: value for name, value in entries.items() if name.startswith("run-details/")}
@@ -695,6 +727,19 @@ class WorkspaceArchive:
                 (archive.digest, FORMAT_VERSION, archive.source_project_id, identity,
                  canonical(archive.counts), _now(), principal.actor_id, mutation.receipt_id),
             )
+            for source in archive.rows["staff_context_packets"]:
+                historical_id = uuid.uuid5(uuid.NAMESPACE_URL,
+                                           f"{archive.digest}:staff-context:{source['staff_session_id']}").hex
+                await conn.execute(
+                    "INSERT INTO historical_staff_context_packets(id,archive_digest,project_id,task_id,"
+                    "source_staff_session_id,source_task_id,source_packet_hash,source_packet_json,"
+                    "source_role,source_role_hint,source_contract_revision,source_created_at,imported_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (historical_id, archive.digest, identity, id_map["board_tasks"][source["task_id"]],
+                     source["staff_session_id"], source["task_id"], source["packet_hash"],
+                     source["packet_json"], source["role"], source["role_hint"],
+                     source["contract_revision"], source["created_at"], _now()),
+                )
             return {"project_id": identity, "archive_digest": archive.digest,
                     "restored_rows": {name: count for name, count in archive.counts.items() if name not in ARCHIVED_ONLY},
                     "archived_only": {name: archive.counts[name] for name in ARCHIVED_ONLY},

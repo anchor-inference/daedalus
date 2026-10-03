@@ -70,12 +70,14 @@ from daedalus.extensions import (
     api_control,
     api_coordinator_authority,
     api_files,
+    api_goal_budget,
     api_harnesses,
     api_integrations,
     api_issue_sync,
     api_knowledge,
     api_lifecycle,
     api_plugins,
+    api_project_start,
     api_projects,
     api_runtime,
     api_skill_quality,
@@ -1513,6 +1515,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_control.register(api, app, auth)
     api_coordinator_authority.register(api, app, auth)
     api_projects.register(api, app, auth)
+    api_project_start.register(api, app, auth)
+    api_goal_budget.register(api, app, auth)
     api_knowledge.register(api, app, auth)
     api_runtime.register(api, app, auth)
     api_lifecycle.register(api, app, auth)

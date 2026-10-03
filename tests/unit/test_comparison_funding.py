@@ -22,6 +22,7 @@ from daedalus.stores.comparisons import create_group
 from daedalus.stores.control import ControlStore, Principal, Scope, canonical
 from daedalus.stores.database import Database
 from daedalus.stores.executions import ExecutionStore
+from daedalus.stores.goal_budget import set_budget_in, view_in
 from daedalus.stores.inference_budget import BudgetRefused, Constraint, InferenceBudget
 from daedalus.stores.runtime_release import physical_exit_in
 from tests.unit.test_inference_admission import answer, endpoint, provider, request
@@ -98,6 +99,31 @@ async def test_both_allocations_reserve_atomically_before_either_can_start(db: D
     assert len(await fund(db, pair)) == 2
     with pytest.raises(BudgetRefused, match='available balance'):
         await reserve(db, 'ordinary', 1, constraints=(Constraint('total:all', 200),))
+
+
+async def test_project_goal_cap_reserves_the_whole_pair_and_retains_exact_goal_attribution(db: Database, pair) -> None:
+    await db.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at)"
+                     " VALUES ('project',1,'Compare both alternatives','operator','now')")
+    async with db.transaction() as conn:
+        await set_budget_in(conn, project_id='project', budget_id='goal-budget', expected_goal_revision=1,
+                            limit_usd='0.000199', coordination_limit_usd='0.000050')
+    with pytest.raises(BudgetRefused, match='goal:goal-budget'):
+        await fund(db, pair)
+    assert not await db.fetchall('SELECT id FROM comparison_funding_slots')
+    assert not await db.fetchall('SELECT slot_id FROM goal_budget_allocations')
+    async with db.transaction() as conn:
+        await set_budget_in(conn, project_id='project', budget_id='ignored-new-origin', expected_goal_revision=1,
+                            limit_usd='0.000200', coordination_limit_usd='0.000050')
+    assert len(await fund(db, pair)) == 2
+    assert [tuple(row) for row in await db.fetchall(
+        'SELECT slot_id,budget_id,project_id,goal_revision FROM goal_budget_allocations ORDER BY slot_id'
+    )] == [('slot1', 'goal-budget', 'project', 1), ('slot2', 'goal-budget', 'project', 1)]
+    async with db.transaction() as conn:
+        balance = await view_in(conn, 'project')
+    assert balance is not None
+    assert balance['total']['held_usd'] == '0.000200'
+    assert balance['total']['available_usd'] == '0.000000'
+    assert balance['coordination']['held_usd'] == '0.000000'
 
 
 async def test_existing_normal_reservation_blocks_pair_without_leaving_one_slot(db: Database, pair) -> None:

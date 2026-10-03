@@ -19,6 +19,7 @@ import { LifecycleCancel } from "./project/LifecycleCancel";
 import { CoordinatorAuthority } from "./project/CoordinatorAuthority";
 import { ProjectKnowledge } from "./project/ProjectKnowledge";
 import { ProjectArchive } from "./project/ProjectArchive";
+import { ProjectBudget, budgetKey } from "./project/ProjectBudget";
 
 const PICKED = "daedalus.project";
 
@@ -49,7 +50,7 @@ function afterChange(): void {
   invalidate("/api/sessions");
 }
 
-type ProjectWrite = { method: "PATCH" | "POST" | "DELETE"; path: string; body: Record<string, unknown>; label: string };
+type ProjectWrite = { method: "PATCH" | "POST" | "DELETE" | "PUT"; path: string; body: Record<string, unknown>; label: string };
 type WriteProject = (method: ProjectWrite["method"], path: string, fields: Record<string, unknown>, label: string, onSuccess?: () => void) => Promise<boolean>;
 
 function savedProjectWrite(projectId: string): ProjectWrite | null {
@@ -57,8 +58,9 @@ function savedProjectWrite(projectId: string): ProjectWrite | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(`daedalus.project.write.${projectId}`) ?? "null");
     const suffix = typeof value?.path === "string" && value.path.startsWith(base) ? value.path.slice(base.length) : null;
-    const pathAllowed = suffix === "" || suffix === "/folders" || (typeof suffix === "string" && /^\/folders\/[^/]+$/.test(suffix));
-    return pathAllowed && ["PATCH", "POST", "DELETE"].includes(value.method)
+    const pathAllowed = suffix === "" || suffix === "/folders" || suffix === "/budget"
+      || (typeof suffix === "string" && /^\/folders\/[^/]+$/.test(suffix));
+    return pathAllowed && ["PATCH", "POST", "DELETE", "PUT"].includes(value.method)
       && typeof value.body?.client_operation_id === "string" && Number.isInteger(value.body?.expected_entity_revision)
       && typeof value.label === "string" ? value as ProjectWrite : null;
   } catch { return null; }
@@ -93,6 +95,7 @@ function useProjectWrites(projectId: string, revision: number | undefined, readF
       remember(null);
       setConflict(null);
       setRequiredRevision(receipt.entity_revision);
+      if (intent.path === budgetKey(projectId)) invalidate(intent.path);
       afterChange(); refresh();
       toast(intent.label);
       (onSuccess ?? completion.current)?.();
@@ -105,6 +108,7 @@ function useProjectWrites(projectId: string, revision: number | undefined, readF
         const currentRevision = error.data.current_revision ?? (detail && typeof detail === "object" ? (detail as Record<string, unknown>).current_revision : null);
         if (Number.isInteger(currentRevision)) setConflict(Number(intent.body.expected_entity_revision));
         completion.current = null;
+        if (intent.path === budgetKey(projectId)) invalidate(intent.path);
         refresh();
       } else if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
         remember(null);
@@ -133,6 +137,7 @@ function useProjectWrites(projectId: string, revision: number | undefined, readF
       if (!fresh) return;
       setRequiredRevision(fresh.entity_revision ?? null);
       setConflict(null);
+      invalidate(budgetKey(projectId));
       afterChange(); refresh();
     } catch (error) { toast(errorText(error)); }
     finally { setBusy(false); }
@@ -163,7 +168,7 @@ export function ProjectSwitcher({ projects, current, onPick, onClose, toast }: {
     onPick(id);
     onClose();
   };
-  if (adding) return <AddProjectSheet onClose={() => (projects.length ? setAdding(false) : onClose())} onAdded={(p) => { setAdding(false); pick(p.id); }} toast={toast} />;
+  if (adding) return <AddProjectSheet firstProject={projects.length === 0} onClose={() => (projects.length ? setAdding(false) : onClose())} onAdded={(p) => { setAdding(false); pick(p.id); }} toast={toast} />;
   if (editing) return <ProjectSettingsSheet project={editing} onClose={() => setEditing(null)} onRemoved={() => { setEditing(null); if (editing.id === current) onPick(""); onClose(); }} toast={toast} />;
   return (
     <Sheet title={t("shell.projects")} onClose={onClose} size="narrow">
@@ -265,19 +270,106 @@ function EnvNote({ env, environments }: { env: Env; environments?: ProjectEnviro
 }
 
 /** A name is enough. Choosing an existing folder is the optional second step. */
-export function AddProjectSheet({ onClose, onAdded, toast }: { onClose: () => void; onAdded: (p: Project) => void; toast: (t: string) => void }) {
+type StartDraft = { name: string; root: string; env: Env | ""; guided: boolean; goal: string;
+  constraints: string; taskTitle: string; checks: string; owner: "manual" | "later" };
+type StartIntent = { client_operation_id: string; expected_collection_revision: number; name: string;
+  goal: string; constraints: string; task_title: string; checks: string[]; owner_intent: "manual" | "later";
+  folder?: { path: string; env?: Env } };
+
+function savedStart<T>(key: string): T | null {
+  try { return JSON.parse(sessionStorage.getItem(key) ?? "null") as T | null; }
+  catch { return null; }
+}
+
+function keepStart(key: string, value: unknown | null): void {
+  try { if (value === null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, JSON.stringify(value)); }
+  catch { /* the mounted form retains the draft and exact request */ }
+}
+
+export function AddProjectSheet({ onClose, onAdded, toast, firstProject = false }: { onClose: () => void; onAdded: (p: Project) => void;
+  toast: (t: string) => void; firstProject?: boolean }) {
   const environments = useEnvironments().data;
-  const [name, setName] = useState("");
-  const [root, setRoot] = useState("");
-  const [env, setEnv] = useState<Env | "">("");
+  const [initial] = useState(() => savedStart<StartDraft>("daedalus.project.start.draft"));
+  const [name, setName] = useState(initial?.name ?? "");
+  const [root, setRoot] = useState(initial?.root ?? "");
+  const [env, setEnv] = useState<Env | "">(initial?.env ?? "");
+  const [guided, setGuided] = useState(initial?.guided ?? firstProject);
+  const [goal, setGoal] = useState(initial?.goal ?? "");
+  const [constraints, setConstraints] = useState(initial?.constraints ?? "");
+  const [taskTitle, setTaskTitle] = useState(initial?.taskTitle ?? "");
+  const [checks, setChecks] = useState(initial?.checks ?? "");
+  const [owner, setOwner] = useState<"manual" | "later">(initial?.owner ?? "manual");
+  const [pending, setPending] = useState<StartIntent | null>(() => savedStart<StartIntent>("daedalus.project.start.pending"));
+  const [conflict, setConflict] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const offline = useOffline();
   const typed = root.trim();
   const where: Env = env || environments?.local || "container";
   const local = !environments || where === environments.local;
   const rootProblem = pathProblem(typed) ? t("project.root.problem") : "";
+  const criteria = checks.split("\n").map((line) => line.trim()).filter(Boolean);
+  const tooMany = criteria.length > 12;
+  useEffect(() => keepStart("daedalus.project.start.draft", { name, root, env, guided, goal, constraints, taskTitle, checks, owner }),
+            [name, root, env, guided, goal, constraints, taskTitle, checks, owner]);
+
+  async function sendStart(intent: StartIntent) {
+    if (busy || offline) return;
+    setBusy(true);
+    try {
+      const receipt = await api.post<{ project_id: string; task_id: string; receipt_id: string }>("/api/project-start", intent);
+      if (!receipt?.receipt_id || !receipt?.project_id || !receipt?.task_id) throw new Error(t("project.start.badReceipt"));
+      const projects = await api.get<Project[]>("/api/projects");
+      const created = projects.find((item) => item.id === receipt.project_id);
+      if (!created) throw new Error(t("project.start.projectMissing"));
+      keepStart("daedalus.project.start.pending", null);
+      keepStart("daedalus.project.start.draft", null);
+      setPending(null);
+      afterChange();
+      toast(t("project.start.created"));
+      onAdded(created);
+      navigate(projectPagePath(created.id, "board", { task: receipt.task_id }));
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.status === 409 &&
+          !failure.message.includes("command identity was reused with a different request")) {
+        keepStart("daedalus.project.start.pending", null);
+        setPending(null);
+        setConflict(true);
+      }
+      toast(errorText(failure));
+    } finally { setBusy(false); }
+  }
+
+  async function reviewConflict() {
+    if (busy || offline) return;
+    setBusy(true);
+    try {
+      await api.get<Project[]>("/api/projects");
+      await api.get<{ collection_revision: number }>("/api/control/revisions");
+      setConflict(false);
+    } catch (failure) { toast(errorText(failure)); }
+    finally { setBusy(false); }
+  }
+
   async function add() {
-    if (!name.trim() || rootProblem || busy) return;
+    if (!name.trim() || rootProblem || busy || offline || pending || conflict) return;
+    if (guided) {
+      if (!goal.trim() || !constraints.trim() || !taskTitle.trim() || !criteria.length || tooMany) return;
+      setBusy(true);
+      try {
+        const revisions = await api.get<{ collection_revision: number }>("/api/control/revisions");
+        if (!Number.isInteger(revisions.collection_revision)) throw new Error(t("project.start.unavailable"));
+        const intent: StartIntent = { client_operation_id: crypto.randomUUID(),
+          expected_collection_revision: revisions.collection_revision, name: name.trim(), goal: goal.trim(),
+          constraints: constraints.trim(), task_title: taskTitle.trim(), checks: criteria, owner_intent: owner,
+          ...(typed ? { folder: { path: typed, ...(env ? { env } : {}) } } : {}) };
+        keepStart("daedalus.project.start.pending", intent);
+        setPending(intent);
+        setBusy(false);
+        await sendStart(intent);
+      } catch (failure) { setBusy(false); toast(errorText(failure)); }
+      return;
+    }
     setBusy(true);
     try {
       const folders = typed ? [{ path: typed, ...(env ? { env } : {}) }] : undefined;
@@ -295,6 +387,27 @@ export function AddProjectSheet({ onClose, onAdded, toast }: { onClose: () => vo
     <Sheet title={t("shell.projects.add")} onClose={onClose} size="narrow">
       <label className="field" htmlFor="project-name">{t("common.name")}</label>
       <input id="project-name" className="field" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t("project.name.placeholder")} />
+      <button className="disclosure" type="button" onClick={() => setGuided((value) => !value)} aria-expanded={guided} disabled={!!pending || busy}>
+        <span className={`chev ${guided ? "down" : ""}`}>›</span> {t("project.start.title")}
+      </button>
+      {guided && <div className="project-start-fields">
+        <p className="sub">{t("project.start.intro")}</p>
+        <label className="field" htmlFor="project-start-goal">{t("project.start.goal")}</label>
+        <textarea id="project-start-goal" className="field" rows={3} maxLength={4000} value={goal} disabled={!!pending || busy} onChange={(event) => setGoal(event.target.value)} />
+        <label className="field" htmlFor="project-start-constraints">{t("project.start.constraints")}</label>
+        <textarea id="project-start-constraints" className="field" rows={2} maxLength={4000} value={constraints} disabled={!!pending || busy} onChange={(event) => setConstraints(event.target.value)} />
+        <label className="field" htmlFor="project-start-task">{t("project.start.task")}</label>
+        <input id="project-start-task" className="field" maxLength={200} value={taskTitle} disabled={!!pending || busy} onChange={(event) => setTaskTitle(event.target.value)} />
+        <label className="field" htmlFor="project-start-checks">{t("project.start.checks")}</label>
+        <textarea id="project-start-checks" className="field" rows={3} value={checks} disabled={!!pending || busy} onChange={(event) => setChecks(event.target.value)} placeholder={t("project.start.checksHint")} />
+        {tooMany && <p className="sub attn" role="status">{t("project.start.tooMany")}</p>}
+        <label className="field" htmlFor="project-start-owner">{t("project.start.owner")}</label>
+        <select id="project-start-owner" className="field" value={owner} disabled={!!pending || busy} onChange={(event) => setOwner(event.target.value as "manual" | "later")}>
+          <option value="manual">{t("project.start.ownerManual")}</option>
+          <option value="later">{t("project.start.ownerLater")}</option>
+        </select>
+        <p className="sub">{t("project.start.ownerHelp")}</p>
+      </div>}
       <button className="disclosure" type="button" onClick={() => setChoosing((value) => !value)} aria-expanded={choosing}><span className={`chev ${choosing ? "down" : ""}`}>›</span> {t("project.existing")}</button>
       {choosing ? (
         <>
@@ -304,9 +417,13 @@ export function AddProjectSheet({ onClose, onAdded, toast }: { onClose: () => vo
         </>
       ) : <div className="sub">{t("project.automatic.hint")}</div>}
       {rootProblem && <div className="sub attn">{rootProblem}</div>}
+      {pending && <p className="sub attn" role="status">{t("project.start.pending")} <button type="button" className="linkbtn" disabled={busy || offline} onClick={() => void sendStart(pending)}>{t("common.retry")}</button></p>}
+      {conflict && <p className="sub attn" role="status">{t("project.start.conflict")} <button type="button" className="linkbtn" disabled={busy || offline} onClick={() => void reviewConflict()}>{t("project.start.reviewChange")}</button></p>}
+      {offline && <p className="sub attn" role="status">{t("result.block.unconfirmed")}</p>}
       <div className="sheet-foot">
         <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" onClick={add} disabled={busy || !name.trim() || !!rootProblem}>{t("common.add")}</button>
+        <button className="btn primary" onClick={add} disabled={busy || offline || !!pending || conflict || !name.trim() || !!rootProblem ||
+          (guided && (!goal.trim() || !constraints.trim() || !taskTitle.trim() || !criteria.length || tooMany))}>{t(guided ? "project.start.create" : "common.add")}</button>
       </div>
     </Sheet>
   );
@@ -527,6 +644,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
         <span>{t("project.snapshots")}</span>
         <span className="sub">{t("project.snapshots.hint.edit")}</span>
       </label>
+      <ProjectBudget projectId={project.id} write={writes.write} canWrite={writes.ready} />
       <ProjectExtensions projectId={project.id} toast={toast} />
       <ProjectArchive project={project} toast={toast} onChanged={afterChange} readFailed={!!projects.error}
         onOpenRestored={(id) => { rememberProject(id); onClose(); navigate(projectPagePath(id, "team")); }} />

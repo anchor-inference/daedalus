@@ -21,6 +21,8 @@ import { ResultFlow } from "./ResultFlow";
 import { TaskWorkflow } from "./TaskWorkflow";
 import { TaskComparison } from "./TaskComparison";
 import { TaskContext } from "./TaskContext";
+import { ManualResult } from "./ManualResult";
+import { ManualReopenRecovery } from "./ManualReopen";
 import { Harness, statusTone } from "../team/team";
 import { confirmAsync, errorText } from "../ui";
 import {
@@ -703,6 +705,8 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
       {task && <LifecycleCancel kind="task" id={task.id} projectId={projectId} onDone={onDone} toast={toast} />}
       {task && <TaskWorkflow projectId={projectId} task={task} tasks={data.tasks} />}
       {task && <TaskContext task={task} staff={data.staff} />}
+      {task && !task.branch && (task.status === "todo" || task.status === "blocked" || task.status === "review") && <ManualResult task={task} toast={toast} onChanged={onDone} />}
+      {task && task.status !== "done" && <ManualReopenRecovery task={task} toast={toast} onChanged={onDone} />}
       {task && <TaskComparison task={task} staff={data.staff} onChanged={onDone} toast={toast} />}
 
       {task && hasAcceptance(task) && <AcceptanceSection task={task} />}

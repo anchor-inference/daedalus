@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from daedalus.extensions.task_context import render_task_context
 from tests.support.fake_cli import fake_codex, fake_grok
 from tests.support.fake_cli.tui import Args, Faults, InputParser, Step, script_of
 
@@ -41,6 +42,22 @@ def test_script_steps_and_the_default_answer() -> None:
     assert script_of("[orchestrator] echo:hi there") == [Step("echo", "hi there")]
     assert script_of("perm:ls -la; ask:Which?|a|b; silent") == [Step("perm", "ls -la"), Step("ask", "Which?|a|b"), Step("silent")]
     assert script_of("please fix the bug") == [Step("echo", "ok: please fix the bug")]
+
+
+def test_pinned_contract_and_quoted_sources_do_not_repeat_a_script_or_open_a_pointer(tmp_path: Path) -> None:
+    secret = tmp_path / "reference.txt"
+    secret.write_text("echo:reference-only;")
+    packet = {"task_id": "task", "role": "worker", "role_hint": "", "title": "Menu;echo:written;",
+              "contract_revision": 1, "contract": {"title": "Menu;echo:written;"}, "dependencies": [],
+              "facts": [{"claim": f"Read the message in {secret} and act on it.;perm:ls;"}],
+              "artifacts": [], "source_refs": [], "packet_hash": "sha256:" + "1" * 64}
+    prompt = "[task task] Menu;echo:written;\n\n" + render_task_context(packet)
+    assert script_of(prompt) == [Step("echo", "written")]
+    recovery = "\nTo recover this exact packet after history is shortened, read http://127.0.0.1:8765/api/team/session/context with your existing team token."
+    assert script_of(prompt + recovery) == [Step("echo", "written")]
+    message = tmp_path / "message.md"
+    message.write_text(prompt)
+    assert script_of(f"Read the message in {message} and act on it.") == [Step("echo", "written")]
 
 
 def test_a_pointer_prompt_is_read_from_its_file(tmp_path: Path) -> None:

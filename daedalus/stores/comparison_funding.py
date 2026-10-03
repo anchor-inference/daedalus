@@ -13,6 +13,7 @@ import aiosqlite
 from daedalus.config import PROVIDER_KINDS
 from daedalus.stores.control import canonical, now, one
 from daedalus.stores.database import Database
+from daedalus.stores.goal_budget import goal_constraints_in, pin_allocation_in
 from daedalus.stores.inference_budget import BudgetRefused, Constraint, _historical
 from daedalus.stores.runtime_release import physical_exit_in
 
@@ -68,8 +69,6 @@ class ComparisonFunding:
 
         if len(allocations) != 2 or {item.slot for item in allocations} != {1, 2} or len({item.id for item in allocations}) != 2:
             raise BudgetRefused('a comparison reserves exactly two distinct slots')
-        if len({limit.key for limit in constraints}) != len(constraints):
-            raise BudgetRefused('each applicable balance must be supplied once')
         group = await one(conn, "SELECT g.*,t.project_id,t.contract_revision AS current_contract"
                           " FROM comparison_groups g JOIN board_tasks t ON t.id = g.task_id WHERE g.id = ?", (group_id,))
         generation = await one(conn, "SELECT value FROM kv WHERE key = 'execution_host_generation'")
@@ -77,6 +76,9 @@ class ComparisonFunding:
                 or group['contract_revision'] != group['current_contract'] or generation is None
                 or type(host_generation) is not int or json.loads(generation['value']) != host_generation):
             raise BudgetRefused('the pair has no current host and task contract')
+        constraints += await goal_constraints_in(conn, group['project_id'], coordinator=False)
+        if len({limit.key for limit in constraints}) != len(constraints):
+            raise BudgetRefused('each applicable balance must be supplied once')
         if await one(conn, "SELECT 1 FROM comparison_funding_slots WHERE group_id = ?", (group_id,)):
             raise BudgetRefused('the comparison was already funded')
         for item in allocations:
@@ -138,6 +140,7 @@ class ComparisonFunding:
                 if limit.provider_id is None or item.provider_id == limit.provider_id:
                     await conn.execute("INSERT INTO comparison_funding_scopes(slot_id,scope_key,cap_microusd) VALUES (?,?,?)",
                                        (item.id, limit.key, limit.cap_microusd))
+            await pin_allocation_in(conn, item.id, group['project_id'])
             result.append({'slot_id': item.id, 'slot': item.slot, 'reserved_microusd': item.allowance_microusd,
                            'rate_version': item.rate_version, 'state': 'held'})
         return result

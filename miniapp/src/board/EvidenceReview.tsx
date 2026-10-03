@@ -9,7 +9,8 @@ import { errorText } from "../ui";
 import type { ProjectTask, Review } from "./board";
 import type { ResultReceipt } from "./ResultFlow";
 
-export type ResultContract = { task_id: string; contract_revision: number; entity_revision: number; checklist?: { id: string; text: string }[] };
+export type ResultContract = { task_id: string; contract_revision: number; entity_revision: number;
+  checklist?: { id: string; text: string }[]; requirements?: { id: string; text: string; file_id?: string | null }[] };
 type Evidence = { evidence_id: string; criterion_id: string; observation: string; verification: "verified" | "failed" | "stale"; manifest_digest_before: string | null; manifest_digest_after: string | null; observed_at: string };
 
 export function evidenceCoverage(checklist: { id: string }[], evidence: Evidence[]): boolean {
