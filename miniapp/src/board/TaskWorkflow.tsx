@@ -45,7 +45,7 @@ function definition(steps: StepDraft[]): Definition {
 export function TaskWorkflow({ projectId, task, tasks }: { projectId: string; task: ProjectTask; tasks: ProjectTask[] }) {
   const offline = useOffline();
   const [open, setOpen] = useState(false);
-  return <section className="task-workflow">
+  return <section className="task-workflow task-workflow-section">
     <button type="button" className="pboard-fold section-title" aria-expanded={open} onClick={() => setOpen(!open)}>{t("taskWorkflow.title")}</button>
     {open && <WorkflowContent projectId={projectId} task={task} tasks={tasks} offline={offline} />}
   </section>;

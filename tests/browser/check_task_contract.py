@@ -1,4 +1,4 @@
-"""What a card was asked and how its acceptance went, on a project's board, at 390 and 1280 px, in both languages.
+"""What a card was asked and how its acceptance went, on a project's board at phone and desktop widths.
 
 A finished card used to say only that it was done: whether anybody had checked it, and against what,
 lived in the orchestrator's chat. Checked here: a card in review or done names its acceptance level
@@ -194,7 +194,7 @@ def main() -> int:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(executable_path=CHROMIUM)
         for lang in ("en", "ru"):
-            for width, height in ((390, 844), (1280, 860)):
+            for width, height in ((320, 844), (390, 844), (1440, 860)):
                 phone = width < 1024
                 for step in (cards, menu_sheet, prices_sheet, photos_sheet, reworded):
                     context = browser.new_context(viewport={"width": width, "height": height}, is_mobile=phone, has_touch=phone)

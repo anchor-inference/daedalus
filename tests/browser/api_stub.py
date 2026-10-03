@@ -800,6 +800,19 @@ class BoardStub:
     def answer(self, method: str, path: str, query: str, body: dict | None) -> tuple[int, object] | None:
         """``(status, body)`` for a route of the board, or None for anything else."""
         base = f"/api/projects/{self.project['id']}/board"
+        if method == "GET" and path.startswith("/api/board/") and path.endswith("/context-history"):
+            task_id = path.split("/")[3]
+            if not any(task["id"] == task_id for task in self.tasks):
+                return 404, {"detail": "no such task"}
+            return 200, {"task_id": task_id, "entries": []}
+        if method == "GET" and path.startswith("/api/board/") and path.endswith("/context"):
+            task_id = path.split("/")[3]
+            task = next((item for item in self.tasks if item["id"] == task_id), None)
+            if task is None:
+                return 404, {"detail": "no such task"}
+            return 200, {"task_id": task_id, "title": task["title"], "role": "worker",
+                         "contract_revision": 1, "contract": {"brief": {}, "requirements": [], "checklist": []},
+                         "dependencies": [], "facts": [], "artifacts": [], "source_refs": [], "packet_hash": "a" * 64}
         if path == "/api/board-workflows/validate" and method == "POST":
             return 200, {"valid": True, "topology": [node["id"] for node in (body or {}).get("nodes", [])], "required_capabilities": [], "definition_digest": "a" * 64}
         if path == "/api/board-workflows/runs" and method == "POST":

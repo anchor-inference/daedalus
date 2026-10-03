@@ -3034,8 +3034,10 @@ button.staff-row:hover { background: var(--surface-2); }
 .btn.warn { color: var(--warn); background: transparent; border-color: color-mix(in srgb, var(--warn) 50%, transparent); font-weight: 600; }
 .btn.warn:hover { background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .pboard-sheet-status { margin-bottom: 8px; flex-wrap: wrap; }
-.task-workflow { border-top: 1px solid var(--line); padding: 12px 0; }
-.task-workflow > .section-title { width: 100%; text-align: left; }
+.task-workflow, .task-context { border-top: 1px solid var(--line); padding: 12px 0; }
+/* The section-title carries a two-pixel inline margin on board sections; alongside a full-width
+   button it widened the sheet's scroll area on a phone. Keep the whole heading tappable. */
+.task-workflow > .section-title, .task-context > .section-title { width: 100%; margin-inline: 0; text-align: left; }
 .task-workflow-body { display: grid; gap: 10px; min-width: 0; }
 .task-workflow-body p { margin: 0; }
 .task-workflow-create, .task-workflow-run { display: grid; gap: 10px; min-width: 0; }

@@ -43,7 +43,7 @@ function PacketView({ packet }: { packet: Packet }) {
 
 export function TaskContext({ task, staff }: { task: ProjectTask; staff: TeamMember[] }) {
   const [open, setOpen] = useState(false);
-  return <section className="task-workflow">
+  return <section className="task-context">
     <button type="button" className="pboard-fold section-title" aria-expanded={open} onClick={() => setOpen(!open)}>{t("taskContext.title")}</button>
     {open && <ContextContent task={task} staff={staff} />}
   </section>;
