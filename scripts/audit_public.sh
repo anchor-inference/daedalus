@@ -252,17 +252,19 @@ Generated with a tool: see the session log at https://example.invalid/session_01
     printf '%s\n' "$report"
     return 1
   fi
-  printf '%s' "$report" | grep -q "tool (compiled executable" || {
+  grep -q "tool (compiled executable" <<< "$report" || {
     echo "SELF-CHECK FAILED: the committed binary was not named"; printf '%s\n' "$report"; return 1; }
-  printf '%s' "$report" | grep -q "notes/build.md" || {
+  grep -q "notes/build.md" <<< "$report" || {
     echo "SELF-CHECK FAILED: the machine path was not named"; printf '%s\n' "$report"; return 1; }
   # One assertion per kind, each naming the file that carries it. A single assertion over all four
   # kinds in one file answered "the provider token was named" while a kind had stopped being
   # matched, so the name that must appear in the failure is the one that went missing.
+  # A successful grep closes its pipe early. With pipefail, printf can then receive
+  # SIGPIPE and turn a real finding into a missing carrier; grep owns its input here.
   local missing="" named=""
   while read -r file; do
     [ -n "$file" ] || continue
-    if printf '%s' "$report" | grep -q "$file"; then
+    if grep -q -- "$file" <<< "$report"; then
       named="$named $file"
     else
       missing="$missing $file"
@@ -274,9 +276,9 @@ Generated with a tool: see the session log at https://example.invalid/session_01
     return 1
   fi
   echo "self-check: the kinds the report names, one per file:$named"
-  printf '%s' "$report" | grep -q "notes/network.md" || {
+  grep -q "notes/network.md" <<< "$report" || {
     echo "SELF-CHECK FAILED: the internal address was not named"; printf '%s\n' "$report"; return 1; }
-  printf '%s' "$report" | grep -q "someone@example.invalid" || {
+  grep -q "someone@example.invalid" <<< "$report" || {
     echo "SELF-CHECK FAILED: the tooling trailer was not named"; printf '%s\n' "$report"; return 1; }
   echo "self-check: the audit refuses a committed binary and a machine path, each provider token kind by the file that carries it, an internal address and a tooling trailer"
 
@@ -321,7 +323,7 @@ Generated with a tool: see the session log at https://example.invalid/session_01
   # that commit sits in: an enumeration cut short after it still finds the credential and still
   # refuses. This is the other half, and it holds wherever the credential sits -- the audit must
   # report having visited every commit the fixture has.
-  if ! printf '%s\n' "$report2" | grep -q "^history: $walked_expected commit(s) walked$"; then
+  if ! grep -q "^history: $walked_expected commit(s) walked$" <<< "$report2"; then
     echo "SELF-CHECK FAILED: the history reader did not report visiting all of the fixture's commits"
     printf '%s\n' "$report2"
     return 1
@@ -381,7 +383,9 @@ Generated with a tool: see the session log at https://example.invalid/session_01
     printf '%s\n' "$report3"
     return 1
   fi
-  if ! printf '%s\n' "$report3" | sed -n '/^== working tree$/,/^== history/p' | grep -q "notes.txt"; then
+  local working_report
+  working_report=$(sed -n '/^== working tree$/,/^== history/p' <<< "$report3")
+  if ! grep -q "notes.txt" <<< "$working_report"; then
     echo "SELF-CHECK FAILED: the fault that lives only in the working tree was not named by the section that reads it"
     printf '%s\n' "$report3"
     return 1
@@ -392,7 +396,7 @@ Generated with a tool: see the session log at https://example.invalid/session_01
   # nothing else. `git grep <commit>` already carries the commit, and prefixing it again printed
   # `<sha>:<sha>:<path>...` -- a reader comparing this output with plain `git grep` would see a
   # prefix the tool never generated.
-  if printf '%s\n' "$report2" | grep -Eq '^[0-9a-f]{40}:[0-9a-f]{40}:'; then
+  if grep -Eq '^[0-9a-f]{40}:[0-9a-f]{40}:' <<< "$report2"; then
     echo "SELF-CHECK FAILED: a history hit printed the commit id twice"
     printf '%s\n' "$report2"
     return 1
@@ -427,7 +431,7 @@ Generated with a tool: see the session log at https://example.invalid/session_01
     printf '%s\n' "$report4"
     return 1
   fi
-  printf '%s' "$report4" | grep -q "this checkout is shallow" || {
+  grep -q "this checkout is shallow" <<< "$report4" || {
     echo "SELF-CHECK FAILED: a shallow checkout was refused, but not for being shallow"
     printf '%s\n' "$report4"
     return 1; }
@@ -468,7 +472,7 @@ Generated with a tool: see the session log at https://example.invalid/session_01
     printf '%s\n' "$report5"
     return 1
   fi
-  printf '%s' "$report5" | grep -q "^history: clean over the 1 commit(s) this checkout has$" || {
+  grep -q "^history: clean over the 1 commit(s) this checkout has$" <<< "$report5" || {
     echo "SELF-CHECK FAILED: the cut copy did not answer clean over the shallow clone it walked"
     printf '%s\n' "$report5"
     return 1; }
@@ -512,7 +516,7 @@ Generated with a tool: see the session log at https://example.invalid/session_01
     printf '%s\n' "$report6"
     return 1
   fi
-  printf '%s' "$report6" | grep -q "named the same commit more than once" || {
+  grep -q "named the same commit more than once" <<< "$report6" || {
     echo "SELF-CHECK FAILED: a commit list that repeats one id was refused, but not for repeating it"
     printf '%s\n' "$report6"
     return 1; }
@@ -551,7 +555,7 @@ Generated with a tool: see the session log at https://example.invalid/session_01
     printf '%s\n' "$report3"
     return 1
   fi
-  printf '%s' "$report3" | grep -q "the reader could not answer" || {
+  grep -q "the reader could not answer" <<< "$report3" || {
     echo "SELF-CHECK FAILED: a failed enumeration was not named as a failed reader"
     printf '%s\n' "$report3"
     return 1; }

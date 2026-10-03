@@ -71,6 +71,7 @@ function useProjectWrites(projectId: string, revision: number | undefined, readF
   const [conflict, setConflict] = useState<number | null>(null);
   const [requiredRevision, setRequiredRevision] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmed, setConfirmed] = useState<ProjectWrite | null>(null);
   const completion = useRef<(() => void) | null>(null);
   const offline = useOffline();
   const readCurrent = !readFailed && Number.isInteger(revision) && (revision ?? 0) > 0;
@@ -93,6 +94,7 @@ function useProjectWrites(projectId: string, revision: number | undefined, readF
       if (!receipt || typeof receipt.receipt_id !== "string" || !Number.isInteger(receipt.entity_revision))
         throw new Error(t("project.write.badReceipt"));
       remember(null);
+      setConfirmed(intent);
       setConflict(null);
       setRequiredRevision(receipt.entity_revision);
       if (intent.path === budgetKey(projectId)) invalidate(intent.path);
@@ -143,7 +145,7 @@ function useProjectWrites(projectId: string, revision: number | undefined, readF
     finally { setBusy(false); }
   }
 
-  return { write, retry: () => pending ? run(pending) : Promise.resolve(false), reviewConflict, pending, conflict, busy, offline, readCurrent, ready };
+  return { write, retry: () => pending ? run(pending) : Promise.resolve(false), reviewConflict, pending, confirmed, conflict, busy, offline, readCurrent, ready };
 }
 
 /** The control that says which project is in view and opens the list: sidebar, header or palette. */
@@ -644,7 +646,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
         <span>{t("project.snapshots")}</span>
         <span className="sub">{t("project.snapshots.hint.edit")}</span>
       </label>
-      <ProjectBudget projectId={project.id} write={writes.write} canWrite={writes.ready} />
+      <ProjectBudget projectId={project.id} write={writes.write} canWrite={writes.ready} confirmed={writes.confirmed} />
       <ProjectExtensions projectId={project.id} toast={toast} />
       <ProjectArchive project={project} toast={toast} onChanged={afterChange} readFailed={!!projects.error}
         onOpenRestored={(id) => { rememberProject(id); onClose(); navigate(projectPagePath(id, "team")); }} />

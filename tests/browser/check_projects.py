@@ -58,6 +58,15 @@ def run() -> int:
             return answer(route, {"presets": {}, "model": {}})
         if path == "/api/plugins/catalog":
             return answer(route, [{"manifest": extension, "valid": True, "digest": "a" * 64, "required_capabilities": ["board.read"], "ui_extensions": extension["ui_extensions"]}])
+        if path == "/api/plugins/read-models":
+            return answer(route, [
+                {"id": "task_counts", "input_schema": {"type": "object", "additionalProperties": False,
+                    "properties": {"project_id": {"type": "string", "minLength": 1, "maxLength": 64}}, "required": ["project_id"]}},
+                {"id": "accepted_results", "input_schema": {"type": "object", "additionalProperties": False,
+                    "properties": {"project_id": {"type": "string", "minLength": 1, "maxLength": 64},
+                                   "limit": {"type": "integer", "minimum": 1, "maximum": 20, "title": "Maximum results"}},
+                    "required": ["project_id"]}},
+            ])
         if path == "/api/runtime/hosts" and request.method == "GET":
             if host_list_failure[0]:
                 return answer(route, {"detail": "host list unavailable"}, status=503)
@@ -227,7 +236,8 @@ def run() -> int:
         page.set_viewport_size({"width": 1440, "height": 900})
         expect(extensions.locator(".project-extension")).to_have_count(0)
         extensions.locator("summary").first.click()
-        expect(extensions.locator(".project-extension")).to_have_count(1)
+        expect(extensions.locator("article.project-extension")).to_have_count(1)
+        expect(extensions.locator("details.project-extension")).to_have_count(1)
         expect(extensions).to_contain_text("ordinary project work needs no extension")
         extensions.get_by_role("button", name="Install").click()
         expect(extensions).to_contain_text("Activating")

@@ -53,38 +53,78 @@ function validAmount(value: string): boolean {
 type Write = (method: "PUT", path: string, fields: Record<string, unknown>, label: string,
               onSuccess?: () => void) => Promise<boolean>;
 
-export function ProjectBudget({ projectId, write, canWrite }: {
+type BudgetSource = { goalRevision: number; total: string | null; coordination: string | null };
+type BudgetDraft = { version: 1; total: string; coordination: string; source: BudgetSource };
+type ConfirmedWrite = { path: string; body: Record<string, unknown> };
+
+function sourceOf(data: GoalBudget): BudgetSource {
+  return { goalRevision: data.goal_revision, total: data.total?.limit_usd ?? null,
+    coordination: data.coordination?.limit_usd ?? null };
+}
+
+function storedDraft(projectId: string): BudgetDraft | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(`daedalus.project.budget.draft.${projectId}`) ?? "null");
+    return value?.version === 1 && typeof value?.total === "string" && value.total.length <= 32
+      && typeof value?.coordination === "string" && value.coordination.length <= 32
+      && Number.isInteger(value?.source?.goalRevision)
+      && (value.source.total === null || (typeof value.source.total === "string" && value.source.total.length <= 32))
+      && (value.source.coordination === null || (typeof value.source.coordination === "string" && value.source.coordination.length <= 32))
+      ? value as BudgetDraft : null;
+  } catch { return null; }
+}
+
+export function ProjectBudget({ projectId, write, canWrite, confirmed }: {
   projectId: string;
   write: Write;
   canWrite: boolean;
+  confirmed?: ConfirmedWrite | null;
 }) {
   const { data, error, refresh } = useGoalBudget(projectId);
   const offline = useOffline();
-  const [total, setTotal] = useState("");
-  const [coordination, setCoordination] = useState("");
-  const [initialized, setInitialized] = useState(false);
+  const [draft, setDraft] = useState<BudgetDraft | null>(() => storedDraft(projectId));
   const [saving, setSaving] = useState(false);
+  const key = `daedalus.project.budget.draft.${projectId}`;
+  const total = draft?.total ?? data?.total?.limit_usd ?? "";
+  const coordination = draft?.coordination ?? data?.coordination?.limit_usd ?? "";
+  const source = data ? sourceOf(data) : null;
+  const sourceChanged = !!draft && !!source && (draft.source.goalRevision !== source.goalRevision
+    || draft.source.total !== source.total || draft.source.coordination !== source.coordination);
+
+  function remember(next: BudgetDraft | null) {
+    setDraft(next);
+    try {
+      if (next) localStorage.setItem(key, JSON.stringify(next));
+      else localStorage.removeItem(key);
+    } catch { /* This mounted form still retains the typed values. */ }
+  }
+
+  function edit(field: "total" | "coordination", value: string) {
+    if (!source) return;
+    remember({ version: 1, total: field === "total" ? value : total,
+      coordination: field === "coordination" ? value : coordination,
+      source: draft?.source ?? source });
+  }
+
   useEffect(() => {
-    if (data && !initialized) {
-      setTotal(data.total?.limit_usd ?? "");
-      setCoordination(data.coordination?.limit_usd ?? "");
-      setInitialized(true);
-    }
-  }, [data, initialized]);
+    if (confirmed?.path !== budgetKey(projectId) || !draft) return;
+    if (confirmed.body.limit_usd === draft.total && confirmed.body.coordination_limit_usd === draft.coordination)
+      remember(null);
+  }, [confirmed, draft, projectId]);
   const valid = validAmount(total) && validAmount(coordination)
     && Number(coordination) <= Number(total);
   const changed = !data?.configured || total !== data.total?.limit_usd
     || coordination !== data.coordination?.limit_usd;
 
   async function save() {
-    if (!data || !initialized || !valid || !changed || saving || offline || !canWrite) return;
+    if (!data || !valid || !changed || sourceChanged || saving || offline || !canWrite) return;
     setSaving(true);
     try {
       await write("PUT", budgetKey(projectId), {
         limit_usd: total,
         coordination_limit_usd: coordination,
         expected_goal_revision: data.goal_revision,
-      }, t("budget.saved"), () => invalidate(budgetKey(projectId)));
+      }, t("budget.saved"));
     } finally { setSaving(false); }
   }
 
@@ -100,13 +140,17 @@ export function ProjectBudget({ projectId, write, canWrite }: {
       <div>{budgetCompact(data)}</div>
     </div>}
     <p className="sub">{t("budget.scope")}</p>
+    {sourceChanged && <p className="sub attn" role="status">{t("budget.draft.sourceChanged")}{" "}
+      <button type="button" className="linkbtn" disabled={!data || offline} onClick={() => source && draft && remember({ ...draft, source })}>{t("budget.draft.review")}</button>
+    </p>}
     <div className="project-budget-fields">
       <label htmlFor={`budget-total-${projectId}`}>{t("budget.total")}</label>
-      <input id={`budget-total-${projectId}`} className="field" inputMode="decimal" value={total} onChange={(event) => setTotal(event.target.value)} placeholder="1.000000" />
+      <input id={`budget-total-${projectId}`} className="field" inputMode="decimal" maxLength={32} value={total} disabled={!data} onChange={(event) => edit("total", event.target.value)} placeholder="1.000000" />
       <label htmlFor={`budget-coordination-${projectId}`}>{t("budget.coordination")}</label>
-      <input id={`budget-coordination-${projectId}`} className="field" inputMode="decimal" value={coordination} onChange={(event) => setCoordination(event.target.value)} placeholder="0.500000" />
+      <input id={`budget-coordination-${projectId}`} className="field" inputMode="decimal" maxLength={32} value={coordination} disabled={!data} onChange={(event) => edit("coordination", event.target.value)} placeholder="0.500000" />
     </div>
+    {draft && <button type="button" className="linkbtn" onClick={() => remember(null)}>{t("budget.draft.discard")}</button>}
     {data?.configured && <div className="sub">{t("budget.cli")}</div>}
-    <button type="button" className="btn small" onClick={() => void save()} disabled={!data || !initialized || !valid || !changed || saving || offline || !canWrite}>{t("budget.save")}</button>
+    <button type="button" className="btn small" onClick={() => void save()} disabled={!data || !valid || !changed || sourceChanged || saving || offline || !canWrite}>{t("budget.save")}</button>
   </details>;
 }

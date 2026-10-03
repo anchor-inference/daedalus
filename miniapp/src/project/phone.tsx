@@ -120,7 +120,7 @@ export function ProjectPhoneHead({ projectId, title, subtitle, actions, extra }:
       actions={
         <>
           {actions}
-          {remaining && <span className="chip tiny" title={t("budget.summaryHint")}>{remaining}</span>}
+          {remaining && <span className="chip tiny project-budget-chip" title={`${remaining} · ${t("budget.summaryHint")}`}>{remaining}</span>}
           {project && <EnvPill env={env} tiny />}
           <OverflowMenu items={pages} label={t("phone.pages")} />
         </>
