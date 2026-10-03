@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0d161a">
+  <title>Daedalus · мастерская маскота</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/mascot-studio/studio.css">
+  <script type="module" src="/mascot-studio/studio.js"></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">✳</span><span><strong>DAEDALUS</strong><small>МАСТЕРСКАЯ МАСКОТА</small></span></div>
+    <div class="header-note"><span class="live-dot"></span> Отдельная сцена · живая 3D-модель</div>
+  </header>
+
+  <main class="layout">
+    <section class="intro" aria-label="О мастерской">
+      <div class="section-eyebrow"><span>01 / ЖИВАЯ СЦЕНА</span><span id="stage-state">СПОКОЙСТВИЕ</span></div>
+      <h1>Маленький помощник<br><em>с большим характером.</em></h1>
+      <p class="intro-text">Попробуй эмоции, движения и предметы. Каждая карточка меняет настоящую 3D-сцену: лицо, позу и то, что маскот держит в руках.</p>
+    </section>
+
+    <section class="stage-dock" aria-label="Сцена маскота">
+      <div class="stage-frame">
+        <canvas id="stage" aria-label="Интерактивная 3D-сцена с маскотом"></canvas>
+        <div class="stage-corner"><span class="live-dot"></span> LIVE PREVIEW</div>
+        <div class="framing" role="group" aria-label="Кадр">
+          <button type="button" data-framing="full" aria-pressed="true">Целиком</button>
+          <button type="button" data-framing="portrait" aria-pressed="false">Лицо</button>
+        </div>
+        <div class="stage-hint">Потяни, чтобы повернуть</div>
+        <button class="camera-reset" id="camera-reset" type="button" title="Вернуть ракурс" aria-label="Вернуть ракурс">↺</button>
+      </div>
+      <div class="speech-panel" aria-live="polite">
+        <div class="speech-icon" aria-hidden="true">✳</div>
+        <div><small>DAEDALUS ГОВОРИТ</small><p id="speech">Привет. Я рядом, если понадоблюсь.</p></div>
+        <button id="new-line" class="icon-button" type="button" title="Другая реплика" aria-label="Другая реплика">↻</button>
+      </div>
+    </section>
+
+    <section class="stage-tools" aria-label="Быстрые действия">
+      <button id="surprise" class="button button-primary" type="button">✦ Удиви меня</button>
+      <button id="tour" class="button button-ghost" type="button" aria-pressed="false">▶ Автопоказ</button>
+      <span id="selection-caption">Daedalus · спокойствие · дышит и оглядывается</span>
+    </section>
+
+    <section class="library" aria-label="Библиотека маскота">
+      <div class="section-eyebrow"><span>02 / БИБЛИОТЕКА</span><span id="library-count">10 СЦЕН</span></div>
+      <div class="library-heading"><div><h2>Настрой настроение.</h2><p>Выбирай карточку — маскот сразу оживает.</p></div><span class="edition">STUDIO / 01</span></div>
+      <nav class="tabs" aria-label="Разделы библиотеки" role="tablist">
+        <button class="tab active" data-tab="scenarios" type="button" role="tab" aria-selected="true">Сцены</button>
+        <button class="tab" data-tab="emotions" type="button" role="tab" aria-selected="false">Эмоции</button>
+        <button class="tab" data-tab="actions" type="button" role="tab" aria-selected="false">Движения</button>
+        <button class="tab" data-tab="props" type="button" role="tab" aria-selected="false">Предметы</button>
+        <button class="tab" data-tab="mascots" type="button" role="tab" aria-selected="false">Маскоты</button>
+        <button class="tab" data-tab="voice" type="button" role="tab" aria-selected="false">Голос</button>
+        <button class="tab" data-tab="ai" type="button" role="tab" aria-selected="false">Нейронка</button>
+      </nav>
+      <div class="library-tools" id="library-tools"><input id="search" type="search" placeholder="Найти в библиотеке…" aria-label="Найти в библиотеке"><div id="filters" class="filters"></div></div>
+      <div id="library-body" class="library-body" role="tabpanel"></div>
+      <div class="library-footer"><span>Выражения лица • жесты • 3D-реквизит</span><span id="fps-note">WebGL · пауза в скрытой вкладке</span></div>
+    </section>
+  </main>
+
+  <footer class="page-footer"><span>Лаборатория персонажа Daedalus</span><span>Сцена рассчитана на перенос в голосовой режим</span></footer>
+</body>
+</html>
