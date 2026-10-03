@@ -96,6 +96,25 @@ async def fired(r: Rig) -> list[AppEvent]:
     return await events(r.manager, "watch.fired")
 
 
+async def test_delivery_cursor_deduplicates_after_cooldown_and_restart(settings: Settings, db: Database, tmp_path: Path) -> None:
+    r = await rig(settings, db, tmp_path)
+    clock = Clock()
+    keeper = await with_watches(r, clock)
+    try:
+        project = await r.orch.enable(r.project.id)
+        item = await keeper.create(project, when={"event": "staff_finished"}, then={"action": "wake"})
+        assert await keeper.fire(item, "finished", source_cursor="bus:123")
+        clock.advance(minutes=11)
+        assert not await keeper.fire(item, "finished", source_cursor="bus:123")
+        await keeper.load()
+        assert not await keeper.fire(keeper.get(project.id, item.id), "finished", source_cursor="bus:123")
+        rows = await db.fetchall("SELECT status, source_cursor FROM watch_deliveries WHERE watch_id = ?", (item.id,))
+        assert [(row["status"], row["source_cursor"]) for row in rows] == [("delivered", "bus:123")]
+    finally:
+        await keeper.close()
+        await r.manager.close()
+
+
 # -- what each kind waits for ----------------------------------------------------------------------------
 
 

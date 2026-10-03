@@ -66,8 +66,13 @@ from daedalus.extensions import (
     api_control,
     api_files,
     api_harnesses,
+    api_integrations,
+    api_knowledge,
+    api_plugins,
     api_projects,
+    api_skill_quality,
     api_staff,
+    api_workflows,
     launcher_updates,
 )
 from daedalus.extensions import commands as slash
@@ -1536,6 +1541,14 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     # on projects extend rather than this file.
     api_control.register(api, app, auth)
     api_projects.register(api, app, auth)
+    # Lightweight API fixtures deliberately omit durable stores; the installed host has them.
+    if hasattr(app, "db"):
+        api_knowledge.register(api, app, auth)
+        api_workflows.register(api, app, auth)
+        api_plugins.register(api, app, auth)
+        if hasattr(manager, "skills"):
+            api_skill_quality.register(api, app, auth)
+        api_integrations.register(api, app, auth)
     # The command-line agents: the Harnesses screen and the hiring form's catalog.
     api_harnesses.register(api, app, auth)
     # One staff member's session as its runtime sees it: the staff view's reads.

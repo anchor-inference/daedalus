@@ -17,12 +17,12 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from protocore.contracts.llm import LLMObservabilityContext, LLMRequest
-from protocore.contracts.memory import MemoryScope
 from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResultBlock, ToolUseBlock
 
 from daedalus.extensions.notifications import Draft
 from daedalus.host.prompts import split_headline, without_turn_context
 from daedalus.host.session_runner import TENANT, transcript_for_summary
+from daedalus.stores.knowledge import KnowledgeStore
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -101,17 +101,20 @@ class Learning:
                 logger.warning("memory extraction failed for run %s", run_id, exc_info=True)
 
     async def extract_memories(self, session_id: str, run_id: str) -> int:
-        """Ask the model which durable facts this run established and store them as memories.
+        """Ask the model for project fact candidates, which need review before use.
 
         Durable means useful in a later, unrelated session: a decision, a preference the operator
         stated, an identifier (repo, host, id), a how-to that took effort to find. The transcript of
         the run alone is the input; the model answers with a JSON list, each item becoming one
-        memory (the store merges near-duplicates).
+        candidate; an unbound session has no project scope and is skipped.
         """
         manager = self.app.manager
         assert manager is not None
         state = await manager.get_state(session_id)
         if state is None or state.engine is None:
+            return 0
+        project = await manager.projects.for_session(session_id)
+        if project is None:
             return 0
         cfg = self.app.config.memory
         history = list(state.engine.history)[min(state.run_history_start, len(state.engine.history)):]
@@ -152,10 +155,13 @@ class Learning:
                 kind = "fact"
             if len(fact) < 12 or len(fact) > 600:
                 continue
-            await manager.memory.write(TENANT, MemoryScope.global_, "", fact, kind=kind, source_refs=[f"session:{session_id}", f"run:{run_id}"])
+            await KnowledgeStore(self.app.db).candidate(
+                project.id, fact, kind=kind, source_kind="run", source_id=run_id,
+                actor="memory_extraction",
+            )
             stored += 1
         if stored:
-            logger.warning("memory extraction: %d fact(s) from run %s", stored, run_id)
+            logger.info("memory extraction: %d candidate(s) from run %s", stored, run_id)
         return stored
 
     async def report(self, days: int = 7) -> dict[str, Any]:

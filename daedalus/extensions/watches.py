@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import re
@@ -131,6 +132,7 @@ class Watch:
     fire_count: int
     enabled: bool
     state: dict[str, Any] = field(default_factory=dict)
+    condition_revision: int = 1
 
     @classmethod
     def from_row(cls, row: Any) -> Watch:
@@ -146,6 +148,7 @@ class Watch:
             cooldown_s=int(row["cooldown_s"]), once=bool(row["once"]), note=str(row["note"] or ""), created_by=str(row["created_by"]),
             created_at=str(row["created_at"]), last_fired_at=row["last_fired_at"], fire_count=int(row["fire_count"] or 0),
             enabled=bool(row["enabled"]), state=load(row["state_json"]),
+            condition_revision=int(row["condition_revision"]) if "condition_revision" in row.keys() else 1,
         )
 
     @property
@@ -160,6 +163,7 @@ class Watch:
             "cooldown_minutes": max(1, round(self.cooldown_s / 60)), "once": self.once, "note": self.note,
             "created_by": self.created_by, "created_at": self.created_at, "last_fired_at": self.last_fired_at,
             "fire_count": self.fire_count, "enabled": self.enabled, "stopped": str(self.state.get("stopped") or ""),
+            "condition_revision": self.condition_revision,
             # ``stopped`` is a code: once · budget · pattern · slow_pattern.
             "last_error": str(self.state.get("last_error") or ""), "describe": describe(self),
         }
@@ -315,8 +319,8 @@ class Watches:
 
     async def _save(self, watch: Watch) -> None:
         await self.manager.db.execute(
-            "UPDATE watches SET pattern_json = ?, action_json = ?, cooldown_s = ?, once = ?, note = ?, last_fired_at = ?, fire_count = ?, enabled = ?, state_json = ? WHERE id = ?",
-            (json.dumps(watch.pattern), json.dumps(watch.action), watch.cooldown_s, int(watch.once), watch.note, watch.last_fired_at, watch.fire_count, int(watch.enabled), json.dumps(watch.state), watch.id),
+            "UPDATE watches SET pattern_json = ?, action_json = ?, cooldown_s = ?, once = ?, note = ?, last_fired_at = ?, fire_count = ?, enabled = ?, state_json = ?, condition_revision = ? WHERE id = ?",
+            (json.dumps(watch.pattern), json.dumps(watch.action), watch.cooldown_s, int(watch.once), watch.note, watch.last_fired_at, watch.fire_count, int(watch.enabled), json.dumps(watch.state), watch.condition_revision, watch.id),
         )
 
     # -- setting one -------------------------------------------------------------------------------
@@ -366,6 +370,7 @@ class Watches:
                 watch.state.pop("stopped", None)
                 watch.state.pop("fires", None)
                 watch.state.pop("last_error", None)
+        watch.condition_revision += 1
         await self._save(watch)
         if watch.event == "terminal_output":
             if watch.enabled:
@@ -532,7 +537,7 @@ class Watches:
             return 0.0
         return max(0.0, watch.cooldown_s - (self.clock() - last).total_seconds())
 
-    async def fire(self, watch: Watch, detail: str, *, staff_id: str | None = None) -> bool:
+    async def fire(self, watch: Watch, detail: str, *, staff_id: str | None = None, source_cursor: str | None = None) -> bool:
         """Do what the watch says, within its cooldown and its hourly budget. Whether it fired."""
         async with self._firing:
             current = self._watches.get(watch.id)
@@ -545,6 +550,25 @@ class Watches:
             if len(fires) >= self.config.max_fires_per_hour:
                 await self._stop(watch, "budget", f"it fired {len(fires)} times within an hour, the most a watch may")
                 return False
+            cursor_value = source_cursor or f"unidentified:{uuid.uuid4().hex}"
+            dedup_key = hashlib.sha256(f"{watch.id}:{watch.condition_revision}:{cursor_value}".encode()).hexdigest()
+            delivery_id = uuid.uuid4().hex
+            at = now.isoformat()
+            async with self.manager.db.transaction() as conn:
+                inserted = await conn.execute(
+                    "INSERT OR IGNORE INTO watch_deliveries "
+                    "(id, watch_id, condition_revision, source_cursor, dedup_key, status, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
+                    (delivery_id, watch.id, watch.condition_revision, cursor_value, dedup_key, at, at),
+                )
+                if inserted.rowcount == 0:
+                    return False
+                # Reserve the fire before invoking a notification or member. A crash after this point
+                # is an uncertain delivery for review, not permission to send it again on replay.
+                await conn.execute(
+                    "UPDATE watches SET last_fired_at = ?, fire_count = fire_count + 1 WHERE id = ?",
+                    (at, watch.id),
+                )
             fires.append(now.isoformat())
             watch.state["fires"] = fires
             watch.last_fired_at = now.isoformat()
@@ -552,7 +576,19 @@ class Watches:
             if watch.once:
                 watch.enabled = False
                 watch.state["stopped"] = "once"
-            error = await self._act(watch, detail)
+            try:
+                error = await self._act(watch, detail)
+            except Exception as exc:  # noqa: BLE001 — an external send may have happened before failure
+                error = f"delivery outcome unknown: {str(exc)[-300:]}"
+                delivery_status = "reconciling"
+            else:
+                delivery_status = "failed" if error else "delivered"
+                if watch.action.get("action") == "wake" and not error:
+                    delivery_status = "pending"  # the bus event itself is this watch's effect
+            await self.manager.db.execute(
+                "UPDATE watch_deliveries SET status = ?, updated_at = ? WHERE id = ?",
+                (delivery_status, self.clock().isoformat(), delivery_id),
+            )
             if error:
                 watch.state["last_error"] = error[:500]
             else:
@@ -570,6 +606,17 @@ class Watches:
             )
         except Exception:  # noqa: BLE001 — the action is done; the event is its record
             logger.warning("could not publish watch.fired for %s", watch.id, exc_info=True)
+            if watch.action.get("action") == "wake" and not error:
+                await self.manager.db.execute(
+                    "UPDATE watch_deliveries SET status = 'reconciling', updated_at = ? WHERE id = ?",
+                    (self.clock().isoformat(), delivery_id),
+                )
+        else:
+            if watch.action.get("action") == "wake" and not error:
+                await self.manager.db.execute(
+                    "UPDATE watch_deliveries SET status = 'delivered', updated_at = ? WHERE id = ?",
+                    (self.clock().isoformat(), delivery_id),
+                )
         return True
 
     async def _act(self, watch: Watch, detail: str) -> str:
@@ -637,7 +684,7 @@ class Watches:
         for watch in self.of_project(event.project_id, enabled_only=True):
             detail = event_matches(watch, event)
             if detail:
-                await self.fire(watch, detail, staff_id=event.staff_id)
+                await self.fire(watch, detail, staff_id=event.staff_id, source_cursor=f"bus:{event.seq}")
 
     async def _on_webhook(self, event: AppEvent) -> None:
         payload = dict(event.payload)
@@ -653,7 +700,7 @@ class Watches:
                     continue
                 if not matched:
                     continue
-            await self.fire(watch, detail)
+            await self.fire(watch, detail, source_cursor=f"bus:{event.seq}")
 
     # -- the ticker --------------------------------------------------------------------------------
 
@@ -683,7 +730,7 @@ class Watches:
             return
         # Once per silence: the same last signal never fires twice, whatever the cooldown.
         watch.state["silent_since"] = since
-        if not await self.fire(watch, f"{watch.pattern.get('staff')} has been silent since {since[:16].replace('T', ' ')} UTC while working", staff_id=session.staff_id):
+        if not await self.fire(watch, f"{watch.pattern.get('staff')} has been silent since {since[:16].replace('T', ' ')} UTC while working", staff_id=session.staff_id, source_cursor=f"silence:{session.staff_id}:{since}"):
             await self._save(watch)
 
     async def _poll_git(self, now: datetime) -> None:
@@ -727,7 +774,8 @@ class Watches:
             return
         lines = [f"{name}: {heads[name][0][:8]} \"{_one_line(heads[name][1], 100)}\"" for name in moved[:5]]
         more = f" and {len(moved) - 5} more" if len(moved) > 5 else ""
-        if not await self.fire(watch, f"new commits in {watch.pattern.get('folder_label')} — " + "; ".join(lines) + more):
+        cursor = "git:" + str(watch.pattern.get("folder")) + ":" + ",".join(f"{name}@{seen[name]}" for name in sorted(moved))
+        if not await self.fire(watch, f"new commits in {watch.pattern.get('folder_label')} — " + "; ".join(lines) + more, source_cursor=cursor):
             await self._save(watch)
 
     async def heads(self, folder: ProjectFolder) -> dict[str, tuple[str, str]]:
@@ -820,7 +868,7 @@ class Watches:
             if await self._own_echo(watch, text):
                 continue
             title = watch.pattern.get("terminal_title") or watch.pattern.get("staff") or terminal_id
-            await self.fire(watch, f"{title}'s terminal printed \"{_one_line(text, 200)}\"", staff_id=watch.pattern.get("staff_id"))
+            await self.fire(watch, f"{title}'s terminal printed \"{_one_line(text, 200)}\"", staff_id=watch.pattern.get("staff_id"), source_cursor=f"terminal:{terminal_id}:{since}")
 
     async def _own_echo(self, watch: Watch, text: str) -> bool:
         """Whether a match is only the orchestrator's own message showing in the member's terminal."""
@@ -837,6 +885,10 @@ class Watches:
     # -- life --------------------------------------------------------------------------------------
 
     async def start(self) -> None:
+        await self.manager.db.execute(
+            "UPDATE watch_deliveries SET status = 'reconciling', updated_at = ? WHERE status = 'pending'",
+            (self.clock().isoformat(),),
+        )
         await self.load()
         cursor = await self.manager.db.kv_get(CURSOR_KEY)
         after = int(cursor) if isinstance(cursor, int) else None

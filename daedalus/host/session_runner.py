@@ -90,6 +90,7 @@ from daedalus.stores.database import Database
 from daedalus.stores.dispatches import DispatchStore
 from daedalus.stores.files import MAIN as MAIN_FILES
 from daedalus.stores.files import FileRefused, FileStore
+from daedalus.stores.knowledge import KnowledgeStore
 from daedalus.stores.media import MediaStore
 from daedalus.stores.persistent import PersistentMemory, PersistentWorkspace
 from daedalus.stores.projects import Project, ProjectFolder, ProjectSettings, ProjectStore
@@ -1770,6 +1771,12 @@ class SessionManager:
         # rewrites on every compaction compounds its errors. The core rebuilds it on its next pass.
         ledgers = [m for m in history if is_ledger(m)]
         rebuilt = [message, *ledgers[-1:], *tail]
+        # The capture must be durable before any working-history rewrite. If it cannot be recorded,
+        # this compaction fails with the old context intact instead of leaving an untraceable summary.
+        await KnowledgeStore(self.db).capture_compaction(
+            session_id, state.run_id or "", state.project.id if state.project is not None else None,
+            summary, seqs,
+        )
         state.persist_gen += 1  # any persist captured before this point describes a history that is gone
         await self._reset_observed_prompt(state, before=[*history, *tail], after=rebuilt)
         if state.engine is not None:

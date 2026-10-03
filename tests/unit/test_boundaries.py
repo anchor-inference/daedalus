@@ -84,7 +84,8 @@ def test_only_the_telegram_transport_imports_aiogram() -> None:
 
 
 def test_only_the_api_modules_import_the_http_framework() -> None:
-    assert _violations(PKG, HTTP_FRAMEWORK, allowed_dirs=("daedalus/extensions/api.py", "daedalus/extensions/api_projects.py", "daedalus/extensions/api_harnesses.py", "daedalus/extensions/api_staff.py", "daedalus/extensions/api_files.py", "daedalus/extensions/api_browsers.py")) == []
+    # Every domain route is in an api_ module; adding one should not require weakening the boundary.
+    assert _violations(PKG, HTTP_FRAMEWORK, allowed_dirs=("daedalus/extensions/api.py", "daedalus/extensions/api_")) == []
 
 
 def test_lower_layers_do_not_import_upward() -> None:

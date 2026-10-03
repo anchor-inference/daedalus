@@ -184,7 +184,7 @@ class DirectorySkillStore(ISkillStore):
             raise SkillNotFoundError(skill_id)
         refs: list[SkillFileRef] = []
         for path in sorted(p for p in skill_dir.rglob("*") if p.is_file()):
-            if path.name == DISABLED_MARKER:
+            if path.name in (DISABLED_MARKER, ".published"):
                 continue
             data = path.read_bytes()
             refs.append(
