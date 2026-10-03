@@ -99,6 +99,9 @@ def walk(page: Page) -> None:
     expect(page.locator(".chat.in-project.orchestrator")).to_be_visible(timeout=15000)
     no_notice(page, "project")
     side = page.locator("nav.project-sidebar")
+    advanced = side.locator("details.focus-advanced")
+    if advanced.get_attribute("open") is None:
+        advanced.locator("summary").click()
     side.locator(".focus-staff", has_text="Lev").click()
     expect(page.locator(".staff-head")).to_contain_text("Lev", timeout=15000)
     no_notice(page, "staff session")

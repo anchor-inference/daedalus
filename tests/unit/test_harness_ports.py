@@ -72,7 +72,7 @@ async def test_the_port_tells_a_missing_program_from_an_environment_that_is_down
     port = RuntimeEnvironment(service, "container", home="/home/operator", actor="harness")  # type: ignore[arg-type]
     result = await port.run(["claude", "--version"], cwd="/srv", env={"A": "1"}, timeout=5)
     assert (result.stdout, result.path) == ("2.1.281 (Claude Code)\n", "/home/operator/.local/bin/claude")
-    assert service.runs[0] == ("container", ["claude", "--version"], {"cwd": "/srv", "env_vars": {"A": "1"}, "timeout": 5, "actor": "harness"})
+    assert service.runs[0] == ("container", ["claude", "--version"], {"cwd": "/srv", "env_vars": {"A": "1"}, "timeout": 5, "actor": "harness", "resources": None})
     with pytest.raises(ProgramNotFound):
         await port.run(["missing"])
     with pytest.raises(EnvironmentUnavailable):

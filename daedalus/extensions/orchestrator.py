@@ -32,9 +32,11 @@ from protocore.contracts.types import OPERATOR_WORDS_METADATA_KEY, Message, Mess
 
 from daedalus.config import NoModelConfigured
 from daedalus.extensions import orchestrator_contract, orchestrator_ops, orchestrator_team, wakeups
+from daedalus.extensions.coordinator_handoff import CoordinatorHandoff
 from daedalus.extensions.likeness import same_question
 from daedalus.extensions.notifications import Draft, ProjectNotifyPolicy
 from daedalus.extensions.operator_steps import OperatorSteps
+from daedalus.extensions.orchestrator_admission import mutates
 from daedalus.extensions.orchestrator_loops import OpenResults
 from daedalus.extensions.project_usage import ProjectUsage
 from daedalus.extensions.watches import describe as describe_watch
@@ -45,6 +47,7 @@ from daedalus.host.peek import BridgedFolderAccess, FolderAccess, LocalFolderAcc
 from daedalus.host.session_runner import HOME_KEY, WorkspaceUnreachable, home_of
 from daedalus.host.wake_queue import Batch, TargetState, Wake, WakeQueue
 from daedalus.staff_runtime import ReadRequest
+from daedalus.stores.control import Principal
 from daedalus.stores.files import refs_line
 from daedalus.stores.projects import (
     BRIEF_SECTIONS,
@@ -422,8 +425,6 @@ class Orchestrators:
 
     async def replace(self, project_id: str, reason: str) -> Project:
         """Use the same durable handoff for an internal recovery as the operator's command."""
-        from daedalus.extensions.coordinator_handoff import CoordinatorHandoff
-        from daedalus.stores.control import Principal
 
         project = await self.project(project_id)
         response = await CoordinatorHandoff(self).replace(
@@ -438,7 +439,6 @@ class Orchestrators:
     async def replace_command(self, project_id: str, reason: str, *, principal: Any,
                               client_operation_id: str, expected_entity_revision: int,
                               expected_coordinator_session_id: str) -> dict[str, Any]:
-        from daedalus.extensions.coordinator_handoff import CoordinatorHandoff
 
         return await CoordinatorHandoff(self).replace(
             project_id, reason, principal=principal, client_operation_id=client_operation_id,
@@ -1727,7 +1727,6 @@ class Orchestrators:
     async def service(self, operation: str, /, **kwargs: Any) -> Any:
         """The tools' hook: every operation first checks that the calling session holds the office.
         The operation is positional because several tools have an argument called ``op`` of their own."""
-        from daedalus.extensions.orchestrator_admission import mutates
 
         if not mutates(operation, kwargs):
             return await orchestrator_ops.dispatch(self, operation, OPERATIONS, **kwargs)
@@ -1797,7 +1796,6 @@ class Orchestrators:
 
     async def resume(self) -> None:
         """Start the wake queues of every project that has an orchestrator, each from its cursor."""
-        from daedalus.extensions.coordinator_handoff import CoordinatorHandoff
 
         await CoordinatorHandoff(self).reconcile()
         for project in await self.manager.projects.list():

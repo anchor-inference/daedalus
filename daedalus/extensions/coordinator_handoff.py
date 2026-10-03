@@ -72,7 +72,9 @@ class CoordinatorHandoff:
             found = await self.orchestrators.catalogue_lookup(base_url, api_key)
         else:
             # The existing discovery path uses the configured key on GET /models, never an inference.
-            from daedalus.extensions.api import lookup_openai_models
+            from daedalus.extensions.api import (
+                lookup_openai_models,  # Lazy: API composition imports this handoff service.
+            )
 
             found = await lookup_openai_models(base_url, api_key)
         if preset.model not in found.get("models", []):

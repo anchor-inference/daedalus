@@ -9,7 +9,6 @@ place, and this is what pins them down.
 from __future__ import annotations
 
 import asyncio
-import importlib
 import importlib.util
 import json
 import os
@@ -30,14 +29,17 @@ from tests.support.waiting import SETTLE
 LAUNCHER = Path(__file__).resolve().parents[2] / "launcher" / "supervisor.py"
 
 
-def reloaded_config(monkeypatch: pytest.MonkeyPatch, **env: str) -> Any:
-    """The configuration module read again with this environment, since what it decides at import
-    time is exactly what the mode changes."""
+def isolated_config(monkeypatch: pytest.MonkeyPatch, **env: str) -> Any:
+    """Read import-time defaults without replacing exception classes used by other components."""
     for key, value in env.items():
         monkeypatch.setenv(key, value)
-    import daedalus.config as config
-
-    return importlib.reload(config)
+    name = "daedalus.native_defaults_under_test"
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().parents[2] / "daedalus" / "config.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_the_mode_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -80,13 +82,12 @@ def test_the_sandbox_cannot_be_opened_onto_this_installations_own_directories(mo
 
 def test_services_are_reached_at_the_loopback_address_natively(monkeypatch: pytest.MonkeyPatch) -> None:
     """There is no docker host to publish from: a service the agent starts listens here."""
-    config = reloaded_config(monkeypatch, DAEDALUS_NATIVE="1")
+    config = isolated_config(monkeypatch, DAEDALUS_NATIVE="1")
     try:
         assert config.Settings().services_public_host == "127.0.0.1"
         assert config.Settings().native is True
     finally:
         monkeypatch.delenv("DAEDALUS_NATIVE", raising=False)
-        importlib.reload(config)
     assert Settings().services_public_host == ""
 
 

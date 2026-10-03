@@ -16,6 +16,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.extensions import questions, wakeups
+from daedalus.extensions.coordinator_handoff import CoordinatorHandoff
 from daedalus.extensions.project_commands import ProjectCommands
 from daedalus.extensions.project_usage import ProjectUsage
 from daedalus.extensions.watch_authority import status as watch_authority_status
@@ -556,7 +557,6 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.get("/api/projects/{project_id}/orchestrator/replace")
     async def replacement_status(project_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         await existing(project_id)
-        from daedalus.extensions.coordinator_handoff import CoordinatorHandoff
 
         return {"handoff": await CoordinatorHandoff(orchestrators()).view(project_id)}
 
