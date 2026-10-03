@@ -89,7 +89,8 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     field = page.get_by_role("textbox", name=words["rename"])
     field.fill("naya · bot")
     page.get_by_role("button", name=words["save"], exact=True).click()
-    expect(page.get_by_text("naya · bot").first).to_be_visible(timeout=5000)
+    row = page.locator("[data-terminal='tm-naya']")
+    expect(row.get_by_text("naya · bot", exact=True)).to_be_visible(timeout=5000)
     patched = [body for method, path, body in term.requests if method == "PATCH" and path == "/api/terminals/tm-naya"]
     if patched != [{"title": "naya · bot"}]:
         say(f"the rename sent {patched}")
