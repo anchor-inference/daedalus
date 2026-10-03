@@ -16,6 +16,7 @@ import { plural, t } from "./i18n";
 import { ProjectExtensions } from "./project/ProjectExtensions";
 import { ExecutionHosts } from "./project/ExecutionHosts";
 import { LifecycleCancel } from "./project/LifecycleCancel";
+import { CoordinatorAuthority } from "./project/CoordinatorAuthority";
 
 const PICKED = "daedalus.project";
 
@@ -435,6 +436,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
         <span className="sub">{t("project.snapshots.hint.edit")}</span>
       </label>
       <ProjectExtensions projectId={project.id} toast={toast} />
+      <CoordinatorAuthority projectId={project.id} toast={toast} />
       <ExecutionHosts toast={toast} />
       <LifecycleCancel kind="project_goal" id={project.id} projectId={project.id} onDone={afterChange} toast={toast} />
       {project.sessions.length > 0 && (

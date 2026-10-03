@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -24,6 +25,13 @@ def run() -> int:
     lifecycle_commands: list[dict] = []
     lifecycle_attempts: list[dict] = []
     lifecycle_fingerprint = ["b" * 64]
+    authority_revision = [1]
+    authority_grants: list[dict] = []
+    authority_requests: list[dict] = []
+    authority_receipts: dict[str, tuple[dict, dict]] = {}
+    authority_unknown = [1]
+    host_list_failure = [False]
+    host_list_item = [False]
     unhandled = Unhandled()
     extension = {"id": "project_status", "version": "1.0.0", "display_name": "Project status", "description": "Read task counts by status for one selected project.", "capabilities": ["board.read"], "tools": [{"name": "inspect_project"}], "ui_extensions": [{"id": "project_status", "slot": "project.settings", "schema_version": 1, "component": "status"}]}
 
@@ -51,7 +59,16 @@ def run() -> int:
         if path == "/api/plugins/catalog":
             return answer(route, [{"manifest": extension, "valid": True, "digest": "a" * 64, "required_capabilities": ["board.read"], "ui_extensions": extension["ui_extensions"]}])
         if path == "/api/runtime/hosts" and request.method == "GET":
-            return answer(route, {"items": [], "collection_revision": 1})
+            if host_list_failure[0]:
+                return answer(route, {"detail": "host list unavailable"}, status=503)
+            item = {"host_id": "host-1", "label": "Test host", "entity_revision": 1,
+                                             "identity_state": "verified", "fingerprint": "a" * 64,
+                                             "pending_fingerprint": None, "public_key": "a" * 44,
+                                             "host_generation": 1, "reachability": "unknown",
+                                             "capabilities_state": "unknown", "artifact_transfer_state": "unknown",
+                                             "ssh_configured": True, "probe_error": None, "observed_at": None,
+                                             "effects_allowed": False, "blockers": []}
+            return answer(route, {"items": [item] if host_list_item[0] else [], "collection_revision": 1})
         if path == "/api/plugins" and request.method == "GET":
             return answer(route, {"items": installed, "collection_revision": len(installed) + 1})
         if path == "/api/plugins/safe-mode" and request.method == "GET":
@@ -65,6 +82,56 @@ def run() -> int:
             return answer(route, {"id": "project_status", "state": "inactive"})
         if path == "/api/projects/p1/board" and request.method == "GET":
             return answer(route, {"tasks": [{"id": "t-owned", "title": "Owned task"}]})
+        if path == "/api/projects/p1/orchestrator/authority" and request.method == "GET":
+            bundles = [
+                {"id": name, "scope_kind": scope, "operations": operations, "effects": effects,
+                 "max_expires_at": (datetime.now(UTC) + timedelta(hours=24)).isoformat(), "blockers": []}
+                for name, scope, operations, effects in (
+                    ("planning", "project", ["board.task.create", "board.task.update"], []),
+                    ("execution", "task", ["task.launch"], ["execution.start"]),
+                    ("execution_project", "project", ["task.launch"], ["execution.start"]),
+                    ("review", "project", ["review.verdict", "review.return"], []),
+                )
+            ]
+            return answer(route, {"project_id": "p1", "entity_revision": authority_revision[0], "current_coordinator_session_id": "coordinator-current",
+                                  "available_bundles": bundles, "grants": authority_grants, "readiness_blockers": []})
+        if path == "/api/projects/p1/orchestrator/authority" and request.method == "POST":
+            payload = request.post_data_json
+            authority_requests.append(payload)
+            key = payload["client_operation_id"]
+            if key in authority_receipts:
+                original, receipt = authority_receipts[key]
+                return answer(route, receipt if original == payload else {"detail": "intent changed"}, status=200 if original == payload else 409)
+            if payload["expected_entity_revision"] != authority_revision[0]:
+                return answer(route, {"detail": "project changed"}, status=409)
+            bundle = payload["bundle_id"]
+            task_id = payload.get("task_id")
+            operations = ["board.task.create", "board.task.update"] if bundle == "planning" else (["review.verdict", "review.return"] if bundle == "review" else ["task.launch"])
+            effects = ["execution.start"] if bundle.startswith("execution") else []
+            grant = {"grant_id": f"grant-{len(authority_grants) + 1}", "generation": 1, "session_id": "coordinator-current",
+                     "scope": {"kind": "task" if task_id else "project", "id": task_id or "p1"},
+                     "operations": operations, "effects": effects, "expires_at": payload["expires_at"],
+                     "revoked_at": None, "created_at": datetime.now(UTC).isoformat(), "state": "active", "receipt_id": f"receipt-{key}",
+                     "parent_grant_id": None, "parent_grant_generation": None}
+            authority_grants.insert(0, grant)
+            authority_revision[0] += 1
+            receipt = {"grant_id": grant["grant_id"], "receipt_id": grant["receipt_id"], "entity_revision": authority_revision[0]}
+            authority_receipts[key] = payload, receipt
+            if authority_unknown[0]:
+                authority_unknown[0] -= 1
+                return answer(route, {"detail": "unconfirmed response"}, status=503)
+            return answer(route, receipt)
+        if path == "/api/projects/p1/orchestrator/authority/grant-1/revoke" and request.method == "POST":
+            payload = request.post_data_json
+            authority_requests.append(payload)
+            grant = next(grant for grant in authority_grants if grant["grant_id"] == "grant-1")
+            if payload["expected_entity_revision"] != authority_revision[0] or payload["expected_grant_generation"] != grant["generation"]:
+                return answer(route, {"detail": "approval changed"}, status=409)
+            grant["generation"] += 1
+            grant["revoked_at"] = datetime.now(UTC).isoformat()
+            grant["state"] = "revoked"
+            authority_revision[0] += 1
+            return answer(route, {"grant_id": "grant-1", "receipt_id": "withdrawal", "entity_revision": authority_revision[0]})
         if path == "/api/lifecycle/project_goal/p1" and request.method == "GET":
             task = {"parent_kind": "project_goal", "parent_id": "p1", "child_kind": "task", "child_id": "t-owned", "generation": 1, "source_revision": 1, "cancel_state": "active"}
             attempt = {"parent_kind": "task", "parent_id": "t-owned", "child_kind": "execution_attempt", "child_id": "a-owned", "generation": 1, "source_revision": 1, "cancel_state": "active"}
@@ -159,6 +226,45 @@ def run() -> int:
         expect(extensions).to_contain_text("Activating")
         expect(extensions.get_by_role("button", name="Test on this project")).to_be_disabled()
         assert staged and staged[0]["expected_digest"] == "a" * 64 and staged[0]["client_operation_id"], staged
+        page.set_viewport_size({"width": 320, "height": 560})
+        authority = page.locator("details.sheet-section", has_text="Coordinator permissions")
+        authority.locator("summary").first.click()
+        expect(authority).to_contain_text("Active approvals: 0")
+        authority.get_by_text("Approve an action", exact=True).click()
+        authority.get_by_role("button", name="Approve", exact=True).click()
+        page.locator(".sheet-backdrop.confirm .dialog button").last.click()
+        expect(authority).to_contain_text("unconfirmed", timeout=5000)
+        assert authority_requests[0]["bundle_id"] == "planning" and authority_requests[0]["task_id"] is None
+        authority.get_by_role("button", name="Retry original request").click()
+        expect(authority).to_contain_text("Active approvals: 1", timeout=5000)
+        assert authority_requests[1] == authority_requests[0], "uncertain approval did not replay the exact request"
+        authority.locator("select").first.select_option("execution")
+        expect(authority.get_by_role("button", name="Approve", exact=True)).to_be_disabled()
+        authority.locator("select").nth(1).select_option("t-owned")
+        authority.get_by_role("button", name="Approve", exact=True).click()
+        page.locator(".sheet-backdrop.confirm .dialog button").last.click()
+        expect(authority).to_contain_text("Active approvals: 2", timeout=5000)
+        assert authority_requests[2]["bundle_id"] == "execution" and authority_requests[2]["task_id"] == "t-owned"
+        planning = authority.locator(".project-extension", has_text="Plan and edit tasks")
+        planning.get_by_role("button", name="Withdraw approval").click()
+        planning.locator("textarea").fill("Reduce coordinator scope")
+        planning.get_by_role("button", name="Withdraw approval").click()
+        page.locator(".sheet-backdrop.confirm .dialog button").last.click()
+        expect(authority).to_contain_text("Active approvals: 1", timeout=5000)
+        assert authority_requests[-1]["expected_grant_generation"] == 1 and authority_requests[-1]["reason"] == "Reduce coordinator scope"
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "authority controls overflow the phone"
+        host_list_item[0] = True
+        hosts = page.locator("details.project-runtime-hosts")
+        hosts.locator("summary").first.click()
+        page.wait_for_timeout(3200)
+        hosts.locator("summary").first.click()
+        expect(hosts.get_by_role("button", name="Check SSH transport")).to_be_enabled()
+        host_list_failure[0] = True
+        hosts.locator("summary").first.click()
+        page.wait_for_timeout(3200)
+        hosts.locator("summary").first.click()
+        expect(hosts).to_contain_text("Host state could not be confirmed", timeout=5000)
+        expect(hosts.get_by_role("button", name="Check SSH transport")).to_be_disabled()
         browser.close()
     return unhandled.report()
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
+from daedalus.extensions.ci_observations import ci_readiness
 from daedalus.extensions.effects import EffectOutcome, EffectResolution
 from daedalus.extensions.orchestrator_domain import unresolved_review_comments
 from daedalus.host.worktrees import WorktreeError, WorktreeRefused
@@ -49,6 +50,9 @@ class MergeEffect:
                 row["contract_revision"] != row["current_revision"] or row["status"] != "review"):
             return EffectOutcome("failed", "result, verdict, or task review state changed")
         async with self.app.db.transaction() as conn:
+            ci = await ci_readiness(conn, claim.task_id, row["contract_revision"], row["head_sha"])
+            if ci["state"] == "blocked":
+                return EffectOutcome("failed", "required CI changed or is missing for the reviewed head")
             latest = await conn.execute("SELECT id FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
                                         " AND attempt_id IS ? ORDER BY created_at DESC,rowid DESC LIMIT 1",
                                         (claim.task_id, row["contract_revision"], row["current_attempt_id"]))

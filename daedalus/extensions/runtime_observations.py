@@ -47,8 +47,12 @@ async def observe_exit(app: Application, *, staff_session_id: str, runtime_ref: 
         row = await one(conn, "SELECT a.*,t.current_attempt_id,t.contract_revision AS current_contract,"
                         "s.session_id,s.terminal_id FROM execution_attempts a"
                         " JOIN board_tasks t ON t.id = a.task_id JOIN staff_sessions s ON s.id = a.staff_session_id"
-                        " WHERE a.staff_session_id = ? AND t.current_attempt_id = a.id", (staff_session_id,))
-        if row is None or row["host_generation"] != generation or row["contract_revision"] != row["current_contract"]:
+                        " WHERE a.staff_session_id = ? AND ((a.runtime_kind = 'daedalus' AND a.native_run_id = ?)"
+                        " OR (a.runtime_kind = 'cli' AND a.provider_session_ref = ?))",
+                        (staff_session_id, runtime_ref, f"terminal:{runtime_ref}"))
+        # Projection changes refuse further worker writes, but cannot erase physical ownership.
+        # The exact old run still has to release its slot before the replacement can start.
+        if row is None or row["host_generation"] != generation:
             return False
         if row["runtime_kind"] == "daedalus":
             run = await one(conn, "SELECT session_id,status FROM runs WHERE id = ?", (runtime_ref,))

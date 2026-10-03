@@ -4160,6 +4160,10 @@ button.staff-row:hover { background: var(--surface-2); }
 .bp-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: var(--space-8) var(--space-5); color: var(--fg-2); font-size: var(--fs-13); text-align: center; }
 .bp-empty .ic { color: var(--fg-3); margin-bottom: 4px; }
 .bp-empty b { color: var(--fg); font-size: var(--fs-14); }
+.bp-ownership { flex: none; width: 100%; max-width: 100%; padding: var(--space-2) var(--space-3); background: var(--surface-2); color: var(--fg); text-align: left; }
+.bp-ownership summary { cursor: pointer; min-height: var(--ctl-h); display: flex; align-items: center; }
+.bp-ownership-body { max-height: 35vh; overflow: auto; overflow-wrap: anywhere; }
+.bp-ownership-body p { margin: var(--space-2) 0; }
 .bp-give { width: 300px; padding: 10px; }
 /* Above the phone's driving screen, which is itself above the sheets. */
 .menu.bp-give { z-index: 42; }

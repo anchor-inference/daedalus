@@ -14,10 +14,13 @@ from typing import Any
 import aiosqlite
 
 from daedalus.config import native_mode
+from daedalus.stores.ci_schema import MIGRATION as CI_MIGRATION
+from daedalus.stores.comparison_schema import MIGRATION as COMPARISON_MIGRATION
 from daedalus.stores.control_schema import MIGRATION as CONTROL_MIGRATION
 from daedalus.stores.execution_schema import MIGRATION as EXECUTION_MIGRATION
 from daedalus.stores.extension_schema import EXTENSION_SCHEMA
 from daedalus.stores.grant_lineage_schema import MIGRATION as GRANT_LINEAGE_MIGRATION
+from daedalus.stores.issue_sync_schema import ISSUE_SYNC_MIGRATION
 from daedalus.stores.knowledge_invalidation_schema import MIGRATION as KNOWLEDGE_INVALIDATION_MIGRATION
 from daedalus.stores.lifecycle_ownership_schema import MIGRATION as LIFECYCLE_OWNERSHIP_MIGRATION
 from daedalus.stores.lifecycle_schema import MIGRATION as LIFECYCLE_MIGRATION
@@ -1711,6 +1714,9 @@ MIGRATIONS.append(STAFF_REPORT_MIGRATION)
 MIGRATIONS.append(RUNTIME_OBSERVATION_MIGRATION)
 MIGRATIONS.append(WORKSPACE_ARCHIVE_MIGRATION)
 MIGRATIONS.append(GRANT_LINEAGE_MIGRATION)
+MIGRATIONS.append(COMPARISON_MIGRATION)
+MIGRATIONS.append(CI_MIGRATION)
+MIGRATIONS.append(ISSUE_SYNC_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

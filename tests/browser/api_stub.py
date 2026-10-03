@@ -435,6 +435,9 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
     if path in GATES:
         return 200, "application/json", json.dumps(GATES[path])
     parts = path.split("/")
+    if method.upper() == "GET" and len(parts) == 6 and parts[2:4] == ["runtime", "browsers"] and parts[5] == "ownership":
+        return 200, "application/json", json.dumps({"group_id": parts[4], "alive": "unknown", "reason": "unconfirmed", "observed_at": None,
+                                              "last_safe_url": None, "reconnectable": False, "instance_generation": "", "authorization_state": "authenticated_operator"})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "artifact-manifests" and parts[4] == "transfer-readiness":
         return 200, "application/json", json.dumps({"manifest_id": parts[3], "project_id": "", "available": False, "reason": "file_unavailable", "transfers": []})
     if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] in ("mode", "yagni"):

@@ -396,6 +396,10 @@ class WebhookReceived(TypedDict):
     """A pull request's outcome (``opened``, ``merged`` …) or a CI run's (``success``, ``failure`` …)."""
     branch: NotRequired[str]
     title: NotRequired[str]
+    repository_id: NotRequired[str]
+    head_sha: NotRequired[str]
+    run_id: NotRequired[str]
+    check_name: NotRequired[str]
 
 
 class ProjectChanged(TypedDict):

@@ -276,7 +276,7 @@ class Lifecycle:
                 return "unknown"
             if row["state"] == "cancelled":
                 return "unknown"
-            if row["current_attempt_id"] != attempt_id or not row["staff_session_id"] or row["ended_at"]:
+            if not row["staff_session_id"] or row["ended_at"]:
                 await conn.execute(
                     "UPDATE lifecycle_owners SET cancel_state = 'unknown',last_observed_at = ?,updated_at = ? "
                     "WHERE parent_kind = ? AND parent_id = ? AND child_kind = 'execution_attempt' "
@@ -320,7 +320,7 @@ class Lifecycle:
         )
         host = await self.app.db.fetchone("SELECT value FROM kv WHERE key = 'execution_host_generation'")
         if (current is None or host is None or int(json.loads(host["value"])) != row["host_generation"]
-                or current["current_attempt_id"] != attempt_id or current["host_generation"] != row["host_generation"]):
+                or current["host_generation"] != row["host_generation"]):
             return "unknown"
         observed = f"session:{current['session_id']}" if row["runtime_kind"] == "daedalus" else f"terminal:{current['terminal_id']}"
         if not row["provider_session_ref"] or observed != row["provider_session_ref"]:

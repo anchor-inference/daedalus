@@ -15,6 +15,7 @@ import { clock } from "../format";
 import { plural, t } from "../i18n";
 import { Icon, type IconName } from "../icons";
 import { navigate, pathFor } from "../router";
+import { useQuery } from "../store";
 import { confirmAsync, errorText, haptic } from "../ui";
 import { answerDialog, closeBrowser, consumeTake, deleteRecording, deviceSaving, recordingMoved, resizeViewport, setControl, setRecording, takeHandoff, useActions, useLiveSnapshot, useLiveView, useRecording, useWorkflows, workflowsMoved } from "./data";
 import { currentRecording, ProcedureEditor, RecordBar, RecordButton, RecordedCard, waitingRecording } from "./steps";
@@ -32,6 +33,7 @@ import type { ViewerChord } from "./keys";
 /** The tab's body: the session's groups, the busiest one shown (a session rarely has more than one). */
 export function BrowserTab({ groups, toast, phone }: { groups: BrowserGroup[]; toast: (text: string) => void; phone?: boolean }) {
   const open = groups.filter((g) => g.status !== "closed" && g.status !== "lost");
+  const previous = groups.filter((g) => g.status === "closed" || g.status === "lost");
   const [chosen, setChosen] = useState<string | null>(null);
   const group = open.find((g) => g.id === chosen) ?? open[0] ?? null;
   if (!group) {
@@ -40,6 +42,9 @@ export function BrowserTab({ groups, toast, phone }: { groups: BrowserGroup[]; t
         <Icon name="globe" size={22} />
         <b>{t("browser.none.title")}</b>
         <span>{t("browser.none.body")}</span>
+        {previous.length > 0 && <details className="bp-ownership"><summary>{t("browser.ownership.previous")}</summary>
+          {previous.map((item) => <OwnershipDisclosure key={item.id} groupId={item.id} label={item.owner.label} />)}
+        </details>}
       </div>
     );
   }
@@ -54,6 +59,30 @@ type PanelProps = {
   phone?: boolean;
   /** The page of its own: no panel around it. The log sits beside the picture once it is opened. */
   full?: boolean;
+}
+
+type BrowserOwnership = {
+  group_id: string; alive: "yes" | "no" | "unknown"; reason: string;
+  observed_at: string | null; last_safe_url: string | null; reconnectable: boolean;
+  instance_generation: string; authorization_state: string;
+};
+
+function OwnershipDisclosure({ groupId, label }: { groupId: string; label?: string }) {
+  const [open, setOpen] = useState(false);
+  const query = useQuery<BrowserOwnership>(open ? `/api/runtime/browsers/${encodeURIComponent(groupId)}/ownership` : null, { staleMs: 0, pollMs: 5000 });
+  const ownership = query.data;
+  const valid = !query.error && ownership?.group_id === groupId && ownership.authorization_state === "authenticated_operator";
+  const state = valid && ownership?.alive === "yes" && ownership.reconnectable && ownership.observed_at ? "yes"
+    : valid && ownership?.alive === "no" ? "no" : "unknown";
+  return <details className="bp-ownership" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary>{label || t("browser.ownership.check")}</summary>
+    {open && <div className="bp-ownership-body" role="status">
+      <p>{t(`browser.ownership.${state}`)}</p>
+      {valid && ownership?.last_safe_url && <p className="mono">{ownership.last_safe_url}</p>}
+      {query.error && <p className="result-warning">{t("browser.ownership.readFailed")}</p>}
+      <button type="button" className="linkbtn" onClick={() => query.refresh()}>{t("common.retry")}</button>
+    </div>}
+  </details>;
 }
 
 const PAGE_MIN = 320;
@@ -201,6 +230,7 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
   const viewer = (
     <div className="bp-stage-wrap">
       <Banner drive={drive} agent={agent} needs={needs} state={snap.state.kind} control={control} viewers={snap.viewers} bare={phone} />
+      {(snap.state.kind === "reconnecting" || snap.state.kind === "proxy-blocked" || snap.state.kind === "unavailable") && <OwnershipDisclosure groupId={group.id} />}
       {steps && <RecordBar group={group.id} recording={steps} tab={viewing?.id ?? null} toast={toast} />}
       <BrowserViewer
         live={live}

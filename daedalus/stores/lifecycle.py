@@ -146,7 +146,7 @@ async def record_owned_exit(
     )
     if (row is None or row["staff_session_id"] != staff_session_id or row["host_generation"] != host_generation
             or row["provider_session_ref"] != provider_session_ref or not provider_session_ref
-            or row["current_attempt_id"] != attempt_id or row["source_revision"] != row["contract_revision"]
+            or row["source_revision"] != row["contract_revision"]
             or not row["ended_at"]):
         return False
     host = await one(conn, "SELECT value FROM kv WHERE key = 'execution_host_generation'")

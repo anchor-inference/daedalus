@@ -124,16 +124,19 @@ class ExecutionStore:
         await self.control.authorize(conn, launcher, self._scope(task["project_id"]), "task.launch",
                                      task_id=task_id, effects=("execution.start",))
         await self.control.authorize(conn, worker, self._scope(task["project_id"]), "result.submit", task_id=task_id)
-        if task["current_attempt_id"]:
-            previous = await one(conn, "SELECT state,native_run_id,runtime_instance FROM execution_attempts WHERE id = ?", (task["current_attempt_id"],))
-            if previous is not None and previous["state"] in (*ACTIVE, "recovering"):
+        async with conn.execute("SELECT a.id,a.state FROM execution_attempts a WHERE a.task_id = ?"
+                                " AND NOT EXISTS (SELECT 1 FROM runtime_exit_observations e"
+                                " WHERE e.attempt_id = a.id AND e.contract_revision = a.contract_revision"
+                                " AND e.host_generation = a.host_generation AND e.staff_session_id = a.staff_session_id"
+                                " AND e.provider_session_ref = a.provider_session_ref AND e.runtime_kind = a.runtime_kind"
+                                " AND ((a.runtime_kind = 'daedalus' AND e.runtime_ref = a.native_run_id)"
+                                " OR (a.runtime_kind = 'cli' AND e.runtime_instance = a.runtime_instance"
+                                " AND a.provider_session_ref = 'terminal:' || e.runtime_ref)))", (task_id,)) as cursor:
+            previous = await cursor.fetchone()
+        if previous is not None:
+            if previous["state"] in (*ACTIVE, "recovering"):
                 raise ControlDenied("the previous execution must be stopped or reconciled first")
-            if previous is not None:
-                proof = await one(conn, "SELECT 1 FROM runtime_exit_observations WHERE attempt_id = ?"
-                                  " AND (runtime_ref = ? OR runtime_instance = ?) LIMIT 1",
-                                  (task["current_attempt_id"], previous["native_run_id"], previous["runtime_instance"]))
-                if proof is None:
-                    raise ControlDenied("the previous execution has no host-observed runtime exit")
+            raise ControlDenied("the previous execution has no host-observed runtime exit")
         await conn.execute("INSERT INTO execution_attempts(id,task_id,contract_revision,host_generation,"
                            " fence_token_hash,state,created_at,updated_at,actor_id,grant_id,grant_generation,"
                            " staff_session_id,runtime_kind) VALUES (?,?,?,?,?,'queued',?,?,?,?,?,?,?)",

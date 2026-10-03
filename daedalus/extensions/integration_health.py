@@ -14,7 +14,7 @@ def capability_matrix(*, github_configured: bool, webhooks: set[str]) -> list[di
         {
             "provider": "github", "source": "host_adapter", "configured": github_configured,
             "capabilities": {"pull_request_read": True, "pull_request_write": True,
-                             "issue_sync": False, "inbound_events": "github" in webhooks},
+                             "issue_sync": True, "inbound_events": "github" in webhooks},
         },
         {
             "provider": "gitlab", "source": "no_host_adapter", "configured": False,

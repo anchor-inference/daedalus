@@ -35,13 +35,14 @@ function HostContent({ toast }: { toast: (message: string) => void }) {
   const [busy, setBusy] = useState(false);
   const intent = useRef<Intent | null>(null);
   const revision = query.data?.collection_revision;
+  const readCurrent = !!query.data && !query.error;
 
   async function enroll() {
     const name = label.trim();
     const key = publicKey.trim();
     const address = sshHost.trim();
     const sshReady = !address || (!!sshUser.trim() && !!remoteRoot.trim() && Number(sshPort) > 0 && Number(sshPort) <= 65535);
-    if (busy || offline || !name || !key || !Number.isInteger(revision) || !sshReady) return;
+    if (busy || offline || !readCurrent || !name || !key || !Number.isInteger(revision) || !sshReady) return;
     const transport = address ? { ssh_host: address, ssh_port: Number(sshPort), ssh_user: sshUser.trim(), remote_root: remoteRoot.trim() } : {};
     const signature = JSON.stringify([name, key, revision, transport]);
     if (intent.current?.key !== signature) intent.current = { key: signature, id: crypto.randomUUID() };
@@ -61,7 +62,7 @@ function HostContent({ toast }: { toast: (message: string) => void }) {
     <p className="sub">{t("host.intro")}</p>
     {query.error && <div className="result-warning" role="status">{t("host.unknown")} <button type="button" className="linkbtn" onClick={query.refresh}>{t("common.retry")}</button></div>}
     {query.data?.items.length === 0 && <div className="sub">{t("host.none")}</div>}
-    {query.data?.items.map((host) => <HostCard key={host.host_id} host={host} revision={revision} refresh={query.refresh} offline={offline} toast={toast} />)}
+    {query.data?.items.map((host) => <HostCard key={host.host_id} host={host} revision={revision} readCurrent={readCurrent} refresh={query.refresh} offline={offline} toast={toast} />)}
     <details>
       <summary>{t("host.pair")}</summary>
       <p className="sub">{t("host.pairHint")}</p>
@@ -74,19 +75,19 @@ function HostContent({ toast }: { toast: (message: string) => void }) {
         <label className="field">{t("host.sshUser")}<input className="field" value={sshUser} maxLength={64} onChange={(event) => setSshUser(event.target.value)} /></label>
         <label className="field">{t("host.remoteRoot")}<input className="field" value={remoteRoot} maxLength={256} onChange={(event) => setRemoteRoot(event.target.value)} /></label>
       </details>
-      <button type="button" className="btn small" disabled={busy || offline || !Number.isInteger(revision) || !label.trim() || !publicKey.trim() || (!!sshHost.trim() && (!sshUser.trim() || !remoteRoot.trim() || Number(sshPort) < 1 || Number(sshPort) > 65535))} onClick={() => void enroll()}>{t("host.recordKey")}</button>
+      <button type="button" className="btn small" disabled={busy || offline || !readCurrent || !Number.isInteger(revision) || !label.trim() || !publicKey.trim() || (!!sshHost.trim() && (!sshUser.trim() || !remoteRoot.trim() || Number(sshPort) < 1 || Number(sshPort) > 65535))} onClick={() => void enroll()}>{t("host.recordKey")}</button>
     </details>
   </div>;
 }
 
-function HostCard({ host, revision, refresh, offline, toast }: { host: Host; revision: number | undefined; refresh: () => void; offline: boolean; toast: (message: string) => void }) {
+function HostCard({ host, revision, readCurrent, refresh, offline, toast }: { host: Host; revision: number | undefined; readCurrent: boolean; refresh: () => void; offline: boolean; toast: (message: string) => void }) {
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [signature, setSignature] = useState("");
   const [candidateKey, setCandidateKey] = useState("");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const intent = useRef<Intent | null>(null);
-  const canWrite = !offline && !busy && Number.isInteger(revision);
+  const canWrite = !offline && !busy && readCurrent && Number.isInteger(revision);
 
   async function requestChallenge() {
     if (!canWrite) return;

@@ -17,6 +17,7 @@ from typing import Any
 
 import aiosqlite
 
+from daedalus.extensions.ci_observations import ci_readiness
 from daedalus.extensions.task_contract import REQUIREMENT_KINDS, check_items
 from daedalus.stores.control import ControlStore, Principal
 from daedalus.stores.database import Database
@@ -112,9 +113,11 @@ async def replace_contract(
     snapshot = {"requirements": _requirements(requirements), "checklist": _checks(checks),
                 "acceptance": acceptance.strip(), "depends_on": _json(task["depends_on"], []),
                 "brief": {key: str(value).strip() for key, value in brief.items()},
-                "folder_id": task["folder_id"], "file_ids": [row["file_id"] for row in attached]}
+                "folder_id": task["folder_id"], "file_ids": [row["file_id"] for row in attached],
+                "ci_checks": current.get("ci_checks", [])}
     current.setdefault("folder_id", None)
     current.setdefault("file_ids", [])
+    current.setdefault("ci_checks", [])
     prior = {key: current.get(key) for key in snapshot}
     changed = _canonical(snapshot) != _canonical(prior)
     if change_kind not in ("semantic", "editorial"):
@@ -144,6 +147,10 @@ async def replace_contract(
             " VALUES (?, ?, ?, ?, ?, ?)",
             (task_id, revision, origin_kind, origin_ref, _canonical(snapshot), _now()),
         )
+        await conn.execute("INSERT INTO ci_required_checks(task_id,contract_revision,provider,repository_id,"
+                           " check_name,created_at) SELECT task_id,?,provider,repository_id,check_name,?"
+                           " FROM ci_required_checks WHERE task_id = ? AND contract_revision = ?",
+                           (revision, _now(), task_id, task["contract_revision"]))
         await conn.execute("UPDATE board_tasks SET contract_revision = ?, acceptance_state = 'returned',"
                            " checklist = ?, acceptance = ?, brief_json = ? WHERE id = ?",
                            (revision, _canonical([{"id": item["id"], "text": item["text"], "done": False}
@@ -172,6 +179,7 @@ async def capture_contract_change(conn: aiosqlite.Connection, task_id: str, *, o
     old = _json(current["snapshot_json"], {})
     old.setdefault("folder_id", None)
     old.setdefault("file_ids", [])
+    old.setdefault("ci_checks", [])
     old_checks = old.get("checklist", [])
     old_by_text: dict[str, list[str]] = {}
     for old_item in old_checks:
@@ -192,12 +200,16 @@ async def capture_contract_change(conn: aiosqlite.Connection, task_id: str, *, o
     snapshot = {"requirements": [dict(row) for row in requirements], "checklist": check_snapshot,
                 "acceptance": task["acceptance"], "depends_on": _json(task["depends_on"], []),
                 "brief": _json(task["brief_json"], {}), "folder_id": task["folder_id"],
-                "file_ids": [row["file_id"] for row in attached]}
+                "file_ids": [row["file_id"] for row in attached], "ci_checks": old["ci_checks"]}
     if _canonical(snapshot) == _canonical(old):
         return int(task["contract_revision"])
     revision = int(task["contract_revision"]) + 1
     await conn.execute("INSERT INTO task_contract_versions(task_id,contract_revision,origin_kind,origin_ref,snapshot_json,created_at)"
                        " VALUES (?,?,?,?,?,?)", (task_id, revision, origin_kind, origin_ref, _canonical(snapshot), _now()))
+    await conn.execute("INSERT INTO ci_required_checks(task_id,contract_revision,provider,repository_id,"
+                       " check_name,created_at) SELECT task_id,?,provider,repository_id,check_name,?"
+                       " FROM ci_required_checks WHERE task_id = ? AND contract_revision = ?",
+                       (revision, _now(), task_id, task["contract_revision"]))
     await conn.execute("UPDATE board_tasks SET contract_revision = ?, acceptance_state = 'returned' WHERE id = ?",
                        (revision, task_id))
     await conn.execute("UPDATE next_actions SET state = 'cancelled' WHERE task_id = ? AND state = 'active'"
@@ -284,13 +296,23 @@ class OriginalReports:
         return original
 
 
+async def _comparison_member(conn: aiosqlite.Connection, task_id: str, attempt_id: str | None,
+                             contract_revision: int) -> aiosqlite.Row | None:
+    if attempt_id is None:
+        return None
+    return await _one(conn, "SELECT g.id,g.state,g.selected_result_id FROM comparison_group_attempts m"
+                      " JOIN comparison_groups g ON g.id = m.group_id"
+                      " WHERE m.attempt_id = ? AND g.task_id = ? AND g.contract_revision = ?"
+                      " AND g.state IN ('active','ready')", (attempt_id, task_id, contract_revision))
+
+
 async def submit_result(
     conn: aiosqlite.Connection, *, result_id: str, task_id: str, attempt_id: str | None,
     contract_revision: int, outcome: str, original_text: str | None, original_blob_ref: str | None,
     original_digest: str, original_size_bytes: int, actor_id: str, manifest_ids: list[str],
     checks: list[dict[str, Any]], limitations: list[str], original_artifact_file_id: str | None = None,
 ) -> dict[str, Any]:
-    """Insert a full immutable report only for the task's current contract and attempt."""
+    """Insert a full immutable report for the current attempt or a bounded comparison member."""
     if outcome not in RESULT_OUTCOMES:
         raise ValueError("invalid result outcome")
     if (original_text is None) == (original_blob_ref is None):
@@ -300,7 +322,9 @@ async def submit_result(
         raise KeyError(task_id)
     if int(task["contract_revision"]) != contract_revision:
         raise DomainConflict("the result refers to an older contract")
-    if task["current_attempt_id"] != attempt_id:
+    comparison = (await _comparison_member(conn, task_id, attempt_id, contract_revision)
+                  if task["current_attempt_id"] != attempt_id else None)
+    if task["current_attempt_id"] != attempt_id and comparison is None:
         raise DomainConflict("the attempt is no longer current")
     if original_text is not None:
         original = original_text.encode("utf-8")
@@ -323,10 +347,11 @@ async def submit_result(
     for manifest_id in manifest_ids:
         await conn.execute("INSERT INTO result_artifacts(result_id, manifest_id) VALUES (?, ?)",
                            (result_id, manifest_id))
-    await conn.execute("UPDATE board_tasks SET acceptance_state = 'handed_in' WHERE id = ?", (task_id,))
+    if comparison is None:
+        await conn.execute("UPDATE board_tasks SET acceptance_state = 'handed_in' WHERE id = ?", (task_id,))
     return {"result_id": result_id, "task_id": task_id, "contract_revision": contract_revision,
             "outcome": outcome, "original_digest": original_digest, "original_size_bytes": original_size_bytes,
-            "verification": "unverified", "acceptance_state": "handed_in"}
+            "verification": "unverified", "acceptance_state": "comparison_pending" if comparison else "handed_in"}
 
 
 async def add_review_evidence(
@@ -363,7 +388,10 @@ async def record_verdict(
     task = await _one(conn, "SELECT contract_revision,current_attempt_id,status FROM board_tasks WHERE id = ?", (result["task_id"],))
     if task is None or int(task["contract_revision"]) != int(result["contract_revision"]):
         raise DomainConflict("review target is stale after a contract change")
-    if result["attempt_id"] != task["current_attempt_id"]:
+    comparison = (await _comparison_member(conn, result["task_id"], result["attempt_id"],
+                                           result["contract_revision"])
+                  if result["attempt_id"] != task["current_attempt_id"] else None)
+    if result["attempt_id"] != task["current_attempt_id"] and comparison is None:
         raise DomainConflict("review target came from a superseded attempt")
     latest = await _one(conn, "SELECT id FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
                         " AND attempt_id IS ? ORDER BY created_at DESC,rowid DESC LIMIT 1",
@@ -383,6 +411,10 @@ async def record_verdict(
             raise DomainConflict("the worker cannot independently review its own result")
     if accepted and (verification != "verified" or result["outcome"] != "complete"):
         raise DomainConflict("only a verified complete result can be accepted")
+    if accepted:
+        ci = await ci_readiness(conn, result["task_id"], result["contract_revision"], head)
+        if ci["state"] == "blocked":
+            raise DomainConflict("required CI has not passed for the reviewed head")
     if accepted and task["status"] != "review":
         raise DomainConflict("a result can be approved only while the task is in review")
     evidence = []
@@ -519,6 +551,9 @@ async def accept_result(
         raise DomainConflict("the verdict belongs to another result or contract")
     if verdict["verification"] != "verified" or not verdict["accepted"]:
         raise DomainConflict("the result has no approving verified verdict")
+    ci = await ci_readiness(conn, task_id, contract_revision, current_head)
+    if ci["state"] == "blocked":
+        raise DomainConflict("required CI changed or is missing for the accepted head")
     if await unresolved_review_comments(conn, result_id):
         raise DomainConflict("blocking review comments remain unresolved")
     if verdict["head"] != current_head or verdict["base"] != current_base:

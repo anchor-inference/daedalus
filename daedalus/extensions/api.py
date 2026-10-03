@@ -64,11 +64,13 @@ from daedalus.doctor import DoctorContext, render_text, run_checks, summarize
 from daedalus.extensions import (
     api_board,
     api_browsers,
+    api_ci,
     api_control,
     api_coordinator_authority,
     api_files,
     api_harnesses,
     api_integrations,
+    api_issue_sync,
     api_knowledge,
     api_lifecycle,
     api_plugins,
@@ -82,8 +84,9 @@ from daedalus.extensions import (
     launcher_updates,
 )
 from daedalus.extensions import commands as slash
+from daedalus.extensions.ci_observations import record_signed_delivery
 from daedalus.extensions.heartbeat import TEMPLATE as HEARTBEAT_TEMPLATE
-from daedalus.extensions.inbound import PAYLOAD_MAX_CHARS, flatten_payload, verify_signature, webhook_facts
+from daedalus.extensions.inbound import PAYLOAD_MAX_CHARS, flatten_payload, verify_signature
 from daedalus.extensions.notifications import ActionConflict, ActionRefused, Draft, NotificationService
 from daedalus.extensions.push import PushRefused, PushService
 from daedalus.extensions.review import ReviewRefused
@@ -1498,6 +1501,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     install_routes(api, app, auth)
     api_board.register(api, app, auth)
+    api_ci.install_routes(api, app, auth)
     api_control.register(api, app, auth)
     api_coordinator_authority.register(api, app, auth)
     api_projects.register(api, app, auth)
@@ -1510,6 +1514,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_plugins.register(api, app, auth)
     api_skill_quality.register(api, app, auth)
     api_integrations.register(api, app, auth)
+    api_issue_sync.register(api, app, auth)
     # The command-line agents: the Harnesses screen and the hiring form's catalog.
     api_harnesses.register(api, app, auth)
     # One staff member's session as its runtime sees it: the staff view's reads.
@@ -4287,8 +4292,6 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         stamped = request.headers.get("x-github-delivery") or request.headers.get("x-delivery-id")
         # Without a delivery id, identical bodies within the same minute are one event; later repeats are new ones.
         delivery_id = stamped or hashlib.sha256(raw).hexdigest() + ":" + datetime.now(UTC).strftime("%Y%m%d%H%M")
-        if not await inbound.record_delivery(provider, delivery_id):  # type: ignore[attr-defined]
-            return {"status": "duplicate", "delivery_id": delivery_id}
         try:
             payload = json.loads(raw.decode("utf-8")) if raw else {}
         except ValueError:
@@ -4296,24 +4299,35 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         event = request.headers.get("x-github-event") or request.headers.get("x-event") or ""
         if not event and isinstance(payload, dict) and isinstance(payload.get("event") or payload.get("type"), str):
             event = str(payload.get("event") or payload.get("type"))[:100]
+        issue_sync = app.extensions.get("issue_sync")
+
+        async def observe_issue(conn: Any) -> None:
+            if provider == "github" and issue_sync is not None:
+                await issue_sync.record_webhook_in(conn, event, payload)
+
         summary = flatten_payload(payload)
         text = (f"event: {event}\n" if event else "") + summary
-        # Every accepted delivery is an event, so a project's watch on a pull request or a CI result
-        # hears it whether or not a session also runs it.
         try:
-            await manager.bus.publish(
-                "webhook.received",
-                {"provider": provider, "event": event, "delivery_id": delivery_id, "summary": summary, **webhook_facts(event, payload)},
+            receipt = await record_signed_delivery(
+                app.db, manager.bus, inbound, provider=provider, event=event, delivery_id=delivery_id,
+                payload=payload, payload_digest=hashlib.sha256(raw).hexdigest(), summary=summary,
+                observe=observe_issue,
             )
-        except Exception:  # noqa: BLE001 — the delivery is accepted; the event is for the watches
-            logger.warning("could not publish webhook.received for %s", provider, exc_info=True)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 — persistence must succeed before acknowledging a signed event.
+            logger.warning("could not persist signed webhook %s", provider, exc_info=True)
+            raise HTTPException(503, "the signed delivery could not be persisted; retry it") from exc
+        if not receipt["fresh"]:
+            return {"status": "duplicate", "delivery_id": delivery_id}
         if conf.deliver == "events":
             return {"status": "accepted", "delivery_id": delivery_id, "delivered": "events"}
         try:
             result = await inbound.deliver(source=f"webhook:{provider}", text=text, session_ref=conf.session or None, default_title=f"[webhook {provider}]", prompt=conf.prompt)  # type: ignore[attr-defined]
         except Exception as exc:  # noqa: BLE001 — the sender must get a status, and the failure goes to the inbox
             logger.warning("webhook %s could not run", provider, exc_info=True)
-            await inbound.forget_delivery(provider, delivery_id)  # type: ignore[attr-defined]
+            # The accepted event may already have woken a standing rule. Forgetting its identity
+            # would repeat that action when the sender retries after a failed direct launch.
             if app.notifications is not None:
                 await app.notifications.post(Draft("system", f"Webhook {provider} could not start a run", f"{type(exc).__name__}: {exc}", kind="webhook_failed", tone="warning", source=f"webhook:{provider}"))
             raise HTTPException(503, "accepted but could not start a run; see the inbox") from exc

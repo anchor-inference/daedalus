@@ -19,6 +19,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+import aiosqlite
+
 from daedalus.extensions.notifications import Draft, Tone
 
 if TYPE_CHECKING:
@@ -85,6 +87,7 @@ def webhook_facts(event: str, payload: Any) -> dict[str, str]:
         return {}
     facts: dict[str, Any] = {
         "repo": _dig(payload, "repository", "full_name") or _dig(payload, "project", "path_with_namespace"),
+        "repository_id": _dig(payload, "repository", "id"),
         "action": payload.get("action"),
     }
     if event == "pull_request":
@@ -92,17 +95,24 @@ def webhook_facts(event: str, payload: Any) -> dict[str, str]:
         merged = bool(_dig(pull, "merged"))
         facts["conclusion"] = "merged" if payload.get("action") == "closed" and merged else payload.get("action")
         facts["branch"] = _dig(pull, "head", "ref")
+        facts["head_sha"] = _dig(pull, "head", "sha")
         facts["title"] = _dig(pull, "title")
     elif event in ("check_suite", "check_run", "workflow_run"):
         run = payload.get(event) or {}
         facts["conclusion"] = _dig(run, "conclusion")
         facts["branch"] = _dig(run, "head_branch") or _dig(run, "check_suite", "head_branch")
+        facts["head_sha"] = _dig(run, "head_sha") or _dig(run, "check_suite", "head_sha")
+        facts["run_id"] = _dig(run, "id")
+        facts["check_name"] = _dig(run, "name") or _dig(run, "display_title")
         facts["title"] = _dig(run, "name") or _dig(run, "display_title")
     elif event == "status":
         state = payload.get("state")
         facts["conclusion"] = state if state != "pending" else None
         branches = payload.get("branches") or []
         facts["branch"] = _dig(branches[0], "name") if branches and isinstance(branches[0], dict) else None
+        facts["head_sha"] = payload.get("sha")
+        facts["run_id"] = payload.get("id")
+        facts["check_name"] = payload.get("context")
         facts["title"] = payload.get("context")
     return {key: str(value)[:200] for key, value in facts.items() if isinstance(value, (str, int)) and str(value)}
 
@@ -197,13 +207,17 @@ class Inbound:
     async def record_delivery(self, provider: str, delivery_id: str) -> bool:
         """True when the delivery is new; an INSERT OR IGNORE is the atomic dedupe."""
         async with self.app.db.transaction() as conn:
-            cursor = await conn.execute(
-                "INSERT OR IGNORE INTO webhook_deliveries(provider, delivery_id, at) VALUES (?, ?, ?)",
-                (provider, delivery_id, datetime.now(UTC).isoformat()),
-            )
-            fresh = bool(cursor.rowcount)
-            cutoff = (datetime.now(UTC) - timedelta(days=DELIVERIES_KEEP_DAYS)).isoformat()
-            await conn.execute("DELETE FROM webhook_deliveries WHERE at < ?", (cutoff,))
+            return await self.record_delivery_in(conn, provider, delivery_id)
+
+    async def record_delivery_in(self, conn: aiosqlite.Connection, provider: str, delivery_id: str) -> bool:
+        """Keep dedupe in the caller's transaction with the accepted event and CI observation."""
+        cursor = await conn.execute(
+            "INSERT OR IGNORE INTO webhook_deliveries(provider, delivery_id, at) VALUES (?, ?, ?)",
+            (provider, delivery_id, datetime.now(UTC).isoformat()),
+        )
+        fresh = bool(cursor.rowcount)
+        cutoff = (datetime.now(UTC) - timedelta(days=DELIVERIES_KEEP_DAYS)).isoformat()
+        await conn.execute("DELETE FROM webhook_deliveries WHERE at < ?", (cutoff,))
         return fresh
 
     async def forget_delivery(self, provider: str, delivery_id: str) -> None:
