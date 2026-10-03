@@ -167,3 +167,12 @@ async def test_expired_or_changed_request_does_not_modify_state(db: Database) ->
     with pytest.raises(ControlDenied, match="expired"):
         await store.mutate(Principal(subject.actor_id, "agent", grant["grant_id"], 1), scope, "task.edit", "expired", 1, entity, {}, forbidden)
     assert await store.revision(scope, entity) == 1
+
+
+async def test_heartbeat_does_not_invalidate_a_pending_operator_decision(db: Database) -> None:
+    scope = await project(db)
+    entity = await task(db, scope)
+    await db.execute("UPDATE board_tasks SET heartbeat_at = '2026-01-02',updated_at = '2026-01-02' WHERE id = 'task'")
+    assert await ControlStore(db).revision(scope, entity) == 1
+    await db.execute("UPDATE board_tasks SET status = 'review' WHERE id = 'task'")
+    assert await ControlStore(db).revision(scope, entity) == 2

@@ -22,7 +22,8 @@ END;
 CREATE TRIGGER projects_revision AFTER UPDATE ON projects WHEN NEW.entity_revision = OLD.entity_revision BEGIN
     UPDATE projects SET entity_revision = entity_revision + 1 WHERE id = NEW.id;
 END;
-CREATE TRIGGER tasks_revision AFTER UPDATE ON board_tasks WHEN NEW.entity_revision = OLD.entity_revision BEGIN
+CREATE TRIGGER tasks_revision AFTER UPDATE OF title,status,priority,acceptance,checklist,depends_on,session_id,run_id,notes,origin_session_id,project_id,assignee_staff_id,brief_json,folder_id,branch,merge_state,acceptance_state,current_attempt_id
+ON board_tasks WHEN NEW.entity_revision = OLD.entity_revision BEGIN
     UPDATE board_tasks SET entity_revision = entity_revision + 1 WHERE id = NEW.id;
 END;
 CREATE TRIGGER tasks_collection_insert AFTER INSERT ON board_tasks BEGIN

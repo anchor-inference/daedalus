@@ -61,7 +61,15 @@ from daedalus.config import (
     on_demand_tool_groups_for,
 )
 from daedalus.doctor import DoctorContext, render_text, run_checks, summarize
-from daedalus.extensions import api_browsers, api_files, api_harnesses, api_projects, api_staff, launcher_updates
+from daedalus.extensions import (
+    api_browsers,
+    api_control,
+    api_files,
+    api_harnesses,
+    api_projects,
+    api_staff,
+    launcher_updates,
+)
 from daedalus.extensions import commands as slash
 from daedalus.extensions.heartbeat import TEMPLATE as HEARTBEAT_TEMPLATE
 from daedalus.extensions.inbound import PAYLOAD_MAX_CHARS, flatten_payload, verify_signature, webhook_facts
@@ -1526,6 +1534,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     # The projects, their folders, brief and journal: their own module, which the features built
     # on projects extend rather than this file.
+    api_control.register(api, app, auth)
     api_projects.register(api, app, auth)
     # The command-line agents: the Harnesses screen and the hiring form's catalog.
     api_harnesses.register(api, app, auth)

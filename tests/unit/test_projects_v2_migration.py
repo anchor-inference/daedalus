@@ -136,6 +136,7 @@ async def test_every_project_keeps_its_folder_and_every_session_its_directory(tm
     new = set(after) - set(counts)
     # The migrations after this one run as well and add tables of their own; this one's are these.
     later = {"terminals", "terminal_audit", "harness_catalog", "harness_launches", "harness_deliveries", "push_subscriptions", "dispatches", "dispatch_messages", "files", "file_access", "task_files", "file_transfers", "browsers", "browser_profiles", "browser_groups", "browser_audit", "staff_allow_rules", "browser_workflows", "task_requirements", "requirement_deliveries", "open_loops"}
+    later.update({"domain_collection_revisions", "actor_grants", "grant_events", "operation_receipts", "execution_attempts", "effect_outbox", "quarantined_attempt_events"})
     assert new - later == {"project_folders", "project_briefs", "project_journal", "staff", "staff_sessions", "staff_messages", "asks", "watches"}
     assert after["project_folders"] == counts["projects"]
 
