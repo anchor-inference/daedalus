@@ -83,6 +83,8 @@ def serve(page: Page, stub: BoardStub, unhandled: Unhandled) -> None:
             return route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
         if path == "/api/projects":
             return route.fulfill(status=200, content_type="application/json", body=json.dumps([project()]))
+        if request.method == "GET" and path == f"/api/projects/{PID}/next-actions":
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"project_id": PID, "actions": []}))
         if path == "/api/sessions":
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"sessions": [], "projects": []}))
         if path == "/api/settings":
