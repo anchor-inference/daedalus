@@ -200,6 +200,13 @@ async def test_a_message_that_asks_several_things_is_kept_as_several_commitments
                                     evidence=[{"item": "C1", "how": "listed", "result": "ok"}],
                                     call_id=f"fixture-report:{uuid.uuid4().hex}")
         result_id = await accept_branchless_result(r.team, task_id)
+        accepted = (await r.orch.focus_state(await r.refreshed()))["accepted_results"]
+        [shown] = accepted
+        receipt = await r.manager.db.fetchone("SELECT contract_revision,attempt_id,original_digest FROM result_receipts WHERE id = ?", (result_id,))
+        assert receipt is not None
+        assert (shown["task_id"], shown["result_id"], shown["author"]) == (task_id, result_id, "Ira")
+        assert (shown["contract_revision"], shown["attempt_id"], shown["original_digest"]) == (
+            receipt["contract_revision"], receipt["attempt_id"], receipt["original_digest"])
         kept = await r.manager.db.fetchall("SELECT refs_json FROM project_journal"
                                            " WHERE project_id = ? AND kind = 'commitment_kept'", (r.project.id,))
         assert len(kept) == 1

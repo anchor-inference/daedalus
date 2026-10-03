@@ -1371,6 +1371,8 @@ class OrchestratorDomain:
                                   and row["attempt_id"] == task["current_attempt_id"]), None)
         out = []
         for row in rows:
+            staff = (await self.db.fetchone("SELECT name FROM staff WHERE id = ?", (row["actor_id"][6:],))
+                     if row["actor_id"].startswith("staff:") else None)
             async with self.db.transaction() as conn:
                 manual = (row["attempt_id"] is None and
                           await manual_result_origin(conn, row["id"], task_id, row["actor_id"]))
@@ -1384,6 +1386,7 @@ class OrchestratorDomain:
             stale = int(row["contract_revision"]) != int(task["contract_revision"])
             out.append({"result_id": row["id"], "task_id": task_id, "attempt_id": row["attempt_id"],
                         "origin_kind": "operator_manual" if manual else "worker",
+                        "author": staff["name"] if staff else "operator" if row["actor_id"].startswith("operator:") else None,
                         "contract_revision": int(row["contract_revision"]), "outcome": row["outcome"],
                         "original_digest": row["original_digest"], "original_size_bytes": row["original_size_bytes"],
                         "original_preview": (row["original_text"] or "")[:1000],

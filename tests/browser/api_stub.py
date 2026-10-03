@@ -734,6 +734,9 @@ class BoardStub:
         self.reviews: dict[str, dict] = {}
         """A task's review as the host would read it from git; a branch task without one gets :meth:`review`."""
         self.merged: list[str] = []
+        self.result_rows: dict[str, list[dict]] = {}
+        self.merge_requests: list[tuple[str, dict]] = []
+        self.merge_receipts: dict[str, dict] = {}
         self.rejected: list[tuple[str, str]] = []
         self.stops: list[tuple[str, dict]] = []
         self.workflow_runs: dict[str, dict] = {}
@@ -935,9 +938,40 @@ class BoardStub:
                 return 200, {"task_id": row["id"], "contract_revision": 1, "entity_revision": row["entity_revision"],
                              "checklist": [{"id": f"C{index}", "text": item["text"]} for index, item in enumerate(row["checklist"], 1)]}
             if path.endswith("/results") and method == "GET":
+                if row["id"] in self.result_rows:
+                    return 200, self.result_rows[row["id"]]
+                if row["id"] == "t-hero":
+                    return 200, [{"result_id": "res-hero", "task_id": "t-hero", "attempt_id": "attempt-hero", "contract_revision": 1,
+                                  "outcome": "complete", "origin_kind": "worker", "author": "Olga", "original_preview": "Original worker report: image delivered",
+                                  "original_digest": "a" * 64, "artifacts": [{"id": "artifact-hero", "artifact_kind": "file", "artifact_key": "hero.png", "digest": "b" * 64}],
+                                  "checks": ["Image opens on a phone"], "limitations": [], "verification": "verified", "verdict_id": "verdict-hero",
+                                  "current_result_id": "res-hero", "acceptance_state": "operator_approved", "accepted": True,
+                                  "created_at": "2026-09-23T17:55:00Z"}]
                 return 200, []
+            if path.endswith("/results/res-hero/original") and method == "GET":
+                return 200, {"original_text": "Original worker report: image delivered\nChecked on desktop and phone.\nNo outstanding changes."}
             if len(parts) == 7 and parts[4] == "results" and parts[6] == "comments" and method == "GET":
                 return 200, []
+            if len(parts) == 7 and parts[4] == "results" and parts[6] == "evidence" and method == "GET":
+                return 200, [{"evidence_id": "evidence-endpoint", "criterion_id": "completion", "observation": "tests pass",
+                              "verification": "verified", "manifest_digest_before": "b" * 64,
+                              "manifest_digest_after": "b" * 64, "observed_at": "2026-09-24T09:26:00Z"}]
+            if len(parts) == 7 and parts[4] == "results" and parts[6] == "merge" and method == "POST":
+                review = self._review_of(row)
+                if row["status"] != "review" or not row.get("branch") or not review["can_merge"] or row["id"] in self.merge_receipts:
+                    return 409, {"detail": "the reviewed branch is not ready"}
+                self.merge_requests.append((row["id"], dict(body or {})))
+                self.merge_receipts[row["id"]] = {"id": "merge-endpoint", "result_id": parts[5],
+                    "verdict_id": (body or {}).get("verdict_id"), "head_sha": "head", "base_sha": "base",
+                    "merge_sha": "merged-head", "state": "queued", "error": None}
+                return 200, {"state": "queued", "effect_id": "merge-endpoint"}
+            if len(parts) == 7 and parts[4] == "results" and parts[6] == "return" and method == "POST":
+                note = str((body or {}).get("reason") or "")
+                if not note or row["status"] != "review":
+                    return 409, {"detail": "the reviewed result cannot be returned"}
+                self.rejected.append((row["id"], note))
+                row.update(status="doing", merge_state="rejected", acceptance_state="returned")
+                return 200, {"result_id": parts[5], "state": "returned"}
             if method == "POST" and path.endswith("/accept"):
                 if row["status"] != "review":
                     return 409, {"detail": f"only a task in review can be accepted; this one is {row['status']}"}
@@ -951,7 +985,9 @@ class BoardStub:
             if path.endswith("/review") and method == "GET":
                 if not row.get("branch"):
                     return 409, {"detail": f"task {row['id']} has no staff branch to review"}
-                return 200, {**self._review_of(row), "status": row["status"], "head_sha": "head", "base_sha": "base", "current_sha": "base", "merge_receipt": None}
+                receipt = self.merge_receipts.get(row["id"])
+                return 200, {**self._review_of(row), "status": row["status"], "head_sha": "head", "base_sha": "base",
+                             "current_sha": "merged-head" if receipt and receipt["state"] == "merged" else "base", "merge_receipt": receipt}
             if path.endswith("/stop") and method == "POST":
                 self.stops.append((row["id"], dict(body or {})))
                 return 200, {"effect_id": "stop-1", "task_id": row["id"], "state": "queued", "receipt_id": "receipt", "entity_revision": row["entity_revision"] + 1}
@@ -1982,7 +2018,11 @@ class FocusStub:
             ],
         }
         counts = {"in_work": len(goals), "decisions": len(results), "waiting_for_you": 1, "unconfirmed": 2, "commitments": len(commitments)}
-        return {"project_id": pid, "counts": counts, "goals": goals, "open_results": results, "commitments": commitments, "receipts": receipts}
+        accepted_results = [{"task_id": "t-hero", "title": words["task.hero"], "result_id": "res-hero", "contract_revision": 1,
+                             "current_contract_revision": 1, "attempt_id": "attempt-hero", "original_digest": "a" * 64,
+                             "author": "Olga", "created_at": "2026-09-23T17:55:00Z"}]
+        return {"project_id": pid, "counts": counts, "goals": goals, "open_results": results, "accepted_results": accepted_results,
+                "commitments": commitments, "receipts": receipts}
 
 
 def health(at, *, tools: str, silent: bool = False) -> dict:  # type: ignore[no-untyped-def]
@@ -2329,7 +2369,7 @@ def finished_contracts(lang: str) -> list[dict]:
     return [
         BoardStub.task("t-menu", words["task.menu"], status="done", assignee=ira, checklist=menu, acceptance_state="accepted", requirements=[sheet], updated_at="2026-09-24T08:50:00Z"),
         BoardStub.task("t-prices", words["task.prices"], status="done", assignee=max_, checklist=prices, acceptance_state="handed_in", updated_at="2026-09-24T09:12:00Z"),
-        BoardStub.task("t-hero", words["task.hero"], status="done", assignee=olga, checklist=hero, acceptance_state="operator_approved", updated_at="2026-09-23T18:00:00Z"),
+        BoardStub.task("t-hero", words["task.hero"], status="done", assignee=olga, checklist=hero, acceptance_state="operator_approved", contract_revision=1, updated_at="2026-09-23T18:00:00Z"),
     ]
 
 

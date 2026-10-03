@@ -1,7 +1,7 @@
 // A task's result is one immutable candidate with its own verification and acceptance. The exact
 // result, verdict, contract and current branch must agree before the operator can accept it.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { absTime } from "../format";
 import { t } from "../i18n";
@@ -18,9 +18,11 @@ import { ManualReopen } from "./ManualReopen";
 export type ResultReceipt = {
   result_id: string;
   task_id: string;
+  attempt_id?: string | null;
   contract_revision: number;
   outcome: string;
   origin_kind?: "operator_manual" | "worker";
+  author?: string | null;
   original_preview: string;
   original_digest: string;
   original_size_bytes: number;
@@ -79,6 +81,64 @@ function detail(value: unknown): string {
     return [row.criterion, row.text, row.result, row.reason].filter((part): part is string => typeof part === "string" && !!part).join(" · ") || JSON.stringify(value);
   }
   return String(value);
+}
+
+export type AcceptedResultReference = { resultId: string; revision: number; attemptId: string; digest: string };
+
+/** A summary link names a receipt, contract and attempt. A changed board must not redirect it to a newer result. */
+export function AcceptedResultDetail({ task, reference }: { task: ProjectTask; reference: AcceptedResultReference }) {
+  const base = `/api/board/${encodeURIComponent(task.id)}`;
+  const identity = JSON.stringify([task.id, reference.resultId, reference.revision, reference.attemptId, reference.digest]);
+  const [snapshot, setSnapshot] = useState<{ identity: string; results: ResultReceipt[]; contract: Contract } | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [original, setOriginal] = useState<string | null>(null);
+  const [originalError, setOriginalError] = useState(false);
+  const [readAttempt, setReadAttempt] = useState(0);
+  useEffect(() => {
+    setSnapshot(null);
+    setLoadError(false);
+    let active = true;
+    void Promise.all([api.get<ResultReceipt[]>(`${base}/results`), api.get<Contract>(`${base}/contract`)])
+      .then(([results, contract]) => { if (active) setSnapshot({ identity, results, contract }); })
+      .catch(() => { if (active) setLoadError(true); });
+    return () => { active = false; };
+  }, [base, identity, loadAttempt]);
+  const checked = snapshot?.identity === identity ? snapshot : null;
+  const receipt = checked?.results.find((item) => item.result_id === reference.resultId);
+  const current = !!receipt && !!reference.resultId && Number.isInteger(reference.revision) && !!reference.digest &&
+    receipt.task_id === task.id && receipt.contract_revision === reference.revision &&
+    (receipt.attempt_id ?? "") === reference.attemptId && receipt.original_digest === reference.digest &&
+    receipt.current_result_id === receipt.result_id && receipt.accepted &&
+    receipt.acceptance_state === "operator_approved" && task.status === "done" && task.acceptance_state === "operator_approved" &&
+    checked?.contract.contract_revision === reference.revision && task.contract_revision === reference.revision;
+  useEffect(() => {
+    setOriginal(null);
+    setOriginalError(false);
+    if (!current) return;
+    let active = true;
+    void api.get<{ original_text: string }>(`${base}/results/${encodeURIComponent(reference.resultId)}/original`)
+      .then((response) => { if (active) setOriginal(response.original_text); })
+      .catch(() => { if (active) setOriginalError(true); });
+    return () => { active = false; };
+  }, [base, reference.resultId, current, readAttempt]);
+  const uncertain = loadError || !checked;
+  return <section className="result-flow" aria-label={t("result.title")}>
+    <h3>{t("result.title")}</h3>
+    {uncertain ? <p className="result-warning" role="alert">{t(loadError ? "goal.resultUnavailable" : "result.loading")} {loadError && <button type="button" className="linkbtn" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>{t("common.retry")}</button>}</p>
+      : !current || !receipt ? <p className="result-warning" role="alert">{t("goal.resultStale")}</p>
+      : <>
+        <div className="result-summary">{receipt.original_preview?.split("\n")[0] || t("result.noSummary")}</div>
+        <p className="sub">{t("goal.acceptedBy", { name: receipt.author || t("goal.result.member") })}</p>
+        <p className="result-state">{t("result.acceptance.operator_approved")} · {t("result.version", { revision: receipt.contract_revision })} · {absTime(receipt.created_at)}</p>
+        {(receipt.checks ?? []).length > 0 && <div className="result-checks"><b>{t("result.checks")}</b><ul>{receipt.checks.map((item, index) => <li key={index}>{detail(item)}</li>)}</ul></div>}
+        {(receipt.limitations ?? []).length > 0 && <div className="result-warning"><b>{t("result.limitations")}</b><ul>{receipt.limitations.map((item, index) => <li key={index}>{detail(item)}</li>)}</ul></div>}
+        <div className="result-details"><b>{t("result.evidence")}</b><ul>{(receipt.artifacts ?? []).map((artifact) => <li key={artifact.id}>{artifact.artifact_kind}: {artifact.artifact_key} · {artifact.digest}</li>)}</ul><div className="mono">{receipt.original_digest}</div></div>
+        <h4>{t("result.original")}</h4>
+        {originalError ? <p className="result-warning" role="alert">{t("goal.resultUnavailable")} <button type="button" className="linkbtn" onClick={() => setReadAttempt((attempt) => attempt + 1)}>{t("common.retry")}</button></p>
+          : original === null ? <p className="sub">{t("result.loading")}</p> : <pre className="result-original">{original}</pre>}
+      </>}
+  </section>;
 }
 
 export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onAccepted: () => void; toast: (text: string) => void }) {

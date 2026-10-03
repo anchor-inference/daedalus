@@ -1,8 +1,5 @@
-// The goal line over the orchestrator's composer: the project in one line of counts — work in hand,
-// decisions needed, what waits for the operator, what nobody confirmed, what was promised — and, a
-// tap away, the list behind them. It sits over the composer rather than in the header because a
-// phone's header has no room for a second line, and the composer is where the operator is about to
-// ask "what is going on?" — the line answers it before the question is typed.
+// The goal line names the next step at the point where the operator can reply. Its expanded list
+// keeps the task, result and promise evidence nearby without filling a phone's header.
 
 import { useEffect, useId, useState } from "react";
 import { acceptanceTone } from "../board/board";
@@ -26,14 +23,14 @@ export function GoalStrip({ projectId }: { projectId: string }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
-  if (!state || (parts.length === 0 && state.goals.length === 0)) return null;
+  if (!state || (parts.length === 0 && state.goals.length === 0 && !state.accepted_results?.length)) return null;
   const waitsForYou = (state.counts.waiting_for_you ?? 0) > 0;
   const blocked = goalRows(state.goals).find((goal) => goal.blocked || goal.next);
   const blockedReason = blocked?.next ? ("key" in blocked.next ? t(blocked.next.key) : blocked.next.text) : "";
   const headline = waitsForYou ? t("goal.headline.you") : blocked ? t(blockedReason ? "goal.headline.reason" : "goal.headline.blocked", { title: blocked.title || t("goal.card.untitled"), reason: blockedReason }) : state.goals[0] ? t("goal.headline.work", { title: state.goals[0].title || t("goal.card.untitled") }) : t("goal.headline.quiet");
   return (
     <div className={`goal-strip ${open ? "open" : ""} ${lineNeedsAttention(state.counts) ? "attn" : ""}`}>
-      {open && <GoalList id={listId} state={state} />}
+      {open && <GoalList id={listId} projectId={projectId} state={state} />}
       <div className="goal-primary">
       <button type="button" className="goal-line" aria-expanded={open} aria-controls={open ? listId : undefined} onClick={() => setOpen((o) => !o)} title={t(open ? "goal.hide" : "goal.show")}>
         <Icon name="board" size={14} />
@@ -47,10 +44,11 @@ export function GoalStrip({ projectId }: { projectId: string }) {
   );
 }
 
-/** The list the line opens: the goals, then the results waiting for a decision, then the promises. */
-function GoalList({ id, state }: { id: string; state: FocusState }) {
+/** The list the line opens: work, results awaiting review, accepted receipts, then promises. */
+function GoalList({ id, projectId, state }: { id: string; projectId: string; state: FocusState }) {
   const goals = goalRows(state.goals);
   const results = resultRows(state.open_results);
+  const accepted = state.accepted_results ?? [];
   return (
     <div className="goal-list" id={id} role="region" aria-label={t("goal.list")}>
       {goals.length > 0 && (
@@ -101,6 +99,18 @@ function GoalList({ id, state }: { id: string; state: FocusState }) {
           </ul>
         </section>
       )}
+      {accepted.length > 0 && <section className="goal-sec accepted-results">
+        <h4 className="goal-sec-head">{t("goal.acceptedResults")} <span className="num">{accepted.length}</span></h4>
+        <ul>{accepted.map((result) => <li key={result.result_id} className="goal-item accepted-result" data-result={result.result_id}>
+          <div className="goal-item-head"><span className="goal-title">{result.title}</span><span className="goal-age num">{relTime(result.created_at)}</span></div>
+          <div className="goal-item-meta"><span>{t("goal.acceptedBy", { name: result.author || t("goal.result.member") })}</span>
+            <button type="button" className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "board", {
+              task: result.task_id, result: result.result_id, revision: String(result.contract_revision),
+              attempt: result.attempt_id ?? "", digest: result.original_digest,
+            }))}>{t("goal.openAccepted")}</button>
+          </div>
+        </li>)}</ul>
+      </section>}
       {state.commitments.length > 0 && (
         <section className="goal-sec commitments">
           <h4 className="goal-sec-head">{t("goal.commitments")} <span className="num">{state.commitments.length}</span></h4>
@@ -117,7 +127,7 @@ function GoalList({ id, state }: { id: string; state: FocusState }) {
           </ul>
         </section>
       )}
-      {goals.length === 0 && results.length === 0 && state.commitments.length === 0 && <div className="goal-empty">{t("goal.empty")}</div>}
+      {goals.length === 0 && results.length === 0 && accepted.length === 0 && state.commitments.length === 0 && <div className="goal-empty">{t("goal.empty")}</div>}
     </div>
   );
 }

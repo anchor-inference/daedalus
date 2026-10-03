@@ -1,9 +1,9 @@
 """Reviewing and merging a staff branch, in project focus mode on a desktop and on a phone, in both languages.
 
-What is checked is what the operator relies on: a task in review with a staff branch opens to its review —
-the branch and where it merges, "+5 −1 · 2 files", the commits, the files and what the staff member
-checked; the Diff opens the change file by file; Merge merges and the task is done; when the folder is
-not ready, Merge is disabled and says why; Send back takes a note and returns the task to its member.
+What is checked is what the operator relies on: a branch review opens its changes and recorded
+checks; a merge requires the exact result, verdict and current branch, and queues only once. A dirty
+or conflicting folder blocks it; a result may be returned with a note. A task without a branch has
+no merge action.
 Nothing scrolls sideways at 390 px, and the buttons are big enough to tap.
 """
 
@@ -28,12 +28,12 @@ PID = "b4k3ry20f0c5"
 
 WORDS = {
     "en": {
-        "merge": "Merge", "diff": "Diff", "reject": "Send back", "send": "Send back with the note", "stat": "2 files · 2 commits", "merged": "is merged",
-        "rejected": "Sent back", "dirty": "Merge waits: the folder has uncommitted changes", "conflict": "conflict", "checked": "tests pass",
+        "merge": "Merge reviewed branch", "diff": "Diff", "reject": "Return with a note", "send": "Send back", "stat": "2 files · 2 commits", "merged": "Merge requested; waiting for the recorded outcome",
+        "rejected": "Result returned for changes", "dirty": "The reviewed branch must be merged first.", "conflict": "conflict", "checked": "tests pass", "open": "Open review",
     },
     "ru": {
-        "merge": "Слить", "diff": "Изменения", "reject": "Вернуть", "send": "Вернуть с замечанием", "stat": "2 файла · 2 коммита", "merged": "слита",
-        "rejected": "Возвращено", "dirty": "Слить пока нельзя: в папке есть незакоммиченные изменения", "conflict": "конфликт", "checked": "tests pass",
+        "merge": "Влить проверенную ветку", "diff": "Изменения", "reject": "Вернуть с замечанием", "send": "Вернуть", "stat": "2 файла · 2 коммита", "merged": "Слияние запрошено; ожидаем подтверждённый итог",
+        "rejected": "Результат возвращён на доработку", "dirty": "Сначала нужно влить проверенную ветку.", "conflict": "конфликт", "checked": "tests pass", "open": "Открыть проверку",
     },
 }
 
@@ -62,16 +62,33 @@ def endpoint(focus: FocusStub) -> dict:
     return next(t for t in focus.board.tasks if t["id"] == "t-endpoint")
 
 
+def reviewed_result(focus: FocusStub) -> dict:
+    """A completed worker receipt bound to the branch and an accepted verification verdict."""
+    task = endpoint(focus)
+    task.update(acceptance_state="accepted", contract_revision=1)
+    receipt = {"result_id": "res-endpoint", "task_id": task["id"], "attempt_id": "attempt-endpoint",
+               "contract_revision": 1, "outcome": "complete", "origin_kind": "worker", "author": "Max",
+               "original_preview": "Endpoint implemented and tested", "original_digest": "a" * 64,
+               "artifacts": [{"id": "artifact-endpoint", "artifact_kind": "file", "artifact_key": "api/notify.py", "digest": "b" * 64}],
+               "checks": ["tests pass"], "limitations": [], "verification": "verified", "verdict_id": "verdict-endpoint",
+               "verdict_accepted": True, "verdict_head": "head", "verdict_base": "base",
+               "current_result_id": "res-endpoint", "acceptance_state": "accepted", "accepted": False,
+               "created_at": "2026-09-24T09:26:00Z"}
+    focus.board.result_rows[task["id"]] = [receipt]
+    return receipt
+
+
 def desktop(page: Page, lang: str) -> None:
     words = WORDS[lang]
     focus = FocusStub.bakery(lang)
+    reviewed_result(focus)
     serve(page, focus)
     # The board as a tab of the panel beside the orchestrator's chat: focus mode keeps the panel in the address.
     page.goto(f"{BASE}/project/{PID}?token=t&lang={lang}&panel=board")
     expect(page.locator(".chat.in-project.orchestrator")).to_be_visible()
     expect(page.locator(".panel .panel-tab[data-tab='board']")).to_have_attribute("aria-selected", "true")
     card = page.locator(".panel .pboard.embedded .pcard", has_text=endpoint(focus)["title"])
-    expect(card.get_by_role("button", name=words["merge"])).to_be_visible()
+    expect(card).to_contain_text(words["open"])
     card.locator(".pcard-title").click()
 
     # The review sits in the task's sheet: branch, numbers, commits, files, receipts.
@@ -86,6 +103,9 @@ def desktop(page: Page, lang: str) -> None:
     expect(panel.locator(".review-commits li")).to_have_count(2)
     expect(panel.locator(".review-files li")).to_have_count(2)
     expect(panel.locator(".review-receipts li.ok")).to_contain_text(words["checked"])
+    evidence = sheet.locator(".result-flow")
+    expect(evidence).to_contain_text("Endpoint implemented and tested")
+    expect(evidence.get_by_role("button", name=words["merge"])).to_be_enabled()
     # On a branch task the plain Accept is not offered beside Merge: the two would be the same button.
     expect(sheet.locator(".pboard-moves").get_by_role("button", name="Accept")).to_have_count(0)
 
@@ -98,10 +118,10 @@ def desktop(page: Page, lang: str) -> None:
     expect(diff).to_have_count(0)
 
     # Send back with a note.
-    panel.get_by_role("button", name=words["reject"], exact=True).click()
-    send = panel.get_by_role("button", name=words["send"])
+    evidence.get_by_role("button", name=words["reject"], exact=True).click()
+    send = evidence.get_by_role("button", name=words["send"], exact=True)
     expect(send).to_be_disabled()
-    panel.locator("textarea").fill("Log unpaid orders as well")
+    evidence.locator(".result-return textarea").fill("Log unpaid orders as well")
     send.click()
     expect(page.locator(".toast")).to_contain_text(words["rejected"])
     assert focus.board.rejected == [("t-endpoint", "Log unpaid orders as well")], focus.board.rejected
@@ -111,6 +131,7 @@ def desktop(page: Page, lang: str) -> None:
 def merging(page: Page, lang: str, *, phone: bool) -> None:
     words = WORDS[lang]
     focus = FocusStub.bakery(lang)
+    reviewed_result(focus)
     task = endpoint(focus)
     # First the folder is dirty: Merge is disabled and says why.
     focus.board.reviews["t-endpoint"] = BoardStub.review(task, blockers=[{"code": "dirty", "text": "the folder has uncommitted changes; commit or stash them first"}])
@@ -119,9 +140,9 @@ def merging(page: Page, lang: str, *, phone: bool) -> None:
     sheet = page.locator(".sheet.pboard-sheet")
     panel = sheet.locator(".review-panel")
     expect(panel).to_be_visible()
-    merge = panel.locator(".review-actions").get_by_role("button", name=words["merge"])
+    merge = sheet.locator(".result-flow").get_by_role("button", name=words["merge"])
     expect(merge).to_be_disabled()
-    expect(panel.locator(".review-why")).to_contain_text(words["dirty"])
+    expect(sheet.locator(".result-action .result-warning").first).to_contain_text(words["dirty"])
     if phone:
         box = merge.bounding_box()
         assert box is not None and box["height"] >= 28, box
@@ -130,32 +151,46 @@ def merging(page: Page, lang: str, *, phone: bool) -> None:
     # The operator commits in the folder; the review is read again and Merge goes through.
     del focus.board.reviews["t-endpoint"]
     page.reload()
-    merge = page.locator(".sheet.pboard-sheet .review-panel .review-actions").get_by_role("button", name=words["merge"])
+    merge = page.locator(".sheet.pboard-sheet .result-flow").get_by_role("button", name=words["merge"])
     expect(merge).to_be_enabled()
     merge.click()
     expect(page.locator(".toast")).to_contain_text(words["merged"])
-    assert focus.board.merged == ["t-endpoint"], focus.board.merged
-    expect(page.locator(".sheet.pboard-sheet")).to_have_count(0)
-    assert task["status"] == "done" and task["merge_state"] == "merged"
+    assert len(focus.board.merge_requests) == 1, focus.board.merge_requests
+    assert focus.board.merge_requests[0][1]["verdict_id"] == "verdict-endpoint"
+    page.reload()
+    expect(page.locator(".sheet.pboard-sheet .result-flow").get_by_role("button", name=words["merge"])).to_be_disabled()
+    assert len(focus.board.merge_requests) == 1
+    focus.board.merge_receipts["t-endpoint"]["state"] = "merged"
+    task.update(status="done", merge_state="merged", acceptance_state="operator_approved")
+    focus.board.result_rows["t-endpoint"][0].update(accepted=True, acceptance_state="operator_approved")
+    page.reload()
+    expect(page.locator(".sheet.pboard-sheet .result-flow").get_by_role("button", name=words["merge"])).to_have_count(0)
+    assert len(focus.board.merge_requests) == 1
+    page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}&task=t-hero")
+    expect(page.locator(".sheet.pboard-sheet .result-flow")).to_be_visible()
+    expect(page.locator(".sheet.pboard-sheet .result-flow").get_by_role("button", name=words["merge"])).to_have_count(0)
+    refused = page.evaluate("async () => (await fetch('/api/board/t-hero/results/res-hero/merge', {method: 'POST'})).status")
+    assert refused == 409 and len(focus.board.merge_requests) == 1, (refused, focus.board.merge_requests)
     fits(page, f"{lang} {'phone' if phone else 'desktop'} merged")
 
 
 def conflicting(page: Page, lang: str) -> None:
     words = WORDS[lang]
     focus = FocusStub.bakery(lang)
+    reviewed_result(focus)
     task = endpoint(focus)
     task["merge_state"] = "conflict"
     focus.board.reviews["t-endpoint"] = BoardStub.review(task, conflicts=["api/notify.py"], blockers=[{"code": "conflicts", "text": "the merge would conflict in api/notify.py"}])
     serve(page, focus)
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
     card = page.locator(".pcard", has_text=task["title"])
-    expect(card.locator(".chip")).to_contain_text(words["conflict"])
+    expect(card.locator(".chip.bad")).to_contain_text(words["conflict"])
     card.locator(".pcard-title").click()
     panel = page.locator(".sheet.pboard-sheet .review-panel")
     # Said once, under the Merge it holds back, in the red of a conflict.
     expect(panel.locator(".review-why.bad")).to_contain_text("api/notify.py")
     expect(panel.locator(".review-blockers")).to_have_count(0)
-    expect(panel.locator(".review-actions").get_by_role("button", name=words["merge"])).to_be_disabled()
+    expect(page.locator(".sheet.pboard-sheet .result-flow").get_by_role("button", name=words["merge"])).to_be_disabled()
 
 
 def main() -> int:

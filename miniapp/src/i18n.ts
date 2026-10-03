@@ -4325,6 +4325,11 @@ Object.assign(DICT, {
   "goal.card.untitled": { en: "Untitled task", ru: "Задача без названия" },
   "goal.reminded": { en: "reminded", ru: "напомнено" },
   "goal.empty": { en: "No cards in hand; the questions wait in the Questions tab.", ru: "Карточек в работе нет; вопросы ждут во вкладке «Вопросы»." },
+  "goal.acceptedResults": { en: "Accepted results", ru: "Принятые результаты" },
+  "goal.acceptedBy": { en: "Report by {name}", ru: "Отчёт: {name}" },
+  "goal.openAccepted": { en: "Open exact result", ru: "Открыть этот результат" },
+  "goal.resultStale": { en: "This accepted result has changed or is no longer current. Refresh the project before reviewing it.", ru: "Этот принятый результат изменился или больше не актуален. Обновите проект перед проверкой." },
+  "goal.resultUnavailable": { en: "The exact result could not be confirmed. Retry loading it.", ru: "Не удалось подтвердить именно этот результат. Повторите загрузку." },
 
   "fate.label": { en: "What became of this message", ru: "Что стало с сообщением" },
   "fate.requirement": { en: "→ {label} on {card}", ru: "→ {label} в карточке {card}" },

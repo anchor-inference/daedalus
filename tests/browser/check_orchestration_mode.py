@@ -32,8 +32,8 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID, GARDEN = "b4k3ry20f0c5", "9a4d3e2f1c0b"
 
 WORDS = {
-    "en": {"agents": "Agents", "orchestration": "Orchestration", "staff": "6 staff", "working": "4 working", "open": "Open project Bakery 2.0", "notice": "Bakery 2.0: the board changed"},
-    "ru": {"agents": "Агенты", "orchestration": "Оркестрация", "staff": "6 сотрудников", "working": "4 работают", "open": "Открыть проект Bakery 2.0", "notice": "Bakery 2.0: доска изменилась"},
+    "en": {"agents": "Agents", "orchestration": "Orchestration", "staff": "6 staff", "working": "4 working", "open": "Open project Bakery 2.0", "notice": "Bakery 2.0: the board changed", "pages": "Project pages", "board": "Board"},
+    "ru": {"agents": "Агенты", "orchestration": "Оркестрация", "staff": "6 сотрудников", "working": "4 работают", "open": "Открыть проект Bakery 2.0", "notice": "Bakery 2.0: доска изменилась", "pages": "Страницы проекта", "board": "Доска"},
 }
 
 # What waits for the operator: the one request of Bakery (its `needs_you`), and the main chat's own
@@ -261,8 +261,15 @@ def phone(page: Page, lang: str) -> None:
     fits(page, f"{lang} phone orchestration list")
     listing.locator(".orch-row").first.click()
     page.wait_for_url(re.compile(rf"/app/orchestration/project/{PID}(\?|$)"))
-    expect(page.locator("nav.tabbar.project-tabs a")).to_have_count(4)
+    project_tabs = page.locator("nav.tabbar.project-tabs a")
+    expect(project_tabs).to_have_count(3)
+    assert project_tabs.evaluate_all("els => els.map(e => e.dataset.tab)") == ["orchestrator", "attention", "journal"]
+    expect(project_tabs.nth(0)).to_have_class(re.compile(r"\bactive\b"))
     go(page, f"/orchestration/project/{PID}/team", lang)
+    # The detailed board stays reachable from a project page menu when the bar has three destinations.
+    page.locator(".pagehead").get_by_role("button", name=words["pages"]).click()
+    expect(page.get_by_role("menuitem", name=words["board"])).to_be_visible()
+    page.keyboard.press("Escape")
     page.locator(".pagehead .iconbtn[href]").first.click()
     page.wait_for_url("**/app/orchestration/projects**")
 
@@ -276,7 +283,8 @@ def phone(page: Page, lang: str) -> None:
     # The Inbox's card of an unread entry opens its link at once.
     page.locator(".notice-row[data-notice='77']").first.click()
     page.wait_for_url(f"**/app/orchestration/project/{PID}/board**")
-    expect(page.locator("nav.tabbar.project-tabs a[data-tab='board']")).to_have_class(re.compile(r"\bactive\b"))
+    expect(page.locator(".phone-board .pboard")).to_be_visible()
+    expect(page.locator("nav.tabbar.project-tabs a.active")).to_have_count(0)
     fits(page, f"{lang} phone deep link")
 
 

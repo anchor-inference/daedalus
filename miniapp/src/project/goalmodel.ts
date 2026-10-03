@@ -25,6 +25,8 @@ export type OpenResultCause = "report_done" | "report_stuck" | "report_needs_inp
 
 export type OpenResult = { id: number | string; cause: OpenResultCause | string; task_id: string | null; title: string | null; staff_name: string | null; summary: string; opened_at: string; reminded: boolean };
 
+export type AcceptedResult = { task_id: string; title: string; result_id: string; contract_revision: number; current_contract_revision: number; attempt_id: string | null; original_digest: string; author: string | null; created_at: string };
+
 export type Commitment = { id: number | string; text: string; task_id: string | null; message_seq: number | null; at: string };
 
 export type RequirementDelivery = { staff_name: string; acknowledged: boolean; opened: boolean; via: string; cli: boolean };
@@ -38,6 +40,7 @@ export type FocusState = {
   counts: FocusCounts;
   goals: FocusGoal[];
   open_results: OpenResult[];
+  accepted_results?: AcceptedResult[];
   commitments: Commitment[];
   /** What each of the operator's messages turned into, by the message's seq (a string, as JSON keys are). */
   receipts: Record<string, Receipt[]>;

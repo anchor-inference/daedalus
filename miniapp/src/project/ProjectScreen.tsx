@@ -56,13 +56,13 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
   } else if (!wide && view.page === "team") {
     body = <PhoneTeam projectId={projectId} toast={toast} />;
   } else if (!wide && view.page === "board") {
-    body = <PhoneBoard projectId={projectId} toast={toast} board={(bannered) => <ProjectBoard projectId={projectId} toast={toast} embedded selected={route.query.get("task")} bannered={bannered} />} />;
+    body = <PhoneBoard projectId={projectId} toast={toast} board={(bannered) => <ProjectBoard projectId={projectId} toast={toast} embedded selected={route.query.get("task")} selectedResult={route.query} bannered={bannered} />} />;
   } else if (!wide && view.page === "terminals") {
     body = <PhoneTerminals projectId={projectId} toast={toast} />;
   } else if (view.page === "team") {
     body = <TeamPage projectId={projectId} toast={toast} back={back} />;
   } else if (view.page === "board") {
-    body = <ProjectBoard projectId={projectId} toast={toast} selected={route.query.get("task")} back={back} />;
+    body = <ProjectBoard projectId={projectId} toast={toast} selected={route.query.get("task")} selectedResult={route.query} back={back} />;
   } else if (view.page === "journal") {
     body = <JournalPage projectId={projectId} back={back} toast={toast} />;
   } else if (view.page === "brief") {

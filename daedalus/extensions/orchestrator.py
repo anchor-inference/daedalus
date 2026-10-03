@@ -1426,6 +1426,22 @@ class Orchestrators:
              "summary": lp.get("summary") or "", "opened_at": lp["opened_at"], "reminded": lp.get("reminded_at") is not None}
             for lp in loops
         ]
+        accepted_rows = await db.fetchall(
+            "SELECT t.id AS task_id,t.title,t.contract_revision AS current_contract_revision,"
+            " r.id AS result_id,r.contract_revision,r.attempt_id,r.original_digest,r.actor_id,r.created_at,"
+            " s.name AS staff_name FROM board_tasks t JOIN result_receipts r ON r.id=t.accepted_result_id"
+            " LEFT JOIN staff s ON r.actor_id='staff:' || s.id"
+            " WHERE t.project_id=? AND t.status='done' AND t.acceptance_state='operator_approved'"
+            " ORDER BY r.created_at DESC,r.rowid DESC LIMIT 5", (project.id,),
+        )
+        accepted_results = [
+            {"task_id": row["task_id"], "title": row["title"], "result_id": row["result_id"],
+             "contract_revision": row["contract_revision"], "current_contract_revision": row["current_contract_revision"],
+             "attempt_id": row["attempt_id"], "original_digest": row["original_digest"],
+             "author": row["staff_name"] or ("operator" if row["actor_id"].startswith("operator:") else None),
+             "created_at": row["created_at"]}
+            for row in accepted_rows
+        ]
         commitments = [
             {"id": c.id, "text": c.text, "task_id": c.refs.get("task_id") or None, "message_seq": c.refs.get("message_seq"), "at": c.at}
             for c in await self.manager.projects.commitments(project.id)
@@ -1461,6 +1477,7 @@ class Orchestrators:
             "counts": {"in_work": len(goals), "decisions": len(results), "waiting_for_you": len(asks), "unconfirmed": len(unconfirmed), "commitments": len(commitments)},
             "goals": goals,
             "open_results": results,
+            "accepted_results": accepted_results,
             "commitments": commitments,
             "receipts": {str(k): v for k, v in receipts.items()},
         }

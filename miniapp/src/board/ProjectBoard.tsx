@@ -18,7 +18,7 @@ import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { LifecycleCancel } from "../project/LifecycleCancel";
 import { waitKey } from "../project/focus";
 import { ReviewPanel } from "./ReviewPanel";
-import { ResultFlow } from "./ResultFlow";
+import { AcceptedResultDetail, ResultFlow, type AcceptedResultReference } from "./ResultFlow";
 import { TaskWorkflow } from "./TaskWorkflow";
 import { TaskComparison } from "./TaskComparison";
 import { TaskContext } from "./TaskContext";
@@ -88,7 +88,7 @@ function storedLaunchEffect(taskId: string): string | null {
  * above the board already shows with its answers: the board leaves it out rather than showing the same
  * question twice, in two different sets of controls, across the top half of a phone.
  */
-export function ProjectBoard({ projectId, toast, selected, layout = "auto", embedded = false, back, bannered = null }: { projectId: string; toast: (text: string) => void; selected?: string | null; layout?: "auto" | "list"; embedded?: boolean; back?: string | null; bannered?: string | null }) {
+export function ProjectBoard({ projectId, toast, selected, selectedResult, layout = "auto", embedded = false, back, bannered = null }: { projectId: string; toast: (text: string) => void; selected?: string | null; selectedResult?: URLSearchParams; layout?: "auto" | "list"; embedded?: boolean; back?: string | null; bannered?: string | null }) {
   const [showDone, setShowDone] = useState(false);
   const key = `${boardKey(projectId)}?include_done=${showDone ? 1 : 0}`;
   // While the event stream is up the board is read again when its project changes; the poll is only
@@ -117,6 +117,10 @@ export function ProjectBoard({ projectId, toast, selected, layout = "auto", embe
   const inAddress = selected !== undefined;
   const chosen = inAddress ? selected : picked;
   const open = chosen ? data?.tasks.find((task) => task.id === chosen) ?? null : null;
+  const resultReference: AcceptedResultReference | null = selectedResult?.has("result") ? {
+    resultId: selectedResult.get("result") ?? "", revision: Number(selectedResult.get("revision")),
+    attemptId: selectedResult.get("attempt") ?? "", digest: selectedResult.get("digest") ?? "",
+  } : null;
   // A link to a finished task widens the board so the task can be shown.
   useEffect(() => {
     if (chosen && data && !open && !showDone) setShowDone(true);
@@ -182,6 +186,7 @@ export function ProjectBoard({ projectId, toast, selected, layout = "auto", embe
             <button className="btn primary" onClick={refresh}>{t("common.retry")}</button>
           </div>
         )}
+        {resultReference && data && !open && showDone && <div className="result-warning" role="alert">{t("goal.resultStale")}</div>}
         {empty && (
           <div className="empty">
             <b>{t("pboard.empty")}</b>
@@ -224,7 +229,7 @@ export function ProjectBoard({ projectId, toast, selected, layout = "auto", embe
         )}
       </div>
       {creating && data && <TaskSheet projectId={projectId} data={data} onClose={() => setCreating(false)} onDone={reload} toast={toast} />}
-      {open && data && <TaskSheet key={open.id} projectId={projectId} data={data} task={open} onClose={closeTask} onDone={reload} toast={toast} />}
+      {open && data && <TaskSheet key={open.id} projectId={projectId} data={data} task={open} resultReference={resultReference} onClose={closeTask} onDone={reload} toast={toast} />}
     </>
   );
 }
@@ -446,7 +451,7 @@ function RequirementsSection({ requirements }: { requirements: Requirement[] }) 
 }
 
 /** Creating a task and changing one: the same sheet, because a task is its title, its brief, who does it and what it waits for. */
-function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectId: string; data: BoardResponse; task?: ProjectTask; onClose: () => void; onDone: () => void; toast: (text: string) => void }) {
+function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, toast }: { projectId: string; data: BoardResponse; task?: ProjectTask; resultReference?: AcceptedResultReference | null; onClose: () => void; onDone: () => void; toast: (text: string) => void }) {
   const offline = useOffline();
   const operation = useRef<{ fingerprint: string; id: string } | null>(null);
   const launchOperation = useRef<{ fingerprint: string; id: string } | null>(null);
@@ -695,7 +700,8 @@ function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectI
       {task && task.status === "review" && task.branch && (
         <ReviewPanel taskId={task.id} />
       )}
-      {task && (task.status === "review" || task.acceptance_state === "operator_approved") && <ResultFlow task={task} onAccepted={onDone} toast={toast} />}
+      {task && resultReference && <AcceptedResultDetail task={task} reference={resultReference} />}
+      {task && !resultReference && (task.status === "review" || task.acceptance_state === "operator_approved") && <ResultFlow task={task} onAccepted={onDone} toast={toast} />}
       {task && (NEXT[task.status].length > 0 || task.status === "review") && (
         <div className="btnrow pboard-moves" role="group" aria-label={t("board.moveto")}>
           {NEXT[task.status].length > 0 && <span className="sub">{t("board.moveto")}</span>}

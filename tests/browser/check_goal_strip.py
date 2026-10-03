@@ -1,12 +1,9 @@
 """The goal line over the orchestrator's composer, at 1280 and 390 px, in both languages.
 
-What the operator relies on: one line under the conversation that names what is going on in the
-project — the work in hand, the decisions the orchestrator owes, what waits for the operator, what no
-member confirmed, what was promised — with only the counts that are not zero, on one row that does
-not cut the last of them off. Pressed, it opens the list behind the counts: every card with its owner,
-acceptance and what it waits on (the checkout, blocked on the operator's answer, first); the results
-waiting for the orchestrator's decision, oldest first, each saying who reported what on which card;
-and the promises. Escape closes it. Nothing scrolls sideways.
+The compact line names the operator's next decision. Pressed, it opens the work and result list:
+each card's owner, acceptance and blocker; reports awaiting the orchestrator's decision; an accepted
+result linked to its exact immutable report; and the promises. A changed revision or failed original
+read is shown plainly. Nothing scrolls sideways.
 
     cd miniapp && npx vite build --outDir /tmp/app-dist
     mkdir -p /tmp/app-root && ln -s /tmp/app-dist /tmp/app-root/app
@@ -18,6 +15,7 @@ Exit 0 when every claim holds.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -36,15 +34,15 @@ PID = "b4k3ry20f0c5"
 
 WORDS = {
     "en": {
-        "long": ["in work: 5", "decisions needed: 2", "waiting for you: 1", "not confirmed: 2", "promised: 2"],
-        "short": ["5 in work", "to decide 2", "for you 1", "unconfirmed 2", "promised 2"],
+        "headline": "A decision is waiting for you", "action": "Open decision", "accepted": "Accepted results",
+        "open_accepted": "Open exact result", "stale": "This accepted result has changed", "unavailable": "The exact result could not be confirmed",
         "goals": "Work in hand", "results": "Waiting for the orchestrator's decision", "commitments": "Promised to you",
         "waits": "waits on:", "decision": "the orchestrator's decision", "handed": "handed in",
         "lev": "Lev needs input on", "max": "Max reported done on", "reminded": "reminded",
     },
     "ru": {
-        "long": ["в работе: 5", "нужны решения: 2", "ждут вас: 1", "не подтверждено: 2", "обещано: 2"],
-        "short": ["в работе 5", "решить 2", "вам 1", "не подтверждено 2", "обещано 2"],
+        "headline": "Ждут вашего решения", "action": "Открыть решение", "accepted": "Принятые результаты",
+        "open_accepted": "Открыть этот результат", "stale": "Этот принятый результат изменился", "unavailable": "Не удалось подтвердить именно этот результат",
         "goals": "В работе", "results": "Ждут решения оркестратора", "commitments": "Обещано вам",
         "waits": "ждёт:", "decision": "решения оркестратора", "handed": "сдано",
         "lev": "Lev: нужны данные", "max": "Max: сдано", "reminded": "напомнено",
@@ -56,12 +54,11 @@ CLOSE = {"en": "Close the panel", "ru": "Закрыть панель"}
 
 
 def one_row(strip, words: dict, where: str) -> None:  # type: ignore[no-untyped-def]
-    """The counts on one row, none cut off: the long words where the strip is wide, the short where not."""
-    wide = strip.evaluate("el => el.getBoundingClientRect().width") > 640
-    shown = [c.inner_text().strip() for c in strip.locator(".goal-count").all()]
-    assert shown == words["long" if wide else "short"], f"{where}: the line says {shown}"
-    cut = strip.locator(".goal-counts").evaluate("el => el.scrollWidth - el.clientWidth")
-    assert cut <= 1, f"{where}: the line cuts {cut}px of its counts off"
+    """The compact summary stays legible above the composer at desk and phone widths."""
+    line = strip.locator(".goal-line")
+    expect(line.locator(".goal-headline")).to_have_text(words["headline"])
+    expect(strip.locator(".goal-next-action")).to_have_text(words["action"])
+    assert line.evaluate("el => el.scrollWidth - el.clientWidth") <= 1, f"{where}: the summary is cut off"
 
 
 def check(page: Page, lang: str, width: int) -> None:
@@ -75,14 +72,11 @@ def check(page: Page, lang: str, width: int) -> None:
     strip = chat.locator(".goal-strip")
     expect(strip).to_be_visible(timeout=15000)
 
-    # The line: the five counts, in their long words where the column is wide and their short ones where
-    # it is not (a phone, or a desk with the panel open beside the chat), on one row.
-    counts = strip.locator(".goal-count")
-    expect(counts).to_have_count(5)
+    # The compact line names the next decision; the expanded list carries the full work and result history.
     line = strip.locator(".goal-line")
     one_row(strip, words, where)
     if not phone:
-        # With the panel closed the conversation has a desk's width, and the line its long words.
+        # The summary remains one line when the conversation gains the full desk width.
         page.get_by_role("button", name=CLOSE[lang], exact=True).first.click()
         expect(page.locator(".panel.shown")).to_have_count(0)
         page.wait_for_timeout(300)
@@ -93,8 +87,7 @@ def check(page: Page, lang: str, width: int) -> None:
     # A decision owed and the operator's own question edge it in amber.
     assert "attn" in (strip.get_attribute("class") or ""), f"{where}: the line is not marked as waiting on someone"
     # It sits between the conversation and the composer, above the field.
-    field = chat.locator(".composer-box").bounding_box()
-    assert field and box["y"] + box["height"] <= field["y"] + 1, f"{where}: the line {box} is not above the composer {field}"
+    page.wait_for_function("() => { const line = document.querySelector('.chat.in-project.orchestrator .goal-line'); const field = document.querySelector('.chat.in-project.orchestrator .composer-box'); return !!line && !!field && line.getBoundingClientRect().bottom <= field.getBoundingClientRect().top + 1; }")
     expect(line).to_have_attribute("aria-expanded", "false")
     fits(page, f"{where} line")
     if SHOTS:
@@ -106,7 +99,7 @@ def check(page: Page, lang: str, width: int) -> None:
     listing = strip.locator(".goal-list")
     expect(listing).to_be_visible()
     sections = listing.locator(".goal-sec")
-    expect(sections).to_have_count(3)
+    expect(sections).to_have_count(4)
     expect(sections.nth(0).locator(".goal-sec-head")).to_contain_text(words["goals"])
     goals = sections.nth(0).locator(".goal-item")
     expect(goals).to_have_count(5)
@@ -138,7 +131,12 @@ def check(page: Page, lang: str, width: int) -> None:
     for row in rows.all():
         assert row.locator(".goal-age").inner_text().strip(), f"{where}: an open result has no age"
 
-    promised = sections.nth(2)
+    accepted = sections.nth(2)
+    expect(accepted.locator(".goal-sec-head")).to_contain_text(words["accepted"])
+    expect(accepted.locator(".goal-item")).to_have_count(1)
+    expect(accepted).to_contain_text(invented["task.hero"])
+    expect(accepted).to_contain_text("Olga")
+    promised = sections.nth(3)
     expect(promised.locator(".goal-sec-head")).to_contain_text(words["commitments"])
     expect(promised.locator(".goal-item")).to_have_count(2)
     expect(promised).to_contain_text(invented["commit.gallery"])
@@ -156,9 +154,30 @@ def check(page: Page, lang: str, width: int) -> None:
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/goal-list-{lang}-{width}.png")
 
-    page.keyboard.press("Escape")
-    expect(listing).to_have_count(0)
-    expect(line).to_have_attribute("aria-expanded", "false")
+    # A row opens its own immutable report through the board, with the exact identity in the route.
+    accepted.get_by_role("button", name=words["open_accepted"]).click()
+    expect(page.locator(".result-original")).to_contain_text("Original worker report: image delivered")
+    expect(page.locator(".result-original")).to_contain_text("Checked on desktop and phone.")
+    expect(page.locator(".result-flow")).to_contain_text("hero.png")
+    assert "result=res-hero" in page.url and "revision=1" in page.url and "attempt=attempt-hero" in page.url, page.url
+    exact_url = page.url
+    page.goto(exact_url.replace("revision=1", "revision=2"))
+    expect(page.locator(".result-flow [role=alert]")).to_contain_text(words["stale"])
+    expect(page.locator(".result-original")).to_have_count(0)
+    def newer_result(route) -> None:  # type: ignore[no-untyped-def]
+        status, payload = focus.board.answer("GET", "/api/board/t-hero/results", "", None)
+        rows = json.loads(json.dumps(payload))
+        rows[0]["current_result_id"] = "res-newer"
+        route.fulfill(status=status, body=json.dumps(rows), content_type="application/json")
+    page.route("**/api/board/t-hero/results", newer_result)
+    page.goto(exact_url)
+    expect(page.locator(".result-flow [role=alert]")).to_contain_text(words["stale"])
+    expect(page.locator(".result-original")).to_have_count(0)
+    page.unroute("**/api/board/t-hero/results", newer_result)
+    page.route("**/api/board/t-hero/results/res-hero/original", lambda route: route.fulfill(status=503, body='{"detail":"unavailable"}', content_type="application/json"))
+    page.goto(exact_url)
+    expect(page.locator(".result-flow [role=alert]")).to_contain_text(words["unavailable"])
+    expect(page.locator(".result-original")).to_have_count(0)
 
 
 def run() -> int:
