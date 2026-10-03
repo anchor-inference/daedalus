@@ -6,7 +6,7 @@
 // Everything here is sized for a thumb: rows and answers take the touch row height, and a field is
 // 16 px so Safari does not zoom into it.
 
-import { FormEvent, ReactNode, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useId, useMemo, useState } from "react";
 import { api, ApiError, type Ask, type StaffSessionView, type TerminalEnvName, type TerminalView as TerminalRow } from "../api";
 import { Skeleton } from "../ui/components";
 import { MenuItem, OverflowMenu, toast } from "../ui/dialogs";
@@ -19,7 +19,7 @@ import { go, PageHeader } from "../shell";
 import { ORCHESTRATION_LIST, navigate, pathFor, projectHome, projectPagePath, projectSessionPath, projectStaffPath } from "../router";
 import { alwaysServer, answeredBy, askWords, canAlways, composerWhen, nowChoice } from "../staff/model";
 import { HealthLine } from "../staff/health";
-import { invalidate, useQuery } from "../store";
+import { invalidate, useOffline, useQuery } from "../store";
 import { PhoneTerminal, type PhoneTerminalProps } from "../terminal/mobile";
 import { TerminalRowMenu } from "../terminal/rowmenu";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
@@ -47,7 +47,7 @@ function useTeamAndBoard(projectId: string): { team: Team | null; board: Project
   };
 }
 
-const TAB_ICONS: Record<PhoneTab, IconName> = { orchestrator: "conductor", team: "bots", board: "board", terminals: "terminal" };
+const TAB_ICONS: Record<PhoneTab, IconName> = { orchestrator: "conductor", attention: "alert", journal: "journal" };
 
 function tabPath(projectId: string, tab: PhoneTab): string {
   return tab === "orchestrator" ? projectHome(projectId) : projectPagePath(projectId, tab);
@@ -61,7 +61,8 @@ export function useOperatorAsks(projectId: string) {
     if (!event.project_id || event.project_id === projectId) invalidate(`/api/asks?project=${enc(projectId)}`);
   }, [projectId]);
   const asks = Array.isArray(query.data?.asks) ? query.data!.asks : [];
-  return useMemo(() => oldestOpen(asks), [asks]);
+  const open = useMemo(() => oldestOpen(asks), [asks]);
+  return { ...open, unverified: !!query.error || !query.data };
 }
 
 // ── the tab bar ──────────────────────────────────────────────────────────────────────────────
@@ -77,9 +78,9 @@ export function ProjectTabs({ projectId, current }: { projectId: string; current
           <a key={tab} href={href} data-tab={tab} className={current === tab ? "active" : ""} aria-current={current === tab ? "page" : undefined} onClick={(e) => go(e, href)}>
             <span className="glyph">
               <Icon name={TAB_ICONS[tab]} size={22} />
-              {tab === "team" && waiting > 0 && <span className="tab-badge">{waiting}</span>}
+          {tab === "attention" && waiting > 0 && <span className="tab-badge">{waiting}</span>}
             </span>
-            {t(`phone.tab.${tab}`)}
+            {t(`focus.nav.${tab}`)}
           </a>
         );
       })}
@@ -104,6 +105,9 @@ export function ProjectPhoneHead({ projectId, title, subtitle, actions, extra }:
     { label: t("focus.page.journal"), icon: "journal", onSelect: () => navigate(projectPagePath(projectId, "journal")) },
     { label: t("focus.page.wakeups"), icon: "clock", onSelect: () => navigate(projectPagePath(projectId, "wakeups")) },
     { label: t("focus.page.folders"), icon: "folder", onSelect: () => navigate(projectPagePath(projectId, "folders")) },
+    { label: t("focus.page.team"), icon: "bots", onSelect: () => navigate(projectPagePath(projectId, "team")) },
+    { label: t("focus.page.board"), icon: "board", onSelect: () => navigate(projectPagePath(projectId, "board")) },
+    { label: t("focus.page.terminals"), icon: "terminal", onSelect: () => navigate(projectPagePath(projectId, "terminals")) },
   ];
   return (
     <PageHeader
@@ -141,24 +145,27 @@ function askerLine(ask: Ask, names: Map<string, string>): string {
  * "Always, all <server> tools" beside it (`alwaysServer`). A refusal because someone answered first
  * names who did.
  */
-export function AskAnswers({ ask, projectId, toast, always = false, server = "" }: { ask: Ask; projectId: string; toast: (text: string) => void; always?: boolean; server?: string }) {
+export function AskAnswers({ ask, projectId, toast, always = false, server = "", unverified = false }: { ask: Ask; projectId: string; toast: (text: string) => void; always?: boolean; server?: string; unverified?: boolean }) {
+  const offline = useOffline();
+  const blocked = offline || unverified;
+  const offlineId = useId();
   const [writing, setWriting] = useState(false);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const options = Array.isArray(ask.detail?.options) ? ask.detail.options.filter((o): o is string => typeof o === "string") : [];
   async function send(body: { selected?: string[]; text?: string; allow?: boolean; always?: boolean; server?: boolean }) {
-    if (busy) return;
+    if (busy || blocked) return;
     setBusy(true);
     try {
       await api.post(`/api/asks/${enc(ask.id)}/answer`, body);
       toast(t("focus.ask.sent"));
+      setWriting(false);
+      setText("");
     } catch (e) {
       const who = e instanceof ApiError && e.status === 409 ? answeredBy(e.message) : "";
       toast(e instanceof ApiError && e.status === 409 ? (who ? t("perm.conflict.by", { who: t(`perm.by.${who}`) }) : t("focus.ask.conflict")) : errorText(e));
     } finally {
       setBusy(false);
-      setWriting(false);
-      setText("");
       invalidate(`/api/asks?project=${enc(projectId)}`);
       invalidate(`/api/projects/${enc(projectId)}/board`);
       invalidate(`/api/projects/${enc(projectId)}/staff`);
@@ -175,24 +182,25 @@ export function AskAnswers({ ask, projectId, toast, always = false, server = "" 
   const permission = ask.kind === "permission" || ask.kind === "folder";
   return (
     <div className="ask-answers">
+      {blocked && <div id={offlineId} className="focus-attention-warning" role="status">{t(offline ? "focus.attention.offline" : "focus.attention.stale")}</div>}
       {!writing && (
         <div className="ask-answers-row">
           {permission ? (
             <>
-              <button className="btn primary" disabled={busy} onClick={() => void send({ allow: true })}>{t(ask.kind === "folder" ? "focus.ask.yes" : "phone.ask.allow")}</button>
-              {always && ask.kind === "permission" && <button className="btn" disabled={busy} data-answer="always" onClick={() => void send({ allow: true, always: true })}>{t("perm.always")}</button>}
-              {always && server && ask.kind === "permission" && <button className="btn" disabled={busy} data-answer="always-server" onClick={() => void send({ allow: true, always: true, server: true })}>{t("perm.always.server", { server })}</button>}
-              <button className="btn" disabled={busy} onClick={() => void send({ allow: false })}>{t(ask.kind === "folder" ? "focus.ask.no" : "phone.ask.deny")}</button>
+              <button className="btn primary" disabled={busy || blocked} aria-describedby={blocked ? offlineId : undefined} onClick={() => void send({ allow: true })}>{t(ask.kind === "folder" ? "focus.ask.yes" : "phone.ask.allow")}</button>
+              {always && ask.kind === "permission" && <button className="btn" disabled={busy || blocked} aria-describedby={blocked ? offlineId : undefined} data-answer="always" onClick={() => void send({ allow: true, always: true })}>{t("perm.always")}</button>}
+              {always && server && ask.kind === "permission" && <button className="btn" disabled={busy || blocked} aria-describedby={blocked ? offlineId : undefined} data-answer="always-server" onClick={() => void send({ allow: true, always: true, server: true })}>{t("perm.always.server", { server })}</button>}
+              <button className="btn" disabled={busy || blocked} aria-describedby={blocked ? offlineId : undefined} onClick={() => void send({ allow: false })}>{t(ask.kind === "folder" ? "focus.ask.no" : "phone.ask.deny")}</button>
             </>
           ) : (
             options.map((option, i) => (
-              <button key={option} className={`btn ${i === 0 ? "primary" : ""}`} disabled={busy} onClick={() => void send({ selected: [option] })}>{option}</button>
+              <button key={option} className={`btn ${i === 0 ? "primary" : ""}`} disabled={busy || blocked} aria-describedby={blocked ? offlineId : undefined} onClick={() => void send({ selected: [option] })}>{option}</button>
             ))
           )}
           {ask.kind !== "folder" && (
             // A pen and a dashed frame: as a bare grey word under two solid buttons it read as a
             // caption, and nobody found the way to type an answer of their own.
-            <button className="btn ask-answers-write" disabled={busy} onClick={() => setWriting(true)}><Icon name="pen" size={14} />{t(ask.kind === "permission" ? "phone.ask.denyWhy" : "phone.ask.write")}</button>
+            <button className="btn ask-answers-write" disabled={busy || blocked} aria-describedby={blocked ? offlineId : undefined} onClick={() => setWriting(true)}><Icon name="pen" size={14} />{t(ask.kind === "permission" ? "phone.ask.denyWhy" : "phone.ask.write")}</button>
           )}
         </div>
       )}
@@ -208,7 +216,7 @@ export function AskAnswers({ ask, projectId, toast, always = false, server = "" 
             enterKeyHint="send"
             onChange={(e) => setText(e.target.value)}
           />
-          <button className="btn primary" type="submit" disabled={busy || (ask.kind !== "permission" && !text.trim())}>{t("focus.ask.send")}</button>
+          <button className="btn primary" type="submit" disabled={busy || blocked || (ask.kind !== "permission" && !text.trim())} aria-describedby={blocked ? offlineId : undefined}>{t("focus.ask.send")}</button>
           <button className="iconbtn" type="button" onClick={() => setWriting(false)} aria-label={t("common.cancel")} title={t("common.cancel")}><Icon name="close" /></button>
         </form>
       )}
@@ -218,7 +226,7 @@ export function AskAnswers({ ask, projectId, toast, always = false, server = "" 
 
 /** The request that has waited longest for the operator, at the top of a tab, answered in place. */
 export function NeedsYouBanner({ projectId, toast }: { projectId: string; toast: (text: string) => void }) {
-  const { ask, waiting } = useOperatorAsks(projectId);
+  const { ask, waiting, unverified } = useOperatorAsks(projectId);
   const { data: team } = useQuery<{ staff: Staff[] }>(staffKey(projectId), { staleMs: 5000 });
   if (!ask) return null;
   const names = new Map((team?.staff ?? []).map((m) => [m.id, m.name]));
@@ -233,7 +241,7 @@ export function NeedsYouBanner({ projectId, toast }: { projectId: string; toast:
         {waiting > 1 && <span className="needs-banner-more">· {t("phone.needs.more", { n: waiting - 1 })}</span>}
       </div>
       <div className="needs-banner-text"><b>{askerLine(ask, names)}</b> {askWords(ask)}</div>
-      <AskAnswers key={ask.id} ask={ask} projectId={projectId} toast={toast} />
+      <AskAnswers key={ask.id} ask={ask} projectId={projectId} toast={toast} unverified={unverified} />
     </section>
   );
 }

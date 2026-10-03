@@ -13,6 +13,7 @@ import { navigate, projectPagePath } from "./router";
 import { invalidate, useQuery } from "./store";
 import { confirmAsync, errorText } from "./ui";
 import { plural, t } from "./i18n";
+import { ProjectExtensions } from "./project/ProjectExtensions";
 
 const PICKED = "daedalus.project";
 
@@ -431,6 +432,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
         <span>{t("project.snapshots")}</span>
         <span className="sub">{t("project.snapshots.hint.edit")}</span>
       </label>
+      <ProjectExtensions projectId={project.id} toast={toast} />
       {project.sessions.length > 0 && (
         <>
           <label className="field">{t("project.agents.in")}</label>

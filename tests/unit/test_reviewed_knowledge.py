@@ -87,3 +87,41 @@ async def test_command_replay_returns_one_receipt_and_review_has_separate_cas(db
         expected_version=1, verdict="promote", reason="source verified",
         client_operation_id="review-one",
     )
+
+
+async def test_task_manifest_source_becomes_stale_at_next_artifact_revision(db: Database) -> None:
+    await db.execute(
+        "INSERT INTO board_tasks(id,project_id,title,status,priority,acceptance,checklist,depends_on,created_at,updated_at,brief_json) "
+        "VALUES ('task','project','Draft','open',3,'','[]','[]','now','now','{}')"
+    )
+    await db.execute(
+        "INSERT INTO artifact_manifests(id,task_id,artifact_kind,artifact_key,artifact_revision,digest,size_bytes,created_at) "
+        "VALUES ('manifest-one','task','document','draft',1,'digest-one',10,'now')"
+    )
+    store = KnowledgeStore(db)
+    candidate = await store.candidate(
+        "project", "The draft contains the approved heading", source_kind="manifest",
+        source_id="manifest-one", actor="extractor",
+    )
+    await store.review(candidate["fact_id"], "project", expected_version=1, verdict="promote", actor="operator", reason="checked draft")
+    assert len(await store.context_facts("project")) == 1
+    await db.execute(
+        "INSERT INTO artifact_manifests(id,task_id,artifact_kind,artifact_key,artifact_revision,digest,size_bytes,created_at) "
+        "VALUES ('manifest-two','task','document','draft',2,'digest-two',12,'now')"
+    )
+    assert await store.context_facts("project") == []
+    assert (await store.list_with_freshness("project"))[0]["source_status"] == "stale"
+
+
+async def test_compaction_captures_exact_contract_revision_before_rewrite(db: Database) -> None:
+    await db.execute(
+        "INSERT INTO sessions(id,tenant_id,project_id,title,created_at,last_message_at) "
+        "VALUES ('session','tenant','project','Draft','now','now')"
+    )
+    await db.execute(
+        "INSERT INTO board_tasks(id,project_id,session_id,title,status,priority,acceptance,checklist,depends_on,created_at,updated_at,brief_json) "
+        "VALUES ('task','project','session','Draft','open',3,'','[]','[]','now','now','{}')"
+    )
+    capture = await KnowledgeStore(db).capture_compaction("session", "run", "project", "summary", [5, 6])
+    assert "task-contract:task@1" in capture["contract_refs"]
+    assert capture["source_refs"] == ["transcript:session@5", "transcript:session@6"]

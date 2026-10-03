@@ -115,7 +115,7 @@ export function useOffline(): boolean {
   return offline;
 }
 
-export type Query<T> = { data: T | undefined; error: string | null; loading: boolean; refresh: () => Promise<void> };
+export type Query<T> = { data: T | undefined; error: string | null; loading: boolean; updatedAt: number | null; refresh: () => Promise<void> };
 
 /**
  * `key` is the API path. `pollMs` refreshes while the component is mounted and the tab is visible;
@@ -179,5 +179,5 @@ export function useQuery<T>(key: string | null, opts: { pollMs?: number; staleMs
     return () => window.clearTimeout(timer);
   }, [key, miss, pollMs, refresh]);
   const entry = key ? cache.get(key) : undefined;
-  return { data: entry?.data as T | undefined, error: entry?.error ?? null, loading: !!key && !entry, refresh };
+  return { data: entry?.data as T | undefined, error: entry?.error ?? null, loading: !!key && !entry, updatedAt: entry?.at || null, refresh };
 }

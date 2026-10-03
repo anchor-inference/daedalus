@@ -40,7 +40,8 @@ class ReviewBody(BaseModel):
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
-    store = KnowledgeStore(app.db)
+    def store() -> KnowledgeStore:
+        return KnowledgeStore(app.db)
 
     async def project_exists(project_id: str) -> None:
         row = await app.db.fetchone("SELECT 1 FROM projects WHERE id = ?", (project_id,))
@@ -50,7 +51,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.get("/api/projects/{project_id}/knowledge")
     async def list_knowledge(project_id: str, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
         await project_exists(project_id)
-        return await store.list_with_freshness(project_id)
+        return await store().list_with_freshness(project_id)
 
     @api.get("/api/projects/{project_id}/knowledge/{fact_id}/history")
     async def fact_history(project_id: str, fact_id: str, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
@@ -80,7 +81,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def create_candidate(project_id: str, body: CandidateBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         await project_exists(project_id)
         try:
-            return await store.candidate_command(
+            return await store().candidate_command(
                 Principal.operator(who), project_id, expected_revision=body.expected_collection_revision,
                 client_operation_id=body.client_operation_id, claim=body.claim, kind=body.kind,
                 source_kind=body.source_kind, source_id=body.source_id,
@@ -94,7 +95,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def review_fact(project_id: str, fact_id: str, body: ReviewBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         await project_exists(project_id)
         try:
-            return await store.review_command(
+            return await store().review_command(
                 Principal.operator(who), project_id, fact_id,
                 expected_revision=body.expected_entity_revision, expected_version=body.expected_version,
                 verdict=body.verdict, reason=body.reason, client_operation_id=body.client_operation_id,
@@ -110,18 +111,37 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def task_context(task_id: str, role: str = "worker", _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         if role not in {"worker", "reviewer", "orchestrator"}:
             raise HTTPException(400, "unsupported role")
-        task = await app.db.fetchone("SELECT id, project_id, title, acceptance, depends_on FROM board_tasks WHERE id = ?", (task_id,))
+        task = await app.db.fetchone("SELECT id, project_id, title, contract_revision FROM board_tasks WHERE id = ?", (task_id,))
         if task is None or task["project_id"] is None:
             raise HTTPException(404, "no such project task")
-        facts = await store.context_facts(str(task["project_id"]))
-        deps = json.loads(task["depends_on"] or "[]")
+        contract = await app.db.fetchone(
+            "SELECT snapshot_json FROM task_contract_versions WHERE task_id = ? AND contract_revision = ?",
+            (task_id, task["contract_revision"]),
+        )
+        if contract is None:
+            raise HTTPException(409, "task contract version is missing")
+        facts = await store().context_facts(str(task["project_id"]))
+        snapshot = json.loads(contract["snapshot_json"])
+        artifacts = await app.db.fetchall(
+            "SELECT id,artifact_key,artifact_revision,digest,artifact_kind FROM artifact_manifests "
+            "WHERE task_id = ? OR (task_id IS NULL AND project_id = ?) "
+            "ORDER BY created_at DESC,id DESC LIMIT 50", (task_id, task["project_id"]),
+        )
         packet = {
-            "task_id": task_id, "role": role, "title": task["title"], "acceptance": task["acceptance"],
-            "dependencies": deps, "facts": [
+            "task_id": task_id, "role": role, "title": task["title"],
+            "contract_revision": task["contract_revision"], "contract": snapshot,
+            "artifacts": [
+                {"id": row["id"], "key": row["artifact_key"], "revision": row["artifact_revision"],
+                 "kind": row["artifact_kind"], "digest": row["digest"]} for row in artifacts
+            ],
+            "facts": [
                 {"fact_id": row["fact_id"], "version": row["version"], "claim": row["claim"],
                  "source": f"{row['source_kind']}:{row['source_id']}@{row['source_revision']}"}
                 for row in facts
             ],
         }
         digest = hashlib.sha256(json.dumps(packet, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        return {**packet, "source_refs": [item["source"] for item in packet["facts"]], "packet_hash": "sha256:" + digest}
+        refs = [f"task-contract:{task_id}@{task['contract_revision']}"]
+        refs.extend(f"manifest:{row['id']}@{row['revision']}#{row['digest']}" for row in packet["artifacts"])
+        refs.extend(item["source"] for item in packet["facts"])
+        return {**packet, "source_refs": refs, "packet_hash": "sha256:" + digest}

@@ -6,18 +6,23 @@ third-party manifest alone cannot cause code to load into this process.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
-import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from jsonschema import Draft202012Validator, SchemaError
 
+from daedalus.extensions.effects import EffectOutcome, EffectResolution
 from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
+from daedalus.stores.outbox import Claim, OutboxStore
+
+if TYPE_CHECKING:
+    from daedalus.app import Application
 
 IDENT = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 VERSION = re.compile(r"^[0-9][a-z0-9_.-]{0,63}$")
@@ -79,53 +84,23 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
 
 
 class PluginRegistry:
-    def __init__(self, db: Database, adapters: dict[str, Callable[[], Any]] | None = None) -> None:
+    def __init__(self, db: Database, adapters: dict[str, Callable[[], Any]] | None = None, dispatcher: Any = None) -> None:
         self.db = db
         self.adapters = adapters or {}
         self.active: dict[str, Any] = {}
         self.safe_mode = False
+        self.dispatcher = dispatcher
+        self.lifecycle = asyncio.Lock()
 
-    async def install(self, manifest: dict[str, Any], expected_digest: str) -> dict[str, Any]:
-        checked = validate_manifest(manifest)
-        if checked["digest"] != expected_digest:
-            raise PluginRefused("manifest digest changed")
-        plugin_id = manifest["id"]
-        if plugin_id not in self.adapters:
-            raise PluginRefused("no trusted host adapter is registered")
+    async def dependencies_active(self, manifest: dict[str, Any]) -> bool:
         for dep in manifest["dependencies"]:
             row = await self.db.fetchone(
                 "SELECT 1 FROM plugin_manifests WHERE id = ? AND version = ? AND digest = ? AND status = 'active'",
                 (dep["id"], dep["version"], dep["digest"]),
             )
             if row is None:
-                raise PluginRefused("dependency pin is not active")
-        if self.safe_mode:
-            raise PluginRefused("extensions are disabled in safe mode")
-        adapter = self.adapters[plugin_id]()
-        at = datetime.now(UTC).isoformat()
-        await self.db.execute(
-            "INSERT INTO plugin_manifests(id, version, digest, manifest, status, health, created_at) "
-            "VALUES (?, ?, ?, ?, 'staged', 'unknown', ?)",
-            (plugin_id, manifest["version"], expected_digest, canonical(manifest).decode(), at),
-        )
-        try:
-            adapter.register(manifest)
-            await self.db.execute(
-                "UPDATE plugin_manifests SET status = 'active', health = 'unknown' WHERE id = ? AND version = ?",
-                (plugin_id, manifest["version"]),
-            )
-        except BaseException:
-            try:
-                adapter.unregister()
-            except Exception:
-                pass
-            await self.db.execute(
-                "UPDATE plugin_manifests SET status = 'failed', health = 'registration_failed' WHERE id = ? AND version = ?",
-                (plugin_id, manifest["version"]),
-            )
-            raise
-        self.active[plugin_id] = adapter
-        return {"id": plugin_id, "version": manifest["version"], "status": "active", **checked}
+                return False
+        return True
 
     async def install_command(
         self, principal: Principal, manifest: dict[str, Any], expected_digest: str,
@@ -154,10 +129,9 @@ class PluginRegistry:
                 "VALUES (?, ?, ?, ?, 'staged', 'unknown', ?)",
                 (manifest["id"], manifest["version"], expected_digest, canonical(manifest).decode(), datetime.now(UTC).isoformat()),
             )
-            await conn.execute(
-                "INSERT INTO effect_outbox(id, receipt_id, kind, payload_json, created_at) "
-                "VALUES (?, ?, 'plugin.register', ?, ?)",
-                (uuid.uuid4().hex, mutation.receipt_id, canonical({"id": manifest["id"], "version": manifest["version"]}), datetime.now(UTC).isoformat()),
+            await OutboxStore.enqueue(
+                conn, mutation, principal, kind="plugin.register", operation="plugin.install",
+                payload={"id": manifest["id"], "version": manifest["version"]}, effects=("plugin.register",),
             )
             return {"id": manifest["id"], "version": manifest["version"], "status": "staged", **checked}
 
@@ -166,10 +140,15 @@ class PluginRegistry:
             expected_collection_revision, Entity("collection", "global"),
             {"manifest": manifest, "expected_digest": expected_digest}, effect, effects=("plugin.register",),
         )
-        await self.reconcile()
+        if self.dispatcher is not None:
+            self.dispatcher.notify()
         return response
 
-    async def reconcile(self) -> None:
+    async def load_active(self) -> None:
+        async with self.lifecycle:
+            await self._load_active_locked()
+
+    async def _load_active_locked(self) -> None:
         self.safe_mode = bool(await self.db.kv_get("plugin_safe_mode", False))
         if self.safe_mode:
             return
@@ -188,6 +167,8 @@ class PluginRegistry:
                 valid = validate_manifest(manifest)["digest"] == row["digest"]
             except (ValueError, TypeError, PluginRefused):
                 valid = False
+            if valid and not await self.dependencies_active(manifest):
+                valid = False
             if not valid:
                 await self.db.execute(
                     "UPDATE plugin_manifests SET health = 'digest_mismatch' WHERE id = ? AND version = ?",
@@ -204,49 +185,67 @@ class PluginRegistry:
                 )
                 continue
             self.active[plugin_id] = adapter
-        pending = await self.db.fetchall(
-            "SELECT o.id outbox_id, m.id, m.version, m.manifest FROM effect_outbox o "
-            "JOIN plugin_manifests m ON m.id = json_extract(o.payload_json, '$.id') "
-            "AND m.version = json_extract(o.payload_json, '$.version') "
-            "WHERE o.kind = 'plugin.register' AND o.state = 'pending' AND m.status = 'staged'"
+
+    async def run(self, claim: Claim, check: Callable[[Claim], Any]) -> EffectOutcome:
+        plugin_id, version = claim.payload["id"], claim.payload["version"]
+        row = await self.db.fetchone(
+            "SELECT manifest,digest,status FROM plugin_manifests WHERE id = ? AND version = ?", (plugin_id, version)
         )
-        for row in pending:
-            plugin_id = str(row["id"])
-            factory = self.adapters.get(plugin_id)
-            if factory is None:
-                continue
+        if row is None or row["status"] != "staged":
+            return EffectOutcome("failed", "plugin is no longer staged")
+        manifest = json.loads(row["manifest"])
+        if validate_manifest(manifest)["digest"] != row["digest"]:
+            return EffectOutcome("failed", "plugin digest changed")
+        if not await self.dependencies_active(manifest):
+            return EffectOutcome("failed", "plugin dependency pin is inactive")
+        factory = self.adapters.get(plugin_id)
+        if factory is None:
+            return EffectOutcome("failed", "trusted adapter is unavailable")
+        if await self.db.kv_get("plugin_safe_mode", False):
+            return EffectOutcome("failed", "extensions are disabled in safe mode")
+        await check(claim)
+        async with self.lifecycle:
+            current = await self.db.fetchone(
+                "SELECT status,digest FROM plugin_manifests WHERE id = ? AND version = ?", (plugin_id, version)
+            )
+            if current is None or current["status"] != "staged" or current["digest"] != row["digest"]:
+                return EffectOutcome("failed", "plugin lifecycle changed before registration")
+            if await self.db.kv_get("plugin_safe_mode", False) or not await self.dependencies_active(manifest):
+                return EffectOutcome("failed", "plugin policy changed before registration")
+            await check(claim)
             adapter = factory()
             try:
-                adapter.register(json.loads(row["manifest"]))
+                adapter.register(manifest)
                 async with self.db.transaction() as conn:
-                    await conn.execute(
+                    cursor = await conn.execute(
                         "UPDATE plugin_manifests SET status = 'active', health = 'unknown' WHERE id = ? AND version = ? AND status = 'staged'",
-                        (plugin_id, row["version"]),
+                        (plugin_id, version),
                     )
-                    await conn.execute(
-                        "UPDATE effect_outbox SET state = 'completed', completed_at = ? WHERE id = ? AND state = 'pending'",
-                        (datetime.now(UTC).isoformat(), row["outbox_id"]),
-                    )
-            except BaseException:
+                    if cursor.rowcount != 1:
+                        raise PluginRefused("plugin lifecycle changed during registration")
+            except Exception as exc:
                 try:
                     adapter.unregister()
                 except Exception:
                     pass
-                await self.db.execute(
-                    "UPDATE effect_outbox SET state = 'unknown', error = 'registration outcome requires review' WHERE id = ?",
-                    (row["outbox_id"],),
-                )
-                continue
+                return EffectOutcome("unknown", f"registration requires reconciliation: {type(exc).__name__}")
             self.active[plugin_id] = adapter
+            return EffectOutcome("completed")
 
-    async def revoke(self, plugin_id: str, version: str) -> None:
-        adapter = self.active.pop(plugin_id, None)
-        if adapter is not None:
-            adapter.unregister()
-        await self.db.execute(
-            "UPDATE plugin_manifests SET status = 'revoked' WHERE id = ? AND version = ?",
-            (plugin_id, version),
+    async def reconcile(self, claim: Claim) -> EffectResolution | None:
+        plugin_id, version = claim.payload["id"], claim.payload["version"]
+        row = await self.db.fetchone(
+            "SELECT status,digest,manifest FROM plugin_manifests WHERE id = ? AND version = ?", (plugin_id, version)
         )
+        if row is None:
+            return EffectResolution("failed", {"observed": "manifest_missing"})
+        if row["status"] == "active":
+            if plugin_id in self.active and validate_manifest(json.loads(row["manifest"]))["digest"] == row["digest"]:
+                return EffectResolution("completed", {"observed": "active_registered_manifest", "digest": row["digest"]})
+        if plugin_id == "project_status" and row["status"] == "staged" and plugin_id not in self.active:
+            # This shipped adapter has no durable side effect; an interrupted process cannot retain its registration.
+            return EffectResolution("failed", {"observed": "staged_without_registered_adapter"})
+        return None
 
     async def revoke_command(
         self, principal: Principal, plugin_id: str, version: str, *,
@@ -266,15 +265,16 @@ class PluginRegistry:
             )
             return {"id": plugin_id, "version": version, "status": "revoked"}
 
-        response = await ControlStore(self.db).mutate(
-            principal, Scope("global", "global"), "plugin.revoke", client_operation_id,
-            expected_collection_revision, Entity("collection", "global"),
-            {"id": plugin_id, "version": version}, effect,
-        )
-        adapter = self.active.pop(plugin_id, None)
-        if adapter is not None:
-            adapter.unregister()
-        return response
+        async with self.lifecycle:
+            response = await ControlStore(self.db).mutate(
+                principal, Scope("global", "global"), "plugin.revoke", client_operation_id,
+                expected_collection_revision, Entity("collection", "global"),
+                {"id": plugin_id, "version": version}, effect,
+            )
+            adapter = self.active.pop(plugin_id, None)
+            if adapter is not None:
+                adapter.unregister()
+            return response
 
     async def health(self, plugin_id: str) -> dict[str, Any]:
         if self.safe_mode or await self.db.kv_get("plugin_safe_mode", False):
@@ -284,7 +284,7 @@ class PluginRegistry:
             return {"id": plugin_id, "state": "inactive"}
         try:
             result = adapter.health()
-            return {"id": plugin_id, "state": "healthy" if result else "unhealthy"}
+            return {"id": plugin_id, "state": "configured_unverified" if result else "unhealthy"}
         except Exception:
             return {"id": plugin_id, "state": "unhealthy", "reason": "adapter_error"}
 
@@ -327,13 +327,14 @@ class PluginRegistry:
             )
             return {"safe_mode": enabled}
 
-        response = await ControlStore(self.db).mutate(
-            principal, Scope("global", "global"), "plugin.safe_mode", client_operation_id,
-            expected_collection_revision, Entity("collection", "global"), {"enabled": enabled}, effect,
-        )
-        self.safe_mode = bool(await self.db.kv_get("plugin_safe_mode", False))
+        async with self.lifecycle:
+            response = await ControlStore(self.db).mutate(
+                principal, Scope("global", "global"), "plugin.safe_mode", client_operation_id,
+                expected_collection_revision, Entity("collection", "global"), {"enabled": enabled}, effect,
+            )
+            self.safe_mode = bool(await self.db.kv_get("plugin_safe_mode", False))
         if not self.safe_mode:
-            await self.reconcile()
+            await self.load_active()
         return response
 
 
@@ -387,3 +388,16 @@ class ProjectStatusAdapter:
             "SELECT status, COUNT(*) count FROM board_tasks WHERE project_id = ? GROUP BY status", (project_id,)
         )
         return {"project_id": project_id, "name": row["name"], "tasks": {item["status"]: item["count"] for item in counts}}
+
+
+async def install(app: Application) -> list[Any]:
+    dispatcher = app.extensions["effects"]
+    adapters = app.extensions.get("plugin_adapters")
+    offered = {"project_status": lambda: ProjectStatusAdapter(app.db)}
+    if isinstance(adapters, dict):
+        offered.update(adapters)
+    registry = PluginRegistry(app.db, offered, dispatcher)
+    await registry.load_active()
+    dispatcher.register("plugin.register", registry)
+    app.extensions["plugin_registry"] = registry
+    return []

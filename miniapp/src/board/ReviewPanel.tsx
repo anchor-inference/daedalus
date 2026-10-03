@@ -5,15 +5,13 @@
 // button went.
 
 import { useState } from "react";
-import { api } from "../api";
 import { Skeleton } from "../ui/components";
 import { Sheet } from "../ui/dialogs";
 import { relTime } from "../format";
 import { Icon } from "../icons";
 import { plural, t } from "../i18n";
 import { DiffView } from "../previewparts";
-import { invalidate, useQuery } from "../store";
-import { errorText } from "../ui";
+import { useQuery } from "../store";
 import { BLOCKER_CODES, Review, ReviewBlocker, mergeBlock } from "./board";
 
 export const reviewKey = (taskId: string) => `/api/board/${encodeURIComponent(taskId)}/review`;
@@ -26,42 +24,11 @@ export function blockerText(blocker: ReviewBlocker, review: Pick<Review, "curren
   return t(`pboard.review.block.${blocker.code}`, { current: review.current, base: review.base, files: (review.conflicts ?? []).slice(0, 3).join(", ") });
 }
 
-export function ReviewPanel({ taskId, onMerged, onRejected, toast }: { taskId: string; onMerged: () => void; onRejected: () => void; toast: (text: string) => void }) {
+export function ReviewPanel({ taskId }: { taskId: string }) {
   const { data, error, loading, refresh } = useQuery<Review>(reviewKey(taskId), { staleMs: 2000 });
   const [diff, setDiff] = useState(false);
-  const [rejecting, setRejecting] = useState(false);
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
-  async function merge() {
-    setBusy(true);
-    try {
-      await api.post(`/api/board/${encodeURIComponent(taskId)}/merge`);
-      toast(t("pboard.review.merged", { branch: data?.branch ?? "" }));
-      onMerged();
-    } catch (e) {
-      toast(errorText(e));
-      invalidate(reviewKey(taskId));
-      refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function reject() {
-    setBusy(true);
-    try {
-      await api.post(`/api/board/${encodeURIComponent(taskId)}/reject`, { note: note.trim() });
-      toast(t("pboard.review.rejected"));
-      setRejecting(false);
-      setNote("");
-      onRejected();
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
 
   if (loading && !data) return <section className="review-panel" aria-label={t("pboard.review")}><Skeleton rows={2} /></section>;
   if (error && !data) {
@@ -128,23 +95,9 @@ export function ReviewPanel({ taskId, onMerged, onRejected, toast }: { taskId: s
       )}
       <div className="btnrow review-actions">
         <button className="btn small" disabled={!data.patch} onClick={() => setDiff(true)}><Icon name="changes" size={14} /> {t("pboard.review.diff")}</button>
-        <button className="btn small" onClick={() => setRejecting(!rejecting)} aria-expanded={rejecting}>{t("pboard.review.reject")}</button>
         <span className="grow" />
-        <button className="btn small primary" disabled={busy || block !== null} title={block ? blockerText(block, data) : undefined} onClick={merge}>
-          <Icon name="check" size={14} /> {t("pboard.review.merge")}
-        </button>
       </div>
-      {block && <div className={`sub review-why ${block.code === "conflicts" ? "bad" : "attn"}`}>{t("pboard.review.why", { reason: blockerText(block, data) })}</div>}
-      {rejecting && (
-        <div className="review-reject">
-          <label className="field" htmlFor={`reject-${taskId}`}>{t("pboard.review.reject.note")}</label>
-          <textarea id={`reject-${taskId}`} className="field" rows={3} maxLength={2000} value={note} placeholder={t("pboard.review.reject.placeholder")} onChange={(e) => setNote(e.target.value)} />
-          <div className="btnrow">
-            <span className="grow" />
-            <button className="btn small warn" disabled={busy || !note.trim()} onClick={reject}>{t("pboard.review.reject.send")}</button>
-          </div>
-        </div>
-      )}
+      <div className={`sub review-why ${block?.code === "conflicts" ? "bad" : "attn"}`}>{block ? t("pboard.review.why", { reason: blockerText(block, data) }) : t("result.block.unverified")}</div>
       {diff && (
         <Sheet title={data.branch} onClose={() => setDiff(false)} size="full" className="review-diff">
           {!data.patch_complete && <div className="sub attn">{t("pboard.review.diff.cut")}</div>}

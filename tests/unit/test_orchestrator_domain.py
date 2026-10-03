@@ -14,8 +14,10 @@ from daedalus.extensions.orchestrator_domain import (
     OriginalReports,
     accept_result,
     add_artifact_manifest,
+    add_review_comment,
     add_review_evidence,
     apply_goal_revision,
+    capture_contract_change,
     claim_handoff,
     configure_workflow,
     dependency_readiness,
@@ -128,6 +130,59 @@ async def test_changed_manifest_during_check_cannot_support_acceptance(domain_db
             await record_verdict(conn, verdict_id="verdict1", result_id="result1", reviewer_actor_id="reviewer",
                                  verification="verified", accepted=True, head=None, base=None,
                                  environment_digest="env", evidence_ids=["changed"], reason="")
+
+
+async def test_late_blocking_comment_and_new_result_fence_acceptance(domain_db: Database) -> None:
+    original = b"report"
+    digest = hashlib.sha256(original).hexdigest()
+    async with domain_db.transaction() as conn:
+        await add_artifact_manifest(conn, manifest_id="manifest1", project_id=None, task_id="task1",
+                                    artifact_kind="document", artifact_key="report", artifact_revision=1,
+                                    digest=digest, size_bytes=len(original))
+        await submit_result(conn, result_id="result1", task_id="task1", attempt_id=None,
+                            contract_revision=1, outcome="complete", original_text=original.decode(),
+                            original_blob_ref=None, original_digest=digest, original_size_bytes=len(original),
+                            actor_id="worker", manifest_ids=["manifest1"], checks=[], limitations=[])
+        await add_review_evidence(conn, evidence_id="evidence1", result_id="result1", criterion_id="C1",
+                                  command="check", exit_code=0, environment_digest="env",
+                                  manifest_digest_before=digest, manifest_digest_after=digest)
+        await record_verdict(conn, verdict_id="verdict1", result_id="result1", reviewer_actor_id="reviewer",
+                             verification="verified", accepted=True, head=None, base=None,
+                             environment_digest="env", evidence_ids=["evidence1"], reason="checked")
+        await add_review_comment(conn, comment_id="comment1", result_id="result1", author_actor_id="reviewer",
+                                 source="operator", priority="blocking", body="Evidence needs another check")
+        with pytest.raises(DomainConflict, match="blocking"):
+            await accept_result(conn, task_id="task1", result_id="result1", verdict_id="verdict1",
+                                contract_revision=1, current_head=None, current_base=None)
+        await conn.execute("INSERT INTO review_comment_resolutions(id,comment_id,result_id,actor_id,resolution,reason,created_at)"
+                           " VALUES ('resolution1','comment1','result1','reviewer','resolved','checked','2026-01-01')")
+        await submit_result(conn, result_id="result2", task_id="task1", attempt_id=None,
+                            contract_revision=1, outcome="complete", original_text=original.decode(),
+                            original_blob_ref=None, original_digest=digest, original_size_bytes=len(original),
+                            actor_id="worker", manifest_ids=["manifest1"], checks=[], limitations=[])
+        with pytest.raises(DomainConflict, match="newer result"):
+            await accept_result(conn, task_id="task1", result_id="result1", verdict_id="verdict1",
+                                contract_revision=1, current_head=None, current_base=None)
+
+
+async def test_duplicate_check_ids_rejected_and_reorder_preserves_ids(domain_db: Database) -> None:
+    with pytest.raises(ValueError, match="unique"):
+        async with domain_db.transaction() as conn:
+            await replace_contract(conn, task_id="task1", requirements=[],
+                                   checks=[{"id": "C1", "text": "First"}, {"id": "C1", "text": "Second"}],
+                                   acceptance="", brief={}, origin_kind="operator", origin_ref="edit",
+                                   change_kind="semantic")
+    async with domain_db.transaction() as conn:
+        await replace_contract(conn, task_id="task1", requirements=[],
+                               checks=[{"id": "C1", "text": "Clear result"}, {"id": "C2", "text": "Other"}],
+                               acceptance="", brief={}, origin_kind="operator", origin_ref="edit",
+                               change_kind="semantic")
+        await conn.execute("UPDATE board_tasks SET checklist = ? WHERE id = 'task1'",
+                           ('[{"text":"Other","done":false},{"text":"Clear result","done":false}]',))
+        await capture_contract_change(conn, "task1", origin_kind="operator")
+    projected = await OrchestratorDomain(domain_db).contract("task1")
+    assert [(item["id"], item["text"]) for item in projected["checklist"]] == [
+        ("C2", "Other"), ("C1", "Clear result")]
 
 
 async def test_legacy_dependency_requires_resolution_and_claim_is_single(domain_db: Database) -> None:

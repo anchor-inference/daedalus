@@ -1,6 +1,7 @@
 """A project on a phone, at 390 and 400 px with a touch screen, in both languages.
 
-The project's four tabs take the place of the app's own and light the one on screen; the header names
+The project's three tabs take the place of the app's own; contextual tools stay behind the header.
+The header names
 the project, says how its work goes and leads back to orchestration's list of projects, where the app's
 own tabs return.
 The request that has waited longest for the operator is a banner answered with one tap — an option, or
@@ -31,9 +32,9 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "b4k3ry20f0c5"
 
 WORDS = {
-    "en": {"tabs": ["Orchestrator", "Team", "Terminals", "Board"], "needs": "Needs you", "ira": "Ira asks:", "orchestrator": "The orchestrator asks:", "write": "Answer…", "head": "3 working · 1 in review",
+    "en": {"tabs": ["Project", "Needs decision", "History"], "needs": "Needs you", "ira": "Ira asks:", "orchestrator": "The orchestrator asks:", "write": "Answer…", "head": "3 working · 1 in review",
            "own": "Your own answer…", "send": "Answer", "working": "working", "review": "Review", "merge": "Merge", "board": "Board · Bakery 2.0"},
-    "ru": {"tabs": ["Оркестратор", "Команда", "Терминалы", "Доска"], "needs": "Нужны вы", "ira": "Ira спрашивает:", "orchestrator": "Оркестратор спрашивает:", "write": "Ответить…", "head": "3 работают · 1 на проверке",
+    "ru": {"tabs": ["Проект", "Требуют решения", "История"], "needs": "Нужны вы", "ira": "Ira спрашивает:", "orchestrator": "Оркестратор спрашивает:", "write": "Ответить…", "head": "3 работают · 1 на проверке",
            "own": "Свой ответ…", "send": "Ответить", "working": "работает", "review": "Проверка", "merge": "Слить", "board": "Доска · Bakery 2.0"},
 }
 
@@ -90,12 +91,12 @@ def run_one(page: Page, lang: str, width: int) -> None:
     page.goto(f"{BASE}/project/{PID}/team?token=t&lang={lang}")
     expect(page.locator(".pagehead h1")).to_have_text("Bakery 2.0")
     expect(page.locator(".pagehead .sub")).to_have_text(words["head"])
-    tabs(page, words, "team")
+    tabs(page, words, None)
     banner = page.locator(".needs-banner")
     expect(banner).to_have_attribute("data-ask", "q9w2e1")
     expect(banner).to_contain_text(words["needs"])
     expect(banner).to_contain_text(words["ira"])
-    expect(page.locator("nav.project-tabs a[data-tab='team'] .tab-badge")).to_have_text("2")
+    expect(page.locator("nav.project-tabs a[data-tab='attention'] .tab-badge")).to_have_text("2")
     tall_enough(page, ".needs-banner .ask-answers-row .btn", where)
     items = page.locator(".phone-staff-item")
     expect(items).to_have_count(6)
@@ -105,13 +106,13 @@ def run_one(page: Page, lang: str, width: int) -> None:
 
     # The board leaves out the request the banner above it already shows: the same question twice, in
     # two different sets of controls, took the top half of the screen. The orchestrator's stays listed.
-    page.locator("nav.project-tabs a[data-tab='board']").tap()
+    page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
     page.wait_for_url(f"**/project/{PID}/board**")
     expect(page.locator(".needs-banner")).to_have_attribute("data-ask", "q9w2e1")
     needs = page.locator(".pboard-list .pcard.need")
     expect(needs).to_have_count(1)
     expect(needs.locator(".pcard-short")).to_have_text("q4r8tz")
-    page.locator("nav.project-tabs a[data-tab='team']").tap()
+    page.goto(f"{BASE}/project/{PID}/team?token=t&lang={lang}")
     page.wait_for_url(f"**/project/{PID}/team**")
     expect(banner).to_have_attribute("data-ask", "q9w2e1")
 
@@ -129,7 +130,7 @@ def run_one(page: Page, lang: str, width: int) -> None:
     banner.locator(".ask-answers-own .btn.primary").tap()
     expect(page.locator(".needs-banner")).to_have_count(0)
     assert focus.answers[-1] == ("ask-spring", {"text": "after, like last spring"}), focus.answers
-    expect(page.locator("nav.project-tabs a[data-tab='team'] .tab-badge")).to_have_count(0)
+    expect(page.locator("nav.project-tabs a[data-tab='attention'] .tab-badge")).to_have_count(0)
 
     # A member with a conversation opens it without the tabs, and its back returns to the team.
     items.filter(has_text="Lev").locator(".phone-staff-row").tap()
@@ -140,23 +141,23 @@ def run_one(page: Page, lang: str, width: int) -> None:
     page.locator(".chat-head .iconbtn").first.tap()
     page.wait_for_url(f"**/project/{PID}/team**")
 
-    # The board: a tab away, under chips, a review accepted with one tap.
-    page.locator("nav.project-tabs a[data-tab='board']").tap()
+    # The board remains a contextual project tool, under chips.
+    page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
     page.wait_for_url(f"**/project/{PID}/board**")
-    tabs(page, words, "board")
+    tabs(page, words, None)
     expect(page.locator(".pagehead h1")).to_have_text(words["board"])
     expect(page.locator(".pboard-cols")).to_have_count(0)
     page.locator(".pboard-chips .chip", has_text=words["review"]).tap()
-    # The task in review is a staff branch, and on a branch accepting is merging: the card says Merge.
-    page.locator(".pboard-list .pcard").get_by_role("button", name=words["merge"]).tap()
-    expect(page.locator(".toast")).to_be_visible()
-    assert focus.board.accepted == ["t-endpoint"], focus.board.accepted
+    # A branch result cannot be accepted without the exact current receipt and verdict.
+    page.locator(".pboard-list .pcard").tap()
+    expect(page.locator(".sheet.pboard-sheet .result-flow button", has_text="Accept" if lang == "en" else "Принять")).to_be_disabled()
+    assert not focus.board.accepted
     fits(page, f"{where} board")
 
     # The terminals: rows that lead to the phone's terminal.
-    page.locator("nav.project-tabs a[data-tab='terminals']").tap()
+    page.goto(f"{BASE}/project/{PID}/terminals?token=t&lang={lang}")
     page.wait_for_url(f"**/project/{PID}/terminals**")
-    tabs(page, words, "terminals")
+    tabs(page, words, None)
     rows = page.locator(".phone-term")
     expect(rows).to_have_count(3)
     expect(rows.first).to_have_attribute("href", "/app/terminals/tm-ira")
@@ -175,7 +176,7 @@ def run_one(page: Page, lang: str, width: int) -> None:
     # A page behind the header's menu keeps the tabs with none lit.
     page.goto(f"{BASE}/project/{PID}/journal?token=t&lang={lang}")
     page.wait_for_selector(".journal-entry", timeout=10000)
-    tabs(page, words, None)
+    tabs(page, words, "journal")
 
     # The header's back leaves the project for orchestration's list, and the app's own tabs come back.
     page.goto(f"{BASE}/project/{PID}/team?token=t&lang={lang}")

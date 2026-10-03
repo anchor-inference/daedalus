@@ -644,11 +644,6 @@ class BoardUpdateBody(BaseModel):
     depends_on: list[str] | None = Field(default=None, max_length=50)
 
 
-class RejectBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    note: str = Field(min_length=1, max_length=2000)
-
-
 class ProjectTaskBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=200)
@@ -1539,16 +1534,18 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     # The projects, their folders, brief and journal: their own module, which the features built
     # on projects extend rather than this file.
+    from daedalus.extensions.api_orchestrator_domain import (
+        install_routes,  # Lazy: route composition follows the authentication dependency.
+    )
+
+    install_routes(api, app, auth)
     api_control.register(api, app, auth)
     api_projects.register(api, app, auth)
-    # Lightweight API fixtures deliberately omit durable stores; the installed host has them.
-    if hasattr(app, "db"):
-        api_knowledge.register(api, app, auth)
-        api_workflows.register(api, app, auth)
-        api_plugins.register(api, app, auth)
-        if hasattr(manager, "skills"):
-            api_skill_quality.register(api, app, auth)
-        api_integrations.register(api, app, auth)
+    api_knowledge.register(api, app, auth)
+    api_workflows.register(api, app, auth)
+    api_plugins.register(api, app, auth)
+    api_skill_quality.register(api, app, auth)
+    api_integrations.register(api, app, auth)
     # The command-line agents: the Harnesses screen and the hiring form's catalog.
     api_harnesses.register(api, app, auth)
     # One staff member's session as its runtime sees it: the staff view's reads.
@@ -4307,17 +4304,6 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         assigned = task.get("assignee_staff_id") and (task.get("assignee_staff_id") != before.get("assignee_staff_id") or body.resume_from)
         return {**task, "launch": await launch(task, body.resume_from) if assigned else None}
 
-    @api.post("/api/board/{task_id}/accept")
-    async def board_accept(task_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """The operator accepts a task in review; it is done. A conflict when it is not in review, or when
-        its staff branch is not merged yet."""
-        try:
-            return await _board().accept(task_id, by="operator")
-        except KeyError:
-            raise HTTPException(404, "no such task") from None
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
-
     def _review():  # type: ignore[no-untyped-def]
         review = getattr(app.extensions.get("staff"), "review", None)
         if review is None:
@@ -4332,27 +4318,6 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         except KeyError:
             raise HTTPException(404, "no such task") from None
         except ReviewRefused as exc:
-            raise HTTPException(409, str(exc)) from exc
-
-    @api.post("/api/board/{task_id}/merge")
-    async def board_merge(task_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """The operator merges a task's staff branch as a merge commit; the task is done. 409 with the
-        reason when the folder is not clean, not on the base, or the merge would conflict."""
-        try:
-            return await _review().merge(task_id, by="operator")  # type: ignore[no-any-return]
-        except KeyError:
-            raise HTTPException(404, "no such task") from None
-        except (ReviewRefused, ValueError) as exc:
-            raise HTTPException(409, str(exc)) from exc
-
-    @api.post("/api/board/{task_id}/reject")
-    async def board_reject(task_id: str, body: RejectBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """The operator sends a task's work back from review with a note for its staff member."""
-        try:
-            return await _review().reject(task_id, body.note, by="operator")  # type: ignore[no-any-return]
-        except KeyError:
-            raise HTTPException(404, "no such task") from None
-        except (ReviewRefused, ValueError) as exc:
             raise HTTPException(409, str(exc)) from exc
 
     @api.delete("/api/board/{task_id}")

@@ -31,6 +31,7 @@ export type Assignee = {
 
 export type ProjectTask = {
   id: string;
+  entity_revision?: number;
   title: string;
   status: TaskStatus;
   priority: number;
@@ -222,6 +223,10 @@ export type Review = {
   branch: string;
   base: string;
   current: string;
+  head_sha?: string | null;
+  base_sha?: string | null;
+  current_sha?: string | null;
+  merge_receipt?: { id: string; result_id: string; verdict_id: string; head_sha: string; base_sha: string; merge_sha: string; state: string; error: string | null } | null;
   folder: { id: string; path: string; label: string; env: string };
   exists: boolean;
   on_base: boolean;

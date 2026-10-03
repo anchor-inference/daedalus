@@ -711,6 +711,9 @@ class StaffStore:
                         int(staff.one_off), staff.created_by, staff.created_at,
                     ),
                 )
+                await conn.execute("INSERT INTO staff_role_versions(staff_id,role_revision,purpose,authority_json,"
+                                   " output_contract_json,created_at) VALUES (?,1,?,'{}','{}',?)",
+                                   (staff.id, staff.role, staff.created_at))
                 await self._journal(conn, project_id, "hire", text, {"staff_id": staff.id})
         except sqlite3.IntegrityError as exc:
             # The partial unique index over active names: the check is the database's, so two hires
@@ -736,10 +739,23 @@ class StaffStore:
         if "default_folder_id" in changes and changes["default_folder_id"] == "":
             merged["default_folder_id"] = None
         fields = self._check(merged, settings, folders)
-        await self._db.execute(
-            "UPDATE staff SET role = ?, agent = ?, model = ?, effort = ?, permission_mode = ?, env = ?, default_folder_id = ?, isolation = ?, instructions = ?, notes = ?, color = ? WHERE id = ?",
-            tuple(fields[k] for k in EDITABLE) + (staff_id,),
-        )
+        async with self._db.transaction() as conn:
+            await conn.execute(
+                "UPDATE staff SET role = ?, agent = ?, model = ?, effort = ?, permission_mode = ?, env = ?, default_folder_id = ?, isolation = ?, instructions = ?, notes = ?, color = ? WHERE id = ?",
+                tuple(fields[k] for k in EDITABLE) + (staff_id,),
+            )
+            if fields["role"] != current.role:
+                row = await conn.execute("SELECT role_revision,authority_json,output_contract_json FROM staff WHERE id = ?",
+                                         (staff_id,))
+                old = await row.fetchone()
+                await row.close()
+                revision = int(old["role_revision"]) + 1
+                await conn.execute("UPDATE staff SET role_revision = ?,purpose = ? WHERE id = ?",
+                                   (revision, fields["role"], staff_id))
+                await conn.execute("INSERT INTO staff_role_versions(staff_id,role_revision,purpose,authority_json,"
+                                   " output_contract_json,created_at) VALUES (?,?,?,?,?,?)",
+                                   (staff_id, revision, fields["role"], old["authority_json"],
+                                    old["output_contract_json"], _now()))
         updated = await self.get(staff_id)
         assert updated is not None
         return updated
@@ -1137,9 +1153,10 @@ class AsksStore:
             short = self._short_id()
             try:
                 await self._db.execute(
-                    "INSERT INTO asks(id, short_id, project_id, origin, kind, staff_id, staff_session_id, task_id, request_ref, text, detail_json, routed_to, suggestion, created_at, routed_at, dispatch_id, title) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (ask_id, short, project_id, origin, kind, staff_id, staff_session_id, task_id, _plain(request_ref, "the request reference", 500), body, details, routed_to, _plain(suggestion, "the suggestion", TEXT_MAX, multiline=True), at, at, dispatch_id or None, heading),
+                    "INSERT INTO asks(id, short_id, project_id, origin, kind, staff_id, staff_session_id, task_id, request_ref, text, detail_json, routed_to, suggestion, created_at, routed_at, dispatch_id, title, origin_contract_revision) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+                    " (SELECT contract_revision FROM board_tasks WHERE id = ?))",
+                    (ask_id, short, project_id, origin, kind, staff_id, staff_session_id, task_id, _plain(request_ref, "the request reference", 500), body, details, routed_to, _plain(suggestion, "the suggestion", TEXT_MAX, multiline=True), at, at, dispatch_id or None, heading, task_id),
                 )
             except sqlite3.IntegrityError:
                 if await self._db.fetchone("SELECT 1 FROM asks WHERE short_id = ? AND resolved_at IS NULL", (short,)) is None:
@@ -1165,13 +1182,21 @@ class AsksStore:
         if len(body) > ASK_DETAIL_MAX:
             raise StaffError(f"an answer is at most {ASK_DETAIL_MAX} characters of JSON")
         async with self._db.transaction() as conn:
+            row = await conn.execute("SELECT a.task_id,a.origin_contract_revision,t.contract_revision"
+                                     " FROM asks a LEFT JOIN board_tasks t ON t.id = a.task_id WHERE a.id = ?", (ask_id,))
+            ask = await row.fetchone()
+            await row.close()
+            applies = ask is not None and (ask["task_id"] is None or
+                                           (ask["origin_contract_revision"] is not None and
+                                            ask["origin_contract_revision"] == ask["contract_revision"]))
             cursor = await conn.execute(
-                "UPDATE asks SET resolved_at = ?, resolved_by = ?, resolution_json = ? WHERE id = ? AND resolved_at IS NULL",
-                (_now(), by, body, ask_id),
+                "UPDATE asks SET resolved_at = ?, resolved_by = ?, resolution_json = ?,"
+                " answered_contract_revision = ? WHERE id = ? AND resolved_at IS NULL",
+                (_now(), by, body, ask["contract_revision"] if applies and ask["task_id"] else None, ask_id),
             )
             changed = cursor.rowcount
             await cursor.close()
-        return changed == 1
+        return changed == 1 and applies
 
     async def revise(self, ask_id: str, *, title: str, text: str, detail: dict[str, Any]) -> bool:
         """Change an open request's words in place: the same row, the same id, so an answer the operator

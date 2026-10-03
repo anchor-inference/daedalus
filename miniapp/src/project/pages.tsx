@@ -385,6 +385,10 @@ function EnableSheet({ project, onClose, toast }: { project: Project; onClose: (
   }
   return (
     <Sheet title={t("focus.enable.sheet", { name: project.name })} onClose={onClose} size="narrow" className="enable-sheet">
+      <p className="focus-enable-intro">{t("focus.enable.first")}</p>
+      <p className="focus-cost">{t("focus.enable.cost")}</p>
+      <details className="focus-enable-advanced">
+      <summary>{t("focus.enable.advanced")}</summary>
       <label className="field" htmlFor="orch-model">{t("focus.enable.model")}</label>
       <select id="orch-model" className="field" value={model} onChange={(e) => setModel(e.target.value)}>
         <option value="">{fallback ? t("focus.enable.model.default", { name: fallback }) : t("team.model.default.short")}</option>
@@ -406,7 +410,7 @@ function EnableSheet({ project, onClose, toast }: { project: Project; onClose: (
       <label className="field" htmlFor="orch-cap">{t("focus.enable.cap")}</label>
       <input id="orch-cap" className="field" type="number" min={1} max={32} value={cap} onChange={(e) => setCap(Math.max(1, Math.min(32, Number(e.target.value) || 1)))} />
       <div className="sub form-hint">{t("focus.enable.cap.hint")} {plural("team.count.staff", cap)}</div>
-      <p className="focus-cost">{t("focus.enable.cost")}</p>
+      </details>
       <div className="btnrow">
         <button className="btn primary" disabled={busy} onClick={() => void go()}>{t("focus.enable.go")}</button>
         <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>

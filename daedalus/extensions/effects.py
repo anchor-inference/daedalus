@@ -111,9 +111,13 @@ class EffectDispatcher:
 
 
 async def install(app: Application) -> list[asyncio.Task[None]]:
-    from daedalus.extensions.task_controls import TaskStopEffect
+    from daedalus.extensions.merge_effect import MergeEffect  # Lazy: handlers import the dispatcher outcome contracts.
+    from daedalus.extensions.task_controls import (
+        TaskStopEffect,  # Lazy: the handler imports the dispatcher outcome contracts.
+    )
 
     dispatcher = EffectDispatcher(OutboxStore(app.db))
     dispatcher.register("task.stop", TaskStopEffect(app))
+    dispatcher.register("review.merge", MergeEffect(app))
     app.extensions["effects"] = dispatcher
     return [asyncio.create_task(dispatcher.run(), name="effect-dispatcher")]

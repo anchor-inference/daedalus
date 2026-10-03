@@ -1,18 +1,7 @@
-"""Review and merge: the operator reads a staff branch on its card and merges it with one button.
+"""Read-only review projection and explicit rejection for a staff branch.
 
-The orchestrator proposes, the operator merges. A staff member's ``Report(done)`` puts the task in
-review with ``merge_state='proposed'``; this module is the only way that work reaches the folder:
-
-- :meth:`Review.review` reads what a merge would bring — commits, the files and their line counts, a
-  bounded patch, the dry run of the merge — and what stands in its way, without changing anything;
-- :meth:`Review.merge` merges the branch into the folder's current branch as a merge commit when the
-  folder is clean, still on the branch the task was cut from, and the dry run is clean; the task is
-  done, the worktree goes when the member has nothing else to do in that folder, the merged branch is
-  deleted with ``-d`` and ``task.accepted`` tells the orchestrator. A merge that fails is undone, the
-  folder is exactly as it was, and ``task.merge_failed`` wakes the orchestrator to sort it out;
-- :meth:`Review.reject` sends the task back to its member with the operator's note.
-
-Nothing is pushed: the operator's remote is the operator's business.
+The merge itself runs through a fenced outbox effect. Reading this projection cannot change the
+task, and merging a branch does not itself accept an immutable result.
 """
 
 from __future__ import annotations
@@ -20,11 +9,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from daedalus.extensions.board import OPERATOR
 from daedalus.extensions.staff import SENT_BACK
-from daedalus.host.worktrees import BranchComparison, WorktreeError, WorktreeRefused
+from daedalus.host.worktrees import BranchComparison, WorktreeError
 from daedalus.stores.projects import Project, ProjectFolder
-from daedalus.stores.staff import ACTIVE_STATUSES, StaffError
+from daedalus.stores.staff import StaffError
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -86,11 +74,6 @@ class Review:
         out: list[dict[str, str]] = []
         if task["status"] != "review":
             out.append({"code": "status", "text": f"the task is {task['status']}, not in review"})
-        open_items = [str(c.get("text") or "") for c in task.get("checklist") or [] if not c.get("done")]
-        if open_items:
-            # Checked before the merge, not left to the move to done: a merge that lands and then cannot
-            # close its task would leave the work in the folder and the task in review.
-            out.append({"code": "checklist", "text": f"the checklist still has {len(open_items)} open item(s): {', '.join(open_items[:3])}"})
         if not comparison.exists:
             out.append({"code": "branch", "text": f"the branch {comparison.branch} no longer exists"})
             return out
@@ -117,11 +100,11 @@ class Review:
         except Exception as exc:  # noqa: BLE001 — git's own failure, worded for the card
             raise ReviewRefused(f"the branch could not be read in {folder.path}: {exc}") from exc
         blockers = self.blockers(task, comparison, base)
-        if comparison.conflicts and task["status"] == "review" and task.get("merge_state") == "proposed":
-            # Merge is disabled on a conflict, so pressing it cannot be what tells the orchestrator: the
-            # first review that sees one does, once — the state moves on and a second look is silent.
-            await self._failed(task, project, f"the merge would conflict in {', '.join(comparison.conflicts[:10])}", comparison.conflicts)
-            task["merge_state"] = "conflict"
+        merged = await self.app.db.fetchone("SELECT id,result_id,verdict_id,head_sha,base_sha,merge_sha,state,error"
+                                            " FROM task_merge_receipts WHERE task_id = ?"
+                                            " ORDER BY created_at DESC,id DESC LIMIT 1", (task_id,))
+        head_sha = await self.team.worktrees.commit_identity(folder, str(task["branch"])) if comparison.exists else None
+        current_sha = await self.team.worktrees.commit_identity(folder)
         return {
             "task_id": task["id"],
             "title": task["title"],
@@ -130,6 +113,10 @@ class Review:
             "branch": comparison.branch,
             "base": base,
             "current": comparison.current,
+            "head_sha": head_sha or (merged["head_sha"] if merged is not None else None),
+            "base_sha": current_sha if not merged or merged["state"] != "merged" else merged["base_sha"],
+            "current_sha": current_sha,
+            "merge_receipt": dict(merged) if merged is not None else None,
             "folder": {"id": folder.id, "path": str(folder.path), "label": folder.label, "env": folder.env},
             "exists": comparison.exists,
             "on_base": not base or comparison.current == base,
@@ -150,96 +137,8 @@ class Review:
         }
 
     async def merge(self, task_id: str, *, by: str = "operator") -> dict[str, Any]:
-        """Merge the task's branch and finish the task; the finished task, with ``merge`` saying what landed.
-
-        Only the operator merges (decision: the orchestrator proposes). The preconditions are the ones
-        the card shows, checked again here because the folder may have changed since the card was drawn.
-        A conflict — seen by the dry run or by the merge itself — sets ``merge_state='conflict'``,
-        publishes ``task.merge_failed`` so the orchestrator is woken to have it resolved, and is refused;
-        a dirty folder or one on another branch is refused without an event, because it is the
-        operator's own folder to put right.
-        """
-        if by != "operator":
-            raise ReviewRefused("only the operator merges a staff branch; the orchestrator proposes it")
-        task, project, folder = await self._where(task_id)
-        base = await self._base(task)
-        try:
-            comparison = await self.team.worktrees.compare(folder, str(task["branch"]))
-        except Exception as exc:  # noqa: BLE001 — any git failure is a refusal with git's words
-            raise ReviewRefused(f"the branch could not be read in {folder.path}: {exc}") from exc
-        blockers = self.blockers(task, comparison, base)
-        conflict = next((b for b in blockers if b["code"] == "conflicts"), None)
-        if conflict is not None:
-            await self._failed(task, project, conflict["text"], comparison.conflicts or [])
-            raise ReviewRefused(conflict["text"])
-        if blockers:
-            raise ReviewRefused("; ".join(b["text"] for b in blockers))
-        message = f"Merge {task['branch']}: {task['title']}"
-        try:
-            sha = await self.team.worktrees.merge(folder, str(task["branch"]), message=message)
-        except WorktreeRefused as exc:
-            await self._failed(task, project, str(exc), [])
-            raise ReviewRefused(str(exc)) from exc
-        await self.app.db.execute("UPDATE board_tasks SET merge_state = 'merged', acceptance_state = 'operator_approved' WHERE id = ?", (task["id"],))
-        # The merge is the operator's acceptance of every check of the card (see ``Board.accept``).
-        done = await self.board.update(task["id"], status="done", note=f"merged by the operator as {sha[:10]} into {comparison.current}", check=list(range(len(task.get("checklist") or []))))
-        await self.board._publish("task.accepted", done, OPERATOR, merge=sha, branch=str(task["branch"]))
-        await self.app.manager.projects.record(  # type: ignore[union-attr]
-            project.id, "operator", "merge", f"Merged {task['branch']} into {comparison.current} ({len(comparison.commits)} commits, +{comparison.added} −{comparison.removed}): {task['title']}", {"task_id": task["id"], "commit": sha}
-        )
-        cleanup = await self._clean_up(task, folder)
-        done["merge"] = {"commit": sha, "into": comparison.current, **cleanup}
-        return done
-
-    async def _failed(self, task: dict[str, Any], project: Project, error: str, conflicts: list[str]) -> None:
-        """Mark the conflict and tell the orchestrator — once per proposal: a task already marked has
-        been told, and pressing Merge on it again is not news."""
-        if task.get("merge_state") == "conflict":
-            return
-        await self.app.db.execute("UPDATE board_tasks SET merge_state = 'conflict' WHERE id = ?", (task["id"],))
-        extra: dict[str, Any] = {"error": error[:1000]}
-        if conflicts:
-            extra["conflicts"] = conflicts[:50]
-        await self.board._publish("task.merge_failed", await self.board.get(task["id"]), OPERATOR, **extra)
-        await self.app.manager.projects.record(project.id, "system", "merge", f"Merging {task['branch']} failed and was undone: {error[:500]}", {"task_id": task["id"]})  # type: ignore[union-attr]
-
-    async def _clean_up(self, task: dict[str, Any], folder: ProjectFolder) -> dict[str, Any]:
-        """After a merge: the worktree goes when its member has no next task in this folder, and the
-        merged branch goes with ``-d`` when nothing has it checked out.
-
-        The member's session on this task is ended first when it sits idle, because a session whose
-        working directory was removed under it would fail on the next thing it is told. A member still
-        working (told something new meanwhile) keeps both.
-        """
-        out = {"worktree_removed": False, "branch_deleted": False}
-        member_id = task.get("assignee_staff_id")
-        row = await self.app.db.fetchone(
-            "SELECT id FROM staff_sessions WHERE task_id = ? AND branch = ? AND worktree_path IS NOT NULL ORDER BY started_at DESC LIMIT 1", (task["id"], task["branch"])
-        )
-        session = await self.team.manager.staff.session(row["id"]) if row is not None else None
-        if member_id and session is not None:
-            next_here = await self.app.db.fetchone(
-                "SELECT 1 FROM board_tasks WHERE assignee_staff_id = ? AND id != ? AND status IN ('todo', 'blocked', 'doing') AND (folder_id = ? OR folder_id IS NULL) LIMIT 1",
-                (member_id, task["id"], folder.id),
-            )
-            live = await self.team.live(session.id) if session.live else None
-            busy = live is not None and live.session.status in ACTIVE_STATUSES
-            if next_here is None and not busy:
-                if live is not None:
-                    await self.team._end(live, "its task was merged", stop=True, by="operator")
-                worktree = await self.team.worktree_of(session)
-                if worktree is not None:
-                    try:
-                        out["branch_deleted"] = await self.team.worktrees.remove(worktree, delete_branch_if_merged=True)
-                        out["worktree_removed"] = True
-                    except WorktreeError as exc:
-                        logger.warning("kept the worktree of task %s: %s", task["id"], exc)
-        if not out["branch_deleted"]:
-            try:
-                out["branch_deleted"] = await self.team.worktrees.delete_branch(folder, str(task["branch"]))
-            except WorktreeError:
-                pass
-        return out
+        """External merges require a queued, exact-result command and a fenced effect claim."""
+        raise ReviewRefused("merge requires an exact result, verified verdict, and queued operation receipt")
 
     async def reject(self, task_id: str, note: str, *, by: str = "operator") -> dict[str, Any]:
         """Send the work back: the task returns to doing with ``merge_state='rejected'`` and the note goes

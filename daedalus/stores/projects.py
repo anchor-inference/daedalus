@@ -566,6 +566,8 @@ class ProjectStore:
                 "INSERT INTO projects(id, name, created_at, settings, system) VALUES (?, ?, ?, ?, ?)",
                 (project_id, name, created.isoformat(), json.dumps(settings.dump()), settings.system),
             )
+            await conn.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at)"
+                               " VALUES (?,1,'','system',?)", (project_id, created.isoformat()))
             for folder in made:
                 await conn.execute(
                     "INSERT INTO project_folders(id, project_id, path, label, env, is_git, readonly, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1024,6 +1026,8 @@ class ProjectStore:
             raise ProjectError(f"a brief is written by the operator, the orchestrator or the system, not {by!r}")
         if section in OPERATOR_ONLY_SECTIONS and by != "operator":
             raise ProjectError(f"only the operator writes {section}: it bounds what may be granted without asking them")
+        if section == "goals":
+            raise ProjectError("goal changes require an impact preview and an exact scope revision")
         if await self.get(project_id) is None:
             raise KeyError(project_id)
         at = _now()

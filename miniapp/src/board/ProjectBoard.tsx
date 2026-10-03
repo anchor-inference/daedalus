@@ -3,8 +3,8 @@
 // list, because five columns on a phone are five slivers nobody can read. The component takes the
 // project by id and nothing else, so the project's focus panel and its phone tab can mount it as it is.
 
-import { useEffect, useMemo, useState } from "react";
-import { api } from "../api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, ApiError } from "../api";
 import { Skeleton, copyText } from "../ui/components";
 import { OverflowMenu, Sheet } from "../ui/dialogs";
 import { useEvent, useStreamUp } from "../events";
@@ -13,9 +13,10 @@ import { Icon } from "../icons";
 import { plural, t } from "../i18n";
 import { navigate, pathFor, projectHome, projectPagePath, projectSessionPath } from "../router";
 import { PageHeader, useMedia } from "../shell";
-import { invalidate, useQuery } from "../store";
+import { invalidate, useOffline, useQuery } from "../store";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { ReviewPanel } from "./ReviewPanel";
+import { ResultFlow } from "./ResultFlow";
 import { Harness, statusTone } from "../team/team";
 import { confirmAsync, errorText } from "../ui";
 import {
@@ -38,7 +39,6 @@ import {
   deliveryState,
   emptyBrief,
   hasAcceptance,
-  mergesOnAccept,
   missingBrief,
   requirementSource,
   sections,
@@ -109,15 +109,6 @@ export function ProjectBoard({ projectId, toast, selected, layout = "auto", embe
   const openTask = (task: ProjectTask) => (inAddress ? navigate(`${boardPath}?task=${encodeURIComponent(task.id)}`) : setPicked(task.id));
   const closeTask = () => (inAddress ? navigate(boardPath, { replace: true }) : setPicked(null));
 
-  async function accept(task: ProjectTask) {
-    try {
-      await api.post(`/api/board/${encodeURIComponent(task.id)}/accept`);
-      toast(t("pboard.accepted", { title: task.title }));
-      reload();
-    } catch (e) {
-      toast(errorText(e));
-    }
-  }
   function pickChip(column: Column) {
     const next = toggleFilter(filter, column);
     setFilter(next);
@@ -129,7 +120,7 @@ export function ProjectBoard({ projectId, toast, selected, layout = "auto", embe
   const empty = data && data.tasks.length === 0 && data.needs_you.length === 0 && columnCount("done", arranged, data.counts) === 0;
   const phoneChips = data ? chips(arranged, data.counts) : [];
 
-  const card = (task: ProjectTask) => <TaskCard key={task.id} task={task} titles={titles} onOpen={() => openTask(task)} onAccept={() => accept(task)} />;
+  const card = (task: ProjectTask) => <TaskCard key={task.id} task={task} titles={titles} onOpen={() => openTask(task)} />;
   const needCard = (need: NeedsYou) => <NeedCard key={need.id} need={need} projectId={projectId} />;
   const items = (column: Column) => (column === "needs" ? arranged.needs.map(needCard) : arranged[column].map(card));
 
@@ -216,7 +207,7 @@ export function ProjectBoard({ projectId, toast, selected, layout = "auto", embe
         )}
       </div>
       {creating && data && <TaskSheet projectId={projectId} data={data} onClose={() => setCreating(false)} onDone={reload} toast={toast} />}
-      {open && data && <TaskSheet projectId={projectId} data={data} task={open} onClose={closeTask} onDone={reload} onAccept={() => accept(open)} toast={toast} />}
+      {open && data && <TaskSheet projectId={projectId} data={data} task={open} onClose={closeTask} onDone={reload} toast={toast} />}
     </>
   );
 }
@@ -280,7 +271,7 @@ function StatusText({ task, titles }: { task: ProjectTask; titles: Record<string
   return null;
 }
 
-function TaskCard({ task, titles, onOpen, onAccept }: { task: ProjectTask; titles: Record<string, { title: string; status: TaskStatus }>; onOpen: () => void; onAccept: () => void }) {
+function TaskCard({ task, titles, onOpen }: { task: ProjectTask; titles: Record<string, { title: string; status: TaskStatus }>; onOpen: () => void }) {
   const done = task.checklist.filter((c) => c.done).length;
   return (
     <div
@@ -320,9 +311,7 @@ function TaskCard({ task, titles, onOpen, onAccept }: { task: ProjectTask; title
         {task.status === "done" || task.status === "dropped" ? (
           <span className="faint" title={absTime(task.updated_at)}>{task.status === "dropped" ? t("board.col.dropped") : relTime(task.updated_at)}</span>
         ) : null}
-        {task.status === "review" && (
-          <button className="btn small primary" onClick={(e) => { e.stopPropagation(); onAccept(); }}>{mergesOnAccept(task) ? t("pboard.review.merge") : t("pboard.accept")}</button>
-        )}
+        {task.status === "review" && <span className="sub">{t("result.openReview")}</span>}
       </div>
     </div>
   );
@@ -440,7 +429,16 @@ function RequirementsSection({ requirements }: { requirements: Requirement[] }) 
 }
 
 /** Creating a task and changing one: the same sheet, because a task is its title, its brief, who does it and what it waits for. */
-function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: { projectId: string; data: BoardResponse; task?: ProjectTask; onClose: () => void; onDone: () => void; onAccept?: () => void; toast: (text: string) => void }) {
+function TaskSheet({ projectId, data, task, onClose, onDone, toast }: { projectId: string; data: BoardResponse; task?: ProjectTask; onClose: () => void; onDone: () => void; toast: (text: string) => void }) {
+  const offline = useOffline();
+  const operation = useRef<{ fingerprint: string; id: string } | null>(null);
+  const stopOperation = useRef<string | null>(null);
+  const createRevision = useRef<number | null>(null);
+  const intentId = (body: Record<string, unknown>) => {
+    const fingerprint = JSON.stringify(body);
+    if (operation.current?.fingerprint !== fingerprint) operation.current = { fingerprint, id: crypto.randomUUID() };
+    return operation.current.id;
+  };
   const [title, setTitle] = useState(task?.title ?? "");
   const [brief, setBrief] = useState<Brief>(task?.brief ?? emptyBrief());
   const [assignee, setAssignee] = useState(task?.assignee_staff_id ?? "");
@@ -453,6 +451,9 @@ function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: 
   const [resumeBefore, setResumeBefore] = useState("");
   const [resumeMore, setResumeMore] = useState(false);
   const [resumeError, setResumeError] = useState("");
+  const [stopEffectId, setStopEffectId] = useState<string | null>(null);
+  const stopEffect = useQuery<{ state: string }>(stopEffectId ? `/api/control/effects/${encodeURIComponent(stopEffectId)}` : null, { pollMs: 5000, staleMs: 0 });
+  const writeBlocked = offline || (!!task && !Number.isInteger(task.entity_revision));
 
   // Only tasks still open can be waited for; a dependency already listed stays offered so it can be removed.
   const candidates = data.tasks.filter((other) => other.id !== task?.id && ((other.status !== "done" && other.status !== "dropped") || deps.includes(other.id)));
@@ -505,10 +506,19 @@ function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: 
   }
 
   async function save() {
+    if (offline) { toast(t("result.block.unconfirmed")); return; }
     setBusy(true);
     try {
       if (!task) {
-        const made = await api.post<{ launch?: Launch }>(`${boardKey(projectId)}`, { title: title.trim(), brief, assignee_staff_id: assignee || null, depends_on: deps, priority, resume_from: resumeFrom || null });
+        if (createRevision.current === null) {
+          const revisions = await api.get<{ collection_revision: number }>(`/api/control/revisions?project=${encodeURIComponent(projectId)}`);
+          if (!Number.isInteger(revisions.collection_revision)) { toast(t("result.block.unconfirmed")); return; }
+          createRevision.current = revisions.collection_revision;
+        }
+        const body = { title: title.trim(), brief, assignee_staff_id: assignee || null, depends_on: deps, priority, resume_from: resumeFrom || null, expected_collection_revision: createRevision.current };
+        const made = await api.post<{ launch?: Launch }>(`${boardKey(projectId)}`, { ...body, client_operation_id: intentId(body) });
+        operation.current = null;
+        createRevision.current = null;
         report(made);
       } else {
         const body: Record<string, unknown> = {};
@@ -520,11 +530,15 @@ function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: 
         if (priority !== task.priority) body.priority = priority;
         if (note.trim()) body.note = note.trim();
         if (resumeFrom) body.resume_from = resumeFrom;
-        report(await api.put<{ launch?: Launch }>(`/api/board/${encodeURIComponent(task.id)}`, body));
+        if (!Number.isInteger(task.entity_revision)) { toast(t("result.block.unconfirmed")); return; }
+        body.expected_entity_revision = task.entity_revision;
+        report(await api.put<{ launch?: Launch }>(`/api/board/${encodeURIComponent(task.id)}`, { ...body, client_operation_id: intentId(body) }));
+        operation.current = null;
       }
       onDone();
       onClose();
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) { operation.current = null; createRevision.current = null; }
       toast(errorText(e));
     } finally {
       setBusy(false);
@@ -532,23 +546,30 @@ function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: 
   }
   async function move(status: TaskStatus) {
     if (!task) return;
+    if (offline || !Number.isInteger(task.entity_revision)) { toast(t("result.block.unconfirmed")); return; }
     try {
-      await api.put(`/api/board/${encodeURIComponent(task.id)}`, { status });
+      await api.put(`/api/board/${encodeURIComponent(task.id)}`, { status, expected_entity_revision: task.entity_revision, client_operation_id: crypto.randomUUID() });
       onDone();
     } catch (e) {
       toast(errorText(e));
     }
   }
-  async function remove() {
-    if (!task) return;
-    if (!(await confirmAsync(t("board.delete.title", { title: task.title }), { body: t("board.delete.body"), action: t("board.delete.action") }))) return;
+  async function stopTask() {
+    if (!task || writeBlocked || busy) return;
+    if (!(await confirmAsync(t("result.stopTaskTitle", { title: task.title }), { body: t("result.stopTaskBody"), action: t("result.stopTaskAction"), danger: true }))) return;
+    const id = stopOperation.current ?? crypto.randomUUID();
+    stopOperation.current = id;
+    setBusy(true);
     try {
-      await api.delete(`/api/board/${encodeURIComponent(task.id)}`);
+      const response = await api.post<{ effect_id: string }>(`/api/board/${encodeURIComponent(task.id)}/stop`, { expected_entity_revision: task.entity_revision, client_operation_id: id, reason: "operator_requested" });
+      stopOperation.current = null;
+      setStopEffectId(response.effect_id);
+      toast(t("result.stopTaskQueued"));
       onDone();
-      onClose();
-    } catch (e) {
-      toast(errorText(e));
-    }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) stopOperation.current = null;
+      toast(errorText(error));
+    } finally { setBusy(false); }
   }
   const toggleDep = (id: string) => setDeps(deps.includes(id) ? deps.filter((d) => d !== id) : [...deps, id]);
 
@@ -566,7 +587,7 @@ function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: 
               ...(task.assignee?.session_id ? [{ label: t("pboard.open.staff", { name: task.assignee.name }), icon: "bots" as const, onSelect: () => navigate(projectSessionPath(projectId, task.assignee!.session_id!)) }] : []),
               { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
               "-",
-              { label: t("board.delete.menu"), icon: "trash", danger: true, onSelect: remove },
+              { label: t("board.delete.menu"), icon: "trash", danger: true, disabled: true, hint: t("result.deleteUnavailable"), onSelect: () => {} },
             ]}
           />
         )
@@ -581,17 +602,19 @@ function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: 
         </div>
       )}
       {task && task.status === "review" && task.branch && (
-        <ReviewPanel taskId={task.id} toast={toast} onMerged={() => { onDone(); onClose(); }} onRejected={onDone} />
+        <ReviewPanel taskId={task.id} />
       )}
+      {task && (task.status === "review" || task.acceptance_state === "operator_approved") && <ResultFlow task={task} onAccepted={onDone} toast={toast} />}
       {task && (NEXT[task.status].length > 0 || task.status === "review") && (
         <div className="btnrow pboard-moves" role="group" aria-label={t("board.moveto")}>
-          {task.status === "review" && onAccept && !mergesOnAccept(task) && <button className="btn small primary" onClick={onAccept}><Icon name="check" size={14} /> {t("pboard.accept")}</button>}
           {NEXT[task.status].length > 0 && <span className="sub">{t("board.moveto")}</span>}
           {NEXT[task.status].map((status) => (
-            <button key={status} className="btn small" onClick={() => move(status)}>{t(`board.col.${status}`)}</button>
+            <button key={status} className="btn small" disabled={writeBlocked} onClick={() => move(status)}>{t(`board.col.${status}`)}</button>
           ))}
         </div>
       )}
+      {task?.status === "doing" && <div className="btnrow"><button type="button" className="btn small warn" disabled={writeBlocked || busy || !!stopEffectId} onClick={() => void stopTask()}>{t("result.stopTaskAction")}</button><span className="sub">{t("result.stopTaskScope")}</span></div>}
+      {stopEffectId && <div className="result-warning" role="status">{t(stopEffect.error ? "result.stopTaskUnconfirmed" : stopEffect.data?.state === "completed" ? "result.stopTaskObserved" : stopEffect.data?.state === "unknown" ? "result.stopTaskUnconfirmed" : "result.stopTaskPending")} <button type="button" className="linkbtn" onClick={() => stopEffect.refresh()}>{t("common.retry")}</button></div>}
 
       {task && hasAcceptance(task) && <AcceptanceSection task={task} />}
 
@@ -670,8 +693,9 @@ function TaskSheet({ projectId, data, task, onClose, onDone, onAccept, toast }: 
 
       <div className="sheet-foot">
         <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" disabled={busy || !title.trim() || !changed} onClick={save}>{task ? t("common.save") : t("common.create")}</button>
+        <button className="btn primary" disabled={busy || writeBlocked || !title.trim() || !changed} onClick={save}>{task ? t("common.save") : t("common.create")}</button>
       </div>
+      {writeBlocked && <div className="result-warning" role="status">{t("result.block.unconfirmed")}</div>}
     </Sheet>
   );
 }

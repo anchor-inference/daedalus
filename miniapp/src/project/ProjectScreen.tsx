@@ -12,6 +12,7 @@ import { focusView } from "./focus";
 import { BriefPage, EnableOrchestrator, FoldersPage, JournalPage, TerminalsPage, WakeupsPage } from "./pages";
 import { SetupLine } from "../main/cards";
 import { PhoneBoard, PhoneTeam, PhoneTerminals } from "./phone";
+import { AttentionPage } from "./attention";
 
 const TeamPage = lazy(retried(() => import("../team/TeamPage"), (m) => ({ default: m.TeamPage })));
 const ProjectBoard = lazy(retried(() => import("../board/ProjectBoard"), (m) => ({ default: m.ProjectBoard })));
@@ -50,6 +51,8 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
   } else if (view.kind === "staff") {
     // A command-line member, reached from its row: on a phone back leads to the team it came from.
     body = <StaffView key={view.id} projectId={projectId} staffId={view.id} wide={wide} toast={toast} onBack={() => (wide ? navigate(home) : goBack(projectPagePath(projectId, "team")))} />;
+  } else if (view.page === "attention") {
+    body = <AttentionPage projectId={projectId} back={back} toast={toast} />;
   } else if (!wide && view.page === "team") {
     body = <PhoneTeam projectId={projectId} toast={toast} />;
   } else if (!wide && view.page === "board") {

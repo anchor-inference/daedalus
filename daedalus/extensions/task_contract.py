@@ -193,6 +193,10 @@ class Contracts:
             raise ValueError(f"the card already has {REQUIREMENTS_MAX} requirements in force; merge some of them (Require(replaces=…)) before adding more")
         now = _now()
         async with self.db.transaction() as conn:
+            from daedalus.extensions.orchestrator_domain import (
+                capture_contract_change,  # Lazy: the domain imports checklist parsing from this module.
+            )
+
             cursor = await conn.execute("SELECT COALESCE(MAX(number), 0) + 1 FROM task_requirements WHERE task_id = ?", (task_id,))
             number = int((await cursor.fetchone())[0])
             requirement_id = uuid.uuid4().hex[:10]
@@ -203,12 +207,21 @@ class Contracts:
             )
             if replaces is not None:
                 await conn.execute("UPDATE task_requirements SET state = 'superseded', updated_at = ? WHERE id = ?", (now, replaces.id))
+            await capture_contract_change(conn, task_id, origin_kind="requirement", origin_ref=source)
+            await conn.execute("UPDATE board_tasks SET entity_revision = entity_revision + 1 WHERE id = ?", (task_id,))
         found = await self.find(task_id, requirement_id)
         assert found is not None
         return found
 
     async def withdraw(self, requirement: Requirement) -> None:
-        await self.db.execute("UPDATE task_requirements SET state = 'withdrawn', updated_at = ? WHERE id = ?", (_now(), requirement.id))
+        from daedalus.extensions.orchestrator_domain import (
+            capture_contract_change,  # Lazy: the domain imports checklist parsing from this module.
+        )
+
+        async with self.db.transaction() as conn:
+            await conn.execute("UPDATE task_requirements SET state = 'withdrawn', updated_at = ? WHERE id = ?", (_now(), requirement.id))
+            await capture_contract_change(conn, requirement.task_id, origin_kind="requirement", origin_ref="withdraw")
+            await conn.execute("UPDATE board_tasks SET entity_revision = entity_revision + 1 WHERE id = ?", (requirement.task_id,))
 
     async def set_evidence(self, requirement: Requirement, evidence: dict[str, Any]) -> None:
         await self.db.execute("UPDATE task_requirements SET evidence_json = ?, updated_at = ? WHERE id = ?", (json.dumps(evidence, ensure_ascii=False), _now(), requirement.id))
@@ -227,10 +240,16 @@ class Contracts:
         new round in a command-line member's session) keeps what the first one learnt: an
         acknowledgement or an opened file is not taken back by being told again."""
         await self.db.execute(
-            "INSERT INTO requirement_deliveries(requirement_id, staff_session_id, staff_id, via, message_id, path, delivered_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO requirement_deliveries(requirement_id, staff_session_id, staff_id, via, message_id, path, delivered_at, task_id, contract_revision)"
+            " SELECT ?, ?, ?, ?, ?, ?, ?, t.id, t.contract_revision FROM board_tasks t WHERE t.id = ?"
             " ON CONFLICT(requirement_id, staff_session_id) DO UPDATE SET via = excluded.via, message_id = excluded.message_id,"
-            " path = CASE WHEN excluded.path != '' THEN excluded.path ELSE requirement_deliveries.path END, delivered_at = excluded.delivered_at",
-            (requirement.id, staff_session_id, staff_id, via, message_id, path, _now()),
+            " path = CASE WHEN excluded.path != '' THEN excluded.path ELSE requirement_deliveries.path END,"
+            " acknowledged_at = CASE WHEN requirement_deliveries.contract_revision = excluded.contract_revision"
+            " THEN requirement_deliveries.acknowledged_at ELSE NULL END,"
+            " opened_at = CASE WHEN requirement_deliveries.contract_revision = excluded.contract_revision"
+            " THEN requirement_deliveries.opened_at ELSE NULL END,"
+            " delivered_at = excluded.delivered_at, task_id = excluded.task_id, contract_revision = excluded.contract_revision",
+            (requirement.id, staff_session_id, staff_id, via, message_id, path, _now(), requirement.task_id),
         )
 
     async def acknowledge(self, task_id: str, staff_session_id: str, refs: list[str]) -> tuple[list[str], list[str]]:
@@ -243,19 +262,26 @@ class Contracts:
                 unknown.append(ref)
                 continue
             now = _now()
-            await self.db.execute(
-                "INSERT INTO requirement_deliveries(requirement_id, staff_session_id, staff_id, via, delivered_at, acknowledged_at)"
-                " SELECT ?, s.id, s.staff_id, 'brief', ?, ? FROM staff_sessions s WHERE s.id = ?"
-                " ON CONFLICT(requirement_id, staff_session_id) DO UPDATE SET acknowledged_at = COALESCE(requirement_deliveries.acknowledged_at, excluded.acknowledged_at)",
-                (requirement.id, now, now, staff_session_id),
+            delivered = await self.db.fetchone(
+                "SELECT 1 FROM requirement_deliveries d JOIN board_tasks t ON t.id = d.task_id"
+                " WHERE d.requirement_id = ? AND d.staff_session_id = ? AND d.contract_revision = t.contract_revision",
+                (requirement.id, staff_session_id),
             )
+            if delivered is None:
+                unknown.append(ref)
+                continue
+            await self.db.execute("UPDATE requirement_deliveries SET acknowledged_at = COALESCE(acknowledged_at, ?)"
+                                  " WHERE requirement_id = ? AND staff_session_id = ?",
+                                  (now, requirement.id, staff_session_id))
             confirmed.append(requirement.label)
         return confirmed, unknown
 
     async def opened(self, staff_session_id: str, text: str) -> list[str]:
         """Mark the input files a tool call of the session names as opened; their requirements' ids."""
         rows = await self.db.fetchall(
-            "SELECT requirement_id, path FROM requirement_deliveries WHERE staff_session_id = ? AND path != '' AND opened_at IS NULL", (staff_session_id,)
+            "SELECT d.requirement_id, d.path FROM requirement_deliveries d JOIN board_tasks t ON t.id = d.task_id"
+            " WHERE d.staff_session_id = ? AND d.path != '' AND d.opened_at IS NULL"
+            " AND d.contract_revision = t.contract_revision", (staff_session_id,)
         )
         hit = [row["requirement_id"] for row in rows if _names_file(text, row["path"])]
         for requirement_id in hit:
@@ -269,7 +295,9 @@ class Contracts:
         for requirement in await self.requirements(task_id):
             if requirement.kind != "input":
                 continue
-            rows = await self.db.fetchall("SELECT path, acknowledged_at, opened_at FROM requirement_deliveries WHERE requirement_id = ? AND staff_id = ?", (requirement.id, staff_id))
+            rows = await self.db.fetchall("SELECT d.path, d.acknowledged_at, d.opened_at FROM requirement_deliveries d"
+                                          " JOIN board_tasks t ON t.id = d.task_id WHERE d.requirement_id = ? AND d.staff_id = ?"
+                                          " AND d.contract_revision = t.contract_revision", (requirement.id, staff_id))
             done = any((row["acknowledged_at"] if cli else row["opened_at"]) for row in rows)
             if not done:
                 missing.append((requirement, next((row["path"] for row in rows if row["path"]), "")))
@@ -295,7 +323,8 @@ class Contracts:
         rows = await self.db.fetchall(
             "SELECT r.task_id, r.number, r.text, d.delivered_at, m.name AS staff_name FROM requirement_deliveries d"
             " JOIN task_requirements r ON r.id = d.requirement_id JOIN board_tasks t ON t.id = r.task_id LEFT JOIN staff m ON m.id = d.staff_id"
-            " WHERE r.project_id = ? AND r.state = 'active' AND d.via = 'message' AND d.acknowledged_at IS NULL AND t.status = 'doing'"
+            " WHERE r.project_id = ? AND r.state = 'active' AND d.via = 'message' AND d.acknowledged_at IS NULL"
+            " AND d.contract_revision = t.contract_revision AND t.status = 'doing'"
             " ORDER BY d.delivered_at",
             (project_id,),
         )
@@ -308,7 +337,14 @@ class Contracts:
         return check_items(row["checklist"]) if row is not None else []
 
     async def set_checks(self, task_id: str, items: list[dict[str, Any]]) -> None:
-        await self.db.execute("UPDATE board_tasks SET checklist = ? WHERE id = ?", (json.dumps(items, ensure_ascii=False), task_id))
+        from daedalus.extensions.orchestrator_domain import (
+            capture_contract_change,  # Lazy: the domain imports checklist parsing from this module.
+        )
+
+        async with self.db.transaction() as conn:
+            await conn.execute("UPDATE board_tasks SET checklist = ?, entity_revision = entity_revision + 1 WHERE id = ?",
+                               (json.dumps(items, ensure_ascii=False), task_id))
+            await capture_contract_change(conn, task_id, origin_kind="checklist")
 
     async def acceptance(self, task_id: str) -> str:
         row = await self.db.fetchone("SELECT acceptance_state FROM board_tasks WHERE id = ?", (task_id,))

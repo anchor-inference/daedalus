@@ -32,6 +32,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.notifications import Draft
+from daedalus.extensions.orchestrator_domain import capture_contract_change
 from daedalus.extensions.task_contract import Contracts
 
 if TYPE_CHECKING:
@@ -116,14 +117,29 @@ class Board:
                 raise ValueError("only the operator or the project's orchestrator assigns tasks")
             await self._assignee(project_id, assignee_staff_id)
         status = "blocked" if await self._has_open_deps(deps) else "todo"
-        await self.app.db.execute(
+        async with self.app.db.transaction() as conn:
+            await conn.execute(
             "INSERT INTO board_tasks(id, title, status, priority, acceptance, checklist, depends_on, session_id, origin_session_id, notes, created_at, updated_at, project_id, assignee_staff_id, brief_json)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 task_id, title[:200], status, max(1, min(int(priority), 5)), acceptance[:2000], json.dumps([{"text": c[:200], "done": False} for c in (checklist or [])]),
                 json.dumps(deps), session_id, session_id, notes[:4000], _now(), _now(), project_id, assignee_staff_id or None, json.dumps(self._merge_brief({}, brief)),
             ),
-        )
+            )
+            await conn.execute("INSERT INTO task_contract_versions(task_id,contract_revision,origin_kind,origin_ref,"
+                               " snapshot_json,created_at) VALUES (?,?,?,?,?,?)",
+                               (task_id, 1, actor.kind, session_id or "",
+                                json.dumps({"requirements": [], "checklist": [
+                                    {"id": f"C{index}", "text": text[:200]} for index, text in enumerate(checklist or [], 1)],
+                                    "acceptance": acceptance[:2000], "depends_on": deps,
+                                    "brief": self._merge_brief({}, brief)},
+                                    ensure_ascii=False), _now()))
+            await conn.execute("INSERT INTO workflow_steps(id,task_id,step_kind,state,contract_revision)"
+                               " VALUES (?,?, 'work','pending',1)", (f"task:{task_id}:work", task_id))
+            for dependency in deps:
+                await conn.execute("INSERT INTO task_dependency_edges(id,successor_task_id,predecessor_task_id,kind,"
+                                   " resolution_state,created_at) VALUES (?,?,?,'required','awaiting_result',?)",
+                                   (uuid.uuid4().hex, task_id, dependency, _now()))
         await self.export_plan(session_id)
         task = await self.get(task_id)
         await self._publish("task.created", task, actor, to=status)
@@ -369,15 +385,25 @@ class Board:
             # New dependencies decide afresh whether a waiting task is ready.
             new_status = "blocked" if await self._has_open_deps(deps) else "todo"
         assignee = task.get("assignee_staff_id") if assignee_staff_id is None else (assignee_staff_id or None)
-        await self.app.db.execute(
-            "UPDATE board_tasks SET status = ?, notes = ?, checklist = ?, session_id = ?, run_id = ?,"
-            " title = COALESCE(?, title), acceptance = COALESCE(?, acceptance), priority = COALESCE(?, priority), updated_at = ?, heartbeat_at = ?,"
-            " assignee_staff_id = ?, brief_json = COALESCE(?, brief_json), depends_on = ? WHERE id = ?",
-            (
-                new_status, notes[-NOTES_MAX_CHARS:], json.dumps(checklist), owner, owner_run, title, acceptance, priority, _now(), _now(),
-                assignee, json.dumps(new_brief) if new_brief is not None else None, json.dumps(deps), task_id,
-            ),
-        )
+        async with self.app.db.transaction() as conn:
+            await conn.execute(
+                "UPDATE board_tasks SET status = ?, notes = ?, checklist = ?, session_id = ?, run_id = ?,"
+                " title = COALESCE(?, title), acceptance = COALESCE(?, acceptance), priority = COALESCE(?, priority), updated_at = ?, heartbeat_at = ?,"
+                " assignee_staff_id = ?, brief_json = COALESCE(?, brief_json), depends_on = ?,"
+                " entity_revision = entity_revision + 1 WHERE id = ?",
+                (
+                    new_status, notes[-NOTES_MAX_CHARS:], json.dumps(checklist), owner, owner_run, title, acceptance, priority, _now(), _now(),
+                    assignee, json.dumps(new_brief) if new_brief is not None else None, json.dumps(deps), task_id,
+                ),
+            )
+            await capture_contract_change(conn, task_id, origin_kind=who.kind, origin_ref=actor or "")
+            if depends_on is not None and deps != task["depends_on"]:
+                await conn.execute("UPDATE task_dependency_edges SET kind = 'cancelled', resolution_state = 'cancelled'"
+                                   " WHERE successor_task_id = ? AND resolution_state != 'cancelled'", (task_id,))
+                for dependency in deps:
+                    await conn.execute("INSERT INTO task_dependency_edges(id,successor_task_id,predecessor_task_id,kind,"
+                                       " resolution_state,created_at) VALUES (?,?,?,'required','awaiting_result',?)",
+                                       (uuid.uuid4().hex, task_id, dependency, _now()))
         if moving and who.kind == "operator" and task["status"] in ("review", "done") and new_status in ("todo", "doing") and task.get("project_id"):
             # The operator taking a card back out of review is their verdict on the result.
             await self.app.db.execute("UPDATE board_tasks SET acceptance_state = 'returned' WHERE id = ?", (task_id,))
@@ -412,29 +438,8 @@ class Board:
         return False
 
     async def accept(self, task_id: str, *, by: str = "operator") -> dict[str, Any]:
-        """The operator accepts a task in review: it is done.
-
-        A task with a staff branch that is not merged yet is merged: accepting work that is not in the
-        folder would call finished what is not there, so on a branch task Accept *is* Merge, with its
-        preconditions and its refusals. Without the staff extension there is nothing to merge with,
-        and the task is refused rather than closed.
-        """
-        task = await self.get(task_id)
-        if task["status"] != "review":
-            raise ValueError(f"only a task in review can be accepted; this one is {task['status']}")
-        if task.get("branch") and task.get("merge_state") != "merged":
-            team = self.app.extensions.get("staff")
-            review = getattr(team, "review", None)
-            if review is None:
-                raise ValueError(f"task {task_id} has unmerged work on branch {task['branch']}; it is merged before it is accepted")
-            return await review.merge(task_id, by=by)  # type: ignore[no-any-return]
-        # Accepting is the verdict on every check of the card: its items are ticked with it, or a card
-        # whose checks the orchestrator left to the operator could never be accepted at all.
-        done = await self.update(task_id, status="done", note=f"accepted by the {by}", check=list(range(len(task["checklist"]))))
-        await self.set_acceptance(task_id, "operator_approved" if by == "operator" else "accepted")
-        done = await self.get(task_id)
-        await self._publish("task.accepted", done, OPERATOR if by == "operator" else Actor(by))
-        return done
+        """Refuse the old one-tap operation; acceptance requires an exact reviewed result receipt."""
+        raise ValueError("acceptance requires a result, verdict, and current contract; use the exact-result accept command")
 
     async def set_acceptance(self, task_id: str, state: str) -> None:
         """How far a card's result is accepted (see :mod:`daedalus.extensions.task_contract`)."""

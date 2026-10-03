@@ -45,6 +45,8 @@ EXTENSIONS = (
     "daedalus.extensions.harness",
     "daedalus.extensions.browser",
     "daedalus.extensions.watches",
+    "daedalus.extensions.plugins",
+    "daedalus.extensions.skill_quality",
     "daedalus.extensions.launcher_updates",
     "daedalus.extensions.api",
 )

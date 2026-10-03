@@ -3,7 +3,7 @@
 What is checked is what the operator relies on: on a wide window the columns stand side by side —
 Needs you, In progress, Review, Queue, and Done folded; on a phone they are chips over one list, and a
 chip narrows the list to its column. A request waiting on the operator can be answered from its card;
-a task in review is accepted with one tap; a new task carries its four-part brief, its assignee and
+a task in review requires a current result and verdict before acceptance; a new task carries its four-part brief, its assignee and
 what it waits for; an edit sends only what changed. And the page fits: nothing scrolls sideways at 390 px.
 """
 
@@ -130,13 +130,23 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     cols.locator(".pboard-col.done .pboard-fold").click()
     expect(cols.locator(".pboard-col.done .pcard", has_text="Old price list")).to_be_visible()
 
-    # Accept from the review card; on a staff branch, Accept is Merge.
+    # A branch is inspectable, while a missing exact result never becomes an Accept shortcut.
     review = cols.locator(".pboard-col.review .pcard", has_text="Notify endpoint")
-    review.get_by_role("button", name=words["merge"]).click()
-    expect(page.locator(".toast")).to_contain_text(words["accepted"])
-    assert stub.accepted == ["t-endpoint"], stub.accepted
-    expect(cols.locator(".pboard-col.review .pcard")).to_have_count(0)
-    expect(cols.locator(".pboard-col.done .pcard", has_text="Notify endpoint")).to_be_visible()
+    review.click()
+    sheet = page.locator(".sheet.pboard-sheet")
+    expect(sheet.locator(".review-panel")).to_be_visible()
+    expect(sheet.locator(".result-flow button", has_text="Accept" if lang == "en" else "Принять")).to_be_disabled()
+    assert not stub.accepted
+    page.keyboard.press("Escape")
+
+    cols.locator(".pboard-col.doing .pcard", has_text="Checkout").click()
+    sheet = page.locator(".sheet.pboard-sheet")
+    sheet.get_by_role("button", name="Stop this task" if lang == "en" else "Остановить задачу").click()
+    page.locator(".sheet-backdrop.confirm .dialog button").last.click()
+    expect(page.locator(".toast")).to_contain_text("Stop requested" if lang == "en" else "Остановка запрошена")
+    assert stub.stops and stub.stops[-1][0] == "t-checkout" and stub.stops[-1][1]["client_operation_id"], stub.stops
+    expect(cols.locator(".pboard-col.doing .pcard", has_text="Checkout")).to_be_visible()
+    page.keyboard.press("Escape")
 
     # A new task with its brief, an assignee and what it waits for.
     page.get_by_role("button", name=words["new"]).first.click()
@@ -155,7 +165,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     sheet.locator(".sheet-foot").get_by_role("button", name=words["create"]).click()
     expect(sheet).to_have_count(0)
     made = stub.created[-1]
-    assert made == {
+    assert {key: value for key, value in made.items() if key not in ("expected_collection_revision", "client_operation_id")} == {
         "title": "Delivery zones",
         "brief": {"objective": "Customers see whether we deliver to them", "deliverable": "A zones page and a check at checkout", "boundaries": "Only the site folder", "done_when": "An address outside the zones is refused politely"},
         "assignee_staff_id": "st-lev",
@@ -163,6 +173,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
         "priority": 2,
         "resume_from": None,
     }, made
+    assert made["expected_collection_revision"] == 5 and made["client_operation_id"], made
     expect(page.locator(".toast")).to_contain_text(words["queued"])
     expect(cols.locator(".pboard-col.queue .pcard", has_text="Delivery zones")).to_be_visible()
 
@@ -173,7 +184,8 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     sheet.locator("#ptask-assignee").select_option("st-max")
     sheet.locator(".sheet-foot").get_by_role("button", name=words["save"]).click()
     expect(sheet).to_have_count(0)
-    assert stub.updated[-1] == ("t-photos", {"assignee_staff_id": "st-max"}), stub.updated[-1]
+    edited_id, edited = stub.updated[-1]
+    assert edited_id == "t-photos" and edited["assignee_staff_id"] == "st-max" and edited["expected_entity_revision"] == 1 and edited["client_operation_id"], stub.updated[-1]
     expect(page.locator(".toast")).to_contain_text(words["started"])
     fits(page, f"{lang} desktop")
 
@@ -208,16 +220,15 @@ def phone(page: Page, lang: str, unhandled: Unhandled) -> None:
     page.locator(".pboard-chips .chip", has_text=words["review"]).click()
     expect(sections).to_have_count(1)
     card = sections.first.locator(".pcard", has_text="Notify endpoint")
-    button = card.get_by_role("button", name=words["merge"])
-    box = button.bounding_box()
-    assert box is not None and box["height"] >= 28, box
-    button.click()
-    expect(page.locator(".toast")).to_contain_text(words["accepted"])
-    assert stub.accepted == ["t-endpoint"], stub.accepted
+    card.click()
+    sheet = page.locator(".sheet.pboard-sheet")
+    expect(sheet.locator(".result-flow button", has_text="Accept" if lang == "en" else "Принять")).to_be_disabled()
+    assert not stub.accepted
+    page.keyboard.press("Escape")
 
     page.locator(".pboard-chips .chip", has_text=words["done"]).click()
     expect(page.locator(".pboard-list .pcard", has_text="Old price list")).to_be_visible()
-    expect(page.locator(".pboard-list .pcard", has_text="Notify endpoint")).to_be_visible()
+    expect(page.locator(".pboard-list .pcard", has_text="Notify endpoint")).to_have_count(0)
 
     # The task sheet on a phone: every brief field reachable, nothing sideways.
     page.locator(".pboard-list .pcard", has_text="Old price list").click()

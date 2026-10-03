@@ -6,16 +6,21 @@ claim that a static example proves its behavior; the operator's activation is re
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
-import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from daedalus.extensions.effects import EffectOutcome, EffectResolution
 from daedalus.host.skills import DirectorySkillStore, parse_skill_markdown
 from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
+from daedalus.stores.outbox import Claim, OutboxStore
+
+if TYPE_CHECKING:
+    from daedalus.app import Application
 
 SKILL_ID = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 
@@ -46,21 +51,11 @@ def assess(skill_id: str, markdown: str, dependencies: list[dict[str, str]]) -> 
 
 
 class SkillQuality:
-    def __init__(self, db: Database, directory: DirectorySkillStore) -> None:
+    def __init__(self, db: Database, directory: DirectorySkillStore, dispatcher: Any = None) -> None:
         self.db = db
         self.directory = directory
-
-    async def submit(self, skill_id: str, version: str, markdown: str, dependencies: list[dict[str, str]]) -> dict[str, Any]:
-        check = assess(skill_id, markdown, dependencies)
-        if not check["valid"] or not re.fullmatch(r"[0-9][a-z0-9_.-]{0,63}", version):
-            raise SkillRefused("; ".join(check["errors"]) or "invalid version")
-        manifest = {"id": skill_id, "version": version, "digest": check["digest"], "markdown": markdown, "dependencies": dependencies}
-        await self.db.execute(
-            "INSERT INTO skill_manifests(id, version, digest, manifest, status, created_at) "
-            "VALUES (?, ?, ?, ?, 'candidate', ?)",
-            (skill_id, version, check["digest"], json.dumps(manifest, sort_keys=True), datetime.now(UTC).isoformat()),
-        )
-        return {"id": skill_id, "version": version, "status": "candidate", **check}
+        self.dispatcher = dispatcher
+        self.lifecycle = asyncio.Lock()
 
     async def submit_command(
         self, principal: Principal, skill_id: str, version: str, markdown: str,
@@ -115,10 +110,9 @@ class SkillQuality:
                 "UPDATE skill_manifests SET status = 'staged' WHERE id = ? AND version = ?",
                 (skill_id, version),
             )
-            await conn.execute(
-                "INSERT INTO effect_outbox(id, receipt_id, kind, payload_json, created_at) "
-                "VALUES (?, ?, 'skill.publish', ?, ?)",
-                (uuid.uuid4().hex, mutation.receipt_id, json.dumps({"id": skill_id, "version": version}), datetime.now(UTC).isoformat()),
+            await OutboxStore.enqueue(
+                conn, mutation, principal, kind="skill.publish", operation="skill.activate",
+                payload={"id": skill_id, "version": version}, effects=("skill.publish",),
             )
             return {"id": skill_id, "version": version, "status": "staged", "digest": expected_digest}
 
@@ -128,14 +122,15 @@ class SkillQuality:
             {"id": skill_id, "version": version, "expected_digest": expected_digest}, effect,
             effects=("skill.publish",),
         )
-        await self.reconcile()
+        if self.dispatcher is not None:
+            self.dispatcher.notify()
         return response
 
-    async def reconcile(self) -> None:
+    async def load_active(self) -> None:
         completed = await self.db.fetchall(
             "SELECT s.id, s.digest, s.manifest FROM skill_manifests s "
-            "JOIN effect_outbox o ON s.id = json_extract(o.payload_json, '$.id') "
-            "AND s.version = json_extract(o.payload_json, '$.version') "
+            "JOIN effect_outbox o ON s.id = json_extract(o.payload_json, '$.data.id') "
+            "AND s.version = json_extract(o.payload_json, '$.data.version') "
             "WHERE o.kind = 'skill.publish' AND o.state = 'completed' AND s.status = 'active'"
         )
         for row in completed:
@@ -146,82 +141,75 @@ class SkillQuality:
             if hashlib.sha256(entry.read_bytes()).hexdigest() == row["digest"]:
                 (target / ".disabled").unlink(missing_ok=True)
                 (target / ".published").touch()
-        pending = await self.db.fetchall(
-            "SELECT o.id outbox_id, s.id, s.version, s.digest, s.manifest "
-            "FROM effect_outbox o JOIN skill_manifests s "
-            "ON s.id = json_extract(o.payload_json, '$.id') "
-            "AND s.version = json_extract(o.payload_json, '$.version') "
-            "WHERE o.kind = 'skill.publish' AND o.state = 'pending' AND s.status = 'staged'"
-        )
-        for row in pending:
-            target = self.directory.root / row["id"]
-            manifest = json.loads(row["manifest"])
-            if hashlib.sha256(manifest["markdown"].encode()).hexdigest() != row["digest"]:
-                await self.db.execute(
-                    "UPDATE effect_outbox SET state = 'unknown', error = 'skill digest mismatch' WHERE id = ?",
-                    (row["outbox_id"],),
-                )
-                continue
-            if target.exists():
-                await self.db.execute(
-                    "UPDATE effect_outbox SET state = 'unknown', error = 'skill directory collision' WHERE id = ?",
-                    (row["outbox_id"],),
-                )
-                continue
-            try:
-                target.mkdir()
-                (target / ".disabled").touch()
-                (target / "SKILL.md").write_text(manifest["markdown"], encoding="utf-8")
-                async with self.db.transaction() as conn:
-                    await conn.execute(
-                        "UPDATE skill_manifests SET status = 'active' WHERE id = ? AND version = ? AND status = 'staged'",
-                        (row["id"], row["version"]),
-                    )
-                    await conn.execute(
-                        "UPDATE effect_outbox SET state = 'completed', completed_at = ? WHERE id = ? AND state = 'pending'",
-                        (datetime.now(UTC).isoformat(), row["outbox_id"]),
-                    )
-                (target / ".disabled").unlink()
-                (target / ".published").touch()
-            except BaseException:
-                await self.db.execute(
-                    "UPDATE effect_outbox SET state = 'unknown', error = 'publication outcome requires review' WHERE id = ?",
-                    (row["outbox_id"],),
-                )
-                continue
 
-    async def activate(self, skill_id: str, version: str, expected_digest: str) -> dict[str, Any]:
+    async def run(self, claim: Claim, check: Any) -> EffectOutcome:
+        skill_id, version = claim.payload["id"], claim.payload["version"]
         row = await self.db.fetchone(
-            "SELECT digest, manifest, status FROM skill_manifests WHERE id = ? AND version = ?",
-            (skill_id, version),
+            "SELECT digest,manifest,status FROM skill_manifests WHERE id = ? AND version = ?", (skill_id, version)
         )
-        if row is None or row["status"] != "candidate" or row["digest"] != expected_digest:
-            raise SkillRefused("candidate or digest changed")
+        if row is None or row["status"] != "staged":
+            return EffectOutcome("failed", "skill is no longer staged")
         manifest = json.loads(row["manifest"])
+        if hashlib.sha256(manifest["markdown"].encode()).hexdigest() != row["digest"]:
+            return EffectOutcome("failed", "skill digest changed")
         for dependency in manifest["dependencies"]:
             pinned = await self.db.fetchone(
                 "SELECT 1 FROM skill_manifests WHERE id = ? AND version = ? AND digest = ? AND status = 'active'",
                 (dependency["id"], dependency["version"], dependency["digest"]),
             )
             if pinned is None:
-                raise SkillRefused("dependency pin is not active")
-        if hashlib.sha256(manifest["markdown"].encode()).hexdigest() != expected_digest:
-            raise SkillRefused("stored skill body changed")
+                return EffectOutcome("failed", "skill dependency pin is inactive")
         target = self.directory.root / skill_id
         if target.exists():
-            raise SkillRefused("skill directory already exists; replacing it requires a separate review")
-        target.mkdir()
-        try:
-            (target / ".disabled").touch()
-            (target / "SKILL.md").write_text(manifest["markdown"], encoding="utf-8")
-            await self.db.execute(
-                "UPDATE skill_manifests SET status = 'active' WHERE id = ? AND version = ? AND status = 'candidate'",
-                (skill_id, version),
+            return EffectOutcome("failed", "skill directory already exists")
+        await check(claim)
+        async with self.lifecycle:
+            current = await self.db.fetchone(
+                "SELECT digest,status FROM skill_manifests WHERE id = ? AND version = ?", (skill_id, version)
             )
-            (target / ".disabled").unlink()
-        except BaseException:
-            (target / "SKILL.md").unlink(missing_ok=True)
-            (target / ".disabled").unlink(missing_ok=True)
-            target.rmdir()
-            raise
-        return {"id": skill_id, "version": version, "status": "active", "digest": expected_digest}
+            if current is None or current["status"] != "staged" or current["digest"] != row["digest"]:
+                return EffectOutcome("failed", "skill lifecycle changed before publication")
+            if target.exists():
+                return EffectOutcome("failed", "skill directory already exists")
+            await check(claim)
+            try:
+                target.mkdir()
+                (target / ".disabled").touch()
+                (target / "SKILL.md").write_text(manifest["markdown"], encoding="utf-8")
+                async with self.db.transaction() as conn:
+                    cursor = await conn.execute(
+                        "UPDATE skill_manifests SET status = 'active' WHERE id = ? AND version = ? AND status = 'staged'",
+                        (skill_id, version),
+                    )
+                    if cursor.rowcount != 1:
+                        raise SkillRefused("skill lifecycle changed during publication")
+                (target / ".disabled").unlink()
+                (target / ".published").touch()
+            except Exception as exc:
+                return EffectOutcome("unknown", f"publication requires reconciliation: {type(exc).__name__}")
+            return EffectOutcome("completed")
+
+    async def reconcile(self, claim: Claim) -> EffectResolution | None:
+        skill_id, version = claim.payload["id"], claim.payload["version"]
+        row = await self.db.fetchone(
+            "SELECT digest,status FROM skill_manifests WHERE id = ? AND version = ?", (skill_id, version)
+        )
+        target = self.directory.root / skill_id
+        if row is None or (row["status"] == "staged" and not target.exists()):
+            return EffectResolution("failed", {"observed": "no_published_skill"})
+        entry = target / "SKILL.md"
+        if row["status"] == "active" and entry.is_file() and (target / ".published").exists() and not (target / ".disabled").exists() and hashlib.sha256(entry.read_bytes()).hexdigest() == row["digest"]:
+            return EffectResolution("completed", {"observed": "published_matching_digest", "digest": row["digest"]})
+        return None
+
+
+async def install(app: Application) -> list[Any]:
+    manager = app.manager
+    if manager is None:
+        raise RuntimeError("skill store is unavailable")
+    dispatcher = app.extensions["effects"]
+    service = SkillQuality(app.db, manager.skills, dispatcher)
+    await service.load_active()
+    dispatcher.register("skill.publish", service)
+    app.extensions["skill_quality"] = service
+    return []

@@ -2,7 +2,7 @@
 // actions are supplied by the parent so the card also works inside the voice page.
 
 import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, AsrStatus, ModelFallback, Question, SlashCommand } from "./api";
+import { api, ApiError, AsrStatus, ModelFallback, Question, SlashCommand } from "./api";
 import { Popover } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { fileGlyph, previewKind, canPreview } from "./preview";
@@ -11,14 +11,15 @@ import { ModelChoice, ModelSelect } from "./modelselect";
 import { ModeInfo, ModeSelect } from "./modeselect";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "./voicebar";
 import { landWords } from "./voicenote";
+import { loadDraftFiles, saveDraftFiles } from "./project/draftfiles";
 import {
   Approval,
   ComposerStatus,
-  DRAFT_DEBOUNCE_MS,
   QueuedSteer,
   answersComplete,
   questionsKey,
   clearDraft,
+  clearSendIntent,
   composerKey,
   dockKey,
   fieldHeight,
@@ -27,6 +28,7 @@ import {
   placeholderKey,
   primaryAction,
   readDraft,
+  sendIntent,
   writeDraft,
 } from "./composer";
 import { fmtInt } from "./ui/components";
@@ -96,6 +98,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const { sessionId, status, onSend, onStop, commands, onCommand, phone, toast } = props;
   const [draft, setDraftState] = useState(() => readDraft(sessionId));
   const [files, setFiles] = useState<File[]>([]);
+  const [fileReadySession, setFileReadySession] = useState<string | null>(null);
+  const [fileStorageError, setFileStorageError] = useState(false);
   const [sending, setSending] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
@@ -105,22 +109,33 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const photoInput = useRef<HTMLInputElement>(null);
   const plusButton = useRef<HTMLButtonElement>(null);
   const dock = useRef<HTMLDivElement>(null);
-  const draftTimer = useRef(0);
-  const retryId = useRef<string | null>(null);
 
   // The draft is the session's: leaving and coming back finds it, another session does not.
   useEffect(() => {
     setDraftState(readDraft(sessionId));
-    setFiles([]);
-    return () => {
-      window.clearTimeout(draftTimer.current);
-    };
+    setFileReadySession(null);
+    setFileStorageError(false);
+    let active = true;
+    void loadDraftFiles(sessionId).then((saved) => {
+      if (!active) return;
+      setFiles(saved);
+      setFileReadySession(sessionId);
+    }).catch(() => {
+      if (!active) return;
+      setFiles([]);
+      setFileStorageError(true);
+      setFileReadySession(sessionId);
+    });
+    return () => { active = false; };
   }, [sessionId]);
+  useEffect(() => {
+    if (fileReadySession !== sessionId) return;
+    void saveDraftFiles(sessionId, files).then(() => setFileStorageError(false)).catch(() => setFileStorageError(true));
+  }, [sessionId, fileReadySession, files]);
   const setDraft = useCallback(
     (next: string) => {
       setDraftState(next);
-      window.clearTimeout(draftTimer.current);
-      draftTimer.current = window.setTimeout(() => writeDraft(sessionId, next), DRAFT_DEBOUNCE_MS);
+      writeDraft(sessionId, next);
     },
     [sessionId],
   );
@@ -223,29 +238,29 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   async function send(override?: string) {
     const text = (override ?? draft).trim();
     const going = files;
-    if (sending || (!text && going.length === 0)) return;
+    if (sending || fileReadySession !== sessionId || (!text && going.length === 0)) return;
     if (text.startsWith("/") && going.length === 0 && commands.some((c) => c.name === text.slice(1).split(" ")[0].toLowerCase())) {
       await runCommand(text);
       return;
     }
     setSending(true);
-    const clientMessageId = retryId.current ?? crypto.randomUUID();
-    retryId.current = clientMessageId;
-    setDraftState("");
-    window.clearTimeout(draftTimer.current);
-    clearDraft(sessionId);
-    setFiles([]);
-    if (fileInput.current) fileInput.current.value = "";
-    // The files leave the box when sending starts, so the upload's progress takes their place: a
-    // large video took minutes with nothing on screen to say it was still going.
+    const fingerprint = JSON.stringify({ text, files: going.map((file) => [file.name, file.size, file.lastModified, file.type]), model: props.model, mode: props.mode, effort: props.reasoningEffort, place: props.place, action });
+    const clientMessageId = sendIntent(sessionId, fingerprint);
+    // Keep the complete draft until the server confirms it. A dropped reply may be an unknown
+    // outcome; the same client message id is used if the operator explicitly retries.
     if (going.length) setProgress(0);
     try {
       await onSend(text, going, clientMessageId, going.length ? setProgress : undefined);
-      retryId.current = null;
+      clearSendIntent(sessionId);
+      setDraftState("");
+      clearDraft(sessionId);
+      setFiles([]);
+      if (fileInput.current) fileInput.current.value = "";
       haptic("light");
     } catch (e) {
-      setDraft(text);
-      setFiles(going);
+      // A conflict has an authoritative answer from the host. The next deliberate send is a new
+      // attempt; an unconfirmed network failure keeps its original identity for safe retry.
+      if (e instanceof ApiError && e.status === 409) clearSendIntent(sessionId);
       toast(errorText(e));
     } finally {
       setSending(false);
@@ -281,6 +296,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   // ── keys ──
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
     const intent = composerKey(e, { enterSends: enterSends(), paletteOpen: paletteItems.length > 0 });
     if (intent === "complete") {
       e.preventDefault();
@@ -313,6 +329,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       const target = e.target as HTMLElement | null;
       const typing = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
       if (typing && target === textarea.current) return;
+      if (typing) return;
       const intent = composerKey(e, { enterSends: false, paletteOpen: false });
       if (intent === "model") {
         e.preventDefault();
@@ -456,10 +473,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           </div>
         )}
         {progress !== null && <div className="sub upload-progress" role="status">{t("upload.progress", { percent: Math.floor(progress * 100) })}</div>}
+        {fileStorageError && files.length > 0 && <div className="sub upload-progress" role="status">{t("composer.attachments.unsaved")}</div>}
+        {fileReadySession !== sessionId && <div className="sub upload-progress" role="status">{t("composer.attachments.restoring")}</div>}
         {files.length > 0 && !voiceBar && (
           <div className="attachments" aria-label={t("session.attachments")}>
             {files.map((f, i) => (
-              <AttachmentCard key={`${f.name}-${f.size}-${f.lastModified}-${i}`} file={f} onOpen={() => props.onPreviewFile?.(f)} onRemove={() => setFiles((p) => p.filter((_, j) => j !== i))} />
+              <AttachmentCard key={`${f.name}-${f.size}-${f.lastModified}-${i}`} file={f} onOpen={() => props.onPreviewFile?.(f)} onRemove={() => { if (!sending) setFiles((p) => p.filter((_, j) => j !== i)); }} />
             ))}
           </div>
         )}
@@ -467,6 +486,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           hidden={voiceBar}
           ref={textarea}
           value={draft}
+          disabled={sending || fileReadySession !== sessionId}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : t(placeholderKey(status, asking))}
           rows={1}
@@ -477,7 +497,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         <div className="composer-row" hidden={voiceBar}>
           <input ref={fileInput} type="file" multiple hidden onChange={(e) => { addFiles(e.target.files ?? []); e.target.value = ""; }} />
           <input ref={photoInput} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { addFiles(e.target.files ?? []); e.target.value = ""; }} />
-          <button ref={plusButton} type="button" className={`iconbtn flat plus ${plusOpen ? "on" : ""}`} onClick={() => setPlusOpen((o) => !o)} aria-label={t("composer.plus")} title={t("composer.plus")} aria-haspopup="menu" aria-expanded={plusOpen}>
+          <button ref={plusButton} type="button" className={`iconbtn flat plus ${plusOpen ? "on" : ""}`} disabled={sending || fileReadySession !== sessionId} onClick={() => setPlusOpen((o) => !o)} aria-label={t("composer.plus")} title={t("composer.plus")} aria-haspopup="menu" aria-expanded={plusOpen}>
             <Icon name="plus" />
           </button>
           {plusOpen && (
@@ -502,7 +522,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               </button>
             )}
             {props.asr?.configured && <MicButton note={note} />}
-            <button type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled} aria-label={primaryLabel} title={action === "queue" ? `${primaryLabel} — ${t("composer.queue.hint")}` : primaryLabel} data-action={action}>
+            <button type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled || fileReadySession !== sessionId} aria-label={primaryLabel} title={action === "queue" ? `${primaryLabel} — ${t("composer.queue.hint")}` : primaryLabel} data-action={action}>
               <Icon name={action === "stop" ? "stop" : action === "reply" ? "send" : "up"} />
             </button>
           </div>

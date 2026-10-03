@@ -3190,6 +3190,15 @@ button.staff-row:hover { background: var(--surface-2); }
 .focus-row-label { flex: 1; min-width: 0; }
 .focus-row-meta { flex: none; color: var(--fg-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
 .focus-sec { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: var(--ctl-h-sm); margin: 10px 0 2px; padding: 0 2px 0 8px; color: var(--fg-3); font-size: var(--fs-11); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.focus-advanced { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+.focus-advanced > summary { min-height: var(--ctl-h-sm); padding: 7px 8px; border-radius: var(--radius-sm); color: var(--fg-2); cursor: pointer; font-size: var(--fs-13); }
+.focus-advanced > summary:hover, .focus-advanced > summary:focus-visible { background: var(--surface-2); color: var(--fg); }
+.focus-attention { display: grid; align-content: start; gap: 12px; padding-bottom: 24px; }
+.focus-attention-item { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); }
+.focus-attention-item h2 { margin: 6px 0; font-size: var(--fs-16); overflow-wrap: anywhere; }
+.focus-attention-item p { margin: 6px 0 12px; color: var(--fg-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.focus-attention-kind { color: var(--fg-2); font-size: var(--fs-12); }
+.focus-attention-warning { padding: 10px 12px; border: 1px solid var(--warn); border-radius: var(--radius-sm); color: var(--fg); background: var(--surface-2); }
 .focus-sec a { color: inherit; border-radius: var(--radius-xs); }
 .focus-sec a:hover, .focus-sec a.current { color: var(--fg); }
 .focus-sec .n { color: var(--fg-3); font-weight: 500; letter-spacing: 0; }
@@ -3282,6 +3291,9 @@ button.staff-row:hover { background: var(--surface-2); }
 
 /* The goal line over the orchestrator's composer, and the list it opens upward. */
 .goal-strip { display: grid; gap: 6px; width: min(100%, var(--chat-w)); margin-inline: auto; min-width: 0; container: goal / inline-size; }
+.goal-primary { display: flex; align-items: stretch; gap: 6px; min-width: 0; }
+.goal-headline { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.goal-next-action { flex: none; }
 .goal-line { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: var(--row-h-dense); padding: 2px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-2); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; }
 .goal-line:hover { background: var(--surface-2); color: var(--fg); }
 .goal-line > svg { flex: none; color: var(--fg-3); }
@@ -3321,6 +3333,10 @@ button.staff-row:hover { background: var(--surface-2); }
   .goal-counts { gap: 8px; }
   .goal-count-long { display: none; }
   .goal-count-short { display: inline; }
+}
+@container goal (max-width: 390px) {
+  .goal-primary { flex-wrap: wrap; }
+  .goal-next-action { min-height: var(--row-h-touch); }
 }
 .event-time { color: var(--fg-3); font-size: var(--fs-11); font-family: var(--mono); }
 .event-text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
@@ -4352,3 +4368,31 @@ button.staff-row:hover { background: var(--surface-2); }
 .update-closing { display: flex; align-items: center; gap: 10px; margin: 4px 0; font-size: var(--fs-14); }
 .update-spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--info); animation: harness-spin 900ms linear infinite; }
 .update-row-actions { display: inline-flex; gap: 6px; }
+.result-flow { margin: 16px 0; padding: 16px; border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+.result-flow h3 { margin: 0 0 10px; font-size: 1rem; }
+.result-summary { font-weight: 600; overflow-wrap: anywhere; }
+.result-state { color: var(--muted); margin: 8px 0 12px; }
+.result-warning { color: var(--warn); overflow-wrap: anywhere; }
+.result-warning ul, .result-checks ul { margin: 6px 0 10px; padding-left: 20px; }
+.result-details { margin: 12px 0; }
+.result-details summary { cursor: pointer; }
+.result-details li, .result-details .mono { overflow-wrap: anywhere; }
+.result-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.result-compare section { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; overflow-wrap: anywhere; }
+.result-compare h4 { margin: 0 0 8px; }
+@media (max-width: 680px) { .result-compare { grid-template-columns: minmax(0, 1fr); } }
+.result-original { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow: auto; }
+.result-action { display: grid; gap: 8px; justify-items: start; }
+.result-return { display: grid; gap: 8px; width: min(100%, 480px); }
+.result-comment-form { display: grid; gap: 8px; width: min(100%, 480px); }
+.focus-enable-advanced { margin: 12px 0; padding: 10px 0; border-top: 1px solid var(--line); }
+.focus-enable-advanced summary { cursor: pointer; color: var(--fg-2); }
+.focus-enable-advanced[open] > summary { margin-bottom: 12px; }
+.project-extensions { margin: 14px 0; padding: 12px 0; border-top: 1px solid var(--line); }
+.project-extensions > summary { cursor: pointer; font-weight: 600; }
+.project-extension-list { display: grid; gap: 12px; margin-top: 12px; }
+.project-extension { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 12px; min-width: 0; }
+.project-extension-head { display: flex; justify-content: space-between; gap: 8px; }
+.project-extension p { margin: 8px 0; }
+.project-extension details { margin: 8px 0; }
+.project-extension .mono { overflow-wrap: anywhere; }

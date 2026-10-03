@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -39,11 +38,11 @@ class ActivationBody(BaseModel):
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
-    manager = app.manager
-    assert manager is not None
-    service = SkillQuality(app.db, manager.skills)
-    if hasattr(app, "background"):
-        app.background.append(asyncio.create_task(service.reconcile(), name="skill-reconcile"))
+    def service() -> SkillQuality:
+        available = getattr(app, "extensions", {}).get("skill_quality")
+        if not isinstance(available, SkillQuality):
+            raise HTTPException(503, "skill subsystem is unavailable")
+        return available
 
     @api.post("/api/skills/validate")
     async def validate_skill(body: DraftBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -52,7 +51,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.post("/api/skills/candidates")
     async def submit_skill(body: SkillBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await service.submit_command(
+            return await service().submit_command(
                 Principal.operator(who), body.id, body.version, body.markdown, body.dependencies,
                 expected_collection_revision=body.expected_collection_revision,
                 client_operation_id=body.client_operation_id,
@@ -65,7 +64,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.post("/api/skills/{skill_id}/{version}/activate")
     async def activate_skill(skill_id: str, version: str, body: ActivationBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await service.activate_command(
+            return await service().activate_command(
                 Principal.operator(who), skill_id, version, body.expected_digest,
                 expected_collection_revision=body.expected_collection_revision,
                 client_operation_id=body.client_operation_id,

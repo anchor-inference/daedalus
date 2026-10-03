@@ -6,6 +6,7 @@ import {
   questionsKey,
   composerKey,
   composerContext,
+  clearSendIntent,
   dockKey,
   draftKey,
   fieldHeight,
@@ -15,6 +16,7 @@ import {
   primaryAction,
   readDraft,
   readSteers,
+  sendIntent,
   steersAfter,
   writeDraft,
 } from "./composer";
@@ -54,9 +56,14 @@ describe("the primary circle", () => {
   });
 });
 
-const key = (over: Partial<Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">>) => ({ key: "", code: "", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...over });
+const key = (over: Partial<Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "isComposing" | "keyCode">>) => ({ key: "", code: "", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...over });
 
 describe("keys in the field", () => {
+  it("never sends or answers while an input method is composing text", () => {
+    expect(composerKey(key({ key: "Enter", isComposing: true }), { enterSends: true, paletteOpen: false })).toBeNull();
+    expect(composerKey(key({ key: "Enter", keyCode: 229 }), { enterSends: true, paletteOpen: false })).toBeNull();
+    expect(dockKey(key({ key: "н", code: "KeyY", isComposing: true }), false)).toBeNull();
+  });
   it("sends on Enter where Enter sends, and inserts a line with Shift", () => {
     expect(composerKey(key({ key: "Enter" }), { enterSends: true, paletteOpen: false })).toBe("send");
     expect(composerKey(key({ key: "Enter", shiftKey: true }), { enterSends: true, paletteOpen: false })).toBe("newline");
@@ -109,6 +116,14 @@ class MemoryStorage {
 }
 
 describe("the draft", () => {
+  it("reuses the pending send identity only for the same complete intent", () => {
+    const store = new MemoryStorage();
+    const first = sendIntent("s1", 'message:[["a.txt",3,1]]', store);
+    expect(sendIntent("s1", 'message:[["a.txt",3,1]]', store)).toBe(first);
+    expect(sendIntent("s1", 'changed:[["a.txt",3,1]]', store)).not.toBe(first);
+    clearSendIntent("s1", store);
+    expect(sendIntent("s1", 'message:[["a.txt",3,1]]', store)).not.toBe(first);
+  });
   it("is kept per session and comes back", () => {
     const store = new MemoryStorage();
     writeDraft("s1", "half a thought", store);

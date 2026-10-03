@@ -45,17 +45,24 @@ class KnowledgeStore:
             return str(row["sha256"]), str(row["sha256"])
         if kind == "manifest":
             cursor = await conn.execute(
-                "SELECT artifact_key, artifact_revision, digest FROM artifact_manifests "
-                "WHERE id = ? AND project_id = ?", (source_id, project_id)
+                "SELECT m.artifact_key, m.artifact_revision, m.digest, m.task_id FROM artifact_manifests m "
+                "LEFT JOIN board_tasks t ON t.id = m.task_id "
+                "WHERE m.id = ? AND COALESCE(m.project_id, t.project_id) = ?", (source_id, project_id)
             )
             row = await cursor.fetchone()
             await cursor.close()
             if row is None:
                 raise KnowledgeConflict("artifact manifest is not available in this project")
-            cursor = await conn.execute(
-                "SELECT MAX(artifact_revision) latest FROM artifact_manifests "
-                "WHERE project_id = ? AND artifact_key = ?", (project_id, row["artifact_key"])
-            )
+            if row["task_id"]:
+                cursor = await conn.execute(
+                    "SELECT MAX(artifact_revision) latest FROM artifact_manifests "
+                    "WHERE task_id = ? AND artifact_key = ?", (row["task_id"], row["artifact_key"])
+                )
+            else:
+                cursor = await conn.execute(
+                    "SELECT MAX(artifact_revision) latest FROM artifact_manifests "
+                    "WHERE project_id = ? AND task_id IS NULL AND artifact_key = ?", (project_id, row["artifact_key"])
+                )
             newest = await cursor.fetchone()
             await cursor.close()
             return str(newest["latest"]), str(row["digest"])
@@ -260,10 +267,10 @@ class KnowledgeStore:
         async with self.db.transaction() as conn:
             if contract_refs is None:
                 tasks = await conn.execute(
-                    "SELECT id, entity_revision FROM board_tasks WHERE session_id = ? "
+                    "SELECT id, contract_revision FROM board_tasks WHERE session_id = ? "
                     "AND status NOT IN ('done', 'dropped')", (session_id,)
                 )
-                contract_refs = [f"task:{row['id']}@{row['entity_revision']}" for row in await tasks.fetchall()]
+                contract_refs = [f"task-contract:{row['id']}@{row['contract_revision']}" for row in await tasks.fetchall()]
                 await tasks.close()
                 if project_id is not None:
                     loops = await conn.execute(

@@ -523,6 +523,12 @@ class StaffWorktrees:
         except GitError:
             return (await git.run(["rev-parse", "HEAD"], cwd=folder.path)).strip()
 
+    async def commit_identity(self, folder: ProjectFolder, branch: str | None = None) -> str:
+        """Resolve a commit identity without accepting a mutable branch label as review evidence."""
+        git = self._git(folder.env)
+        ref = f"refs/heads/{branch}" if branch else "HEAD"
+        return (await git.run(["rev-parse", "--verify", f"{ref}^{{commit}}"], cwd=folder.path)).strip()
+
     async def compare(self, folder: ProjectFolder, branch: str, *, max_commits: int = 50, max_files: int = 100, max_lines: int = 8000, max_chars: int = 200_000) -> BranchComparison:
         """What merging ``branch`` into the folder's current branch would bring, and whether it would conflict.
 
@@ -572,7 +578,8 @@ class StaffWorktrees:
                 conflicts = _conflicted_names(str(exc)) if exc.returncode == 1 else None
         return BranchComparison(branch, True, current, merged, clean, commits[:max_commits], len(commits) > max_commits, files, patch[:max_chars], complete, conflicts)
 
-    async def merge(self, folder: ProjectFolder, branch: str, *, message: str = "") -> str:
+    async def merge(self, folder: ProjectFolder, branch: str, *, message: str = "",
+                    expected_head: str | None = None, expected_branch_tip: str | None = None) -> str:
         """Merge ``branch`` into the folder's current branch as a merge commit; the merge commit's id.
 
         Always ``--no-ff``, even when a fast-forward would do: the merge commit is the record that a
@@ -589,6 +596,14 @@ class StaffWorktrees:
             raise WorktreeRefused(f"{folder.path} is read-only; nothing can be merged into it")
         git = self._git(folder.env)
         async with await self._lock(git, folder.path):
+            if expected_head is not None:
+                actual_head = (await git.run(["rev-parse", "--verify", "HEAD^{commit}"], cwd=folder.path)).strip()
+                if actual_head != expected_head:
+                    raise WorktreeRefused("the folder HEAD changed after review")
+            if expected_branch_tip is not None:
+                actual_tip = (await git.run(["rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}"], cwd=folder.path)).strip()
+                if actual_tip != expected_branch_tip:
+                    raise WorktreeRefused("the staff branch changed after review")
             if await self._is_dirty(git, folder.path, untracked=False):
                 raise WorktreeRefused(f"{folder.path} has uncommitted changes; commit or stash them before merging {branch}")
             identity: dict[str, str] = {}

@@ -1062,7 +1062,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   }
 
   async function stop() {
-    if (!(await confirmDialog({ title: t("session.stop.title"), body: t("session.stop.body"), action: t("session.stop.action"), danger: true }))) return;
+    if (!(await confirmDialog({ title: t("session.stop.title"), body: t(focus ? "session.stop.projectBody" : "session.stop.body"), action: t("session.stop.action"), danger: true }))) return;
     try {
       await api.post(`/api/sessions/${id}/stop`);
       haptic("medium");

@@ -3,10 +3,11 @@
 // every decision here is tested without a browser; the components only draw what these return.
 
 import type { Project } from "../api";
+import type { ProjectTask } from "../board/board";
 import type { Queued, Staff, StaffStatus } from "../team/team";
 
 /** The pages of a project, each at /app/project/<id>/<page>. No page is the orchestrator's chat. */
-export const FOCUS_PAGES = ["team", "board", "journal", "brief", "wakeups", "folders", "terminals"] as const;
+export const FOCUS_PAGES = ["attention", "team", "board", "journal", "brief", "wakeups", "folders", "terminals"] as const;
 export type FocusPage = (typeof FOCUS_PAGES)[number];
 
 /** What the centre of focus mode shows for a route. */
@@ -176,7 +177,7 @@ export type Autonomy = (typeof AUTONOMIES)[number];
  *  app's own tabs while a project is open, and the header's back leads back to those. Terminals comes
  *  before the board because the app's own bar has them in that order; with the two swapped, a thumb
  *  that learnt "the board is the fourth tab" landed on the wrong one on the way in and out. */
-export const PHONE_TABS = ["orchestrator", "team", "terminals", "board"] as const;
+export const PHONE_TABS = ["orchestrator", "attention", "journal"] as const;
 export type PhoneTab = (typeof PHONE_TABS)[number];
 
 /**
@@ -196,6 +197,11 @@ export function phoneTab(view: FocusView): { tab: PhoneTab | null; bar: boolean 
 export function oldestOpen<T extends { routed_to: string; resolved_at: string | null; created_at: string }>(asks: T[]): { ask: T | null; waiting: number } {
   const open = asks.filter((a) => a.routed_to === "operator" && !a.resolved_at).sort((a, b) => a.created_at.localeCompare(b.created_at));
   return { ask: open[0] ?? null, waiting: open.length };
+}
+
+/** A hand-in belongs to the coordinator's review; it is not an operator decision yet. */
+export function operatorReviewReady(task: Pick<ProjectTask, "status" | "acceptance_state">): boolean {
+  return task.status === "review" && task.acceptance_state === "accepted";
 }
 
 /** "2 working · 1 in review" under the project's name: members at work, and tasks waiting for a look. */

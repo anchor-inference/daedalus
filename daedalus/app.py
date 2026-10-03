@@ -26,6 +26,7 @@ from daedalus.search.service import ConversationSearch
 from daedalus.speech.service import LocalSpeech
 from daedalus.speech.tts_service import LocalTts
 from daedalus.stores.database import Database
+from daedalus.stores.executions import ExecutionStore
 from daedalus.transport.telegram.front import TelegramFront
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ class Application:
         self.settings = settings
         self.config = RuntimeConfig.load(settings.config_path)
         self.db = Database(settings.db_path, workspaces_dir=settings.workspaces_dir)
+        self.executions = ExecutionStore(self.db)
         self.manager: SessionManager | None = None
         self.front: TelegramFront | None = None
         self.background: list[asyncio.Task[None]] = []
@@ -101,8 +103,15 @@ class Application:
                 self.tts.forget()
 
     async def start(self) -> None:
+        self.executions.acquire()
         self.guard.on_boot()
-        await self.db.open()
+        try:
+            await self.db.open()
+            await self.executions.boot()
+        except BaseException:
+            self.executions.release()
+            await self.db.close()
+            raise
         self.manager = SessionManager(self.settings, self.config, db=self.db)
         await self.manager.start()
         self.search.manager = self.manager
@@ -286,6 +295,7 @@ class Application:
             if self.front is not None:
                 await self.front.stop()
             await self.db.close()
+            self.executions.release()
         finally:
             self.guard.on_clean_shutdown()  # a deliberate stop is clean even when a step above failed
 

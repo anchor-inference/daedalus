@@ -44,7 +44,7 @@ export function placeholderKey(status: ComposerStatus, asking: boolean): string 
 
 export type KeyIntent = "send" | "newline" | "complete" | "escape" | "model" | "stop" | null;
 
-type KeyLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;
+type KeyLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey"> & { isComposing?: boolean; keyCode?: number };
 
 /**
  * What a key press in the field asks for. `Enter` and the letter shortcuts use physical position (`code`), with an Enter
@@ -52,6 +52,7 @@ type KeyLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "alt
  * ⌘M opens the model list whichever alphabet the keyboard is on.
  */
 export function composerKey(e: KeyLike, opts: { enterSends: boolean; paletteOpen: boolean }): KeyIntent {
+  if (e.isComposing || e.key === "Process" || e.keyCode === 229) return null;
   const mod = e.metaKey || e.ctrlKey;
   if (mod && !e.altKey && e.shiftKey && e.code === "KeyS") return "stop";
   if (mod && !e.altKey && !e.shiftKey && e.code === "KeyM") return "model";
@@ -65,6 +66,7 @@ export function composerKey(e: KeyLike, opts: { enterSends: boolean; paletteOpen
 
 /** A key on the approval dock: `y` allows, `n` refuses — plain letters, so a text field never sees them. */
 export function dockKey(e: KeyLike, typing: boolean): "approve" | "deny" | null {
+  if (e.isComposing || e.key === "Process" || e.keyCode === 229) return null;
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return null;
   if (e.code === "KeyY") return "approve";
   if (e.code === "KeyN") return "deny";
@@ -123,6 +125,27 @@ export function writeDraft(sessionId: string, text: string, storage: StorageLike
 
 export function clearDraft(sessionId: string, storage: StorageLike | null = safeStorage()): void {
   writeDraft(sessionId, "", storage);
+}
+
+type SendIntent = { fingerprint: string; id: string };
+const SEND_PREFIX = "daedalus.pending-send.";
+
+/** A lost response must reuse the same message identity after a reload, but an edited draft is new work. */
+export function sendIntent(sessionId: string, fingerprint: string, storage: StorageLike | null = safeStorage()): string {
+  const key = `${SEND_PREFIX}${sessionId}`;
+  try {
+    const previous = JSON.parse(storage?.getItem(key) ?? "null") as SendIntent | null;
+    if (previous?.fingerprint === fingerprint && typeof previous.id === "string") return previous.id;
+  } catch {
+    /* unavailable storage or a partial old write gets a fresh identity */
+  }
+  const id = crypto.randomUUID();
+  try { storage?.setItem(key, JSON.stringify({ fingerprint, id })); } catch { /* the in-memory retry still works */ }
+  return id;
+}
+
+export function clearSendIntent(sessionId: string, storage: StorageLike | null = safeStorage()): void {
+  try { storage?.removeItem(`${SEND_PREFIX}${sessionId}`); } catch { /* storage can be unavailable */ }
 }
 
 /** The last custom model the operator typed, so the field opens with it. */

@@ -39,7 +39,7 @@ WORDS = {
         "wakeups": "Wake-ups", "journal": "Journal", "folders": "Folders", "machine": "the machine's terminal limit is reached", "placeholder": "Write to the orchestrator…",
         "lev": "Write to Lev…", "folder": "Folder added", "created": "Task created", "assigned": "Assigned", "watch": "Watch set", "asked": "Asked you",
         "questions": "Questions", "events": "3 events since 09:51", "onlyyou": "edited by you only", "byorch": "changed by the orchestrator", "older": "Older entries",
-        "note": "Add a note", "enable": "Switch the orchestrator on", "on": "Switch on", "cost": "fifteen times", "pause": "Pause after the turn", "accepted": "accepted",
+        "note": "Add a note", "enable": "Switch the orchestrator on", "on": "Switch on", "cost": "total is not known", "pause": "Pause after the turn", "accepted": "accepted",
         "staff": "6 staff", "needs": "1 needs you", "autonomy": "autonomy: normal",
         "spent": "$2.05 today", "levspend": "$1.20 today · 412k tokens", "iraspend": "subscription · window 23 %", "totals": "Today $2.05 · 7 days $10.90 · All $33.80",
         "orchspend": "Orchestrator: $0.85 today · 96k tokens",
@@ -49,7 +49,7 @@ WORDS = {
         "wakeups": "Будильники", "journal": "Журнал", "folders": "Папки", "machine": "достигнут предел терминалов машины", "placeholder": "Напишите оркестратору…",
         "lev": "Написать сотруднику Lev…", "folder": "Папка добавлена", "created": "Задача создана", "assigned": "Назначено", "watch": "Наблюдение поставлено", "asked": "Спросил вас",
         "questions": "Вопросы", "events": "3 события с 09:51", "onlyyou": "правите только вы", "byorch": "изменено оркестратором", "older": "Более ранние записи",
-        "note": "Добавить заметку", "enable": "Включить оркестратор", "on": "Включить", "cost": "в пятнадцать раз", "pause": "После хода — пауза", "accepted": "принято",
+        "note": "Добавить заметку", "enable": "Включить оркестратор", "on": "Включить", "cost": "итоговая сумма заранее неизвестна", "pause": "После хода — пауза", "accepted": "принято",
         "staff": "6 сотрудников", "needs": "1 ждёт вас", "autonomy": "самостоятельность: обычная",
         "spent": "$2.05 сегодня", "levspend": "$1.20 сегодня · токенов: 412k", "iraspend": "подписка · окно 23 %", "totals": "Сегодня $2.05 · 7 дней $10.90 · Всего $33.80",
         "orchspend": "Оркестратор: $0.85 сегодня · токенов: 96k",
@@ -104,6 +104,8 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(side.locator(".focus-project-name")).to_have_text("Bakery 2.0")
     expect(side.locator(".focus-project-meta")).to_contain_text(words["autonomy"])
     expect(side.locator(".focus-row.orchestrator")).to_have_class(re.compile(r"\bcurrent\b"))
+    expect(side.locator(".focus-row", has_text="History" if lang == "en" else "История")).to_be_visible()
+    side.locator(".focus-advanced summary").click()
     rows = side.locator(".focus-staff:not(.compact)")
     expect(rows).to_have_count(5)
     expect(side.locator(".focus-staff.compact")).to_have_count(1)
@@ -119,7 +121,7 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(side.locator(".focus-row.ended", has_text="psql · orders")).to_contain_text("0")
     # Today's spend of the whole project under its name.
     expect(side.locator(".focus-spend")).to_have_text(words["spent"])
-    for label in ("board", "brief", "wakeups", "journal", "folders"):
+    for label in ("board", "brief", "wakeups", "folders"):
         expect(side.locator(".focus-row", has_text=words[label])).to_have_count(1)
     # One wake-up and one watch switched on; the watch that switched itself off is not counted.
     expect(side.locator(".focus-row", has_text=words["wakeups"]).locator(".focus-row-meta")).to_have_text("2")
@@ -206,7 +208,7 @@ def desktop(page: Page, lang: str, width: int) -> None:
     fits(page, f"{lang} {width} staff session")
 
     # The journal: a page of thirty, the older ones on request, and a note of the operator's own.
-    side.locator(".focus-row", has_text=words["journal"]).click()
+    side.locator(".focus-row", has_text="History" if lang == "en" else "История").click()
     page.wait_for_url(f"**/app/orchestration/project/{PID}/journal")
     expect(page.locator(".journal-entry")).to_have_count(30)
     # What the project spends, over the journal: the totals and the orchestrator's own share today.

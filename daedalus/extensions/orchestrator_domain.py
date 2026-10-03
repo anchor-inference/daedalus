@@ -83,8 +83,11 @@ def _checks(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     checks = check_items(items)
     if len(checks) > 12:
         raise ValueError("a contract can have at most 12 checks")
-    return [{"id": str(item.get("id") or f"C{index}"), "text": str(item["text"]).strip()}
-            for index, item in enumerate(checks, 1)]
+    normalized = [{"id": str(item.get("id") or f"C{index}"), "text": str(item["text"]).strip()}
+                  for index, item in enumerate(checks, 1)]
+    if len({item["id"] for item in normalized}) != len(normalized):
+        raise ValueError("acceptance check ids must be unique")
+    return normalized
 
 
 async def replace_contract(
@@ -158,8 +161,22 @@ async def capture_contract_change(conn: aiosqlite.Connection, task_id: str, *, o
     checks = check_items(task["checklist"])
     old = _json(current["snapshot_json"], {})
     old_checks = old.get("checklist", [])
-    check_snapshot = [{"id": old_checks[index].get("id", f"C{index + 1}") if index < len(old_checks) else f"C{index + 1}",
-                       "text": str(item["text"]).strip()} for index, item in enumerate(checks)]
+    old_by_text: dict[str, list[str]] = {}
+    for old_item in old_checks:
+        old_by_text.setdefault(str(old_item.get("text") or "").strip(), []).append(str(old_item["id"]))
+    check_snapshot = []
+    occupied = {str(item.get("id")) for item in old_checks}
+    for index, item in enumerate(checks, 1):
+        text = str(item["text"]).strip()
+        matching = old_by_text.get(text, [])
+        identifier = item.get("id") or (matching.pop(0) if matching else None)
+        if identifier is None:
+            identifier = f"C{index}"
+            while identifier in occupied:
+                identifier = f"C{int(identifier[1:]) + 1}"
+        occupied.add(str(identifier))
+        check_snapshot.append({"id": str(identifier), "text": text})
+    check_snapshot = _checks(check_snapshot)
     snapshot = {"requirements": [dict(row) for row in requirements], "checklist": check_snapshot,
                 "acceptance": task["acceptance"], "depends_on": _json(task["depends_on"], []),
                 "brief": _json(task["brief_json"], {})}
@@ -185,6 +202,9 @@ async def add_artifact_manifest(
         raise ValueError("an artifact needs project or task scope")
     if artifact_kind not in MANIFEST_KINDS or artifact_revision < 1 or size_bytes < 0:
         raise ValueError("invalid artifact kind, revision, or size")
+    if not artifact_key.strip() or len(artifact_key) > 500 or len(digest) != 64 or any(
+            character not in "0123456789abcdef" for character in digest):
+        raise ValueError("artifact identity needs a key and sha256 digest")
     if task_id is not None:
         task = await _one(conn, "SELECT project_id FROM board_tasks WHERE id = ?", (task_id,))
         if task is None:
@@ -265,7 +285,7 @@ async def submit_result(
         raise KeyError(task_id)
     if int(task["contract_revision"]) != contract_revision:
         raise DomainConflict("the result refers to an older contract")
-    if attempt_id is not None and task["current_attempt_id"] != attempt_id:
+    if task["current_attempt_id"] != attempt_id:
         raise DomainConflict("the attempt is no longer current")
     if original_text is not None:
         original = original_text.encode("utf-8")
@@ -322,16 +342,30 @@ async def record_verdict(
     self_review_waiver_receipt_id: str | None = None,
 ) -> dict[str, Any]:
     """Append judgement without mutating the original result or another verdict."""
-    result = await _one(conn, "SELECT task_id, contract_revision, outcome, actor_id FROM result_receipts WHERE id = ?", (result_id,))
+    result = await _one(conn, "SELECT task_id, contract_revision, attempt_id, outcome, actor_id FROM result_receipts WHERE id = ?", (result_id,))
     if result is None:
         raise KeyError(result_id)
-    task = await _one(conn, "SELECT contract_revision FROM board_tasks WHERE id = ?", (result["task_id"],))
+    task = await _one(conn, "SELECT contract_revision,current_attempt_id FROM board_tasks WHERE id = ?", (result["task_id"],))
     if task is None or int(task["contract_revision"]) != int(result["contract_revision"]):
         raise DomainConflict("review target is stale after a contract change")
+    if result["attempt_id"] != task["current_attempt_id"]:
+        raise DomainConflict("review target came from a superseded attempt")
+    latest = await _one(conn, "SELECT id FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
+                        " AND attempt_id IS ? ORDER BY created_at DESC,id DESC LIMIT 1",
+                        (result["task_id"], result["contract_revision"], result["attempt_id"]))
+    if latest is None or latest["id"] != result_id:
+        raise DomainConflict("a newer result superseded the reviewed result")
     if verification not in ("verified", "failed", "stale"):
         raise ValueError("invalid verification state")
-    if reviewer_actor_id == result["actor_id"] and self_review_waiver_receipt_id is None:
-        raise DomainConflict("the worker cannot independently review its own result")
+    if reviewer_actor_id == result["actor_id"]:
+        waiver = await _one(conn, "SELECT operation_kind, actor_id, response_json FROM operation_receipts WHERE id = ?",
+                            (self_review_waiver_receipt_id,)) if self_review_waiver_receipt_id else None
+        binding = _json(waiver["response_json"], {}) if waiver is not None else {}
+        if (waiver is None or waiver["operation_kind"] != "self_review.waive" or
+                waiver["actor_id"] == reviewer_actor_id or binding.get("task_id") != result["task_id"] or
+                binding.get("result_id") != result_id or binding.get("contract_revision") != result["contract_revision"] or
+                binding.get("approved") is not True):
+            raise DomainConflict("the worker cannot independently review its own result")
     if accepted and (verification != "verified" or result["outcome"] != "complete"):
         raise DomainConflict("only a verified complete result can be accepted")
     evidence = []
@@ -370,6 +404,9 @@ async def record_verdict(
          int(accepted), head, base, environment_digest, _canonical(evidence), reason,
          self_review_waiver_receipt_id, _now()),
     )
+    if accepted:
+        await conn.execute("UPDATE board_tasks SET acceptance_state = 'accepted' WHERE id = ? AND status = 'review'",
+                           (result["task_id"],))
     return {"verdict_id": verdict_id, "result_id": result_id, "verification": verification,
             "accepted": accepted, "contract_revision": int(result["contract_revision"])}
 
@@ -437,7 +474,7 @@ async def accept_result(
     current_merge_sha: str | None = None,
 ) -> dict[str, Any]:
     """Bind acceptance to the exact immutable result and the current review evidence."""
-    task = await _one(conn, "SELECT status, contract_revision, acceptance_state, branch, merge_state, checklist"
+    task = await _one(conn, "SELECT status, contract_revision, acceptance_state, branch, merge_state, checklist, current_attempt_id"
                       " FROM board_tasks WHERE id = ?", (task_id,))
     if task is None:
         raise KeyError(task_id)
@@ -445,15 +482,22 @@ async def accept_result(
         raise DomainConflict("the task is not reviewing this contract revision")
     if task["branch"] and task["merge_state"] != "merged":
         raise DomainConflict("branch work needs its separate reviewed operator merge first")
-    result = await _one(conn, "SELECT task_id, contract_revision, outcome FROM result_receipts WHERE id = ?", (result_id,))
+    result = await _one(conn, "SELECT task_id, contract_revision, attempt_id, outcome FROM result_receipts WHERE id = ?", (result_id,))
     if result is None or result["task_id"] != task_id or result["contract_revision"] != contract_revision or result["outcome"] != "complete":
         raise DomainConflict("the accepted result is missing, partial, or stale")
+    latest = await _one(conn, "SELECT id FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
+                        " AND attempt_id IS ? ORDER BY created_at DESC,id DESC LIMIT 1",
+                        (task_id, contract_revision, task["current_attempt_id"]))
+    if result["attempt_id"] != task["current_attempt_id"] or latest is None or latest["id"] != result_id:
+        raise DomainConflict("a newer result or attempt superseded the reviewed result")
     verdict = await _one(conn, "SELECT result_id, contract_revision, verification, accepted, head, base FROM review_verdicts WHERE id = ?",
                          (verdict_id,))
     if verdict is None or verdict["result_id"] != result_id or verdict["contract_revision"] != contract_revision:
         raise DomainConflict("the verdict belongs to another result or contract")
     if verdict["verification"] != "verified" or not verdict["accepted"]:
         raise DomainConflict("the result has no approving verified verdict")
+    if await unresolved_review_comments(conn, result_id):
+        raise DomainConflict("blocking review comments remain unresolved")
     if verdict["head"] != current_head or verdict["base"] != current_base:
         raise DomainConflict("the reviewed head or base changed")
     if task["branch"]:
@@ -757,7 +801,10 @@ async def scope_impact_preview(conn: aiosqlite.Connection, project_id: str,
                                root_task_ids: list[str]) -> dict[str, Any]:
     """Follow accepted-result dependencies from explicitly named changed work."""
     if not root_task_ids:
-        raise DomainConflict("scope change needs explicit affected roots")
+        existing = await _one(conn, "SELECT id FROM board_tasks WHERE project_id = ? LIMIT 1", (project_id,))
+        if existing is not None:
+            raise DomainConflict("scope change needs explicit affected roots")
+        return {"project_id": project_id, "affected_task_ids": [], "affected_attempts": [], "root_task_ids": []}
     roots = set(root_task_ids)
     for task_id in roots:
         task = await _one(conn, "SELECT project_id FROM board_tasks WHERE id = ?", (task_id,))
@@ -874,11 +921,13 @@ class OrchestratorDomain:
                 **_json(row["snapshot_json"], {})}
 
     async def results(self, task_id: str) -> list[dict[str, Any]]:
-        task = await self.db.fetchone("SELECT contract_revision, accepted_result_id, acceptance_state FROM board_tasks WHERE id = ?", (task_id,))
+        task = await self.db.fetchone("SELECT contract_revision, current_attempt_id, accepted_result_id, acceptance_state"
+                                      " FROM board_tasks WHERE id = ?", (task_id,))
         if task is None:
             raise KeyError(task_id)
         rows = await self.db.fetchall("SELECT * FROM result_receipts WHERE task_id = ? ORDER BY created_at DESC, id DESC", (task_id,))
-        current_result_id = next((row["id"] for row in rows if int(row["contract_revision"]) == int(task["contract_revision"])), None)
+        current_result_id = next((row["id"] for row in rows if int(row["contract_revision"]) == int(task["contract_revision"])
+                                  and row["attempt_id"] == task["current_attempt_id"]), None)
         out = []
         for row in rows:
             verdict = await self.db.fetchone("SELECT id, verification, accepted, contract_revision, head, base"

@@ -31,8 +31,6 @@ class StartBody(DefinitionBody):
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
-    workflows = BoardWorkflows(app.db)
-
     @api.post("/api/board-workflows/validate")
     async def validate_workflow(body: DefinitionBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
@@ -43,7 +41,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.post("/api/board-workflows/runs")
     async def start_workflow(body: StartBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await workflows.start(
+            return await BoardWorkflows(app.db).start(
                 Principal.operator(who), body.project_id, body.task_id,
                 body.model_dump(exclude={"project_id", "task_id", "expected_entity_revision", "client_operation_id"}),
                 expected_entity_revision=body.expected_entity_revision,

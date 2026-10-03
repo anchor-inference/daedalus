@@ -76,8 +76,11 @@ class OpenResults:
         task_id = str(event.payload.get("task_id") or "") or None
         await self.close(event.project_id, task_id=task_id, staff_id=None if task_id else event.staff_id, by="system", decision="a newer report replaced it", causes=REPORT_CAUSES)
         await self.db.execute(
-            "INSERT INTO open_loops(project_id, task_id, staff_id, cause, event_seq, summary, opened_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (event.project_id, task_id, event.staff_id, cause, event.seq, _one_line(str(event.payload.get("text") or ""), SUMMARY_CHARS), _now()),
+            "INSERT INTO open_loops(project_id, task_id, staff_id, cause, event_seq, summary, opened_at, contract_revision, attempt_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT contract_revision FROM board_tasks WHERE id = ?),"
+            " (SELECT current_attempt_id FROM board_tasks WHERE id = ?))",
+            (event.project_id, task_id, event.staff_id, cause, event.seq,
+             _one_line(str(event.payload.get("text") or ""), SUMMARY_CHARS), _now(), task_id, task_id),
         )
 
     async def _orchestrated(self, project_id: str) -> bool:
@@ -96,8 +99,9 @@ class OpenResults:
         )
         for row in rows:
             await self.db.execute(
-                "INSERT INTO open_loops(project_id, task_id, cause, summary, opened_at) VALUES (?, ?, ?, ?, ?)",
-                (project_id, row["id"], UNOWNED, _one_line(row["title"], SUMMARY_CHARS), _now()),
+                "INSERT INTO open_loops(project_id, task_id, cause, summary, opened_at, contract_revision)"
+                " VALUES (?, ?, ?, ?, ?, (SELECT contract_revision FROM board_tasks WHERE id = ?))",
+                (project_id, row["id"], UNOWNED, _one_line(row["title"], SUMMARY_CHARS), _now(), row["id"]),
             )
         return [row["id"] for row in rows]
 

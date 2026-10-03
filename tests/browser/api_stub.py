@@ -695,6 +695,7 @@ class BoardStub:
         """A task's review as the host would read it from git; a branch task without one gets :meth:`review`."""
         self.merged: list[str] = []
         self.rejected: list[tuple[str, str]] = []
+        self.stops: list[tuple[str, dict]] = []
 
     @staticmethod
     def task(id_: str, title: str, *, status: str = "todo", priority: int = 3, assignee: dict | None = None, **fields: object) -> dict:
@@ -702,7 +703,7 @@ class BoardStub:
             "id": id_, "title": title, "status": status, "priority": priority, "acceptance": "", "checklist": [], "depends_on": [], "session_id": None, "notes": "",
             "created_at": "2026-09-24T09:00:00Z", "updated_at": "2026-09-24T09:30:00Z", "project_id": "", "assignee_staff_id": assignee["id"] if assignee else None,
             "brief": {"objective": "", "deliverable": "", "boundaries": "", "done_when": ""}, "branch": None, "merge_state": "", "assignee": assignee,
-            "acceptance_state": "", "requirements": [],
+            "acceptance_state": "", "requirements": [], "entity_revision": 1,
         }
         row.update(fields)
         return row
@@ -753,6 +754,10 @@ class BoardStub:
     def answer(self, method: str, path: str, query: str, body: dict | None) -> tuple[int, object] | None:
         """``(status, body)`` for a route of the board, or None for anything else."""
         base = f"/api/projects/{self.project['id']}/board"
+        if path == "/api/control/effects/stop-1" and method == "GET":
+            return 200, {"effect_id": "stop-1", "state": "pending"}
+        if path == "/api/control/revisions" and method == "GET":
+            return 200, {"scope": {"kind": "project", "id": self.project["id"]}, "entity_revision": 1, "collection_revision": len(self.tasks) + 1}
         if path == base and method == "GET":
             return 200, self.listing("include_done=1" in query)
         if path == base and method == "POST":
@@ -774,6 +779,12 @@ class BoardStub:
             row = next((t for t in self.tasks if t["id"] == parts[3]), None)
             if row is None:
                 return 404, {"detail": "no such task"}
+            if path.endswith("/contract") and method == "GET":
+                return 200, {"task_id": row["id"], "contract_revision": 1, "entity_revision": row["entity_revision"]}
+            if path.endswith("/results") and method == "GET":
+                return 200, []
+            if len(parts) == 7 and parts[4] == "results" and parts[6] == "comments" and method == "GET":
+                return 200, []
             if method == "POST" and path.endswith("/accept"):
                 if row["status"] != "review":
                     return 409, {"detail": f"only a task in review can be accepted; this one is {row['status']}"}
@@ -787,7 +798,10 @@ class BoardStub:
             if path.endswith("/review") and method == "GET":
                 if not row.get("branch"):
                     return 409, {"detail": f"task {row['id']} has no staff branch to review"}
-                return 200, {**self._review_of(row), "status": row["status"]}
+                return 200, {**self._review_of(row), "status": row["status"], "head_sha": "head", "base_sha": "base", "current_sha": "base", "merge_receipt": None}
+            if path.endswith("/stop") and method == "POST":
+                self.stops.append((row["id"], dict(body or {})))
+                return 200, {"effect_id": "stop-1", "task_id": row["id"], "state": "queued", "receipt_id": "receipt", "entity_revision": row["entity_revision"] + 1}
             if path.endswith("/merge") and method == "POST":
                 review = self._review_of(row)
                 if row["status"] != "review" or not review["can_merge"]:
@@ -1024,6 +1038,8 @@ class FocusStub:
         """Every standing grant the operator took back: ``(staff id, rule)``."""
         self.focus_states: dict[str, dict] = {}
         """What ``GET /api/projects/<id>/focus-state`` answers, by project; a project not here has an empty one."""
+        self.next_actions: dict[str, list[dict]] = {}
+        """Operator-owned next steps returned by the project-wide readiness projection."""
         self.posted: list[tuple[str, dict]] = []
         """Every message the operator sent to a chat of the project: ``(session id, body)``, as posted."""
         self.search_busy = False
@@ -1108,6 +1124,9 @@ class FocusStub:
         if path.startswith("/api/projects/") and path.endswith("/focus-state") and method == "GET":
             pid = path.split("/")[3]
             return 200, self.focus_states.get(pid) or empty_focus_state(pid)
+        if path.startswith("/api/projects/") and path.endswith("/next-actions") and method == "GET":
+            pid = path.split("/")[3]
+            return 200, {"project_id": pid, "actions": self.next_actions.get(pid, [])}
         if path.startswith("/api/sessions/") and path.endswith("/messages") and method == "POST" and path.count("/") == 4:
             sid = path.split("/")[3]
             if sid in self.details:

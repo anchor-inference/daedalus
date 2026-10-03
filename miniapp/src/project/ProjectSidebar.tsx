@@ -20,7 +20,7 @@ import type { Staff } from "../team/team";
 import { invalidate } from "../store";
 import { useFocus, useProject, useUsage, staffKey } from "./data";
 import { chipText, totalsLine } from "./usage";
-import { FocusView, firstWait, splitTeam, staffTone, waitKey } from "./focus";
+import { FocusView, firstWait, operatorReviewReady, splitTeam, staffTone, waitKey } from "./focus";
 
 export type ProjectSidebarProps = {
   projectId: string;
@@ -81,12 +81,18 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
 
         <FocusRow
           icon="conductor"
-          label={t("focus.orchestrator")}
+          label={t("focus.nav.orchestrator")}
           href={projectHome(p.projectId)}
           current={p.view.kind === "orchestrator"}
           meta={!orchestrator?.enabled ? t("focus.orchestrator.off") : orchestratorRow?.status === "running" ? t("focus.orchestrator.now") : orchestratorRow?.last_message_at ? relTime(orchestratorRow.last_message_at) : ""}
           className={`orchestrator ${orchestratorRow?.status === "running" ? "live" : ""} ${!orchestrator?.enabled ? "off" : ""}`}
         />
+
+        <FocusRow icon="alert" label={t("focus.nav.attention")} href={projectPagePath(p.projectId, "attention")} current={here("attention")} meta={board ? String((board.needs_you?.length ?? 0) + (board.tasks?.filter(operatorReviewReady).length ?? 0)) : ""} />
+        <FocusRow icon="journal" label={t("focus.nav.journal")} href={projectPagePath(p.projectId, "journal")} current={here("journal")} />
+
+        <details className="focus-advanced">
+          <summary>{t("focus.nav.more")}</summary>
 
         <div className="focus-sec">
           <a href={projectPagePath(p.projectId, "team")} onClick={(e) => go(e, projectPagePath(p.projectId, "team"))} className={here("team") ? "current" : ""}>
@@ -129,8 +135,8 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
         <FocusRow icon="board" label={t("focus.page.board")} href={projectPagePath(p.projectId, "board")} current={here("board")} meta={board ? String(openTasks) : ""} />
         <FocusRow icon="pen" label={t("focus.page.brief")} href={projectPagePath(p.projectId, "brief")} current={here("brief")} />
         <FocusRow icon="clock" label={t("focus.page.wakeups")} href={projectPagePath(p.projectId, "wakeups")} current={here("wakeups")} meta={wakeups ? String(wakeups) : ""} />
-        <FocusRow icon="journal" label={t("focus.page.journal")} href={projectPagePath(p.projectId, "journal")} current={here("journal")} />
         <FocusRow icon="folder" label={t("focus.page.folders")} href={projectPagePath(p.projectId, "folders")} current={here("folders")} meta={project ? String(project.folders.length) : ""} />
+        </details>
       </div>
       {hiring && team && <StaffSheet team={team} onClose={() => setHiring(false)} onDone={() => invalidate(staffKey(p.projectId).split("?")[0])} toast={p.toast} />}
     </nav>

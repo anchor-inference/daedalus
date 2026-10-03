@@ -19,7 +19,10 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 def run() -> int:
     projects: list[dict] = []
     created: list[dict] = []
+    installed: list[dict] = []
+    staged: list[dict] = []
     unhandled = Unhandled()
+    extension = {"id": "project_status", "version": "1.0.0", "display_name": "Project status", "description": "Read task counts by status for one selected project.", "capabilities": ["board.read"], "tools": [{"name": "inspect_project"}], "ui_extensions": [{"id": "project_status", "slot": "project.settings", "schema_version": 1, "component": "status"}]}
 
     def answer(route, body: object, status: int = 200) -> None:  # type: ignore[no-untyped-def]
         route.fulfill(status=status, content_type="application/json", body=json.dumps(body))
@@ -42,6 +45,19 @@ def run() -> int:
         if path == "/api/settings":
             # The start canvas reads the default model before a chat exists.
             return answer(route, {"presets": {}, "model": {}})
+        if path == "/api/plugins/catalog":
+            return answer(route, [{"manifest": extension, "valid": True, "digest": "a" * 64, "required_capabilities": ["board.read"], "ui_extensions": extension["ui_extensions"]}])
+        if path == "/api/plugins" and request.method == "GET":
+            return answer(route, {"items": installed, "collection_revision": len(installed) + 1})
+        if path == "/api/plugins/safe-mode" and request.method == "GET":
+            return answer(route, {"enabled": False})
+        if path == "/api/plugins/install" and request.method == "POST":
+            payload = request.post_data_json
+            staged.append(payload)
+            installed.append({"id": "project_status", "version": "1.0.0", "digest": "a" * 64, "status": "staged", "health": "inactive", "created_at": "2026-10-03T00:00:00Z"})
+            return answer(route, {"id": "project_status", "status": "staged", "receipt_id": "receipt", "entity_revision": 1})
+        if path == "/api/plugins/project_status/health":
+            return answer(route, {"id": "project_status", "state": "inactive"})
         if path == "/api/project-directories":
             query = parse_qs(url.query)
             if not query:
@@ -81,6 +97,18 @@ def run() -> int:
         expect(page.locator("#project-root")).to_have_value("/work/existing")
         page.get_by_role("button", name="Add", exact=True).click()
         assert created[1] == {"name": "Existing", "folders": [{"path": "/work/existing"}]}, created[1]
+        page.locator(".project-chip").click()
+        page.locator(".project-row", has_text="Plain").get_by_role("button", name="Settings for Plain").click()
+        extensions = page.locator(".project-extensions")
+        expect(extensions).to_be_visible()
+        expect(extensions.locator(".project-extension")).to_have_count(0)
+        extensions.locator("summary").first.click()
+        expect(extensions.locator(".project-extension")).to_have_count(1)
+        expect(extensions).to_contain_text("ordinary project work needs no extension")
+        extensions.get_by_role("button", name="Install").click()
+        expect(extensions).to_contain_text("Activating")
+        expect(extensions.get_by_role("button", name="Test on this project")).to_be_disabled()
+        assert staged and staged[0]["expected_digest"] == "a" * 64 and staged[0]["client_operation_id"], staged
         browser.close()
     return unhandled.report()
 

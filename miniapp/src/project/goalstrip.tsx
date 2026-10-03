@@ -7,8 +7,9 @@
 import { useEffect, useId, useState } from "react";
 import { acceptanceTone } from "../board/board";
 import { relTime } from "../format";
-import { plural, t } from "../i18n";
+import { t } from "../i18n";
 import { Icon } from "../icons";
+import { navigate, projectPagePath } from "../router";
 import { useFocusState } from "./data";
 import { cardTitle, goalLine, goalRows, lineNeedsAttention, resultKey, resultRows, type FocusState } from "./goalmodel";
 
@@ -25,24 +26,23 @@ export function GoalStrip({ projectId }: { projectId: string }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
-  if (!state || parts.length === 0) return null;
+  if (!state || (parts.length === 0 && state.goals.length === 0)) return null;
+  const waitsForYou = (state.counts.waiting_for_you ?? 0) > 0;
+  const blocked = goalRows(state.goals).find((goal) => goal.blocked || goal.next);
+  const blockedReason = blocked?.next ? ("key" in blocked.next ? t(blocked.next.key) : blocked.next.text) : "";
+  const headline = waitsForYou ? t("goal.headline.you") : blocked ? t(blockedReason ? "goal.headline.reason" : "goal.headline.blocked", { title: blocked.title, reason: blockedReason }) : state.goals[0] ? t("goal.headline.work", { title: state.goals[0].title }) : t("goal.headline.quiet");
   return (
     <div className={`goal-strip ${open ? "open" : ""} ${lineNeedsAttention(state.counts) ? "attn" : ""}`}>
       {open && <GoalList id={listId} state={state} />}
+      <div className="goal-primary">
       <button type="button" className="goal-line" aria-expanded={open} aria-controls={open ? listId : undefined} onClick={() => setOpen((o) => !o)} title={t(open ? "goal.hide" : "goal.show")}>
         <Icon name="board" size={14} />
-        <span className="goal-counts">
-          {/* A phone has a third of a desk's width for the same five counts: it says them in their
-              short words rather than wrapping the line or cutting the last ones off. */}
-          {parts.map((part) => (
-            <span key={part.kind} className={`goal-count ${part.kind}`}>
-              <span className="goal-count-long">{plural(`goal.count.${part.kind}`, part.n)}</span>
-              <span className="goal-count-short">{plural(`goal.short.${part.kind}`, part.n)}</span>
-            </span>
-          ))}
-        </span>
+        <span className="goal-headline">{headline}</span>
         <span className="goal-chev" aria-hidden><Icon name="chevron" size={14} /></span>
       </button>
+      {waitsForYou && <button type="button" className="btn small warn goal-next-action" onClick={() => navigate(projectPagePath(projectId, "attention"))}>{t("goal.openAttention")}</button>}
+      {!waitsForYou && blocked && <button type="button" className="btn small goal-next-action" onClick={() => navigate(projectPagePath(projectId, "board", { task: blocked.id }))}>{t("goal.openTask")}</button>}
+      </div>
     </div>
   );
 }
