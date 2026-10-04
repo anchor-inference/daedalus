@@ -140,9 +140,9 @@ class WriterLeases:
 
     async def observe_effect(self, lease: WriterLease, effect: WriterEffect, *, state: str,
                              result_digest: str | None = None) -> None:
-        """Record entry, a returned result, or uncertainty without certifying physical quiescence."""
-        if state not in ("entered", "returned", "unknown"):
-            raise ValueError("only entry, command result and unknown observations are supported")
+        """Record entry, revocation, a returned result, or uncertainty without certifying quiescence."""
+        if state not in ("entered", "revoking", "returned", "unknown"):
+            raise ValueError("only entry, revocation, command result and unknown observations are supported")
         if state == "returned":
             if result_digest is None or len(result_digest) != 64 or any(c not in "0123456789abcdef" for c in result_digest):
                 raise ValueError("a returned effect requires the exact result digest")
@@ -160,10 +160,62 @@ class WriterLeases:
                 raise ControlConflict("the effect observation changed its physical owner")
             if entry["state"] == state and entry["result_digest"] == result_digest:
                 return
-            if entry["state"] in ("returned", "unknown") or (state == "returned" and entry["state"] != "entered"):
+            if (entry["state"] in ("returned", "unknown")
+                    or (state == "returned" and entry["state"] not in ("entered", "revoking"))
+                    or (state == "revoking" and (effect.kind != "file" or entry["state"] != "entered"))
+                    or (state == "entered" and entry["state"] != "reserved")):
                 raise ControlConflict("the effect observation changed an immutable outcome")
             entry["state"], entry["result_digest"], entry["observed_at"] = state, result_digest, now()
             await self._write_owners(conn, record, owners)
+
+    async def enter_file_owner(self, lease: WriterLease, effect: WriterEffect) -> None:
+        """Claim one local barrier object exactly once; a replay must not reopen admission."""
+        async with self.db.transaction() as conn:
+            owners, entry = await self._file_owner(conn, lease, effect)
+            if entry["state"] != "reserved":
+                raise ControlConflict("the local file owner already entered or has an unknown outcome")
+            entry["state"], entry["observed_at"] = "entered", now()
+            await self._write_owners(conn, {"token_hash": self._hash(lease.token)}, owners)
+
+    async def check_file_admission(self, lease: WriterLease, effect: WriterEffect) -> None:
+        """Reject stale or revoked admission before submitting another local write thread."""
+        async with self.db.transaction() as conn:
+            _, entry = await self._file_owner(conn, lease, effect)
+            if entry["state"] != "entered":
+                raise ControlConflict("the local file owner is no longer admitting mutations")
+
+    async def _file_owner(self, conn: Any, lease: WriterLease,
+                          effect: WriterEffect) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        generation = await self.executions._host(conn)
+        record = await self._read(conn)
+        if generation != lease.host_generation or not self._matches(record, lease):
+            raise ControlConflict("the local file owner belongs to an earlier writer claim")
+        owners = await self._owners(conn, record)
+        entry = next((entry for entry in owners if entry["id"] == effect.id), None)
+        if effect.kind != "file" or entry is None or (entry["kind"], entry["owner_instance"], entry["operation_id"]) != (
+                effect.kind, effect.owner_instance, effect.operation_id):
+            raise ControlConflict("the local file owner identity changed")
+        return owners, entry
+
+    async def finish_file_barrier(self, lease: WriterLease, effect: WriterEffect, receipt: dict[str, Any]) -> None:
+        """Persist a local mutation barrier receipt; this still does not release the writer claim."""
+        expected = {"effect_id": effect.id, "owner_instance": effect.owner_instance,
+                    "project_id": lease.project_id, "claim_revision": lease.revision,
+                    "host_generation": lease.host_generation}
+        if (any(receipt.get(key) != value for key, value in expected.items())
+                or set(receipt) != set(expected) | {"mutations"}
+                or not isinstance(receipt["mutations"], list)
+                or len(receipt["mutations"]) > 256
+                or any(state not in ("written", "failed") for state in receipt["mutations"])):
+            raise ValueError("the local barrier receipt must name this exact settled mutation frontier")
+        digest = hashlib.sha256(canonical(receipt).encode()).hexdigest()
+        async with self.db.transaction() as conn:
+            owners, entry = await self._file_owner(conn, lease, effect)
+            if entry["state"] != "revoking":
+                raise ControlConflict("the local file owner was not durably revoked")
+            entry["state"], entry["result_digest"], entry["observed_at"] = "returned", digest, now()
+            await self._write_owners(conn, {"token_hash": self._hash(lease.token)}, owners)
+            await conn.execute("INSERT INTO kv(key,value) VALUES (?,?)", ("local_file_barrier:" + effect.id, canonical(receipt)))
 
     async def effect_owners(self) -> list[dict[str, Any]]:
         """Inspect held physical owners after restart without exposing the claim's secret."""
