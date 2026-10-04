@@ -130,7 +130,8 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
     strict_profile = profile is not None and profile["state"] == "enabled"
     writer_only = not strict_profile and member_row["harness"] != "daedalus" and member_row["isolation"] == "shared"
     if writer_only and await app.db.fetchone("SELECT 1 FROM task_files WHERE task_id = ? LIMIT 1", (task_id,)):
-        raise ControlConflict("writer containment cannot yet own initial file delivery")
+        raise ControlConflict("shared writer containment cannot own initial file delivery; "
+                              "use an isolated Git worktree member for a task with files")
     if strict_profile or writer_only:
         if strict_profile and harness == "daedalus":
             strict_target(profile, env=env, harness=harness, capability={})

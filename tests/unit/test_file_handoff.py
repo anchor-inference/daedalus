@@ -37,12 +37,13 @@ from daedalus.extensions.dispatcher_projects import ProjectMaker
 from daedalus.extensions.dispatches import Dispatches
 from daedalus.extensions.harness import catalog_roots
 from daedalus.extensions.orchestrator_ops import Refused
+from daedalus.extensions.task_launch import queue_launch
 from daedalus.harness.claude import ClaudeCodeAdapter
 from daedalus.harness.runtime import CliStaffRuntime
 from daedalus.host.handoff import Handoff
 from daedalus.host.session_runner import Attachment
 from daedalus.stores import files as files_module
-from daedalus.stores.control import ControlStore, Entity, Principal, Scope
+from daedalus.stores.control import ControlConflict, ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
 from daedalus.stores.files import MAIN, FileRefused
 from daedalus.stores.harness import HarnessStore
@@ -113,7 +114,9 @@ class Chain:
         return self.r.manager
 
     async def langpt(self) -> Staff:
-        return await self.manager.staff.hire(self.project.id, name="langpt", harness="claude", env="host", isolation="shared")
+        # The fake terminal opens files and reports a pre-existing estimate; it cannot attest the
+        # delegated cgroup required for a shared writable CLI worker.
+        return await self.manager.staff.hire(self.project.id, name="langpt", harness="claude", env="host", isolation="readonly")
 
     async def handle(self, scope: str, *, origin: str = "operator") -> str:
         listed = [f for f in await self.manager.files.listing(scope) if f.origin == origin]
@@ -535,6 +538,19 @@ async def test_refusals_are_said_before_anything_is_sent(settings: Settings, db:
         failure = await c.manager.db.fetchone("SELECT error FROM effect_outbox WHERE id = ?", (queued["effect_id"],))
         assert failure is not None and "host terminal bridge" in failure["error"]
         assert c.opened() == []
+
+
+async def test_shared_host_cli_without_delegated_containment_is_refused_before_launch(settings: Settings, db: Database, tmp_path: Path) -> None:
+    async with chain(settings, db, tmp_path) as c:
+        member = await c.manager.staff.hire(c.project.id, name="shared", harness="claude", env="host", isolation="shared")
+        task_id = await board_task(c.manager, c.project, "Read a note", brief=brief_task("Read a note"))
+        revision = await ControlStore(db).revision(Scope("project", c.project.id), Entity("task", task_id))
+        with pytest.raises(ControlConflict, match="delegated writer containment.*isolated Git worktree or read-only member"):
+            await queue_launch(c.r.team.app, task_id, Principal.operator({"via": "token", "user_id": 1}),
+                               staff_id=member.id, client_operation_id=uuid.uuid4().hex,
+                               expected_entity_revision=revision)
+        assert await db.fetchone("SELECT 1 FROM effect_outbox LIMIT 1") is None
+        assert await db.fetchone("SELECT 1 FROM execution_attempts LIMIT 1") is None
 
 
 async def test_an_old_host_daemon_without_fs_write_is_refused_with_how_to_update(settings: Settings, db: Database, tmp_path: Path) -> None:

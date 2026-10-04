@@ -79,7 +79,10 @@ def writer_target(*, env: str, harness: str, capability: dict[str, Any]) -> dict
         raise ControlConflict("this worker has no contained writable CLI launch")
     if (env not in ("container", "host") or capability.get("available") is not True
             or capability.get("kind") != "cgroup_v2" or capability.get("sandbox") != "ok"):
-        raise ControlConflict("the CLI environment has no proven delegated writer containment")
+        raise ControlConflict("the CLI environment has no proven delegated writer containment; "
+                              "shared writable CLI work requires delegated cgroup v2 CPU and a sandbox "
+                              "that blocks cgroupfs writes; use an isolated Git worktree or read-only member "
+                              "when these are unavailable")
     instance = capability.get("daemon_instance")
     if not isinstance(instance, str) or not instance:
         raise ControlConflict("the terminal daemon generation is unknown")
