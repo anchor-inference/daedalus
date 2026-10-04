@@ -241,6 +241,25 @@ func TestSandboxedShellKeepsItsIntegration(t *testing.T) {
 func TestSandboxRefusals(t *testing.T) {
 	// Without a prober the build offers no sandbox, and says so.
 	f, _ := startSide(t)
+	for _, requested := range []string{"credentials", "typo"} {
+		we := f.callErr("terminal.create", map[string]any{"id": "scoped", "sandbox": map[string]any{
+			"read_isolation": requested, "writable": []string{},
+		}})
+		code := wire.CodeInvalidParams
+		if requested == "credentials" {
+			code = wire.CodeUnsupported
+		}
+		if we == nil || we.Code != code {
+			t.Fatalf("read isolation %q: %v", requested, we)
+		}
+	}
+	var listed struct {
+		Terminals []term.Info `json:"terminals"`
+	}
+	f.call(t, "terminal.list", nil, &listed)
+	if len(listed.Terminals) != 0 {
+		t.Fatalf("a refused scoped request spawned a terminal: %+v", listed.Terminals)
+	}
 	if we := f.callErr("terminal.create", map[string]any{"id": "a", "sandbox": map[string]any{"writable": []string{}}}); we == nil || we.Code != wire.CodeUnsupported {
 		t.Fatalf("no prober: %v", we)
 	}
@@ -250,6 +269,9 @@ func TestSandboxRefusals(t *testing.T) {
 	f.call(t, "daemon.info", nil, &info)
 	if info.Capabilities["sandbox"] != "not available in this build" {
 		t.Fatalf("capability: %v", info.Capabilities["sandbox"])
+	}
+	if info.Capabilities["credential_read_isolation"] != false {
+		t.Fatalf("credential read isolation was advertised: %v", info.Capabilities)
 	}
 
 	// A machine without namespaces: refused with the probe's reason, which daemon.info reports too.

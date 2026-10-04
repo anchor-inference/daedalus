@@ -12,7 +12,8 @@ import (
 // sandboxParams is `terminal.create {sandbox}`: the folders the program may write. Everything else
 // is read-only, and the daemon's own directories are hidden.
 type sandboxParams struct {
-	Writable []string `json:"writable"`
+	Writable      []string `json:"writable"`
+	ReadIsolation string   `json:"read_isolation"`
 }
 
 // sandboxRequest reads the create's sandbox, or nil when none was asked for.
@@ -26,6 +27,14 @@ func sandboxRequest(raw json.RawMessage) (*sandboxParams, error) {
 	}
 	if len(p.Writable) > sandbox.MaxWritable {
 		return nil, wire.Errorf(wire.CodeInvalidParams, "sandbox: at most %d writable folders", sandbox.MaxWritable)
+	}
+	if p.ReadIsolation != "" {
+		if p.ReadIsolation != "credentials" {
+			return nil, wire.Errorf(wire.CodeInvalidParams, "sandbox: unknown read isolation %q", p.ReadIsolation)
+		}
+		// The ordinary sandbox mounts / read-only, including every peer login in the shared home.
+		// A selected sealed file cannot close that route, and exec.run remains outside the mount.
+		return nil, wire.Errorf(wire.CodeUnsupported, "credential read isolation is unavailable: shared home and side-channel programs remain readable")
 	}
 	return &p, nil
 }
