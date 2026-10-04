@@ -64,7 +64,7 @@ from tests.orchestrator_eval.scenarios import BY_ID, SCENARIOS, Call, Record, Sc
 from tests.orchestrator_eval.stand import Stand
 
 SUBSCRIPTIONS = ("claude", "codex", "grok")
-"""Upstreams billed as a command-line subscription, not per token: their dollars are zero."""
+"""Upstreams with subscription access whose cost cannot be attributed to one replay."""
 
 PRICES = {
     # ($ per million input tokens missed by the cache, cached, output), for providers that report tokens only.
@@ -142,17 +142,17 @@ class Model:
             headers["x-opencode-session"] = self.session
         return headers
 
-    def cost(self, usage: dict[str, Any]) -> float | None:
+    def cost(self, usage: dict[str, Any]) -> tuple[float | None, str]:
         if self.upstream in SUBSCRIPTIONS:
-            return 0.0
+            return None, "subscription"
         if usage.get("cost") is not None:
-            return float(usage["cost"])
+            return float(usage["cost"]), "provider_reported"
         price = PRICES.get(self.label)
         if price is None or usage.get("prompt_tokens") is None or usage.get("completion_tokens") is None:
-            return None
+            return None, "unpriced"
         prompt = int(usage.get("prompt_tokens") or 0)
         hit = cached_tokens(usage)
-        return ((prompt - hit) * price[0] + hit * price[1] + int(usage.get("completion_tokens") or 0) * price[2]) / 1e6
+        return ((prompt - hit) * price[0] + hit * price[1] + int(usage.get("completion_tokens") or 0) * price[2]) / 1e6, "local_estimate"
 
 
 def cached_tokens(usage: dict[str, Any]) -> int:
@@ -212,9 +212,23 @@ class Episode:
     tokens_in: int = 0
     tokens_cached: int = 0
     tokens_out: int = 0
-    cost: float | None = 0.0
+    cost: float | None = None
+    cost_basis: str = "not_observed"
     seconds: float = 0.0
     stopped: str = ""
+
+    def record_cost(self, cost: float | None, basis: str) -> None:
+        """Keep an unknown call from turning into a priced total on a later response."""
+        if self.model_calls == 0:
+            self.cost = cost
+            self.cost_basis = basis
+        else:
+            self.cost = None if cost is None or self.cost is None else self.cost + cost
+            if basis == "unpriced":
+                self.cost_basis = "unpriced"
+            elif self.cost_basis != basis and self.cost_basis != "unpriced":
+                self.cost_basis = "mixed"
+        self.model_calls += 1
 
 
 class Runner:
@@ -243,6 +257,8 @@ class Runner:
 
     async def episode(self, http: httpx.AsyncClient, model: Model, scenario: Scenario, repeat: int) -> Episode:
         result = Episode(scenario.id, model.label, repeat)
+        if model.upstream in SUBSCRIPTIONS:
+            result.cost_basis = "subscription"
         root = Path(tempfile.mkdtemp(prefix="oeval-"))
         transcript = self.out / "transcripts" / model.label.replace("/", "_").replace(":", "-") / f"{scenario.id}-{repeat}.jsonl"
         transcript.parent.mkdir(parents=True, exist_ok=True)
@@ -271,14 +287,13 @@ class Runner:
                     for _ in range(MAX_STEPS):
                         data = await complete(http, model, messages, self.schemas)
                         usage = data.get("usage") or {}
-                        cost = model.cost(usage)
+                        cost, basis = model.cost(usage)
                         async with self.lock:
-                            if cost is None:
+                            if basis == "unpriced":
                                 model.unknown_cost = True
-                            else:
+                            if cost is not None:
                                 model.spent += cost
-                        result.cost = None if cost is None or result.cost is None else result.cost + cost
-                        result.model_calls += 1
+                        result.record_cost(cost, basis)
                         result.tokens_in += int(usage.get("prompt_tokens") or 0)
                         result.tokens_cached += cached_tokens(usage)
                         result.tokens_out += int(usage.get("completion_tokens") or 0)
@@ -402,18 +417,27 @@ def summary(results: list[Episode], models: list[Model], scenarios: list[Scenari
             mine = [r for r in results if r.scenario == scenario.id and r.model == model.label]
             row.append(f"{sum(r.success for r in mine)}/{len(mine)}" if mine else "—")
         lines.append("| " + " | ".join(row) + " |")
-    lines += ["", "| model | passed | turns/episode | tool calls/episode | refused calls | operator questions | tokens in / out | $ |", "|---|---|---|---|---|---|---|---|"]
+    lines += ["", "| model | passed | turns/episode | tool calls/episode | refused calls | operator questions | tokens in / out | cost |", "|---|---|---|---|---|---|---|---|"]
     for model in models:
         mine = [r for r in results if r.model == model.label]
         if not mine:
             continue
         n = len(mine)
-        total_cost = "UNKNOWN" if any(r.cost is None for r in mine) else f"{sum(r.cost or 0 for r in mine):.3f}"
+        if model.upstream in SUBSCRIPTIONS:
+            total_cost = "SUBSCRIPTION (per-replay USD unavailable)"
+        elif any(r.cost is None for r in mine):
+            total_cost = "UNKNOWN"
+        else:
+            sources = {r.cost_basis for r in mine}
+            basis = ("provider reported" if sources == {"provider_reported"} else
+                     "local estimate" if sources == {"local_estimate"} else "mixed reported and estimated")
+            total_cost = f"${sum(r.cost or 0 for r in mine):.3f} ({basis})"
         lines.append(
             f"| {model.label} | {sum(r.success for r in mine)}/{n} | {sum(r.turns for r in mine) / n:.2f} | {sum(r.tool_calls for r in mine) / n:.1f} | "
             f"{sum(r.refused for r in mine)} | {sum(r.asked_operator for r in mine)} | {sum(r.tokens_in for r in mine) // 1000}k / {sum(r.tokens_out for r in mine) // 1000}k | {total_cost} |"
         )
-    lines += ["", "## Failures", ""]
+    lines += ["", "Local estimates use the rate table in this runner; verify its prices before comparing providers.",
+              "", "## Failures", ""]
     for r in results:
         if not r.success:
             lines.append(f"- {r.scenario} · {r.model} · #{r.repeat}: {r.why}")

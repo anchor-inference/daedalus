@@ -74,7 +74,7 @@ from tests.browser_eval.site import Sites, State
 from tests.browser_eval.tasks import BY_ID, TASKS, Outcome, Task
 
 SUBSCRIPTIONS = ("claude", "codex", "grok")
-"""Upstreams billed as a command-line subscription, not per token: their dollars are zero."""
+"""Upstreams with subscription access whose cost cannot be attributed to one replay."""
 
 PRICES = {
     # ($ per million input tokens missed by the cache, cached, output). OpenRouter reports what it
@@ -215,17 +215,17 @@ class Model:
             body["usage"] = {"include": True}
         return body
 
-    def cost(self, usage: dict[str, Any]) -> float | None:
+    def cost(self, usage: dict[str, Any]) -> tuple[float | None, str]:
         if self.upstream in SUBSCRIPTIONS:
-            return 0.0
+            return None, "subscription"
         if usage.get("cost") is not None:
-            return float(usage["cost"])
+            return float(usage["cost"]), "provider_reported"
         price = PRICES.get(self.label)
         if price is None or usage.get("prompt_tokens") is None or usage.get("completion_tokens") is None:
-            return None
+            return None, "unpriced"
         prompt = int(usage.get("prompt_tokens") or 0)
         hit = cached_tokens(usage)
-        return ((prompt - hit) * price[0] + hit * price[1] + int(usage.get("completion_tokens") or 0) * price[2]) / 1e6
+        return ((prompt - hit) * price[0] + hit * price[1] + int(usage.get("completion_tokens") or 0) * price[2]) / 1e6, "local_estimate"
 
 
 def cached_tokens(usage: dict[str, Any]) -> int:
@@ -287,13 +287,27 @@ class Episode:
     tokens_cached: int = 0
     tokens_out: int = 0
     tokens_reasoning: int = 0
-    cost: float | None = 0.0
+    cost: float | None = None
+    cost_basis: str = "not_observed"
     seconds: float = 0.0
     stopped: str = ""
     """Why the loop ended when it was not the model's own final answer: steps, time, budget, error."""
     covers: list[str] = field(default_factory=list)
     seen: list[str] = field(default_factory=list)
     """What the fixture's server saw, for reading a failure: the records and the fields posted."""
+
+    def record_cost(self, cost: float | None, basis: str) -> None:
+        """Keep an unknown call from turning into a priced total on a later response."""
+        if self.model_calls == 0:
+            self.cost = cost
+            self.cost_basis = basis
+        else:
+            self.cost = None if cost is None or self.cost is None else self.cost + cost
+            if basis == "unpriced":
+                self.cost_basis = "unpriced"
+            elif self.cost_basis != basis and self.cost_basis != "unpriced":
+                self.cost_basis = "mixed"
+        self.model_calls += 1
 
 
 class Runner:
@@ -316,6 +330,8 @@ class Runner:
         work = Path(tempfile.mkdtemp(prefix="beval-ws-"))
         files = Workspace(work)
         result = Episode(task.id, model.label, repeat, covers=list(task.covers))
+        if model.upstream in SUBSCRIPTIONS:
+            result.cost_basis = "subscription"
 
         async def gate(ask: SensitiveAsk) -> tuple[bool, str]:
             # The operator says yes to everything: the evaluation measures how the agent gets the task
@@ -342,14 +358,13 @@ class Runner:
                 for _ in range(self.max_steps):
                     data = await complete(http, model, messages, self.tools)
                     usage = data.get("usage") or {}
-                    cost = model.cost(usage)
+                    cost, basis = model.cost(usage)
                     async with self.lock:
-                        if cost is None:
+                        if basis == "unpriced":
                             model.unknown_cost = True
-                        else:
+                        if cost is not None:
                             model.spent += cost
-                    result.cost = None if cost is None or result.cost is None else result.cost + cost
-                    result.model_calls += 1
+                    result.record_cost(cost, basis)
                     result.tokens_in += int(usage.get("prompt_tokens") or 0)
                     result.tokens_cached += cached_tokens(usage)
                     result.tokens_out += int(usage.get("completion_tokens") or 0)
@@ -450,13 +465,22 @@ def summary(episodes: list[Episode], models: list[Model], tasks: list[Task], sta
             continue
         n = len(mine)
         ok = sum(e.success for e in mine)
-        total_cost = "UNKNOWN" if any(e.cost is None for e in mine) else f"${sum(e.cost or 0 for e in mine):.3f}"
+        if model.upstream in SUBSCRIPTIONS:
+            total_cost = "SUBSCRIPTION (per-replay USD unavailable)"
+        elif any(e.cost is None for e in mine):
+            total_cost = "UNKNOWN"
+        else:
+            sources = {e.cost_basis for e in mine}
+            basis = ("provider reported" if sources == {"provider_reported"} else
+                     "local estimate" if sources == {"local_estimate"} else "mixed reported and estimated")
+            total_cost = f"${sum(e.cost or 0 for e in mine):.3f} ({basis})"
         lines.append(
             f"| {model.label} | {ok}/{n} ({ok / n:.0%}) | {sum(e.tool_calls for e in mine) / n:.1f} | {sum(e.model_calls for e in mine) / n:.1f} | "
             f"{sum(e.tokens_in for e in mine) / n / 1000:.1f}k ({sum(e.tokens_cached for e in mine) / n / 1000:.1f}k) / {sum(e.tokens_out for e in mine) / n / 1000:.1f}k | "
             f"{total_cost} | {sum(e.seconds for e in mine) / n:.0f} |"
         )
-    lines += ["", "## Error kinds in tool results", "", "| model | " + " | ".join(k for k, _ in ERROR_KINDS) + " | invented ref | frame ref | other | truncated | operator asks |", "|---" * (len(ERROR_KINDS) + 7) + "|"]
+    lines += ["", "Local estimates use the rate table in this runner; verify its prices before comparing providers.",
+              "", "## Error kinds in tool results", "", "| model | " + " | ".join(k for k, _ in ERROR_KINDS) + " | invented ref | frame ref | other | truncated | operator asks |", "|---" * (len(ERROR_KINDS) + 7) + "|"]
     for model in models:
         mine = [e for e in episodes if e.model == model.label]
         if not mine:
