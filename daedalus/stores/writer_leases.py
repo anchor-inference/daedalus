@@ -33,7 +33,7 @@ class WriterEffect:
 
 
 class WriterLeases:
-    """A global claim only for strict CLI attempts with a kernel-owned process group.
+    """A global claim for contained CLI attempts with a kernel-owned process group.
 
     A missing attempt proves no provider entered, but interrupted file handoff or git preparation
     may still write. Registered host effects keep their own identity and cannot be freed by the
@@ -93,7 +93,8 @@ class WriterLeases:
                     raise ControlConflict("a contained writer still owns writable project folders")
             # An attempt launched before this gate was installed has no claim row. Its cgroup
             # remains an owner until the same exact release proof is durable.
-            async with conn.execute("SELECT attempt_id FROM attempt_resource_bindings") as cursor:
+            async with conn.execute("SELECT attempt_id FROM attempt_resource_bindings"
+                                    " UNION ALL SELECT attempt_id FROM writer_attempt_bindings") as cursor:
                 existing = await cursor.fetchall()
             for row in existing:
                 if not await attempt_released_in(conn, row["attempt_id"]):
@@ -236,15 +237,17 @@ class WriterLeases:
             await self._write(conn, record)
 
     async def bind(self, lease: WriterLease, attempt_id: str) -> None:
-        """Bind before runtime entry; only an exact strict containment binding is accepted."""
+        """Bind before runtime entry; only an exact CLI containment binding is accepted."""
         async with self.db.transaction() as conn:
             await self.executions._host(conn)
             row = await one(conn, "SELECT a.runtime_kind,r.state,r.host_generation FROM execution_attempts a"
-                            " JOIN attempt_resource_bindings r ON r.attempt_id = a.id"
+                            " JOIN (SELECT attempt_id,state,host_generation FROM attempt_resource_bindings"
+                            " UNION ALL SELECT attempt_id,state,host_generation FROM writer_attempt_bindings) r"
+                            " ON r.attempt_id = a.id"
                             " WHERE a.id = ? AND a.task_id IN (SELECT id FROM board_tasks WHERE project_id = ?)",
                             (attempt_id, lease.project_id))
             if row is None or row["runtime_kind"] != "cli" or row["state"] != "reserved" or int(row["host_generation"]) != lease.host_generation:
-                raise ControlConflict("the writer has no exact strict CLI containment binding")
+                raise ControlConflict("the writer has no exact CLI containment binding")
             record = await self._read(conn)
             if not self._matches(record, lease) or not record["effects_started"] or record["attempt_id"]:
                 raise ControlConflict("the writer lease changed before runtime entry")

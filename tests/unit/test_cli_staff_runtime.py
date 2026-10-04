@@ -271,7 +271,8 @@ class Stand:
     harness: HarnessConfig
 
     async def hire(self, name: str = "Ada") -> Staff:
-        return await self.manager.staff.hire(self.project.id, name=name, harness=getattr(self.adapter, "name", "claude"), isolation="shared")
+        # The fake daemon has no cgroup delegation; these tests exercise the CLI conversation.
+        return await self.manager.staff.hire(self.project.id, name=name, harness=getattr(self.adapter, "name", "claude"), isolation="readonly")
 
     async def task(self, title: str = "Menu page", *,
                    requirements: list[dict[str, str]] | None = None) -> str:

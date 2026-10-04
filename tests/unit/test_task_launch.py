@@ -101,6 +101,46 @@ async def test_lost_response_replays_one_receipt_and_one_observed_attempt(db: Da
         app.executions.release()
 
 
+async def test_writable_cli_queue_pins_containment_without_a_ceiling_profile(db: Database) -> None:
+    app, _, team, _, revision = await queued_fixture(db)
+    await db.execute("UPDATE staff SET harness = 'claude',isolation = 'shared' WHERE id = 'worker'")
+    capability = {"available": True, "kind": "cgroup_v2", "sandbox": "ok", "daemon_instance": "daemon-one"}
+    terminals = SimpleNamespace(containment_capability=AsyncMock(return_value=capability),
+                                preflight_attempt_resources=AsyncMock(return_value={}))
+    app.extensions["terminals"] = terminals
+    try:
+        with pytest.raises(ControlConflict, match="delegated writer containment"):
+            terminals.containment_capability.return_value = {**capability, "available": False}
+            await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                               client_operation_id="uncontained", expected_entity_revision=revision)
+        assert (await db.fetchone("SELECT count(*) FROM effect_outbox"))[0] == 0
+        terminals.containment_capability.return_value = capability
+        result = await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                                    client_operation_id="contained", expected_entity_revision=revision)
+        effect = await db.fetchone("SELECT payload_json FROM effect_outbox WHERE id = ?", (result["effect_id"],))
+        resources = json.loads(effect["payload_json"])["data"]["resources"]
+        assert resources["mode"] == "writer"
+        assert resources["limits"] == {"memory_bytes": 0, "cpu_millis": 0,
+                                       "process_count": 0, "disk_bytes": 0}
+        assert resources["daemon_instance"] == "daemon-one"
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
+async def test_worktree_cli_keeps_its_existing_launch_path(db: Database) -> None:
+    app, _, team, _, revision = await queued_fixture(db)
+    await db.execute("UPDATE staff SET harness = 'claude',isolation = 'worktree' WHERE id = 'worker'")
+    try:
+        result = await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                                    client_operation_id="worktree", expected_entity_revision=revision)
+        effect = await db.fetchone("SELECT payload_json FROM effect_outbox WHERE id = ?", (result["effect_id"],))
+        assert json.loads(effect["payload_json"])["data"]["resources"] is None
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
 async def test_queued_worktree_launch_refuses_changed_source_after_command(db: Database) -> None:
     app, dispatcher, team, starts, revision = await queued_fixture(db)
     try:

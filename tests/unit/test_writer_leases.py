@@ -10,13 +10,16 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 from types import MethodType, SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
+from daedalus.extensions.resource_runtime import reconcile as reconcile_containment
 from daedalus.extensions.staff import Team
 from daedalus.stores.control import ControlConflict
 from daedalus.stores.database import Database
 from daedalus.stores.executions import ExecutionStore
+from daedalus.stores.resource_profiles import bind_launch_in, observe_in
 from daedalus.stores.staff import StaffError
 from daedalus.stores.writer_leases import KEY, WriterLeases
 
@@ -308,6 +311,84 @@ async def test_exact_empty_container_exit_releases_bound_attempt(db: Database) -
         owner.release()
 
 
+async def test_writer_only_cli_waits_for_whole_container_and_exact_exit(db: Database) -> None:
+    owner = await _owner(db)
+    try:
+        leases = WriterLeases(owner)
+        first = await leases.acquire("project")
+        await leases.begin_effects(first)
+        await _attempt(db, first.host_generation, strict=False)
+        await db.execute("INSERT INTO project_folders(id,project_id,path,env,position,created_at)"
+                         " VALUES ('folder','project','/tmp/fixture-worktree','container',0,'2026-01-01')")
+        await db.execute("INSERT INTO writer_attempt_bindings(attempt_id,project_id,host_generation,env,"
+                         "daemon_instance,folder_id,folder_path_digest,launch_workspace_digest,state,created_at,updated_at)"
+                         " VALUES ('attempt','project',?,'container','daemon','folder','folder-digest',"
+                         "'workspace-digest','reserved','2026-01-01','2026-01-01')", (str(first.host_generation),))
+        await leases.bind(first, "attempt")
+        async with db.transaction() as conn:
+            bound = await bind_launch_in(conn, attempt_id="attempt", host_generation=first.host_generation,
+                                         launch_id="launch")
+            evidence = {"scope": bound["scope"], "daemon_instance": "daemon",
+                        "enforced": True, "populated": True}
+            await observe_in(conn, attempt_id="attempt", launch_id="launch", kind="spawn", evidence=evidence)
+            await observe_in(conn, attempt_id="attempt", launch_id="launch", kind="sample",
+                             evidence={**evidence, "populated": False})
+        await db.execute("INSERT INTO runtime_exit_observations(attempt_id,runtime_ref,provider_session_ref,"
+                         "staff_session_id,contract_revision,host_generation,runtime_kind,runtime_instance,"
+                         "observed_status,observed_at) VALUES ('attempt','terminal','terminal:terminal',"
+                         "'staff-session',1,?,'cli','daemon','exited','2026-01-01')", (first.host_generation,))
+        assert not await leases.release_if_safe(first)
+        with pytest.raises(ControlConflict, match="still owns"):
+            await leases.acquire("project")
+        terminals = SimpleNamespace(observe_attempt=AsyncMock(return_value={"enforced": True,
+                                                                  "populated": False}),
+                                    release_attempt=AsyncMock())
+        app = SimpleNamespace(db=db, executions=owner, extensions={"terminals": terminals})
+        assert await reconcile_containment(app, "attempt")
+        terminals.release_attempt.assert_awaited_once()
+        assert await leases.release_if_safe(first)
+        assert (await leases.acquire("another-project")).revision == first.revision + 1
+    finally:
+        owner.release()
+
+
+async def test_writer_only_cli_survives_host_restart_without_a_false_release(db: Database) -> None:
+    owner = await _owner(db)
+    leases = WriterLeases(owner)
+    first = await leases.acquire("project")
+    await leases.begin_effects(first)
+    await _attempt(db, first.host_generation, strict=False)
+    await db.execute("INSERT INTO project_folders(id,project_id,path,env,position,created_at)"
+                     " VALUES ('folder','project','/tmp/fixture-worktree','container',0,'2026-01-01')")
+    await db.execute("INSERT INTO writer_attempt_bindings(attempt_id,project_id,host_generation,env,"
+                     "daemon_instance,folder_id,folder_path_digest,launch_workspace_digest,state,created_at,updated_at)"
+                     " VALUES ('attempt','project',?,'container','daemon','folder','folder-digest',"
+                     "'workspace-digest','reserved','2026-01-01','2026-01-01')", (str(first.host_generation),))
+    await leases.bind(first, "attempt")
+    async with db.transaction() as conn:
+        bound = await bind_launch_in(conn, attempt_id="attempt", host_generation=first.host_generation,
+                                     launch_id="launch")
+        await observe_in(conn, attempt_id="attempt", launch_id="launch", kind="spawn",
+                         evidence={"scope": bound["scope"], "daemon_instance": "daemon",
+                                   "enforced": True, "populated": True})
+    owner.release()
+    await db.close()
+    await db.open()
+    successor = ExecutionStore(db)
+    successor.acquire()
+    try:
+        await successor.boot()
+        recovered = WriterLeases(successor)
+        assert not await recovered.release_if_safe(first)
+        with pytest.raises(ControlConflict, match="still owns"):
+            await recovered.acquire("another-project")
+        app = SimpleNamespace(db=db, executions=successor, extensions={"terminals": SimpleNamespace()})
+        assert not await reconcile_containment(app, "attempt")
+        assert (await db.fetchone("SELECT state FROM writer_attempt_bindings WHERE attempt_id = 'attempt'"))[0] == "unknown"
+    finally:
+        successor.release()
+
+
 async def test_bind_refuses_an_uncontained_or_native_attempt(db: Database) -> None:
     owner = await _owner(db)
     try:
@@ -315,7 +396,7 @@ async def test_bind_refuses_an_uncontained_or_native_attempt(db: Database) -> No
         lease = await leases.acquire("project")
         await leases.begin_effects(lease)
         await _attempt(db, lease.host_generation, kind="daedalus", strict=False)
-        with pytest.raises(ControlConflict, match="strict CLI"):
+        with pytest.raises(ControlConflict, match="CLI containment"):
             await leases.bind(lease, "attempt")
         assert not await leases.release_if_safe(lease)
     finally:

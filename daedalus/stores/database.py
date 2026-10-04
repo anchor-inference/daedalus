@@ -59,6 +59,7 @@ from daedalus.stores.watch_authority_schema import MIGRATION as WATCH_AUTHORITY_
 from daedalus.stores.watch_delivery_schema import WATCH_DELIVERY_MIGRATION
 from daedalus.stores.workflow_scope_schema import MIGRATION as WORKFLOW_SCOPE_MIGRATION
 from daedalus.stores.workspace_archive_schema import MIGRATION as WORKSPACE_ARCHIVE_MIGRATION
+from daedalus.stores.writer_containment_schema import MIGRATION as WRITER_CONTAINMENT_MIGRATION
 
 logger = logging.getLogger(__name__)
 
@@ -1771,6 +1772,7 @@ MIGRATIONS.append(ATTEMPT_FAULT_MIGRATION)
 MIGRATIONS.append(RETRY_MIGRATION)
 MIGRATIONS.append(EFFECT_APPROVAL_MIGRATION)
 MIGRATIONS.append(CALENDAR_DIAGRAM_MIGRATION)
+MIGRATIONS.append(WRITER_CONTAINMENT_MIGRATION)
 
 BRANCH_BASE_SCHEMA = MIGRATIONS.index(CONTROL_MIGRATION)
 

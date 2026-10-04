@@ -829,6 +829,11 @@ class Team:
         folder = self.folder_for(project, member, task)
         source = await self._resume_source(member, task, folder, resume_from) if resume_from else None
         previous = await self.live_of(member)
+        if resources is not None and resources.get("mode") == "writer":
+            # Git preparation and initial file delivery have no contained process owner yet.
+            # Refuse them before the claim crosses its uncertain preparation boundary.
+            if member.isolation != "shared" or await self.manager.files.of_task(task.id):
+                raise StaffError("writer containment needs a shared folder without initial file delivery")
         if writer_lease is not None:
             # The checks above are reads. From here, settling an old worker, preparing a worktree
             # or delivering files may leave a write in flight if this host loses the outcome.
@@ -1145,7 +1150,9 @@ class Team:
             folder, cwd = await self.cwd_of(live)
             strict = await self.manager.db.fetchone(
                 "SELECT b.attempt_id FROM attempt_resource_bindings b JOIN execution_attempts a"
-                " ON a.id = b.attempt_id WHERE a.staff_session_id = ?", (live.id,)
+                " ON a.id = b.attempt_id WHERE a.staff_session_id = ?"
+                " UNION ALL SELECT b.attempt_id FROM writer_attempt_bindings b JOIN execution_attempts a"
+                " ON a.id = b.attempt_id WHERE a.staff_session_id = ?", (live.id, live.id)
             )
             leases = WriterLeases(self.app.executions) if strict is not None else None
             handoff = await leases.begin_handoff(strict["attempt_id"]) if leases is not None else None

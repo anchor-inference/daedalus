@@ -164,17 +164,27 @@ func install(path string, limits Limits) error {
 	if limits.DiskBytes != 0 {
 		return fmt.Errorf("%w: cgroup v2 has no disk-space quota", ErrUnavailable)
 	}
-	if limits.MemoryBytes <= 0 || limits.CPUMillis < 10 || limits.ProcessCount <= 0 {
-		return errors.New("memory, CPU and process ceilings must all be positive")
-	}
-	if limits.MemoryBytes < 16<<20 || limits.MemoryBytes > 1<<50 || limits.CPUMillis > 100000 || limits.ProcessCount > 65536 {
+	if limits.MemoryBytes < 0 || limits.CPUMillis < 0 || limits.ProcessCount < 0 ||
+		limits.MemoryBytes > 1<<50 || limits.CPUMillis > 100000 || limits.ProcessCount > 65536 ||
+		limits.MemoryBytes > 0 && limits.MemoryBytes < 16<<20 ||
+		limits.CPUMillis > 0 && limits.CPUMillis < 10 {
 		return errors.New("resource ceilings are outside supported bounds")
 	}
+	memory, cpu, processes := "max", fmt.Sprintf("max %d", cpuPeriod), "max"
+	if limits.MemoryBytes > 0 {
+		memory = strconv.FormatInt(limits.MemoryBytes, 10)
+	}
+	if limits.CPUMillis > 0 {
+		cpu = fmt.Sprintf("%d %d", limits.CPUMillis*cpuPeriod/1000, cpuPeriod)
+	}
+	if limits.ProcessCount > 0 {
+		processes = strconv.FormatInt(limits.ProcessCount, 10)
+	}
 	settings := map[string]string{
-		"memory.max":       strconv.FormatInt(limits.MemoryBytes, 10),
+		"memory.max":       memory,
 		"memory.oom.group": "1",
-		"cpu.max":          fmt.Sprintf("%d %d", limits.CPUMillis*cpuPeriod/1000, cpuPeriod),
-		"pids.max":         strconv.FormatInt(limits.ProcessCount, 10),
+		"cpu.max":          cpu,
+		"pids.max":         processes,
 	}
 	for name, value := range settings {
 		if err := os.WriteFile(filepath.Join(path, name), []byte(value), 0o600); err != nil {

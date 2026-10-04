@@ -714,15 +714,20 @@ class Terminals(SideChannels):
             if (info.get("capabilities") or {}).get("inherited_env_selection") is not True:
                 raise InvalidRequest("the terminal daemon cannot select inherited variables for a staff launch")
         project_id = spec.project_id or await self.owners.project_of(spec.owner)
-        if spec.owner.kind == "staff" and project_id:
+        if staff_harness and project_id:
             profile = await self.db.fetchone("SELECT state FROM resource_profile_versions"
                                              " WHERE project_id = ? ORDER BY revision DESC LIMIT 1",
                                              (project_id,))
-            if profile is not None and profile["state"] == "enabled":
+            needs_binding = ((profile is not None and profile["state"] == "enabled")
+                             or spec.resources is not None)
+            if needs_binding:
                 scope = (spec.resources or {}).get("scope") or {}
                 binding = await self.db.fetchone(
                     "SELECT b.attempt_id,b.host_generation,b.daemon_instance,b.launch_id,b.env"
-                    " FROM attempt_resource_bindings b JOIN execution_attempts a ON a.id = b.attempt_id"
+                    " FROM (SELECT attempt_id,host_generation,daemon_instance,launch_id,env,state"
+                    " FROM attempt_resource_bindings UNION ALL SELECT attempt_id,host_generation,"
+                    " daemon_instance,launch_id,env,state FROM writer_attempt_bindings) b"
+                    " JOIN execution_attempts a ON a.id = b.attempt_id"
                     " JOIN staff_sessions s ON s.id = a.staff_session_id"
                     " WHERE s.staff_id = ? AND s.ended_at IS NULL AND b.state IN ('reserved','enforced')"
                     " AND b.attempt_id = ?",
@@ -731,7 +736,7 @@ class Terminals(SideChannels):
                 if (binding is None or binding["host_generation"] != scope.get("host_generation")
                         or binding["daemon_instance"] != spec.resources.get("expected_instance")
                         or binding["launch_id"] != scope.get("launch_id") or binding["env"] != spec.env):
-                    raise InvalidRequest("a strict staff terminal needs its exact attempt containment")
+                    raise InvalidRequest("a writable staff terminal needs its exact attempt containment")
         cwd = spec.cwd or await self.owners.default_cwd(spec.env, spec.owner, project_id) or ""
         terminal_id = secrets.token_hex(6)
         row = {

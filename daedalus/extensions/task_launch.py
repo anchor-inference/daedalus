@@ -35,7 +35,13 @@ from daedalus.stores.executions import ACTIVE
 from daedalus.stores.goal_budget import requires_priced_native_in
 from daedalus.stores.goal_budget import view_in as goal_budget_view_in
 from daedalus.stores.outbox import Claim, OutboxStore
-from daedalus.stores.resource_profiles import disk_snapshot, latest_in, record_disk_entry_in, strict_target
+from daedalus.stores.resource_profiles import (
+    disk_snapshot,
+    latest_in,
+    record_disk_entry_in,
+    strict_target,
+    writer_target,
+)
 from daedalus.stores.runtime_release import attempt_released_in, no_entry_in
 from daedalus.stores.staff import DAEDALUS_EFFORTS, StaffError, daedalus_cannot_reach
 from daedalus.stores.update_drains import UpdateDrainActive, assert_admission_open_in
@@ -90,13 +96,14 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
                 raise ControlConflict("the command identity was reused with a different request")
             return json.loads(receipt["response_json"])
         profile = await latest_in(conn, scope.id)
-        if profile is not None and profile["state"] == "enabled":
+        member_row = await one(conn, "SELECT harness,name,isolation,default_folder_id FROM staff"
+                               " WHERE id = ? AND project_id = ? AND archived_at IS NULL",
+                               (staff_id, scope.id))
+        if member_row is None:
+            raise ControlDenied("the worker is not an active member of this project")
+        if (profile is not None and profile["state"] == "enabled"
+                or member_row["harness"] != "daedalus" and member_row["isolation"] == "shared"):
             task_row = await one(conn, "SELECT folder_id FROM board_tasks WHERE id = ?", (task_id,))
-            member_row = await one(conn, "SELECT harness,name,isolation,default_folder_id FROM staff"
-                                   " WHERE id = ? AND project_id = ? AND archived_at IS NULL",
-                                   (staff_id, scope.id))
-            if member_row is None:
-                raise ControlDenied("the worker is not an active member of this project")
             folder = None
             for folder_id in (task_row["folder_id"], member_row["default_folder_id"]):
                 if folder_id:
@@ -120,14 +127,19 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
         fallback = await handoff_preview(app, task_id, fallback_from_attempt_id, staff_id)
         if fallback["preview_digest"] != fallback_preview_digest or not fallback["ready"]:
             raise ControlConflict("the runtime handoff preview is stale or its source is not released")
-    if profile is not None and profile["state"] == "enabled":
-        if harness == "daedalus":
+    strict_profile = profile is not None and profile["state"] == "enabled"
+    writer_only = not strict_profile and member_row["harness"] != "daedalus" and member_row["isolation"] == "shared"
+    if writer_only and await app.db.fetchone("SELECT 1 FROM task_files WHERE task_id = ? LIMIT 1", (task_id,)):
+        raise ControlConflict("writer containment cannot yet own initial file delivery")
+    if strict_profile or writer_only:
+        if strict_profile and harness == "daedalus":
             strict_target(profile, env=env, harness=harness, capability={})
         terminals = app.extensions.get("terminals")
         if terminals is None:
             raise ControlConflict("the terminal daemon cannot prove resource containment")
         capability = await terminals.containment_capability(env)
-        resources = strict_target(profile, env=env, harness=harness, capability=capability)
+        resources = (strict_target(profile, env=env, harness=harness, capability=capability)
+                     if strict_profile else writer_target(env=env, harness=harness, capability=capability))
         resources["folder_id"] = folder["id"]
         resources["workspace_path_digest"] = digest(folder["path"])
         resources["launch_workspace_digest"] = digest(workspace_path)
@@ -219,11 +231,12 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
         if resources is None:
             if current_profile is not None and current_profile["state"] == "enabled":
                 raise ControlConflict("the resource profile changed before launch")
-        elif (current_profile is None or current_profile["state"] != "enabled"
-              or int(current_profile["revision"]) != resources["profile_revision"]
-              or folder["env"] != resources["env"] or folder["id"] != resources["folder_id"]
+        elif (folder["env"] != resources["env"] or folder["id"] != resources["folder_id"]
               or digest(folder["path"]) != resources["workspace_path_digest"]
-              or int(current_profile["min_free_disk_bytes"]) != resources["min_free_disk_bytes"]):
+              or (resources.get("mode") == "writer" and current_profile is not None and current_profile["state"] == "enabled")
+              or (resources.get("mode") != "writer" and (current_profile is None or current_profile["state"] != "enabled"
+                  or int(current_profile["revision"]) != resources["profile_revision"]
+                  or int(current_profile["min_free_disk_bytes"]) != resources["min_free_disk_bytes"]))):
             raise ControlConflict("the resource profile or worker environment changed before launch")
         if fallback is not None:
             current = await snapshot_in(conn, task_id=task_id, source_attempt_id=fallback_from_attempt_id,
@@ -365,8 +378,10 @@ class TaskLaunchEffect:
         if resources is None:
             if profile is not None and profile["state"] == "enabled":
                 raise ControlDenied("the resource profile changed after the launch command")
-        elif (profile is None or profile["state"] != "enabled" or profile["revision"] != resources["profile_revision"]
-              or profile["min_free_disk_bytes"] != resources["min_free_disk_bytes"]):
+        elif ((resources.get("mode") == "writer" and profile is not None and profile["state"] == "enabled")
+              or (resources.get("mode") != "writer" and (profile is None or profile["state"] != "enabled"
+                  or profile["revision"] != resources["profile_revision"]
+                  or profile["min_free_disk_bytes"] != resources["min_free_disk_bytes"]))):
             raise ControlDenied("the resource profile changed after the launch command")
 
     async def run(self, claim: Claim, check: Callable[[Claim], Awaitable[None]]) -> EffectOutcome:

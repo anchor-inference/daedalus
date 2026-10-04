@@ -17,7 +17,9 @@ logger = logging.getLogger(__name__)
 
 async def binding(app: Application, attempt_id: str) -> dict[str, Any] | None:
     row = await app.db.fetchone("SELECT attempt_id,host_generation,daemon_instance,launch_id,env"
-                                " FROM attempt_resource_bindings WHERE attempt_id = ?", (attempt_id,))
+                                " FROM attempt_resource_bindings WHERE attempt_id = ?"
+                                " UNION ALL SELECT attempt_id,host_generation,daemon_instance,launch_id,env"
+                                " FROM writer_attempt_bindings WHERE attempt_id = ?", (attempt_id, attempt_id))
     if row is None or not row["launch_id"]:
         return None
     scope = {"attempt_id": row["attempt_id"], "host_generation": row["host_generation"],
@@ -119,8 +121,12 @@ class ResourceMonitor:
                     "SELECT b.attempt_id FROM attempt_resource_bindings b"
                     " WHERE (b.state = 'enforced' OR (b.state = 'unknown' AND b.host_generation = ?))"
                     " AND b.launch_id IS NOT NULL"
+                    " AND EXISTS(SELECT 1 FROM runtime_exit_observations e WHERE e.attempt_id = b.attempt_id)"
+                    " UNION ALL SELECT b.attempt_id FROM writer_attempt_bindings b"
+                    " WHERE (b.state = 'enforced' OR (b.state = 'unknown' AND b.host_generation = ?))"
+                    " AND b.launch_id IS NOT NULL"
                     " AND EXISTS(SELECT 1 FROM runtime_exit_observations e WHERE e.attempt_id = b.attempt_id)",
-                    (str(generation),),
+                    (str(generation), str(generation)),
                 )
                 rows = await cursor.fetchall()
                 await cursor.close()

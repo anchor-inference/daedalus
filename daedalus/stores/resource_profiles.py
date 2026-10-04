@@ -73,6 +73,20 @@ def strict_target(profile: aiosqlite.Row, *, env: str, harness: str,
             "min_free_disk_bytes": int(profile["min_free_disk_bytes"])}
 
 
+def writer_target(*, env: str, harness: str, capability: dict[str, Any]) -> dict[str, Any]:
+    """Contain a writable CLI even when the operator has set no resource ceilings."""
+    if harness in ("daedalus", "opencode"):
+        raise ControlConflict("this worker has no contained writable CLI launch")
+    if (env not in ("container", "host") or capability.get("available") is not True
+            or capability.get("kind") != "cgroup_v2" or capability.get("sandbox") != "ok"):
+        raise ControlConflict("the CLI environment has no proven delegated writer containment")
+    instance = capability.get("daemon_instance")
+    if not isinstance(instance, str) or not instance:
+        raise ControlConflict("the terminal daemon generation is unknown")
+    return {"mode": "writer", "limits": dict.fromkeys(LIMIT_FIELDS, 0),
+            "env": env, "daemon_instance": instance, "min_free_disk_bytes": 0}
+
+
 def disk_snapshot(observation: dict[str, Any] | None, *, path: str, minimum: int,
                   admitted: dict[str, Any] | None = None) -> dict[str, Any]:
     """Accept only a fresh daemon observation of the selected workspace volume, never a reservation."""
@@ -98,6 +112,21 @@ def disk_snapshot(observation: dict[str, Any] | None, *, path: str, minimum: int
 
 async def bind_attempt_in(conn: aiosqlite.Connection, *, attempt_id: str, project_id: str,
                           host_generation: int, resource: dict[str, Any]) -> None:
+    if resource.get("mode") == "writer":
+        if (resource.get("limits") != dict.fromkeys(LIMIT_FIELDS, 0)
+                or resource.get("min_free_disk_bytes") != 0
+                or not resource.get("folder_id") or not resource.get("workspace_path_digest")
+                or not resource.get("launch_workspace_digest")):
+            raise ControlConflict("the writer containment target is incomplete")
+        await conn.execute(
+            "INSERT INTO writer_attempt_bindings(attempt_id,project_id,host_generation,env,daemon_instance,"
+            "folder_id,folder_path_digest,launch_workspace_digest,state,created_at,updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (attempt_id, project_id, str(host_generation), resource["env"], resource["daemon_instance"],
+             resource["folder_id"], resource["workspace_path_digest"],
+             resource["launch_workspace_digest"], "reserved", now(), now()),
+        )
+        return
     profile = await latest_in(conn, project_id)
     if (profile is None or profile["state"] != "enabled"
             or int(profile["revision"]) != resource["profile_revision"]
@@ -143,21 +172,29 @@ async def record_disk_entry_in(conn: aiosqlite.Connection, *, attempt_id: str,
 
 async def bind_launch_in(conn: aiosqlite.Connection, *, attempt_id: str,
                          host_generation: int, launch_id: str) -> dict[str, Any]:
-    row = await one(conn, "SELECT * FROM attempt_resource_bindings WHERE attempt_id = ?", (attempt_id,))
+    table, row = await _binding(conn, attempt_id)
     if row is None or row["host_generation"] != str(host_generation):
         raise ControlConflict("resource containment belongs to another host generation")
     if row["launch_id"] not in (None, launch_id):
         raise ControlConflict("the attempt already has a different resource launch")
-    await conn.execute("UPDATE attempt_resource_bindings SET launch_id = ?,updated_at = ?"
+    await conn.execute(f"UPDATE {table} SET launch_id = ?,updated_at = ?"
                        " WHERE attempt_id = ? AND host_generation = ?", (launch_id, now(), attempt_id, str(host_generation)))
     return {"scope": {"attempt_id": attempt_id, "host_generation": str(host_generation),
                       "launch_id": launch_id},
-            "limits": json.loads(row["limits_json"]), "expected_instance": row["daemon_instance"]}
+            "limits": json.loads(row["limits_json"]) if table == "attempt_resource_bindings" else dict.fromkeys(LIMIT_FIELDS, 0),
+            "expected_instance": row["daemon_instance"]}
+
+
+async def _binding(conn: aiosqlite.Connection, attempt_id: str) -> tuple[str, aiosqlite.Row | None]:
+    row = await one(conn, "SELECT * FROM attempt_resource_bindings WHERE attempt_id = ?", (attempt_id,))
+    if row is not None:
+        return "attempt_resource_bindings", row
+    return "writer_attempt_bindings", await one(conn, "SELECT * FROM writer_attempt_bindings WHERE attempt_id = ?", (attempt_id,))
 
 
 async def observe_in(conn: aiosqlite.Connection, *, attempt_id: str, launch_id: str,
                      kind: str, evidence: dict[str, Any], terminal_id: str | None = None) -> None:
-    row = await one(conn, "SELECT * FROM attempt_resource_bindings WHERE attempt_id = ?", (attempt_id,))
+    table, row = await _binding(conn, attempt_id)
     if row is None or row["launch_id"] != launch_id:
         raise ControlConflict("resource observation has no matching attempt launch")
     if evidence.get("scope") != {"attempt_id": attempt_id, "host_generation": row["host_generation"],
@@ -168,49 +205,61 @@ async def observe_in(conn: aiosqlite.Connection, *, attempt_id: str, launch_id: 
     if kind not in ("spawn", "sample", "stop", "exit", "unknown"):
         raise ValueError("invalid resource observation kind")
     if kind == "unknown":
-        previous = await one(conn, "SELECT observation_kind,reason FROM attempt_resource_observations"
+        observations = "attempt_resource_observations" if table == "attempt_resource_bindings" else "writer_attempt_observations"
+        previous = await one(conn, f"SELECT observation_kind,reason FROM {observations}"
                              " WHERE attempt_id = ? ORDER BY observed_at DESC,id DESC LIMIT 1", (attempt_id,))
         if (previous is not None and previous["observation_kind"] == "unknown"
                 and previous["reason"] == str(evidence.get("reason") or "")):
             return
-    await conn.execute(
-        "INSERT INTO attempt_resource_observations(id,attempt_id,host_generation,daemon_instance,launch_id,"
-        "terminal_id,observation_kind,enforced,populated,memory_peak_bytes,cpu_usage_usec,processes,"
-        "oom_kills,pids_max_events,reason,observed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (uuid.uuid4().hex, attempt_id, row["host_generation"], row["daemon_instance"], launch_id,
-         terminal_id, kind, int(bool(evidence.get("enforced"))),
-         int(evidence["populated"]) if evidence.get("populated") is not None else None,
-         evidence.get("memory_peak_bytes"), evidence.get("cpu_usage_usec"), evidence.get("processes"),
-         evidence.get("oom_kills"), evidence.get("pids_max_events"), str(evidence.get("reason") or ""), now()),
-    )
+    common = (uuid.uuid4().hex, attempt_id, row["host_generation"], row["daemon_instance"], launch_id,
+              terminal_id, kind, int(bool(evidence.get("enforced"))),
+              int(evidence["populated"]) if evidence.get("populated") is not None else None)
+    if table == "attempt_resource_bindings":
+        await conn.execute(
+            "INSERT INTO attempt_resource_observations(id,attempt_id,host_generation,daemon_instance,launch_id,"
+            "terminal_id,observation_kind,enforced,populated,memory_peak_bytes,cpu_usage_usec,processes,"
+            "oom_kills,pids_max_events,reason,observed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (*common, evidence.get("memory_peak_bytes"), evidence.get("cpu_usage_usec"), evidence.get("processes"),
+             evidence.get("oom_kills"), evidence.get("pids_max_events"), str(evidence.get("reason") or ""), now()),
+        )
+    else:
+        await conn.execute(
+            "INSERT INTO writer_attempt_observations(id,attempt_id,host_generation,daemon_instance,launch_id,"
+            "terminal_id,observation_kind,enforced,populated,reason,observed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (*common, str(evidence.get("reason") or ""), now()),
+        )
     if kind == "spawn" and evidence.get("enforced"):
-        await conn.execute("UPDATE attempt_resource_bindings SET state = 'enforced',updated_at = ?"
+        await conn.execute(f"UPDATE {table} SET state = 'enforced',updated_at = ?"
                            " WHERE attempt_id = ? AND state = 'reserved'", (now(), attempt_id))
     elif kind == "unknown":
-        await conn.execute("UPDATE attempt_resource_bindings SET state = 'unknown',updated_at = ?"
+        await conn.execute(f"UPDATE {table} SET state = 'unknown',updated_at = ?"
                            " WHERE attempt_id = ?", (now(), attempt_id))
     elif kind in ("exit", "stop") and evidence.get("enforced") and evidence.get("populated") is False:
-        await conn.execute("UPDATE attempt_resource_bindings SET state = 'released',updated_at = ?"
+        await conn.execute(f"UPDATE {table} SET state = 'released',updated_at = ?"
                            " WHERE attempt_id = ?", (now(), attempt_id))
 
 
 async def released_in(conn: aiosqlite.Connection, attempt_id: str) -> bool:
-    row = await one(conn, "SELECT state,launch_id FROM attempt_resource_bindings WHERE attempt_id = ?", (attempt_id,))
+    table, row = await _binding(conn, attempt_id)
     if row is None:
         return True
     if row["launch_id"] is None:
         return False
+    observations = "attempt_resource_observations" if table == "attempt_resource_bindings" else "writer_attempt_observations"
     return row["state"] == "released" and await one(conn,
-        "SELECT 1 FROM attempt_resource_observations WHERE attempt_id = ? AND launch_id = ?"
+        f"SELECT 1 FROM {observations} WHERE attempt_id = ? AND launch_id = ?"
         " AND observation_kind IN ('stop','exit') AND enforced = 1 AND populated = 0",
         (attempt_id, row["launch_id"])) is not None
 
 
 async def for_staff_in(conn: aiosqlite.Connection, staff_session_id: str) -> dict[str, Any] | None:
-    row = await one(conn, "SELECT b.* FROM attempt_resource_bindings b JOIN execution_attempts a"
-                    " ON a.id = b.attempt_id WHERE a.staff_session_id = ?", (staff_session_id,))
+    row = await one(conn, "SELECT b.attempt_id FROM attempt_resource_bindings b JOIN execution_attempts a"
+                    " ON a.id = b.attempt_id WHERE a.staff_session_id = ?"
+                    " UNION ALL SELECT b.attempt_id FROM writer_attempt_bindings b JOIN execution_attempts a"
+                    " ON a.id = b.attempt_id WHERE a.staff_session_id = ?", (staff_session_id, staff_session_id))
     if row is None:
         return None
+    table, row = await _binding(conn, row["attempt_id"])
     if row["state"] == "released":
         # Transcript export after proved physical exit is a host read, not worker execution.
         return None
@@ -218,4 +267,5 @@ async def for_staff_in(conn: aiosqlite.Connection, staff_session_id: str) -> dic
         raise ControlConflict("the worker's resource attempt has no bound launch")
     return {"scope": {"attempt_id": row["attempt_id"], "host_generation": row["host_generation"],
                       "launch_id": row["launch_id"]},
-            "limits": json.loads(row["limits_json"]), "expected_instance": row["daemon_instance"]}
+            "limits": json.loads(row["limits_json"]) if table == "attempt_resource_bindings" else dict.fromkeys(LIMIT_FIELDS, 0),
+            "expected_instance": row["daemon_instance"]}

@@ -162,6 +162,7 @@ async def test_every_project_keeps_its_folder_and_every_session_its_directory(tm
             "resource_profile_versions", "attempt_resource_bindings", "attempt_resource_observations",
             "schedule_proposals", "schedule_proposal_receipts",
             "attempt_disk_preflights", "attempt_disk_entry_observations",
+            "writer_attempt_bindings", "writer_attempt_observations",
         "calendar_accounts", "calendar_events", "diagrams", "diagram_revisions",
     })
     assert new - later == {"project_folders", "project_briefs", "project_journal", "staff", "staff_sessions", "staff_messages", "asks", "watches"}

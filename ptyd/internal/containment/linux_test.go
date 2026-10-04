@@ -33,6 +33,21 @@ func TestScopeAndObservations(t *testing.T) {
 	}
 }
 
+func TestWriterContainmentWithoutResourceCeilings(t *testing.T) {
+	root := t.TempDir()
+	if err := install(root, Limits{}); err != nil {
+		t.Fatal(err)
+	}
+	for file, expected := range map[string]string{
+		"memory.max": "max", "cpu.max": "max 100000", "pids.max": "max",
+	} {
+		value, err := os.ReadFile(filepath.Join(root, file))
+		if err != nil || string(value) != expected {
+			t.Fatalf("%s = %q, %v; want %q", file, value, err, expected)
+		}
+	}
+}
+
 func TestKernelContainmentOwnsSetsidDescendantWithoutKillingSibling(t *testing.T) {
 	controller, err := NewController("testinstance")
 	if err != nil {

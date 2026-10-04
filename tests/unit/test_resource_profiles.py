@@ -26,6 +26,7 @@ from daedalus.stores.resource_profiles import (
     released_in,
     set_profile_in,
     strict_target,
+    writer_target,
 )
 from daedalus.stores.staff import StaffStore
 from tests.unit.test_launch_controls import OPERATOR, launch_fixture
@@ -104,6 +105,36 @@ async def test_strict_preflight_refuses_native_disk_and_unproved_daemon(db: Data
                                          "daemon_instance": "instance"})
     assert accepted["limits"] == {"memory_bytes": 64 << 20, "cpu_millis": 500,
                                   "process_count": 8, "disk_bytes": 0}
+
+
+async def test_writer_only_attempt_binds_without_a_resource_profile(db: Database) -> None:
+    app, _, task, _ = await launch_fixture(db)
+    try:
+        await db.execute("INSERT INTO project_folders(id,project_id,path,env,position,created_at)"
+                         " VALUES ('folder','project','/tmp/fixture-worktree','container',0,'2026-01-01')")
+        await db.execute("UPDATE staff SET harness = 'claude',isolation = 'shared' WHERE id = 'worker'")
+        await db.execute("UPDATE staff_sessions SET kind = 'cli' WHERE id = 'staff-session'")
+        member = await StaffStore(db).get("worker")
+        session = await StaffStore(db).session("staff-session")
+        target = writer_target(env="container", harness="claude",
+                               capability={"available": True, "kind": "cgroup_v2", "sandbox": "ok",
+                                           "daemon_instance": "daemon-one"})
+        target.update({"folder_id": "folder", "workspace_path_digest": "folder-digest",
+                       "launch_workspace_digest": "workspace-digest"})
+        token = launch_resources.set(target)
+        try:
+            identity = await prepare_attempt(app, OPERATOR, member,
+                                             BoardTask(task.id, task.title, task.status,
+                                                       project_id=task.project_id, assignee_staff_id=member.id),
+                                             session, fence_token=secrets.token_urlsafe(32))
+        finally:
+            launch_resources.reset(token)
+        row = await db.fetchone("SELECT state,daemon_instance,folder_id FROM writer_attempt_bindings"
+                                " WHERE attempt_id = ?", (identity.id,))
+        assert (row["state"], row["daemon_instance"], row["folder_id"]) == ("reserved", "daemon-one", "folder")
+        assert (await db.fetchone("SELECT count(*) FROM attempt_resource_bindings"))[0] == 0
+    finally:
+        app.executions.release()
 
 
 async def test_resource_binding_needs_exact_launch_and_empty_observation(db: Database) -> None:
