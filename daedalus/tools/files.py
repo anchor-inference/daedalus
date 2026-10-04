@@ -14,6 +14,7 @@ from protocore.tools.decorator import tool
 
 from daedalus.host.services import PathOutsideProject
 from daedalus.processes import end_tree
+from daedalus.stores.control import ControlConflict, ControlDenied
 from daedalus.tools import search_hint
 from daedalus.tools._common import FRAME_CHARS, clip, error, ok, output_limit, refuse_protected, services_for
 from daedalus.tools.shell import shell_argv, shell_environment
@@ -156,7 +157,7 @@ async def write_file(context: ToolContext, path: str, content: str) -> ToolResul
     assert target is not None
     try:
         await services.fs.write_text(target, content)
-    except OSError as exc:
+    except (OSError, ControlConflict, ControlDenied) as exc:
         return error(context, f"could not write {target}: {exc}")
     return ok(context, f"wrote {len(content)} characters to {target}" + await diagnostics(services, target), path=str(target))
 
@@ -192,7 +193,7 @@ async def edit_file(
         return error(context, str(miss))
     try:
         await fs.write_text(target, updated)
-    except OSError as exc:
+    except (OSError, ControlConflict, ControlDenied) as exc:
         return error(context, f"could not write {target}: {exc}")
     note = f" (matched {how})" if how != "exactly" else ""
     return ok(context, f"edited {target}: {count} replacement(s){note}" + await diagnostics(services, target), path=str(target))
@@ -320,7 +321,7 @@ async def multi_edit(context: ToolContext, path: str, edits: list[dict[str, Any]
         total += count
     try:
         await fs.write_text(target, text)
-    except OSError as exc:
+    except (OSError, ControlConflict, ControlDenied) as exc:
         return error(context, f"could not write {target}: {exc}")
     return ok(context, f"edited {target}: {total} replacement(s) in {len(edits)} edits" + await diagnostics(services, target), path=str(target))
 

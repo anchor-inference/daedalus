@@ -8,12 +8,15 @@ import threading
 from pathlib import Path
 
 import pytest
+from protocore.contracts.tools import ToolContext
 
 from daedalus.host.file_effects import ClaimedLocalFS
+from daedalus.host.services import SessionServices, locator
 from daedalus.stores.control import ControlConflict, ControlDenied, canonical
 from daedalus.stores.database import Database
 from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.writer_leases import WriterLeases
+from daedalus.tools.files import edit_file, multi_edit, write_file
 from tests.unit.test_writer_leases import _attempt, _owner
 
 
@@ -170,6 +173,10 @@ async def test_restart_does_not_reopen_an_owner_while_its_old_thread_writes(db: 
             await recovered.acquire("project")
         with pytest.raises(ControlConflict, match="claim changed"):
             await ClaimedLocalFS.create(recovered, lease, owner_instance="new-host", operation_id="replacement")
+        late = tmp_path / "replacement.txt"
+        with pytest.raises(ControlConflict, match="revoked"):
+            await fs.write_text(late, "new-owner")
+        assert not late.exists()
         resume.set()
         await asyncio.wait_for(writer, timeout=5)
         with pytest.raises(ControlDenied, match="generation"):
@@ -223,4 +230,36 @@ async def test_failed_file_mutation_settles_without_becoming_success(db: Databas
         assert not await leases.release_if_safe(lease)
         assert await db.kv_get("local_file_barrier:" + fs.effect.id) == receipt
     finally:
+        owner.release()
+
+
+async def test_native_file_tools_share_one_claimed_mutation_frontier(db: Database, tmp_path: Path) -> None:
+    owner = await _owner(db)
+    session_id = "claimed-file-tools"
+    try:
+        leases = WriterLeases(owner)
+        lease = await leases.acquire("project")
+        fs = await ClaimedLocalFS.create(leases, lease, owner_instance="host", operation_id=session_id)
+        services = SessionServices(session_id=session_id, workspace_dir=tmp_path, claimed_fs=fs)
+        locator.register(services)
+        context = ToolContext(tenant_id="t", run_id="r", session_id=session_id,
+                              metadata={"tool_call_id": "call"})
+        assert services.fs is fs
+        written = await write_file().invoke(context, {"path": "note.txt", "content": "one two"})
+        edited = await edit_file().invoke(context, {"path": "note.txt", "old_string": "one", "new_string": "three"})
+        multiple = await multi_edit().invoke(context, {"path": "note.txt", "edits": [
+            {"old_string": "three", "new_string": "four"},
+            {"old_string": "two", "new_string": "five"},
+        ]})
+        assert not written.is_error and not edited.is_error and not multiple.is_error
+        assert (tmp_path / "note.txt").read_text() == "four five"
+        receipt = await fs.revoke()
+        assert receipt["mutations"] == ["written", "written", "written"]
+        refused = await write_file().invoke(context, {"path": "after.txt", "content": "late"})
+        assert refused.is_error
+        assert not (tmp_path / "after.txt").exists()
+        assert await db.kv_get("local_file_barrier:" + fs.effect.id) == receipt
+        assert not await leases.release_if_safe(lease)
+    finally:
+        locator.unregister(session_id)
         owner.release()

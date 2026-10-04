@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from daedalus.host.containment import Walls
+from daedalus.host.file_effects import ClaimedLocalFS
 from daedalus.host.filesystem import ExecBackend, LocalFS, ShellFS
 from daedalus.host.policy import sealed_root
 
@@ -70,6 +71,8 @@ class SessionServices:
     """Create a standing agent session with a brief, files and settings (see the SpawnAgent tool)."""
     exec_backend: ExecBackend | None = None
     """Where Exec runs and the file tools look when the session drives another machine (a benchmark container)."""
+    claimed_fs: ClaimedLocalFS | None = None
+    """A caller-owned local mutation frontier. Its caller must revoke it after the session stops."""
     writable: list[Path] = field(default_factory=list)
     """Paths outside the walls this session may write to under the sandbox: the worktrees it opened for its own changes."""
     walls: Walls | None = None
@@ -109,6 +112,10 @@ class SessionServices:
 
     @property
     def fs(self) -> LocalFS | ShellFS:
+        if self.claimed_fs is not None:
+            if self.exec_backend is not None:
+                raise RuntimeError("a claimed local filesystem cannot write through a remote shell")
+            return self.claimed_fs
         return ShellFS(self.exec_backend, timeout=min(self.tool_timeout_seconds, 120.0)) if self.exec_backend is not None else LocalFS()
 
     def resolve(self, path: str | None, *, write: bool = False) -> Path:
