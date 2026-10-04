@@ -112,6 +112,7 @@ from daedalus.stores.sqlite import (
     message_text,
 )
 from daedalus.stores.staff import AsksStore, StaffStore
+from daedalus.stores.update_drains import UpdateDrainActive, UpdateDrainPaused, assert_admission_open_in
 from daedalus.terminals import endpoint as terminal_endpoint
 from daedalus.tools import TOOL_GROUPS, discover_tools
 from daedalus.tools.dispatcher import build as build_dispatcher_tools
@@ -590,6 +591,7 @@ class SessionManager:
         self.run_started_hooks: list[Callable[[str, str], Awaitable[None]]] = []
         """``(session_id, run_id)`` after a run was actually created — the point where a prompt hook's side effects may be committed."""
         self.shutting_down = False
+        self._update_parked_run_ids: set[str] = set()
         self.recovering = True
         """True from construction until boot recovery has decided the fate of every run the previous process left behind."""
         self.unloadable_sessions: dict[str, str] = {}
@@ -2523,6 +2525,7 @@ class SessionManager:
         *,
         steer: bool = False,
         follow_up: bool = False,
+        expected_running: bool | None = None,
         as_answer: bool = True,
         origin: str = "operator",
         client_message_id: str | None = None,
@@ -2605,6 +2608,7 @@ class SessionManager:
             receipt_payload = {
                 "text": text,
                 "steer": steer,
+                "follow_up": follow_up,
                 "as_answer": as_answer,
                 "origin": origin,
                 "attachments": attachment_receipts,
@@ -2620,6 +2624,8 @@ class SessionManager:
                                 or (pinned["provider_id"], pinned["model"]) != _provider_resume[1:]):
                             raise RuntimeError("the provider continuation has no matching durable run pin")
                     return str(existing["run_id"] or state.run_id or "")
+            if expected_running is not None and bool(state.running) != expected_running:
+                raise RuntimeError("the run changed since the message was composed; review its destination and send again")
             if _provider_resume is not None:
                 failed_run_id, provider_id, model = _provider_resume
                 if (not client_message_id or text != PROVIDER_RESUME_NOTE or origin != "core"
@@ -2907,6 +2913,8 @@ class SessionManager:
         is the first (``claimed`` says the caller already won that race itself); a question that has a
         request row elsewhere is answered once, by whoever updates that row first.
         """
+        async with self.db.transaction() as conn:
+            await assert_admission_open_in(conn)
         state = await self.get_state(session_id)
         if state is None or state.pending is None or state.engine is None:
             raise RuntimeError("no pending question for this session")
@@ -3481,6 +3489,8 @@ class SessionManager:
     async def _start_run_ready(
         self, state: SessionState, message: Message | None, *, continue_turn: bool = False
     ) -> str:
+        async with self.db.transaction() as conn:
+            await assert_admission_open_in(conn)
         if state.running and not continue_turn:
             raise RuntimeError("a run is already active in this session")
         state.run_active_since = time.monotonic()
@@ -3631,6 +3641,21 @@ class SessionManager:
         status = "completed"
         try:
             # A continuation drives the model against the history as it stands; nothing is appended.
+            closed = None
+            async with self.db.transaction() as conn:
+                try:
+                    await assert_admission_open_in(conn)
+                except UpdateDrainActive as exc:
+                    closed = exc
+            if closed is not None:
+                # Snapshot persistence takes its own database lock. Keep it outside the
+                # admission transaction, including when a run has not entered the core yet.
+                if message is not None and not continue_turn:
+                    engine.history.append(message)
+                if engine.state is not LoopState.RUNNING:
+                    engine.transition_to(LoopState.RUNNING)
+                await engine.persist_snapshot()
+                raise UpdateDrainPaused(str(closed)) from closed
             iterator = engine.run(None) if continue_turn else engine.run(message)
             async for event in iterator:
                 await self._dispatch_event(state, event)
@@ -3642,8 +3667,15 @@ class SessionManager:
                 status = "cancelled"
             elif await self._report_provider_refusal(state, run_id):
                 status = "failed"
+        except UpdateDrainPaused:
+            status = "interrupted"
+            await self.runs.update_status(run_id, TENANT, RunStatus.paused)
+            raise
         except asyncio.CancelledError:
-            status = "interrupted" if self.shutting_down else "cancelled"
+            parked = run_id in self._update_parked_run_ids
+            status = "interrupted" if self.shutting_down or parked else "cancelled"
+            if parked:
+                await self.runs.update_status(run_id, TENANT, RunStatus.paused)
             raise
         except Exception as exc:  # noqa: BLE001 — surfaced to the operator, never swallowed
             logger.exception("run %s crashed", run_id)
@@ -5123,14 +5155,134 @@ class SessionManager:
 
     # -- recovery -------------------------------------------------------------------
 
-    async def resume_unfinished(self) -> list[str]:
+    async def stop_for_update(self, targets: list[dict[str, str]]) -> dict[str, list[str]]:
+        """Stop exact native runs only when no external tool outcome is still unconfirmed.
+
+        The engine's task exiting is insufficient for a detached command or an interrupted
+        side effect. Those remain visible for their existing runtime controls to reconcile.
+        """
+        async with self.db.transaction() as conn:
+            try:
+                await assert_admission_open_in(conn)
+            except UpdateDrainActive:
+                pass
+            else:
+                raise RuntimeError("close update admission before stopping native runs")
+        deadline = asyncio.get_running_loop().time() + self.config.ops.shutdown_grace_seconds
+        stopping = []
+        unconfirmed = []
+        tasks = []
+        for target in targets:
+            run_id = target['id']
+            state = self._states.get(target['session_id'])
+            row = await self.db.fetchone('SELECT session_id,status FROM runs WHERE id = ?', (run_id,))
+            if row is None or row['session_id'] != target['session_id']:
+                unconfirmed.append(run_id)
+                continue
+            if row['status'] in ('completed', 'error', 'cancelled'):
+                stopping.append(run_id)
+                continue
+            if state is None or state.run_id != run_id or state.engine is None:
+                unconfirmed.append(run_id)
+                continue
+            snapshot = state.engine.snapshot()
+            if snapshot.get('background_task_ids') or any(
+                    intent.get('state') == 'DISPATCHED' or intent.get('outcome') == 'unknown'
+                    for intent in snapshot.get('open_intents', [])):
+                unconfirmed.append(run_id)
+                continue
+            if state.task is not None and not state.task.done():
+                state.engine.stop()
+                state.task.cancel()
+                tasks.append(state.task)
+                stopping.append(run_id)
+            else:
+                # A saved question has no live task to cancel. Ending it must still publish
+                # the normal settled event and callbacks so ownership observes a real exit.
+                state.engine.stop()
+                state.pending = None
+                await self.db.execute('DELETE FROM pending_questions WHERE session_id = ? AND run_id = ?',
+                                      (target['session_id'], run_id))
+                await self.runs.update_status(run_id, TENANT, RunStatus.cancelled)
+                await self._announce_settled(state, run_id, 'cancelled', housekeeping=True)
+                state.settled.clear()
+                state.housekeeping = asyncio.create_task(self._settle_run(state, run_id, 'cancelled'),
+                                                        name=f"settle:{run_id}")
+                state.housekeeping.add_done_callback(_log_task_failure)
+                tasks.append(state.housekeeping)
+                stopping.append(run_id)
+        if tasks:
+            await asyncio.wait(tasks, timeout=max(0, deadline - asyncio.get_running_loop().time()))
+        writes = [task for state in self._states.values() if state.run_id in stopping
+                  for task in (state.housekeeping, *state.persist_tasks) if task is not None and not task.done()]
+        if writes:
+            await asyncio.wait(writes, timeout=max(0, deadline - asyncio.get_running_loop().time()))
+        confirmed = []
+        for run_id in stopping:
+            row = await self.db.fetchone('SELECT status FROM runs WHERE id = ?', (run_id,))
+            state = next((s for s in self._states.values() if s.run_id == run_id), None)
+            if (row is not None and row['status'] in ('completed', 'error', 'cancelled')
+                    and not (state and (state.running or self._settling(state)))):
+                confirmed.append(run_id)
+            else:
+                unconfirmed.append(run_id)
+        return {'stopped': sorted(confirmed), 'unconfirmed': sorted(set(unconfirmed))}
+
+    async def park_for_update(self, run_ids: set[str]) -> dict[str, list[str]]:
+        """Park exact native runs without closing providers or calling them completed.
+
+        A cancellation that has not finished saving remains unconfirmed; a timeout cannot
+        authorize replacement of the process or deletion of its checkpoint.
+        """
+        async with self.db.transaction() as conn:
+            try:
+                await assert_admission_open_in(conn)
+            except UpdateDrainActive:
+                pass
+            else:
+                raise RuntimeError("close update admission before parking native runs")
+        tasks = []
+        for state in tuple(self._states.values()):
+            if state.run_id not in run_ids:
+                continue
+            if state.task is not None and not state.task.done():
+                self._update_parked_run_ids.add(state.run_id)
+                state.task.cancel()
+                tasks.append(state.task)
+        if tasks:
+            await asyncio.wait(tasks, timeout=self.config.ops.shutdown_grace_seconds)
+        checkpoints = {entry["run_id"] for entry in await self.events.unfinished_snapshots()}
+        parked = []
+        unconfirmed = []
+        for run_id in sorted(run_ids):
+            state = next((s for s in self._states.values() if s.run_id == run_id), None)
+            pending_writes = bool(state and any(not task.done() for task in state.persist_tasks))
+            active = bool(state and (state.running or self._settling(state)))
+            if not active and not pending_writes and run_id in checkpoints:
+                parked.append(run_id)
+                self._update_parked_run_ids.discard(run_id)
+            else:
+                unconfirmed.append(run_id)
+        return {"parked": parked, "unconfirmed": unconfirmed}
+
+    async def resume_unfinished(self, allowed_run_ids: set[str] | None = None) -> list[str]:
         """Continue runs that were mid-flight when the process last stopped."""
+        # Recovery must not turn a closed update fence into a failed resume that deletes
+        # the only saved engine state. The update decision owns reopening admission.
+        async with self.db.transaction() as conn:
+            try:
+                await assert_admission_open_in(conn)
+            except UpdateDrainActive:
+                self.recovering = False
+                return []
         resumed: list[str] = []
         parked: list[str] = []
         exceeded = self.budget_exceeded()
         try:
             seen: set[str] = set()
             for entry in await self.events.unfinished_snapshots():  # newest first
+                if allowed_run_ids is not None and entry['run_id'] not in allowed_run_ids:
+                    continue
                 session_id = str(entry["session_id"] or entry["snapshot"].get("session_id") or "")
                 if session_id in seen:
                     # An older snapshot of a session whose newer run is resumed: a leftover, not a second run.
@@ -5148,6 +5300,11 @@ class SessionManager:
                         parked.append(entry["run_id"])
                         continue
                 await self._resume_one(entry, resumed)
+                if entry["run_id"] not in resumed:
+                    # A restore can legitimately wait for an answer, or fail because the
+                    # selected model is unavailable. Either way its saved state is still
+                    # the only copy of the work and cannot be treated as a stale run.
+                    parked.append(entry["run_id"])
             if parked:
                 logger.warning("budget exceeded; %d paid-provider unfinished run(s) stay parked until the cap is lifted", len(parked))
             await self._settle_stale_runs(resumed, parked)
@@ -5172,7 +5329,7 @@ class SessionManager:
         session_id = entry["session_id"] or entry["snapshot"].get("session_id")
         state = await self.get_state(session_id)
         if state is None:
-            await self.events.delete_snapshot(entry["run_id"])
+            logger.warning("run %s could not restore its session; checkpoint retained", entry["run_id"])
             return
         if state.running:
             return  # something in this process already drives the session; its own run owns the snapshot
@@ -5189,8 +5346,7 @@ class SessionManager:
                         or not message.metadata.get("daedalus.provider_resume")):
                     raise RuntimeError("the prepared provider input has no matching durable placement")
         except Exception:  # noqa: BLE001
-            logger.exception("could not resume run %s", entry["run_id"])
-            await self.events.delete_snapshot(entry["run_id"])
+            logger.exception("could not resume run %s; checkpoint retained", entry["run_id"])
             return
         state.engine = engine
         state.run_id = entry["run_id"]
@@ -5199,7 +5355,7 @@ class SessionManager:
         if engine.state is LoopState.AWAITING:
             row = await self.db.fetchone("SELECT * FROM pending_questions WHERE session_id = ?", (session_id,))
             if row is None:
-                await self.events.delete_snapshot(entry["run_id"])
+                logger.warning("run %s has no saved question; checkpoint retained", entry["run_id"])
                 return
             state.pending = PendingQuestion(
                 session_id=session_id,
@@ -5218,7 +5374,7 @@ class SessionManager:
                     logger.exception("pending-restored callback failed")
             return
         if not engine.history and message is None:
-            await self.events.delete_snapshot(entry["run_id"])
+            logger.warning("run %s has no replayable history; checkpoint retained", entry["run_id"])
             return
         if engine.state is not LoopState.RUNNING:
             engine.transition_to(LoopState.RUNNING)

@@ -907,8 +907,7 @@ async def test_a_report_is_never_folded_into_the_more_line(settings: Settings, d
 async def test_assign_to_a_worktree_member_in_a_plain_folder_is_refused_with_the_way_out(settings: Settings, db: Database, tmp_path: Path) -> None:
     """The orchestrator assigns a task in a folder that is no git repository to a member hired for a
     worktree of their own. The start used to go ahead in the folder itself; Assign now refuses, says
-    the card stays unstarted, and names both ways out. A refusal that comes later, from the queue,
-    wakes the orchestrator with the reason whole: cut at 200 characters it lost the ways out."""
+    the card stays unstarted, and names both ways out before a launch enters the queue."""
     r = await rig(settings, db, tmp_path)
     try:
         runtime = fake(r)
@@ -918,25 +917,16 @@ async def test_assign_to_a_worktree_member_in_a_plain_folder_is_refused_with_the
         notes.mkdir()
         await r.manager.projects.add_folder(r.project.id, str(notes))
         await r.manager.staff.hire(r.project.id, name="Ada", role="Menu", isolation="worktree")
-        task_id = _task_in(await r.call(sid, "assign", staff="Ada", title="Tidy the notes",
-                                        folder=str(notes), wait_for_admission=False, **BRIEF))
-
-        async def launch_failed() -> bool:
-            row = await r.manager.db.fetchone(
-                "SELECT state FROM effect_outbox WHERE kind = 'task.launch'"
-                " AND json_extract(payload_json,'$.control.task_id') = ?", (task_id,),
-            )
-            return row is not None and row["state"] == "failed"
-
-        await until_await(launch_failed, "the launch failure became durable")
-        row = await r.manager.db.fetchone(
-            "SELECT error FROM effect_outbox WHERE kind = 'task.launch'"
-            " AND json_extract(payload_json,'$.control.task_id') = ?", (task_id,),
-        )
-        assert row is not None
-        said = row["error"]
+        with pytest.raises(Refused) as refused:
+            await r.call(sid, "assign", staff="Ada", title="Tidy the notes",
+                         folder=str(notes), wait_for_admission=False, **BRIEF)
+        said = str(refused.value)
         assert "is not a git repository" in said
         assert "a folder of the project that is a git repository" in said and "isolation to shared" in said
+        task = await r.manager.db.fetchone("SELECT id,status FROM board_tasks WHERE title = 'Tidy the notes'")
+        assert task is not None and task["status"] == "todo"
+        assert await r.manager.db.fetchone("SELECT id FROM effect_outbox WHERE kind = 'task.launch'"
+                                            " AND json_extract(payload_json,'$.control.task_id') = ?", (task["id"],)) is None
         assert runtime.started == []
     finally:
         await close_team(r.manager)

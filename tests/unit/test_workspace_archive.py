@@ -323,8 +323,8 @@ async def test_context_packet_tamper_is_rejected_before_import(archive_store) ->
 async def test_historical_goal_cost_is_portable_without_restoring_spend_authority(archive_store) -> None:
     db, _, service = archive_store
     await db.execute(
-        "INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at)"
-        " VALUES ('source',1,'Research','operator','2026-01-01')"
+        "INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at,checks_json)"
+        " VALUES ('source',1,'Research','operator','2026-01-01','[\"Sources checked\"]')"
     )
     await db.execute(
         "INSERT INTO project_goal_budgets(project_id,budget_id,limit_microusd,"
@@ -376,6 +376,7 @@ async def test_historical_goal_cost_is_portable_without_restoring_spend_authorit
         " VALUES ('source-slot','goal:source-budget',1000000)"
     )
     checked = check_archive(await service.export("source"))
+    assert checked.rows["project_goal_revisions"][0]["checks_json"] == '["Sources checked"]'
     assert checked.counts["goal_inference_reservations"] == 2
     assert checked.counts["goal_usage_events"] == 1
     assert checked.counts["goal_comparison_slots"] == 1
@@ -388,6 +389,8 @@ async def test_historical_goal_cost_is_portable_without_restoring_spend_authorit
                                           expected_collection_revision=revision,
                                           client_operation_id="restore-with-cost")
     restored = result["project_id"]
+    assert (await db.fetchone("SELECT checks_json FROM project_goal_revisions WHERE project_id=?",
+                             (restored,)))["checks_json"] == '["Sources checked"]'
     summary = result["historical_goal_budget"]
     assert summary["historical_observed_spent_microusd"] == 12345
     assert summary["historical_total_microusd"] is None

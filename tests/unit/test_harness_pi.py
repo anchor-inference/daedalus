@@ -188,6 +188,9 @@ def log(s: Stand, what: str) -> list[dict[str, Any]]:
 async def started(s: Stand, script: str, *, name: str = "Ada") -> Any:
     member = await s.hire(name)
     task_id = await s.task(f"Menu page;{script};")
+    # Pi's built-in tools cannot enforce the project's ask or edits permission level.
+    # These bridge lifecycle tests explicitly exercise an unrestricted Pi launch.
+    s.team.permission_level = lambda _project: "all"
     assigned = await operator_assignment(s.team, member, task_id)
     assert assigned["state"] == "queued" and assigned["effect_id"]
     return member

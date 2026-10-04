@@ -1091,14 +1091,14 @@ async def test_a_worktree_member_is_refused_a_task_whose_folder_has_no_worktree_
         ada = await manager.staff.hire(project.id, name="Ada", isolation="worktree")
         task_id = await board_task(manager, project, "Tidy the notes")
         await manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (folder_id, task_id))
-        with pytest.raises(AssertionError) as refused:
+        with pytest.raises(StaffError) as refused:
             await operator_assignment(team, ada, task_id)
         said = str(refused.value)
         assert "notes is not a git repository" in said and "Ada works in a git worktree of their own" in said
         assert "a folder of the project that is a git repository" in said and "isolation to shared" in said and "read-only" in said
         assert runtime.started == [] and await status_of(manager, ada) == "off"
         row = await task_row(manager, task_id)
-        assert (row["status"], row["assignee_staff_id"]) == ("todo", ada.id)
+        assert (row["status"], row["assignee_staff_id"]) == ("todo", None)
         assert not await manager.db.fetchall("SELECT id FROM execution_attempts WHERE task_id = ?", (task_id,))
         assert team.queue.queue(project.id) == []
 

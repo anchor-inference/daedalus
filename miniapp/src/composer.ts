@@ -127,6 +127,28 @@ export function clearDraft(sessionId: string, storage: StorageLike | null = safe
   writeDraft(sessionId, "", storage);
 }
 
+export type DraftTarget = { session: string; project: string; workspace: string; model: string; mode: string; effort: string; reply: string; intent?: "send" | "steer" | "queue" };
+const TARGET_PREFIX = "daedalus.draft-target.";
+
+/** Keep the settings the words were written for, so a later screen or model change asks for a decision. */
+export function readDraftTarget(sessionId: string, storage: StorageLike | null = safeStorage()): DraftTarget | null {
+  try {
+    const value = JSON.parse(storage?.getItem(`${TARGET_PREFIX}${sessionId}`) ?? "null") as DraftTarget | null;
+    return value && value.session === sessionId && [value.project, value.workspace, value.model, value.mode, value.effort, value.reply].every((part) => typeof part === "string") ? value : null;
+  } catch { return null; }
+}
+
+export function writeDraftTarget(sessionId: string, target: DraftTarget | null, storage: StorageLike | null = safeStorage()): void {
+  try {
+    if (target) storage?.setItem(`${TARGET_PREFIX}${sessionId}`, JSON.stringify(target));
+    else storage?.removeItem(`${TARGET_PREFIX}${sessionId}`);
+  } catch { /* the visible draft remains editable if storage is unavailable */ }
+}
+
+export function draftTargetChanged(saved: DraftTarget | null, current: DraftTarget): boolean {
+  return !!saved && (saved.session !== current.session || saved.project !== current.project || saved.workspace !== current.workspace || saved.model !== current.model || saved.mode !== current.mode || saved.effort !== current.effort || saved.reply !== current.reply);
+}
+
 type SendIntent = { fingerprint: string; id: string };
 const SEND_PREFIX = "daedalus.pending-send.";
 

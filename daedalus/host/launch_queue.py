@@ -30,7 +30,7 @@ from daedalus.stores.control import Principal
 
 logger = logging.getLogger(__name__)
 
-WaitReason = Literal["dependencies", "busy", "project", "terminals", "machine", "stagger", "behind"]
+WaitReason = Literal["dependencies", "busy", "project", "terminals", "machine", "host", "stagger", "behind"]
 """Why an entry waits:
 
 - ``dependencies``: the task waits for other tasks to finish;
@@ -38,6 +38,7 @@ WaitReason = Literal["dependencies", "busy", "project", "terminals", "machine", 
 - ``project``: every slot of the project's concurrency is taken;
 - ``terminals``: a command-line member needs the terminals service, which is not running here;
 - ``machine``: the machine already runs as many terminal sessions as its cap allows;
+- ``host``: staff of either runtime kind occupy the shared host cap or control reserve;
 - ``stagger``: the project launched a moment ago and spaces its launches out;
 - ``behind``: another entry of the project starts first.
 """
@@ -100,6 +101,7 @@ class Entry:
     by: str
     env: str = ""
     resume_from: str | None = None
+    source_head: str | None = None
     order: int = 0
     since: float = field(default_factory=time.time)
     reason: WaitReason | None = None
@@ -110,6 +112,9 @@ class Entry:
     check_authority: Callable[[], Awaitable[None]] | None = None
     capacity_slot_id: str | None = None
     resources: dict[str, Any] | None = None
+    fallback_decision_id: str | None = None
+    attempt_id: str | None = None
+    role_class: Literal["coordinator", "reviewer", "worker"] = "worker"
 
     def view(self, position: int) -> dict[str, Any]:
         return {
@@ -121,6 +126,7 @@ class Entry:
             "detail": self.detail,
             "since": self.since,
             "by": self.by,
+            "role_class": self.role_class,
         }
 
 
@@ -164,6 +170,8 @@ class LaunchQueue:
         check_reserved: Callable[[Entry], Awaitable[bool]] | None = None,
         active_in: Callable[[aiosqlite.Connection, str], Awaitable[int]] | None = None,
         concurrency_in: Callable[[aiosqlite.Connection, str], Awaitable[int]] | None = None,
+        claim_host: Callable[[Entry], Awaitable[str | None]] | None = None,
+        finish_host: Callable[[Entry, bool], Awaitable[None]] | None = None,
     ) -> None:
         self._concurrency = concurrency
         self._active = active
@@ -178,6 +186,8 @@ class LaunchQueue:
         self._check_reserved = check_reserved
         self._active_in = active_in
         self._concurrency_in = concurrency_in
+        self._claim_host = claim_host
+        self._finish_host = finish_host
         """Whether an entry goes to its member's live session as a message rather than a launch: it
         then opens no terminal and starts no process, so neither the machine's cap nor the spacing
         of launches applies to it. Without this, a member idle at its prompt waited behind other
@@ -333,6 +343,16 @@ class LaunchQueue:
                 self._wait(entry, "stagger", f"starts in about {max(1, round(delay))} s; launches of a project are spaced {stagger:g} s apart")
                 self._wake_in(project_id, delay)
                 break
+            if not reuse and self._claim_host is not None:
+                try:
+                    host_wait = await self._claim_host(entry)
+                except Exception as exc:  # noqa: BLE001 — a failed admission belongs to this command
+                    self._entries.get(project_id, []).remove(entry)
+                    entry.error = exc
+                    continue
+                if host_wait is not None:
+                    self._wait(entry, "host", host_wait)
+                    continue
             await self._start(entry, reuse=reuse)
             launched_here = launched_here or (entry.started and not reuse)
             if entry.started and not reserved:
@@ -382,8 +402,15 @@ class LaunchQueue:
                 except Exception:  # noqa: BLE001
                     logger.exception("reporting a failed launch failed")
         finally:
-            if launches:
-                self._terminal_launches -= 1
+            try:
+                if not reuse and self._finish_host is not None:
+                    try:
+                        await self._finish_host(entry, entry.started)
+                    except Exception as exc:  # noqa: BLE001 — the runtime outcome needs reconciliation
+                        entry.error = exc
+            finally:
+                if launches:
+                    self._terminal_launches -= 1
 
     def _wake_in(self, project_id: str, delay: float) -> None:
         if project_id in self._timers:

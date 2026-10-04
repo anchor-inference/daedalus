@@ -516,7 +516,16 @@ class CliStaffRuntime:
         launch_id = "l" + secrets.token_hex(8)
         spec = self._spec(req, launch_id, resume_ref)
         plan = self.adapter.resume_plan(spec, resume_ref) if resume_ref else self.adapter.launch_plan(spec)
+        from daedalus.harness.observation import observe  # Lazy: observe imports the launch contract used by adapters.
+        effective = observe(self.adapter, spec, plan)
         row = await self.store.catalog_row(req.env, self.kind)
+        logger.info(
+            "%s launch %s version=%s requested=(%s, %s, %s, %s) effective=(%s, %s, %s, %s)",
+            self.kind, launch_id, row.installed_version if row is not None else "unknown",
+            effective.requested_model or "default", effective.requested_tools,
+            effective.requested_permission, bool(effective.requested_resume),
+            effective.model or "default", effective.tools, effective.permission, bool(effective.resume),
+        )
         record = Launch(
             launch_id=launch_id,
             staff_session_id=req.staff_session_id,
@@ -659,6 +668,10 @@ class CliStaffRuntime:
                 screen = await session.term.screen()
                 step = self.adapter.readiness(screen)
                 if step.action == "fail":
+                    if "sign in" in step.reason.lower() or "signed in" in step.reason.lower():
+                        phase_event = getattr(self.ingress, "phase_event", None)
+                        if phase_event is not None and (live := await self.lookup(session.staff_session_id)) is not None:
+                            await phase_event(live, "auth_required")
                     await self._failed(session, step.reason or "the command-line agent will not start", screen)
                     return
                 if step.action == "keys" and step.keys and (screen != last_answered or self.clock() - answered_at >= GATE_REPEAT_S):
@@ -795,6 +808,10 @@ class CliStaffRuntime:
             session.turn_ended_waiting = False
         context = StateContext(first_prompt_pending=session.first_prompt_pending, open_requests=tuple(session.open.values()), waiting_for=live.session.waiting_for, turn_ended=session.turn_ended_waiting)
         step = next_state(current, event, context)
+        phase_event = getattr(self.ingress, "phase_event", None)
+        if phase_event is not None and step.signal:
+            await phase_event(live, kind.value,
+                              meaningful_output=kind is EventKind.TURN_COMPLETED and bool(event.payload.get("last_message")))
         if kind in (EventKind.PROMPT_ACKNOWLEDGED, EventKind.TURN_STARTED, EventKind.TOOL_STARTED):
             session.first_prompt_pending = False
         if step.signal:

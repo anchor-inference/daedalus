@@ -208,6 +208,31 @@ async def test_a_retried_upload_keeps_one_file_and_one_message(settings: Setting
     await manager.close()
 
 
+async def test_explicit_delivery_keeps_queue_and_upload_intents_distinct(settings: Settings, db: Database) -> None:
+    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    manager = await _manager(settings, db, provider)
+    state = await manager.create_session("explicit delivery")
+    sid = state.session.id
+    async with _client(settings, db, manager) as client:
+        premature = await client.post(f"/api/sessions/{sid}/messages", json={"text": "later", "follow_up": True, "expected_running": True}, headers=H)
+        assert premature.status_code == 409
+        await manager.submit(sid, "start")
+        await asyncio.sleep(0.3)
+        assert state.running
+        queued = await client.post(f"/api/sessions/{sid}/messages", json={"text": "later", "follow_up": True, "expected_running": True, "client_message_id": "later-1"}, headers=H)
+        assert queued.status_code == 200 and queued.json()["receipt"]["status"] == "queued"
+        upload = await client.post(
+            f"/api/sessions/{sid}/upload",
+            data={"text": "now", "steer": "true", "expected_running": "true", "client_message_id": "now-1"},
+            files={"files": ("notes.txt", b"same bytes", "text/plain")}, headers=H,
+        )
+        assert upload.status_code == 200 and upload.json()["receipt"]["status"] == "queued"
+        queues = await manager.live.load(sid)
+        assert [item["id"] for item in queues["follow_up"]] == ["later-1"]
+        assert [item["id"] for item in queues["steer"]] == ["now-1"]
+    await manager.close()
+
+
 async def test_a_steer_the_run_has_read_is_gone_from_the_queue_and_cannot_be_withdrawn(settings: Settings, db: Database) -> None:
     provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 1"}}, {"text": "first"}, {"text": "second"}])
     manager = await _manager(settings, db, provider)

@@ -42,6 +42,27 @@ async def domain_api(tmp_path: Path):  # type: ignore[no-untyped-def]
     await db.close()
 
 
+async def test_attempt_timing_is_scoped_and_keeps_heartbeat_separate(domain_api) -> None:  # type: ignore[no-untyped-def]
+    db, client = domain_api
+    await db.execute("INSERT INTO execution_attempts(id,task_id,contract_revision,host_generation,"
+                     " fence_token_hash,state,created_at,updated_at)"
+                     " VALUES ('attempt','task1',1,1,'digest','running','2026-01-01','2026-01-01')")
+    await db.execute("INSERT INTO attempt_phase_clocks(attempt_id,phase,started_at,deadline_at,"
+                     " last_signal_at,last_progress_at,outcome) VALUES"
+                     " ('attempt','first_output','2026-01-01','2026-01-02','2026-01-01T01:00:00',NULL,'timed_out')")
+    response = await client.get("/api/board/task1/attempts/attempt/timing")
+    assert response.status_code == 200
+    assert response.json() == {
+        "attempt_id": "attempt", "attempt_state": "running", "phase": "first_output",
+        "deadline_at": "2026-01-02", "heartbeat_at": "2026-01-01T01:00:00",
+        "last_progress_at": None, "state": "timed_out",
+    }
+    other = await client.get("/api/board/another-task/attempts/attempt/timing")
+    assert other.status_code == 404
+    missing = await client.get("/api/board/task1/attempts/another-attempt/timing")
+    assert missing.status_code == 404
+
+
 async def test_exact_result_flow_over_http(domain_api) -> None:  # type: ignore[no-untyped-def]
     db, client = domain_api
     contract = await client.get("/api/board/task1/contract")

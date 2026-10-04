@@ -247,6 +247,11 @@ def _harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, preflight_ok: b
         calls.append("stop")
 
     supervisor.stop_child = stop_child  # type: ignore[method-assign]
+    async def committed(bot: str, core: str, transcript: str) -> dict[str, str]:
+        calls.append("drain committed")
+        return {"state": "committed", "receipt_id": "saved"}
+
+    supervisor._drain_before_stop = committed  # type: ignore[method-assign]
     return sup, supervisor, calls
 
 
@@ -345,7 +350,9 @@ async def test_a_server_restart_just_goes_round_again(monkeypatch: pytest.Monkey
     """With a remote the running revision was preflighted when it was merged; there is nothing to check."""
     sup, supervisor, calls = _harness(monkeypatch, tmp_path, preflight_ok=False)
     supervisor.configured = "server"
-    assert await supervisor.restart("after a merge") == "restarting"
+    assert await supervisor.restart("after a merge") == "checking the running work before restart"
+    assert supervisor.restart_task is not None
+    await supervisor.restart_task
     assert supervisor.restart_requested.is_set()
     assert not any(c.startswith("preflight") for c in calls)
 

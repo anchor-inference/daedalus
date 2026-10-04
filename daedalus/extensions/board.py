@@ -500,12 +500,41 @@ class Board:
                 "session_id": session["session_id"] if session is not None else None,
             }
         await self._contracts(tasks)
+        await self._accepted_attempt_costs(tasks)
         needs = await self.needs_you(project_id)
         counts_rows = await self.app.db.fetchall("SELECT status, count(*) AS n FROM board_tasks WHERE project_id = ? GROUP BY status", (project_id,))
         counts = {status: 0 for status in STATUSES}
         counts.update({r["status"]: int(r["n"]) for r in counts_rows if r["status"] in counts})
         team = [{"id": m["id"], "name": m["name"], "color": m["color"], "harness": m["harness"], "isolation": m["isolation"]} for m in members.values() if m["archived_at"] is None]
         return {"tasks": tasks, "needs_you": needs, "counts": {**counts, "needs_you": len(needs)}, "staff": team}
+
+    async def _accepted_attempt_costs(self, tasks: list[dict[str, Any]]) -> None:
+        """Expose priced native inference attached to the exact accepted worker attempt."""
+        accepted = [task for task in tasks if task.get("accepted_result_id") and task.get("acceptance_state") == "operator_approved"]
+        if not accepted:
+            return
+        placeholders = ",".join("?" for _ in accepted)
+        rows = await self.app.db.fetchall(
+            "SELECT t.id AS task_id,r.attempt_id,a.runtime_kind,"
+            " sum(CASE WHEN i.state IN ('settled','overrun') THEN 1 ELSE 0 END) AS priced_count,"
+            " sum(CASE WHEN i.state NOT IN ('settled','overrun','released')"
+            " OR (i.state IN ('settled','overrun') AND i.actual_microusd IS NULL) THEN 1 ELSE 0 END) AS unresolved,"
+            " sum(CASE WHEN i.state IN ('settled','overrun') THEN i.actual_microusd ELSE 0 END) AS amount"
+            " FROM board_tasks t JOIN result_receipts r ON r.id = t.accepted_result_id AND r.task_id = t.id"
+            " LEFT JOIN execution_attempts a ON a.id = r.attempt_id AND a.task_id = t.id"
+            " AND a.contract_revision = r.contract_revision"
+            " LEFT JOIN inference_reservations i ON i.execution_attempt_id = a.id"
+            f" WHERE t.id IN ({placeholders}) AND t.accepted_contract_revision = r.contract_revision"
+            " GROUP BY t.id,r.attempt_id,a.runtime_kind",
+            tuple(task["id"] for task in accepted),
+        )
+        by_task = {row["task_id"]: row for row in rows}
+        for task in accepted:
+            row = by_task.get(task["id"])
+            # A CLI subscription, manual receipt, or unobserved call has no defensible price.
+            priced = (row is not None and row["runtime_kind"] == "daedalus" and
+                      row["priced_count"] > 0 and not row["unresolved"] and row["amount"] is not None)
+            task["accepted_attempt_cost_microusd"] = int(row["amount"]) if priced else None
 
     async def _contracts(self, tasks: list[dict[str, Any]]) -> None:
         """Each card's requirements, with who was given each and whether they confirmed or opened it."""

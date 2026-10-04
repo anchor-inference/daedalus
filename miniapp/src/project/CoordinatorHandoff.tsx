@@ -62,10 +62,10 @@ export function CoordinatorHandoff({ projectId, revision, sessionId, onChanged, 
       setConflict(false);
       setCollision(false);
       void status.refresh(); void onChanged();
-      if (reply.state === "blocked") toast(t(`handoff.blocker.${reply.blocker ?? "unknown"}`));
+      if (reply.state === "blocked") toast(t(`coordinatorHandoff.blocker.${reply.blocker ?? "unknown"}`));
       else {
         edit("");
-        toast(t("handoff.committed"));
+        toast(t("coordinatorHandoff.committed"));
       }
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
@@ -81,8 +81,8 @@ export function CoordinatorHandoff({ projectId, revision, sessionId, onChanged, 
 
   async function begin() {
     if (!active || busy || pending || offline || status.error || conflict) return;
-    if (!(await confirmAsync(t("handoff.confirm.title"), {
-      body: t("handoff.confirm.body"), action: t("handoff.action"),
+    if (!(await confirmAsync(t("coordinatorHandoff.confirm.title"), {
+      body: t("coordinatorHandoff.confirm.body"), action: t("coordinatorHandoff.action"),
     }))) return;
     const command = { reason: reason.trim(), client_operation_id: crypto.randomUUID(),
       expected_entity_revision: revision, expected_coordinator_session_id: sessionId };
@@ -92,34 +92,34 @@ export function CoordinatorHandoff({ projectId, revision, sessionId, onChanged, 
 
   const blocker = current?.blocker ?? "unknown";
   return <details className="sheet-section" onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary>{t("handoff.title")}</summary>
+    <summary>{t("coordinatorHandoff.title")}</summary>
     {open && <div className="project-extension-list">
-      <p className="sub">{t("handoff.intro")}</p>
-      {offline && <div className="result-warning" role="status">{t("handoff.offline")}</div>}
-      {status.error && <div className="result-warning" role="status">{t("handoff.readFailed")} <button type="button" className="linkbtn" onClick={() => status.refresh()}>{t("common.retry")}</button></div>}
+      <p className="sub">{t("coordinatorHandoff.intro")}</p>
+      {offline && <div className="result-warning" role="status">{t("coordinatorHandoff.offline")}</div>}
+      {status.error && <div className="result-warning" role="status">{t("coordinatorHandoff.readFailed")} <button type="button" className="linkbtn" onClick={() => status.refresh()}>{t("common.retry")}</button></div>}
       {!status.error && !status.data && <div className="sub">{t("common.loading")}</div>}
       {current && <div role="status" className={current.state === "blocked" ? "result-warning" : "sub"}>
-        {t(`handoff.state.${current.state}`)}{current.state === "blocked" ? ` · ${t(`handoff.blocker.${blocker}`)}` : ""}
+        {t(`coordinatorHandoff.state.${current.state}`)}{current.state === "blocked" ? ` · ${t(`coordinatorHandoff.blocker.${blocker}`)}` : ""}
       </div>}
-      {current?.new_active && current.schedules_needing_approval > 0 && <p className="sub">{t("handoff.schedules", { count: current.schedules_needing_approval })}</p>}
-      {pending && <div role="status" className="result-warning">{t(collision ? "handoff.collision" : "handoff.pending")}
+      {current?.new_active && current.schedules_needing_approval > 0 && <p className="sub">{t("coordinatorHandoff.schedules", { count: current.schedules_needing_approval })}</p>}
+      {pending && <div role="status" className="result-warning">{t(collision ? "coordinatorHandoff.collision" : "coordinatorHandoff.pending")}
         <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => {
           if (collision) { remember(null); setCollision(false); setConflict(true); void status.refresh(); void onChanged(); }
           else void submit(pending);
-        }}>{t(collision ? "handoff.review" : "handoff.retry")}</button></div>}
-      {conflict && <div role="status" className="result-warning">{t("handoff.conflict")} <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => {
+        }}>{t(collision ? "coordinatorHandoff.review" : "coordinatorHandoff.retry")}</button></div>}
+      {conflict && <div role="status" className="result-warning">{t("coordinatorHandoff.conflict")} <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => {
         setBusy(true);
         void Promise.all([status.refresh(), onChanged()]).then(() => setConflict(false)).finally(() => setBusy(false));
-      }}>{t("handoff.review")}</button></div>}
-      {!active && <p className="sub">{t("handoff.noOffice")}</p>}
+      }}>{t("coordinatorHandoff.review")}</button></div>}
+      {!active && <p className="sub">{t("coordinatorHandoff.noOffice")}</p>}
       {active && <>
-        <label className="field">{t("handoff.reason")}
+        <label className="field">{t("coordinatorHandoff.reason")}
           <textarea className="field" maxLength={300} value={reason} onChange={(event) => edit(event.target.value)} disabled={busy || !!pending} />
         </label>
-        <button type="button" className="btn small" disabled={offline || busy || !!pending || !!status.error || !status.data || conflict} onClick={() => void begin()}>{t("handoff.action")}</button>
+        <button type="button" className="btn small" disabled={offline || busy || !!pending || !!status.error || !status.data || conflict} onClick={() => void begin()}>{t("coordinatorHandoff.action")}</button>
       </>}
-      <p className="sub">{t("handoff.readinessLimit")}</p>
-      {current?.receipt_id && <details><summary>{t("handoff.receipt")}</summary><div className="mono">{current.receipt_id}</div></details>}
+      <p className="sub">{t("coordinatorHandoff.readinessLimit")}</p>
+      {current?.receipt_id && <details><summary>{t("coordinatorHandoff.receipt")}</summary><div className="mono">{current.receipt_id}</div></details>}
     </div>}
   </details>;
 }

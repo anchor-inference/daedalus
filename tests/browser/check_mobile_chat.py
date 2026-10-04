@@ -25,6 +25,8 @@ def run() -> None:
             assert page.locator(".activity").last.is_visible()
             page.locator(".thinking-head").last.click()
             page.locator(".composer textarea").fill("Please use fewer files.")
+            page.locator('.composer button[aria-label="Message actions"]').click()
+            page.get_by_role("menuitem", name="Queue for the next step").click()
             assert page.locator('.composer [data-action="queue"]').is_enabled()
             for height in (844, 440, 320, 844):
                 page.set_viewport_size({"width": width, "height": height})

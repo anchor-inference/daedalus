@@ -396,6 +396,7 @@ export function AddProjectSheet({ onClose, onAdded, toast, firstProject = false 
       </button>
       {guided && <div className="project-start-fields">
         <p className="sub">{t("project.start.intro")}</p>
+        <p className="sub">{t("goal.start.cost")}</p>
         <label className="field" htmlFor="project-start-goal">{t("project.start.goal")}</label>
         <textarea id="project-start-goal" className="field" rows={3} maxLength={4000} value={goal} disabled={!!pending || busy} onChange={(event) => setGoal(event.target.value)} />
         <label className="field" htmlFor="project-start-constraints">{t("project.start.constraints")}</label>

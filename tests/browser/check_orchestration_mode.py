@@ -171,6 +171,9 @@ def desktop(page: Page, lang: str) -> None:
     keys(page, "g", "a")
     page.wait_for_url("**/app/agents")
     expect(rail.locator("[data-rail='agents']")).to_have_class(re.compile(r"\bon\b"))
+    # The address can change before the destination finishes rendering; wait for the Agents column
+    # before sending another shortcut from that screen.
+    expect(side.locator(f".folder[data-project='{GARDEN}']")).to_be_visible()
     keys(page, "g", "t")
     page.wait_for_url("**/app/terminals")
     expect(page.locator("nav.sidebar")).to_be_visible()

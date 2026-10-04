@@ -74,8 +74,8 @@ async def queued_fixture(db: Database):
         return None
 
     team = SimpleNamespace(member=staff.get, task=task, project=project,
-                           folder_for=lambda *_: SimpleNamespace(id="folder", env="container"),
-                           worktrees=SimpleNamespace(check=AsyncMock(return_value=None)))
+                           folder_for=lambda *_: SimpleNamespace(id="folder", path=Path("/tmp/fixture-worktree"), env="container"),
+                           worktrees=SimpleNamespace(check=AsyncMock(return_value="a" * 40)))
     team.queue = LaunchQueue(concurrency=concurrency, active=active, ready=ready, free=ready,
                              launch=launch, capacity=lambda: None, stagger=lambda: 0)
     app.extensions["staff"] = team
@@ -96,6 +96,22 @@ async def test_lost_response_replays_one_receipt_and_one_observed_attempt(db: Da
         assert len(starts) == 1
         assert starts[0].id == (await db.fetchone("SELECT current_attempt_id FROM board_tasks"))[0]
         assert (await db.fetchone("SELECT provider_session_ref FROM execution_attempts"))[0] == "session:native-session"
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
+async def test_queued_worktree_launch_refuses_changed_source_after_command(db: Database) -> None:
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    try:
+        result = await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                                    client_operation_id="source-pin", expected_entity_revision=revision)
+        team.worktrees.check.return_value = "b" * 40
+        assert await dispatcher.step()
+        assert starts == []
+        effect = await dispatcher.store.view(result["effect_id"])
+        assert effect["state"] == "failed"
+        assert "moved since launch approval" in effect["error"]
     finally:
         team.queue.close()
         app.executions.release()

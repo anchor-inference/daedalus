@@ -1037,23 +1037,30 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   // The message goes out; while a run is on the host holds it as a steer for the next step, and the
   // queue is re-read so the card is there before the stream says so.
-  async function send(text: string, files: File[], clientMessageId?: string, onProgress?: (fraction: number) => void) {
-    const steer = busyRef.current && status === "running";
+  async function send(text: string, files: File[], intent: "send" | "steer" | "queue", clientMessageId?: string, onProgress?: (fraction: number) => void): Promise<"sent" | "steered" | "queued"> {
+    const steer = intent === "steer";
+    const followUp = intent === "queue";
     const reply = orchestrating ? currentReply(id) : null;
+    let result: { receipt?: { status: string } };
     if (files.length > 0) {
       const form = new FormData();
       form.append("text", uploadText(text, reply));
       if (clientMessageId) form.append("client_message_id", clientMessageId);
+      if (steer) form.append("steer", "true");
+      if (followUp) form.append("follow_up", "true");
+      form.append("expected_running", steer || followUp ? "true" : "false");
       for (const f of files) form.append("files", f, f.name);
-      await api.upload(`/api/sessions/${id}/upload`, form, onProgress);
+      result = await api.upload<{ receipt?: { status: string } }>(`/api/sessions/${id}/upload`, form, onProgress);
     } else {
-      await api.post(`/api/sessions/${id}/messages`, messageBody(text, { steer, clientMessageId, reply }));
+      result = await api.post<{ receipt?: { status: string } }>(`/api/sessions/${id}/messages`, messageBody(text, { steer, followUp, clientMessageId, reply }));
     }
+    if (result.receipt?.status !== "queued" && result.receipt?.status !== "consumed") throw new Error(t("composer.delivery.unconfirmed"));
     // Only once the message is out: a send that fails puts the words back and keeps what they answer.
     if (reply) setReply(id, null);
     stick.current = true;
     if (steer) void loadSteers();
     load();
+    return result.receipt!.status === "queued" ? steer ? "steered" : "queued" : "sent";
   }
 
   async function answer(answers: Answer[]) {
@@ -1432,6 +1439,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             onChooseMode={setMode}
             onYagni={setYagni}
             place={{ project: detail?.project?.name, workspace: detail?.workspace_name || detail?.workspace, system: !!(detail?.project?.system || detail?.project?.settings.system) }}
+            targetProject={detail?.project?.id}
+            targetWorkspace={detail?.workspace}
             idlePlaceholder={focusPlaceholder}
             context={detail?.context ?? null}
             onContext={hasDetails ? () => { setDetailsFocus("context"); panel.open("details"); } : undefined}

@@ -62,7 +62,9 @@ def main() -> int:
                 expect(page.locator(".focus-attention-item")).not_to_have_count(0)
                 expect(page.locator(".focus-attention-item .ask-answers-row .btn").first).to_be_visible()
                 expect(page.locator(".focus-attention-item")).to_have_count(3)
-                expect(page.locator(".focus-attention-item").last).to_contain_text("Open task" if lang == "en" else "Открыть задачу")
+                blocked = page.locator(".focus-attention-item").last
+                expect(blocked).to_contain_text("dependent work is unfinished" if lang == "en" else "зависимая работа не закончена")
+                expect(blocked.get_by_role("button", name="Open task" if lang == "en" else "Открыть задачу")).to_be_visible()
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (lang, width, "attention overflow")
 
                 bar.locator("a[data-tab='journal']").click()

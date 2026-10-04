@@ -125,7 +125,6 @@ async def test_the_operators_own_task_and_a_branch_still_go_to_review(settings: 
         receipt = await r.manager.db.fetchone("SELECT original_text FROM result_receipts WHERE task_id = ?",
                                               (posted,))
         assert receipt is not None and receipt["original_text"] == "menu.md committed"
-
         ben = await r.manager.staff.hire(r.project.id, name="Ben", role="Menu", isolation="worktree")
         branched = await r.board.add(title="Prices", session_id=(await r.refreshed()).settings.orchestrator.session_id, brief=BRIEF)
         await operator_assignment(r.team, ben, branched["id"])

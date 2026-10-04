@@ -15,6 +15,9 @@ import aiosqlite
 
 from daedalus.stores.control import ControlDenied, ControlStore, Mutation, Principal, Scope, canonical, now, one
 from daedalus.stores.database import Database
+from daedalus.stores.effect_approvals import ApprovalPending, EffectApprovals
+from daedalus.stores.retry_policy import READ_ONLY_BUDGETS, TRANSIENT_ERRORS, budget, next_retry_at
+from daedalus.stores.update_drains import UpdateDrainActive, assert_admission_open_in
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +33,7 @@ class Claim:
     effects: tuple[str, ...]
     operation: str
     payload: dict[str, Any]
+    approval_required: bool
 
 
 class OutboxStore:
@@ -38,11 +42,12 @@ class OutboxStore:
         self.control = ControlStore(db)
 
     @staticmethod
-    async def enqueue(conn: aiosqlite.Connection, mutation: Mutation, principal: Principal, *, kind: str, operation: str, payload: dict[str, Any], effects: tuple[str, ...] = (), task_id: str | None = None, attempt_id: str | None = None) -> str:
+    async def enqueue(conn: aiosqlite.Connection, mutation: Mutation, principal: Principal, *, kind: str, operation: str, payload: dict[str, Any], effects: tuple[str, ...] = (), task_id: str | None = None, attempt_id: str | None = None, approval_required: bool = False) -> str:
         if not kind or not operation or not isinstance(payload, dict):
             raise ValueError("an effect kind, operation and payload are required")
         action_id = uuid.uuid5(uuid.NAMESPACE_URL, f"effect:{mutation.receipt_id}:{kind}").hex
-        envelope = {"data": payload, "control": {"task_id": task_id, "effects": list(effects), "operation": operation}}
+        envelope = {"data": payload, "control": {"task_id": task_id, "effects": list(effects), "operation": operation,
+                                                 "approval_required": approval_required}}
         await conn.execute(
             "INSERT INTO effect_outbox(id,receipt_id,grant_id,grant_generation,attempt_id,kind,payload_json,created_at) VALUES (?,?,?,?,?,?,?,?)",
             (action_id, mutation.receipt_id, principal.grant_id, principal.grant_generation, attempt_id, kind, canonical(envelope), now()),
@@ -63,11 +68,13 @@ class OutboxStore:
             principal = Principal(receipt["actor_id"], grant["origin_class"] if grant is not None else "system", row["grant_id"], row["grant_generation"])
         else:
             principal = Principal(receipt["actor_id"], "operator" if receipt["actor_id"].startswith("operator:") else "system")
-        return Claim(row["id"], row["receipt_id"], row["kind"], int(row["claim_generation"]), principal, scope, metadata["task_id"], row["attempt_id"], tuple(metadata["effects"]), metadata["operation"], envelope["data"])
+        return Claim(row["id"], row["receipt_id"], row["kind"], int(row["claim_generation"]), principal, scope, metadata["task_id"], row["attempt_id"], tuple(metadata["effects"]), metadata["operation"], envelope["data"], bool(metadata.get("approval_required")))
 
     async def _authorize(self, conn: aiosqlite.Connection, row: aiosqlite.Row) -> Claim:
         claim = await self._decode(conn, row)
         await self.control.authorize(conn, claim.principal, claim.scope, claim.operation, task_id=claim.task_id, effects=claim.effects)
+        if json.loads(row["payload_json"])["control"].get("approval_required"):
+            await EffectApprovals.check(conn, row)
         if row["attempt_id"]:
             attempt = await one(conn, "SELECT a.task_id,a.state,a.host_generation,t.current_attempt_id FROM execution_attempts a JOIN board_tasks t ON t.id=a.task_id WHERE a.id = ?", (row["attempt_id"],))
             host = await one(conn, "SELECT value FROM kv WHERE key = 'execution_host_generation'")
@@ -87,21 +94,74 @@ class OutboxStore:
             return []
         async with self.db.transaction() as conn:
             placeholders = ",".join("?" for _ in kinds)
-            async with conn.execute(f"SELECT * FROM effect_outbox WHERE state = 'unknown' AND kind IN ({placeholders}) ORDER BY created_at,id LIMIT ?", (*kinds, limit)) as cursor:
+            async with conn.execute(f"SELECT * FROM effect_outbox WHERE state = 'unknown' AND kind IN ({placeholders})"
+                                    " AND (kind != 'provider.resume' OR (retry_blocked = 0 AND (retry_at IS NULL OR retry_at <= ?)))"
+                                    " ORDER BY created_at,id LIMIT ?", (*kinds, now(), limit)) as cursor:
                 rows = await cursor.fetchall()
             return [await self._decode(conn, row) for row in rows]
+
+    async def begin_status_read(self, claim: Claim) -> bool:
+        """Reserve one read of an unknown resume's exact receipt without authorizing a resend."""
+        if claim.kind != "provider.resume":
+            return False
+        async with self.db.transaction() as conn:
+            row = await one(conn, "SELECT * FROM effect_outbox WHERE id = ?", (claim.id,))
+            if (row is None or row["state"] != "unknown" or row["claim_generation"] != claim.generation
+                    or row["retry_blocked"] or (row["retry_at"] and row["retry_at"] > now())):
+                return False
+            prior = await one(conn, "SELECT count(*) AS count FROM retry_attempts WHERE effect_id = ? AND phase = 'status_read'", (claim.id,))
+            ordinal = int(prior["count"]) + 1
+            remaining = budget("provider.resume.status_read") - ordinal
+            if remaining < 0:
+                await conn.execute("UPDATE effect_outbox SET retry_blocked = 1,error = 'status read retry budget exhausted' WHERE id = ?", (claim.id,))
+                return False
+            await conn.execute("INSERT INTO retry_attempts(op_id,effect_id,phase,ordinal,budget_left,state,created_at)"
+                               " VALUES (?,?,'status_read',?,?,'claimed',?)",
+                               (claim.receipt_id, claim.id, ordinal, remaining, now()))
+            return True
+
+    async def end_status_read(self, claim: Claim, *, error_class: str | None = None,
+                              resolved: bool = False) -> None:
+        """A missing status is a successful read; only failed reads spend the retry budget."""
+        async with self.db.transaction() as conn:
+            attempt = await one(conn, "SELECT ordinal,budget_left FROM retry_attempts WHERE effect_id = ?"
+                                " AND phase = 'status_read' AND state = 'claimed'", (claim.id,))
+            if attempt is None:
+                return
+            if error_class is None:
+                if resolved:
+                    await conn.execute("UPDATE retry_attempts SET state = 'completed' WHERE effect_id = ?"
+                                       " AND phase = 'status_read' AND state = 'claimed'", (claim.id,))
+                else:
+                    await conn.execute("DELETE FROM retry_attempts WHERE effect_id = ? AND phase = 'status_read'"
+                                       " AND state = 'claimed'", (claim.id,))
+                await conn.execute("UPDATE effect_outbox SET retry_at = NULL WHERE id = ?", (claim.id,))
+                return
+            retry = error_class in TRANSIENT_ERRORS and bool(attempt["budget_left"])
+            due = next_retry_at(claim.id, int(attempt["ordinal"]), now()) if retry else None
+            await conn.execute("UPDATE retry_attempts SET state = ?,error_class = ?,next_at = ? WHERE effect_id = ?"
+                               " AND phase = 'status_read' AND state = 'claimed'",
+                               ("scheduled" if retry else "failed", error_class, due, claim.id))
+            await conn.execute("UPDATE effect_outbox SET retry_at = ?,retry_blocked = ?,error = ? WHERE id = ? AND state = 'unknown'",
+                               (due, 0 if retry else 1, f"status read {error_class}" if retry else f"status read {error_class}; manual reconciliation required", claim.id))
 
     async def claim(self, kinds: tuple[str, ...], *, exclude: tuple[str, ...] = ()) -> Claim | None:
         if not kinds:
             return None
         async with self.db.transaction() as conn:
+            try:
+                await assert_admission_open_in(conn)
+            except UpdateDrainActive:
+                # Keep pending effects durable until the update's successor has
+                # verified and reopened admission; claiming would start physical work.
+                return None
             placeholders = ",".join("?" for _ in kinds)
             async with conn.execute(
                 "SELECT e.*,r.scope_id AS receipt_scope_id,t.priority AS task_priority,"
                 "t.project_id AS task_project_id FROM effect_outbox e"
                 " JOIN operation_receipts r ON r.id = e.receipt_id"
                 " LEFT JOIN board_tasks t ON t.id = json_extract(e.payload_json,'$.control.task_id')"
-                f" WHERE e.state = 'pending' AND e.kind IN ({placeholders})", kinds,
+                f" WHERE e.state = 'pending' AND (e.retry_at IS NULL OR e.retry_at <= ?) AND e.kind IN ({placeholders})", (now(), *kinds),
             ) as cursor:
                 rows = await cursor.fetchall()
             cursor_row = await one(conn, "SELECT value FROM kv WHERE key = 'effect_admission_cursor'")
@@ -128,10 +188,21 @@ class OutboxStore:
                     continue
                 try:
                     await self._authorize(conn, row)
+                except ApprovalPending:
+                    continue
                 except (ControlDenied, KeyError) as exc:
                     await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ?,completed_at = ? WHERE id = ? AND state = 'pending'", (str(exc), now(), row["id"]))
                     continue
                 await conn.execute("UPDATE effect_outbox SET state = 'claimed',claim_generation = claim_generation + 1,claimed_at = ? WHERE id = ? AND state = 'pending'", (now(), row["id"]))
+                prior = await one(conn, "SELECT count(*) AS count FROM retry_attempts WHERE effect_id = ? AND phase = 'delivery'", (row["id"],))
+                ordinal = int(prior["count"]) + 1
+                if ordinal > budget(row["kind"]):
+                    await conn.execute("UPDATE effect_outbox SET state = 'failed',error = 'retry budget exhausted',completed_at = ? WHERE id = ?", (now(), row["id"]))
+                    continue
+                await conn.execute(
+                    "INSERT INTO retry_attempts(op_id,effect_id,phase,ordinal,budget_left,state,created_at) VALUES (?,?,'delivery',?,?,?,?)",
+                    (row["receipt_id"], row["id"], ordinal, budget(row["kind"]) - ordinal, "claimed", now()),
+                )
                 next_position = {
                     "project": (row["task_project_id"] or row["receipt_scope_id"])
                     if row["kind"] == "task.launch" else previous,
@@ -158,9 +229,12 @@ class OutboxStore:
             except (ControlDenied, KeyError) as exc:
                 await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ?,completed_at = ? WHERE id = ?",
                                    (str(exc), now(), claim.id))
+                await conn.execute("UPDATE retry_attempts SET state = 'failed',error_class = 'authorization' WHERE effect_id = ? AND phase = 'delivery' AND state = 'claimed'", (claim.id,))
                 return False
             await conn.execute("UPDATE effect_outbox SET state = 'pending',claimed_at = NULL,error = ? WHERE id = ? AND claim_generation = ?",
                                (reason, claim.id, claim.generation))
+            # Admission never reached the effect; it must not consume a delivery attempt.
+            await conn.execute("DELETE FROM retry_attempts WHERE effect_id = ? AND phase = 'delivery' AND state = 'claimed'", (claim.id,))
             return True
 
     async def check(self, claim: Claim) -> None:
@@ -182,12 +256,54 @@ class OutboxStore:
                 await conn.execute("INSERT INTO quarantined_attempt_events(attempt_id,event_json,reason,created_at) VALUES (?,?,?,?)", (claim.attempt_id or f"effect:{claim.id}", canonical({"effect_id": claim.id, "generation": claim.generation, "state": state}), "stale effect completion", now()))
                 return False
             await conn.execute("UPDATE effect_outbox SET state = ?,error = ?,completed_at = ? WHERE id = ? AND claim_generation = ?", (state, error, now(), claim.id, claim.generation))
+            await conn.execute("UPDATE retry_attempts SET state = ?,error_class = ? WHERE effect_id = ? AND phase = 'delivery' AND state = 'claimed'",
+                               (state, error, claim.id))
+            return True
+
+    async def retry(self, claim: Claim, *, error_class: str) -> bool:
+        """Schedule a proven read-only transient failure; every other outcome needs reconciliation."""
+        async with self.db.transaction() as conn:
+            row = await one(conn, "SELECT * FROM effect_outbox WHERE id = ?", (claim.id,))
+            if row is None or row["state"] != "claimed" or row["claim_generation"] != claim.generation:
+                return False
+            attempt = await one(conn, "SELECT ordinal,budget_left FROM retry_attempts WHERE effect_id = ? AND phase = 'delivery' AND state = 'claimed'", (claim.id,))
+            if attempt is None:
+                raise ControlDenied("the effect has no current retry attempt")
+            if row["kind"] not in READ_ONLY_BUDGETS or error_class not in TRANSIENT_ERRORS:
+                state = "unknown" if row["kind"] not in READ_ONLY_BUDGETS else "failed"
+                await conn.execute("UPDATE effect_outbox SET state = ?,error = ?,completed_at = ? WHERE id = ?",
+                                   (state, f"{error_class}: reconcile before retry" if state == "unknown" else error_class, now(), claim.id))
+                await conn.execute("UPDATE retry_attempts SET state = ?,error_class = ? WHERE effect_id = ? AND phase = 'delivery' AND state = 'claimed'",
+                                   (state, error_class, claim.id))
+                return False
+            try:
+                await self._authorize(conn, row)
+            except (ControlDenied, KeyError) as exc:
+                await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ?,completed_at = ? WHERE id = ?",
+                                   (str(exc), now(), claim.id))
+                await conn.execute("UPDATE retry_attempts SET state = 'failed',error_class = 'authorization' WHERE effect_id = ? AND phase = 'delivery' AND state = 'claimed'", (claim.id,))
+                return False
+            if not attempt["budget_left"]:
+                await conn.execute("UPDATE effect_outbox SET state = 'failed',error = ?,completed_at = ? WHERE id = ?",
+                                   (f"{error_class}: retry budget exhausted", now(), claim.id))
+                await conn.execute("UPDATE retry_attempts SET state = 'failed',error_class = ? WHERE effect_id = ? AND phase = 'delivery' AND state = 'claimed'",
+                                   (error_class, claim.id))
+                return False
+            due = next_retry_at(claim.id, int(attempt["ordinal"]), now())
+            await conn.execute("UPDATE effect_outbox SET state = 'pending',claimed_at = NULL,retry_at = ?,error = ? WHERE id = ?",
+                               (due, error_class, claim.id))
+            await conn.execute("UPDATE retry_attempts SET state = 'scheduled',error_class = ?,next_at = ? WHERE effect_id = ? AND phase = 'delivery' AND state = 'claimed'",
+                               (error_class, due, claim.id))
             return True
 
     async def recover(self) -> int:
         """Quarantine interrupted claims; no claim is automatically delivered a second time."""
         async with self.db.transaction() as conn:
             cursor = await conn.execute("UPDATE effect_outbox SET state = 'unknown',error = 'effect interrupted; reconcile before retry',claim_generation = claim_generation + 1 WHERE state = 'claimed'")
+            await conn.execute("UPDATE retry_attempts SET state = 'unknown',error_class = 'interrupted' WHERE phase = 'delivery' AND state = 'claimed'")
+            # A status query is read-only; its interrupted call can be scheduled again, within
+            # the same durable budget. No write claim is returned to pending here.
+            await conn.execute("UPDATE retry_attempts SET state = 'scheduled',error_class = 'interrupted',next_at = ? WHERE phase = 'status_read' AND state = 'claimed'", (now(),))
             return cursor.rowcount
 
     async def reconcile(self, action_id: str, *, generation: int, state: str, evidence: dict[str, Any]) -> bool:
@@ -199,6 +315,7 @@ class OutboxStore:
             if row is None or row["state"] != "unknown" or row["claim_generation"] != generation:
                 return False
             await conn.execute("UPDATE effect_outbox SET state = ?,error = ?,completed_at = ? WHERE id = ? AND claim_generation = ?", (state, canonical({"reconciliation": evidence}), now(), action_id, generation))
+            await conn.execute("UPDATE retry_attempts SET state = ? WHERE effect_id = ? AND phase = 'delivery' AND state = 'unknown'", (state, action_id))
             return True
 
     async def view(self, action_id: str) -> dict[str, Any]:

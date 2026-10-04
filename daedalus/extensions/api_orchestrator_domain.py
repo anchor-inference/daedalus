@@ -20,7 +20,6 @@ from daedalus.extensions.orchestrator_domain import (
     add_review_evidence,
     advance_workflow_step,
     apply_goal_revision,
-    claim_handoff,
     configure_workflow,
     dependency_readiness,
     manual_review_readiness,
@@ -77,6 +76,19 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
             except DomainConflict as exc:
                 raise HTTPException(409, str(exc)) from exc
 
+    @api.get("/api/projects/{project_id}/scope-revisions/current")
+    async def current_goal(project_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        async with app.db.transaction() as conn:
+            async with conn.execute("SELECT p.goal_revision,p.entity_revision,g.body,g.checks_json FROM projects p"
+                                    " JOIN project_goal_revisions g ON g.project_id = p.id"
+                                    " AND g.goal_revision = p.goal_revision WHERE p.id = ?", (project_id,)) as cursor:
+                goal = await cursor.fetchone()
+            if goal is None:
+                raise HTTPException(404, "no current project goal")
+            return {"project_id": project_id, "goal_revision": goal["goal_revision"],
+                    "entity_revision": goal["entity_revision"], "body": goal["body"],
+                    "checks": json.loads(goal["checks_json"]) if goal["checks_json"] is not None else None}
+
     @api.post("/api/projects/{project_id}/scope-revisions")
     async def scope_apply(project_id: str, body: dict[str, Any],
                           who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -86,16 +98,20 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
             if isinstance(revision, bool) or not isinstance(revision, int):
                 raise ValueError("expected_entity_revision must be an integer")
 
-            async def effect(conn: Any, _: Any) -> dict[str, Any]:
+            async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
                 return await apply_goal_revision(conn, project_id=project_id,
                                                  expected_goal_revision=int(body["expected_goal_revision"]),
                                                  body=body["body"], root_task_ids=list(body["root_task_ids"]),
-                                                 origin_kind="operator", origin_ref="",
-                                                 control=store, principal=principal)
+                                                 origin_kind="operator", origin_ref=mutation.receipt_id,
+                                                 control=store, principal=principal,
+                                                 checks=body.get("checks"), mutation=mutation)
 
-            return await store().mutate(principal, Scope("project", project_id), "goal.revise",
-                                      str(body["client_operation_id"]), revision, Entity("project", project_id),
-                                      body, effect)
+            result = await store().mutate(principal, Scope("project", project_id), "goal.revise",
+                                          str(body["client_operation_id"]), revision, Entity("project", project_id),
+                                          body, effect, effects=("lifecycle.stop",))
+            if result.get("stop_effect_id"):
+                app.extensions["effects"].notify()
+            return result
         except KeyError as exc:
             raise HTTPException(422, f"missing field or project: {exc}") from exc
         except ControlDenied as exc:
@@ -241,6 +257,38 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
             return await domain().contract(task_id)
         except KeyError as exc:
             raise HTTPException(404, "no such task") from exc
+
+    @api.get("/api/board/{task_id}/attempts/{attempt_id}/timing")
+    async def attempt_timing(task_id: str, attempt_id: str,
+                             who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            principal = Principal.operator(who)
+            async with app.db.transaction() as conn:
+                async with conn.execute("SELECT project_id FROM board_tasks WHERE id = ?", (task_id,)) as cursor:
+                    task = await cursor.fetchone()
+                if task is None:
+                    raise HTTPException(404, "no such task")
+                scope = Scope("project", task["project_id"]) if task["project_id"] else Scope("global", "global")
+                await store().authorize(conn, principal, scope, "control.read", task_id=task_id)
+                async with conn.execute("SELECT state FROM execution_attempts WHERE id = ? AND task_id = ?",
+                                        (attempt_id, task_id)) as cursor:
+                    attempt = await cursor.fetchone()
+                if attempt is None:
+                    raise HTTPException(404, "no such attempt on this task")
+                async with conn.execute("SELECT phase,deadline_at,last_signal_at,last_progress_at,outcome"
+                                        " FROM attempt_phase_clocks WHERE attempt_id = ?"
+                                        " ORDER BY (outcome = 'active') DESC,started_at DESC LIMIT 1",
+                                        (attempt_id,)) as cursor:
+                    clock = await cursor.fetchone()
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
+        if clock is None:
+            return {"attempt_id": attempt_id, "attempt_state": attempt["state"], "phase": None,
+                    "deadline_at": None, "heartbeat_at": None, "last_progress_at": None, "state": "unknown"}
+        return {"attempt_id": attempt_id, "attempt_state": attempt["state"],
+                "phase": clock["phase"], "deadline_at": clock["deadline_at"],
+                "heartbeat_at": clock["last_signal_at"], "last_progress_at": clock["last_progress_at"],
+                "state": clock["outcome"]}
 
     @api.put("/api/board/{task_id}/contract")
     async def put_contract(task_id: str, body: dict[str, Any], who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -488,10 +536,9 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
 
     @api.post("/api/board/{task_id}/handoffs")
     async def handoff(task_id: str, body: dict[str, Any], who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
-            return await claim_handoff(conn, claim_id=mutation.object_id, task_id=task_id,
-                                       operation_id=mutation.receipt_id, reservation_id=body.get("reservation_id"))
-        return await mutate(task_id, who, body, "handoff.claim", effect)
+        Principal.operator(who)
+        from daedalus.extensions.auto_handoff import advance  # Lazy: the route reuses the event worker's launch path.
+        return await advance(app, task_id)
 
     @api.get("/api/board/{task_id}/workflow")
     async def workflow(task_id: str, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:

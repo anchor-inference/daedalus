@@ -102,10 +102,11 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         data = json.loads(req.post_data) if req.post_data else None
         HOST.posted.append((req.method, rel, data))
         if rel == f"/api/sessions/{SESSION}/messages":
-            if HOST.status == "running":
+            if HOST.status == "running" and (data or {}).get("steer"):
                 HOST.n += 1
                 HOST.queue.append({"id": f"q_{HOST.n:04d}", "text": str((data or {}).get("text", "")), "queued_at": "2026-09-18T12:01:00+00:00"})
-            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"run_id": "r2"}))
+            receipt = {"status": "queued" if HOST.status == "running" else "consumed"}
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"run_id": "r2", "receipt": receipt}))
         if rel.startswith(f"/api/sessions/{SESSION}/steer/"):
             sid = rel.rsplit("/", 1)[1]
             before = len(HOST.queue)
@@ -285,6 +286,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     field(page).click()
     page.keyboard.press("Enter")
     reached(page, "/messages", 0, "Enter", problems)
+    page.wait_for_function("() => document.querySelector('.composer textarea')?.value === ''")
     sent = posts("/messages")
     print("sent:", sent)
     first_id = sent[0][2].get("client_message_id") if len(sent) == 1 else None
@@ -315,8 +317,13 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if page.locator(".composer-foot").count():
         problems.append("a dynamic footer still changes the composer's height")
     hint = page.locator(".composer .roundbtn.primary").get_attribute("title") or ""
-    if "next step" not in hint:
-        problems.append(f"the queue state carries no hint ({hint!r})")
+    if not page.locator(".composer .roundbtn.primary").is_disabled():
+        problems.append("a running draft can be sent without choosing steer or queue")
+    page.locator(".composer [aria-label='Message actions']").click()
+    page.get_by_role("menuitem", name="Steer the current run").click()
+    hint = page.locator(".composer .roundbtn.primary").get_attribute("title") or ""
+    if "Steer" not in hint or page.locator(".composer .roundbtn.primary").is_disabled():
+        problems.append(f"the chosen steer is not ready ({hint!r})")
     page.locator(".composer .roundbtn.primary").click()
     page.wait_for_selector(".composer .steer", timeout=5000)
     steered = posts("/messages")[-1]
@@ -338,6 +345,17 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     print("withdrawn:", deleted)
     if not deleted or not deleted[-1][1].endswith("/steer/q_0001"):
         problems.append(f"the × did not DELETE the steer ({deleted})")
+
+    field(page).fill("after this run")
+    page.locator(".composer [aria-label='Message actions']").click()
+    page.get_by_role("menuitem", name="Queue for the next step").click()
+    before_queue = len(posts("/messages"))
+    page.locator(".composer .roundbtn.primary").click()
+    reached(page, "/messages", before_queue, "explicit queue", problems)
+    page.wait_for_function("() => document.querySelector('.composer textarea')?.value === ''")
+    queued = posts("/messages")[-1][2]
+    if queued.get("follow_up") is not True or queued.get("steer") is True:
+        problems.append(f"the explicit queue was not a follow-up ({queued})")
 
     # Ctrl+Shift+S stops the run, after the confirm.
     field(page).click()

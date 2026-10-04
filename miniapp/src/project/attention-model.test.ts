@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Ask } from "../api";
 import type { ProjectTask } from "../board/board";
-import { budgetAttention, distinctOperatorActions, type NextAction } from "./attention-model";
+import { actionBlockerKeys, budgetAttention, distinctOperatorActions, type NextAction } from "./attention-model";
 import type { GoalBudget, MoneyBalance } from "./ProjectBudget";
 
 const task = { id: "task-one", contract_revision: 4 } as ProjectTask;
@@ -25,6 +25,15 @@ describe("attention source identity", () => {
   it("does not treat a matching request ID on a different task as the same source", () => {
     expect(distinctOperatorActions([action("action-one", "answer_question", ask.id)],
       [{ ...ask, task_id: "another-task" }], [task])).toHaveLength(1);
+  });
+});
+
+describe("blocked actions", () => {
+  it("names distinct known blockers and keeps unknown or missing reasons explicit", () => {
+    expect(actionBlockerKeys(["dependency_not_ready", "stale_contract", "dependency_not_ready"]))
+      .toEqual(["focus.attention.blocker.dependency_not_ready", "focus.attention.blocker.stale_contract"]);
+    expect(actionBlockerKeys(["new_server_reason"])).toEqual(["focus.attention.blocker.unknown"]);
+    expect(actionBlockerKeys([])).toEqual(["focus.attention.blocker.unknown"]);
   });
 });
 

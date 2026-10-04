@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 
@@ -9,12 +10,13 @@ import pytest
 
 from daedalus.extensions.launch_controls import prepare_attempt
 from daedalus.extensions.lifecycle import Lifecycle
-from daedalus.extensions.orchestrator_domain import apply_goal_revision
+from daedalus.extensions.orchestrator_domain import DomainConflict, apply_goal_revision
 from daedalus.extensions.runtime_observations import admit_native_run, observe_exit
 from daedalus.staff_runtime import BoardTask
-from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Principal
+from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
 from daedalus.stores.lifecycle import record_owned_exit
+from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.staff import StaffStore
 from tests.unit.test_execution_ownership import owner
 
@@ -135,12 +137,56 @@ async def test_goal_replacement_keeps_old_physical_work_owned_until_its_exact_ex
                          " VALUES ('project',1,'Original objective','operator','now')")
         await native_session(db)
         await admit_native_run(app, "staff-session", "native", "run")
-        async with db.transaction() as conn:
-            await apply_goal_revision(conn, project_id="project", expected_goal_revision=1,
-                                      body="A revised objective", root_task_ids=["task"], origin_kind="operator", origin_ref="goal-edit",
-                                      principal=operator, control=ControlStore(db))
+        control = ControlStore(db)
+        revision = await control.revision(Scope("project", "project"), Entity("project", "project"))
+
+        async def change(conn, mutation):
+            return await apply_goal_revision(conn, project_id="project", expected_goal_revision=1,
+                                             body="A revised objective", root_task_ids=["task"],
+                                             origin_kind="operator", origin_ref="goal-edit",
+                                             principal=operator, control=control, mutation=mutation)
+
+        changed = await control.mutate(operator, Scope("project", "project"), "goal.revise", "revise",
+                                       revision, Entity("project", "project"), {"body": "A revised objective"},
+                                       change, effects=("lifecycle.stop",))
+        stop = await db.fetchone("SELECT state,payload_json FROM effect_outbox WHERE id = ?",
+                                 (changed["stop_effect_id"],))
+        assert stop["state"] == "pending"
+        assert json.loads(stop["payload_json"])["data"]["attempts"][0]["child_id"] == identity.id
+        ownership = await db.fetchone("SELECT cancel_state FROM lifecycle_owners WHERE child_id = ?", (identity.id,))
+        assert ownership["cancel_state"] == "requested"
         assert (await db.fetchone("SELECT current_attempt_id FROM board_tasks WHERE id = 'task'"))[0] is None
         assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "superseded"
+        stopped = []
+        live = SimpleNamespace(id="staff-session", staff=SimpleNamespace(id="worker"),
+                               session_id="native", terminal_id=None)
+
+        class Team:
+            async def live(self, staff_session_id):
+                return live if staff_session_id == live.id else None
+
+            def execution_lock(self, staff_id):
+                return asyncio.Lock()
+
+        class Manager:
+            async def stop_run(self, session_id, run_id):
+                stopped.append((session_id, run_id))
+                return True
+
+        app.manager = Manager()
+        app.extensions = {"staff": Team()}
+        lifecycle = Lifecycle(app)
+        outbox = OutboxStore(db)
+        claim = await outbox.claim(("lifecycle.stop",))
+        assert claim is not None and claim.id == changed["stop_effect_id"]
+        assert claim.payload["attempts"][0]["runtime_ref"] == "run"
+        await db.execute("UPDATE execution_attempts SET native_run_id = 'later' WHERE id = ?", (identity.id,))
+        assert await lifecycle._stop_attempt(claim.payload["attempts"][0], claim, outbox.check) == "unknown"
+        assert stopped == []
+        await db.execute("UPDATE execution_attempts SET native_run_id = 'run' WHERE id = ?", (identity.id,))
+        assert (await lifecycle.run(claim, outbox.check)).state == "unknown"
+        assert await outbox.finish(claim, state="unknown", error="physical exit pending")
+        assert stopped == [("native", "run")]
         staff = StaffStore(db)
         await db.execute("INSERT INTO staff(id,project_id,name,harness,created_by,created_at)"
                          " VALUES ('other-worker','project','Another worker','daedalus','operator','now')")
@@ -154,10 +200,75 @@ async def test_goal_replacement_keeps_old_physical_work_owned_until_its_exact_ex
         assert (await db.fetchone("SELECT count(*) FROM actor_grants"))[0] == 1
         await db.execute("UPDATE runs SET status = 'completed' WHERE id = 'run'")
         assert await observe_exit(app, staff_session_id="staff-session", runtime_ref="run", observed_status="completed")
+        assert (await db.fetchone("SELECT cancel_state FROM lifecycle_owners WHERE child_id = ?", (identity.id,)))[0] == "drained"
+        unknown = (await outbox.unknown(("lifecycle.stop",)))[0]
+        proof = await lifecycle.reconcile(unknown)
+        assert proof is not None and proof.state == "completed"
+        assert await outbox.reconcile(unknown.id, generation=unknown.generation,
+                                      state=proof.state, evidence=proof.evidence)
         successor = await prepare_attempt(app, operator, member, task, replacement, fence_token="r" * 32)
         assert successor.id != identity.id
         assert (await db.fetchone("SELECT current_attempt_id FROM board_tasks WHERE id = 'task'"))[0] == successor.id
         assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "superseded"
+    finally:
+        store.release()
+
+
+async def test_goal_replacement_refuses_unbound_attempt_without_changing_goal(db: Database) -> None:
+    store, identity, _ = await owner(db)
+    operator = Principal.operator({"via": "cookie", "user_id": 1})
+    try:
+        await db.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at)"
+                         " VALUES ('project',1,'Original objective','operator','now')")
+        async with db.transaction() as conn:
+            with pytest.raises(DomainConflict, match="no exact runtime binding"):
+                await apply_goal_revision(conn, project_id="project", expected_goal_revision=1,
+                                          body="A revised objective", root_task_ids=["task"],
+                                          origin_kind="operator", origin_ref="goal-edit",
+                                          principal=operator, control=ControlStore(db))
+        assert (await db.fetchone("SELECT goal_revision FROM projects WHERE id = 'project'"))[0] == 1
+        assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "queued"
+        assert not await db.fetchall("SELECT * FROM scope_impacts")
+    finally:
+        store.release()
+
+
+async def test_owned_cli_stop_rechecks_the_exact_terminal_inside_execution_lock(db: Database) -> None:
+    store, identity, _ = await owner(db)
+    try:
+        await bound_cli(db)
+        await db.execute("UPDATE lifecycle_owners SET cancel_state = 'requested' WHERE child_id = ?", (identity.id,))
+        stopped = []
+        lock = asyncio.Lock()
+        live = SimpleNamespace(id="staff-session", staff=SimpleNamespace(id="worker"), terminal_id="replacement")
+
+        class Team:
+            def execution_lock(self, staff_id):
+                assert staff_id == "worker"
+                return lock
+
+            async def live(self, staff_session_id):
+                assert lock.locked()
+                return live
+
+            def runtime(self, staff):
+                return self
+
+            async def stop(self, current):
+                assert lock.locked()
+                stopped.append(current.terminal_id)
+
+        app = SimpleNamespace(db=db, executions=store, extensions={"staff": Team()})
+        lifecycle = Lifecycle(app)
+        request = {"parent_kind": "task", "parent_id": "task", "generation": 1,
+                   "source_revision": 1, "child_id": identity.id}
+        async def check(_):
+            await asyncio.sleep(0)
+        assert await lifecycle._stop_attempt(request, None, check) == "unknown"
+        assert stopped == []
+        live.terminal_id = "terminal"
+        assert await lifecycle._stop_attempt(request, None, check) == "unknown"
+        assert stopped == ["terminal"]
     finally:
         store.release()
 

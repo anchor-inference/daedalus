@@ -26,6 +26,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from protocore.contracts.blob import BlobNotFoundError
+
 from daedalus.stores.blobs import FileBlobStore
 from daedalus.stores.database import Database
 
@@ -42,7 +44,7 @@ MAIN = "main"
 """The main orchestrator's scope; every other scope is a project's id."""
 HANDLE_RE = re.compile(r"\batt:([0-9a-f]{12})\b")
 _BARE_RE = re.compile(r"^[0-9a-f]{12}$")
-ORIGINS = ("operator", "staff", "orchestrator", "folder", "dispatcher", "browser")
+ORIGINS = ("operator", "staff", "orchestrator", "folder", "dispatcher", "browser", "schedule")
 ACTIONS = ("attached", "shared", "delivered", "fetched", "imported", "refused")
 
 
@@ -170,7 +172,9 @@ class FileStore:
             (scope, digest, clean),
         )
         if existing is not None:
-            return _file(existing)
+            stored = _file(existing)
+            await self.read(stored)
+            return stored
         await self.blobs.put(FILES_TENANT, data, content_type=kind)
         file_id = secrets.token_hex(6)
         at = _now()
@@ -218,6 +222,21 @@ class FileStore:
             raise FileRefused(f"{handle(file_id)} is not one of {where} files")
         return _file(row)
 
+    async def in_scope_in(self, conn: Any, text: str, scope: str) -> StoredFile:
+        """Resolve a scoped handle inside an existing domain transaction."""
+        file_id = parse_handle(text)
+        if file_id is None:
+            raise FileRefused("the approved attachment is not a file handle")
+        cursor = await conn.execute(
+            "SELECT f.* FROM files f JOIN file_access a ON a.file_id=f.id"
+            " WHERE f.id=? AND a.scope=?", (file_id, scope),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        if row is None:
+            raise FileRefused("the approved attachment is outside this project")
+        return _file(row)
+
     async def listing(self, scope: str, *, limit: int = 30) -> list[StoredFile]:
         rows = await self.db.fetchall(
             "SELECT f.* FROM files f JOIN file_access a ON a.file_id = f.id WHERE a.scope = ? ORDER BY a.added_at DESC LIMIT ?",
@@ -226,7 +245,13 @@ class FileStore:
         return [_file(r) for r in rows]
 
     async def read(self, stored: StoredFile) -> bytes:
-        return await self.blobs.get(FILES_TENANT, stored.sha256)
+        try:
+            data = await self.blobs.get(FILES_TENANT, stored.sha256)
+        except BlobNotFoundError as exc:
+            raise FileRefused(f"{stored.handle} no longer has kept bytes") from exc
+        if len(data) != stored.size or hashlib.sha256(data).hexdigest() != stored.sha256:
+            raise FileRefused(f"{stored.handle} no longer matches its kept digest")
+        return data
 
     def path_of(self, stored: StoredFile) -> Path:
         """Where the bytes are on this machine, for a copy that does not read them into memory."""

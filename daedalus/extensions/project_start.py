@@ -79,8 +79,9 @@ class ProjectStart:
                                (folder_id, project_id, str(chosen), folder.label.strip() if folder else "", env,
                                 int(env == self.projects.local_env and (chosen / ".git").exists()),
                                 int(folder.readonly) if folder else 0, 0, stamp))
-            await conn.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,origin_ref,created_at)"
-                               " VALUES (?,1,?,'operator',?,?)", (project_id, objective, mutation.receipt_id, stamp))
+            await conn.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,origin_ref,created_at,checks_json)"
+                               " VALUES (?,1,?,'operator',?,?,?)", (project_id, objective, mutation.receipt_id, stamp,
+                                                                      json.dumps(checked)))
             for section, body in (("goals", objective), ("constraints", boundaries),
                                   ("done_when", "\n".join(checked))):
                 await conn.execute("INSERT INTO project_briefs(project_id,section,body,updated_at,updated_by)"

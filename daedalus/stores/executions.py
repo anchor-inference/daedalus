@@ -22,6 +22,7 @@ from daedalus.stores.control import ControlDenied, ControlStore, Principal, Scop
 from daedalus.stores.database import Database
 from daedalus.stores.lifecycle import admit_child
 from daedalus.stores.runtime_release import attempt_released_in
+from daedalus.stores.update_drains import assert_admission_open_in
 
 ACTIVE = ("queued", "starting", "running", "waiting")
 
@@ -112,6 +113,7 @@ class ExecutionStore:
                      runtime_kind: str, fence_token: str, comparison_slot_id: str | None = None) -> AttemptIdentity:
         """Claim in the authorized launch command's transaction, before starting the provider."""
         generation = await self._host(conn)
+        await assert_admission_open_in(conn)
         if runtime_kind not in ("daedalus", "cli") or len(fence_token) < 24 or not attempt_id:
             raise ValueError("a runtime and an unguessable fence token are required")
         task = await one(conn, "SELECT project_id,contract_revision,current_attempt_id,status,folder_id"
@@ -328,6 +330,9 @@ class ExecutionStore:
         _, current = await self._check(conn, identity.id, operation="result.submit")
         if current != identity:
             raise ControlDenied("the result belongs to another execution identity")
+        from daedalus.stores.phase_clocks import PhaseClocks  # Lazy: phase clocks need this store to fence attempts.
+
+        await PhaseClocks(self).close(conn, identity)
         await conn.execute("UPDATE execution_attempts SET state = ?,updated_at = ? WHERE id = ?",
                            (states[outcome], now(), identity.id))
 

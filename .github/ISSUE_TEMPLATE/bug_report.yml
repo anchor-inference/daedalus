@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a reproducible problem without sharing secrets or private data.
+title: "Bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please remove tokens, personal content, host names, and private paths from logs and examples. For a security vulnerability, use the private reporting path in SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The installed release version or commit where this occurred.
+      placeholder: "release version or commit"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux desktop
+        - macOS desktop
+        - Windows desktop
+        - Self-hosted server
+        - Browser app
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: settings
+    attributes:
+      label: Requested and effective settings
+      description: Include the selected provider, model, runtime, permission mode, and any observed effective values that differ. Do not paste keys or private URLs.
+      placeholder: "Requested: ...\nObserved: ..."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Use a small, shareable example and state whether the issue reproduces after a restart.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Expected and actual result
+      description: Include the exact error state, whether work continued, and whether the result was saved.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted evidence
+      description: Add relevant log lines or screenshots only after removing private data. A saved receipt or operation ID may help correlate retries.
+    validations:
+      required: false

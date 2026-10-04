@@ -2,7 +2,7 @@
 // session of the project, or one of its pages. The route decides which, through `focusView`; this
 // file only mounts what that names, with the project's way back instead of the agents list's.
 
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { SessionScreen, retried } from "../chunks";
 import { Skeleton } from "../ui/components";
 import { t } from "../i18n";
@@ -13,6 +13,10 @@ import { BriefPage, EnableOrchestrator, FoldersPage, JournalPage, TerminalsPage,
 import { SetupLine } from "../main/cards";
 import { PhoneBoard, PhoneTeam, PhoneTerminals } from "./phone";
 import { AttentionPage } from "./attention";
+import { GuidedGoal } from "./GuidedGoal";
+import { rememberProjectView } from "./lastview";
+import { useQuery } from "../store";
+import { ContextErrorBoundary } from "./ContextErrorBoundary";
 
 const TeamPage = lazy(retried(() => import("../team/TeamPage"), (m) => ({ default: m.TeamPage })));
 const ProjectBoard = lazy(retried(() => import("../board/ProjectBoard"), (m) => ({ default: m.ProjectBoard })));
@@ -21,7 +25,14 @@ const StaffView = lazy(retried(() => import("../staff/StaffView"), (m) => ({ def
 export function ProjectScreen({ projectId, page, inner, toast, wide }: { projectId: string; page: string | null; inner: string | null; toast: (text: string) => void; wide: boolean }) {
   const route = useRoute();
   const { project, loading } = useProject(projectId);
+  const { data: currentGoal } = useQuery<{ body: string; project_id: string }>(
+    `/api/projects/${encodeURIComponent(projectId)}/scope-revisions/current`, { staleMs: 5000 });
   const view = focusView(page, inner);
+  useEffect(() => {
+    const coordinator = project?.settings.orchestrator;
+    if (currentGoal?.project_id === projectId && currentGoal.body && coordinator?.enabled && coordinator.session_id)
+      rememberProjectView(projectId, page, coordinator.session_id);
+  }, [project, projectId, page, currentGoal]);
   // On a desktop the sidebar is the way back; a phone has no sidebar, so every page carries one.
   const home = projectHome(projectId);
   const back = wide ? null : home;
@@ -30,7 +41,7 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
   let body;
   if (view.kind === "orchestrator") {
     const orchestrator = project.settings.orchestrator;
-    body = orchestrator?.enabled && orchestrator.session_id ? (
+    const ready = orchestrator?.enabled && orchestrator.session_id ? (
       <SessionScreen
         key={orchestrator.session_id}
         id={orchestrator.session_id}
@@ -45,6 +56,7 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
       // The project's home, so a phone's way back is the orchestration list it was picked from.
       <EnableOrchestrator project={project} toast={toast} back={wide ? null : ORCHESTRATION_LIST} />
     );
+    body = <GuidedGoal key={project.id} project={project} toast={toast} wide={wide} ready={ready} />;
   } else if (view.kind === "session") {
     // A member's conversation is reached from the team on a phone, and goes back there.
     body = <SessionScreen key={view.id} id={view.id} focus={{ projectId, kind: "member" }} onBack={() => (wide ? navigate(home) : goBack(projectPagePath(projectId, "team")))} toast={toast} />;
@@ -74,5 +86,7 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
   } else {
     body = <TerminalsPage projectId={projectId} selected={route.query.get("t")} back={back} toast={toast} />;
   }
-  return <Suspense fallback={<div className="empty">{t("common.loading")}</div>}>{body}</Suspense>;
+  return <Suspense fallback={<div className="empty">{t("common.loading")}</div>}>
+    {view.kind === "page" && view.page === "board" ? <ContextErrorBoundary key={projectId}>{body}</ContextErrorBoundary> : body}
+  </Suspense>;
 }

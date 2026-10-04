@@ -139,13 +139,24 @@ PID = "b4k3ry20f0c5"
 QUESTION = "Is this the endpoint Naya waits for?"
 
 
-def orchestrator(page: Page, name: str, width: int) -> list[str]:
+def orchestrator(page: Page, name: str, width: int, lang: str) -> list[str]:
     """Answering a line of the orchestrator's events card, and the receipts under the operator's messages."""
     problems: list[str] = []
-    words = FOCUS_WORDS["en"]
-    focus = FocusStub.bakery("en")
+    name = f"{name} {lang}"
+    words = FOCUS_WORDS[lang]
+    focus = FocusStub.bakery(lang)
+    labels = {
+        "en": {"reply": "Reply to this", "more": "More actions", "confirmed": "delivered to Lev → confirmed",
+               "open": "open", "drained": "arrived as a turn ended, read in the next",
+               "pending": "delivered to Olga → not confirmed yet", "steered": "arrived during a turn",
+               "read": "read by the orchestrator", "commitment": "commitment: "},
+        "ru": {"reply": "Ответить на это", "more": "Ещё действия", "confirmed": "передано: Lev → подтверждено",
+               "open": "не выполнено", "drained": "пришло в конце хода, прочитано в следующем",
+               "pending": "передано: Olga → ещё не подтверждено", "steered": "пришло во время хода",
+               "read": "прочитано оркестратором", "commitment": "обязательство: "},
+    }[lang]
     serve_focus(page, focus)
-    page.goto(f"{BASE}/orchestration/project/{PID}?token=t&lang=en")
+    page.goto(f"{BASE}/orchestration/project/{PID}?token=t&lang={lang}")
     chat = page.locator(".chat.in-project.orchestrator")
     line = chat.locator(".event-card .event-line").first
     line.wait_for(timeout=15000)
@@ -158,7 +169,7 @@ def orchestrator(page: Page, name: str, width: int) -> list[str]:
         return [f"{name}: the events line has no visible reply button"]
     if box["x"] + box["width"] > width + 1 or box["x"] < 0:
         problems.append(f"{name}: the events line's reply button is outside the viewport ({box})")
-    if reply.get_attribute("aria-label") != "Reply to this":
+    if reply.get_attribute("aria-label") != labels["reply"]:
         problems.append(f"{name}: the events line's reply button is called {reply.get_attribute('aria-label')!r}")
 
     # The quote waits over the composer, and can be taken back before anything is sent.
@@ -176,14 +187,14 @@ def orchestrator(page: Page, name: str, width: int) -> list[str]:
     answer_row = chat.locator(".turn", has_text=words["orch.hours"]).locator(".msg-actions").last
     answer_row.scroll_into_view_if_needed()
     answer_row.hover()
-    if name == "phone":
-        answer_row.get_by_role("button", name="More actions").click()
-        labels = page.locator('[role="menuitem"]').all_text_contents()
+    if name.startswith("phone"):
+        answer_row.get_by_role("button", name=labels["more"]).click()
+        action_labels = page.locator('[role="menuitem"]').all_text_contents()
         page.keyboard.press("Escape")
     else:
-        labels = [b.get_attribute("aria-label") for b in answer_row.locator("button").all()]
-    if not any(label and "Reply to this" in label for label in labels):
-        problems.append(f"{name}: the orchestrator's reply has no 'Reply to this' ({labels})")
+        action_labels = [b.get_attribute("aria-label") for b in answer_row.locator("button").all()]
+    if not any(label and labels["reply"] in label for label in action_labels):
+        problems.append(f"{name}: the orchestrator's reply has no {labels['reply']!r} ({action_labels})")
 
     # Answer the events line for real: the POST carries what it answers, and the sent message shows it.
     line.scroll_into_view_if_needed()
@@ -223,19 +234,19 @@ def orchestrator(page: Page, name: str, width: int) -> list[str]:
         return " ".join(found.first.inner_text().split())
 
     confirmed = fate(words["op.photos"])
-    for part in ("R1 on Menu photo captions", "delivered to Lev → confirmed", "commitment: " + words["commit.gallery"], "open"):
+    for part in (f"R1 {'on' if lang == 'en' else 'в карточке'} {words['task.photos']}", labels["confirmed"], labels["commitment"] + words["commit.gallery"], labels["open"]):
         if part not in confirmed:
             problems.append(f"{name}: the receipt of the confirmed correction lacks {part!r}: {confirmed!r}")
     pending = fate(words["op.hours"])
-    for part in ("arrived as a turn ended, read in the next", "R2 on Opening hours", "delivered to Olga → not confirmed yet"):
+    for part in (labels["drained"], f"R2 {'on' if lang == 'en' else 'в карточке'} {words['task.hours']}", labels["pending"]):
         if part not in pending:
             problems.append(f"{name}: the receipt of the correction sent to Olga lacks {part!r}: {pending!r}")
     steered = fate(words["op.steps"])
-    if "arrived during a turn" not in steered or "read by the orchestrator" not in steered:
+    if labels["steered"] not in steered or labels["read"] not in steered:
         problems.append(f"{name}: the message placed into a turn says {steered!r}")
     if chat.locator(".msg-wrap", has_text=words["op.steps"]).locator(".msg-quote").count() != 1:
         problems.append(f"{name}: the message that answered Naya's steps does not show its quote")
-    if "read by the orchestrator" not in fate(words["op.ask"]):
+    if labels["read"] not in fate(words["op.ask"]):
         problems.append(f"{name}: the first message, answered since, does not say it was read")
     rows = chat.locator(".msg-fate").evaluate_all("rows => rows.map(r => r.getBoundingClientRect().right)")
     if any(right > width + 1 for right in rows):
@@ -299,9 +310,10 @@ def run() -> int:
                 page.screenshot(path=str(Path(__file__).parent / f"message-actions-{name}.png"))
             context.close()
 
-            context = browser.new_context(viewport={"width": width, "height": height}, is_mobile=name == "phone", has_touch=name == "phone")
-            problems += orchestrator(context.new_page(), name, width)
-            context.close()
+            for lang in ("en", "ru"):
+                context = browser.new_context(viewport={"width": width, "height": height}, is_mobile=name == "phone", has_touch=name == "phone")
+                problems += orchestrator(context.new_page(), name, width, lang)
+                context.close()
         browser.close()
     print("problems:", problems or "none")
     return 1 if problems else 0

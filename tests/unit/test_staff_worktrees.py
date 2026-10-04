@@ -22,6 +22,7 @@ import pytest
 from daedalus.host.containment import walls_for
 from daedalus.host.worktrees import (
     EXCLUDE_MARKER,
+    LocalGit,
     StaffWorktrees,
     WorktreeRefused,
     WorktreeUnavailable,
@@ -106,6 +107,91 @@ async def test_two_staff_in_one_repository_at_once_both_get_a_worktree(tmp_path:
     assert _git(repo, "status", "--porcelain") == ""
     # Both went through the one lock of that repository.
     assert len(trees._locks) == 1
+
+
+@pytest.mark.parametrize("untracked", [False, True])
+async def test_dirty_source_is_refused_before_worktree_metadata_is_written(tmp_path: Path, untracked: bool) -> None:
+    repo = _repo(tmp_path)
+    trees = StaffWorktrees("container")
+    if untracked:
+        (repo / "new.txt").write_text("unfinished\n")
+    else:
+        (repo / "readme.txt").write_text("unfinished\n")
+    exclude = repo / ".git" / "info" / "exclude"
+    before = exclude.read_bytes()
+
+    with pytest.raises(WorktreeRefused, match="uncommitted changes"):
+        await trees.prepare(_folder(repo), "Anna", "1", "one")
+
+    assert exclude.read_bytes() == before
+    assert not (repo / ".agents" / "worktrees" / "anna").exists()
+    assert not _git(repo, "branch", "--list", "agent/anna/1-one").strip()
+
+
+async def test_source_commit_moved_while_queued_is_refused_before_write(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    trees = StaffWorktrees("container")
+    folder = _folder(repo)
+    assigned_head = await trees.check(folder)
+    (repo / "later.txt").write_text("later\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "operator moved the source")
+    exclude = repo / ".git" / "info" / "exclude"
+    before = exclude.read_bytes()
+
+    with pytest.raises(WorktreeRefused, match="moved since assignment"):
+        await trees.prepare(folder, "Anna", "1", "one", expected_head=assigned_head)
+
+    assert exclude.read_bytes() == before
+    assert not _git(repo, "branch", "--list", "agent/anna/1-one").strip()
+    assert not (repo / ".agents" / "worktrees" / "anna").exists()
+
+
+async def test_generated_untracked_files_do_not_make_the_source_dirty(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    (repo / ".agents").mkdir()
+    (repo / ".agents" / "inbox.txt").write_text("generated\n")
+    (repo / "inbox").mkdir()
+    (repo / "inbox" / "message.txt").write_text("generated\n")
+    (repo / "PLAN.md").write_text("# Generated board plan\n")
+
+    tree = await StaffWorktrees("container").prepare(_folder(repo), "Anna", "1", "one")
+
+    assert tree.path.exists()
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+async def test_subfolder_source_checks_the_whole_repository(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    (repo / "module").mkdir()
+    (repo / "module" / "entry.txt").write_text("entry\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add module")
+    (repo / "outside.txt").write_text("unfinished\n")
+
+    with pytest.raises(WorktreeRefused, match="uncommitted changes"):
+        await StaffWorktrees("container").prepare(_folder(repo / "module"), "Anna", "1", "one")
+
+    assert not (repo / "module" / ".agents" / "worktrees" / "anna").exists()
+
+
+async def test_source_move_during_preparation_is_refused_before_branch_creation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _repo(tmp_path)
+    original = LocalGit.ensure_excluded
+
+    async def move_source(git: LocalGit, folder: Path) -> None:
+        await original(git, folder)
+        (folder / "later.txt").write_text("later\n")
+        _git(folder, "add", "-A")
+        _git(folder, "commit", "-qm", "operator moved the source")
+
+    monkeypatch.setattr(LocalGit, "ensure_excluded", move_source)
+
+    with pytest.raises(WorktreeRefused, match="moved since assignment"):
+        await StaffWorktrees("container").prepare(_folder(repo), "Anna", "1", "one")
+
+    assert not _git(repo, "branch", "--list", "agent/anna/1-one").strip()
+    assert not (repo / ".agents" / "worktrees" / "anna").exists()
 
 
 async def test_the_next_task_reuses_the_worktree_and_keeps_what_was_installed(tmp_path: Path) -> None:

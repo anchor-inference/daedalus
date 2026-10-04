@@ -21,6 +21,8 @@ import { ReviewPanel } from "./ReviewPanel";
 import { AcceptedResultDetail, ResultFlow, type AcceptedResultReference } from "./ResultFlow";
 import { TaskWorkflow } from "./TaskWorkflow";
 import { TaskComparison } from "./TaskComparison";
+import { RuntimeHandoff } from "./RuntimeHandoff";
+import { HostCapacity } from "./HostCapacity";
 import { TaskContext } from "./TaskContext";
 import { ManualResult } from "./ManualResult";
 import { ManualReopenRecovery } from "./ManualReopen";
@@ -60,6 +62,12 @@ type TaskCommand = { task: { id: string; entity_revision: number } };
 type LaunchReceipt = { effect_id: string; state: "queued"; entity_revision: number };
 type LaunchIntent = { id: string; body: { staff_id: string; resume_from: string | null; expected_entity_revision: number } };
 type ResumeSession = { id: string; started_at: string; owner_name: string; task_title: string; can_resume: boolean; resume_reason: string };
+
+export function acceptedAttemptCost(amount: number | null | undefined): string {
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0) return t("pboard.cost.unknown");
+  if (amount % 10_000 === 0) return `$${(amount / 1_000_000).toFixed(2)}`;
+  return `$${(amount / 1_000_000).toFixed(6).replace(/0+$/, "")}`;
+}
 
 const boardKey = (projectId: string) => `/api/projects/${encodeURIComponent(projectId)}/board`;
 const launchIntentKey = (taskId: string) => `task-launch-intent:${taskId}`;
@@ -702,6 +710,11 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
       )}
       {task && resultReference && <AcceptedResultDetail task={task} reference={resultReference} />}
       {task && !resultReference && (task.status === "review" || task.acceptance_state === "operator_approved") && <ResultFlow task={task} onAccepted={onDone} toast={toast} />}
+      {task?.status === "done" && task.acceptance_state === "operator_approved" && (
+        <p className="sub pboard-attempt-cost" title={t("pboard.cost.scope")}>
+          {t("pboard.cost.label")} · <strong>{acceptedAttemptCost(task.accepted_attempt_cost_microusd)}</strong>
+        </p>
+      )}
       {task && (NEXT[task.status].length > 0 || task.status === "review") && (
         <div className="btnrow pboard-moves" role="group" aria-label={t("board.moveto")}>
           {NEXT[task.status].length > 0 && <span className="sub">{t("board.moveto")}</span>}
@@ -718,6 +731,7 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
       {task && !task.branch && (task.status === "todo" || task.status === "blocked" || task.status === "review") && <ManualResult task={task} toast={toast} onChanged={onDone} />}
       {task && task.status !== "done" && <ManualReopenRecovery task={task} toast={toast} onChanged={onDone} />}
       {task && <TaskComparison task={task} staff={data.staff} onChanged={onDone} toast={toast} />}
+      {task && <RuntimeHandoff task={task} onChanged={onDone} toast={toast} />}
 
       {task && hasAcceptance(task) && <AcceptanceSection task={task} />}
 
@@ -779,6 +793,8 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
           {resumeError && <div className="sub attn">{resumeError}</div>}
         </>
       )}
+      {task && assignee && ((task.status === "todo" || task.status === "blocked") || launchPending) &&
+        <HostCapacity projectId={projectId} pending={launchPending} />}
       {task && assignee && (task.status === "todo" || task.status === "blocked") && (
         <div className="btnrow">
           <button type="button" className="btn small" disabled={busy || writeBlocked || editorChanged || launchPending} onClick={async () => {

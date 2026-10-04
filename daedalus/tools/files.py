@@ -67,6 +67,23 @@ async def read_file(
     context: ToolContext, path: str, offset: int = 1, limit: int = 400
 ) -> ToolResult:
     services = services_for(context)
+    if path.startswith("att:"):
+        from daedalus.stores.files import FileRefused  # Lazy: attachment reads alone need the file store.
+        from daedalus.tools.vision import VisionUnavailable, kept_body  # Lazy: text reads avoid vision imports.
+
+        manager = services.extra.get("manager")
+        if manager is None:
+            return error(context, "kept files are unavailable in this session")
+        owner = await manager.db.fetchone("SELECT project_id FROM sessions WHERE id=?", (services.session_id,))
+        if owner is None or not owner["project_id"]:
+            return error(context, "this session has no project file scope")
+        try:
+            stored = await manager.files.in_scope(path, owner["project_id"])
+            data = await manager.files.read(stored)
+            body = await kept_body(manager, data, stored, offset=offset, limit=limit)
+        except (FileRefused, VisionUnavailable, OSError, ValueError) as exc:
+            return error(context, str(exc))
+        return ok(context, f"{stored.handle} {stored.name} ({stored.mime}, {stored.size} bytes):\n{body}")
     fs = services.fs
     target, refusal = _resolve_path(context, services, path, "read")
     if refusal is not None:

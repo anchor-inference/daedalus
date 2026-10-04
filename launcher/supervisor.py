@@ -115,6 +115,11 @@ assert _dependency_spec is not None and _dependency_spec.loader is not None
 dependency_runtime = importlib.util.module_from_spec(_dependency_spec)
 _dependency_spec.loader.exec_module(dependency_runtime)
 
+_drain_spec = importlib.util.spec_from_file_location("daedalus_update_drain", Path(__file__).with_name("update_drain.py"))
+assert _drain_spec is not None and _drain_spec.loader is not None
+update_drain = importlib.util.module_from_spec(_drain_spec)
+_drain_spec.loader.exec_module(update_drain)
+
 
 def dependency_service() -> Any:
     return dependency_runtime.Dependencies(BOT_REPO, STATE, REBUILD_TRIGGER_DIR, native=os.environ.get("DAEDALUS_NATIVE", "").lower() in ("1", "true", "yes", "on"))
@@ -685,6 +690,7 @@ class Supervisor:
         """The secret the loopback channel asks for, empty where the channel is a socket and the
         filesystem answers the same question."""
         self.health_task: asyncio.Task[None] | None = None
+        self.recovery_task: asyncio.Task[None] | None = None
         self.rebuild_task: asyncio.Task[None] | None = None
         self.queued_rebuild: str | None = None
         """The reason of a rebuild asked for while another was running: it runs right after, so a pull
@@ -709,6 +715,24 @@ class Supervisor:
         revision goes back to the last known-good one by itself: a change that cannot boot cannot be
         undone from the app, because the app is what is not coming up."""
         log(f"self-development mode: {self.mode} (configured {CONFIGURED_MODE})")
+
+    async def _drain_before_stop(self, bot_sha: str, core_sha: str, transcript: str,
+                                 *, policy: str | None = None) -> dict[str, Any]:
+        """Require the running host's durable commitment before stopping its process tree."""
+        child = self.child
+        if child is None or child.returncode is not None:
+            raise update_drain.DrainRefused('the running host cannot confirm an update drain')
+        policy = policy or os.environ.get('DAEDALUS_UPDATE_DRAIN_POLICY', 'stop_all')
+        client = update_drain.UpdateDrainClient(STATE)
+        def verify(references: list[dict[str, Any]]) -> str:
+            return update_drain.verify_candidate_checkpoints(
+                STATE, candidate_dir(BOT_REPO), candidate_dir(CORE_REPO), PREFLIGHT_VENV,
+                bot_sha, core_sha, references)
+        receipt = await client.commit(bot_sha, core_sha, transcript, policy=policy,
+                                      verify_checkpoints=verify if policy == 'checkpoint_supported' else None)
+        if self.child is not child or child.returncode is not None:
+            raise update_drain.DrainRefused('the child changed after update commitment')
+        return receipt
 
     @property
     def mode(self) -> str:
@@ -762,6 +786,22 @@ class Supervisor:
         if child.returncode is None:
             record_good(bot, core)
 
+    async def _recover_successor(self, child: asyncio.subprocess.Process, bot: str, core: str) -> None:
+        """Reconcile a predecessor's committed update after this child serves its API."""
+        client = update_drain.UpdateDrainClient(STATE)
+        deadline = time.monotonic() + 120
+        while self.child is child and child.returncode is None:
+            try:
+                recovered = await client.recover(bot, core)
+                if recovered is not None:
+                    log(f"update drain {recovered['id']} recovered by installed successor")
+                return
+            except update_drain.DrainRefused as exc:
+                if 'host did not confirm GET' not in str(exc) or time.monotonic() >= deadline:
+                    log(f'update drain successor recovery refused: {exc}')
+                    return
+                await asyncio.sleep(1)
+
     async def run_loop(self) -> None:
         while self.want_running:
             await self.start_child()
@@ -769,6 +809,10 @@ class Supervisor:
             if self.health_task is not None:
                 self.health_task.cancel()
             self.health_task = asyncio.create_task(self._record_good_when_healthy(self.child, self.running_revision, self.running_core))
+            if self.recovery_task is not None:
+                self.recovery_task.cancel()
+            self.recovery_task = asyncio.create_task(self._recover_successor(
+                self.child, self.running_revision, self.running_core))
             started = time.monotonic()
             waiter = asyncio.create_task(self.child.wait())
             restart = asyncio.create_task(self.restart_requested.wait())
@@ -830,6 +874,11 @@ class Supervisor:
                 write_result("no_rollback", broken, f"{BOOT_THRESHOLD} failed boots and no earlier known-good revision left to go back to")
                 log("no known-good revision left that has not already been tried; staying where we are")
                 return False
+            try:
+                await self._drain_before_stop(target['bot'], target['core'], 'known-good automatic rollback')
+            except update_drain.DrainRefused as exc:
+                log(f"automatic rollback refused: {exc}")
+                return False
             self.tried_revisions.add(target["bot"])
             self._checkout(target["bot"], target["core"])
             changed = self._changed_files(target["bot"], broken)
@@ -856,12 +905,25 @@ class Supervisor:
         detached worktree of itself first, and the bot is stopped only once that passes.
         """
         if self.mode != "local":
-            self.restart_requested.set()
-            return "restarting"
+            if self.lock.locked() or (self.restart_task is not None and not self.restart_task.done()):
+                return "a restart, rebuild or rollback is already running; this one is not started twice"
+            self.restart_task = asyncio.create_task(self._restart_remote(reason))
+            return "checking the running work before restart"
         if self.lock.locked() or (self.restart_task is not None and not self.restart_task.done()):
             return "a restart, rebuild or rollback is already running; this one is not started twice"
         self.restart_task = asyncio.create_task(self._apply_local(reason))
         return "checking the change and restarting: it applies if the checks pass, and the running version is kept if they do not"
+
+    async def _restart_remote(self, reason: str) -> None:
+        async with self.lock:
+            target, target_core = head(BOT_REPO), head(CORE_REPO)
+            try:
+                await self._drain_before_stop(target, target_core, f'restart of checked checkout: {reason}')
+            except update_drain.DrainRefused as exc:
+                write_result('drain_refused', target, str(exc))
+                return
+            await self.stop_child()
+            self.restart_requested.set()
 
     async def _apply_local(self, reason: str) -> None:
         """Preflight the commit in the checkout and restart on it; keep the running one if it fails."""
@@ -895,6 +957,11 @@ class Supervisor:
                     # asking a rebuilder that a local installation does not have.
                     detail = "the code change is live, but this change also rewrites the image (the Dockerfile, the packages or the supervisor). Run an update to build a new image; until then the old environment is what runs."
                     log("the change touches the image; no rebuild is attempted in local mode")
+                try:
+                    await self._drain_before_stop(target, target_core, transcript)
+                except update_drain.DrainRefused as exc:
+                    write_result('drain_refused', target, str(exc))
+                    return
                 await self.stop_child()
                 stopped = True
                 write_result("applied", target, detail)
@@ -977,9 +1044,28 @@ class Supervisor:
                         return
                 code, out = git(BOT_REPO, "rev-parse", "origin/main")
                 incoming = out.strip() if code == 0 else "unknown"
+                code, out = git(CORE_REPO, "rev-parse", "origin/main")
+                incoming_core = out.strip() if code == 0 else "unknown"
                 changed = self._changed_files(previous["bot"], incoming)
                 if any(path in changed for path in REBUILD_TRIGGER_FILES) or any(path.startswith("launcher/") for path in changed):
                     # The image itself changes: the rebuilder replaces the container from origin/main.
+                    if not rebuilder_alive():
+                        outcome = 'image rebuild refused: no live rebuilder can replace the container'
+                        return
+                    for repo in (BOT_REPO, CORE_REPO):
+                        ok, out = await asyncio.to_thread(prepare_candidate, repo)
+                        if not ok:
+                            outcome = f'candidate checkout failed for {repo.name}: {out[-500:]}'
+                            return
+                    ok, transcript = await asyncio.to_thread(preflight, candidate_dir(BOT_REPO))
+                    if not ok:
+                        outcome = 'image rebuild refused: candidate preflight failed'
+                        return
+                    try:
+                        await self._drain_before_stop(incoming, incoming_core, transcript)
+                    except update_drain.DrainRefused as exc:
+                        outcome = f'image rebuild drain refused: {exc}'
+                        return
                     await self.stop_child()
                     stopped = True
                     for repo in (BOT_REPO, CORE_REPO):
@@ -1004,6 +1090,11 @@ class Supervisor:
                         f"the bot kept running on bot={previous['bot'][:10]} core={previous['core'][:10]}\n\n{transcript[-6000:]}"
                     )
                     outcome = "preflight failed; the running revision was kept"
+                    return
+                try:
+                    await self._drain_before_stop(incoming, incoming_core, transcript)
+                except update_drain.DrainRefused as exc:
+                    outcome = f'rebuild drain refused: {exc}'
                     return
                 await self.stop_child()
                 stopped = True
@@ -1068,7 +1159,6 @@ class Supervisor:
 
     async def _rollback(self, steps_back: int) -> str:
         async with self.lock:
-            await self.stop_child()
             history = load_history()
             current = {"bot": head(BOT_REPO), "core": head(CORE_REPO)}
             candidates = [h for h in history if h["bot"] != current["bot"] or h["core"] != current["core"]]
@@ -1077,12 +1167,19 @@ class Supervisor:
                 return "no earlier known-good revision recorded"
             index = max(0, len(candidates) - 1 - steps_back)
             target = candidates[index]
-            self._checkout(target["bot"], target["core"])
-            ok, transcript = await asyncio.to_thread(preflight, BOT_REPO)
+            for repo, sha in ((BOT_REPO, target['bot']), (CORE_REPO, target['core'])):
+                ok, out = await asyncio.to_thread(prepare_candidate, repo, sha)
+                if not ok:
+                    return f'rollback target checkout failed: {out[-800:]}'
+            ok, transcript = await asyncio.to_thread(preflight, candidate_dir(BOT_REPO))
             if not ok:
-                self._checkout(current["bot"], current["core"])
-                self.restart_requested.set()
                 return f"rollback target failed preflight; staying on the current revision\n{transcript[-800:]}"
+            try:
+                await self._drain_before_stop(target['bot'], target['core'], transcript)
+            except update_drain.DrainRefused as exc:
+                return f'rollback drain refused; the running revision was kept: {exc}'
+            await self.stop_child()
+            self._checkout(target["bot"], target["core"])
             self.restart_requested.set()
             return f"rolled back to bot={target['bot'][:10]} core={target['core'][:10]} (from {target['at']}); restarting"
 
@@ -1130,6 +1227,8 @@ class Supervisor:
                 if self.dependencies.native:
                     await asyncio.sleep(max(0, job["restart_at"] - time.time()))
                     self.dependencies.advance(job, "restarting")
+                    target, target_core = head(BOT_REPO), head(CORE_REPO)
+                    await self._drain_before_stop(target, target_core, 'checked dependency installation')
                     await self.stop_child()
                     self.restart_requested.set()
                     job["state"] = "completed"
@@ -1272,6 +1371,9 @@ async def main() -> int:
             # ending its tree, which is what a stop there means anyway.
             signal.signal(sig, lambda *_: _terminate())
     GOOD_DIR.mkdir(parents=True, exist_ok=True)
+    # The host update API authenticates this launcher even when commands use a
+    # filesystem socket and would not otherwise need a loopback credential.
+    loopback_token()
     if not load_history():
         record_good()
     await asyncio.to_thread(sync_venv_if_stale, BOT_REPO)

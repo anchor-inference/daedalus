@@ -90,7 +90,8 @@ class ComparisonLaunchEffect:
 
         entry = Entry(project.id, member.id, member.name, task.id, task.priority, False,
                       "operator", env=folder.env, principal=claim.principal,
-                      check_authority=authorized, capacity_slot_id=claim.payload["slot_id"])
+                      check_authority=authorized, capacity_slot_id=claim.payload["slot_id"],
+                      attempt_id=claim.payload["attempt_id"])
         attempt_bound = launch_attempt.set(claim.payload["attempt_id"])
         slot_bound = launch_capacity_slot.set(claim.payload["slot_id"])
         try:

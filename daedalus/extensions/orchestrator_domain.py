@@ -19,10 +19,11 @@ import aiosqlite
 
 from daedalus.extensions.ci_observations import ci_readiness
 from daedalus.extensions.task_contract import REQUIREMENT_KINDS, RETURNED, check_items
-from daedalus.stores.control import ControlStore, Principal
+from daedalus.stores.control import ControlStore, Mutation, Principal
 from daedalus.stores.database import Database
 from daedalus.stores.knowledge import enqueue_artifact_change
 from daedalus.stores.lifecycle import admit_child
+from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.projects import keep_task_commitments_in
 from daedalus.stores.runtime_release import attempt_released_in
 
@@ -1242,7 +1243,8 @@ async def scope_impact_preview(conn: aiosqlite.Connection, project_id: str,
 async def apply_goal_revision(
     conn: aiosqlite.Connection, *, project_id: str, expected_goal_revision: int,
     body: str, root_task_ids: list[str], origin_kind: str, origin_ref: str,
-    control: ControlStore, principal: Principal,
+    control: ControlStore, principal: Principal, checks: list[str] | None = None,
+    mutation: Mutation | None = None,
 ) -> dict[str, Any]:
     """Advance a project goal and fence only its explicit dependency closure."""
     project = await _one(conn, "SELECT goal_revision FROM projects WHERE id = ?", (project_id,))
@@ -1250,17 +1252,73 @@ async def apply_goal_revision(
         raise KeyError(project_id)
     if project["goal_revision"] != expected_goal_revision:
         raise DomainConflict("goal changed since the impact preview")
-    prior = await _one(conn, "SELECT body FROM project_goal_revisions WHERE project_id = ? AND goal_revision = ?",
+    prior = await _one(conn, "SELECT body,checks_json FROM project_goal_revisions WHERE project_id = ? AND goal_revision = ?",
                        (project_id, expected_goal_revision))
     if prior is None:
         raise DomainConflict("current goal revision is missing")
-    if prior["body"] == body:
+    if checks is not None and (not isinstance(checks, list) or not 1 <= len(checks) <= 12 or
+                               any(not isinstance(text, str) or not text.strip() or len(text.strip()) > 200 for text in checks)):
+        raise ValueError("one to twelve checkable criteria are required")
+    checks_json = json.dumps([text.strip() for text in checks]) if checks is not None else prior["checks_json"]
+    if prior["body"] == body and checks_json == prior["checks_json"]:
         return {"project_id": project_id, "goal_revision": expected_goal_revision,
                 "affected_task_ids": [], "semantic_change": False}
     preview = await scope_impact_preview(conn, project_id, root_task_ids)
+    # A goal can invalidate a result immediately, but it cannot make its provider disappear.
+    # Pin each unreleased process to its existing ownership edge before clearing the board binding.
+    stopping = []
+    for task_id in preview["affected_task_ids"]:
+        if await _one(conn, "SELECT 1 FROM comparison_groups WHERE task_id = ?"
+                      " AND state IN ('planned','active','ready') LIMIT 1", (task_id,)):
+            raise DomainConflict("an affected comparison must be stopped and reconciled before revising the goal")
+        if await _one(conn, "SELECT 1 FROM effect_outbox WHERE kind IN"
+                      " ('task.launch','comparison.launch.first','comparison.launch.second')"
+                      " AND state IN ('claimed','unknown')"
+                      " AND json_extract(payload_json,'$.control.task_id') = ? LIMIT 1", (task_id,)):
+            raise DomainConflict("an affected launch is in flight or unknown; reconcile it before revising the goal")
+        attempts = await _many(conn, "SELECT a.id,a.state,a.host_generation,a.provider_session_ref,"
+                               "a.runtime_kind,a.native_run_id,a.runtime_instance,a.staff_session_id,"
+                               "s.session_id,s.terminal_id,s.ended_at FROM execution_attempts a"
+                               " LEFT JOIN staff_sessions s ON s.id = a.staff_session_id WHERE a.task_id = ?",
+                               (task_id,))
+        for attempt in attempts:
+            if await attempt_released_in(conn, attempt["id"]):
+                continue
+            owner = await _one(conn, "SELECT parent_kind,parent_id,generation,source_revision,cancel_state"
+                               " FROM lifecycle_owners WHERE child_kind = 'execution_attempt' AND child_id = ?"
+                               " AND cancel_state IN ('active','requested','acknowledged','unknown')", (attempt["id"],))
+            if (owner is None or owner["parent_kind"] != "task" or owner["parent_id"] != task_id
+                    or owner["cancel_state"] != "active"):
+                raise DomainConflict("an affected execution has no exact lifecycle owner")
+            if (not attempt["staff_session_id"] or attempt["ended_at"] or
+                    (attempt["runtime_kind"] == "daedalus" and
+                     (not attempt["native_run_id"] or not attempt["session_id"] or
+                      attempt["provider_session_ref"] != f"session:{attempt['session_id']}")) or
+                    (attempt["runtime_kind"] == "cli" and
+                     (not attempt["terminal_id"] or not attempt["runtime_instance"] or
+                      attempt["provider_session_ref"] != f"terminal:{attempt['terminal_id']}"))):
+                raise DomainConflict("an affected launch has no exact runtime binding; wait for a launch or no-entry proof before revising the goal")
+            stopping.append({"parent_kind": owner["parent_kind"], "parent_id": owner["parent_id"],
+                             "generation": owner["generation"], "source_revision": owner["source_revision"],
+                             "child_id": attempt["id"], "staff_session_id": attempt["staff_session_id"],
+                             "host_generation": attempt["host_generation"],
+                             "runtime_kind": attempt["runtime_kind"],
+                             "provider_session_ref": attempt["provider_session_ref"],
+                             "runtime_ref": (attempt["native_run_id"] if attempt["runtime_kind"] == "daedalus"
+                                             else attempt["terminal_id"]),
+                             "runtime_instance": attempt["runtime_instance"]})
+    if stopping and mutation is None:
+        raise DomainConflict("a goal revision with running work needs a durable stop command")
+    for task_id in preview["affected_task_ids"]:
+        # A pending launch has not crossed the provider boundary. Cancel it in the same
+        # transaction, so the unchanged task contract cannot let it start after revision.
+        await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ?,completed_at = ?"
+                           " WHERE kind = 'task.launch' AND state = 'pending'"
+                           " AND json_extract(payload_json,'$.control.task_id') = ?",
+                           ("goal revision changed the task", _now(), task_id))
     revision = expected_goal_revision + 1
-    await conn.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,origin_ref,created_at)"
-                       " VALUES (?,?,?,?,?,?)", (project_id, revision, body, origin_kind, origin_ref, _now()))
+    await conn.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,origin_ref,created_at,checks_json)"
+                       " VALUES (?,?,?,?,?,?,?)", (project_id, revision, body, origin_kind, origin_ref, _now(), checks_json))
     await conn.execute("UPDATE projects SET goal_revision = ? WHERE id = ?", (revision, project_id))
     if root_task_ids:
         for task_id in root_task_ids:
@@ -1274,6 +1332,11 @@ async def apply_goal_revision(
                        " VALUES (?,'goals',?,?,?) ON CONFLICT(project_id,section) DO UPDATE SET"
                        " body = excluded.body,updated_at = excluded.updated_at,updated_by = excluded.updated_by",
                        (project_id, body, _now(), origin_kind if origin_kind in ("operator", "orchestrator", "system") else "system"))
+    if checks_json is not None:
+        await conn.execute("INSERT INTO project_briefs(project_id,section,body,updated_at,updated_by)"
+                           " VALUES (?,'done_when',?,?,'operator') ON CONFLICT(project_id,section) DO UPDATE SET"
+                           " body = excluded.body,updated_at = excluded.updated_at,updated_by = excluded.updated_by",
+                           (project_id, "\n".join(json.loads(checks_json)), _now()))
     for task_id in preview["affected_task_ids"]:
         await conn.execute("INSERT INTO scope_impacts(id,project_id,contract_revision,impact_kind,target_key,"
                            " affected_attempt_id,disposition,reason,created_at)"
@@ -1286,8 +1349,22 @@ async def apply_goal_revision(
         await conn.execute("UPDATE board_tasks SET current_attempt_id = NULL, accepted_result_id = NULL,"
                            " accepted_contract_revision = NULL, acceptance_state = 'returned',"
                            " entity_revision = entity_revision + 1 WHERE id = ?", (task_id,))
+    if stopping:
+        for owner in stopping:
+            await conn.execute("UPDATE lifecycle_owners SET cancel_state = 'requested',updated_at = ?"
+                               " WHERE parent_kind = ? AND parent_id = ? AND generation = ?"
+                               " AND child_kind = 'execution_attempt' AND child_id = ?"
+                               " AND cancel_state IN ('active','requested','acknowledged','unknown')",
+                               (_now(), owner["parent_kind"], owner["parent_id"], owner["generation"], owner["child_id"]))
+        effect_id = await OutboxStore.enqueue(conn, mutation, principal, kind="lifecycle.stop",
+                                              operation="goal.revise",
+                                              payload={"project_id": project_id, "goal_revision": revision,
+                                                       "attempts": stopping}, effects=("lifecycle.stop",))
+    else:
+        effect_id = None
     return {"project_id": project_id, "goal_revision": revision,
-            "affected_task_ids": preview["affected_task_ids"], "semantic_change": True}
+            "affected_task_ids": preview["affected_task_ids"], "semantic_change": True,
+            "stop_effect_id": effect_id}
 
 
 async def check_planning_capacity(conn: aiosqlite.Connection, project_id: str,

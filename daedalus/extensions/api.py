@@ -63,12 +63,15 @@ from daedalus.config import (
 )
 from daedalus.doctor import DoctorContext, render_text, run_checks, summarize
 from daedalus.extensions import (
+    api_attempt_diagnostics,
     api_board,
     api_browsers,
+    api_capacity,
     api_ci,
     api_comparisons,
     api_control,
     api_coordinator_authority,
+    api_effect_approvals,
     api_files,
     api_goal_budget,
     api_harnesses,
@@ -83,9 +86,11 @@ from daedalus.extensions import (
     api_recurring,
     api_resource_profiles,
     api_runtime,
+    api_runtime_handoff,
     api_skill_quality,
     api_staff,
     api_staff_reports,
+    api_update_drains,
     api_workflows,
     api_workspace_archive,
     launcher_updates,
@@ -311,6 +316,8 @@ class ReplyTo(BaseModel):
 class SendMessageBody(BaseModel):
     text: str
     steer: bool = False
+    follow_up: bool = False
+    expected_running: bool | None = None
     client_message_id: str = Field(default="", max_length=64)
     reply_to: ReplyTo | None = None
     """What in the chat the message answers: a report, an event line, a reply of the agent's."""
@@ -1493,7 +1500,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     )
 
     install_routes(api, app, auth)
+    api_effect_approvals.install_routes(api, app, auth)
+    api_attempt_diagnostics.register(api, app, auth)
     api_board.register(api, app, auth)
+    api_capacity.register(api, app, auth)
     api_comparisons.install_routes(api, app, auth)
     api_ci.install_routes(api, app, auth)
     api_control.register(api, app, auth)
@@ -1506,6 +1516,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_recurring.register(api, app, auth)
     api_resource_profiles.register(api, app, auth)
     api_runtime.register(api, app, auth)
+    api_runtime_handoff.register(api, app, auth)
+    api_update_drains.register(api, app, auth)
     api_lifecycle.register(api, app, auth)
     api_staff_reports.register(api, app, auth)
     api_workflows.register(api, app, auth)
@@ -2465,6 +2477,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 session_id,
                 text,
                 steer=body.steer,
+                follow_up=body.follow_up,
+                expected_running=body.expected_running,
                 client_message_id=body.client_message_id or None,
                 reply_to=reply,
             )
@@ -2482,6 +2496,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         session_id: str,
         text: str = Form(""),
         client_message_id: str = Form("", max_length=64),
+        steer: bool = Form(False),
+        follow_up: bool = Form(False),
+        expected_running: bool | None = Form(None),
         files: list[UploadFile] = File(default=[]),
         _: dict[str, Any] = Depends(auth),
     ) -> dict[str, Any]:
@@ -2516,6 +2533,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 session_id,
                 body,
                 attachments,
+                steer=steer,
+                follow_up=follow_up,
+                expected_running=expected_running,
                 client_message_id=client_message_id or None,
             )
         except ReceiptConflict as exc:

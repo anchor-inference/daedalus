@@ -1810,11 +1810,39 @@ class Orchestrators:
         if follower is not None:
             self._background.add(follower)
             follower.add_done_callback(self._background.discard)
+        from daedalus.extensions.auto_handoff import (
+            on_task_moved,  # Lazy: only a running event loop can attach this follower.
+        )
+        try:
+            handoff_follower = self.manager.bus.on(
+                EventFilter(types=("task.moved",)), lambda event: on_task_moved(self.app, event),
+                name="orchestrator-auto-handoff")
+        except RuntimeError:
+            handoff_follower = None
+        if handoff_follower is not None:
+            self._background.add(handoff_follower)
+            handoff_follower.add_done_callback(self._background.discard)
+        from daedalus.extensions.auto_handoff import (
+            on_capacity_released,  # Lazy: capacity wakes use the same installed event bus as task moves.
+        )
+        try:
+            capacity_follower = self.manager.bus.on(
+                EventFilter(types=("staff.status", "task.moved", "terminal.exited")),
+                lambda event: on_capacity_released(self.app, event), name="orchestrator-handoff-capacity")
+        except RuntimeError:
+            capacity_follower = None
+        if capacity_follower is not None:
+            self._background.add(capacity_follower)
+            capacity_follower.add_done_callback(self._background.discard)
 
     async def resume(self) -> None:
         """Start the wake queues of every project that has an orchestrator, each from its cursor."""
 
         await CoordinatorHandoff(self).reconcile()
+        from daedalus.extensions.auto_handoff import (
+            recover,  # Lazy: recovery starts after the host has installed extensions.
+        )
+        await recover(self.app)
         for project in await self.manager.projects.list():
             orchestrator = project.settings.orchestrator
             if orchestrator.enabled and orchestrator.session_id:

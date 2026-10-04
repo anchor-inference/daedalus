@@ -38,8 +38,9 @@ async def test_guided_start_replays_after_lost_reply_and_pins_contract(tmp_path:
         project = await projects.get(first["project_id"])
         assert project and project.primary.path.is_dir()
         assert len(await projects.list()) == 1
-        assert (await db.fetchone("SELECT body FROM project_goal_revisions WHERE project_id = ?",
-                                  (project.id,)))["body"] == request["goal"]
+        goal = await db.fetchone("SELECT body,checks_json FROM project_goal_revisions WHERE project_id = ?",
+                                 (project.id,))
+        assert goal["body"] == request["goal"] and json.loads(goal["checks_json"]) == request["checks"]
         task = await db.fetchone("SELECT project_id,assignee_staff_id,checklist,brief_json,status FROM board_tasks WHERE id = ?",
                                  (first["task_id"],))
         assert task and task["project_id"] == project.id and task["assignee_staff_id"] is None

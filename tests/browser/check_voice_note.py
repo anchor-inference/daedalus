@@ -89,7 +89,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     if rel == f"/api/sessions/{SESSION}/messages" and req.method == "POST":
         data = json.loads(req.post_data or "{}")
         HOST.sent.append(str(data.get("text", "")))
-        return reply({"run_id": "r2"})
+        return reply({"run_id": "r2", "receipt": {"status": "consumed", "run_id": "r2",
+                                               "client_message_id": data.get("client_message_id")}})
     if rel == "/api/asr":
         return reply({"configured": True, "reason": "", "provider": "openrouter", "model": "qwen/qwen3-asr-flash", "max_seconds": 600, "autosend": False, "transcriber": "cloud", "fallback": ""})
     if req.method == "GET" and rel == f"/api/sessions/{SESSION}":

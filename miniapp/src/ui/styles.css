@@ -3034,6 +3034,13 @@ button.staff-row:hover { background: var(--surface-2); }
 .btn.warn { color: var(--warn); background: transparent; border-color: color-mix(in srgb, var(--warn) 50%, transparent); font-weight: 600; }
 .btn.warn:hover { background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .pboard-sheet-status { margin-bottom: 8px; flex-wrap: wrap; }
+.host-capacity { margin: 4px 0 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--fg-2); font-size: var(--fs-12); min-width: 0; }
+.host-capacity.waiting { border-color: var(--warn); color: var(--fg); }
+.host-capacity-line { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
+.host-capacity-line > span { min-width: 0; overflow-wrap: anywhere; }
+.host-capacity-details { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--line); }
+.host-capacity-details ol { margin: 6px 0 0; padding-left: 22px; }
+.host-capacity-details li { padding: 2px 0; }
 .task-workflow, .task-context { border-top: 1px solid var(--line); padding: 12px 0; }
 /* The section-title carries a two-pixel inline margin on board sections; alongside a full-width
    button it widened the sheet's scroll area on a phone. Keep the whole heading tappable. */
@@ -3469,6 +3476,9 @@ button.staff-row:hover { background: var(--surface-2); }
 
 /* Switching an orchestrator on. */
 .focus-enable .empty { max-width: 560px; margin: 0 auto; }
+.guided-goal { display: flex; flex-direction: column; gap: 10px; overflow-wrap: anywhere; }
+.guided-goal h2, .guided-goal p { margin: 0; }
+.guided-goal .btn.primary { align-self: flex-start; }
 .focus-enable .empty .ic { color: var(--accent); }
 .autonomy-choice { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; min-width: 0; }
 /* The first thing a new project shows: centred in the free height, not pinned under the header with

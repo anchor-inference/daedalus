@@ -807,6 +807,11 @@ class RecurringEffect:
                     await conn.execute("UPDATE effect_outbox SET state = 'pending',claimed_at = NULL,error = ?"
                                        " WHERE id = ? AND state = 'unknown' AND claim_generation = ?",
                                        ("proven interrupted before effect entry", claim.id, claim.generation))
+                    # A claim recovered before the durable entry marker never consumed the
+                    # write's one delivery attempt. Retaining it would exhaust that budget
+                    # and strand an occurrence that is proven safe to admit again.
+                    await conn.execute("DELETE FROM retry_attempts WHERE effect_id = ? AND phase = 'delivery'"
+                                       " AND state = 'unknown'", (claim.id,))
                     dispatcher = self.app.extensions.get("effects")
                     if dispatcher is not None:
                         dispatcher.notify()

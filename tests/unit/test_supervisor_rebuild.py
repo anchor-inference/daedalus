@@ -42,6 +42,11 @@ def _harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, preflight_ok: b
         calls.append("stop")
 
     supervisor.stop_child = stop_child  # type: ignore[method-assign]
+    async def committed(bot: str, core: str, transcript: str) -> dict[str, str]:
+        calls.append("drain committed")
+        return {"state": "committed", "receipt_id": "saved"}
+
+    supervisor._drain_before_stop = committed  # type: ignore[method-assign]
     return sup, supervisor, calls
 
 

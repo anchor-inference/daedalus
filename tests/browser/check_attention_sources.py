@@ -49,6 +49,9 @@ def run() -> None:
                     {"action_id": "assign-checkout", "task_id": "t-checkout", "contract_revision": 1,
                      "kind": "assign", "owner_kind": "operator", "context_ref": "ask-ira",
                      "enabled": True, "blockers": []},
+                    {"action_id": "blocked-review", "task_id": "t-checkout", "contract_revision": 0,
+                     "kind": "review", "owner_kind": "operator", "context_ref": None,
+                     "enabled": False, "blockers": ["stale_contract", "result_not_verified"]},
                 ]
                 focus.budget_views[PROJECT] = {"configured": True, "project_id": PROJECT,
                     "entity_revision": 1, "goal_revision": 1, "budget_id": "goal-budget",
@@ -56,12 +59,17 @@ def run() -> None:
                 serve(page, focus)
                 page.goto(f"{BASE}/orchestration/project/{PROJECT}/attention?token=t&lang={lang}")
                 cards = page.locator(".focus-attention-item")
-                expect(cards).to_have_count(6)
+                expect(cards).to_have_count(7)
                 if width < 600:
-                    expect(page.locator("nav.project-tabs a[data-tab='attention'] .tab-badge")).to_have_text("6")
+                    expect(page.locator("nav.project-tabs a[data-tab='attention'] .tab-badge")).to_have_text("7")
                 assert not page.get_by_text("same-ask").count()
                 expect(cards.filter(has_text="Input needed" if lang == "en" else "Нужны данные")).to_have_count(1)
                 expect(cards.filter(has_text="Assignment needed" if lang == "en" else "Нужно назначение")).to_have_count(1)
+                blocked = cards.filter(has_text="task requirements changed" if lang == "en" else "условия задачи изменились")
+                expect(blocked).to_have_count(1)
+                expect(blocked).to_contain_text("result is not verified" if lang == "en" else "результат не проверен")
+                expect(blocked).not_to_contain_text("Review needed" if lang == "en" else "Нужна проверка")
+                expect(blocked.get_by_role("button", name="Open task" if lang == "en" else "Открыть задачу")).to_be_visible()
                 expect(cards.filter(has_text="Result to review" if lang == "en" else "Результат на проверке")).to_have_count(1)
                 budget = cards.filter(has_text="No budget remains" if lang == "en" else "Бюджет исчерпан")
                 expect(budget).to_have_count(1)
@@ -72,7 +80,7 @@ def run() -> None:
 
                 next(ask for ask in focus.asks if ask["id"] == "ask-ira")["resolved_at"] = "2026-01-01T00:00:00Z"
                 page.reload()
-                expect(cards).to_have_count(6)
+                expect(cards).to_have_count(7)
                 expect(cards.filter(has_text="Answer needed" if lang == "en" else "Нужен ответ")).to_have_count(1)
 
                 focus.budget_views[PROJECT]["total"] = balance(None, "unknown_usage")

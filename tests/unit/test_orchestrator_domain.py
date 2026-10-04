@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -412,6 +413,94 @@ async def test_goal_change_fences_only_named_dependency_closure(domain_db: Datab
     assert (await domain_db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'unrelated'"))[0] == 1
     assert (await domain_db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'child'"))[0] == 3
     assert len(await domain_db.fetchall("SELECT id FROM scope_impacts WHERE project_id = 'project1'")) == 4
+
+
+async def test_guided_goal_criteria_are_versioned_and_ordinary_revision_preserves_them(domain_db: Database) -> None:
+    await domain_db.execute("INSERT INTO projects(id,name,created_at,settings)"
+                            " VALUES ('project1','Example','2026-01-01','{}')")
+    await domain_db.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at)"
+                            " VALUES ('project1',1,'','system','2026-01-01')")
+    principal = Principal.operator({"via": "token", "user_id": 1})
+    async with domain_db.transaction() as conn:
+        first = await apply_goal_revision(conn, project_id="project1", expected_goal_revision=1,
+                                          body="Publish a menu", root_task_ids=[], origin_kind="operator", origin_ref="",
+                                          control=ControlStore(domain_db), principal=principal,
+                                          checks=["All items listed", "Prices checked"])
+        assert first["goal_revision"] == 2
+    async with domain_db.transaction() as conn:
+        revised = await apply_goal_revision(conn, project_id="project1", expected_goal_revision=2,
+                                            body="Publish the final menu", root_task_ids=[], origin_kind="operator",
+                                            origin_ref="", control=ControlStore(domain_db), principal=principal)
+        assert revised["goal_revision"] == 3
+    rows = await domain_db.fetchall("SELECT goal_revision,body,checks_json FROM project_goal_revisions"
+                                    " WHERE project_id = 'project1' ORDER BY goal_revision")
+    assert [(row["goal_revision"], row["body"]) for row in rows] == [
+        (1, ""), (2, "Publish a menu"), (3, "Publish the final menu")]
+    assert rows[0]["checks_json"] is None
+    assert [json.loads(row["checks_json"]) for row in rows[1:]] == [
+        ["All items listed", "Prices checked"], ["All items listed", "Prices checked"]]
+    assert (await domain_db.fetchone("SELECT body FROM project_briefs WHERE project_id = 'project1'"
+                                     " AND section = 'done_when'"))["body"] == "All items listed\nPrices checked"
+
+
+@pytest.mark.parametrize("launch_state", ["pending", "claimed", "late_error"])
+async def test_goal_change_cancels_only_unclaimed_launch_in_its_transaction(
+    domain_db: Database, launch_state: str,
+) -> None:
+    await domain_db.execute("INSERT INTO projects(id,name,created_at,settings)"
+                            " VALUES ('project1','Example','2026-01-01','{}')")
+    await domain_db.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at)"
+                            " VALUES ('project1',1,'Old goal','operator','2026-01-01')")
+    await domain_db.execute("INSERT INTO board_tasks(id,title,status,priority,acceptance,checklist,depends_on,"
+                            " created_at,updated_at,brief_json,project_id) VALUES"
+                            " ('root','Work','todo',3,'','[]','[]','2026-01-01','2026-01-01','{}','project1')")
+    control = ControlStore(domain_db)
+    principal = Principal.operator({"via": "token", "user_id": 1})
+    scope = Scope("project", "project1")
+
+    async def launch(conn, mutation):
+        effect_id = await OutboxStore.enqueue(conn, mutation, principal, kind="task.launch",
+                                              operation="task.launch", payload={"task_id": "root"},
+                                              task_id="root", effects=("execution.start",))
+        return {"effect_id": effect_id}
+
+    task_revision = await control.revision(scope, Entity("task", "root"))
+    queued = await control.mutate(principal, scope, "task.launch", "launch", task_revision,
+                                  Entity("task", "root"), {}, launch, effects=("execution.start",))
+    if launch_state == "claimed":
+        assert await OutboxStore(domain_db).claim(("task.launch",)) is not None
+    if launch_state == "late_error":
+        await domain_db.execute("CREATE TRIGGER refuse_brief BEFORE INSERT ON project_briefs"
+                                " BEGIN SELECT RAISE(ABORT,'brief write refused'); END")
+
+    async def revise(conn, mutation):
+        return await apply_goal_revision(conn, project_id="project1", expected_goal_revision=1,
+                                         body="New goal", root_task_ids=["root"], origin_kind="operator",
+                                         origin_ref="", control=control, principal=principal, mutation=mutation)
+
+    project_revision = await control.revision(scope, Entity("project", "project1"))
+    command = control.mutate(principal, scope, "goal.revise", "revise", project_revision,
+                             Entity("project", "project1"), {"body": "New goal"}, revise,
+                             effects=("lifecycle.stop",))
+    if launch_state == "claimed":
+        with pytest.raises(DomainConflict, match="in flight or unknown"):
+            await command
+        assert (await domain_db.fetchone("SELECT goal_revision FROM projects WHERE id = 'project1'"))[0] == 1
+        assert (await domain_db.fetchone("SELECT state FROM effect_outbox WHERE id = ?",
+                                         (queued["effect_id"],)))[0] == "claimed"
+        assert not await domain_db.fetchall("SELECT * FROM scope_impacts")
+    elif launch_state == "late_error":
+        with pytest.raises(sqlite3.IntegrityError, match="brief write refused"):
+            await command
+        assert (await domain_db.fetchone("SELECT goal_revision FROM projects WHERE id = 'project1'"))[0] == 1
+        assert (await domain_db.fetchone("SELECT state FROM effect_outbox WHERE id = ?",
+                                         (queued["effect_id"],)))[0] == "pending"
+        assert not await domain_db.fetchall("SELECT * FROM scope_impacts")
+    else:
+        changed = await command
+        assert changed["goal_revision"] == 2
+        assert (await domain_db.fetchone("SELECT state FROM effect_outbox WHERE id = ?",
+                                         (queued["effect_id"],)))[0] == "cancelled"
 
 
 def test_original_report_storage_keeps_full_bytes_and_rejects_oversize(tmp_path: Path) -> None:

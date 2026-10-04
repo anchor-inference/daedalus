@@ -258,7 +258,7 @@ function PendingProposals({ toast, onAccepted }: { toast: (text: string) => void
         <div className="proposal-text">{item.prompt}</div>
         {item.file_count > 0 && <div className="sub">{t("sched.proposal.files", { n: item.file_count })}</div>}
         {item.legacy_file_review_required && <div className="result-warning">{t("sched.proposal.legacyfiles")}</div>}
-        {item.files.map((file) => <div className="sub mono" key={`${file.name}:${file.digest}`}>{file.name} · {file.size} B · SHA-256 {file.digest}</div>)}
+        {item.files.map((file) => <div className="sub mono" key={`${file.name}:${file.digest}`}>{file.name} · {file.size} B · SHA-256 {file.digest} · {t("sched.proposal.revision", { n: item.proposal_revision })}</div>)}
       </div>
       <div className="row-actions">
         <button className="btn small" disabled={!!busy || !!error || offline || !data?.collection_revisions[item.source_project_id ? `project:${item.source_project_id}` : "global:global"]} onClick={() => void decide(item, "withdraw")}>{t("sched.proposal.withdraw")}</button>

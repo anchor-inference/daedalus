@@ -78,6 +78,18 @@ const SAME_IN_BOTH = [
 const isPlural = (key: string) => DICT[key].en.includes("|");
 
 describe("the dictionary", () => {
+  it("does not overwrite a key from another dictionary block", () => {
+    // Object.assign silently keeps the later value, so the runtime dictionary cannot reveal a collision.
+    const keys = [...SOURCES["./i18n.ts"].matchAll(/^\s*"([^"]+)":\s*\{\s*en:/gm)].map((match) => match[1]);
+    const seen = new Set<string>();
+    const repeated: string[] = [];
+    for (const key of keys) {
+      if (seen.has(key)) repeated.push(key);
+      seen.add(key);
+    }
+    expect(repeated).toEqual([]);
+  });
+
   it("has every key in every language", () => {
     const missing: string[] = [];
     for (const [key, entry] of Object.entries(DICT)) {

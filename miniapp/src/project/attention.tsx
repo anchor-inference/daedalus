@@ -13,7 +13,7 @@ import { PageHeader } from "../shell";
 import { useOffline, useQuery } from "../store";
 import { Skeleton } from "../ui/components";
 import { boardKey, useProject } from "./data";
-import { budgetAttention, distinctOperatorActions, type NextAction } from "./attention-model";
+import { actionBlockerKeys, budgetAttention, distinctOperatorActions, type NextAction } from "./attention-model";
 import { operatorReviewReady } from "./focus";
 import { AskAnswers } from "./phone";
 import { useGoalBudget } from "./ProjectBudget";
@@ -58,10 +58,12 @@ export function AttentionPage({ projectId, back, toast }: { projectId: string; b
         <button type="button" className="btn primary" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id }))}>{t("focus.attention.inspect")}</button>
       </section>)}
       {otherActions.map((action) => <section className="focus-attention-item" key={action.action_id}>
-        <div className="focus-attention-kind">{t(`focus.attention.action.${action.kind}`)}</div>
+        <div className="focus-attention-kind">{t(action.enabled ? `focus.attention.action.${action.kind}` : "focus.attention.waiting")}</div>
         <h2>{titles.get(action.task_id) || t("focus.attention.task")}</h2>
-        {!action.enabled && <p className="sub">{t("focus.attention.prerequisite")}</p>}
-        <button type="button" className="btn small" onClick={() => navigate(projectPagePath(projectId, "board", { task: action.task_id }))}>{t("focus.attention.inspect")}</button>
+        {!action.enabled && <p className="sub">{t("focus.attention.blocked", {
+          reason: actionBlockerKeys(action.blockers).map((key) => t(key)).join(" · "),
+        })}</p>}
+        <button type="button" className="btn small" onClick={() => navigate(projectPagePath(projectId, "board", { task: action.task_id }))}>{t("focus.attention.task")}</button>
       </section>)}
       {budgetIssue && <section className="focus-attention-item">
         <div className="focus-attention-kind">{t("focus.attention.budget")}</div>

@@ -31,9 +31,9 @@ on:
   push:
     tags: ["desktop-v*"]
     branches: [main]
-    paths: ["desktop/**", "ptyd/**", "browserd/**", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "ptyd/**", "browserd/**", "scripts/desktop_package_evidence.py", ".github/workflows/desktop.yml"]
   pull_request:
-    paths: ["desktop/**", "ptyd/**", "browserd/**", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "ptyd/**", "browserd/**", "scripts/desktop_package_evidence.py", ".github/workflows/desktop.yml"]
   workflow_dispatch:
 
 permissions:
@@ -394,7 +394,8 @@ jobs:
           cd "$RUNNER_TEMP"
           appimage="$GITHUB_WORKSPACE/out/$(cd "$GITHUB_WORKSPACE/out" && ls Daedalus-linux-*x86_64*.AppImage)"
           "$appimage" --appimage-extract >/dev/null
-          squashfs-root/daedalus-desktop --version
+          if [ "$IS_RELEASE" = true ]; then expected="$GITHUB_REF_NAME"; else expected="dev-${GITHUB_SHA::12}"; fi
+          test "$(squashfs-root/daedalus-desktop --version)" = "$expected"
           test -f squashfs-root/miniapp-dist/index.html
           test -f squashfs-root/seed/manifest.json
           test -f squashfs-root/seed/linux-amd64/wheels.tar.gz
@@ -406,6 +407,19 @@ jobs:
           desktop/shell/test/firstrun-smoke.sh /opt/Daedalus/daedalus-desktop "$RUNNER_TEMP/firstrun"
           desktop/shell/test/linux-smoke.sh run
           sudo desktop/shell/test/linux-smoke.sh remove "$HOME/.local/share/daedalus/data"
+      - name: Record package evidence
+        run: |
+          if [ "$IS_RELEASE" = true ]; then expected="$GITHUB_REF_NAME" channel=stable; else expected="dev-${GITHUB_SHA::12}" channel=canary; fi
+          deb="$GITHUB_WORKSPACE/out/$(cd out && ls Daedalus-linux-*amd64*.deb)"
+          appimage="$GITHUB_WORKSPACE/out/$(cd out && ls Daedalus-linux-*x86_64*.AppImage)"
+          dpkg-deb -x "$deb" "$RUNNER_TEMP/deb-root"
+          python3 scripts/desktop_package_evidence.py --package "$deb" --launcher "$RUNNER_TEMP/deb-root/opt/Daedalus/daedalus-desktop" --target linux-amd64 --channel "$channel" --expected-version "$expected" --passed install --passed start --passed uninstall --passed offline_first_run --output package-evidence/linux-amd64-deb.json
+          python3 scripts/desktop_package_evidence.py --package "$appimage" --launcher "$RUNNER_TEMP/squashfs-root/daedalus-desktop" --target linux-amd64 --channel "$channel" --expected-version "$expected" --output package-evidence/linux-amd64-appimage.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-evidence-linux
+          path: package-evidence
+          retention-days: 3
       - uses: actions/upload-artifact@v4
         with:
           name: app-linux

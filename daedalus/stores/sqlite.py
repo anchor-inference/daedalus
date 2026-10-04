@@ -31,6 +31,7 @@ from daedalus.providers.openai_compat import UsageRecord, UsageSink
 from daedalus.stores.database import Database
 from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.projects import ProjectSettings
+from daedalus.stores.update_drains import assert_admission_open_in
 
 UNFINISHED_RUN_STATUSES = ", ".join(f"'{status.value}'" for status in (RunStatus.queued, RunStatus.running, RunStatus.paused))
 """The statuses of a run that is not over. Its events are what the live view reads and what a resume
@@ -675,6 +676,7 @@ class SqliteRunStore(IRunStore):
     @staticmethod
     async def create_in(conn: aiosqlite.Connection, run: Run) -> None:
         """Create a run alongside the caller's durable admission or continuation receipt."""
+        await assert_admission_open_in(conn)
         await conn.execute(
             "INSERT OR REPLACE INTO runs(id, tenant_id, session_id, status, created_at, updated_at, detail_blob_ref)"
             " VALUES (?, ?, ?, ?, ?, ?, ?)",

@@ -143,7 +143,12 @@ class Application:
                     handled=frozenset({"telegram"}) if self.front is not None else frozenset(),
                 ))
             if effects := self.extensions.get("effects"):
-                effects.enable()
+                from daedalus.stores.update_drains import (
+                    UpdateDrains,  # Lazy: boot recovery may finish under an update fence.
+                )
+
+                if (await UpdateDrains(self.db, self.executions).read())['admission_open']:
+                    effects.enable()
             return
         resumed = await self.manager.resume_unfinished()
         if resumed:
@@ -163,7 +168,12 @@ class Application:
             if resent:
                 await self.front.notify(f"Re-sent {resent} answer(s) the previous process had not confirmed as delivered.", markdown=False)
         if effects := self.extensions.get("effects"):
-            effects.enable()
+            from daedalus.stores.update_drains import (
+                UpdateDrains,  # Lazy: a committed update keeps pending effects parked.
+            )
+
+            if (await UpdateDrains(self.db, self.executions).read())['admission_open']:
+                effects.enable()
 
     async def _log_llamacpp_startup(self) -> None:
         """Record what each configured local server says before the first run needs it."""

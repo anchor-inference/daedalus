@@ -257,7 +257,8 @@ class Lifecycle:
         async with self.app.db.transaction() as conn:
             row = await one(
                 conn, "SELECT a.id,a.task_id,a.state,a.host_generation,a.provider_session_ref,a.staff_session_id,"
-                "a.runtime_kind,a.native_run_id,a.contract_revision,t.current_attempt_id,s.ended_at,s.session_id,s.terminal_id,"
+                "a.runtime_kind,a.native_run_id,a.runtime_instance,a.contract_revision,t.current_attempt_id,"
+                "s.staff_id,s.ended_at,s.session_id,s.terminal_id,"
                 "o.cancel_state,o.source_revision "
                 "FROM execution_attempts a JOIN board_tasks t ON t.id = a.task_id "
                 "JOIN lifecycle_owners o ON o.child_kind = 'execution_attempt' AND o.child_id = a.id "
@@ -268,6 +269,15 @@ class Lifecycle:
             if (row is None or row["source_revision"] != owner["source_revision"]
                     or row["contract_revision"] != owner["source_revision"]
                     or row["cancel_state"] not in {"requested", "acknowledged", "unknown", "drained"}):
+                return "unknown"
+            if ("runtime_ref" in owner and
+                    (row["staff_session_id"] != owner["staff_session_id"] or
+                     row["host_generation"] != owner["host_generation"] or
+                     row["runtime_kind"] != owner["runtime_kind"] or
+                     row["provider_session_ref"] != owner["provider_session_ref"] or
+                     row["runtime_instance"] != owner["runtime_instance"] or
+                     (row["native_run_id"] if row["runtime_kind"] == "daedalus" else row["terminal_id"])
+                     != owner["runtime_ref"])):
                 return "unknown"
             if row["cancel_state"] == "drained":
                 return "drained"
@@ -311,29 +321,39 @@ class Lifecycle:
             )
             staff_session_id = row["staff_session_id"]
         team = self.app.extensions.get("staff")
-        live = await team.live(staff_session_id) if team is not None else None
-        if live is None or live.id != staff_session_id:
-            return "unknown"
-        await check(claim)
-        current = await self.app.db.fetchone(
-            "SELECT a.id,a.provider_session_ref,a.host_generation,t.current_attempt_id,s.session_id,s.terminal_id "
-            "FROM execution_attempts a JOIN board_tasks t ON t.id = a.task_id "
-            "JOIN staff_sessions s ON s.id = a.staff_session_id WHERE a.id = ?", (attempt_id,),
-        )
-        host = await self.app.db.fetchone("SELECT value FROM kv WHERE key = 'execution_host_generation'")
-        if (current is None or host is None or int(json.loads(host["value"])) != row["host_generation"]
-                or current["host_generation"] != row["host_generation"]):
-            return "unknown"
-        observed = f"session:{current['session_id']}" if row["runtime_kind"] == "daedalus" else f"terminal:{current['terminal_id']}"
-        if not row["provider_session_ref"] or observed != row["provider_session_ref"]:
+        if team is None:
             return "unknown"
         try:
-            async with team.execution_lock(live.staff.id):
+            async with team.execution_lock(row["staff_id"]):
+                live = await team.live(staff_session_id)
+                if live is None or live.id != staff_session_id or live.staff.id != row["staff_id"]:
+                    return "unknown"
+                await check(claim)
+                current = await self.app.db.fetchone(
+                    "SELECT a.id,a.provider_session_ref,a.host_generation,a.native_run_id,a.runtime_instance,"
+                    "s.session_id,s.terminal_id,t.ptyd_instance FROM execution_attempts a"
+                    " JOIN staff_sessions s ON s.id = a.staff_session_id"
+                    " LEFT JOIN terminals t ON t.id = s.terminal_id WHERE a.id = ?", (attempt_id,),
+                )
+                host = await self.app.db.fetchone("SELECT value FROM kv WHERE key = 'execution_host_generation'")
+                if (current is None or host is None or int(json.loads(host["value"])) != row["host_generation"]
+                        or current["host_generation"] != row["host_generation"]
+                        or current["provider_session_ref"] != row["provider_session_ref"]):
+                    return "unknown"
+                observed = (f"session:{current['session_id']}" if row["runtime_kind"] == "daedalus"
+                            else f"terminal:{current['terminal_id']}")
+                if not row["provider_session_ref"] or observed != row["provider_session_ref"]:
+                    return "unknown"
+                if row["runtime_kind"] == "daedalus":
+                    if current["native_run_id"] != row["native_run_id"] or live.session_id != current["session_id"]:
+                        return "unknown"
+                elif (current["runtime_instance"] != row["runtime_instance"] or
+                      current["ptyd_instance"] != row["runtime_instance"] or
+                      live.terminal_id != current["terminal_id"]):
+                    return "unknown"
                 await check(claim)
                 async with asyncio.timeout(30):
                     if row["runtime_kind"] == "daedalus":
-                        if not row["native_run_id"]:
-                            return "unknown"
                         if not await self.app.manager.stop_run(current["session_id"], row["native_run_id"]):
                             return "unknown"
                     else:
@@ -345,13 +365,24 @@ class Lifecycle:
     async def reconcile(self, claim: Claim) -> EffectResolution | None:
         for owner in claim.payload["attempts"]:
             row = await self.app.db.fetchone(
-                "SELECT a.state,a.provider_session_ref,s.ended_at,o.cancel_state FROM execution_attempts a "
+                "SELECT a.state,a.provider_session_ref,a.host_generation,a.runtime_kind,a.native_run_id,"
+                "a.runtime_instance,a.staff_session_id,s.terminal_id,s.ended_at,o.cancel_state"
+                " FROM execution_attempts a "
                 "JOIN lifecycle_owners o ON o.child_kind = 'execution_attempt' AND o.child_id = a.id "
                 "AND o.parent_kind = ? AND o.parent_id = ? AND o.generation = ? AND o.source_revision = ? "
                 "LEFT JOIN staff_sessions s ON s.id = a.staff_session_id WHERE a.id = ?",
                 (owner["parent_kind"], owner["parent_id"], owner["generation"], owner["source_revision"], owner["child_id"]),
             )
             if row is None or row["cancel_state"] != "drained":
+                return None
+            if ("runtime_ref" in owner and
+                    (row["staff_session_id"] != owner["staff_session_id"] or
+                     row["host_generation"] != owner["host_generation"] or
+                     row["runtime_kind"] != owner["runtime_kind"] or
+                     row["provider_session_ref"] != owner["provider_session_ref"] or
+                     row["runtime_instance"] != owner["runtime_instance"] or
+                     (row["native_run_id"] if row["runtime_kind"] == "daedalus" else row["terminal_id"])
+                     != owner["runtime_ref"])):
                 return None
         return EffectResolution("completed", {"observed": "all_owned_attempts_terminal"})
 

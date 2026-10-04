@@ -14,15 +14,19 @@ from typing import Any
 import aiosqlite
 
 from daedalus.config import native_mode
+from daedalus.stores.attempt_fault_schema import MIGRATION as ATTEMPT_FAULT_MIGRATION
+from daedalus.stores.capacity_schema import MIGRATION as CAPACITY_MIGRATION
 from daedalus.stores.ci_schema import MIGRATION as CI_MIGRATION
 from daedalus.stores.comparison_funding_schema import MIGRATION as COMPARISON_FUNDING_MIGRATION
 from daedalus.stores.comparison_schema import MIGRATION as COMPARISON_MIGRATION
 from daedalus.stores.contract_change_schema import MIGRATION as CONTRACT_CHANGE_MIGRATION
 from daedalus.stores.control_schema import MIGRATION as CONTROL_MIGRATION
 from daedalus.stores.coordinator_handoff_schema import MIGRATION as COORDINATOR_HANDOFF_MIGRATION
+from daedalus.stores.effect_approval_schema import MIGRATION as EFFECT_APPROVAL_MIGRATION
 from daedalus.stores.execution_schema import MIGRATION as EXECUTION_MIGRATION
 from daedalus.stores.extension_schema import EXTENSION_SCHEMA
 from daedalus.stores.goal_budget_schema import MIGRATION as GOAL_BUDGET_MIGRATION
+from daedalus.stores.goal_criteria_schema import MIGRATION as GOAL_CRITERIA_MIGRATION
 from daedalus.stores.grant_lineage_schema import MIGRATION as GRANT_LINEAGE_MIGRATION
 from daedalus.stores.historical_budget_schema import MIGRATION as HISTORICAL_BUDGET_MIGRATION
 from daedalus.stores.historical_context_schema import MIGRATION as HISTORICAL_CONTEXT_MIGRATION
@@ -32,6 +36,7 @@ from daedalus.stores.knowledge_invalidation_schema import MIGRATION as KNOWLEDGE
 from daedalus.stores.lifecycle_ownership_schema import MIGRATION as LIFECYCLE_OWNERSHIP_MIGRATION
 from daedalus.stores.lifecycle_schema import MIGRATION as LIFECYCLE_MIGRATION
 from daedalus.stores.orchestrator_contract_schema import MIGRATION as ORCHESTRATOR_CONTRACT_MIGRATION
+from daedalus.stores.phase_clock_schema import MIGRATION as PHASE_CLOCK_MIGRATION
 from daedalus.stores.planning_schema import MIGRATION as PLANNING_MIGRATION
 from daedalus.stores.provider_hold_schema import MIGRATION as PROVIDER_HOLD_MIGRATION
 from daedalus.stores.receipt_request_schema import MIGRATION as RECEIPT_REQUEST_MIGRATION
@@ -39,12 +44,16 @@ from daedalus.stores.recurring_schema import MIGRATION as RECURRING_MIGRATION
 from daedalus.stores.resource_disk_schema import MIGRATION as RESOURCE_DISK_MIGRATION
 from daedalus.stores.resource_schema import MIGRATION as RESOURCE_MIGRATION
 from daedalus.stores.result_anchor_schema import MIGRATION as RESULT_ANCHOR_MIGRATION
+from daedalus.stores.retry_schema import MIGRATION as RETRY_MIGRATION
 from daedalus.stores.runtime_entry_schema import MIGRATION as RUNTIME_ENTRY_MIGRATION
+from daedalus.stores.runtime_handoff_schema import MIGRATION as RUNTIME_HANDOFF_MIGRATION
 from daedalus.stores.runtime_observation_schema import MIGRATION as RUNTIME_OBSERVATION_MIGRATION
 from daedalus.stores.runtime_schema import RUNTIME_SCHEMA
+from daedalus.stores.schedule_file_pin_schema import MIGRATION as SCHEDULE_FILE_PIN_MIGRATION
 from daedalus.stores.schedule_proposal_schema import MIGRATION as SCHEDULE_PROPOSAL_MIGRATION
 from daedalus.stores.staff_context_schema import MIGRATION as STAFF_CONTEXT_SCHEMA
 from daedalus.stores.staff_report_schema import MIGRATION as STAFF_REPORT_MIGRATION
+from daedalus.stores.update_drain_schema import MIGRATION as UPDATE_DRAIN_MIGRATION
 from daedalus.stores.watch_authority_schema import MIGRATION as WATCH_AUTHORITY_MIGRATION
 from daedalus.stores.watch_delivery_schema import WATCH_DELIVERY_MIGRATION
 from daedalus.stores.workflow_scope_schema import MIGRATION as WORKFLOW_SCOPE_MIGRATION
@@ -1751,6 +1760,15 @@ MIGRATIONS.append(COORDINATOR_HANDOFF_MIGRATION)
 MIGRATIONS.append(RESOURCE_MIGRATION)
 MIGRATIONS.append(SCHEDULE_PROPOSAL_MIGRATION)
 MIGRATIONS.append(RESOURCE_DISK_MIGRATION)
+MIGRATIONS.append(UPDATE_DRAIN_MIGRATION)
+MIGRATIONS.append(RUNTIME_HANDOFF_MIGRATION)
+MIGRATIONS.append(GOAL_CRITERIA_MIGRATION)
+MIGRATIONS.append(SCHEDULE_FILE_PIN_MIGRATION)
+MIGRATIONS.append(PHASE_CLOCK_MIGRATION)
+MIGRATIONS.append(CAPACITY_MIGRATION)
+MIGRATIONS.append(ATTEMPT_FAULT_MIGRATION)
+MIGRATIONS.append(RETRY_MIGRATION)
+MIGRATIONS.append(EFFECT_APPROVAL_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

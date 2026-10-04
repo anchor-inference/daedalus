@@ -8,6 +8,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+import httpx
+
 from daedalus.stores.control import ControlDenied
 from daedalus.stores.outbox import Claim, OutboxStore
 
@@ -17,10 +19,30 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _status_read_error(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status == 429:
+            return "rate_limit"
+        if status >= 500:
+            return "unavailable"
+        return "authentication" if status in (401, 403) else "schema"
+    if isinstance(exc, httpx.TimeoutException):
+        return "timeout"
+    if isinstance(exc, httpx.NetworkError):
+        return "unavailable"
+    if isinstance(exc, PermissionError):
+        return "authentication"
+    if isinstance(exc, ValueError):
+        return "schema"
+    return "unknown"
+
+
 @dataclass(frozen=True, slots=True)
 class EffectOutcome:
-    state: Literal["completed", "failed", "unknown", "deferred"]
+    state: Literal["completed", "failed", "unknown", "deferred", "retry"]
     error: str | None = None
+    error_class: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,11 +82,18 @@ class EffectDispatcher:
         kinds = tuple(kind for kind, handler in self.handlers.items() if callable(getattr(handler, "reconcile", None)))
         resolved = 0
         for claim in await self.store.unknown(kinds):
+            status_read = claim.kind == "provider.resume"
+            if status_read and not await self.store.begin_status_read(claim):
+                continue
             try:
                 resolution = await self.handlers[claim.kind].reconcile(claim)
                 if resolution is not None:
                     resolved += int(await self.store.reconcile(claim.id, generation=claim.generation, state=resolution.state, evidence=resolution.evidence))
-            except Exception:  # noqa: BLE001 — keep uncertainty visible without starving other actions
+                if status_read:
+                    await self.store.end_status_read(claim, resolved=resolution is not None)
+            except Exception as exc:  # noqa: BLE001 — keep uncertainty visible without starving other actions
+                if status_read:
+                    await self.store.end_status_read(claim, error_class=_status_read_error(exc))
                 logger.exception("effect %s could not be reconciled", claim.id)
         return resolved
 
@@ -86,7 +115,18 @@ class EffectDispatcher:
             await self.store.defer(claim, reason="launch admission changed before execution")
             return True
         try:
-            outcome = await self.handlers[claim.kind].run(claim, self.store.check)
+            if claim.approval_required:
+                # Withdrawal waits for an admitted physical effect; the final check and write
+                # must share the same fence or revocation can commit between them.
+                async with self.store.db.authority_effect_lock(claim.scope.kind, claim.scope.id):
+                    try:
+                        await self.store.check(claim)
+                    except ControlDenied as exc:
+                        outcome = EffectOutcome("failed", str(exc))
+                    else:
+                        outcome = await self.handlers[claim.kind].run(claim, self.store.check)
+            else:
+                outcome = await self.handlers[claim.kind].run(claim, self.store.check)
         except asyncio.CancelledError:
             # The process may already have sent an effect. Cancellation is not proof that it did not.
             await asyncio.shield(self.store.finish(claim, state="unknown", error="effect dispatcher stopped; reconcile outcome"))
@@ -95,7 +135,9 @@ class EffectDispatcher:
             logger.exception("effect %s failed with an uncertain outcome", claim.id)
             await self.store.finish(claim, state="unknown", error=f"{type(exc).__name__}: {exc}")
         else:
-            if outcome.state == "deferred":
+            if outcome.state == "retry":
+                await self.store.retry(claim, error_class=outcome.error_class or "unknown")
+            elif outcome.state == "deferred":
                 await self.store.defer(claim, reason=outcome.error or "waiting for admission")
                 self.postponed.add(claim.id)
             else:

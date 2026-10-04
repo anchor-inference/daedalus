@@ -7,6 +7,7 @@ import {
   composerKey,
   composerContext,
   clearSendIntent,
+  draftTargetChanged,
   dockKey,
   draftKey,
   fieldHeight,
@@ -15,10 +16,12 @@ import {
   placeholderKey,
   primaryAction,
   readDraft,
+  readDraftTarget,
   readSteers,
   sendIntent,
   steersAfter,
   writeDraft,
+  writeDraftTarget,
 } from "./composer";
 
 const idle = { status: "idle" as const, hasDraft: false, hasFiles: false, asking: false, sending: false };
@@ -116,6 +119,18 @@ class MemoryStorage {
 }
 
 describe("the draft", () => {
+  it("keeps the exact target and intent until an explicit review accepts changed settings", () => {
+    const store = new MemoryStorage();
+    const target = { session: "s1", project: "p1", workspace: "one", model: "m1", mode: "agent", effort: "high", reply: "12:answer", intent: "queue" as const };
+    writeDraftTarget("s1", target, store);
+    expect(readDraftTarget("s1", store)).toEqual(target);
+    expect(readDraftTarget("s2", store)).toBeNull();
+    expect(draftTargetChanged(target, { ...target, model: "m2" })).toBe(true);
+    expect(draftTargetChanged(target, { ...target, reply: "13:answer" })).toBe(true);
+    expect(draftTargetChanged(target, { ...target, intent: "steer" })).toBe(false);
+    writeDraftTarget("s1", null, store);
+    expect(readDraftTarget("s1", store)).toBeNull();
+  });
   it("reuses the pending send identity only for the same complete intent", () => {
     const store = new MemoryStorage();
     const first = sendIntent("s1", 'message:[["a.txt",3,1]]', store);

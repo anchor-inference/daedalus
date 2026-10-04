@@ -533,15 +533,22 @@ async def test_native_supervisor_announces_before_stopping_the_app(service: Any,
         events.append("warned")
 
     async def stop() -> None:
-        assert events == ["warned"]
+        assert events == ["warned", "drained"]
         assert service.status()["job"]["stage"] == "restarting"
         events.append("stopped")
 
+    async def drain(bot_sha: str, core_sha: str, transcript: str) -> dict[str, Any]:
+        assert bot_sha and core_sha and transcript == "checked dependency installation"
+        assert events == ["warned"]
+        events.append("drained")
+        return {"state": "committed", "commit_receipt_id": "receipt"}
+
     monkeypatch.setattr(service, "install", install)
     monkeypatch.setattr(sup.asyncio, "sleep", wait)
+    supervisor._drain_before_stop = drain
     supervisor.stop_child = stop
     await supervisor._install_dependencies(job)
-    assert events == ["warned", "stopped"]
+    assert events == ["warned", "drained", "stopped"]
     assert supervisor.restart_requested.is_set()
     assert service.status()["job"]["state"] == "completed"
 

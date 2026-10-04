@@ -768,6 +768,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, PROPOSALS)
     if rel == "/api/schedules":
         return respond(route, SCHEDULES)
+    if rel == "/api/recurring/proposals":
+        return respond(route, {"entries": [], "collection_revisions": {"global:global": 1}})
     if rel == "/api/projects":
         return respond(route, PROJECTS)
     if rel == "/api/settings":

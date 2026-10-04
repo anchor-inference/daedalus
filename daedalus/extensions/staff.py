@@ -638,7 +638,7 @@ class Team:
         try:
             await self.start(member, task, principal=entry.principal, check_authority=entry.check_authority,
                              by=entry.by, resume_from=source, capacity_slot_id=entry.capacity_slot_id,
-                             resources=entry.resources)
+                             resources=entry.resources, source_head=entry.source_head)
         finally:
             launch_resources.reset(bound_resources)
         if entry.capacity_slot_id is None:
@@ -782,16 +782,16 @@ class Team:
     async def start(self, member: Staff, task: BoardTask, *, principal: Principal,
                     check_authority: Callable[[], Awaitable[None]], by: str = "operator",
                     resume_from: str | None = None, capacity_slot_id: str | None = None,
-                    resources: dict[str, Any] | None = None) -> LiveSession:
+                    resources: dict[str, Any] | None = None, source_head: str | None = None) -> LiveSession:
         async with self.execution_lock(member.id):
             return await self._start(member, task, principal=principal, check_authority=check_authority,
                                      by=by, resume_from=resume_from, capacity_slot_id=capacity_slot_id,
-                                     resources=resources)
+                                     resources=resources, source_head=source_head)
 
     async def _start(self, member: Staff, task: BoardTask, *, principal: Principal,
                      check_authority: Callable[[], Awaitable[None]], by: str,
                      resume_from: str | None, capacity_slot_id: str | None,
-                     resources: dict[str, Any] | None = None) -> LiveSession:
+                     resources: dict[str, Any] | None = None, source_head: str | None = None) -> LiveSession:
         """Start a session of ``member`` for ``task`` now; the launch queue calls this once it admits it."""
         if principal.origin_class != "operator" and not principal.grant_id:
             raise StaffError("a host-attested launch principal is required")
@@ -839,7 +839,7 @@ class Team:
             # What prepare refuses past that point (a worktree left with uncommitted changes) is the
             # worktree's state, not the folder's, and is said as such.
             try:
-                worktree = await self.worktrees.prepare(folder, member.name, task.id, task.title)
+                worktree = await self.worktrees.prepare(folder, member.name, task.id, task.title, expected_head=source_head)
             except WorktreeError as exc:
                 raise StaffError(f"no worktree for {member.name} in {folder.path}: {exc}") from exc
             if source and (str(worktree.path) != source.session.worktree_path or worktree.branch != source.session.branch):
@@ -934,17 +934,33 @@ class Team:
                                                           role_hint=member.role)
             if current_context["packet_hash"] != context_packet["packet_hash"]:
                 raise StaffError("the task context changed before the worker started; retry the launch")
+            from daedalus.stores.phase_clocks import PhaseClocks  # Lazy: attempt ownership is established first.
+
+            async with self.app.db.transaction() as conn:
+                await PhaseClocks(self.app.executions).advance(conn, identity, from_phase="prepare", to_phase="spawn")
             await enter_runtime(self.app, identity, capacity_slot_id=capacity_slot_id)
             entered_provider = True
             started = await runtime.resume(request, source) if source else await runtime.start(request)
             await self.manager.staff.started(session.id, session_id=started.session_id, terminal_id=started.terminal_id, cli_session_id=started.cli_session_id, transcript_ref=started.transcript_ref)
             await observe_bind(self.app, identity, session, started)
         except (Exception, asyncio.CancelledError) as exc:
+            cancelled = isinstance(exc, asyncio.CancelledError)
             if identity is not None and not entered_provider:
                 # Cancellation can arrive after the boundary committed but before await returned.
                 # Only the durable host observation can distinguish that from a refused launch.
                 entered_provider = not await observe_no_entry(self.app, identity, staff_session_id=session.id,
                                                               reason=f"could not start: {exc}")
+            if identity is not None:
+                from daedalus.stores.attempt_faults import record_fault  # Lazy: launch ownership is established first.
+
+                async with self.app.db.transaction() as conn:
+                    await record_fault(conn, identity.id, "cancelled" if cancelled else "launch_error",
+                                       cancelled_by="system" if cancelled else None)
+                    if cancelled and not entered_provider:
+                        # A pre-entry cancellation is a normal terminal outcome, even when the
+                        # no-entry observation initially closed the attempt as a failed launch.
+                        await conn.execute("UPDATE execution_attempts SET state = 'cancelled'"
+                                           " WHERE id = ? AND state = 'failed'", (identity.id,))
             if entered_provider:
                 # A provider can create the process before its response disappears. Keep its slot,
                 # task and session owned until an observation establishes what actually happened.
@@ -1908,6 +1924,41 @@ class Ingress:
 
     async def expects_signal(self, live: LiveSession) -> bool:
         return await self.team.silence_watched(live.session)
+
+    async def phase_event(self, live: LiveSession, kind: str, *, meaningful_output: bool = False) -> None:
+        """Project an observed CLI event onto its current attempt without treating chatter as work."""
+        from daedalus.stores.phase_clocks import PhaseClocks  # Lazy: event ingress also runs without a current attempt.
+
+        async with self.team.app.db.transaction() as conn:
+            try:
+                identity = await self.team.app.executions.check_staff(conn, live.id)
+            except ControlDenied:
+                return
+            clocks = PhaseClocks(self.team.app.executions)
+            if kind == "auth_required":
+                await clocks.advance(conn, identity, from_phase="spawn", to_phase="auth")
+                await clocks.advance(conn, identity, from_phase="ready", to_phase="auth")
+            elif kind == "ready":
+                await clocks.advance(conn, identity, from_phase="spawn", to_phase="ready")
+                await clocks.advance(conn, identity, from_phase="auth", to_phase="ready")
+                await clocks.advance(conn, identity, from_phase="ready", to_phase="first_output",
+                                     timeout_seconds=self.manager.config.harness.no_signal_after_s)
+            elif meaningful_output:
+                await clocks.advance(conn, identity, from_phase="spawn", to_phase="ready")
+                await clocks.advance(conn, identity, from_phase="auth", to_phase="ready")
+                await clocks.advance(conn, identity, from_phase="ready", to_phase="first_output",
+                                     timeout_seconds=self.manager.config.harness.no_signal_after_s)
+                try:
+                    await clocks.output(conn, identity,
+                                        idle_timeout_seconds=self.manager.config.harness.no_signal_after_s)
+                except ControlDenied:
+                    return
+                if kind == "turn_completed":
+                    await clocks.close(conn, identity)
+            elif kind in ("turn_completed", "turn_failed", "turn_cancelled", "session_ended", "process_exited"):
+                await clocks.close(conn, identity)
+            else:
+                await clocks.heartbeat(conn, identity)
 
     async def status(self, live: LiveSession, status: str, waiting_for: str = "", *, detail: str = "", actor: str = "") -> None:
         # Compared with the row as it was, not with the caller's copy of it: two paths report the same

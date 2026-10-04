@@ -20,6 +20,7 @@ from daedalus.stores.control import ControlDenied, canonical, one
 from daedalus.stores.goal_budget import charge_for_session_in, goal_constraints_in, pin_reservation_in
 from daedalus.stores.inference_budget import BudgetRefused, Constraint, InferenceBudget, microusd
 from daedalus.stores.provider_holds import ProviderHolds, pinned_target_in
+from daedalus.stores.update_drains import UpdateDrainActive, UpdateDrainPaused, assert_admission_open_in
 
 if TYPE_CHECKING:
     from daedalus.host.session_runner import SessionManager
@@ -152,6 +153,7 @@ class HostInferenceAdmission:
     async def start(self, endpoint: ProviderEndpoint, request: LLMRequest, body: dict[str, Any]) -> str | None:
         try:
             async with self.db.transaction() as conn:
+                await assert_admission_open_in(conn)
                 observer = request.observability
                 attempt = None
                 if observer is not None and observer.session_id:
@@ -210,6 +212,9 @@ class HostInferenceAdmission:
                     await pin_reservation_in(conn, reservation, charge)
                 await self.store.start_in(conn, reservation)
                 return reservation
+        except UpdateDrainActive as exc:
+            # An authority error would settle the run and discard its recoverable snapshot.
+            raise UpdateDrainPaused(str(exc)) from exc
         except BudgetRefused as exc:
             error = LLMProviderError(f"inference budget: {exc}")
             error.classified = ProviderVerdict("budget", False)

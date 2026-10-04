@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from croniter import croniter
 
 from daedalus.extensions.recurring import _contract
+from daedalus.extensions.schedule_files import read_project_file
 from daedalus.stores.control import (
     ControlConflict,
     ControlDenied,
@@ -25,6 +26,7 @@ from daedalus.stores.control import (
     now,
     one,
 )
+from daedalus.stores.files import FileRefused
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -44,22 +46,6 @@ def _due(cron: str | None, run_at: str | None) -> str:
     if due <= datetime.now(UTC):
         raise ValueError("the requested time has already passed")
     return due.isoformat()
-
-
-def _file_snapshot(paths: list[str]) -> list[dict[str, Any]]:
-    if len(paths) > 10:
-        raise ValueError("at most ten files can accompany a schedule proposal")
-    result: list[dict[str, Any]] = []
-    for name in paths:
-        path = Path(name).resolve(strict=True)
-        if not path.is_file() or path.stat().st_size > 25_000_000:
-            raise ValueError("an attached file is unavailable or too large")
-        contents = path.read_bytes()
-        if len(contents) > 25_000_000:
-            raise ValueError("an attached file is too large")
-        result.append({"path": str(path), "size": len(contents),
-                       "digest": hashlib.sha256(contents).hexdigest()})
-    return result
 
 
 def _legacy_current(row: Any, request: dict[str, Any]) -> bool:
@@ -84,6 +70,26 @@ class ScheduleProposals:
         self.db = app.db
         self.control = ControlStore(app.db)
 
+    async def _file_snapshot(self, paths: list[str], project_id: str, actor: str) -> list[dict[str, Any]]:
+        if len(paths) > 10:
+            raise ValueError("at most ten files can accompany a schedule proposal")
+        roots = await self.db.fetchall("SELECT path FROM project_folders WHERE project_id=?", (project_id,))
+        if paths and not roots:
+            raise ControlDenied("the project has no folder for schedule attachments")
+        result: list[dict[str, Any]] = []
+        for name in paths:
+            path, contents = read_project_file(name, [row["path"] for row in roots])
+            try:
+                stored = await self.app.manager.files.add(
+                    contents, name=Path(path).name, origin="schedule", origin_ref=path,
+                    scope=project_id, actor=actor,
+                )
+            except FileRefused as exc:
+                raise ControlDenied("the attachment could not be kept for review") from exc
+            result.append({"path": path, "name": stored.name, "handle": stored.handle,
+                           "size": stored.size, "digest": stored.sha256})
+        return result
+
     async def create(self, *, source_session_id: str, source_run_id: str | None,
                      source_command_id: str, name: str, prompt: str, cron: str | None,
                      run_at: str | None, files: list[str], model: str | None, kind: str,
@@ -94,6 +100,8 @@ class ScheduleProposals:
             raise ControlDenied("the host must identify the proposing session and command")
         if kind not in ("agent", "message", "lazy", "wake") or run_in not in ("new", "self"):
             raise ValueError("unsupported schedule action or run mode")
+        if files and kind != "agent":
+            raise ValueError("only an agent schedule can consume attached files")
         if run_in == "self" and kind != "agent":
             raise ValueError("only an agent schedule can reuse its session")
         if run_in == "self" and target_session not in (None, source_session_id):
@@ -107,6 +115,21 @@ class ScheduleProposals:
             "files": files, "model": model, "kind": kind, "run_in": run_in,
             "target_session": target_session or source_session_id,
         })
+        source_before = await self.db.fetchone("SELECT project_id FROM sessions WHERE id=?", (source_session_id,))
+        if source_before is None:
+            raise ControlDenied("the proposing session no longer exists")
+        existing_before = await self.db.fetchone("SELECT * FROM schedule_proposals WHERE source_actor_id=?"
+                                                " AND source_command_id=?", (source_actor_id, source_command_id))
+        if existing_before is not None:
+            if (existing_before["source_project_id"] != source_before["project_id"]
+                    or existing_before["source_request_digest"] != source_request_digest
+                    or existing_before["source_run_id"] != source_run_id):
+                raise ControlConflict("the command identity was reused with different contents")
+            saved = json.loads(existing_before["request_json"])
+            return {"id": existing_before["id"], "proposal_revision": existing_before["proposal_revision"],
+                    "status": existing_before["status"], "next_run_at": saved["next_run_at"],
+                    "kind": kind, "run_in": run_in, "request_digest": existing_before["request_digest"]}
+        pinned = await self._file_snapshot(files, source_before["project_id"], source_actor_id)
         async with self.db.transaction() as conn:
             source = await one(conn, "SELECT project_id FROM sessions WHERE id = ?", (source_session_id,))
             if source is None:
@@ -128,7 +151,7 @@ class ScheduleProposals:
                         "kind": kind, "run_in": run_in, "request_digest": existing["request_digest"]}
             due = _due(cron, run_at)
             request = {"name": name.strip(), "prompt": prompt.strip(), "cron": cron, "run_at": run_at,
-                       "files": _file_snapshot(files), "model": model, "kind": kind,
+                       "files": pinned, "model": model, "kind": kind,
                        "run_in": run_in, "target_session": target_session or source_session_id,
                        "next_run_at": due}
             request_digest = digest(request)
@@ -203,9 +226,11 @@ class ScheduleProposals:
                 "cron": request["cron"], "run_at": request["run_at"], "kind": request["kind"],
                 "run_in": request["run_in"], "next_run_at": request["next_run_at"],
                 "file_count": len(files) if files else len(legacy_paths),
-                "files": [{"name": Path(file["path"]).name, "size": file["size"],
-                           "digest": file["digest"]} for file in files],
-                "legacy_file_review_required": bool(legacy_paths),
+                "files": [{"name": file.get("name") or Path(file["path"]).name,
+                           "size": file["size"], "digest": file["digest"],
+                           "pinned": bool(file.get("handle"))} for file in files],
+                "legacy_file_review_required": bool(legacy_paths)
+                or any(not file.get("handle") for file in files),
                 "source_session_id": row["source_session_id"], "source_project_id": row["source_project_id"],
                 "proposal_revision": row["proposal_revision"], "request_digest": row["request_digest"],
                 "status": row["status"], "accepted_schedule_id": row["accepted_schedule_id"],
@@ -214,7 +239,8 @@ class ScheduleProposals:
     async def verify_accepted_files(self, schedule: dict[str, Any]) -> None:
         """A path's bytes can change after approval, so compare the launch copy to its pinned digest."""
         row = await self.db.fetchone("SELECT request_json FROM schedule_proposals"
-                                     " WHERE accepted_schedule_id=? AND status='accepted'", (schedule["id"],))
+                                     " WHERE accepted_schedule_id=? AND status='accepted'"
+                                     " ORDER BY updated_at DESC,id DESC LIMIT 1", (schedule["id"],))
         if row is None:
             return
         expected = json.loads(row["request_json"])["files"]
@@ -225,17 +251,17 @@ class ScheduleProposals:
         actual = json.loads(schedule["files"] or "[]")
         if len(actual) != len(expected):
             raise ControlConflict("approved attachments changed")
-        for path_text, pinned in zip(actual, expected, strict=True):
-            if not isinstance(pinned, dict):
-                raise ControlDenied("the approved attachment has no digest")
-            try:
-                path = Path(path_text).resolve(strict=True)
-                current_size = path.stat().st_size
-                current_digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            except OSError as exc:
-                raise ControlConflict("an approved attachment is unavailable") from exc
-            if current_size != pinned["size"] or current_digest != pinned["digest"]:
+        for handle_text, pinned in zip(actual, expected, strict=True):
+            if (not isinstance(pinned, dict) or not pinned.get("handle")
+                    or handle_text != pinned["handle"]):
                 raise ControlConflict("approved attachments changed")
+            try:
+                stored = await self.app.manager.files.in_scope(handle_text, schedule["project_id"])
+                if stored.size != pinned["size"] or stored.sha256 != pinned["digest"]:
+                    raise ControlConflict("approved attachments changed")
+                await self.app.manager.files.read(stored)
+            except FileRefused as exc:
+                raise ControlConflict("approved attachments are unavailable") from exc
 
     async def review_legacy_files(self, principal: Principal, proposal_id: str, *, request_digest: str,
                                   expected_proposal_revision: int, expected_collection_revision: int,
@@ -243,29 +269,35 @@ class ScheduleProposals:
         """Pin today's exact bytes in a new proposal revision before old files can be approved."""
         if principal.origin_class != "operator":
             raise ControlDenied("only an operator can review legacy attachments")
-        initial = await self.db.fetchone("SELECT source_project_id FROM schedule_proposals WHERE id=?", (proposal_id,))
+        initial = await self.db.fetchone("SELECT * FROM schedule_proposals WHERE id=?", (proposal_id,))
         if initial is None:
             raise KeyError(proposal_id)
         scope = Scope("project", initial["source_project_id"]) if initial["source_project_id"] else Scope("global", "global")
         payload = {"proposal_id": proposal_id, "request_digest": request_digest,
                    "expected_proposal_revision": expected_proposal_revision}
+        original = json.loads(initial["request_json"])
+        paths = _legacy_file_paths(original) or [file["path"] for file in original["files"]
+                                                    if isinstance(file, dict) and not file.get("handle")]
+        pinned = (await self._file_snapshot(paths, initial["source_project_id"], principal.actor_id)
+                  if paths and initial["proposal_revision"] == expected_proposal_revision
+                  and initial["request_digest"] == request_digest else [])
 
         async def effect(conn: Any, _: Any) -> dict[str, Any]:
             row = await one(conn, "SELECT * FROM schedule_proposals WHERE id=?", (proposal_id,))
-            if (row is None or row["status"] != "pending" or not row["legacy_schedule_id"]
+            if (row is None or row["status"] != "pending"
                     or row["source_project_id"] != initial["source_project_id"]
                     or row["proposal_revision"] != expected_proposal_revision
                     or row["request_digest"] != request_digest):
                 raise ControlConflict("the proposal changed")
             request = json.loads(row["request_json"])
-            paths = _legacy_file_paths(request)
-            if not paths:
-                raise ControlDenied("there are no unreviewed legacy attachments")
-            legacy = await one(conn, "SELECT * FROM schedules WHERE id=?", (row["legacy_schedule_id"],))
-            if legacy is None or not _legacy_current(legacy, request):
-                raise ControlConflict("the original pending schedule changed")
-            request["legacy_files"] = request["files"]
-            request["files"] = _file_snapshot(paths)
+            if not pinned:
+                raise ControlDenied("there are no unreviewed attachments")
+            if row["legacy_schedule_id"]:
+                legacy = await one(conn, "SELECT * FROM schedules WHERE id=?", (row["legacy_schedule_id"],))
+                if legacy is None or not _legacy_current(legacy, request):
+                    raise ControlConflict("the original pending schedule changed")
+                request["legacy_files"] = request["files"]
+            request["files"] = pinned
             revised_digest = digest(request)
             await conn.execute("UPDATE schedule_proposals SET request_json=?,request_digest=?,"
                                "proposal_revision=proposal_revision+1,updated_at=? WHERE id=?",
@@ -308,6 +340,9 @@ class ScheduleProposals:
             if source is None or source["project_id"] != row["source_project_id"]:
                 raise ControlDenied("the proposal source is no longer in its original scope")
             request = json.loads(row["request_json"])
+            has_files = bool(_legacy_file_paths(request)) or bool(request["files"] if isinstance(request["files"], list) else [])
+            if has_files and request["kind"] != "agent":
+                raise ControlDenied("only an agent schedule can consume attached files")
             target_id = request["target_session"]
             target = await one(conn, "SELECT project_id,metadata FROM sessions WHERE id = ?", (target_id,))
             if target is None or target["project_id"] != row["source_project_id"]:
@@ -328,20 +363,35 @@ class ScheduleProposals:
             if _legacy_file_paths(request):
                 raise ControlDenied("review the original attachments before activation")
             for file in request["files"] if isinstance(request["files"], list) else []:
-                path = Path(file["path"]).resolve(strict=True)
-                if (not path.is_file() or path.stat().st_size != file["size"]
-                        or hashlib.sha256(path.read_bytes()).hexdigest() != file["digest"]):
+                if not file.get("handle"):
+                    raise ControlDenied("review the original attachments before activation")
+                roots = await conn.execute("SELECT path FROM project_folders WHERE project_id=?",
+                                           (row["source_project_id"],))
+                path, contents = read_project_file(file["path"], [item["path"] for item in await roots.fetchall()])
+                try:
+                    stored = await self.app.manager.files.in_scope_in(conn, file["handle"], row["source_project_id"])
+                    await self.app.manager.files.read(stored)
+                except FileRefused as exc:
+                    raise ControlConflict("an attached file is unavailable") from exc
+                if (path != file["path"] or len(contents) != file["size"]
+                        or hashlib.sha256(contents).hexdigest() != file["digest"]
+                        or stored.size != file["size"] or stored.sha256 != file["digest"]):
                     raise ControlConflict("an attached file changed after it was proposed")
-                copied.append(str(path))
+                copied.append(stored.handle)
             legacy_id = row["legacy_schedule_id"]
             if legacy_id:
                 legacy = await one(conn, "SELECT * FROM schedules WHERE id = ?", (legacy_id,))
                 if (legacy is None or not _legacy_current(legacy, request) or legacy["grant_id"]
                         or legacy["authority_state"] != "needs_approval"):
                     raise ControlConflict("the original pending schedule changed")
-                cycle = await one(conn, "SELECT id FROM recurring_cycles WHERE schedule_id = ? LIMIT 1", (legacy_id,))
+                if legacy["active_session_id"] or legacy["active_run_id"]:
+                    raise ControlDenied("the previous scheduled run has not finished")
+                cycle = await one(conn, "SELECT c.id FROM recurring_cycles c LEFT JOIN effect_outbox e"
+                                  " ON e.id=c.effect_id WHERE c.schedule_id=?"
+                                  " AND (c.action_state IN ('pending','dispatching','unknown')"
+                                  " OR e.state IN ('pending','claimed','unknown')) LIMIT 1", (legacy_id,))
                 if cycle is not None:
-                    raise ControlDenied("historical schedule effects require separate review")
+                    raise ControlDenied("settle the prior occurrence before renewed approval")
                 actual_id = legacy_id
             else:
                 actual_id = "s" + mutation.object_id[:15]
@@ -352,10 +402,6 @@ class ScheduleProposals:
                     if not inbox.exists():
                         inbox.mkdir(parents=True)
                         made_workspace = True
-                    for path_text in copied:
-                        dest = inbox / Path(path_text).name
-                        shutil.copy2(path_text, dest)
-                    copied = [str(inbox / Path(path).name) for path in copied]
             grant = await self.control.issue_grant_in(
                 conn, principal, Principal(f"schedule:{actual_id}", "system"), scope,
                 operations=["schedule.fire"], effects=[f"schedule.{request['kind']}"], expires_at=expires_at,
@@ -363,9 +409,10 @@ class ScheduleProposals:
             contract = _contract(request)
             if legacy_id:
                 await conn.execute("UPDATE schedules SET enabled=1,authority_state='current',actor_id=?,"
-                                   "grant_id=?,grant_generation=?,output_contract_json=?,updated_at=? WHERE id=?",
+                                   "grant_id=?,grant_generation=?,files=?,schedule_revision=schedule_revision+1,"
+                                   "output_contract_json=?,updated_at=? WHERE id=?",
                                    (principal.actor_id, grant["grant_id"], grant["generation"],
-                                    canonical(contract), now(), actual_id))
+                                    canonical(copied), canonical(contract), now(), actual_id))
             else:
                 if request["kind"] == "agent" and row["source_project_id"]:
                     folder = await one(conn, "SELECT path FROM project_folders WHERE project_id=?"
@@ -391,7 +438,8 @@ class ScheduleProposals:
             await conn.execute("UPDATE schedule_proposals SET status='accepted',accepted_schedule_id=?,"
                                "proposal_revision=proposal_revision+1,updated_at=? WHERE id=?",
                                (actual_id, now(), proposal_id))
-            return {"proposal_id": proposal_id, "id": actual_id, "schedule_revision": 1,
+            return {"proposal_id": proposal_id, "id": actual_id,
+                    "schedule_revision": int(legacy["schedule_revision"]) + 1 if legacy_id else 1,
                     "proposal_revision": expected_proposal_revision + 1, "authority_state": "current",
                     "next_run_at": due, "grant_expires_at": grant["expires_at"]}
 

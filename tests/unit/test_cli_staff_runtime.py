@@ -32,6 +32,7 @@ from daedalus.extensions.harness import catalog_roots
 from daedalus.extensions.staff import Team
 from daedalus.extensions.task_launch import TaskLaunchEffect
 from daedalus.harness.capabilities import capabilities
+from daedalus.harness.claude import LEVEL_MODES, PERMISSION_MODES
 from daedalus.harness.contract import (
     LAUNCH_DIR,
     Answer,
@@ -131,15 +132,22 @@ class StubClaude:
         hooks = {event: [{"hooks": [{"type": "command", "command": f'"$DAEDALUS_PTYD_BIN" hook {event}', "timeout": 30}]}] for event in HOOKS}
         settings = {"hooks": hooks, "permissions": {"allow": ["mcp__daedalus_team__Report", "mcp__daedalus_team__AskOrchestrator"]}}
         mcp = {"mcpServers": {"daedalus_team": {"command": "ptyd", "args": ["team-mcp"], "env": {"DAEDALUS_ASK_HOLD_MS": "60000"}}}}
+        files = {"settings.json": json.dumps(settings).encode()}
+        for tools in spec.tool_sets:
+            mcp["mcpServers"][tools.server] = {"command": "sh", "args": ["-c", tools.command()]}
+            files[tools.path] = tools.file
+        files["mcp.json"] = json.dumps(mcp).encode()
         # The task text, then this test's script as a segment of its own for the fake's scripted model.
         prompt = f"{spec.first_prompt};{self.script}"
-        argv = ("claude", *session, "--settings", f"{LAUNCH_DIR}/settings.json", "--mcp-config", f"{LAUNCH_DIR}/mcp.json", "--permission-mode", "manual", prompt)
+        permission = PERMISSION_MODES[spec.permission_mode] if spec.permission_mode else LEVEL_MODES[spec.permission_level]
+        model = ("--model", spec.model) if spec.model else ()
+        argv = ("claude", *session, "--settings", f"{LAUNCH_DIR}/settings.json", "--mcp-config", f"{LAUNCH_DIR}/mcp.json", "--permission-mode", permission, *model, prompt)
         companions = (CompanionSpec("app-server", ("claude", "--session-id", str(uuid.uuid4())), ready_pattern="Quick safety check"),) if self.companion else ()
         return LaunchPlan(
             argv=argv,
             env={"DAEDALUS_REPORT_HOLD_MS": "20000"},
             cwd=spec.cwd,
-            files={"settings.json": json.dumps(settings).encode(), "mcp.json": json.dumps(mcp).encode()},
+            files=files,
             companions=companions,
             session_ref=session[1] if session[0] == "--session-id" else session[1],
             first_prompt=prompt,

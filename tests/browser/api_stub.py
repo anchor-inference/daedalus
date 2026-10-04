@@ -218,6 +218,8 @@ class LauncherStub:
 
 
 GATES: dict[str, object] = {
+    "/api/admission/capacity": {"host_id": "local", "cap": 4, "active": 1, "reserved": 0, "available": 3},
+    "/api/admission/queue": {"entries": []},
     # Settings → Tools opens on the tool groups.
     "/api/tool-groups": TOOL_GROUP_CATALOGUE,
     "/api/maintenance": {"notice": None},
@@ -495,6 +497,12 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "focus-state":
         # An orchestrator's chat nobody invented a project for has nothing in hand, and no goal line.
         return 200, "application/json", json.dumps(empty_focus_state(parts[3]))
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "next-actions":
+        return 200, "application/json", json.dumps({"project_id": parts[3], "actions": []})
+    if method.upper() == "GET" and len(parts) == 6 and parts[2] == "projects" and parts[4:] == ["scope-revisions", "current"]:
+        return 200, "application/json", json.dumps({"project_id": parts[3], "goal_revision": 1,
+                                                      "entity_revision": 1, "body": "Existing project goal",
+                                                      "checks": None})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "budget":
         return 200, "application/json", json.dumps({"configured": False, "project_id": parts[3],
                                                       "entity_revision": 1, "goal_revision": 1})
@@ -947,6 +955,52 @@ class BoardStub:
             row = next((t for t in self.tasks if t["id"] == parts[3]), None)
             if row is None:
                 return 404, {"detail": "no such task"}
+            if path.endswith("/handoff-options") and method == "GET":
+                source_harness = row.get("source_harness") or (row.get("assignee") or {}).get("harness")
+                source_id = row.get("current_attempt_id")
+                return 200, {"task_id": row["id"], "source_attempt_id": source_id,
+                             "source_harness": source_harness, "source_released": bool(row.get("source_released")),
+                             "entity_revision": row["entity_revision"], "contract_revision": row.get("contract_revision", 1),
+                             "targets": [{"id": member["id"], "name": member["name"], "harness": member["harness"],
+                                          "permission_mode": member.get("permission_mode", "default")}
+                                         for member in self.staff if member["harness"] != source_harness and not member.get("archived_at")] if source_id else []}
+            if path.endswith("/handoff-preview") and method == "GET":
+                from urllib.parse import parse_qs
+
+                args = parse_qs(query)
+                source_id = args.get("source_attempt_id", [""])[0]
+                target_id = args.get("target_staff_id", [""])[0]
+                target = next((member for member in self.staff if member["id"] == target_id), None)
+                if not target or source_id != row.get("current_attempt_id"):
+                    return 409, {"detail": "stale handoff source or target"}
+                released = bool(row.get("source_released"))
+                return 200, {"ready": released, "preview_digest": "a" * 64,
+                             "blockers": [] if released else ["source_runtime_not_released"],
+                             "budget": None, "resource": {"state": "none"},
+                             "capability": {"available": True, "reason": "", "version": "verified",
+                                            "login": "yes", "cost": "unknown subscription price"},
+                             "packet": {"source_result": row.get("source_result"), "artifacts": [],
+                                        "criteria": row.get("checklist", []), "requirements": row.get("requirements", []),
+                                        "open_obligations": [],
+                                        "workspace": {"branch": row.get("branch"), "base_ref": "main"},
+                                        "target_permission_mode": target.get("permission_mode", "default"),
+                                        "source_permission_mode": (row.get("assignee") or {}).get("permission_mode", "default"),
+                                        "history_portability": "none", "workspace_transfer": "none",
+                                        "cost_state": "unpriced_or_external"}}
+            if path.endswith("/continue-elsewhere") and method == "POST":
+                payload = dict(body or {})
+                if payload.get("source_attempt_id") != row.get("current_attempt_id") or not row.get("source_released"):
+                    return 409, {"detail": "source runtime is not released"}
+                if payload.get("expected_entity_revision") != row["entity_revision"]:
+                    return 409, {"detail": "task changed before continuation"}
+                if payload.get("preview_digest") != "a" * 64:
+                    return 409, {"detail": "preview changed"}
+                self.launched.append((row["id"], payload))
+                row["entity_revision"] += 1
+                row["status"] = "blocked"
+                return 200, {"task_id": row["id"], "effect_id": f"handoff-{row['id']}",
+                             "handoff_id": f"handoff-{row['id']}", "state": "queued",
+                             "receipt_id": "receipt", "entity_revision": row["entity_revision"]}
             if path.endswith("/contract") and method == "GET":
                 return 200, {"task_id": row["id"], "contract_revision": 1, "entity_revision": row["entity_revision"],
                              "checklist": [{"id": f"C{index}", "text": item["text"]} for index, item in enumerate(row["checklist"], 1)]}
@@ -1377,7 +1431,11 @@ class FocusStub:
                 now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
                 messages.append({"role": "user", "seq": seq, "origin": "operator", "text": payload.get("text", ""), "thinking": "", "tool_calls": [], "tool_results": [], "created_at": now,
                                  "delivery": "steer" if payload.get("steer") else None, "reply_to": reply})
-                return 200, {"run_id": f"run-{seq}"}
+                # A missing receipt is an unconfirmed send: the composer must retain its draft and
+                # reply quote. Mirror the host's consumed receipt once the idle session starts a run.
+                run_id = f"run-{seq}"
+                return 200, {"run_id": run_id, "receipt": {"status": "consumed", "run_id": run_id,
+                                                          "client_message_id": payload.get("client_message_id")}}
         if path.startswith("/api/projects/") and path.endswith("/orchestrator/replace"):
             pid = path.split("/")[3]
             if method == "GET":

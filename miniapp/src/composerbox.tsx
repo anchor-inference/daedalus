@@ -12,6 +12,7 @@ import { ModeInfo, ModeSelect } from "./modeselect";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "./voicebar";
 import { landWords } from "./voicenote";
 import { loadDraftFiles, saveDraftFiles } from "./project/draftfiles";
+import { useReply } from "./project/chat";
 import {
   Approval,
   ComposerStatus,
@@ -20,6 +21,7 @@ import {
   questionsKey,
   clearDraft,
   clearSendIntent,
+  draftTargetChanged,
   composerKey,
   dockKey,
   fieldHeight,
@@ -28,8 +30,11 @@ import {
   placeholderKey,
   primaryAction,
   readDraft,
+  readDraftTarget,
   sendIntent,
   writeDraft,
+  writeDraftTarget,
+  type DraftTarget,
 } from "./composer";
 import { fmtInt } from "./ui/components";
 import { t } from "./i18n";
@@ -51,7 +56,7 @@ export type ComposerProps = {
   sessionId: string;
   status: ComposerStatus;
   /** Send the text and the files; while a run is on, the host queues it as a steer. Rejects on failure. */
-  onSend: (text: string, files: File[], clientMessageId?: string, onProgress?: (fraction: number) => void) => Promise<void>;
+  onSend: (text: string, files: File[], intent: "send" | "steer" | "queue", clientMessageId?: string, onProgress?: (fraction: number) => void) => Promise<"sent" | "steered" | "queued">;
   onStop: () => void;
   commands: SlashCommand[];
   /** Run a slash command. Rejects on failure, and the draft comes back. */
@@ -70,6 +75,8 @@ export type ComposerProps = {
   onChooseMode?: (mode: string) => void;
   onYagni?: (on: boolean) => void;
   place?: ComposerPlace;
+  targetProject?: string;
+  targetWorkspace?: string;
   /** What the empty field says while nothing runs, when the conversation is with someone in particular:
    *  "Write to the orchestrator…". Running and waiting keep their own words. */
   idlePlaceholder?: string;
@@ -96,7 +103,11 @@ export type ComposerProps = {
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(props, ref) {
   const { sessionId, status, onSend, onStop, commands, onCommand, phone, toast } = props;
+  const replyTarget = useReply(sessionId);
   const [draft, setDraftState] = useState(() => readDraft(sessionId));
+  const [savedTarget, setSavedTarget] = useState<DraftTarget | null>(() => readDraftTarget(sessionId));
+  const [intent, setIntent] = useState<"send" | "steer" | "queue">(() => readDraftTarget(sessionId)?.intent ?? "send");
+  const [sendOpen, setSendOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [fileReadySession, setFileReadySession] = useState<string | null>(null);
   const [fileStorageError, setFileStorageError] = useState(false);
@@ -108,11 +119,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const fileInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   const plusButton = useRef<HTMLButtonElement>(null);
+  const sendButton = useRef<HTMLButtonElement>(null);
   const dock = useRef<HTMLDivElement>(null);
 
   // The draft is the session's: leaving and coming back finds it, another session does not.
   useEffect(() => {
     setDraftState(readDraft(sessionId));
+    const saved = readDraftTarget(sessionId);
+    setSavedTarget(saved);
+    setIntent(saved?.intent ?? "send");
     setFileReadySession(null);
     setFileStorageError(false);
     let active = true;
@@ -128,16 +143,31 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     });
     return () => { active = false; };
   }, [sessionId]);
+  const currentTarget: DraftTarget = { session: sessionId, project: props.targetProject ?? "", workspace: props.targetWorkspace ?? "", model: props.model, mode: props.mode ?? "", effort: props.reasoningEffort ?? "", reply: replyTarget ? `${replyTarget.seq}:${replyTarget.excerpt}` : "" };
+  const needsReview = draftTargetChanged(savedTarget, currentTarget);
+  const rememberTarget = (nextIntent = intent) => {
+    const target = { ...(savedTarget ?? currentTarget), intent: nextIntent };
+    setSavedTarget(target);
+    writeDraftTarget(sessionId, target);
+  };
   useEffect(() => {
     if (fileReadySession !== sessionId) return;
     void saveDraftFiles(sessionId, files).then(() => setFileStorageError(false)).catch(() => setFileStorageError(true));
   }, [sessionId, fileReadySession, files]);
+  useEffect(() => {
+    if (fileReadySession === sessionId && !draft.trim() && files.length === 0) {
+      setSavedTarget(null);
+      writeDraftTarget(sessionId, null);
+    }
+  }, [sessionId, fileReadySession, draft, files]);
   const setDraft = useCallback(
     (next: string) => {
       setDraftState(next);
       writeDraft(sessionId, next);
+      if (next.trim() || files.length) rememberTarget();
+      else { setSavedTarget(null); writeDraftTarget(sessionId, null); }
     },
-    [sessionId],
+    [sessionId, files, savedTarget, currentTarget, intent],
   );
 
   // Measure the placeholder too, and refit when a panel or viewport changes the width.
@@ -172,8 +202,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
       return new File([f], `${f.type.startsWith("image/") ? "screenshot" : "pasted"}-${stamp}${ext}`, { type: f.type, lastModified: f.lastModified });
     });
-    if (named.length) setFiles((p) => [...p, ...named]);
-  }, []);
+    if (named.length) {
+      rememberTarget();
+      setFiles((p) => [...p, ...named]);
+    }
+  }, [rememberTarget]);
 
   useImperativeHandle(
     ref,
@@ -235,28 +268,32 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   // ── send / stop / queue ──
   const { action, enabled } = primaryAction({ status, hasDraft: !!draft.trim(), hasFiles: files.length > 0, asking, sending });
-  async function send(override?: string) {
+  async function send(override?: string, selectedIntent = intent) {
     const text = (override ?? draft).trim();
     const going = files;
     if (sending || fileReadySession !== sessionId || (!text && going.length === 0)) return;
+    if (needsReview || (status === "running" ? selectedIntent === "send" : selectedIntent !== "send")) return;
     if (text.startsWith("/") && going.length === 0 && commands.some((c) => c.name === text.slice(1).split(" ")[0].toLowerCase())) {
       await runCommand(text);
       return;
     }
     setSending(true);
-    const fingerprint = JSON.stringify({ text, files: going.map((file) => [file.name, file.size, file.lastModified, file.type]), model: props.model, mode: props.mode, effort: props.reasoningEffort, place: props.place, action });
+    const fingerprint = JSON.stringify({ text, files: going.map((file) => [file.name, file.size, file.lastModified, file.type]), target: currentTarget, intent: selectedIntent });
     const clientMessageId = sendIntent(sessionId, fingerprint);
     // Keep the complete draft until the server confirms it. A dropped reply may be an unknown
     // outcome; the same client message id is used if the operator explicitly retries.
     if (going.length) setProgress(0);
     try {
-      await onSend(text, going, clientMessageId, going.length ? setProgress : undefined);
+      const delivery = await onSend(text, going, selectedIntent, clientMessageId, going.length ? setProgress : undefined);
       clearSendIntent(sessionId);
       setDraftState("");
       clearDraft(sessionId);
       setFiles([]);
+      setSavedTarget(null);
+      writeDraftTarget(sessionId, null);
       if (fileInput.current) fileInput.current.value = "";
       haptic("light");
+      toast(t(`composer.delivery.${delivery}`));
     } catch (e) {
       // A conflict has an authoritative answer from the host. The next deliberate send is a new
       // attempt; an unconfirmed network failure keeps its original identity for safe retry.
@@ -271,6 +308,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     if (action === "stop") onStop();
     else if (action === "reply") void reply();
     else void send();
+  }
+  function chooseIntent(next: "send" | "steer" | "queue") {
+    setIntent(next);
+    rememberTarget(next);
+    setSendOpen(false);
   }
 
   // ── the voice note ──
@@ -386,7 +428,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const ctx = props.context ?? null;
   const pct = ctx && ctx.window > 0 ? Math.round((100 * ctx.tokens) / ctx.window) : null;
-  const primaryLabel = action === "stop" ? t("session.stop") : action === "queue" ? t("composer.queue") : action === "reply" ? t("composer.reply") : t("session.send");
+  const primaryLabel = action === "stop" ? t("session.stop") : action === "reply" ? t("composer.reply") : t(intent === "queue" ? "composer.queue" : intent === "steer" ? "composer.steer" : "session.send");
+  const intentFits = status === "running" ? intent !== "send" : intent === "send";
   const place = composerContext(props.place);
 
   return (
@@ -475,6 +518,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {progress !== null && <div className="sub upload-progress" role="status">{t("upload.progress", { percent: Math.floor(progress * 100) })}</div>}
         {fileStorageError && files.length > 0 && <div className="sub upload-progress" role="status">{t("composer.attachments.unsaved")}</div>}
         {fileReadySession !== sessionId && <div className="sub upload-progress" role="status">{t("composer.attachments.restoring")}</div>}
+        {needsReview && <div className="sub upload-progress" role="status">{t("composer.draft.targetChanged")} <button type="button" className="btn small" onClick={() => { const next = { ...currentTarget, intent }; setSavedTarget(next); writeDraftTarget(sessionId, next); clearSendIntent(sessionId); }}>{t("composer.draft.useCurrent")}</button></div>}
         {files.length > 0 && !voiceBar && (
           <div className="attachments" aria-label={t("session.attachments")}>
             {files.map((f, i) => (
@@ -522,9 +566,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               </button>
             )}
             {props.asr?.configured && <MicButton note={note} />}
-            <button type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled || fileReadySession !== sessionId} aria-label={primaryLabel} title={action === "queue" ? `${primaryLabel} — ${t("composer.queue.hint")}` : primaryLabel} data-action={action}>
+            <button ref={sendButton} type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled || fileReadySession !== sessionId || needsReview || (action !== "stop" && action !== "reply" && !intentFits)} aria-label={primaryLabel} title={primaryLabel} data-action={action}>
               <Icon name={action === "stop" ? "stop" : action === "reply" ? "send" : "up"} />
             </button>
+            {(draft.trim() || files.length > 0) && <button type="button" className="iconbtn flat" onClick={() => setSendOpen((open) => !open)} disabled={sending || fileReadySession !== sessionId} aria-label={t("composer.draft.actions")} aria-haspopup="menu" aria-expanded={sendOpen}><Icon name="chevron" size={14} /></button>}
+            {sendOpen && <Popover anchor={sendButton.current} onClose={() => setSendOpen(false)} className="plus-menu" label={t("composer.draft.actions")}>
+              {status === "running" ? <>
+                <button type="button" role="menuitem" onClick={() => chooseIntent("steer")}>{t("composer.steer")}</button>
+                <button type="button" role="menuitem" onClick={() => chooseIntent("queue")}>{t("composer.queue")}</button>
+              </> : <button type="button" role="menuitem" onClick={() => chooseIntent("send")}>{t("session.send")}</button>}
+            </Popover>}
           </div>
         </div>
       </div>

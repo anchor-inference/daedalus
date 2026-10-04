@@ -285,6 +285,21 @@ class Scheduler:
             raise PermissionError("this schedule needs operator approval or changed before reservation")
         return str(cycle["id"])
 
+    async def _approved_handles(self, schedule: dict[str, Any], project_id: str | None) -> list[str]:
+        """Only kept project bytes can enter an unattended prompt after the occurrence was reserved."""
+        files = json.loads(schedule.get("files") or "[]")
+        if not files:
+            return []
+        if not project_id or len(files) > 10 or any(not isinstance(item, str)
+                                                   or not item.startswith("att:") for item in files):
+            raise PermissionError("scheduled attachments need renewed operator review")
+        manager = self.app.manager
+        assert manager is not None
+        for item in files:
+            stored = await manager.files.in_scope(item, project_id)
+            await manager.files.read(stored)
+        return files
+
     async def _record_start_failure(self, schedule: dict[str, Any], error: str) -> None:
         """Record a preflight refusal without consuming the due occurrence."""
         failures = int(schedule.get("failure_count") or 0) + 1
@@ -450,9 +465,9 @@ class Scheduler:
         else:
             state = await self.app.create_session(title, metadata=metadata, workspace=workspace, project_id=project_id)
         prompt = schedule["prompt"]
-        files = json.loads(schedule.get("files") or "[]")
+        files = await self._approved_handles(schedule, project_id)
         if files:
-            prompt += "\n\nFiles attached to this task:\n" + "\n".join(f"- {f}" for f in files)
+            prompt += "\n\nApproved kept files (read with Read(path='att:…')):\n" + "\n".join(f"- {f}" for f in files)
         if schedule.get("last_summary"):
             prompt += f"\n\nSummary of the previous run ({schedule.get('last_run_at')}):\n{schedule['last_summary'][:6000]}"
         prompt += (
@@ -481,9 +496,9 @@ class Scheduler:
             logger.warning("schedule %s skipped: session %s is busy", schedule["id"], state.session.id)
             return state.session.id
         prompt = schedule["prompt"]
-        files = json.loads(schedule.get("files") or "[]")
+        files = await self._approved_handles(schedule, state.project.id if state.project else None)
         if files:
-            prompt += "\n\nFiles attached to this task:\n" + "\n".join(f"- {f}" for f in files)
+            prompt += "\n\nApproved kept files (read with Read(path='att:…')):\n" + "\n".join(f"- {f}" for f in files)
         if schedule.get("last_summary"):
             prompt += f"\n\nYour note from the previous run ({schedule.get('last_run_at')}):\n{schedule['last_summary'][:6000]}"
         prompt += (

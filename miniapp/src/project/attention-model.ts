@@ -13,6 +13,16 @@ export type NextAction = {
   blockers: string[];
 };
 
+const ACTION_BLOCKERS = new Set([
+  "stale_contract", "dependency_not_ready", "result_not_verified", "artifact_missing", "ask_unanswered_or_stale",
+]);
+
+/** Unknown server blockers stay visible as an unknown prerequisite instead of looking actionable. */
+export function actionBlockerKeys(blockers: string[]): string[] {
+  const keys = [...new Set(blockers.map((blocker) => ACTION_BLOCKERS.has(blocker) ? blocker : "unknown"))];
+  return (keys.length ? keys : ["unknown"]).map((key) => `focus.attention.blocker.${key}`);
+}
+
 /** Only an exact request reference can prove that two projections name one decision. */
 export function distinctOperatorActions(actions: NextAction[], asks: Ask[], tasks: ProjectTask[]): NextAction[] {
   const current = new Map(tasks.map((task) => [task.id, task.contract_revision]));

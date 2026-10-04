@@ -69,6 +69,11 @@ async def stop(app: Application, attempt_id: str) -> bool:
     target = await binding(app, attempt_id)
     if target is None:
         return False
+    async with app.db.transaction() as conn:
+        generation = await app.executions._host(conn)
+    if str(generation) != target["scope"]["host_generation"]:
+        # A host restart invalidates the old authority even when the daemon still answers.
+        raise ControlConflict("the host generation changed before attempt containment could be stopped")
     try:
         result = await app.extensions["terminals"].kill_attempt(
             target["env"], target["scope"], daemon_instance=target["daemon_instance"])
@@ -76,8 +81,12 @@ async def stop(app: Application, attempt_id: str) -> bool:
         await record(app, target, kind="unknown", observation={"enforced": False,
                                                                  "reason": str(exc)})
         return False
-    empty = await record(app, target, kind="stop" if result.get("complete") else "sample",
-                         observation=result)
+    evidence = result.get("evidence")
+    complete = (result.get("complete") is True and isinstance(evidence, dict)
+                and evidence.get("enforced") is True and evidence.get("populated") is False)
+    empty = await record(app, target, kind="stop" if complete else "sample", observation=result)
+    if not complete:
+        return False
     if empty:
         await app.extensions["terminals"].release_attempt(target["env"], target["scope"],
                                                             daemon_instance=target["daemon_instance"])

@@ -11,6 +11,7 @@ from daedalus.extensions.runtime_observations import observe_exit
 from daedalus.staff_runtime import BoardTask, Started
 from daedalus.stores.control import ControlDenied, ControlStore, Principal, Scope, one
 from daedalus.stores.executions import ACTIVE, AttemptIdentity
+from daedalus.stores.phase_clocks import DEFAULT_TIMEOUTS, PhaseClocks
 from daedalus.stores.staff import Staff, StaffSession
 
 if TYPE_CHECKING:
@@ -43,6 +44,8 @@ async def prepare_attempt(app: Application, principal: Principal, member: Staff,
                                            contract_revision=row["contract_revision"], launcher=principal,
                                            worker=worker, staff_session_id=session.id, runtime_kind=session.kind,
                                            fence_token=fence_token, comparison_slot_id=capacity_slot_id)
+        await PhaseClocks(app.executions).start(conn, identity, "prepare",
+                                                timeout_seconds=DEFAULT_TIMEOUTS["prepare"])
         resource = launch_resources.get()
         if resource is not None:
             from daedalus.stores.resource_profiles import bind_attempt_in  # Lazy: resource profiles are optional.
@@ -81,6 +84,7 @@ async def observe_bind(app: Application, identity: AttemptIdentity, session: Sta
                                    (terminal["ptyd_instance"], identity.id))
         if row["state"] in ACTIVE:
             await app.executions.bind(conn, identity, provider_session_ref=reference)
+            await PhaseClocks(app.executions).advance(conn, identity, from_phase="spawn", to_phase="ready")
         elif row["state"] in ("completed", "failed", "cancelled", "recovering") and row["host_generation"] == identity.host_generation:
             # A report or cancellation can commit inside runtime.start before Started is returned.
             # Record the observed reference without reviving the worker or granting another delivery.

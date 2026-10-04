@@ -14,6 +14,7 @@ import { shortcutFor } from "./navigation";
 import { PaneHandle, clampWidth, pixelDrag, readSidebar, rememberSidebar, usePaneWidth } from "./layout";
 import { Capabilities, SelfDevMode, visibleScreens } from "./capabilities";
 import { ProjectSwitcher, rememberProject, storedProject, useProjects } from "./projects";
+import { projectViewPath, storedProjectView } from "./project/lastview";
 import { projectPath } from "./folders";
 import { ChangeStrip } from "./change";
 import { MaintenanceNotice } from "./maintenance";
@@ -139,6 +140,8 @@ export function App() {
   // /app is the landing, not a choice of Agents: it is sent on to the remembered mode (see
   // migrateLegacyLocation) and must not overwrite that memory on its way through.
   const landing = /^\/app\/?$/.test(window.location.pathname);
+  const landedHere = useRef(landing && !window.location.hash);
+  const restoredView = useRef(false);
   const routeMode = landing ? null : modeOf(route);
   const [lastMode, setLastMode] = useState<Mode>(storedMode);
   useEffect(() => {
@@ -213,6 +216,24 @@ export function App() {
   useAppBadge(notifications.unseen);
   const projects = useProjects();
   const projectList = projects.data ?? [];
+  useEffect(() => {
+    if (!landedHere.current || restoredView.current || !projects.data || storedMode() !== "orchestration") return;
+    restoredView.current = true;
+    const view = storedProjectView();
+    if (!view) return;
+    const project = projects.data.find((item) => item.id === view.project_id);
+    if (!project || !project.settings.orchestrator?.enabled) return;
+    const destination = project.settings.orchestrator.session_id === view.coordinator_session_id
+      ? projectViewPath(view) : projectHome(view.project_id);
+    void api.get<{ project_id: string; body: string }>(`/api/projects/${encodeURIComponent(view.project_id)}/scope-revisions/current`)
+      .then((goal) => {
+        if (goal.project_id !== view.project_id || !goal.body) return;
+        // A direct link or a click made while the read was in flight wins over the device preference.
+        if (window.location.pathname !== modeHome("orchestration", wide)) return;
+        navigate(destination + window.location.search, { replace: true });
+        if (destination !== projectViewPath(view)) showToast(t("goal.start.sessionChanged"));
+      }).catch(() => { /* Stay on the mode home when the project cannot be verified. */ });
+  }, [projects.data, wide, showToast]);
   // The project lens of Agents mode offers the projects that mode lists: none with an orchestrator.
   const agentProjects = projectList.filter((p) => !p.settings.orchestrator?.enabled && p.system !== "dispatcher");
   // A project removed elsewhere must not leave the shell filtering by something that is gone.

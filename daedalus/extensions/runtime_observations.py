@@ -8,6 +8,7 @@ from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING
 
 from daedalus.extensions.resource_runtime import binding, reconcile
+from daedalus.stores.attempt_faults import record_fault
 from daedalus.stores.comparison_funding import ComparisonFunding
 from daedalus.stores.control import ControlDenied, now, one
 from daedalus.stores.executions import ACTIVE, AttemptIdentity
@@ -128,19 +129,26 @@ async def observe_exit(app: Application, *, staff_session_id: str, runtime_ref: 
                         or runtime_instance != row["runtime_instance"] or terminal["ptyd_instance"] != runtime_instance
                         or row["provider_session_ref"] != f"terminal:{runtime_ref}"):
                     return False
-            await conn.execute("INSERT OR IGNORE INTO runtime_exit_observations(attempt_id,runtime_ref,provider_session_ref,"
+            observation = await conn.execute("INSERT OR IGNORE INTO runtime_exit_observations(attempt_id,runtime_ref,provider_session_ref,"
                                "staff_session_id,contract_revision,host_generation,runtime_kind,runtime_instance,"
                                "observed_status,observed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                                (row["id"], runtime_ref, row["provider_session_ref"], staff_session_id,
                                 row["contract_revision"], generation, row["runtime_kind"], runtime_instance, observed_status, now()))
+            fresh_observation = observation.rowcount == 1
+            await observation.close()
             owner = await one(conn, "SELECT 1 FROM lifecycle_owners WHERE child_kind = 'execution_attempt' AND child_id = ?"
                               " AND cancel_state IN ('requested','acknowledged','unknown')", (row["id"],))
+            if (fresh_observation and row["runtime_kind"] == "daedalus" and observed_status == "error"
+                    and owner is None and row["state"] != "recovering"):
+                await record_fault(conn, row["id"], "runtime_error")
             if owner is not None or row["state"] == "recovering":
                 await conn.execute("UPDATE staff_sessions SET ended_at = COALESCE(ended_at,?),status = 'exited',"
                                    "status_at = ?,waiting_for = '' WHERE id = ?", (now(), now(), staff_session_id))
                 if row["state"] in (*ACTIVE, "recovering"):
                     await conn.execute("UPDATE execution_attempts SET state = 'cancelled',updated_at = ? WHERE id = ?",
                                        (now(), row["id"]))
+                    if fresh_observation:
+                        await record_fault(conn, row["id"], "cancelled", cancelled_by="system")
                 await record_owned_exit(conn, attempt_id=row["id"], staff_session_id=staff_session_id,
                                         host_generation=generation, provider_session_ref=row["provider_session_ref"])
             elif row["runtime_kind"] == "cli" and row["state"] in ACTIVE:
@@ -149,6 +157,8 @@ async def observe_exit(app: Application, *, staff_session_id: str, runtime_ref: 
                 await conn.execute("UPDATE execution_attempts SET state = 'failed',updated_at = ? WHERE id = ?"
                                    " AND state IN ('queued','starting','running','waiting')",
                                    (now(), row["id"]))
+                if fresh_observation:
+                    await record_fault(conn, row["id"], "runtime_error")
                 await conn.execute("UPDATE staff_sessions SET ended_at = COALESCE(ended_at,?),status = 'exited',"
                                    "status_at = ?,waiting_for = '' WHERE id = ?", (now(), now(), staff_session_id))
             after = await one(conn, "SELECT status FROM staff_sessions WHERE id = ?", (staff_session_id,))

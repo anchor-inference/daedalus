@@ -26,3 +26,6 @@ the agent gets.
 
 Unit tests live in `tests/unit`, smoke tests in `tests/smoke` (the preflight runs them). A test that passes when the
 feature is broken is worse than none: assert the behaviour, not the configuration.
+
+For bugs, use the GitHub bug report form and the evidence and state definitions in [issue triage](docs/ISSUE_TRIAGE.md).
+Report security vulnerabilities privately as described in [the security policy](SECURITY.md).

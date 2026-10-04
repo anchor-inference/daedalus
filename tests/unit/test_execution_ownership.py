@@ -11,6 +11,7 @@ import pytest
 from daedalus.stores.control import ControlDenied, ControlStore, Principal, Scope
 from daedalus.stores.database import Database
 from daedalus.stores.executions import AttemptIdentity, ExecutionStore
+from daedalus.stores.phase_clocks import PhaseClocks
 
 OPERATOR = Principal.operator({"via": "cookie", "user_id": 1})
 
@@ -77,6 +78,69 @@ async def test_authenticated_staff_context_and_provider_binding_are_exact(db: Da
         with pytest.raises(ControlDenied, match="no current"):
             async with db.transaction() as conn:
                 await store.check_staff(conn, "unrelated-session")
+    finally:
+        store.release()
+
+
+async def test_heartbeat_cannot_satisfy_first_output_or_extend_its_deadline(db: Database) -> None:
+    store, identity, _ = await owner(db)
+    clocks = PhaseClocks(store)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    try:
+        async with db.transaction() as conn:
+            await clocks.start(conn, identity, "first_output", timeout_seconds=30, at=start)
+            await clocks.heartbeat(conn, identity, at=start + timedelta(seconds=29))
+            assert await clocks.expire(conn, identity, at=start + timedelta(seconds=31)) == "first_output"
+            with pytest.raises(ControlDenied, match="needs reconciliation"):
+                await clocks.start(conn, identity, "idle", timeout_seconds=30, at=start + timedelta(seconds=32))
+        row = await db.fetchone("SELECT deadline_at,last_signal_at,outcome FROM attempt_phase_clocks")
+        assert row["deadline_at"] == (start + timedelta(seconds=30)).isoformat()
+        assert row["last_signal_at"] == (start + timedelta(seconds=29)).isoformat()
+        assert row["outcome"] == "timed_out"
+    finally:
+        store.release()
+
+
+async def test_auth_and_idle_have_separate_deadlines_and_output_renews_only_idle(db: Database) -> None:
+    store, identity, _ = await owner(db)
+    clocks = PhaseClocks(store)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    try:
+        async with db.transaction() as conn:
+            await clocks.start(conn, identity, "auth", timeout_seconds=90, at=start)
+            assert await clocks.expire(conn, identity, at=start + timedelta(seconds=60)) is None
+            await clocks.start(conn, identity, "first_output", timeout_seconds=15,
+                               at=start + timedelta(seconds=60))
+            await clocks.output(conn, identity, idle_timeout_seconds=40,
+                                at=start + timedelta(seconds=70))
+            await clocks.heartbeat(conn, identity, at=start + timedelta(seconds=100))
+            assert await clocks.expire(conn, identity, at=start + timedelta(seconds=109)) is None
+            await clocks.output(conn, identity, idle_timeout_seconds=40,
+                                at=start + timedelta(seconds=109))
+            assert await clocks.expire(conn, identity, at=start + timedelta(seconds=140)) is None
+            assert await clocks.expire(conn, identity, at=start + timedelta(seconds=150)) == "idle"
+        rows = await db.fetchall("SELECT phase,outcome FROM attempt_phase_clocks ORDER BY started_at")
+        assert [(row["phase"], row["outcome"]) for row in rows] == [
+            ("auth", "completed"), ("first_output", "completed"), ("idle", "timed_out")]
+    finally:
+        store.release()
+
+
+async def test_superseded_attempt_cannot_change_its_phase_clock(db: Database) -> None:
+    store, identity, _ = await owner(db)
+    clocks = PhaseClocks(store)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    try:
+        async with db.transaction() as conn:
+            await clocks.start(conn, identity, "spawn", timeout_seconds=20, at=start)
+        await db.execute("UPDATE board_tasks SET current_attempt_id = NULL WHERE id = 'task'")
+        with pytest.raises(ControlDenied, match="superseded"):
+            async with db.transaction() as conn:
+                await clocks.heartbeat(conn, identity, at=start + timedelta(seconds=10))
+        with pytest.raises(ControlDenied, match="superseded"):
+            async with db.transaction() as conn:
+                await clocks.expire(conn, identity, at=start + timedelta(seconds=30))
+        assert (await db.fetchone("SELECT outcome FROM attempt_phase_clocks"))[0] == "active"
     finally:
         store.release()
 

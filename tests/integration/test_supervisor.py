@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -45,6 +46,11 @@ def scratch(tmp_path: Path) -> dict[str, Path]:
     for name, source, dirname in (("bot", REPO_ROOT, "daedalus"), ("core", CORE_ROOT, "protocore-exp")):
         bare = tmp_path / f"{name}.git"
         _git("clone", "--bare", "-q", str(source), str(bare), cwd=tmp_path)
+        # A worktree may run this test from a branch behind main. The scratch
+        # origin's main must start at the revision under test for later pushes.
+        source_head = _git("rev-parse", "HEAD", cwd=source).strip()
+        _git("--git-dir", str(bare), "update-ref", "refs/heads/main", source_head, cwd=tmp_path)
+        _git("--git-dir", str(bare), "symbolic-ref", "HEAD", "refs/heads/main", cwd=tmp_path)
         clone = tmp_path / dirname  # the bot resolves the core from its sibling directory
         _git("clone", "-q", str(bare), str(clone), cwd=tmp_path)
         _git("config", "user.email", "t@example.com", cwd=clone)
@@ -57,7 +63,9 @@ def scratch(tmp_path: Path) -> dict[str, Path]:
     return layout
 
 
-async def test_rebuild_applies_good_commit_and_rolls_back_bad_one(scratch: dict[str, Path], tmp_path: Path) -> None:
+async def test_rebuild_applies_good_commit_and_rolls_back_bad_one(
+    scratch: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     sup = _load_supervisor(
         {
             "DAEDALUS_BOT_REPO": str(scratch["bot"]),
@@ -69,6 +77,21 @@ async def test_rebuild_applies_good_commit_and_rolls_back_bad_one(scratch: dict[
         }
     )
     supervisor = sup.Supervisor()
+    # The git/preflight integration runs without an HTTP host. Drain protocol
+    # failure cases have their own tests; this boundary models its commitment.
+    class CommittedDrain:
+        def __init__(self, state: Path) -> None:
+            pass
+
+        async def commit(self, *args: object, **kwargs: object) -> dict[str, str]:
+            return {"commit_receipt_id": "scratch-receipt"}
+
+    monkeypatch.setattr(sup.update_drain, "UpdateDrainClient", CommittedDrain)
+    supervisor.child = SimpleNamespace(returncode=None)
+    async def stop_scratch_child() -> None:
+        supervisor.child = None
+
+    monkeypatch.setattr(supervisor, "stop_child", stop_scratch_child)
     sup.record_good()
     base = sup.head(scratch["bot"])
 
@@ -100,6 +123,7 @@ async def test_rebuild_applies_good_commit_and_rolls_back_bad_one(scratch: dict[
     assert sup.FAILED.exists() and "compileall" in sup.FAILED.read_text()
 
     # Rollback returns to the earlier known-good revision.
+    supervisor.child = SimpleNamespace(returncode=None)
     result = await supervisor.rollback(0)
     assert result.startswith("rolled back"), result
     assert sup.head(scratch["bot"]) == base

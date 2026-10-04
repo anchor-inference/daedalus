@@ -53,7 +53,9 @@ GIT_TIMEOUT = 300.0
 # worktrees under ``.agents/``. In a workspace of the session's own they are the whole of the
 # directory. In a project they land in the operator's repository, where they have no business showing
 # up in `git status` or being swept into a commit by `git add -A`.
-SESSION_ARTEFACTS = ("inbox/", ".exec/", ".jobs/", ".services/", ".checkpoints/", ".agents/")
+# The Board regenerates PLAN.md in the live session workspace; an untracked copy is
+# host output, while a tracked edit is still caught by the tracked-file clean check.
+SESSION_ARTEFACTS = ("inbox/", ".exec/", ".jobs/", ".services/", ".checkpoints/", ".agents/", "PLAN.md")
 EXCLUDE_MARKER = "# daedalus: what an agent working in this folder writes into it"
 
 
@@ -398,14 +400,36 @@ class StaffWorktrees:
 
     # -- the operations ------------------------------------------------------------------------
 
-    async def check(self, folder: ProjectFolder) -> None:
+    async def check(self, folder: ProjectFolder) -> str:
         """Raise :class:`WorktreeRefused` when no worktree can be made in ``folder``, as `prepare` would.
 
         Asked of git itself, in the folder's own environment: the stored ``is_git`` is known only for
         folders of this process's environment and only for a repository's top, and a host folder or a
         subfolder of a repository reads as "not git" there although a worktree is made in it fine.
         ``WorktreeUnavailable`` when the folder cannot be asked at all."""
-        await self._branchable(self._git(folder.env), folder)
+        git = self._git(folder.env)
+        await self._branchable(git, folder)
+        return await self._source_head(git, folder.path)
+
+    async def _source_head(self, git: _Git, folder: Path, *, expected: str | None = None) -> str:
+        """Return a clean source commit, refusing a checkout that changed since assignment.
+
+        The source may move while a launch waits in the queue; its branch name alone is not a safe
+        base for a later worktree write.
+        """
+        head = (await git.run(["rev-parse", "HEAD"], cwd=folder)).strip()
+        if expected is not None and head != expected:
+            raise WorktreeRefused(f"{folder} moved since assignment; assign again from its current commit")
+        if await self._is_dirty(git, folder, untracked=False):
+            raise WorktreeRefused(f"{folder} has uncommitted changes; commit or stash them before assigning a worktree")
+        # The host may already have its own untracked inbox or worktree directory here before it
+        # first updates info/exclude. Those are not changes to the operator's source.
+        prefix = (await git.run(["rev-parse", "--show-prefix"], cwd=folder)).strip()
+        artefacts = [f":(exclude,top){prefix}{name.rstrip('/')}" for name in SESSION_ARTEFACTS]
+        others = await git.run(["ls-files", "--others", "--exclude-standard", "--", ":(top)", *artefacts], cwd=folder)
+        if others.strip():
+            raise WorktreeRefused(f"{folder} has uncommitted changes; commit or stash them before assigning a worktree")
+        return head
 
     async def _branchable(self, git: _Git, folder: ProjectFolder) -> str:
         """The folder's path inside its repository, once it is known that a branch can be cut there."""
@@ -425,7 +449,7 @@ class StaffWorktrees:
             raise WorktreeRefused(f"{where} has no commit yet, so there is nothing to branch a worktree from") from None
         return prefix
 
-    async def prepare(self, folder: ProjectFolder, staff: str, task_id: str, task_title: str) -> Worktree:
+    async def prepare(self, folder: ProjectFolder, staff: str, task_id: str, task_title: str, *, expected_head: str | None = None) -> Worktree:
         """The staff member's worktree in ``folder``, on the task's branch, ready to work in.
 
         Reuses ``<folder>/.agents/worktrees/<staff-slug>`` when it is registered and clean and switches it
@@ -440,18 +464,23 @@ class StaffWorktrees:
         branch = branch_name(slug_, task_id, task_title)
         path = where / WORKTREES_DIR / slug_
         async with await self._lock(git, where):
+            # Nothing in the repository is written until the source is still the one assigned and
+            # clean. Pin the commit for branch creation so a later branch move cannot change its base.
+            head = await self._source_head(git, where, expected=expected_head)
             await git.ensure_excluded(where)
+            await self._source_head(git, where, expected=head)
             try:
                 base = (await git.run(["symbolic-ref", "--quiet", "--short", "HEAD"], cwd=where)).strip()
             except GitError:
                 base = (await git.run(["rev-parse", "HEAD"], cwd=where)).strip()
             try:
-                await self._place(git, where, path, branch, base)
+                await self._place(git, where, path, branch, head)
             except GitError as first:
                 logger.info("worktree for %s in %s failed once, pruning and retrying: %s", slug_, where, first)
                 try:
                     await git.run(["worktree", "prune"], cwd=where)
-                    await self._place(git, where, path, branch, base)
+                    await self._source_head(git, where, expected=head)
+                    await self._place(git, where, path, branch, head)
                 except GitError as exc:
                     raise WorktreeError(f"could not prepare the worktree of {slug_} in {where}: {exc}") from exc
             await self._identity(git, path)
