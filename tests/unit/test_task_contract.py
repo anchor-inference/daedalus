@@ -113,7 +113,7 @@ async def test_a_command_line_member_confirms_its_inputs_in_words(settings: Sett
         r.team.runtimes["claude"] = r.team.runtimes["daedalus"]
         r.team._capacity = Capacity()  # a terminal to start the command-line member in
         sid = await office(r)
-        await member(r, "Cli", harness="claude")
+        await r.manager.staff.hire(r.project.id, name="Cli", role="Scripts", harness="claude", isolation="worktree")
         ref = await attach(r, "ref.mp4")
         task_id, _ = await assigned(r, sid, staff="Cli", title="Promo script", **SCRIPT, inputs=[ref.handle])
         cli = await r.manager.staff.find(r.project.id, "Cli")

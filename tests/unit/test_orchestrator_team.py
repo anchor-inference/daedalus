@@ -475,7 +475,7 @@ async def test_staff_sessions_tool_finds_a_finished_cli_chat(settings: Settings,
         cli.manager = r.manager
         r.team.runtimes["cursor"] = cli
         r.team._capacity = Capacity(running=0, cap=20)
-        member = await r.manager.staff.hire(r.project.id, name="Ada", harness="cursor", isolation="shared")
+        member = await r.manager.staff.hire(r.project.id, name="Ada", harness="cursor", isolation="worktree")
         task_id = await board_task(r.manager, r.project, "Menu")
         queued = await operator_assignment(r.team, member, task_id, wait_for_admission=False)
         async def observed() -> bool:
@@ -856,8 +856,8 @@ async def test_a_card_left_by_a_helper_that_died_goes_to_the_next_member_in_one_
         r.team.runtimes["cursor"] = runtime
         r.team._capacity = Capacity()
         sid = await office(r)
-        await r.manager.staff.hire(r.project.id, name="Ira", role="Video", harness="cursor", isolation="shared")
-        helper = await r.manager.staff.hire(r.project.id, name="mediafix", role="Video", harness="cursor", isolation="shared", one_off=True)
+        await r.manager.staff.hire(r.project.id, name="Ira", role="Video", harness="cursor", isolation="worktree")
+        helper = await r.manager.staff.hire(r.project.id, name="mediafix", role="Video", harness="cursor", isolation="worktree", one_off=True)
         task_id = _task_in(await r.call(sid, "assign", staff="mediafix", title="Fix the two captions", **BRIEF))
         async def helper_started() -> bool:
             return await r.team.live_of(helper) is not None
@@ -892,8 +892,8 @@ async def test_a_card_held_by_a_member_who_is_gone_is_passed_on_released_or_free
         r.team.runtimes["cursor"] = runtime
         r.team._capacity = Capacity()
         sid = await office(r)
-        await r.manager.staff.hire(r.project.id, name="Ira", role="Video", harness="cursor", isolation="shared")
-        helper = await r.manager.staff.hire(r.project.id, name="mediafix", role="Video", harness="cursor", isolation="shared", one_off=True)
+        await r.manager.staff.hire(r.project.id, name="Ira", role="Video", harness="cursor", isolation="worktree")
+        helper = await r.manager.staff.hire(r.project.id, name="mediafix", role="Video", harness="cursor", isolation="worktree", one_off=True)
         first = _task_in(await r.call(sid, "assign", staff="mediafix", title="Fix the two captions", **BRIEF))
         async def helper_started() -> bool:
             return await r.team.live_of(helper) is not None

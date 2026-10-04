@@ -504,7 +504,7 @@ async def test_terminal_output_is_waited_for_on_the_daemon_and_the_orchestrators
         sid = project.settings.orchestrator.session_id
         r.team.runtimes["claude"] = ObservedFakeStaffRuntime(kind="claude")
         r.team.runtimes["claude"].manager = r.manager
-        max_ = await r.manager.staff.hire(r.project.id, name="Max", harness="claude", isolation="shared")
+        max_ = await r.manager.staff.hire(r.project.id, name="Max", harness="claude", isolation="worktree")
         await operator_assignment(r.team, max_, await board_task(r.manager, r.project, "Tests"))
         live = await r.team.live_of(max_)
         assert live is not None and live.session.terminal_id
