@@ -4223,12 +4223,25 @@ class SessionManager:
         """
         p = event.payload
         if event.type is EventType.TOOL_RESULT:
+            original = p.get("content")
+            if not isinstance(original, str):
+                original = "".join(
+                    str(block.get("text") or "") for block in p.get("content_blocks") or ()
+                    if isinstance(block, dict)
+                )
+            # The core sends normal results in content_blocks, and tools can attach UI payloads
+            # and metadata. Mask the whole envelope before either durable event store sees it.
+            cleaned = self._redact_tool_result_payload(p)
+            p.clear()
+            p.update(cleaned)
             content = p.get("content")
-            if isinstance(content, str):
-                cleaned = self.redactor.redact(content)
-                if cleaned != content:
-                    p["content"] = cleaned
-                    self._redact_history_result(state, str(p.get("tool_call_id")), cleaned)
+            if not isinstance(content, str):
+                content = "".join(
+                    str(block.get("text") or "") for block in p.get("content_blocks") or ()
+                    if isinstance(block, dict)
+                )
+            if content != original:
+                self._redact_history_result(state, str(p.get("tool_call_id")), content)
         elif event.type is EventType.TOOL_USE_STOP and isinstance(p.get("final_input"), dict):
             p["final_input"] = self.redactor.redact_any(p["final_input"])
         elif event.type is EventType.ERROR and isinstance(p.get("message"), str):
@@ -4245,6 +4258,28 @@ class SessionManager:
                 state.soft_stop_detail = self.redactor.redact(str(p.get("soft_stop_detail") or ""))
             detail = {k: v for k, v in p.items() if k not in ("from", "to", "reason")}
             logger.warning("run recovery in session %s: %s %s", getattr(getattr(state, "session", None), "id", "?"), p.get("reason"), self.redactor.redact(json.dumps(detail, ensure_ascii=False, default=str)[:400]))
+
+    def _redact_tool_result_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Mask credentials and the operator's home prefix before tool output is stored.
+
+        A home-relative path remains useful for locating an artifact without recording the
+        machine's account name in durable events or their exports.
+        """
+        home = str(Path.home())
+        if home == "/":
+            return self.redactor.redact_any(payload)
+        home_path = re.compile(rf"(?<![A-Za-z0-9]){re.escape(home)}(?=[/\\]|\b)")
+
+        def clean(value: Any) -> Any:
+            if isinstance(value, str):
+                return home_path.sub("~", value)
+            if isinstance(value, dict):
+                return {key: clean(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [clean(item) for item in value]
+            return value
+
+        return clean(self.redactor.redact_any(payload))
 
     @staticmethod
     def _redact_history_result(state: SessionState, tool_call_id: str, cleaned: str) -> None:

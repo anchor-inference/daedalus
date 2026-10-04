@@ -5,17 +5,19 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 from protocore.contracts.llm import ILLMProvider, LLMRequest, LLMResponse, ProviderDelta, ProviderDeltaKind
-from protocore.contracts.types import Message, MessageRole, StopReason, TextBlock
+from protocore.contracts.types import Message, MessageRole, StopReason, TextBlock, ToolResultBlock
 from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
 
 from daedalus.config import Settings
-from daedalus.extensions.api import message_view
+from daedalus.extensions.api import build_app, message_view
 from daedalus.host.session_runner import SessionManager, clip_title
 from daedalus.providers.pricing import ModelPricing
 from daedalus.stores.database import Database
@@ -121,6 +123,65 @@ async def test_run_executes_tool_and_persists_history(settings: Settings, db: Da
     assert provider.requests[-1].messages[-1].role is MessageRole.tool
     usage = await db.fetchone("SELECT count(*) c FROM usage_events")
     assert usage["c"] == 0  # the scripted provider bypasses the usage sink; the loop still saw usage
+    await manager.close()
+
+
+async def test_tool_event_is_redacted_before_durable_storage_and_replay(settings: Settings, db: Database) -> None:
+    manager = await _manager(settings, db, ScriptedProvider([]))
+    state = await manager.create_session("t")
+    token = "sk-test-abcdefghijklmnopqrstuvwxyz012345"
+    private_path = str(Path.home() / "private" / "report.txt")
+    state.engine = SimpleNamespace(history=[Message(
+        role=MessageRole.tool,
+        content_blocks=[ToolResultBlock(tool_call_id="redaction-call", content=f"Report saved at {private_path}; 3 checks passed. Key: {token}")],
+    )])  # type: ignore[assignment]
+    event = TurnEvent(
+        type=EventType.TOOL_RESULT,
+        run_id="redaction-run",
+        payload={
+            "tool_call_id": "redaction-call",
+            "success": True,
+            "is_error": False,
+            "content_blocks": [{"type": "text", "text": f"Report saved at {private_path}; 3 checks passed. Key: {token}"}],
+            "ui_payload": {"note": f"Review {private_path}"},
+            "path": private_path,
+        },
+    )
+    await manager._dispatch_event(state, event)
+    assert event.payload["path"] == "~/private/report.txt"
+    assert event.payload["success"] is True and event.payload["is_error"] is False
+
+    rows = await db.fetchall("SELECT payload FROM events WHERE run_id = ?", ("redaction-run",))
+    stream_rows = await db.fetchall("SELECT payload FROM session_events WHERE session_id = ?", (state.session.id,))
+    assert len(rows) == len(stream_rows) == 1
+    for row in [*rows, *stream_rows]:
+        assert token not in row["payload"]
+        assert private_path not in row["payload"]
+        assert "~/private/report.txt" in row["payload"]
+        assert "3 checks passed" in row["payload"]
+    replay = await manager.events.session_replay(state.session.id, after=0)
+    exported = json.dumps(replay, ensure_ascii=False)
+    assert token not in exported and private_path not in exported
+    assert "3 checks passed" in exported
+    result = await manager.events.session_tool_result(state.session.id, "redaction-call")
+    assert result is not None and "3 checks passed" in result[0] and token not in result[0]
+    await manager.sessions.append_transcript(state.session.id, state.engine.history)
+    state.engine = None
+    app = SimpleNamespace(settings=settings, config=manager.config, db=db, manager=manager, front=None,
+                          extensions={}, guard=None, create_session=manager.create_session)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
+        response = await client.get(
+            f"/api/sessions/{state.session.id}/tool-results/redaction-call",
+            headers={"X-Daedalus-Token": "tok"},
+        )
+        export = await client.get(
+            f"/api/sessions/{state.session.id}/export/download",
+            headers={"X-Daedalus-Token": "tok"},
+        )
+    assert response.status_code == 200
+    assert "3 checks passed" in response.text and token not in response.text and private_path not in response.text
+    assert export.status_code == 200
+    assert "3 checks passed" in export.text and token not in export.text and private_path not in export.text
     await manager.close()
 
 
