@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from daedalus.extensions.auto_handoff import advance, on_capacity_released
+from daedalus.extensions.auto_handoff import advance, on_capacity_released, recover
 from daedalus.extensions.orchestrator_domain import set_next_action
 from daedalus.stores.control import ControlDenied
 from daedalus.stores.database import Database
@@ -121,6 +122,68 @@ async def test_expired_authority_asks_once_without_launch(db: Database, monkeypa
         assert app.manager.asks.open.await_count == 1
         assert (await db.fetchone("SELECT count(*) FROM handoff_claims"))[0] == 0
         assert (await db.fetchone("SELECT count(*) FROM effect_outbox WHERE kind = 'task.launch'"))[0] == 0
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+@pytest.mark.parametrize("project_id", [None, "project"])
+async def test_recovery_reaches_ready_task_after_blocked_page_and_database_reopen(
+    db: Database, monkeypatch: pytest.MonkeyPatch, interrupted: bool, project_id: str | None,
+) -> None:
+    app, dispatcher, team, starts = await ready_successor(db)
+    monkeypatch.setattr("daedalus.extensions.auto_handoff.current_office", AsyncMock(return_value="office"))
+    monkeypatch.setattr("daedalus.extensions.auto_handoff.resolve_authority", AsyncMock(return_value=OPERATOR))
+    async with db.transaction() as conn:
+        await conn.execute("UPDATE board_tasks SET priority = 2 WHERE id = 'task'")
+        for index in range(128):
+            task_id = f"blocked-{index:03}"
+            await conn.execute("INSERT INTO board_tasks(id,project_id,title,status,priority,created_at,updated_at)"
+                               " VALUES (?,'project','Blocked','todo',1,'2026-01-01','2026-01-01')", (task_id,))
+            edge_id = f"blocked-edge-{index:03}"
+            await conn.execute("INSERT INTO task_dependency_edges(id,successor_task_id,predecessor_task_id,"
+                               " kind,resolution_state,created_at)"
+                               " VALUES (?,?,'previous','required','awaiting_result','2026-01-01')",
+                               (edge_id, task_id))
+            await set_next_action(conn, action_id=f"blocked-next-{index:03}", task_id=task_id, kind="assign",
+                                  owner_kind="staff", owner_id="worker",
+                                  prerequisites=[{"kind": "dependency_ready", "ref": edge_id}])
+    visited = []
+    interrupt_next = interrupted
+
+    async def observed_advance(application, task_id):
+        nonlocal interrupt_next
+        visited.append(task_id)
+        if interrupt_next:
+            interrupt_next = False
+            raise asyncio.CancelledError
+        return await advance(application, task_id)
+
+    monkeypatch.setattr("daedalus.extensions.auto_handoff.advance", observed_advance)
+    try:
+        if interrupted:
+            with pytest.raises(asyncio.CancelledError):
+                await recover(app, project_id=project_id)
+        else:
+            await recover(app, project_id=project_id)
+            assert visited == [f"blocked-{index:03}" for index in range(128)]
+        assert "task" not in visited
+        assert (await db.fetchone("SELECT count(*) FROM handoff_claims"))[0] == 0
+        await db.close()
+        await db.open()
+        visited.clear()
+        await recover(app, project_id=project_id)
+        assert visited[0] == "task"
+        assert len(visited) == 128 and len(set(visited)) == 128
+        assert (await db.fetchone("SELECT count(*) FROM handoff_claims"))[0] == 1
+        assert (await db.fetchone("SELECT count(*) FROM effect_outbox WHERE kind = 'task.launch'"))[0] == 1
+        visited.clear()
+        await recover(app, project_id=project_id)
+        assert len(visited) <= 128
+        assert (await db.fetchone("SELECT count(*) FROM handoff_claims"))[0] == 1
+        assert await dispatcher.step()
+        assert len(starts) == 1
     finally:
         team.queue.close()
         app.executions.release()

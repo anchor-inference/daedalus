@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -15,6 +16,39 @@ if TYPE_CHECKING:
     from daedalus.app import Application
 
 logger = logging.getLogger(__name__)
+RECOVERY_BATCH_SIZE = 128
+
+
+async def _recovery_batch(app: Application, project_id: str | None) -> list[str]:
+    """Reserve a circular page before effects so interrupted wakes cannot pin the first page."""
+    key = "auto_handoff_recovery:" + (f"project:{project_id}" if project_id is not None else "global")
+    query = ("SELECT t.id,t.priority,t.created_at FROM board_tasks t"
+             " WHERE t.status = 'todo' AND (? IS NULL OR t.project_id = ?)"
+             " AND EXISTS (SELECT 1 FROM task_dependency_edges e WHERE e.successor_task_id = t.id)"
+             " AND EXISTS (SELECT 1 FROM next_actions n WHERE n.task_id = t.id AND n.state = 'active'"
+             " AND n.kind = 'assign' AND n.owner_kind = 'staff')")
+    order = " ORDER BY t.priority,t.created_at,t.id LIMIT ?"
+    async with app.db.transaction() as conn:
+        async with conn.execute("SELECT value FROM kv WHERE key = ?", (key,)) as reader:
+            saved = await reader.fetchone()
+        position = json.loads(saved["value"]) if saved is not None else None
+        params = (project_id, project_id)
+        after = " AND (t.priority,t.created_at,t.id) > (?,?,?)" if position is not None else ""
+        async with conn.execute(query + after + order,
+                                params + tuple(position or ()) + (RECOVERY_BATCH_SIZE,)) as reader:
+            rows = list(await reader.fetchall())
+        if position is not None and len(rows) < RECOVERY_BATCH_SIZE:
+            async with conn.execute(query + " AND (t.priority,t.created_at,t.id) <= (?,?,?)" + order,
+                                    params + tuple(position) + (RECOVERY_BATCH_SIZE - len(rows),)) as reader:
+                rows.extend(await reader.fetchall())
+        if rows:
+            last = rows[-1]
+            # Persist selection, rather than success: blocked tasks and crashes used to starve
+            # every later task. Launch authority and replay fencing still belong to advance.
+            await conn.execute("INSERT INTO kv(key,value) VALUES (?,?)"
+                               " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                               (key, json.dumps([last["priority"], last["created_at"], last["id"]])))
+        return [row["id"] for row in rows]
 
 
 async def advance(app: Application, task_id: str) -> dict[str, Any]:
@@ -107,14 +141,8 @@ async def on_capacity_released(app: Application, event: Any) -> None:
 
 
 async def recover(app: Application, *, project_id: str | None = None) -> None:
-    rows = await app.db.fetchall("SELECT DISTINCT t.id FROM board_tasks t"
-                                 " JOIN task_dependency_edges e ON e.successor_task_id = t.id"
-                                 " JOIN next_actions n ON n.task_id = t.id AND n.state = 'active'"
-                                 " WHERE t.status = 'todo' AND n.kind = 'assign' AND n.owner_kind = 'staff'"
-                                 " AND (? IS NULL OR t.project_id = ?)"
-                                 " ORDER BY t.priority,t.created_at,t.id LIMIT 128", (project_id, project_id))
-    for row in rows:
+    for task_id in await _recovery_batch(app, project_id):
         try:
-            await advance(app, row["id"])
+            await advance(app, task_id)
         except Exception:
-            logger.exception("automatic handoff recovery could not inspect task %s", row["id"])
+            logger.exception("automatic handoff recovery could not inspect task %s", task_id)
