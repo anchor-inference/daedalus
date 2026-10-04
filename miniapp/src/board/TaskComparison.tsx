@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { absTime } from "../format";
 import { t } from "../i18n";
-import { useOffline, useQuery } from "../store";
+import { navigate, projectHome } from "../router";
+import { invalidate, useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import type { ProjectTask, TeamMember } from "./board";
 import type { ResultReceipt } from "./ResultFlow";
@@ -21,6 +22,7 @@ type LaunchBody = { client_operation_id: string; expected_entity_revision: numbe
   budget_cap_usd: string; alternatives: { staff_id: string; allowance_usd: string }[] };
 type PendingLaunch = { task_id: string; body: LaunchBody };
 type PendingClose = { group_id: string; body: { client_operation_id: string; expected_entity_revision: number } };
+type Capacity = { project: { id: string; concurrency: number; concurrency_cap: number; orchestrator: boolean } };
 
 function money(micros: number | null | undefined): string {
   if (typeof micros !== "number" || !Number.isSafeInteger(micros) || micros < 0) return t("pair.unknown");
@@ -78,6 +80,10 @@ function blocker(code: string): string {
 export function TaskComparison({ task, staff, onChanged, toast }: { task: ProjectTask; staff: TeamMember[];
   onChanged: () => void; toast: (message: string) => void }) {
   const [open, setOpen] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  const [capacityOpenedAt, setCapacityOpenedAt] = useState(0);
+  const [capacityBusy, setCapacityBusy] = useState(false);
+  const [capacityWarning, setCapacityWarning] = useState("");
   const [first, setFirst] = useState("");
   const [second, setSecond] = useState("");
   const [firstAllowance, setFirstAllowance] = useState("");
@@ -94,6 +100,13 @@ export function TaskComparison({ task, staff, onChanged, toast }: { task: Projec
   const [pendingClose, setPendingClose] = useState<PendingClose | null>(() => readClose(task.id));
   const offline = useOffline();
   const base = `/api/board/${encodeURIComponent(task.id)}`;
+  const capacityKey = task.project_id ? `/api/projects/${encodeURIComponent(task.project_id)}/staff?archived=0` : null;
+  const capacity = useQuery<Capacity>(open && preparing ? capacityKey : null, { pollMs: 10000, staleMs: 0 });
+  const projectCapacity = !capacity.error && !!capacity.updatedAt && capacity.updatedAt >= capacityOpenedAt &&
+    capacity.data?.project.id === task.project_id &&
+    Number.isSafeInteger(capacity.data.project.concurrency) && capacity.data.project.concurrency >= 1 &&
+    Number.isSafeInteger(capacity.data.project.concurrency_cap) && capacity.data.project.concurrency_cap >= capacity.data.project.concurrency ?
+      capacity.data.project : null;
   const contract = useQuery<Contract>(open ? `${base}/contract` : null, { staleMs: 0 });
   const history = useQuery<History>(open ? `${base}/comparisons?limit=20` : null, { pollMs: 5000, staleMs: 0 });
   const groups = [...(history.data?.groups ?? []), ...older.filter((item) => !(history.data?.groups ?? []).some((fresh) => fresh.group_id === item.group_id))];
@@ -109,9 +122,34 @@ export function TaskComparison({ task, staff, onChanged, toast }: { task: Projec
   const current = contract.data && !contract.error && contract.data.task_id === task.id &&
     contract.data.entity_revision === task.entity_revision ? contract.data : null;
   const hasOpenGroup = groups.some((group) => ["planned", "active", "ready"].includes(group.state));
-  const canLaunch = !offline && !busy && !pending && !history.error && !contract.error && !!history.data && !!current &&
+  useEffect(() => {
+    if (capacityWarning && projectCapacity && projectCapacity.concurrency >= 2) setCapacityWarning("");
+  }, [capacityWarning, projectCapacity]);
+  const canLaunch = !offline && !busy && !pending && !capacityWarning && !history.error && !contract.error && !!history.data && !!current &&
+    !capacityBusy && !!projectCapacity && projectCapacity.concurrency >= 2 &&
     !!current.folder_id && task.status === "todo" && !hasOpenGroup && workers.length >= 2 &&
     !!first && !!second && first !== second && !!firstCost && !!secondCost && !!capCost && firstCost + secondCost <= capCost;
+
+  async function raiseCapacity() {
+    if (offline || capacityBusy || !capacityKey || !task.project_id || !projectCapacity ||
+        !projectCapacity.orchestrator || projectCapacity.concurrency >= 2) return;
+    if (!(await confirmAsync(t("pair.capacity.confirm.title"), { body: t("pair.capacity.confirm.body"),
+      action: t("pair.capacity.raise") }))) return;
+    setCapacityBusy(true);
+    setCapacityWarning("");
+    try {
+      const updated = await api.patch<{ project_id: string; concurrency: number }>(
+        `/api/projects/${encodeURIComponent(task.project_id)}/orchestrator`,
+        { concurrency: 2, concurrency_cap: Math.max(2, projectCapacity.concurrency_cap) });
+      if (updated.project_id !== task.project_id || updated.concurrency !== 2) throw new Error(t("pair.capacity.unconfirmed"));
+    } catch (error) {
+      setCapacityWarning(errorText(error));
+    } finally {
+      invalidate(capacityKey);
+      await capacity.refresh();
+      setCapacityBusy(false);
+    }
+  }
 
   async function sendLaunch(intent: PendingLaunch) {
     if (offline || busy) return;
@@ -213,8 +251,25 @@ export function TaskComparison({ task, staff, onChanged, toast }: { task: Projec
       {(offline || history.error || contract.error) && <div className="result-warning" role="status">{t("pair.readFailed")} <button type="button" className="linkbtn" onClick={() => { history.refresh(); contract.refresh(); }}>{t("common.retry")}</button></div>}
       {pending && <div className="result-warning" role="status">{t("pair.pending")} <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => void sendLaunch(pending)}>{t("common.retry")}</button> <button type="button" className="linkbtn" disabled={offline || busy || !history.data || !!history.error} onClick={() => void abandonPending()}>{t("pair.abandon")}</button></div>}
       {warning && <div className="result-warning" role="status">{warning}</div>}
-      <details><summary>{t("pair.prepare")}</summary>
+      <details onToggle={(event) => { setPreparing(event.currentTarget.open); if (event.currentTarget.open) setCapacityOpenedAt(Date.now()); }}><summary>{t("pair.prepare")}</summary>
         <p className="sub">{t("pair.budgetHint")}</p>
+        {preparing && <div className="sub" role="status">
+          {projectCapacity ? t("pair.capacity.current", { n: projectCapacity.concurrency, cap: projectCapacity.concurrency_cap }) :
+            t(capacity.error || !task.project_id ? "pair.capacity.unavailable" : "pair.capacity.loading")}
+          {projectCapacity && projectCapacity.concurrency < 2 && projectCapacity.orchestrator && <>
+            {" "}{t("pair.capacity.needTwo")}{" "}
+            <button type="button" className="linkbtn" disabled={offline || capacityBusy || busy || !!pending}
+              onClick={() => void raiseCapacity()}>{t("pair.capacity.raise")}</button>
+          </>}
+          {projectCapacity && projectCapacity.concurrency < 2 && !projectCapacity.orchestrator && task.project_id && <>
+            {" "}{t("pair.capacity.enableHint")}{" "}
+            <button type="button" className="linkbtn" onClick={() => navigate(projectHome(task.project_id!))}>{t("pair.capacity.setup")}</button>
+          </>}
+          {!projectCapacity && !!capacityKey && <>
+            {" "}<button type="button" className="linkbtn" disabled={offline || capacityBusy} onClick={() => void capacity.refresh()}>{t("common.retry")}</button>
+          </>}
+        </div>}
+        {capacityWarning && <div className="result-warning" role="status">{t("pair.capacity.unconfirmed")} {capacityWarning}</div>}
         {workers.length < 2 && <div className="result-warning">{t("pair.twoWorkers")}</div>}
         {!current?.folder_id && <div className="result-warning">{t("pair.folderMissing")}</div>}
         {task.status !== "todo" && <div className="result-warning">{t("pair.taskUnavailable")}</div>}

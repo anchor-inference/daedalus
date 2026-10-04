@@ -18,8 +18,8 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PROJECT = {"id": "p1", "name": "Bakery", "entity_revision": 1, "folders": folders("/home/operator/work/bakery"),
            "created_at": "2026-09-20T00:00:00Z", "settings": {"snapshots": False, "default_env": "container"}, "system": "", "sessions": []}
 WORDS = {
-    "en": {"title": "Compare two approaches", "prepare": "Prepare a comparison", "start": "Start comparison", "retry": "Retry", "queued": "Comparison queued", "unknown": "Observed cost is unknown"},
-    "ru": {"title": "Сравнить два подхода", "prepare": "Подготовить сравнение", "start": "Начать сравнение", "retry": "Ещё раз", "queued": "Сравнение поставлено в очередь", "unknown": "Фактические затраты одного из вариантов неизвестны"},
+    "en": {"title": "Compare two approaches", "prepare": "Prepare a comparison", "start": "Start comparison", "retry": "Retry", "queued": "Comparison queued", "unknown": "Observed cost is unknown", "capacity": "Project capacity: 1 of 10 simultaneous workers.", "raise": "Set capacity to 2"},
+    "ru": {"title": "Сравнить два подхода", "prepare": "Подготовить сравнение", "start": "Начать сравнение", "retry": "Ещё раз", "queued": "Сравнение поставлено в очередь", "unknown": "Фактические затраты одного из вариантов неизвестны", "capacity": "Одновременно в проекте: 1 из 10 исполнителей.", "raise": "Установить лимит 2"},
 }
 
 
@@ -51,7 +51,8 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
              {"id": "two", "name": "Max", "color": "blue", "harness": "daedalus", "isolation": "worktree"}]
     task = BoardStub.task("task", "Prepare catalog", project_id="p1", brief={"objective": "Catalog", "deliverable": "Report", "boundaries": "One folder", "done_when": "Evidence"})
     board = BoardStub(PROJECT, staff=staff, tasks=[task])
-    state: dict[str, object] = {"lost": True, "commands": [], "group": None, "stops": []}
+    state: dict[str, object] = {"lost": True, "commands": [], "group": None, "stops": [], "capacity": 1,
+                                "capacity_changes": [], "capacity_lost": True, "orchestrator": True}
     base = "/api/board/task"
 
     def answer(route, body: object, status: int = 200) -> None:  # type: ignore[no-untyped-def]
@@ -68,7 +69,7 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
         request = route.request
         url = urlsplit(request.url)
         path = url.path[url.path.index("/api/"):] if "/api/" in url.path else ""
-        body = request.post_data_json if request.method == "POST" and request.post_data else None
+        body = request.post_data_json if request.method in ("POST", "PATCH") and request.post_data else None
         if path == base + "/contract" and request.method == "GET":
             return answer(route, {"task_id": "task", "contract_revision": 1, "entity_revision": task["entity_revision"],
                                   "folder_id": PROJECT["folders"][0]["id"], "checklist": []})
@@ -101,7 +102,16 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
         if path == "/api/projects" and request.method == "GET":
             return answer(route, [PROJECT])
         if path == "/api/projects/p1/staff" and request.method == "GET":
-            return answer(route, staff)
+            return answer(route, {"project": {"id": "p1", "concurrency": state["capacity"], "concurrency_cap": 10,
+                                               "orchestrator": state["orchestrator"]}, "staff": staff})
+        if path == "/api/projects/p1/orchestrator" and request.method == "PATCH":
+            assert body == {"concurrency": 2, "concurrency_cap": 10}, body
+            state["capacity_changes"].append(body)
+            state["capacity"] = 2
+            if state["capacity_lost"]:
+                state["capacity_lost"] = False
+                return answer(route, {"detail": "response lost"}, 503)
+            return answer(route, {"project_id": "p1", "concurrency": 2, "concurrency_cap": 10})
         if path == "/api/projects/p1/wakeups" and request.method == "GET":
             return answer(route, [])
         if path == "/api/projects/p1/watches" and request.method == "GET":
@@ -122,8 +132,25 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/project/p1/board?task=task&token=t&lang={language}")
     section = page.locator(".sheet.pboard-sheet details.result-details", has=page.get_by_text(words["title"])).first
+    assert page.get_by_role("button", name=words["raise"]).count() == 0, "capacity control escaped collapsed comparison"
     section.locator("summary").first.click()
+    assert section.get_by_role("button", name=words["raise"]).count() == 0, "capacity control escaped collapsed preparation"
     section.get_by_text(words["prepare"]).click()
+    expect(section.get_by_text(words["capacity"], exact=False)).to_be_visible()
+    expect(section.get_by_role("button", name=words["start"])).to_be_disabled()
+    overflow = page.evaluate("() => { const s = document.querySelector('.sheet'); return [document.documentElement.scrollWidth - innerWidth, s ? s.scrollWidth - s.clientWidth : 0]; }")
+    assert overflow[0] <= 0 and overflow[1] <= 1, overflow
+    section.get_by_role("button", name=words["raise"]).click()
+    capacity_dialog = page.locator(".dialog[role='alertdialog']")
+    expect(capacity_dialog).to_contain_text("Already queued work may start" if language == "en" else "Уже ожидающая работа может начаться")
+    capacity_dialog.get_by_role("button", name="Cancel" if language == "en" else "Отмена").click()
+    assert not state["capacity_changes"] and not state["commands"], "cancelling capacity change must do nothing"
+    section.get_by_role("button", name=words["raise"]).click()
+    page.locator(".dialog[role='alertdialog']").get_by_role("button", name=words["raise"]).click()
+    expect(section.get_by_text("Project capacity: 2" if language == "en" else "Одновременно в проекте: 2", exact=False)).to_be_visible()
+    expect(section.get_by_text("Capacity change is unconfirmed" if language == "en" else "Изменение лимита не подтверждено", exact=False)).to_have_count(0)
+    assert state["capacity_changes"] == [{"concurrency": 2, "concurrency_cap": 10}]
+    assert not state["commands"], "saving capacity must not launch a comparison"
     selects = section.locator("select.field")
     selects.nth(0).select_option("one")
     selects.nth(1).select_option("two")
@@ -152,6 +179,16 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
     assert len(state["stops"]) == 1 and state["group"]["slots"][1]["launch_state"] == "pending"
     overflow = page.evaluate("() => { const s = document.querySelector('.sheet'); return [document.documentElement.scrollWidth - innerWidth, s ? s.scrollWidth - s.clientWidth : 0]; }")
     assert overflow[0] <= 0 and overflow[1] <= 1, overflow
+    state["capacity"] = 1
+    state["orchestrator"] = False
+    page.reload()
+    section = page.locator(".sheet.pboard-sheet details.result-details", has=page.get_by_text(words["title"])).first
+    section.locator("summary").first.click()
+    section.get_by_text(words["prepare"]).click()
+    expect(section.get_by_text(words["capacity"], exact=False)).to_be_visible()
+    assert section.get_by_role("button", name=words["raise"]).count() == 0, "disabled orchestrator cannot accept a PATCH"
+    expect(section.get_by_role("button", name="Open project setup" if language == "en" else "Открыть настройку проекта")).to_be_visible()
+    expect(section.get_by_role("button", name=words["start"])).to_be_disabled()
 
 
 if __name__ == "__main__":
