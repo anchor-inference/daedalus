@@ -185,6 +185,9 @@ async def test_launch_effect_checks_pinned_task_and_rate_before_physical_start(p
 
 
 async def test_command_uses_queue_capacity_on_its_existing_transaction(pair_app):
+    await pair_app.db.execute("UPDATE projects SET settings = ? WHERE id = 'project1'",
+                              ('{"orchestrator":{"concurrency":2,"concurrency_cap":2}}',))
+
     async def forbidden(_project_id):
         raise AssertionError("capacity must not open a second database transaction")
 

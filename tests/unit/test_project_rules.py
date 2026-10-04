@@ -40,6 +40,7 @@ async def test_a_rule_is_shown_whole_every_turn_and_given_to_every_member_with_t
     try:
         runtime = fake(r)
         sid = await office(r)
+        await r.call(sid, "team", concurrency=2)
         await r.manager.projects.set_brief(r.project.id, "notes", NOTES, "orchestrator")
         await r.manager.projects.set_brief(r.project.id, "constraints", "Never push to the shared remote.", "operator")
         ada, ada_live = await working(r, "Ada", "Menu page")
