@@ -236,22 +236,25 @@ class StaffReportService:
             original_file_id = None
             for index, item in enumerate(staged):
                 file_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{mutation.object_id}:{index}:{item.digest}").hex[:12]
+                original_file = index == original_index
                 await conn.execute("INSERT INTO files(id,name,mime,size,sha256,origin,origin_ref,created_at)"
-                                   " VALUES (?,?,?,?,?,'staff',?,?)",
+                                   " VALUES (?,?,?,?,?,?,?,?)",
                                    (file_id, item.name, item.mime, len(item.data), item.digest,
-                                    item.origin_ref[:500], now()))
+                                    "result" if original_file else "staff", item.origin_ref[:500], now()))
                 await conn.execute("INSERT INTO file_access(file_id,scope,added_at,added_by) VALUES (?,?,?,?)",
                                    (file_id, scope.id, now(), principal.actor_id))
                 await conn.execute("INSERT INTO task_files(task_id,file_id,added_at,added_by) VALUES (?,?,?,?)",
                                    (task_id, file_id, now(), principal.actor_id))
+                if original_file:
+                    # The original is review evidence, not an additional file the worker handed
+                    # off; advertising it as staff output made file-forwarding pick report.txt.
+                    original_file_id = file_id
+                    continue
                 await conn.execute("INSERT INTO file_transfers(at,file_id,action,actor,scope,target,size,sha256)"
                                    " VALUES (?,?,'fetched',?,?,?,?,?)",
                                    (now(), file_id, principal.actor_id, scope.id, item.origin_ref[:500],
                                     len(item.data), item.digest))
                 file_refs.append({"id": file_id, "name": item.name, "mime": item.mime, "size": len(item.data)})
-                if index == original_index:
-                    original_file_id = file_id
-                    continue
                 manifest_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{mutation.object_id}:manifest:{index}").hex
                 await add_artifact_manifest(conn, manifest_id=manifest_id, project_id=scope.id,
                                             task_id=task_id, artifact_kind="document" if item.mime.startswith("text/") else "other",

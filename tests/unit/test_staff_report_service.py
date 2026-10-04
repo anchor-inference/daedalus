@@ -155,14 +155,16 @@ async def test_done_report_keeps_full_original_and_replays_without_second_event(
         team.worktree_of = worktree_of
         first, event = await service.submit(live, "done", original, call_id="call-one")
         assert event is not None and first["result_id"] == first["report_id"]
+        assert "files" not in event.payload
         assert await service.original("project", "task", first["report_id"]) == original.encode("utf-8")
         second, replayed_event = await service.submit(live, "done", original, call_id="call-one")
         assert second == first and replayed_event is None
-        manifest = await db.fetchone("SELECT m.id,m.file_id,f.sha256,f.size,r.original_artifact_file_id"
+        manifest = await db.fetchone("SELECT m.id,m.file_id,f.sha256,f.size,f.origin,r.original_artifact_file_id"
                                      " FROM result_receipts r JOIN result_artifacts a ON a.result_id = r.id"
                                      " JOIN artifact_manifests m ON m.id = a.manifest_id"
                                      " JOIN files f ON f.id = m.file_id WHERE r.id = ?", (first["result_id"],))
         assert manifest is not None and manifest["file_id"] == manifest["original_artifact_file_id"]
+        assert manifest["origin"] == "result"
         assert manifest["size"] == len(original.encode("utf-8"))
         assert await manager.files.blobs.get(FILES_TENANT, manifest["sha256"]) == original.encode("utf-8")
         assert (await db.fetchone("SELECT count(*) AS n FROM files"))["n"] == 2

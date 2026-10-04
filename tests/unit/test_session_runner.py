@@ -17,6 +17,7 @@ from protocore.runtime.events.types import EventType
 from daedalus.config import Settings
 from daedalus.extensions.api import message_view
 from daedalus.host.session_runner import SessionManager, clip_title
+from daedalus.providers.pricing import ModelPricing
 from daedalus.stores.database import Database
 from tests.support.models import model_config
 from tests.support.waiting import SETTLE, until, until_await
@@ -31,6 +32,8 @@ class ScriptedProvider(ILLMProvider):
 
     class _Endpoint:
         id = "scripted"
+        kind = "scripted"
+        pricing = {"scripted-model": ModelPricing(input_limit=128_000, limit_source="scripted test provider")}
 
     endpoint = _Endpoint()
 
