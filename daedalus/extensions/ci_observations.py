@@ -24,7 +24,7 @@ def observation_from_webhook(provider: str, event: str, delivery_id: str, payloa
     """Return only identity-complete GitHub check facts; signature verification happens at ingress."""
     if not provider or not delivery_id or not re.fullmatch(r"[0-9a-f]{64}", payload_digest):
         raise ValueError("signed delivery identity and payload digest are required")
-    if event not in ("check_run", "check_suite", "workflow_run", "status"):
+    if provider != "github" or event not in ("check_run", "check_suite", "workflow_run", "status"):
         return None
     repo = payload.get("repository")
     run = payload if event == "status" else payload.get(event)
@@ -137,7 +137,7 @@ async def set_required_checks(conn: aiosqlite.Connection, *, task_id: str, provi
         DomainConflict,  # Lazy: verdicts read CI readiness, creating a cycle.
     )
 
-    if (not provider or len(provider) > 80 or not repository_id.isdecimal() or
+    if (provider != "github" or not repository_id.isdecimal() or
             int(repository_id) <= 0 or len(check_names) > 32 or
             any(not name.strip() or len(name) > 200 for name in check_names)):
         raise ValueError("CI checks need a provider, repository identity and bounded names")
@@ -186,7 +186,7 @@ async def set_required_checks(conn: aiosqlite.Connection, *, task_id: str, provi
 
 
 async def ci_readiness(conn: aiosqlite.Connection, task_id: str, contract_revision: int,
-                       head_sha: str | None) -> dict[str, Any]:
+                       head_sha: str | None, *, require_policy: bool = False) -> dict[str, Any]:
     """A prior green head never satisfies a new head; missing order or check remains unknown."""
     cursor = await conn.execute("SELECT provider,repository_id,check_name FROM ci_required_checks"
                                 " WHERE task_id = ? AND contract_revision = ? ORDER BY check_name",
@@ -194,7 +194,9 @@ async def ci_readiness(conn: aiosqlite.Connection, task_id: str, contract_revisi
     required = await cursor.fetchall()
     await cursor.close()
     if not required:
-        return {"state": "not_required", "checks": []}
+        # A branch with no declared checks has no CI evidence. Treating that absence as success let
+        # an unpushed staff branch pass review without a single check having run.
+        return {"state": "blocked" if require_policy else "not_required", "checks": []}
     checks = []
     for item in required:
         cursor = await conn.execute(

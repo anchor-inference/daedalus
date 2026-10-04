@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from daedalus.config import TerminalsConfig
+from daedalus.harness.env import staff_inherited_env
 from daedalus.stores.database import Database
 from daedalus.terminals.endpoint import absolute_on
 from daedalus.terminals.model import (
@@ -133,6 +134,26 @@ async def _audit(db: Database, terminal_id: str) -> list[dict[str, Any]]:
 
 
 # -- creating, listing, ending ---------------------------------------------------------------
+
+
+async def test_staff_harness_inheritance_is_fixed_at_the_service_boundary(service: Terminals, daemon: FakePtyd, owners: FakeOwners) -> None:
+    staff = owners.add(Owner("staff", "member"), project="project", cwd="/tmp")
+    await service.create(TerminalSpec(env="container", owner=staff, profile="harness:claude"))
+    launch = next(params for method, params in daemon.calls if method == "terminal.create")
+    assert launch["inherited_env"] == staff_inherited_env("claude")
+    assert "OPENAI_API_KEY" not in launch["inherited_env"]
+
+    await service.create(TerminalSpec(env="container", owner=Owner("free"), cwd="/tmp"))
+    operator_launch = [params for method, params in daemon.calls if method == "terminal.create"][-1]
+    assert "inherited_env" not in operator_launch
+
+
+async def test_staff_harness_refuses_a_daemon_without_inheritance_selection(service: Terminals, daemon: FakePtyd, owners: FakeOwners) -> None:
+    daemon.inheritance_selection = False
+    staff = owners.add(Owner("staff", "member"), project="project", cwd="/tmp")
+    with pytest.raises(InvalidRequest, match="cannot select inherited variables"):
+        await service.create(TerminalSpec(env="container", owner=staff, profile="harness:claude"))
+    assert not any(method == "terminal.create" for method, _ in daemon.calls)
 
 
 async def test_a_terminal_is_created_mirrored_listed_and_ended(service: Terminals, daemon: FakePtyd, db: Database, owners: FakeOwners) -> None:

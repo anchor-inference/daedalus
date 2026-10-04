@@ -52,6 +52,24 @@ func matchEnv(pattern, name string) bool {
 	return pattern == name
 }
 
+// SelectInheritedEnv admits exact names only. An empty list passes no daemon environment through.
+// Matching uses the platform's environment key rule so Windows cannot retain a differently cased
+// copy of a credential that a launch meant to exclude.
+func SelectInheritedEnv(inherited []string, names []string) []string {
+	allowed := make(map[string]bool, len(names))
+	for _, name := range names {
+		allowed[envKey(name)] = true
+	}
+	selected := make([]string, 0, len(names))
+	for _, kv := range inherited {
+		name, _, ok := strings.Cut(kv, "=")
+		if ok && allowed[envKey(name)] {
+			selected = append(selected, kv)
+		}
+	}
+	return selected
+}
+
 func isUTF8Locale(v string) bool {
 	v = strings.ToLower(v)
 	return strings.Contains(v, "utf-8") || strings.Contains(v, "utf8")

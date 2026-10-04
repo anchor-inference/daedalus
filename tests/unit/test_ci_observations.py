@@ -62,6 +62,19 @@ async def test_newer_green_run_survives_late_old_failure_and_stale_head_is_unkno
     assert stale["state"] == "blocked" and stale["checks"][0]["state"] == "unknown"
 
 
+async def test_branch_policy_absence_blocks(ci_db: Database) -> None:
+    async with ci_db.transaction() as conn:
+        await conn.execute("UPDATE board_tasks SET contract_revision = 2 WHERE id = 'task1'")
+        readiness = await ci_readiness(conn, "task1", 2, "a" * 40, require_policy=True)
+    assert readiness == {"state": "blocked", "checks": []}
+
+
+def test_non_github_delivery_cannot_become_a_required_check() -> None:
+    body = payload(1, "a" * 40, "success")
+    assert observation_from_webhook("other", "check_run", "delivery", body,
+                                    payload_digest=hashlib.sha256(b"delivery").hexdigest()) is None
+
+
 async def test_cancelled_and_missing_identity_never_pass(ci_db: Database) -> None:
     head = "c" * 40
     body = payload(21, head, "cancelled")
@@ -217,3 +230,21 @@ async def test_required_checks_http_command_replays_and_rejects_stale_or_coerced
         assert (await client.post("/api/board/missing/ci/requirements", json=body)).status_code == 404
         state = (await client.get("/api/board/task1/ci", params={"head_sha": "f" * 40})).json()
         assert state["state"] == "blocked" and len(state["checks"]) == 2
+
+
+async def test_ci_endpoint_uses_the_current_branch_head(ci_db: Database) -> None:
+    await ci_db.execute("UPDATE board_tasks SET branch = 'agent/worker/change' WHERE id = 'task1'")
+
+    class Review:
+        async def review(self, task_id: str) -> dict:
+            assert task_id == "task1"
+            return {"head_sha": "a" * 40}
+
+    api = FastAPI()
+    app = SimpleNamespace(db=ci_db, extensions={"staff": SimpleNamespace(review=Review())})
+    install_routes(api, app, lambda: {"via": "cookie", "user_id": 1})
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
+        stale = await client.get("/api/board/task1/ci", params={"head_sha": "b" * 40})
+        assert stale.status_code == 409
+        current = (await client.get("/api/board/task1/ci")).json()
+        assert current["head_sha"] == "a" * 40 and current["state"] == "blocked"

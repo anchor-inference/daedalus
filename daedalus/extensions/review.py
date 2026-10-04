@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING, Any
 
+from daedalus.extensions.ci_observations import ci_readiness
 from daedalus.extensions.orchestrator_domain import unresolved_review_comments
 from daedalus.host.worktrees import BranchComparison, WorktreeError
 from daedalus.stores.projects import Project, ProjectFolder
@@ -136,6 +137,13 @@ class Review:
         binding = await self.app.db.fetchone("SELECT contract_revision,current_attempt_id FROM board_tasks"
                                             " WHERE id = ?", (task_id,))
         candidate_attempt = comparison_attempt_id if member is not None else binding["current_attempt_id"] if binding else None
+        async with self.app.db.transaction() as conn:
+            ci = await ci_readiness(conn, task_id, binding["contract_revision"], head_sha,
+                                    require_policy=True) if binding is not None else {"state": "blocked", "checks": []}
+        if ci["state"] != "passed":
+            reason = ("no required CI checks are configured; return the task, set its GitHub checks, and run them on this head" if not ci["checks"] else
+                      "required CI has not passed for the current branch HEAD")
+            blockers.append({"code": "ci", "text": reason})
         result = await self.app.db.fetchone(
             "SELECT id,outcome FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
             " AND attempt_id IS ? ORDER BY created_at DESC,rowid DESC LIMIT 1",
@@ -176,7 +184,8 @@ class Review:
             "verdict_id": verdict["id"] if verdict is not None else None,
             "verification": verdict["verification"] if verdict is not None else "unverified",
             "verdict_accepted": bool(verdict["accepted"]) if verdict is not None else False,
-            "ci_status": "unknown",
+            "ci_status": ci["state"],
+            "ci_checks": ci["checks"],
             "folder": {"id": folder.id, "path": str(folder.path), "label": folder.label, "env": folder.env},
             "exists": comparison.exists,
             "on_base": not base or comparison.current == base,

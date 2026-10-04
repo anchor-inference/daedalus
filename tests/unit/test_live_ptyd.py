@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from daedalus.harness.env import staff_inherited_env
 from daedalus.terminals import wire
 from tests.support.harness_ports import Rig
 
@@ -132,6 +133,21 @@ async def test_the_program_gets_the_contracts_environment() -> None:
         assert env["TERM"] == "xterm-256color" and env["DAEDALUS_TERMINAL_ID"] == term.id and env["HOME"] == str(rig.home)
         assert env["DAEDALUS_HOOK_URL"] == launch["hook_url"] and env["DAEDALUS_HOOK_TOKEN"] == launch["hook_token"]
         assert env["DAEDALUS_LAUNCH_DIR"] == launch["dir"] and env["DAEDALUS_DIAL_DIR"] == launch["dial_dir"]
+
+
+async def test_staff_terminal_does_not_inherit_other_provider_environment() -> None:
+    async with Rig(extra_env={"CLAUDE_CONFIG_DIR": "/config/claude", "OPENAI_API_KEY": "other-provider-token",
+                              "GH_TOKEN": "repository-token"}) as rig:
+        out = rig.root / "staff-env.json"
+        await rig.client.call("terminal.create", {
+            "id": "staff-env", "argv": [sys.executable, "-c", f"import json, os; json.dump(dict(os.environ), open({str(out)!r}, 'w'))"],
+            "cwd": str(rig.root), "cols": 80, "rows": 24,
+            "inherited_env": staff_inherited_env("claude"),
+        })
+        await rig.event("terminal.exited")
+        env = json.loads(out.read_text())
+        assert env["CLAUDE_CONFIG_DIR"] == "/config/claude"
+        assert "OPENAI_API_KEY" not in env and "GH_TOKEN" not in env
 
 
 async def test_exec_runs_listed_programs_only_and_kills_on_timeout() -> None:

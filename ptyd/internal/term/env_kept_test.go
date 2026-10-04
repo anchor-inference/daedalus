@@ -26,3 +26,20 @@ func TestClaudeConfigDirIsKept(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectedInheritanceExcludesOtherProviderSecrets(t *testing.T) {
+	inherited := []string{"PATH=/usr/bin", "HOME=/home/someone", "CLAUDE_CONFIG_DIR=/config/claude", "OPENAI_API_KEY=other", "GH_TOKEN=repo"}
+	selected := SelectInheritedEnv(inherited, []string{"PATH", "HOME", "CLAUDE_CONFIG_DIR"})
+	env := BuildEnv(selected, nil, nil, "staff")
+	for _, item := range []string{"OPENAI_API_KEY=other", "GH_TOKEN=repo"} {
+		if slices.Contains(env, item) {
+			t.Fatalf("unselected credential survived: %s", item)
+		}
+	}
+	if !slices.Contains(env, "CLAUDE_CONFIG_DIR=/config/claude") {
+		t.Fatal("selected CLI configuration was dropped")
+	}
+	if len(SelectInheritedEnv(inherited, []string{})) != 0 {
+		t.Fatal("empty selection inherited daemon variables")
+	}
+}

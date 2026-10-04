@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from daedalus import load as load_math
+from daedalus.harness.env import staff_inherited_env
 from daedalus.terminals import wire
 from daedalus.terminals.client import Channel, PtydClient, Unavailable
 from daedalus.terminals.endpoint import absolute_on, remember_hook_port, remember_state_dir
@@ -707,6 +708,11 @@ class Terminals(SideChannels):
             raise InvalidRequest("a terminal is 20×4 to 500×300")
         if not (spec.profile == "shell" or spec.profile.startswith("harness:")):
             raise InvalidRequest("a profile is shell or harness:<name>")
+        staff_harness = spec.owner.kind == "staff" and spec.profile.startswith("harness:")
+        if staff_harness:
+            info = await self._client(spec.env).call("daemon.info", {})
+            if (info.get("capabilities") or {}).get("inherited_env_selection") is not True:
+                raise InvalidRequest("the terminal daemon cannot select inherited variables for a staff launch")
         project_id = spec.project_id or await self.owners.project_of(spec.owner)
         if spec.owner.kind == "staff" and project_id:
             profile = await self.db.fetchone("SELECT state FROM resource_profile_versions"
@@ -757,6 +763,8 @@ class Terminals(SideChannels):
             "input_idle_ms": cfg.input_idle_ms,
             "labels": {"owner_kind": spec.owner.kind, "owner_id": spec.owner.id or "", "project_id": project_id or "", "profile": spec.profile},
         }
+        if staff_harness:
+            params["inherited_env"] = staff_inherited_env(spec.profile.removeprefix("harness:"))
         if cwd:
             params["cwd"] = cwd
         if spec.argv:

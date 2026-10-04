@@ -790,6 +790,11 @@ class BoardStub:
             "more_commits": False, "files": [{"path": "api/notify.py", "added": 3, "removed": 1}, {"path": "tests/test_notify.py", "added": 2, "removed": 0}],
             "added": 5, "removed": 1, "patch": patch, "patch_complete": True, "conflicts": conflicts or [],
             "receipts": receipts if receipts is not None else [{"criterion": "tests pass", "command": "pytest -q", "exit_code": 0, "passed": True, "at": "2026-09-24T09:26:00Z"}],
+            "head_sha": "4f2a9c1d0b7e6a5f4c3b2a1d0e9f8a7b6c5d4e3f",
+            "ci_status": "passed",
+            "ci_checks": [{"provider": "github", "repository_id": "7", "check_name": "unit",
+                           "head_sha": "4f2a9c1d0b7e6a5f4c3b2a1d0e9f8a7b6c5d4e3f",
+                           "state": "passed", "delivery_id": "check-one"}],
             "can_merge": not blockers, "blockers": blockers,
         }
 

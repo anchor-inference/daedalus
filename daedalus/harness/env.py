@@ -29,6 +29,22 @@ DAEMON_STRIP = ("TMUX*",)
 ``CLAUDE*`` with ``CLAUDE_CONFIG_DIR`` kept."""
 FIXED = {"TERM": "xterm-256color", "COLORTERM": "truecolor"}
 UTF8_FALLBACK = "C.UTF-8"
+STAFF_INHERITED_ENV = (
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
+    "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "WINDIR", "PATHEXT", "SSL_CERT_FILE", "SSL_CERT_DIR",
+)
+
+
+def staff_inherited_env(harness: str) -> list[str]:
+    """Keep process basics and only the selected CLI's configuration locator.
+
+    The shared HOME still contains other CLI accounts; this only prevents accidental environment
+    inheritance until credentials can be mounted behind a separate read boundary.
+    """
+    names = list(STAFF_INHERITED_ENV)
+    if harness == "claude":
+        names.append("CLAUDE_CONFIG_DIR")
+    return names
 
 
 def _stripped(name: str) -> bool:

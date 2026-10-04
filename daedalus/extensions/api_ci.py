@@ -30,15 +30,22 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
     @api.get("/api/board/{task_id}/ci")
     async def readiness(task_id: str, head_sha: str | None = None,
                         _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        task = await app.db.fetchone("SELECT contract_revision,branch FROM board_tasks WHERE id = ?", (task_id,))
+        if task is None:
+            raise HTTPException(404, "no such task")
+        if task["branch"]:
+            review = getattr(app.extensions.get("staff"), "review", None)
+            if review is None:
+                raise HTTPException(503, "review service is unavailable")
+            current = await review.review(task_id)
+            if head_sha is not None and head_sha != current["head_sha"]:
+                raise HTTPException(409, "the requested CI head is not the current branch HEAD")
+            head_sha = current["head_sha"]
         async with app.db.transaction() as conn:
-            cursor = await conn.execute("SELECT contract_revision FROM board_tasks WHERE id = ?", (task_id,))
-            task = await cursor.fetchone()
-            await cursor.close()
-            if task is None:
-                raise HTTPException(404, "no such task")
             return {"task_id": task_id, "contract_revision": task["contract_revision"],
                     "head_sha": head_sha,
-                    **await ci_readiness(conn, task_id, task["contract_revision"], head_sha)}
+                    **await ci_readiness(conn, task_id, task["contract_revision"], head_sha,
+                                         require_policy=bool(task["branch"]))}
 
     @api.post("/api/board/{task_id}/ci/requirements")
     async def requirements(task_id: str, body: Requirements,

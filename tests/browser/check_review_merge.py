@@ -29,11 +29,11 @@ PID = "b4k3ry20f0c5"
 WORDS = {
     "en": {
         "merge": "Merge reviewed branch", "diff": "Diff", "reject": "Return with a note", "send": "Send back", "stat": "2 files · 2 commits", "merged": "Merge requested; waiting for the recorded outcome",
-        "rejected": "Result returned for changes", "dirty": "The reviewed branch must be merged first.", "conflict": "conflict", "checked": "tests pass", "open": "Open review",
+        "rejected": "Result returned for changes", "dirty": "The reviewed branch must be merged first.", "conflict": "conflict", "checked": "tests pass", "open": "Open review", "ci": "CI passed for branch head",
     },
     "ru": {
         "merge": "Влить проверенную ветку", "diff": "Изменения", "reject": "Вернуть с замечанием", "send": "Вернуть", "stat": "2 файла · 2 коммита", "merged": "Слияние запрошено; ожидаем подтверждённый итог",
-        "rejected": "Результат возвращён на доработку", "dirty": "Сначала нужно влить проверенную ветку.", "conflict": "конфликт", "checked": "tests pass", "open": "Открыть проверку",
+        "rejected": "Результат возвращён на доработку", "dirty": "Сначала нужно влить проверенную ветку.", "conflict": "конфликт", "checked": "tests pass", "open": "Открыть проверку", "ci": "CI пройден для ветки head",
     },
 }
 
@@ -102,7 +102,8 @@ def desktop(page: Page, lang: str) -> None:
     expect(panel.locator(".review-stat")).to_contain_text(words["stat"])
     expect(panel.locator(".review-commits li")).to_have_count(2)
     expect(panel.locator(".review-files li")).to_have_count(2)
-    expect(panel.locator(".review-receipts li.ok")).to_contain_text(words["checked"])
+    expect(panel.locator(".review-receipts").first.locator("li.ok")).to_contain_text(words["checked"])
+    expect(panel).to_contain_text(words["ci"])
     evidence = sheet.locator(".result-flow")
     expect(evidence).to_contain_text("Endpoint implemented and tested")
     expect(evidence.get_by_role("button", name=words["merge"])).to_be_enabled()

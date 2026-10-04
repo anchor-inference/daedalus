@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from daedalus.extensions.ci_observations import observation_from_webhook, record_observation
 from daedalus.extensions.orchestrator_domain import record_verdict, submit_result
 from daedalus.stores.comparisons import (
     AdmissionProof,
@@ -114,9 +115,19 @@ async def test_approved_first_alternative_does_not_approve_shared_task(compariso
                            "exit_code,manifest_digest_before,manifest_digest_after,observed_at)"
                            " VALUES ('evidence1','result1',1,'check','test',0,?,?, '2026-01-01')",
                            (content_digest, content_digest))
+        await conn.execute("INSERT INTO ci_required_checks(task_id,contract_revision,provider,repository_id,"
+                           "check_name,created_at) VALUES ('task1',1,'github','7','unit','2026-01-01')")
+        head = "a" * 40
+        observation = observation_from_webhook("github", "check_run", "green",
+                                                {"repository": {"id": 7}, "check_run": {
+                                                    "id": 1, "name": "unit", "head_sha": head,
+                                                    "status": "completed", "conclusion": "success"}},
+                                                payload_digest=hashlib.sha256(b"green").hexdigest())
+        assert observation is not None
+        await record_observation(conn, observation)
         response = await record_verdict(conn, verdict_id="verdict1", result_id="result1",
                                         reviewer_actor_id="reviewer", verification="verified", accepted=True,
-                                        head="head1", base="base1", environment_digest=None,
+                                        head=head, base="base1", environment_digest=None,
                                         evidence_ids=["evidence1"], reason="passes")
     assert response["accepted"] is True
     task = await comparison_db.fetchone("SELECT status,current_attempt_id,acceptance_state"

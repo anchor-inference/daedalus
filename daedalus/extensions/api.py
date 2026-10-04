@@ -4346,6 +4346,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         event = request.headers.get("x-github-event") or request.headers.get("x-event") or ""
         if not event and isinstance(payload, dict) and isinstance(payload.get("event") or payload.get("type"), str):
             event = str(payload.get("event") or payload.get("type"))[:100]
+        if provider == "github" and event in ("check_run", "check_suite", "workflow_run", "status") and conf.scheme != "github":
+            raise HTTPException(401, "refused")
         issue_sync = app.extensions.get("issue_sync")
 
         async def observe_issue(conn: Any) -> None:

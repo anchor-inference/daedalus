@@ -88,6 +88,19 @@ export function ReviewPanel({ taskId }: { taskId: string }) {
           ))}
         </ul>
       )}
+      <div className={`sub ${data.ci_status === "passed" ? "ok" : "attn"}`}>
+        {t(data.ci_status === "passed" ? "pboard.review.ci.passed" : "pboard.review.ci.blocked", { head: data.head_sha?.slice(0, 10) || "?" })}
+      </div>
+      {data.ci_checks.length > 0 && (
+        <ul className="review-receipts" aria-label={t("pboard.review.ci.checks")}>
+          {data.ci_checks.map((check) => (
+            <li key={`${check.provider}:${check.repository_id}:${check.check_name}`} className={check.state === "passed" ? "ok" : "bad"}>
+              <Icon name={check.state === "passed" ? "check" : "close"} size={12} />
+              <span className="truncate">{check.check_name}: {t(`pboard.review.ci.state.${check.state}`)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {others.length > 0 && (
         <ul className="review-blockers">
           {others.map((b) => <li key={b.code} className={b.code === "conflicts" ? "bad" : "attn"} title={b.text}>{blockerText(b, data)}</li>)}

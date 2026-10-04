@@ -412,7 +412,8 @@ class LivePtyd(FakePtyd):
         fallback = not Path(cwd).is_dir()
         if fallback:
             cwd = self.home
-        env = self._environment(ident, params.get("env") or {}, params.get("strip_env") or [], launch)
+        env = self._environment(ident, params.get("env") or {}, params.get("strip_env") or [], launch,
+                                params.get("inherited_env"))
         argv = list(params.get("argv") or [env.get("SHELL", "/bin/sh"), "-l"])
         program = shutil.which(argv[0], path=env.get("PATH")) or argv[0]
         master, slave = os.openpty()
@@ -439,7 +440,8 @@ class LivePtyd(FakePtyd):
         self.emit("terminal.created", ident, {"pid": term.pid, "argv": argv, "cwd": cwd, "labels": term.labels, "launch_id": launch_id})
         return {"id": ident, "pid": term.pid, "cwd": cwd, "cwd_fallback": fallback, "shell": env.get("SHELL", "/bin/sh"), "created_at": term.created_at}
 
-    def _environment(self, ident: str, extra: dict[str, str], strip: list[str], launch: LiveLaunch | None) -> dict[str, str]:
+    def _environment(self, ident: str, extra: dict[str, str], strip: list[str], launch: LiveLaunch | None,
+                     inherited: list[str] | None = None) -> dict[str, str]:
         def stripped(name: str) -> bool:
             if name in KEEP:
                 return False
@@ -447,7 +449,10 @@ class LivePtyd(FakePtyd):
                 return True
             return any(name.startswith(p[:-1]) if p.endswith("*") else name == p for p in strip)
 
-        env = {k: v for k, v in self.base_env.items() if not stripped(k)}
+        # The fake CLI's controls come from the test rig, not the host daemon; keep that fixture
+        # channel while modelling the daemon's selection of ordinary inherited variables.
+        env = {k: v for k, v in self.base_env.items()
+               if not stripped(k) and (inherited is None or k in inherited or k.startswith("FAKE_"))}
         env.update({"TERM": "xterm-256color", "COLORTERM": "truecolor", "CLAUDE_CODE_NO_FLICKER": "1", "CLAUDE_CODE_SCROLL_SPEED": "3", "DAEDALUS_TERMINAL_ID": ident, "HOME": self.home})
         effective = next((env[k] for k in ("LC_ALL", "LC_CTYPE", "LANG") if env.get(k)), "")
         if "utf-8" not in effective.lower() and "utf8" not in effective.lower():

@@ -324,7 +324,8 @@ class FakePtyd:
         if method == "daemon.info":
             running = sum(1 for t in self.terminals.values() if t.status == "running")
             return {"version": "fake", "protocol": self.protocol, "instance": self.instance, "env": self.env, "home": self.home, "shell": "/bin/bash",
-                    "capabilities": {"sandbox": self.sandbox, "emulator": "fake@1", "stats": "ok"}, "hooks": {"listen": ""},
+                    "capabilities": {"sandbox": self.sandbox, "emulator": "fake@1", "stats": "ok",
+                                     "inherited_env_selection": getattr(self, "inheritance_selection", True)}, "hooks": {"listen": ""},
                     "side_channels": {"exec_allow": sorted(self.exec_allow), "fs_roots": self.roots, "state_dir": f"{self.run_dir}-state"},
                     "counts": {"running": running, "exited": len(self.terminals) - running}, "machine": self.machine}
         if method == "events.unsubscribe":

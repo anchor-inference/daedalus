@@ -4,7 +4,7 @@ one variable that says where a host's Claude keeps its sign-in kept."""
 from __future__ import annotations
 
 from daedalus.harness.capabilities import CAPABILITIES
-from daedalus.harness.env import DAEMON_STRIP, launch_environment, terminal_environment
+from daedalus.harness.env import DAEMON_STRIP, launch_environment, staff_inherited_env, terminal_environment
 
 BASE = {
     "PATH": "/usr/bin",
@@ -55,3 +55,12 @@ def test_the_daemon_is_given_patterns_to_strip_and_values_to_set() -> None:
     assert spec.set == {"OPENCODE_DISABLE_AUTOUPDATE": "1", "DAEDALUS_LAUNCH_ID": "l-1"}
     # Terminal type and locale are the daemon's own rule, which keeps a UTF-8 locale the user chose.
     assert "LANG" not in spec.set and "TERM" not in spec.set
+
+
+def test_staff_inheritance_selects_only_the_clis_configuration_locator() -> None:
+    claude = staff_inherited_env("claude")
+    codex = staff_inherited_env("codex")
+    assert "CLAUDE_CONFIG_DIR" in claude and "CLAUDE_CONFIG_DIR" not in codex
+    for names in (claude, codex):
+        assert "HOME" in names and "PATH" in names
+        assert not any("TOKEN" in name or "KEY" in name or "SECRET" in name for name in names)

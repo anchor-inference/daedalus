@@ -43,6 +43,7 @@ type createParams struct {
 	Cwd         string            `json:"cwd"`
 	Env         map[string]string `json:"env"`
 	StripEnv    []string          `json:"strip_env"`
+	InheritEnv  *[]string         `json:"inherited_env"`
 	Cols        int               `json:"cols"`
 	Rows        int               `json:"rows"`
 	Title       string            `json:"title"`
@@ -149,7 +150,11 @@ func (d *Daemon) create(ctx context.Context, c *server.Conn, params json.RawMess
 	// itself (a harness, a script) is believed when it knows the nonce of the terminal it runs in.
 	nonce := shellint.NewNonce()
 	extra[shellint.NonceEnv] = nonce
-	env := term.BuildEnv(d.Environ, p.StripEnv, extra, p.ID)
+	inherited := d.Environ
+	if p.InheritEnv != nil {
+		inherited = term.SelectInheritedEnv(inherited, *p.InheritEnv)
+	}
+	env := term.BuildEnv(inherited, p.StripEnv, extra, p.ID)
 
 	argv := p.Argv
 	shell, integration := "", ""
@@ -175,7 +180,7 @@ func (d *Daemon) create(ctx context.Context, c *server.Conn, params json.RawMess
 				for k, v := range l.Env {
 					extra[k] = v
 				}
-				env = term.BuildEnv(d.Environ, p.StripEnv, extra, p.ID)
+				env = term.BuildEnv(inherited, p.StripEnv, extra, p.ID)
 			}
 		}
 	}

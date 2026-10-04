@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +18,7 @@ from protocore.contracts.types import Message, MessageRole, TextBlock
 from daedalus.extensions import api_comparisons, api_orchestrator_domain
 from daedalus.extensions.board import Board
 from daedalus.extensions.board_commands import BoardCommands
+from daedalus.extensions.ci_observations import observation_from_webhook, record_observation
 from daedalus.extensions.comparison_commands import comparison_state, queue_comparison
 from daedalus.extensions.comparison_launch import ComparisonLaunchEffect
 from daedalus.extensions.comparison_stop import ComparisonStopEffect
@@ -184,6 +187,22 @@ async def test_two_native_sessions_start_only_after_both_slots_exist(settings, d
             folder_id=folder["id"],
         )
         task_id = created["task_id"]
+        if reviewed:
+            await db.execute("INSERT INTO ci_required_checks(task_id,contract_revision,provider,repository_id,"
+                             "check_name,created_at) VALUES (?,1,'github','7','unit','2026-01-01')", (task_id,))
+
+        async def green(worktree: Path, run_id: int) -> None:
+            head = git(worktree, "rev-parse", "HEAD").strip()
+            delivery = uuid.uuid4().hex
+            observation = observation_from_webhook("github", "check_run", delivery,
+                                                    {"repository": {"id": 7}, "check_run": {
+                                                        "id": run_id, "name": "unit", "head_sha": head,
+                                                        "status": "completed", "conclusion": "success"}},
+                                                    payload_digest=hashlib.sha256(delivery.encode()).hexdigest())
+            assert observation is not None
+            async with db.transaction() as conn:
+                await record_observation(conn, observation)
+
         revision = await ControlStore(db).revision(scope, Entity("task", task_id))
         launched = await queue_comparison(
             team.app, task_id=task_id, principal=Principal.operator({"via": "token", "user_id": 1}),
@@ -299,6 +318,7 @@ async def test_two_native_sessions_start_only_after_both_slots_exist(settings, d
                 (worktree / f"proposal-{number}.md").write_text(f"Alternative {number}\n")
                 git(worktree, "add", f"proposal-{number}.md")
                 git(worktree, "commit", "-qm", f"alternative {number}")
+                await green(worktree, number)
                 live = await team.live(attempt["staff_session_id"])
                 assert live is not None
                 report, _event = await reports.submit(live, "done", f"Alternative {number} complete",
@@ -409,6 +429,7 @@ async def test_two_native_sessions_start_only_after_both_slots_exist(settings, d
                 assert stale_review.status_code == 200
                 assert stale_review.json()["source_current"] and not stale_review.json()["can_choose"]
                 assert any(item["code"] == "verdict_stale" for item in stale_review.json()["blockers"])
+                await green(winner_worktree, 3)
                 replacement_verdict = {**verdict_commands[0], "client_operation_id": "verdict-1-new-head",
                                        "expected_entity_revision": revision}
                 replaced = await client.post(
