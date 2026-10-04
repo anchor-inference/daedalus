@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import TYPE_CHECKING, Any
@@ -17,16 +18,33 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 RECOVERY_BATCH_SIZE = 128
+RECOVERY_WAKE_SIZE = 512
+_continuations: set[asyncio.Task[None]] = set()
+_CANDIDATES = (" FROM board_tasks t WHERE t.status = 'todo'"
+               " AND (? IS NULL OR t.project_id = ?)"
+               " AND EXISTS (SELECT 1 FROM task_dependency_edges e WHERE e.successor_task_id = t.id)"
+               " AND EXISTS (SELECT 1 FROM next_actions n WHERE n.task_id = t.id AND n.state = 'active'"
+               " AND n.kind = 'assign' AND n.owner_kind = 'staff')")
 
 
-async def _recovery_batch(app: Application, project_id: str | None) -> list[str]:
+def _continuation_done(task: asyncio.Task[None]) -> None:
+    _continuations.discard(task)
+    if not task.cancelled():
+        try:
+            task.result()
+        except Exception:
+            logger.exception("automatic handoff recovery continuation failed")
+
+
+async def _recovery_count(app: Application, project_id: str | None) -> int:
+    row = await app.db.fetchone("SELECT count(*)" + _CANDIDATES, (project_id, project_id))
+    return row[0]
+
+
+async def _recovery_batch(app: Application, project_id: str | None, limit: int) -> list[str]:
     """Reserve a circular page before effects so interrupted wakes cannot pin the first page."""
     key = "auto_handoff_recovery:" + (f"project:{project_id}" if project_id is not None else "global")
-    query = ("SELECT t.id,t.priority,t.created_at FROM board_tasks t"
-             " WHERE t.status = 'todo' AND (? IS NULL OR t.project_id = ?)"
-             " AND EXISTS (SELECT 1 FROM task_dependency_edges e WHERE e.successor_task_id = t.id)"
-             " AND EXISTS (SELECT 1 FROM next_actions n WHERE n.task_id = t.id AND n.state = 'active'"
-             " AND n.kind = 'assign' AND n.owner_kind = 'staff')")
+    query = "SELECT t.id,t.priority,t.created_at" + _CANDIDATES
     order = " ORDER BY t.priority,t.created_at,t.id LIMIT ?"
     async with app.db.transaction() as conn:
         async with conn.execute("SELECT value FROM kv WHERE key = ?", (key,)) as reader:
@@ -35,11 +53,11 @@ async def _recovery_batch(app: Application, project_id: str | None) -> list[str]
         params = (project_id, project_id)
         after = " AND (t.priority,t.created_at,t.id) > (?,?,?)" if position is not None else ""
         async with conn.execute(query + after + order,
-                                params + tuple(position or ()) + (RECOVERY_BATCH_SIZE,)) as reader:
+                                params + tuple(position or ()) + (limit,)) as reader:
             rows = list(await reader.fetchall())
-        if position is not None and len(rows) < RECOVERY_BATCH_SIZE:
+        if position is not None and len(rows) < limit:
             async with conn.execute(query + " AND (t.priority,t.created_at,t.id) <= (?,?,?)" + order,
-                                    params + tuple(position) + (RECOVERY_BATCH_SIZE - len(rows),)) as reader:
+                                    params + tuple(position) + (limit - len(rows),)) as reader:
                 rows.extend(await reader.fetchall())
         if rows:
             last = rows[-1]
@@ -141,8 +159,25 @@ async def on_capacity_released(app: Application, event: Any) -> None:
 
 
 async def recover(app: Application, *, project_id: str | None = None) -> None:
-    for task_id in await _recovery_batch(app, project_id):
-        try:
-            await advance(app, task_id)
-        except Exception:
-            logger.exception("automatic handoff recovery could not inspect task %s", task_id)
+    """Inspect one finite candidate snapshot, yielding between bounded work chunks."""
+    await _recover_remaining(app, project_id, await _recovery_count(app, project_id))
+
+
+async def _recover_remaining(app: Application, project_id: str | None, remaining: int) -> None:
+    budget = min(remaining, RECOVERY_WAKE_SIZE)
+    while budget:
+        task_ids = await _recovery_batch(app, project_id, min(budget, RECOVERY_BATCH_SIZE))
+        if not task_ids:
+            return
+        for task_id in task_ids:
+            try:
+                await advance(app, task_id)
+            except Exception:
+                logger.exception("automatic handoff recovery could not inspect task %s", task_id)
+        remaining -= len(task_ids)
+        budget -= len(task_ids)
+    if remaining:
+        # A large blocked queue must keep moving without waiting for another capacity event.
+        task = asyncio.create_task(_recover_remaining(app, project_id, remaining))
+        _continuations.add(task)
+        task.add_done_callback(_continuation_done)

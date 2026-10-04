@@ -165,25 +165,62 @@ async def test_recovery_reaches_ready_task_after_blocked_page_and_database_reope
         if interrupted:
             with pytest.raises(asyncio.CancelledError):
                 await recover(app, project_id=project_id)
+            assert visited == ["blocked-000"]
+            assert (await db.fetchone("SELECT count(*) FROM handoff_claims"))[0] == 0
         else:
             await recover(app, project_id=project_id)
-            assert visited == [f"blocked-{index:03}" for index in range(128)]
-        assert "task" not in visited
-        assert (await db.fetchone("SELECT count(*) FROM handoff_claims"))[0] == 0
+            assert visited == [*[f"blocked-{index:03}" for index in range(128)], "task"]
+            assert (await db.fetchone("SELECT count(*) FROM handoff_claims"))[0] == 1
         await db.close()
         await db.open()
         visited.clear()
         await recover(app, project_id=project_id)
-        assert visited[0] == "task"
-        assert len(visited) == 128 and len(set(visited)) == 128
+        assert len(visited) == 129 and len(set(visited)) == 129
+        assert "task" in visited
         assert (await db.fetchone("SELECT count(*) FROM handoff_claims"))[0] == 1
         assert (await db.fetchone("SELECT count(*) FROM effect_outbox WHERE kind = 'task.launch'"))[0] == 1
         visited.clear()
         await recover(app, project_id=project_id)
-        assert len(visited) <= 128
+        assert len(visited) == 129
         assert (await db.fetchone("SELECT count(*) FROM handoff_claims"))[0] == 1
         assert await dispatcher.step()
         assert len(starts) == 1
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
+async def test_large_recovery_continues_without_another_event(
+    db: Database, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, _, team, _ = await ready_successor(db)
+    async with db.transaction() as conn:
+        await conn.execute("UPDATE board_tasks SET priority = 2 WHERE id = 'task'")
+        for index in range(512):
+            task_id = f"blocked-{index:03}"
+            edge_id = f"blocked-edge-{index:03}"
+            await conn.execute("INSERT INTO board_tasks(id,project_id,title,status,priority,created_at,updated_at)"
+                               " VALUES (?,'project','Blocked','todo',1,'2026-01-01','2026-01-01')", (task_id,))
+            await conn.execute("INSERT INTO task_dependency_edges(id,successor_task_id,predecessor_task_id,"
+                               " kind,resolution_state,created_at)"
+                               " VALUES (?,?,'previous','required','awaiting_result','2026-01-01')",
+                               (edge_id, task_id))
+            await set_next_action(conn, action_id=f"blocked-next-{index:03}", task_id=task_id, kind="assign",
+                                  owner_kind="staff", owner_id="worker", prerequisites=[])
+    visited = []
+    finished = asyncio.Event()
+
+    async def observed_advance(application, task_id):
+        visited.append(task_id)
+        if task_id == "task":
+            finished.set()
+
+    monkeypatch.setattr("daedalus.extensions.auto_handoff.advance", observed_advance)
+    try:
+        await recover(app, project_id="project")
+        assert len(visited) == 512
+        await asyncio.wait_for(finished.wait(), 10)
+        assert len(visited) == 513 and len(set(visited)) == 513
     finally:
         team.queue.close()
         app.executions.release()
