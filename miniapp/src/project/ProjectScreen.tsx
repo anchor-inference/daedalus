@@ -2,9 +2,10 @@
 // session of the project, or one of its pages. The route decides which, through `focusView`; this
 // file only mounts what that names, with the project's way back instead of the agents list's.
 
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { SessionScreen, retried } from "../chunks";
 import { Skeleton } from "../ui/components";
+import { Sheet } from "../ui/dialogs";
 import { t } from "../i18n";
 import { ORCHESTRATION, ORCHESTRATION_LIST, back as goBack, navigate, projectHome, projectPagePath, useRoute } from "../router";
 import { useProject } from "./data";
@@ -24,6 +25,7 @@ const StaffView = lazy(retried(() => import("../staff/StaffView"), (m) => ({ def
 
 export function ProjectScreen({ projectId, page, inner, toast, wide }: { projectId: string; page: string | null; inner: string | null; toast: (text: string) => void; wide: boolean }) {
   const route = useRoute();
+  const [goalOpen, setGoalOpen] = useState(false);
   const { project, loading } = useProject(projectId);
   const { data: currentGoal } = useQuery<{ body: string; project_id: string }>(
     `/api/projects/${encodeURIComponent(projectId)}/scope-revisions/current`, { staleMs: 5000 });
@@ -50,13 +52,25 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
         toast={toast}
         // A project the main orchestrator is setting up says so, with the button that ends the setup.
         // What waits for the operator is in the Questions tab, which a phone opens from the header.
-        banner={project.setup_by === "dispatcher" ? <SetupLine projectId={projectId} name={project.name} toast={toast} /> : undefined}
+        banner={<>
+          {project.setup_by === "dispatcher" && <SetupLine projectId={projectId} name={project.name} toast={toast} />}
+          {!currentGoal?.body && <div className="main-setup" data-goal-setup>
+            <span className="grow">{t("goal.start.missing")}</span>
+            <button className="linkbtn" onClick={() => setGoalOpen(true)}>{t("goal.start.title")}</button>
+          </div>}
+        </>}
       />
     ) : (
       // The project's home, so a phone's way back is the orchestration list it was picked from.
       <EnableOrchestrator project={project} toast={toast} back={wide ? null : ORCHESTRATION_LIST} />
     );
-    body = <GuidedGoal key={project.id} project={project} toast={toast} wide={wide} ready={ready} />;
+    // An existing conversation remains usable while its project goal is being established.
+    body = orchestrator?.enabled && orchestrator.session_id ? <>
+      {ready}
+      {goalOpen && <Sheet title={t("goal.start.title")} onClose={() => setGoalOpen(false)} size="narrow">
+        <GuidedGoal key={project.id} project={project} toast={toast} wide={wide} embedded ready={null} />
+      </Sheet>}
+    </> : <GuidedGoal key={project.id} project={project} toast={toast} wide={wide} ready={ready} />;
   } else if (view.kind === "session") {
     // A member's conversation is reached from the team on a phone, and goes back there.
     body = <SessionScreen key={view.id} id={view.id} focus={{ projectId, kind: "member" }} onBack={() => (wide ? navigate(home) : goBack(projectPagePath(projectId, "team")))} toast={toast} />;

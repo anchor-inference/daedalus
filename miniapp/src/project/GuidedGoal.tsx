@@ -24,7 +24,7 @@ function keep(key: string, value: unknown): void {
 }
 
 /** The first goal uses the same revisioned project command as later goal changes. */
-export function GuidedGoal({ project, toast, wide, ready }: { project: Project; toast: (text: string) => void; wide: boolean; ready: ReactNode }) {
+export function GuidedGoal({ project, toast, wide, ready, embedded = false }: { project: Project; toast: (text: string) => void; wide: boolean; ready: ReactNode; embedded?: boolean }) {
   const endpoint = key(project.id);
   const { data, error, refresh } = useQuery<Goal>(endpoint, { staleMs: 5000 });
   const [initial] = useState(() => read<Draft>(draftKey(project.id)));
@@ -91,9 +91,9 @@ export function GuidedGoal({ project, toast, wide, ready }: { project: Project; 
     return <>{ready}</>;
   const criteria = checks.split("\n").map((line) => line.trim()).filter(Boolean);
   return <>
-    <PageHeader title={project.name} back={wide ? undefined : ORCHESTRATION_LIST} />
-    <div className="screen narrow guided-goal">
-      <h2>{t("goal.start.title")}</h2>
+    {!embedded && <PageHeader title={project.name} back={wide ? undefined : ORCHESTRATION_LIST} />}
+    <div className={embedded ? "guided-goal" : "screen narrow guided-goal"}>
+      {!embedded && <h2>{t("goal.start.title")}</h2>}
       <p className="sub">{t("goal.start.intro")}</p>
       {!data && !error && <Skeleton rows={3} />}
       {error && !data && <div className="empty"><div>{t("goal.start.readFailed")}</div><button className="btn primary" onClick={() => void refresh()}>{t("common.retry")}</button></div>}

@@ -1057,6 +1057,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "project.name.placeholder": { en: "What this folder is", ru: "Что это за папка" },
   "project.start.title": { en: "Start with a clear first task", ru: "Начать с понятной первой задачи" },
   "project.start.intro": { en: "Describe the goal and one way to check it. This saves a task; it starts no agent or paid call.", ru: "Опишите цель и хотя бы один способ проверки. Задача сохранится, но агент и платные вызовы не запустятся." },
+  "goal.start.missing": { en: "Add a project goal and criteria before delegating work.", ru: "Добавьте цель проекта и критерии перед передачей работы сотрудникам." },
   "goal.start.title": { en: "Start with a clear goal", ru: "Начните с понятной цели" },
   "goal.start.intro": { en: "Write what this project should achieve and how you will know it is done.", ru: "Опишите, чего должен достичь проект и как вы поймёте, что цель достигнута." },
   "goal.start.noRun": { en: "Save records the goal and criteria. It does not start an agent or spend money.", ru: "Сохранение запишет цель и критерии. Агент не запустится, деньги не потратятся." },
