@@ -185,7 +185,7 @@ async def test_work_that_names_a_model_goes_to_a_member_that_runs_it(settings: S
         fake(r)
         with_clis(r)
         sid = await office(r)
-        await r.manager.staff.hire(r.project.id, name="Ada", role="Scripts", harness="claude", model="claude-sonnet-5", isolation="shared")
+        await r.manager.staff.hire(r.project.id, name="Ada", role="Scripts", harness="claude", model="claude-sonnet-5", isolation="worktree")
         task_of(await r.call(sid, "assign", staff="Ada", title="Post drafts", **SCRIPT))
         check = {**SCRIPT, "objective": "Have gpt-6-luna at high effort check the mail relay after its production approval and fix what needs fixing"}
         with pytest.raises(Refused, match="the brief names gpt-6-luna, and Ada runs claude-sonnet-5: .*\\(Codex can\\) — Hire\\(harness=…, model='gpt-6-luna'"):
