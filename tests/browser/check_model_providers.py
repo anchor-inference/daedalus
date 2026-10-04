@@ -14,6 +14,7 @@ from api_stub import expect_app  # noqa: E402
 def main() -> int:
     expect_app(composer.BASE)
     composer.PRESETS["sonnet"] = {**composer.PRESETS["opus"], "label": "Claude Sonnet", "model": "claude-sonnet"}
+    composer.PRESETS["free"] = {**composer.PRESETS["opus"], "label": "Free test model", "model": "free-test", "free_only": True}
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=composer.CHROMIUM)
         for width, theme in ((1440, "dark"), (1128, "light"), (390, "dark")):
@@ -23,9 +24,16 @@ def main() -> int:
             trigger = page.locator(".composer .model-select")
             trigger.click()
             providers = page.locator(".provider-row")
-            expect(providers).to_have_count(3)
+            expect(providers).to_have_count(4)
             expect(page.locator(".provider-mark svg")).to_have_count(3)
             expect(page.locator('.provider-row[data-provider="claude"] .provider-count')).to_have_text("2")
+            page.locator(".provider-row", has_text="Free").click()
+            expect(providers).to_have_count(1)
+            page.locator('.provider-row[data-provider="claude"]').click()
+            expect(page.locator(".model-row", has_text="Free test model")).to_have_count(1)
+            page.locator(".provider-back").click()
+            page.locator(".provider-back").click()
+            expect(providers).to_have_count(4)
             expect(page.locator(".model-list .model-row.on")).to_have_count(0)
             before = len(composer.posts("/model"))
             page.locator('.provider-row[data-provider="claude"]').click()
@@ -38,7 +46,7 @@ def main() -> int:
             expect(page.locator(".model-list [role=status]")).to_be_visible()
             expect(page.locator(".model-row", has_text="DeepSeek Flash")).to_have_count(0)
             page.locator(".provider-back").click()
-            expect(providers).to_have_count(3)
+            expect(providers).to_have_count(4)
             search.fill("Flash")
             expect(providers).to_have_count(0)
             expect(page.locator(".model-row", has_text="DeepSeek Flash")).to_have_count(1)
@@ -48,10 +56,10 @@ def main() -> int:
             assert composer.reached(page, "/model", before, "search selection", problems)
             assert composer.posts("/model")[-1][2] == {"preset": "flash"}
             trigger.click()
-            expect(providers).to_have_count(3)
+            expect(providers).to_have_count(4)
             page.locator('.provider-row[data-provider="local"]').click()
             page.keyboard.press("ArrowLeft")
-            expect(providers).to_have_count(3)
+            expect(providers).to_have_count(4)
             expect(page.locator('.provider-row[data-provider="local"]')).to_be_focused()
             page.keyboard.press("Escape")
             expect(page.locator(".model-list")).to_have_count(0)

@@ -69,12 +69,12 @@
 
   var params = new URLSearchParams(location.search);
   var navLang = (navigator.language || 'en').toLowerCase().indexOf('ru') === 0 ? 'ru' : 'en';
-  var B = BOOT, BA = BOOT.adv || {}, BL = BOOT.local || {}, BT = BOOT.tg || {};
+  var B = BOOT, BA = BOOT.adv || {}, BL = BOOT.local || {}, BF = BOOT.free || {}, BT = BOOT.tg || {};
   var S = {
     lang: B.lang === 'ru' || B.lang === 'en' ? B.lang : navLang,
     mode: B.mode === 'docker' ? 'docker' : 'native',
     docker: !!B.docker,
-    kind: B.kind === 'cli' || B.kind === 'local' ? B.kind : 'cloud',
+    kind: B.kind === 'cli' || B.kind === 'local' || B.kind === 'free' ? B.kind : 'cloud',
     provider: B.provider || 'deepseek',
     keys: PROVIDERS.reduce(function (keys, p) { keys[p.id] = ''; return keys; }, {}),
     // kept: the masks of what is stored, by field. An empty field keeps the stored value.
@@ -83,6 +83,7 @@
     clis: B.clis || { codex: false, claude: false, grok: false },
     scanning: false,
     local: { url: BL.url || 'http://127.0.0.1:11434/v1', key: '', model: BL.model || '', models: BL.model ? [BL.model] : [], test: BL.model ? 'kept' : null, ms: 0 },
+    free: { provider: BF.provider || 'kilo', model: BF.model || '', key: '', test: BF.model ? 'kept' : null, error: '', catalog: [], loading: false },
     limit: B.limit || '20',
     tg: { token: '', owner: BT.owner || '', apiid: BT.apiid || '', apihash: '', more: !!(BT.apiid || (B.kept && B.kept['tg.apihash'])), skip: false },
     adv: { open: false, data: BA.data || '', portsAuto: BA.portsAuto !== false, port: BA.port || '8765', login: !!BA.login, browser: !!BA.browser, voice: BA.voice || 'off' },
@@ -195,7 +196,8 @@
       var tabs = seg('kind', [
         { value: 'cloud', label: t('model.cloud'), icon: 'key' },
         { value: 'cli', label: t('model.cli'), icon: 'term' },
-        { value: 'local', label: t('model.local'), icon: 'server' }
+        { value: 'local', label: t('model.local'), icon: 'server' },
+        { value: 'free', label: t('model.free'), icon: 'key' }
       ], { cls: 'tabs', label: t('model.title') });
       var body = '';
       if (S.kind === 'cloud') {
@@ -214,6 +216,27 @@
         }).join('') + '</div>' +
           '<div class="cli-foot st"><button type="button" class="btn ghost small" data-act="rescan" data-k="rescan"' + (S.scanning ? ' disabled' : '') + '>' + icon('refresh', S.scanning ? 'spin' : '') + '<span>' + esc(t('model.rescan')) + '</span></button>' + info('tip.cli') + '</div>' +
           '<p class="err" data-err="cli" aria-live="polite"></p>';
+      } else if (S.kind === 'free') {
+        var F = S.free;
+        var available = F.catalog.filter(function (x) { return x.id === F.provider; })[0];
+        var freeModels = available ? available.models : [];
+        var selectedFree = freeModels.filter(function (x) { return x.id === F.model; })[0];
+        body = '<p class="free-intro">' + esc(t('free.intro')) + '</p>' +
+          '<div class="provs st" role="radiogroup" aria-label="' + esc(t('free.providers')) + '">' + F.catalog.map(function (x) {
+            return '<label class="prov"><input type="radio" name="free-provider" value="' + esc(x.id) + '" data-bind="free.provider" data-refresh="panel"' + (F.provider === x.id ? ' checked' : '') + '>' +
+              '<span class="prov-mark" aria-hidden="true">' + esc(x.name.charAt(0)) + '</span><span class="prov-name">' + esc(x.name) + '</span></label>';
+          }).join('') + '</div>' +
+          (F.loading ? '<p class="free-intro">' + esc(t('free.loading')) + '</p>' : '') +
+          (F.error ? '<p class="err free-error" role="status">' + esc(F.error) + '</p>' : '') +
+          '<div class="field st" data-field="free.model"><label class="f-label" for="f-free.model">' + esc(t('free.models')) + '</label><div class="f-box select"><select id="f-free.model" data-bind="free.model" data-refresh="panel"' + (freeModels.length ? '' : ' disabled') + '>' +
+          '<option value="">' + esc(t('free.pick')) + '</option>' + freeModels.map(function (m) { return '<option value="' + esc(m.id) + '"' + (m.id === F.model ? ' selected' : '') + '>' + esc(m.name) + '</option>'; }).join('') +
+          '</select>' + icon('down', 'sel-ic') + '</div><p class="err" data-err="free.model" aria-live="polite"></p></div>' +
+          (selectedFree && selectedFree.may_train ? '<p class="free-warning">' + esc(t('free.training')) + '</p>' : '') +
+          (available && available.key_required ? field({ bind: 'free.key', label: available.name + ' · ' + t('model.key'), secret: true, ph: t('model.key.ph') }) +
+            '<p class="free-key-link">' + esc(t('key.get')) + ' <a href="' + esc(available.key_url) + '" target="_blank" rel="noopener noreferrer">' + esc(available.name) + ' ↗</a></p>' : '') +
+          (F.model ? '<div class="test-row st"><button type="button" class="btn test" data-act="test-free"' + (F.test === 'busy' ? ' disabled' : '') + '>' + icon('plug') + '<span>' + esc(F.test === 'busy' ? t('free.testing') : t('free.test')) + '</span></button>' +
+            (F.test === 'ok' || F.test === 'kept' ? '<span class="status ok"><i class="dot ok"></i>' + esc(t('free.ok')) + '</span>' : '') + '</div>' : '') +
+          '<p class="err" data-err="free.provider" aria-live="polite"></p>';
       } else {
         var L = S.local;
         var status = '';
@@ -330,6 +353,7 @@
       return esc(p.name) + ' · ' + (S.keys[p.id] ? mask(S.keys[p.id]) : esc(S.kept['keys.' + p.id] || ''));
     }
     if (S.kind === 'cli') return esc(CLIS.filter(function (c) { return c.id === S.cli; })[0].name) + ' · CLI';
+    if (S.kind === 'free') return esc(S.free.provider + ' / ' + (S.free.model || '—')) + ' · Free';
     return esc(S.local.model || '—') + ' · ' + esc(hostOf(S.local.url));
   }
   function hostOf(u) { try { return new URL(u).host; } catch (e) { return u; } }
@@ -351,6 +375,10 @@
         else if (k.length < 16) e['keys.' + p.id] = t('err.short');
       } else if (S.kind === 'cli') {
         if (!S.clis[S.cli]) e.cli = t('err.cli');
+      } else if (S.kind === 'free') {
+        if (!S.free.catalog.some(function (p) { return p.id === S.free.provider && p.models.some(function (m) { return m.id === S.free.model; }); })) e['free.model'] = t('err.fmodel');
+        else if (S.free.test !== 'ok' && S.free.test !== 'kept') e['free.model'] = t('err.ftest');
+        if (S.free.provider !== 'kilo' && !S.free.key.trim() && !S.kept['keys.' + S.free.provider]) e['free.key'] = t('err.required');
       } else {
         if (!/^https?:\/\/[^\s/]+/i.test(S.local.url.trim())) e['local.url'] = t('err.url');
         else if (S.local.test !== 'ok' && S.local.test !== 'kept') e['local.model'] = t('err.test');
@@ -595,6 +623,31 @@
       if (STEPS[cur] === 'model') refresh({ pop: '.clis' });
     });
   }
+  function loadFreeCatalog() {
+    S.free.loading = true;
+    call('/api/setup/free-catalog', {}).then(function (answer) {
+      S.free.catalog = answer.providers || [];
+      if (!S.free.catalog.some(function (p) { return p.id === S.free.provider; })) S.free.provider = S.free.catalog[0] ? S.free.catalog[0].id : 'kilo';
+      if (!S.free.catalog.some(function (p) { return p.id === S.free.provider && p.models.some(function (m) { return m.id === S.free.model; }); })) {
+        S.free.model = ''; S.free.test = null;
+      }
+      S.free.error = '';
+    }, function (error) { S.free.error = error.message; }).then(function () {
+      S.free.loading = false;
+      if (STEPS[cur] === 'model' && S.kind === 'free') refresh();
+    });
+  }
+  function testFree() {
+    if (!S.free.model) return;
+    S.free.test = 'busy'; S.free.error = '';
+    refresh();
+    call('/api/setup/free-probe', { provider: S.free.provider, model: S.free.model, key: S.free.key.trim() }).then(function (answer) {
+      S.free.test = answer.ok ? 'ok' : 'fail';
+      S.free.error = answer.ok ? '' : answer.error || t('err.ftest');
+    }, function (error) { S.free.test = 'fail'; S.free.error = error.message; }).then(function () {
+      if (STEPS[cur] === 'model') refresh();
+    });
+  }
   // The answers as the launcher's form takes them. A secret field left empty is not sent, which
   // keeps the stored value; Telegram skipped sends nothing, which leaves it as it was.
   function answers() {
@@ -604,6 +657,10 @@
     PROVIDERS.forEach(function (p) { var k = (S.keys[p.id] || '').trim(); if (k) f.set(p.id, k); });
     if (S.kind === 'local') {
       f.set('local_url', S.local.url.trim()); f.set('local_key', S.local.key.trim()); f.set('local_model', S.local.model);
+    }
+    if (S.kind === 'free') {
+      f.set('free_provider', S.free.provider); f.set('free_model', S.free.model);
+      if (S.free.key.trim()) f.set('free_key', S.free.key.trim());
     }
     f.set('usd_per_day', String(S.limit).replace(',', '.'));
     if (!S.tg.skip) {
@@ -728,6 +785,7 @@
       var parts = set.getAttribute('data-set').split('=');
       var path = parts[0], value = coerce(parts[1]);
       setPath(path, value);
+      if (path === 'kind' && value === 'free' && !S.free.loading && !S.free.catalog.length) loadFreeCatalog();
       if (path === 'limit') S.limit = String(value);
       var pop = path === 'kind' ? '.panel' : path === 'adv.portsAuto' ? '.adv' : null;
       if (path === 'lang') { renderAll(); persistLang(); } else refresh({ pop: pop });
@@ -742,6 +800,7 @@
     else if (a === 'skip') skip();
     else if (a === 'eye') { var tg = act.getAttribute('data-target'); S.reveal[tg] = !S.reveal[tg]; refresh(); var inp = currentEl().querySelector('[data-k="' + tg + '"]'); if (inp) inp.focus(); }
     else if (a === 'test') testLocal();
+    else if (a === 'test-free') testFree();
     else if (a === 'rescan') rescan();
     else if (a === 'tgmore') { S.tg.more = !S.tg.more; refresh({ pop: '.more' }); }
     else if (a === 'adv') { S.adv.open = !S.adv.open; refresh({ pop: S.adv.open ? '.adv' : '.defaults' }); if (hooks.onChange) hooks.onChange('adv.open', S); }
@@ -757,6 +816,9 @@
     var v = el.type === 'checkbox' ? el.checked : el.value;
     if (el.type === 'radio' && !el.checked) return;
     setPath(path, v);
+    if (path === 'kind' && v === 'free' && !S.free.loading && !S.free.catalog.length) loadFreeCatalog();
+    if (path === 'free.provider') { S.free.model = ''; S.free.key = ''; S.free.test = null; }
+    if (path === 'free.model' || path === 'free.key') S.free.test = null;
     if (path === 'limit') {
       var step = currentEl();
       var n = Number(String(v).replace(',', '.'));
@@ -863,6 +925,7 @@
     var start = 0;
     if (hooks.onMount) hooks.onMount({ root: root, frame: frame, state: S, steps: STEPS });
     go(start, { instant: true, keepFocus: true });
+    if (S.kind === 'free') loadFreeCatalog();
     requestAnimationFrame(function () { document.body.classList.add('ready'); });
   }
 

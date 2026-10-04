@@ -37,9 +37,12 @@ type Setup struct {
 	// The local or OpenAI-compatible endpoint. The address and its key go to the key proxy as an
 	// upstream of their own, like every other credential, and the app is told only the model: its
 	// provider entry points at the proxy (daedalus/config.py), so the agent never holds the key.
-	LocalURL   string
-	LocalKey   string
-	LocalModel string
+	LocalURL     string
+	LocalKey     string
+	LocalModel   string
+	FreeProvider string
+	FreeModel    string
+	ModelKind    string
 
 	// Voice is off, local or cloud; the app reads it at start (daedalus/config.py), and local is
 	// the speech extra the launcher installs after the start.
@@ -147,13 +150,24 @@ func dailyCap(given, existing string) string {
 // operator's own machine. `current` is what a previous run left in the file.
 func envUpdates(p Paths, s Setup, current map[string]string, searxngSecret, home string) []envVar {
 	answer := answered(s, current)
+	localModel := answer("DAEDALUS_LOCAL_MODEL", "local_model", s.LocalModel)
+	freeProvider := answer("DAEDALUS_FREE_PROVIDER", "free_provider", s.FreeProvider)
+	freeModel := answer("DAEDALUS_FREE_MODEL", "free_model", s.FreeModel)
+	if s.ModelKind == "free" {
+		localModel = ""
+	}
+	if s.ModelKind != "" && s.ModelKind != "free" {
+		freeProvider, freeModel = "", ""
+	}
 	return []envVar{
 		{"TELEGRAM_BOT_TOKEN", answer("TELEGRAM_BOT_TOKEN", "bot_token", s.BotToken)},
 		{"OWNER_USER_ID", answer("OWNER_USER_ID", "owner_id", s.OwnerID)},
 		{"TELEGRAM_API_ID", answer("TELEGRAM_API_ID", "api_id", s.APIID)},
 		{"TELEGRAM_API_HASH", answer("TELEGRAM_API_HASH", "api_hash", s.APIHash)},
 		{"USD_PER_DAY", dailyCap(s.USDPerDay, current["USD_PER_DAY"])},
-		{"DAEDALUS_LOCAL_MODEL", answer("DAEDALUS_LOCAL_MODEL", "local_model", s.LocalModel)},
+		{"DAEDALUS_LOCAL_MODEL", localModel},
+		{"DAEDALUS_FREE_PROVIDER", freeProvider},
+		{"DAEDALUS_FREE_MODEL", freeModel},
 		{"DAEDALUS_VOICE", firstSet(clean(s.Voice), firstSet(current["DAEDALUS_VOICE"], "off"))},
 		{"SEARXNG_SECRET", searxngSecret},
 		// The public address is not on the setup page: an operator who set one by hand keeps it,
@@ -206,6 +220,7 @@ func firstSet(existing, fallback string) string {
 // setup form know them as, with the variable the key proxy reads. API and subscription plans of one
 // vendor are separate entries: they are billed and routed differently upstream.
 var providerKeyVars = [][2]string{
+	{"opencode_zen", "KEYPROXY_KEY_OPENCODE_ZEN"},
 	{"openai", "OPENAI_API_KEY"},
 	{"anthropic", "ANTHROPIC_API_KEY"},
 	{"zai", "ZAI_API_KEY"},
@@ -232,6 +247,8 @@ func keyproxyUpdates(s Setup, current map[string]string) []envVar {
 	updates = append(updates,
 		envVar{"KEYPROXY_UPSTREAM_LOCAL", answer("KEYPROXY_UPSTREAM_LOCAL", "local_url", s.LocalURL)},
 		envVar{"KEYPROXY_KEY_LOCAL", answer("KEYPROXY_KEY_LOCAL", "local_key", s.LocalKey)},
+		envVar{"KEYPROXY_UPSTREAM_KILO", "https://api.kilo.ai/api/gateway"},
+		envVar{"KEYPROXY_UPSTREAM_OPENCODE_ZEN", "https://opencode.ai/zen/v1"},
 	)
 	return append(updates, envVar{"KEYPROXY_USD_PER_DAY", dailyCap(s.USDPerDay, current["KEYPROXY_USD_PER_DAY"])})
 }
@@ -382,6 +399,8 @@ func CurrentSetup(p Paths) Setup {
 		LocalURL:      keys["KEYPROXY_UPSTREAM_LOCAL"],
 		LocalKey:      keys["KEYPROXY_KEY_LOCAL"],
 		LocalModel:    env["DAEDALUS_LOCAL_MODEL"],
+		FreeProvider:  env["DAEDALUS_FREE_PROVIDER"],
+		FreeModel:     env["DAEDALUS_FREE_MODEL"],
 		Voice:         env["DAEDALUS_VOICE"],
 		AppPort:       env["API_PORT"],
 		FixPort:       strings.Contains(","+env["DAEDALUS_FIXED_PORTS"]+",", ",API_PORT,"),

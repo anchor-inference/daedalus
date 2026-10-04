@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -454,6 +455,8 @@ class ModelPresetConfig(BaseModel):
     reasoning_effort: ReasoningEffort = "medium"
     images: bool = False
     """The model accepts images (needed for ImageView and for photos sent in chat)."""
+    free_only: bool = False
+    """A free-catalog preset must stop on failure instead of entering the paid fallback chain."""
     context_window: int = Field(default=128_000, ge=8_000, le=4_000_000)
     """Tokens of history a run may hold before compaction; set below the model's real window to keep runs cheap."""
     max_output_tokens: int = Field(default=32_000, ge=1_024, le=1_000_000)
@@ -1931,6 +1934,18 @@ def preset_id_for(provider_id: str, model: str) -> str:
     return f"{provider_id}.{slug}"
 
 
+def free_preset_id_for(provider_id: str, model: str) -> str:
+    """Keep long catalog IDs within the API limit without merging different models."""
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", model).strip(".-") or "model"
+    preset_id = f"{provider_id}.{slug}"
+    if len(preset_id) <= 64:
+        return preset_id
+    digest = 2166136261
+    for byte in f"{provider_id}/{model}".encode():
+        digest = ((digest ^ byte) * 16777619) & 0xFFFFFFFF
+    return f"{preset_id[:55]}-{digest:08x}"
+
+
 LEGACY_PROVIDER_KEYS = ("default_model", "supports_images", "supports_thinking")
 LEGACY_MODEL_KEYS = ("provider", "name", "thinking", "reasoning_effort", "context_window", "max_output_tokens")
 
@@ -2102,6 +2117,26 @@ def _seed_from_setup(raw: dict[str, Any]) -> bool:
             if not isinstance(chosen, dict):
                 chosen = raw["model"] = {}
             if not chosen.get("preset"):
+                chosen["preset"] = pid
+    free_provider = os.environ.get("DAEDALUS_FREE_PROVIDER", "").strip()
+    free_model = os.environ.get("DAEDALUS_FREE_MODEL", "").strip()
+    free_marker = f"free-model:{free_provider}:{free_model}"
+    if free_provider in ("kilo", "openrouter", "opencode_zen") and free_model and free_marker not in seeded:
+        seeded.append(free_marker)
+        changed = True
+        providers = raw.setdefault("providers", {})
+        presets = raw.setdefault("presets", {})
+        if isinstance(providers, dict) and isinstance(presets, dict):
+            if free_provider == "kilo":
+                providers.setdefault("kilo", {"kind": "openai_compat", "name": "Kilo Gateway", "base_url": keyproxy_base() + "/kilo"})
+            if free_provider == "opencode_zen":
+                providers.setdefault("opencode_zen", {"kind": "openai_compat", "name": "OpenCode Zen", "base_url": keyproxy_base() + "/opencode_zen"})
+            pid = free_preset_id_for(free_provider, free_model)
+            presets.setdefault(pid, {"provider": free_provider, "model": free_model, "label": free_model,
+                                     "thinking": False, "context_window": 128_000, "max_output_tokens": 8_192,
+                                     "free_only": True})
+            chosen = raw.setdefault("model", {})
+            if isinstance(chosen, dict) and not chosen.get("preset"):
                 chosen["preset"] = pid
     if os.environ.get("DAEDALUS_VOICE", "").strip().lower() == "cloud" and "voice-cloud" not in seeded:
         seeded.append("voice-cloud")

@@ -106,6 +106,8 @@ def _write(path: Path, data: dict) -> None:
 @pytest.fixture(autouse=True)
 def _no_setup_answers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DAEDALUS_LOCAL_MODEL", raising=False)
+    monkeypatch.delenv("DAEDALUS_FREE_PROVIDER", raising=False)
+    monkeypatch.delenv("DAEDALUS_FREE_MODEL", raising=False)
     monkeypatch.delenv("DAEDALUS_VOICE", raising=False)
 
 
@@ -165,6 +167,35 @@ def test_no_local_model_adds_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("DAEDALUS_LOCAL_MODEL", "")
     config = RuntimeConfig.load(tmp_path / "config.toml")
     assert "local" not in config.providers and config.presets == {}
+
+
+def test_free_setup_seeds_a_single_free_only_preset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DAEDALUS_FREE_PROVIDER", "kilo")
+    monkeypatch.setenv("DAEDALUS_FREE_MODEL", "stepfun/step-3.7-flash:free")
+    path = tmp_path / "config.toml"
+    config = RuntimeConfig.load(path)
+    pid = "kilo.stepfun-step-3.7-flash-free"
+    assert config.presets[pid].free_only
+    assert config.model.preset == pid
+    assert config.providers["kilo"].base_url.endswith("/kilo")
+    del config.presets[pid]
+    config.model.preset = ""
+    config.save(path)
+    assert pid not in RuntimeConfig.load(path).presets
+
+
+def test_free_setup_keeps_a_long_model_id_with_a_short_unique_preset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from daedalus.config import free_preset_id_for
+
+    first = "publisher/a-very-long-free-model-name-with-many-variants-and-a-context-window:free"
+    second = first.replace("window", "memory")
+    assert len(free_preset_id_for("openrouter", first)) == 64
+    assert free_preset_id_for("openrouter", first) != free_preset_id_for("openrouter", second)
+    monkeypatch.setenv("DAEDALUS_FREE_PROVIDER", "openrouter")
+    monkeypatch.setenv("DAEDALUS_FREE_MODEL", first)
+    config = RuntimeConfig.load(tmp_path / "config.toml")
+    assert config.presets[free_preset_id_for("openrouter", first)].model == first
+    assert free_preset_id_for("openrouter", "a/модель/b") == "openrouter.a-b"
 
 
 def test_cloud_voice_points_an_unset_asr_at_the_openai_provider_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

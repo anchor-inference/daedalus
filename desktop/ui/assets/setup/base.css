@@ -306,6 +306,11 @@ button:disabled { cursor: default; }
 .grid2 { display: grid; grid-template-columns: 1fr; gap: 0 14px; }
 @container frame (min-width: 560px) { .grid2 { grid-template-columns: 1fr 1fr; } }
 .field .err { margin-top: -1px; }
+.free-intro { color: var(--mute); margin: 0 0 12px; font-size: 13px; }
+.free-error { margin: 8px 0; }
+.free-key-link { margin: -3px 0 12px; color: var(--mute); font-size: 12px; }
+.free-key-link a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.free-warning { margin: 0 0 12px; color: #c99b52; font-size: 12px; line-height: 1.45; }
 
 /* ---- CLI list ---- */
 .clis { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }

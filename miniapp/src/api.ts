@@ -1277,6 +1277,7 @@ export type Preset = {
   thinking: boolean;
   reasoning_effort: string;
   images: boolean;
+  free_only?: boolean;
   context_window: number;
   max_output_tokens: number;
   /** Tool groups on demand held back for this model; absent or null follows what the model is known for. */

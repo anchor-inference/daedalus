@@ -83,6 +83,8 @@ from daedalus.host.worktrees import append_exclude, exclude_lines
 from daedalus.mcp.manager import McpManager, blocked_for, mcp_tool_prefix
 from daedalus.processes import end_tree
 from daedalus.providers.chain import build_chain
+from daedalus.providers.free_catalog import approved_endpoint
+from daedalus.providers.free_catalog import catalog as free_catalog
 from daedalus.providers.registry import ProviderRegistry
 from daedalus.security import redact
 from daedalus.stores.blobs import FileBlobStore
@@ -925,7 +927,10 @@ class SessionManager:
             return self.providers.rungs_for(self.config, pid), self.config.presets[pid]
         _, default = self.config.preset()  # NoModelConfigured when the table is empty
         if overrides.get("provider") and overrides.get("model_name"):
-            return self.providers.rungs_for_pair(self.config, overrides["provider"], overrides["model_name"]), default
+            # A manual pair is an explicit choice outside the default preset. Carry its window
+            # settings, but do not claim the default free model's price evidence for that pair.
+            selected = default.model_copy(update={"free_only": False}) if default.free_only else default
+            return self.providers.rungs_for_pair(self.config, overrides["provider"], overrides["model_name"]), selected
         return self.providers.rungs_for(self.config), default
 
     # -- MCP per session --------------------------------------------------------------
@@ -3006,6 +3011,17 @@ class SessionManager:
                 overrides = {**overrides, "preset": chosen}
                 break
         rungs, preset = self.resolve_model(overrides)
+        if preset.free_only:
+            if len(rungs) != 1 or rungs[0][0].endpoint.id != preset.provider or rungs[0][1] != preset.model:
+                raise RuntimeError("free preset has a different model route")
+            snapshot = await free_catalog.get()
+            source = next((row for row in snapshot["providers"] if row["id"] == preset.provider), None)
+            listed = next((row for row in source["models"] if row["id"] == preset.model), None) if source else None
+            if source is None or not source["fresh"] or listed is None or listed["mechanism"] != "zero_price":
+                raise RuntimeError("free model could not be verified now; choose another model before running")
+            configured = self.config.providers.get(preset.provider)
+            if configured is None or not approved_endpoint(preset.provider, configured.base_url, source["base_url"]):
+                raise RuntimeError("free model provider no longer points to its verified endpoint")
         hold = ExitStack()
         hold.enter_context(self.providers.hold([provider for provider, _ in rungs]))
         try:
