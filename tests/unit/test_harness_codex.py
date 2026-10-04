@@ -89,6 +89,52 @@ def test_modes_follow_the_projects_autonomy_and_a_resume_names_the_thread() -> N
     assert resumed.session_ref == "01a0d59e-aee3-7fa2-81c5-60ccc0b5d05c" and adapter._planned["r"].resume == resumed.session_ref
 
 
+@pytest.mark.parametrize("reported", ["other-thread", ""])
+async def test_resume_requires_the_server_to_confirm_the_thread(monkeypatch: pytest.MonkeyPatch, reported: str) -> None:
+    adapter = CodexAdapter()
+    plan = adapter.resume_plan(spec(launch_id="resume", first_prompt=None), "requested-thread")
+    planned = adapter._planned["resume"]
+    state = _Launch()
+    calls: list[str] = []
+    files: list[str] = []
+
+    class Socket:
+        async def send_text(self, message: str) -> None:
+            pass
+
+    async def connect(term: Any) -> Socket:
+        return Socket()
+
+    async def read(current: _Launch) -> None:
+        await asyncio.Event().wait()
+
+    async def call(current: _Launch, method: str, params: Any) -> Any:
+        calls.append(method)
+        if method == "thread/resume":
+            assert params["threadId"] == "requested-thread"
+            return {"thread": {"id": reported} if reported else {}}
+        return {}
+
+    async def put_file(name: str, data: bytes) -> None:
+        files.append(name)
+
+    monkeypatch.setattr(adapter, "_connect", connect)
+    monkeypatch.setattr(adapter, "_read", read)
+    monkeypatch.setattr(adapter, "_call", call)
+    term = SimpleNamespace(id="terminal", put_file=put_file)
+    launch = SimpleNamespace(launch_dir="", session_ref=plan.session_ref)
+    try:
+        with pytest.raises(ConnectionError, match="did not confirm the requested thread"):
+            await adapter._open(term, state, launch, planned)
+    finally:
+        for task in state.tasks:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+    assert calls == ["initialize", "thread/resume"]
+    assert files == [] and state.thread_id == "" and state.queue.empty()
+
+
 def test_the_catalog_reads_the_real_model_list() -> None:
     printed = json.dumps({"models": [{"slug": "gpt-6-astra", "visibility": "list"}, {"slug": "gpt-6-luna", "visibility": "list"}, {"slug": "codex-auto-review", "visibility": "hide"}]})
     models = parse_codex_models(printed)

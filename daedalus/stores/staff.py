@@ -1184,9 +1184,6 @@ class AsksStore:
         """Answer a request. True for the one answer that got there first; False for every later one."""
         if by not in ASK_RESOLVERS:
             raise StaffError(f"a request is answered by the orchestrator, the operator, staff or the system, not {by!r}")
-        body = json.dumps(resolution or {}, ensure_ascii=False)
-        if len(body) > ASK_DETAIL_MAX:
-            raise StaffError(f"an answer is at most {ASK_DETAIL_MAX} characters of JSON")
         async with self._db.transaction() as conn:
             row = await conn.execute("SELECT a.task_id,a.origin_contract_revision,t.contract_revision"
                                      " FROM asks a LEFT JOIN board_tasks t ON t.id = a.task_id WHERE a.id = ?", (ask_id,))
@@ -1195,6 +1192,11 @@ class AsksStore:
             applies = ask is not None and (ask["task_id"] is None or
                                            (ask["origin_contract_revision"] is not None and
                                             ask["origin_contract_revision"] == ask["contract_revision"]))
+            # A stale answer still closes the request. Returning false after writing it made the
+            # operator see "already answered" and hid the fact that the old contract cannot use it.
+            body = json.dumps({**(resolution or {}), **({"applies": False} if not applies else {})}, ensure_ascii=False)
+            if len(body) > ASK_DETAIL_MAX:
+                raise StaffError(f"an answer is at most {ASK_DETAIL_MAX} characters of JSON")
             cursor = await conn.execute(
                 "UPDATE asks SET resolved_at = ?, resolved_by = ?, resolution_json = ?,"
                 " answered_contract_revision = ? WHERE id = ? AND resolved_at IS NULL",
@@ -1202,7 +1204,7 @@ class AsksStore:
             )
             changed = cursor.rowcount
             await cursor.close()
-        return changed == 1 and applies
+        return changed == 1
 
     async def revise(self, ask_id: str, *, title: str, text: str, detail: dict[str, Any]) -> bool:
         """Change an open request's words in place: the same row, the same id, so an answer the operator

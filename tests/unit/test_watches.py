@@ -698,6 +698,10 @@ async def test_a_restart_replays_what_it_missed_without_firing_twice(settings: S
         made = await keeper.create(project, when={"event": "staff_finished", "staff": "Ada"}, then={"action": "notify", "title": "done"})
         first = await r.manager.bus.publish("staff.status", {"status": "turn_done_unseen", "previous": "working"}, project_id=r.project.id, staff_id=ada.id)
         await until_await(lambda: _fired_count(r, 1), "the live event fired the watch")
+        async def handled() -> bool:
+            return keeper._seq >= first.seq
+
+        await until_await(handled, "the watch finished processing the event")
         await keeper.tick()
         cursor = await db.kv_get("watches_cursor")
         assert isinstance(cursor, int) and cursor >= first.seq
@@ -712,6 +716,74 @@ async def test_a_restart_replays_what_it_missed_without_firing_twice(settings: S
             await asyncio.sleep(0.05)
             assert len(await fired(r)) == 2, "the event it had already handled was not handled again"
             assert again.get(r.project.id, made.id).fire_count == 2  # type: ignore[union-attr]
+        finally:
+            await again.close()
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
+async def test_failed_match_keeps_cursor_before_later_events_until_restart(
+    settings: Settings, db: Database, tmp_path: Path,
+) -> None:
+    r = await rig(settings, db, tmp_path)
+    clock = Clock()
+    keeper = await with_watches(r, clock)
+    try:
+        project = await r.orch.enable(r.project.id)
+        ada = await r.manager.staff.hire(r.project.id, name="Ada")
+        bo = await r.manager.staff.hire(r.project.id, name="Bo")
+        first_watch = await keeper.create(project, when={"event": "staff_finished", "staff": "Ada"},
+                                          then={"action": "notify", "title": "First"}, by="operator")
+        unfinished_watch = await keeper.create(project, when={"event": "staff_finished", "staff": "Ada"},
+                                               then={"action": "notify", "title": "Second"}, by="operator")
+        later_watch = await keeper.create(project, when={"event": "staff_finished", "staff": "Bo"},
+                                          then={"action": "notify", "title": "Later"}, by="operator")
+        await keeper.close()
+        before = await r.manager.bus.publish("staff.status", {"status": "working", "previous": "idle"},
+                                             project_id=r.project.id, staff_id=ada.id)
+        failed = await r.manager.bus.publish("staff.status", {"status": "turn_done_unseen", "previous": "working"},
+                                             project_id=r.project.id, staff_id=ada.id)
+        await keeper.on_event(before)
+        real_fire = keeper.fire
+
+        async def interrupted(item: Watch, detail: str, *, source_cursor: str, staff_id: str | None = None) -> bool:
+            if item.id == unfinished_watch.id:
+                raise OSError("reservation interrupted")
+            return await real_fire(item, detail, source_cursor=source_cursor, staff_id=staff_id)
+
+        keeper.fire = interrupted  # type: ignore[method-assign]
+        with pytest.raises(OSError, match="reservation interrupted"):
+            await keeper.on_event(failed)
+        keeper.fire = real_fire  # type: ignore[method-assign]
+        later = await r.manager.bus.publish("staff.status", {"status": "turn_done_unseen", "previous": "working"},
+                                            project_id=r.project.id, staff_id=bo.id)
+        await keeper.on_event(later)
+        await keeper.tick()
+        assert len(await fired(r)) == 2
+
+        reopened = Database(settings.db_path, workspaces_dir=settings.workspaces_dir)
+        await reopened.open()
+        try:
+            assert await reopened.kv_get("watches_cursor") == before.seq
+            rows = await reopened.fetchall("SELECT watch_id,source_cursor FROM watch_deliveries ORDER BY created_at,id")
+            assert {(row["watch_id"], row["source_cursor"]) for row in rows} == {
+                (first_watch.id, f"bus:{failed.seq}"), (later_watch.id, f"bus:{later.seq}")}
+        finally:
+            await reopened.close()
+
+        clock.advance(minutes=11)
+        again = Watches(r.team.app)
+        again.clock = clock
+        await again.start()
+        try:
+            await until_await(lambda: _fired_count(r, 3), "the unfinished match fired after restart")
+            await asyncio.sleep(0.05)
+            assert len(await fired(r)) == 3
+            assert (await db.fetchone("SELECT COUNT(*) AS n FROM watch_deliveries WHERE watch_id = ?",
+                                      (first_watch.id,)))["n"] == 1
+            assert (await db.fetchone("SELECT COUNT(*) AS n FROM watch_deliveries WHERE watch_id = ?",
+                                      (later_watch.id,)))["n"] == 1
         finally:
             await again.close()
     finally:

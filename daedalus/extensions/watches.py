@@ -291,6 +291,7 @@ class Watches:
         self._followers: dict[str, asyncio.Task[None]] = {}
         self._handler: asyncio.Task[None] | None = None
         self._seq = 0
+        self._cursor_failed = False
         self._polled: dict[str, datetime] = {}
         """When each watched folder's branch heads were last read."""
 
@@ -569,16 +570,21 @@ class Watches:
     # -- the bus -----------------------------------------------------------------------------------
 
     async def on_event(self, event: AppEvent) -> None:
-        self._seq = max(self._seq, event.seq)
-        if event.type == "webhook.received":
-            await self._on_webhook(event)
-            return
-        if not event.project_id:
-            return
-        for watch in self.of_project(event.project_id, enabled_only=True):
-            detail = event_matches(watch, event)
-            if detail:
-                await self.fire(watch, detail, staff_id=event.staff_id, source_cursor=f"bus:{event.seq}")
+        try:
+            if event.type == "webhook.received":
+                await self._on_webhook(event)
+            elif event.project_id:
+                for watch in self.of_project(event.project_id, enabled_only=True):
+                    detail = event_matches(watch, event)
+                    if detail:
+                        await self.fire(watch, detail, staff_id=event.staff_id, source_cursor=f"bus:{event.seq}")
+        except Exception:
+            # The bus continues after a failed handler. Keep the cursor before this event even if
+            # later events succeed, so a restart replays the unfinished match and deduplicates the rest.
+            self._cursor_failed = True
+            raise
+        if not self._cursor_failed:
+            self._seq = max(self._seq, event.seq)
 
     async def _on_webhook(self, event: AppEvent) -> None:
         payload = dict(event.payload)

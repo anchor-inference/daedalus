@@ -180,7 +180,9 @@ async def answer(app: Application, items: list[dict[str, Any]], *, project_id: s
         except (Unanswerable, StaffError, KeyError) as exc:
             results.append({**base, "state": "refused", "error": str(exc)})
             continue
-        results.append({**base, "state": "answered", "delivered": bool(done.get("delivered")), "error": str(done.get("error") or ""), "ask": done.get("ask")})
+        results.append({**base, "state": "answered", "applied": done.get("applied", True),
+                        "delivered": bool(done.get("delivered")), "error": str(done.get("error") or ""),
+                        "ask": done.get("ask")})
         if ask.project_id and ask.origin != "dispatcher":
             won.setdefault(ask.project_id, []).append(ask.id)
     for pid, ask_ids in won.items():

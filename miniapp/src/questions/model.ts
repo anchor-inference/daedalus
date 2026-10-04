@@ -160,6 +160,7 @@ export function fitDrafts(drafts: Drafts, questions: WaitingQuestion[]): Drafts 
 /** What a card shows after a send, or after the list lost it: gone with a word, or held with a reason. */
 export type CardFate =
   | { kind: "sent"; failed?: string }
+  | { kind: "stale" }
   | { kind: "conflict"; by: string; line: string }
   | { kind: "withdrawn"; reason: string; hadDraft: boolean }
   | { kind: "elsewhere" }
@@ -167,6 +168,7 @@ export type CardFate =
 
 /** How a card leaves or stays once the host answered its item. */
 export function fateOf(outcome: QuestionOutcome, line: (ask: NonNullable<QuestionOutcome["ask"]>) => string): CardFate {
+  if (outcome.state === "answered" && outcome.applied === false) return { kind: "stale" };
   if (outcome.state === "answered") return outcome.delivered === false && outcome.error ? { kind: "sent", failed: outcome.error } : { kind: "sent" };
   if (outcome.state === "conflict") {
     if (outcome.withdrawn) return { kind: "withdrawn", reason: String(outcome.ask?.resolution?.closed ?? ""), hadDraft: true };
@@ -179,13 +181,14 @@ export function fateOf(outcome: QuestionOutcome, line: (ask: NonNullable<Questio
 /** Whether a fate takes the card off the list after its moment on screen. A conflict and a refusal
  *  stay: the one says who answered first and with what, the other what to fix. */
 export function leaves(fate: CardFate | undefined): boolean {
-  return !!fate && (fate.kind === "sent" || fate.kind === "withdrawn" || fate.kind === "elsewhere");
+  return !!fate && (fate.kind === "sent" || fate.kind === "stale" || fate.kind === "withdrawn" || fate.kind === "elsewhere");
 }
 
 /** How long a leaving card stays: long enough to read its word, longer when a draft went with it. */
 export function leaveMs(fate: CardFate): number {
   if (fate.kind === "withdrawn") return fate.hadDraft ? 5200 : 2600;
   if (fate.kind === "sent" && fate.failed) return 5200;
+  if (fate.kind === "stale") return 5200;
   return 1600;
 }
 

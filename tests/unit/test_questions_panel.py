@@ -201,6 +201,41 @@ async def test_a_batch_of_answers_wakes_the_orchestrator_once(settings: Settings
         await r.manager.close()
 
 
+async def test_answer_to_an_old_task_contract_is_recorded_but_not_applied(
+    settings: Settings, db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        task = await r.orch.board.add(title="Choose a database", project_id=r.project.id, operator=True)
+        ask = await r.manager.asks.open(r.project.id, origin="orchestrator", kind="question",
+                                        text="Which database?", routed_to="operator", task_id=task["id"])
+        await db.execute("UPDATE board_tasks SET contract_revision = contract_revision + 1 WHERE id = ?", (task["id"],))
+
+        async def reject_delivery(*args: Any, **kwargs: Any) -> Any:
+            pytest.fail("a stale answer reached the old task")
+
+        monkeypatch.setattr(r.team, "_deliver", reject_delivery)
+
+        result = await questions.answer(r.team.app, [{"ask_id": ask.id, "text": "Postgres"}],
+                                        project_id=r.project.id, via="project")  # type: ignore[arg-type]
+        [outcome] = result["results"]
+        assert outcome["state"] == "answered" and outcome["applied"] is False
+        assert outcome["delivered"] is False and "contract changed" in outcome["error"]
+        answered = await r.manager.asks.get(ask.id)
+        assert answered is not None and not answered.open
+        assert answered.resolution["text"] == "Postgres" and answered.resolution["applies"] is False
+        row = await db.fetchone("SELECT answered_contract_revision FROM asks WHERE id = ?", (ask.id,))
+        assert row["answered_contract_revision"] is None
+        [batch] = await events(r.manager, "ask.batch")
+        [line] = await r.orch.batch_lines(r.project, batch)
+        assert "older task contract" in line and "does not apply" in line and "Postgres" in line
+        second = await questions.answer(r.team.app, [{"ask_id": ask.id, "text": "SQLite"}],
+                                        project_id=r.project.id, via="project")  # type: ignore[arg-type]
+        assert second["results"][0]["state"] == "conflict"
+    finally:
+        await r.manager.close()
+
+
 async def test_permissions_and_escalations_sit_above_the_questions_and_the_main_list_gathers_projects(settings: Settings, db: Database, tmp_path: Path) -> None:
     r = await rig(settings, db, tmp_path)
     try:

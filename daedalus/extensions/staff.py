@@ -1361,6 +1361,13 @@ class Team:
         if not await self.manager.asks.resolve(ask.id, by, resolution):
             current = await self.manager.asks.get(ask.id)
             raise AlreadyAnswered(f"request {ask.short_id} was already answered by the {current.resolved_by if current else 'someone else'}")
+        answered = await self.manager.asks.get(ask.id)
+        if answered is not None and answered.resolution.get("applies") is False:
+            # The operator's words are recorded, but an old task contract must not receive a
+            # permission or decision as if it answered the current version of the work.
+            await self._announce_resolved(ask, allow=allow, by=by, via=resolution["via"])
+            return {"state": "answered", "applied": False, "delivered": False,
+                    "error": "the task contract changed after this request was asked", "ask": answered.view()}
         if rule is not None and ask.staff_id:
             # Kept before the delivery: the operator's "always" stands even when the session that
             # asked has ended by now, and its next launch is where the rule is read.
@@ -1378,8 +1385,8 @@ class Team:
                 {"ask_id": ask.id, "staff_id": ask.staff_id or ""},
             )
         await self._announce_resolved(ask, allow=allow, by=by, via=resolution["via"])
-        answered = await self.manager.asks.get(ask.id)
-        return {"state": "answered", "delivered": delivered, "error": error, "ask": answered.view() if answered else ask.view()}
+        return {"state": "answered", "applied": True, "delivered": delivered,
+                "error": error, "ask": answered.view() if answered else ask.view()}
 
     async def _standing_rule(self, ask: Ask, *, server: bool) -> str | None:
         """The rule an operator's "always" leaves for the member, if its CLI keeps rules and the tool

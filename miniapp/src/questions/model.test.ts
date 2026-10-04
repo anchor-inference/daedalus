@@ -128,6 +128,7 @@ describe("a send", () => {
     const line = () => "answered in Telegram: Friday";
     const o = (over: Partial<QuestionOutcome>): QuestionOutcome => ({ ask_id: "a", state: "answered", ...over });
     expect(fateOf(o({ delivered: true }), line)).toEqual({ kind: "sent" });
+    expect(fateOf(o({ applied: false, delivered: false }), line)).toEqual({ kind: "stale" });
     expect(fateOf(o({ delivered: false, error: "already has the folder" }), line)).toEqual({ kind: "sent", failed: "already has the folder" });
     const conflict = fateOf(o({ state: "conflict", answered_by: "operator", ask: question({ resolved_by: "operator" }) }), line);
     expect(conflict).toEqual({ kind: "conflict", by: "operator", line: "answered in Telegram: Friday" });

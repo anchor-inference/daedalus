@@ -1137,6 +1137,9 @@ class Orchestrators:
 
     async def _answer_line(self, ask: Ask) -> str:
         answer = self._answer_text(ask)
+        if ask.resolution.get("applies") is False:
+            return (f"the operator answered request [{ask.short_id}] from an older task contract: {answer}. "
+                    "The answer was recorded but does not apply to the current contract; ask again if needed")
         if ask.origin == "orchestrator":
             return f"the operator answered your request [{ask.short_id}] \"{_one_line(ask.heading, 120)}\": {answer}"
         member = await self.manager.staff.get(ask.staff_id) if ask.staff_id else None

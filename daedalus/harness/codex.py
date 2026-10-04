@@ -413,7 +413,12 @@ class CodexAdapter:
         else:
             result = await self._call(state, "thread/start", {**settings, "serviceName": "daedalus"})
         thread = (result or {}).get("thread") or {}
-        state.thread_id = str(thread.get("id") or resume)
+        thread_id = thread.get("id") if isinstance(thread, dict) else None
+        # A resumed thread can carry another session's history and tools. The requested id is not
+        # proof that the app server attached to it, so require the id in the server's own reply.
+        if not isinstance(thread_id, str) or not thread_id or (resume and thread_id != resume):
+            raise ConnectionError("the app server did not confirm the requested thread")
+        state.thread_id = thread_id
         if not resume:
             # A thread nobody has written to has no rollout, and without one neither the TUI nor a
             # restarted host can take it up; one developer item makes it.

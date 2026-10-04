@@ -1003,6 +1003,7 @@ export type QuestionOutcome = {
   ask_id: string;
   short_id?: string;
   state: "answered" | "conflict" | "refused" | "missing";
+  applied?: boolean;
   delivered?: boolean;
   error?: string;
   answered_by?: string;

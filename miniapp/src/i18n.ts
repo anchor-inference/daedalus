@@ -5293,6 +5293,7 @@ Object.assign(DICT, {
   "questions.clear": { en: "Clear", ru: "Очистить" },
   "questions.dismiss": { en: "Dismiss", ru: "Скрыть" },
   "questions.fate.sent": { en: "Sent", ru: "Отправлено" },
+  "questions.fate.stale": { en: "Recorded, but not applied: the task changed. Ask again if needed.", ru: "Ответ сохранён, но не применён: задача изменилась. При необходимости задайте вопрос снова." },
   "questions.fate.withdrawn": { en: "Withdrawn by the orchestrator", ru: "Оркестратор отозвал вопрос" },
   "questions.fate.withdrawn.draft": { en: "Withdrawn by the orchestrator — your draft was dropped", ru: "Оркестратор отозвал вопрос — ваш черновик удалён" },
   "questions.fate.elsewhere": { en: "Answered elsewhere", ru: "Отвечено в другом месте" },

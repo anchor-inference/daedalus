@@ -182,6 +182,7 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
       const result = await api.post<{ results: QuestionOutcome[] }>(answerPath(scope), batch);
       const outcomes = Array.isArray(result?.results) ? result.results : [];
       let answered = 0;
+      let stale = 0;
       let lost = 0;
       const failed: string[] = [];
       const nextFates: Record<string, CardFate> = {};
@@ -189,6 +190,7 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
         const fate = fateOf(outcome, answeredLine);
         nextFates[outcome.ask_id] = fate;
         if (fate.kind === "sent") answered += 1;
+        if (fate.kind === "stale") stale += 1;
         if (fate.kind === "sent" && fate.failed) failed.push(fate.failed);
         if (fate.kind === "conflict" || fate.kind === "withdrawn") lost += 1;
         if (fate.kind === "refused") sent.current.delete(outcome.ask_id);
@@ -197,7 +199,7 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
       setGhosts((g) => ({ ...g, ...Object.fromEntries(gone.map((id) => [id, byId.get(id)!]).filter(([, q]) => q)) }));
       setFates((f) => ({ ...f, ...nextFates }));
       setDrafts((d) => Object.fromEntries(Object.entries(d).filter(([id]) => !gone.includes(id))));
-      toast(failed.length ? t("focus.ask.failed", { reason: failed[0] }) : lost ? t("questions.sent.some", { n: answered, lost }) : plural("questions.sent", answered));
+      toast(stale ? t("questions.fate.stale") : failed.length ? t("focus.ask.failed", { reason: failed[0] }) : lost ? t("questions.sent.some", { n: answered, lost }) : plural("questions.sent", answered));
     } catch (e) {
       for (const item of batch) sent.current.delete(item.ask_id);
       toast(errorText(e));
@@ -463,6 +465,7 @@ function whyNotReady(q: WaitingQuestion, d: Draft): string {
 }
 
 function FateLine({ fate, onDismiss }: { fate: CardFate; onDismiss: () => void }) {
+  if (fate.kind === "stale") return <span className="q-fate warn"><Icon name="alert" size={13} />{t("questions.fate.stale")}</span>;
   if (fate.kind === "sent") {
     return fate.failed ? (
       <span className="q-fate bad"><Icon name="alert" size={13} />{t("focus.ask.failed", { reason: fate.failed })}</span>
