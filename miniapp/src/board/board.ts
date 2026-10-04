@@ -75,8 +75,9 @@ export type ProjectTask = {
   assignee: Assignee | null;
   /** How far the work was accepted; absent from a host older than the task contract. */
   acceptance_state?: AcceptanceState;
-  /** Priced native inference linked to the exact accepted worker attempt; null when it cannot be observed. */
-  accepted_attempt_cost_microusd?: number | null;
+  /** Priced worker inference across attempts through the accepted receipt; null if any cost is unknown. */
+  accepted_result_cost_microusd?: number | null;
+  accepted_result_cost_unknown_reasons?: Array<"subscription" | "unpriced" | "unobserved">;
   /** What the card must satisfy, each with who was given it; absent from an older host. */
   requirements?: Requirement[];
 };

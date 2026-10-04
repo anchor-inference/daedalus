@@ -500,7 +500,7 @@ class Board:
                 "session_id": session["session_id"] if session is not None else None,
             }
         await self._contracts(tasks)
-        await self._accepted_attempt_costs(tasks)
+        await self._accepted_result_costs(tasks)
         needs = await self.needs_you(project_id)
         counts_rows = await self.app.db.fetchall("SELECT status, count(*) AS n FROM board_tasks WHERE project_id = ? GROUP BY status", (project_id,))
         counts = {status: 0 for status in STATUSES}
@@ -508,33 +508,60 @@ class Board:
         team = [{"id": m["id"], "name": m["name"], "color": m["color"], "harness": m["harness"], "isolation": m["isolation"]} for m in members.values() if m["archived_at"] is None]
         return {"tasks": tasks, "needs_you": needs, "counts": {**counts, "needs_you": len(needs)}, "staff": team}
 
-    async def _accepted_attempt_costs(self, tasks: list[dict[str, Any]]) -> None:
-        """Expose priced native inference attached to the exact accepted worker attempt."""
+    async def _accepted_result_costs(self, tasks: list[dict[str, Any]]) -> None:
+        """Price worker attempts through the accepted receipt, retaining every unpriced path."""
         accepted = [task for task in tasks if task.get("accepted_result_id") and task.get("acceptance_state") == "operator_approved"]
         if not accepted:
             return
         placeholders = ",".join("?" for _ in accepted)
         rows = await self.app.db.fetchall(
-            "SELECT t.id AS task_id,r.attempt_id,a.runtime_kind,"
-            " sum(CASE WHEN i.state IN ('settled','overrun') THEN 1 ELSE 0 END) AS priced_count,"
-            " sum(CASE WHEN i.state NOT IN ('settled','overrun','released')"
-            " OR (i.state IN ('settled','overrun') AND i.actual_microusd IS NULL) THEN 1 ELSE 0 END) AS unresolved,"
-            " sum(CASE WHEN i.state IN ('settled','overrun') THEN i.actual_microusd ELSE 0 END) AS amount"
+            "SELECT t.id AS task_id,r.attempt_id AS receipt_attempt_id,a.id AS attempt_id,"
+            " a.runtime_kind,n.attempt_id AS no_entry_id,"
+            " i.id AS reservation_id,i.state,i.actual_microusd"
             " FROM board_tasks t JOIN result_receipts r ON r.id = t.accepted_result_id AND r.task_id = t.id"
-            " LEFT JOIN execution_attempts a ON a.id = r.attempt_id AND a.task_id = t.id"
-            " AND a.contract_revision = r.contract_revision"
-            " LEFT JOIN inference_reservations i ON i.execution_attempt_id = a.id"
-            f" WHERE t.id IN ({placeholders}) AND t.accepted_contract_revision = r.contract_revision"
-            " GROUP BY t.id,r.attempt_id,a.runtime_kind",
+            " LEFT JOIN execution_attempts a ON a.task_id = t.id AND a.created_at <= r.created_at"
+            " LEFT JOIN runtime_no_entry_observations n ON n.attempt_id = a.id"
+            " LEFT JOIN inference_reservations i ON i.execution_attempt_id = a.id AND i.created_at <= r.created_at"
+            f" WHERE t.id IN ({placeholders}) AND t.accepted_contract_revision = r.contract_revision",
             tuple(task["id"] for task in accepted),
         )
-        by_task = {row["task_id"]: row for row in rows}
+        by_task: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            entry = by_task.setdefault(row["task_id"], {"amount": 0, "attempts": {}, "reasons": set(),
+                                                        "receipt_attempt_id": row["receipt_attempt_id"]})
+            if row["attempt_id"] is None:
+                continue
+            attempt = entry["attempts"].setdefault(row["attempt_id"], {
+                "kind": row["runtime_kind"], "no_entry": row["no_entry_id"] is not None,
+                "reservations": 0, "charged": False,
+            })
+            if row["reservation_id"] is None:
+                continue
+            attempt["reservations"] += 1
+            if row["state"] in ("settled", "overrun") and row["actual_microusd"] is not None:
+                attempt["charged"] = True
+                entry["amount"] += int(row["actual_microusd"])
+            elif row["state"] != "released":
+                entry["reasons"].add("unpriced")
         for task in accepted:
-            row = by_task.get(task["id"])
-            # A CLI subscription, manual receipt, or unobserved call has no defensible price.
-            priced = (row is not None and row["runtime_kind"] == "daedalus" and
-                      row["priced_count"] > 0 and not row["unresolved"] and row["amount"] is not None)
-            task["accepted_attempt_cost_microusd"] = int(row["amount"]) if priced else None
+            entry = by_task.get(task["id"])
+            reasons = entry["reasons"] if entry is not None else {"unobserved"}
+            attempts = entry["attempts"] if entry is not None else {}
+            if not attempts or entry["receipt_attempt_id"] not in attempts:
+                # Prior metered work cannot price a human-authored or detached accepted receipt.
+                reasons.add("unobserved")
+            for attempt in attempts.values():
+                if attempt["no_entry"]:
+                    if attempt["charged"]:
+                        reasons.add("unobserved")
+                    continue
+                if attempt["kind"] == "cli":
+                    reasons.add("subscription")
+                elif attempt["kind"] != "daedalus" or not attempt["reservations"]:
+                    # Entered work with no metered call cannot be called free from this ledger.
+                    reasons.add("unobserved")
+            task["accepted_result_cost_microusd"] = None if reasons else entry["amount"]
+            task["accepted_result_cost_unknown_reasons"] = sorted(reasons)
 
     async def _contracts(self, tasks: list[dict[str, Any]]) -> None:
         """Each card's requirements, with who was given each and whether they confirmed or opened it."""

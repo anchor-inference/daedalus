@@ -57,3 +57,48 @@ async def test_unknown_cost_stops_another_paid_request(evaluation: object) -> No
     model = evaluation.Model("unlisted", "new-model", 1.0, unknown_cost=True)
     with pytest.raises(evaluation.OutOfBudget, match="unknown cost"):
         await evaluation.complete(None, model, [], [])
+
+
+@pytest.mark.parametrize("evaluation", [orchestrator, browser])
+def test_cost_per_checked_pass_includes_failed_spend(evaluation: object) -> None:
+    model = evaluation.Model("deepseek", "deepseek-flash", 1.0)
+    episodes = [
+        evaluation.Episode("sample", model.label, 1, success=True, cost=0.001, cost_basis="provider_reported"),
+        evaluation.Episode("sample", model.label, 2, success=False, cost=0.002, cost_basis="provider_reported"),
+        evaluation.Episode("sample", model.label, 3, success=False, cost=0.003, cost_basis="provider_reported"),
+    ]
+    report = (evaluation.summary(episodes, [model], [], "now") if evaluation is browser
+              else evaluation.summary(episodes, [model], []))
+    row = next(line for line in report.splitlines() if line.startswith(f"| {model.label} |"))
+    assert "cost / checked pass" in report
+    assert "1/3" in row and "| $0.006 (provider reported) | $0.006 (provider reported) |" in row
+    assert "failed episodes" in report and "not an accepted task result" in report
+
+
+@pytest.mark.parametrize("evaluation", [orchestrator, browser])
+def test_cost_per_checked_pass_keeps_unknown_and_zero_passes_distinct(evaluation: object) -> None:
+    model = evaluation.Model("deepseek", "deepseek-flash", 1.0)
+    checked = [evaluation.Episode("sample", model.label, 1, success=True, cost=0.001, cost_basis="local_estimate"),
+               evaluation.Episode("sample", model.label, 2, success=False, cost=None, cost_basis="unpriced")]
+    failed = [evaluation.Episode("sample", model.label, 1, success=False, cost=0.001, cost_basis="local_estimate")]
+    def render(episodes: list[object]) -> str:
+        return (evaluation.summary(episodes, [model], [], "now") if evaluation is browser
+                else evaluation.summary(episodes, [model], []))
+    unknown_row = next(line for line in render(checked).splitlines() if line.startswith(f"| {model.label} |"))
+    zero_row = next(line for line in render(failed).splitlines() if line.startswith(f"| {model.label} |"))
+    assert "| UNKNOWN | UNKNOWN |" in unknown_row
+    assert "| $0.001 (local estimate) | undefined (0 passes) |" in zero_row
+
+
+@pytest.mark.parametrize("evaluation", [orchestrator, browser])
+def test_cost_per_checked_pass_does_not_price_subscription_or_reported_zero(evaluation: object) -> None:
+    subscription = evaluation.Model("codex", "licensed", 1.0)
+    priced = evaluation.Model("deepseek", "deepseek-flash", 1.0)
+    episodes = [evaluation.Episode("sample", subscription.label, 1, success=True, cost=None, cost_basis="subscription"),
+                evaluation.Episode("sample", priced.label, 1, success=True, cost=0, cost_basis="provider_reported")]
+    report = (evaluation.summary(episodes, [subscription, priced], [], "now") if evaluation is browser
+              else evaluation.summary(episodes, [subscription, priced], []))
+    subscription_row = next(line for line in report.splitlines() if line.startswith(f"| {subscription.label} |"))
+    priced_row = next(line for line in report.splitlines() if line.startswith(f"| {priced.label} |"))
+    assert subscription_row.count("SUBSCRIPTION (per-replay USD unavailable)") == 2
+    assert "| $0.000 (provider reported) | $0.000 (provider reported) |" in priced_row

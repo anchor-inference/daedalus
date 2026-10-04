@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from daedalus.extensions.api_files import register
 
 
-@pytest.mark.parametrize("mime", ["text/html", "text/html; charset=utf-8", "application/xhtml+xml", "image/svg+xml"])
+@pytest.mark.parametrize("mime", ["text/html", "text/html; charset=utf-8", "application/xhtml+xml", "image/svg+xml", "text/xml", "application/xml", "application/rss+xml"])
 async def test_active_artifact_bytes_and_names_survive_without_app_authority(tmp_path: Path, mime: str) -> None:
     source = tmp_path / "sample.html"
     source.write_bytes(b"<script>fetch('/api/private')</script>")

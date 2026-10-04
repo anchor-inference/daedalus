@@ -17,7 +17,7 @@ from daedalus.extensions.notifications import NotificationService
 from daedalus.extensions.recurring import Recurring, RecurringEffect, repoint_project_schedules_in
 from daedalus.extensions.scheduler import Scheduler
 from daedalus.host.session_runner import SessionManager
-from daedalus.stores.control import Principal
+from daedalus.stores.control import ControlDenied, Principal
 from daedalus.stores.database import Database
 from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.projects import ProjectError
@@ -150,6 +150,79 @@ async def test_claimed_before_effect_entry_can_resume_without_duplicate(system: 
     assert row["state"] == "pending"
     assert await system.extensions["effects"].step()
     assert len(system.front.sent) == 1
+
+
+@pytest.mark.parametrize("run_in", ["self", "new"])
+async def test_started_agent_run_is_reconciled_after_restart_from_its_input_receipt(system: Any,
+                                                                                      run_in: str) -> None:
+    project = await system.manager.projects.create("Workspace")
+    owner = await system.manager.create_session("owner", project_id=project.id)
+    rev = await system.db.fetchone("SELECT revision FROM domain_collection_revisions"
+                                   " WHERE scope_kind='project' AND scope_id=?", (project.id,))
+    created = await system.extensions["recurring"].create(
+        Principal("operator:1", "operator"), name="check", prompt="check the board",
+        cron="* * * * *", run_at=None, kind="agent", target_session=owner.session.id,
+        project_id=project.id, expires_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        expected_collection_revision=rev["revision"], client_operation_id="agent-create",
+    )
+    past = (datetime.now(UTC) - timedelta(minutes=2)).isoformat()
+    await system.db.execute("UPDATE schedules SET run_in = ?,next_run_at = ? WHERE id = ?",
+                            (run_in, past, created["id"]))
+    cycle = await system.extensions["recurring"].reserve(created["id"])
+    assert cycle is not None
+    store = system.extensions["effects"].store
+    claim = await store.claim(("schedule.agent",))
+    assert claim is not None
+    await system.db.execute("UPDATE recurring_cycles SET action_state = 'dispatching' WHERE id = ?", (cycle["id"],))
+    assert await store.recover() == 1
+    await system.extensions["scheduler"].restore()
+    assert created["id"] not in system.extensions["scheduler"]._active
+    assert await system.extensions["effects"].reconcile() == 0
+    assert (await store.view(cycle["effect_id"]))["state"] == "unknown"
+
+    run_session = owner if run_in == "self" else await system.manager.create_session(
+        "[cron] check", project_id=project.id, metadata={"schedule_cycle_id": cycle["id"]},
+    )
+    moment = datetime.now(UTC).isoformat()
+    await system.db.execute("INSERT INTO runs(id,tenant_id,session_id,status,created_at,updated_at)"
+                            " VALUES (?,?,?,?,?,?)", ("scheduled-run", "daedalus", run_session.session.id,
+                                                     "running", moment, moment))
+    await system.db.execute(
+        "INSERT INTO input_receipts(session_id,client_message_id,kind,content_digest,payload,status,"
+        "run_id,step_id,queue_revision,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (run_session.session.id, f"schedule-cycle:{cycle['id']}", "input", "digest", '{"origin":"schedule"}',
+         "accepted", "scheduled-run", "start", 1, moment, moment),
+    )
+    assert await system.extensions["effects"].reconcile() == 0
+    await system.db.execute("UPDATE input_receipts SET status = 'consumed' WHERE session_id = ?"
+                            " AND client_message_id = ?", (run_session.session.id, f"schedule-cycle:{cycle['id']}"))
+    assert await system.extensions["effects"].reconcile() == 1
+    assert (await store.view(cycle["effect_id"]))["state"] == "completed"
+    history = await system.extensions["recurring"].cycles(created["id"])
+    assert history[0]["action_state"] == "delivered"
+    active = await system.db.fetchone("SELECT active_session_id,active_run_id FROM schedules WHERE id = ?",
+                                      (created["id"],))
+    assert (active["active_session_id"], active["active_run_id"]) == (run_session.session.id, "scheduled-run")
+    assert system.extensions["scheduler"]._active_runs[created["id"]] == "scheduled-run"
+
+    # A later due slot cannot be reserved after the effect completed while its run is alive.
+    next_due = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+    await system.db.execute("UPDATE schedules SET next_run_at = ? WHERE id = ?", (next_due, created["id"]))
+    assert await system.extensions["recurring"].reserve(created["id"]) is None
+    assert (await system.db.fetchone("SELECT count(*) AS count FROM recurring_cycles WHERE schedule_id = ?",
+                                     (created["id"],)))["count"] == 1
+    revision = await system.db.fetchone("SELECT revision FROM domain_collection_revisions"
+                                        " WHERE scope_kind='project' AND scope_id=?", (project.id,))
+    with pytest.raises(ControlDenied, match="still active"):
+        await system.extensions["recurring"].run_now(
+            Principal("operator:1", "operator"), created["id"],
+            expected_collection_revision=revision["revision"], expected_schedule_revision=1,
+            client_operation_id="manual-while-active",
+        )
+    await system.db.execute("UPDATE runs SET status = 'completed' WHERE id = 'scheduled-run'")
+    await system.extensions["scheduler"].restore()
+    assert created["id"] not in system.extensions["scheduler"]._active
+    assert await system.extensions["recurring"].reserve(created["id"]) is not None
 
 
 async def test_manual_run_uses_distinct_receipt_and_keeps_due_time(system: Any) -> None:

@@ -102,17 +102,17 @@ class Scheduler:
             return
         rows = await self.app.db.fetchall("SELECT * FROM schedules WHERE active_session_id IS NOT NULL")
         for row in rows:
-            state = await manager.get_state(row["active_session_id"])
-            if state is not None and (state.running or state.pending is not None):
+            run = await self.app.db.fetchone("SELECT status FROM runs WHERE id = ? AND session_id = ?",
+                                              (row["active_run_id"], row["active_session_id"])) if row["active_run_id"] else None
+            state = await manager.get_state(row["active_session_id"]) if not row["active_run_id"] else None
+            if (run is not None and run["status"] in ("queued", "running", "paused")) or (
+                    not row["active_run_id"] and state is not None and (state.running or state.pending is not None)):
                 self._active[row["id"]] = row["active_session_id"]
                 if row["active_run_id"]:
                     self._active_runs[row["id"]] = row["active_run_id"]
             else:
                 self._active[row["id"]] = row["active_session_id"]
-                run_status = "completed"
-                if row["active_run_id"]:
-                    run = await self.app.db.fetchone("SELECT status FROM runs WHERE id = ?", (row["active_run_id"],))
-                    run_status = "failed" if run and run["status"] == "error" else "completed"
+                run_status = "failed" if run is not None and run["status"] == "error" else "completed"
                 await self.on_run_finished(row["active_session_id"], row["active_run_id"] or "", run_status)
 
     # -- CRUD -----------------------------------------------------------------------
@@ -168,6 +168,9 @@ class Scheduler:
                 self._retention.cancel()
 
     async def tick(self) -> None:
+        # A recovered receipt can restore an active run after startup's first restore.
+        # Refreshing here also settles a run that ended between that restore and its hook.
+        await self.restore()
         now = _now()
         rows = await self.app.db.fetchall(
             "SELECT * FROM schedules WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?",
@@ -475,7 +478,8 @@ class Scheduler:
             "attention, call StaySilent instead of writing that there is nothing new. When finished, write SUMMARY.md "
             "in the project directory describing what was done and anything the next run should know."
         )
-        run_id = await manager.submit(state.session.id, prompt, [], as_answer=False, origin="schedule")
+        run_id = await manager.submit(state.session.id, prompt, [], as_answer=False, origin="schedule",
+                                      client_message_id=f"schedule-cycle:{schedule['cycle_id']}" if schedule.get("cycle_id") else None)
         await self._mark_in_flight(schedule["id"], state.session.id, run_id)
         return state.session.id
 
@@ -506,7 +510,8 @@ class Scheduler:
             "Take the work as far as it goes now — the next occurrence is skipped while this turn runs. "
             "If nothing needs attention, call StaySilent with a one-line note of what you checked. End with a short note for the next run.]"
         )
-        run_id = await manager.submit(state.session.id, prompt, [], as_answer=False, origin="schedule")
+        run_id = await manager.submit(state.session.id, prompt, [], as_answer=False, origin="schedule",
+                                      client_message_id=f"schedule-cycle:{schedule['cycle_id']}" if schedule.get("cycle_id") else None)
         await self._mark_in_flight(schedule["id"], state.session.id, run_id)
         return state.session.id
 

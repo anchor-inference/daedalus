@@ -207,8 +207,23 @@ export function Viewer({ src, onInfo, onNavigation, className }: { src: PreviewS
   const [binary, setBinary] = useState(false);
   const kind = binary ? "other" : source && ["markdown", "csv", "html", "json", "diff", "text"].includes(previewKind(name)) ? "text" : previewKind(name);
   const { url, blob, error, progress } = useBlobUrl(src);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const [body, setBody] = useState<{ html?: string; text?: string; rows?: string[][]; sheets?: { name: string; rows: string[][] }[]; error?: string } | null>(null);
   const [sheet, setSheet] = useState(0);
+
+  useEffect(() => {
+    setPdfUrl(null);
+    setPdfError(null);
+    if (kind !== "pdf" || !blob) return;
+    // The native PDF viewer cannot run in a sandboxed frame. A data URL gives its document an
+    // opaque origin while keeping the viewer usable; the original blob URL remains a download.
+    const reader = new FileReader();
+    reader.onload = () => setPdfUrl(String(reader.result));
+    reader.onerror = () => setPdfError(t("preview.nofile"));
+    reader.readAsDataURL(new Blob([blob], { type: "application/pdf" }));
+    return () => { reader.onload = null; reader.onerror = null; reader.abort(); };
+  }, [blob, kind]);
 
   useEffect(() => {
     setBody(null);
@@ -249,8 +264,8 @@ export function Viewer({ src, onInfo, onNavigation, className }: { src: PreviewS
     };
   }, [blob, kind]);
 
-  const failure = error ?? (body?.rows ? null : body?.error);
-  const loading = !failure && (!url || (kind !== "image" && kind !== "pdf" && kind !== "audio" && kind !== "video" && kind !== "other" && !body));
+  const failure = error ?? pdfError ?? (body?.rows ? null : body?.error);
+  const loading = !failure && (!url || (kind === "pdf" && !pdfUrl) || (kind !== "image" && kind !== "pdf" && kind !== "audio" && kind !== "video" && kind !== "other" && !body));
 
   useEffect(() => { onInfo?.({ url, size: blob?.size ?? null, name, kind, loading, progress }); }, [url, blob, name, kind, loading, progress, onInfo]);
 
@@ -269,7 +284,7 @@ export function Viewer({ src, onInfo, onNavigation, className }: { src: PreviewS
         {failure && <div className="empty">{failure}</div>}
         {loading && <FileSkeleton />}
         {!failure && url && kind === "image" && <ImageView url={url} name={name} />}
-        {!failure && url && kind === "pdf" && <iframe className="preview-frame" src={url} title={name} />}
+        {!failure && pdfUrl && kind === "pdf" && <iframe className="preview-frame" src={pdfUrl} title={name} />}
         {!failure && url && kind === "audio" && <audio className="preview-media" controls src={url} />}
         {!failure && url && kind === "video" && <video className="preview-media" controls src={url} />}
         {!failure && body?.html && kind === "markdown" && <div className="answer preview-doc" dangerouslySetInnerHTML={{ __html: body.html }} />}
@@ -311,9 +326,9 @@ export function FilePreview({ src, onClose }: { src: PreviewSource; onClose: () 
           </h3>
           <div className="head-actions">
             {info?.url && (
-              <><a className="iconbtn small" href={info.url} target="_blank" rel="noreferrer" aria-label={t("panel.opennew")}><Icon name="external" size={16} /></a><a className="iconbtn small" href={info.url} download={name} title={t("common.download")} aria-label={t("common.download")}>
+              <a className="iconbtn small" href={info.url} download={name} title={t("common.download")} aria-label={t("common.download")}>
                 <Icon name="download" size={16} />
-              </a></>
+              </a>
             )}
             <button className="iconbtn small" onClick={onClose} aria-label={t("common.close")} title={t("common.close")}>
               <Icon name="close" size={16} />

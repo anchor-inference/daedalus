@@ -480,7 +480,7 @@ class Recurring:
             if current["schedule_revision"] != expected_schedule_revision or _scope(dict(current)) != scope:
                 raise ControlConflict("the schedule changed", current_revision=current["schedule_revision"])
             uncertain = await one(conn, "SELECT c.id FROM recurring_cycles c JOIN effect_outbox e ON e.id=c.effect_id"
-                                  " WHERE c.schedule_id = ? AND e.state IN ('claimed','unknown') LIMIT 1", (schedule_id,))
+                                  " WHERE c.schedule_id = ? AND e.state IN ('pending','claimed','unknown') LIMIT 1", (schedule_id,))
             if uncertain is not None:
                 raise ControlDenied("reconcile an uncertain occurrence before removing the schedule")
             if current["grant_id"]:
@@ -547,6 +547,11 @@ class Recurring:
                     (current["kind"] or "agent") != "wake" or current["cron"]
                     or current["target_session"] != principal.actor_id.partition(":")[2]):
                 raise ControlDenied("a coordinator grant covers only its own one-shot wake")
+            if current["active_run_id"]:
+                active = await one(conn, "SELECT status FROM runs WHERE id = ? AND session_id = ?",
+                                   (current["active_run_id"], current["active_session_id"]))
+                if active is not None and active["status"] in ("queued", "running", "paused"):
+                    raise ControlConflict("the previous scheduled run is still active")
             unresolved = await one(
                 conn, "SELECT c.id FROM recurring_cycles c JOIN effect_outbox e ON e.id = c.effect_id"
                 " WHERE c.schedule_id = ? AND e.state IN ('pending','claimed','unknown') LIMIT 1",
@@ -625,8 +630,13 @@ class Recurring:
                 raise KeyError(schedule_id)
             if current["schedule_revision"] != expected_schedule_revision or _scope(dict(current)) != scope:
                 raise ControlConflict("the schedule changed", current_revision=current["schedule_revision"])
+            if current["active_run_id"]:
+                active = await one(conn, "SELECT status FROM runs WHERE id = ? AND session_id = ?",
+                                   (current["active_run_id"], current["active_session_id"]))
+                if active is not None and active["status"] in ("queued", "running", "paused"):
+                    raise ControlDenied("the previous scheduled run is still active")
             uncertain = await one(conn, "SELECT c.id FROM recurring_cycles c JOIN effect_outbox e ON e.id=c.effect_id"
-                                  " WHERE c.schedule_id = ? AND e.state IN ('claimed','unknown') LIMIT 1", (schedule_id,))
+                                  " WHERE c.schedule_id = ? AND e.state IN ('pending','claimed','unknown') LIMIT 1", (schedule_id,))
             if uncertain is not None:
                 raise ControlDenied("reconcile an uncertain occurrence before starting another")
             cycle_id = uuid.uuid5(uuid.NAMESPACE_URL, f"schedule-manual:{mutation.receipt_id}").hex
@@ -831,5 +841,33 @@ class RecurringEffect:
                 await self.app.db.execute("UPDATE recurring_cycles SET action_state = 'delivered',updated_at = ?"
                                           " WHERE id = ? AND action_state = 'dispatching'", (now(), cycle_id))
                 return EffectResolution("completed", {"cycle_id": cycle_id, "event_seq": event["seq"]})
+        if row["kind"] == "agent" and row["action_state"] == "dispatching":
+            # A run can commit before the scheduler records its in-flight row. Its exact
+            # consumed input proves entry even if that process died before returning.
+            schedule = claim.payload["schedule"]
+            own_session = (schedule.get("target_session") or schedule.get("created_by_session")) if schedule.get("run_in") == "self" else None
+            receipt = await self.app.db.fetchone(
+                "SELECT i.session_id,i.run_id,r.status FROM input_receipts i JOIN runs r ON r.id = i.run_id"
+                " AND r.session_id = i.session_id JOIN sessions s ON s.id = i.session_id"
+                " WHERE i.client_message_id = ? AND json_extract(i.payload,'$.origin') = 'schedule'"
+                " AND i.status = 'consumed' AND i.step_id = 'start'"
+                " AND (i.session_id = ? OR json_extract(s.metadata,'$.schedule_cycle_id') = ?)",
+                (f"schedule-cycle:{cycle_id}", own_session, cycle_id),
+            )
+            if receipt is not None:
+                async with self.app.db.transaction() as conn:
+                    current = await one(conn, "SELECT active_run_id FROM schedules WHERE id = ?",
+                                        (schedule["id"],))
+                    if current is None or current["active_run_id"] not in (None, receipt["run_id"]):
+                        return None
+                    if receipt["status"] in ("queued", "running", "paused"):
+                        await conn.execute("UPDATE schedules SET active_session_id = ?,active_run_id = ?"
+                                           " WHERE id = ?", (receipt["session_id"], receipt["run_id"], schedule["id"]))
+                    await conn.execute("UPDATE recurring_cycles SET action_state = 'delivered',updated_at = ?"
+                                       " WHERE id = ? AND action_state = 'dispatching'", (now(), cycle_id))
+                scheduler = self.app.extensions.get("scheduler")
+                if scheduler is not None:
+                    await scheduler.restore()
+                return EffectResolution("completed", {"cycle_id": cycle_id, "run_id": receipt["run_id"]})
         # A transport call may have completed just before the process died. No timer retry can prove it did not.
         return None

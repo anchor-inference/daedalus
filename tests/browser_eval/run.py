@@ -457,8 +457,8 @@ class Runner:
 
 def summary(episodes: list[Episode], models: list[Model], tasks: list[Task], started: str) -> str:
     lines = [f"# Browser evaluation — {started}", ""]
-    lines.append("| model | success | tool calls / task | model calls / task | tokens in (cached) / out per task | cost | wall s / task |")
-    lines.append("|---|---|---|---|---|---|---|")
+    lines.append("| model | success | tool calls / task | model calls / task | tokens in (cached) / out per task | cost | cost / checked pass | wall s / task |")
+    lines.append("|---|---|---|---|---|---|---|---|")
     for model in models:
         mine = [e for e in episodes if e.model == model.label]
         if not mine:
@@ -467,19 +467,23 @@ def summary(episodes: list[Episode], models: list[Model], tasks: list[Task], sta
         ok = sum(e.success for e in mine)
         if model.upstream in SUBSCRIPTIONS:
             total_cost = "SUBSCRIPTION (per-replay USD unavailable)"
+            pass_cost = "SUBSCRIPTION (per-replay USD unavailable)" if ok else "undefined (0 passes)"
         elif any(e.cost is None for e in mine):
             total_cost = "UNKNOWN"
+            pass_cost = "UNKNOWN" if ok else "undefined (0 passes)"
         else:
             sources = {e.cost_basis for e in mine}
             basis = ("provider reported" if sources == {"provider_reported"} else
                      "local estimate" if sources == {"local_estimate"} else "mixed reported and estimated")
             total_cost = f"${sum(e.cost or 0 for e in mine):.3f} ({basis})"
+            pass_cost = f"${sum(e.cost or 0 for e in mine) / ok:.3f} ({basis})" if ok else "undefined (0 passes)"
         lines.append(
             f"| {model.label} | {ok}/{n} ({ok / n:.0%}) | {sum(e.tool_calls for e in mine) / n:.1f} | {sum(e.model_calls for e in mine) / n:.1f} | "
             f"{sum(e.tokens_in for e in mine) / n / 1000:.1f}k ({sum(e.tokens_cached for e in mine) / n / 1000:.1f}k) / {sum(e.tokens_out for e in mine) / n / 1000:.1f}k | "
-            f"{total_cost} | {sum(e.seconds for e in mine) / n:.0f} |"
+            f"{total_cost} | {pass_cost} | {sum(e.seconds for e in mine) / n:.0f} |"
         )
-    lines += ["", "Local estimates use the rate table in this runner; verify its prices before comparing providers.",
+    lines += ["", "Cost per checked pass includes spend from failed episodes. A pass is the replay check, not an accepted task result or invoice receipt.",
+              "Local estimates use the rate table in this runner; verify its prices before comparing providers.",
               "", "## Error kinds in tool results", "", "| model | " + " | ".join(k for k, _ in ERROR_KINDS) + " | invented ref | frame ref | other | truncated | operator asks |", "|---" * (len(ERROR_KINDS) + 7) + "|"]
     for model in models:
         mine = [e for e in episodes if e.model == model.label]

@@ -417,7 +417,7 @@ def summary(results: list[Episode], models: list[Model], scenarios: list[Scenari
             mine = [r for r in results if r.scenario == scenario.id and r.model == model.label]
             row.append(f"{sum(r.success for r in mine)}/{len(mine)}" if mine else "—")
         lines.append("| " + " | ".join(row) + " |")
-    lines += ["", "| model | passed | turns/episode | tool calls/episode | refused calls | operator questions | tokens in / out | cost |", "|---|---|---|---|---|---|---|---|"]
+    lines += ["", "| model | passed | turns/episode | tool calls/episode | refused calls | operator questions | tokens in / out | cost | cost / checked pass |", "|---|---|---|---|---|---|---|---|---|"]
     for model in models:
         mine = [r for r in results if r.model == model.label]
         if not mine:
@@ -425,18 +425,23 @@ def summary(results: list[Episode], models: list[Model], scenarios: list[Scenari
         n = len(mine)
         if model.upstream in SUBSCRIPTIONS:
             total_cost = "SUBSCRIPTION (per-replay USD unavailable)"
+            pass_cost = "SUBSCRIPTION (per-replay USD unavailable)" if any(r.success for r in mine) else "undefined (0 passes)"
         elif any(r.cost is None for r in mine):
             total_cost = "UNKNOWN"
+            pass_cost = "UNKNOWN" if any(r.success for r in mine) else "undefined (0 passes)"
         else:
             sources = {r.cost_basis for r in mine}
             basis = ("provider reported" if sources == {"provider_reported"} else
                      "local estimate" if sources == {"local_estimate"} else "mixed reported and estimated")
             total_cost = f"${sum(r.cost or 0 for r in mine):.3f} ({basis})"
+            passes = sum(r.success for r in mine)
+            pass_cost = f"${sum(r.cost or 0 for r in mine) / passes:.3f} ({basis})" if passes else "undefined (0 passes)"
         lines.append(
             f"| {model.label} | {sum(r.success for r in mine)}/{n} | {sum(r.turns for r in mine) / n:.2f} | {sum(r.tool_calls for r in mine) / n:.1f} | "
-            f"{sum(r.refused for r in mine)} | {sum(r.asked_operator for r in mine)} | {sum(r.tokens_in for r in mine) // 1000}k / {sum(r.tokens_out for r in mine) // 1000}k | {total_cost} |"
+            f"{sum(r.refused for r in mine)} | {sum(r.asked_operator for r in mine)} | {sum(r.tokens_in for r in mine) // 1000}k / {sum(r.tokens_out for r in mine) // 1000}k | {total_cost} | {pass_cost} |"
         )
-    lines += ["", "Local estimates use the rate table in this runner; verify its prices before comparing providers.",
+    lines += ["", "Cost per checked pass includes spend from failed episodes. A pass is the replay check, not an accepted task result or invoice receipt.",
+              "Local estimates use the rate table in this runner; verify its prices before comparing providers.",
               "", "## Failures", ""]
     for r in results:
         if not r.success:

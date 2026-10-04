@@ -216,10 +216,11 @@ async def test_agent_task_can_run_in_its_own_session(app: Any) -> None:
     await _durable(app, scheduler)
     manager = app.manager
     owner = await manager.create_session("owner")
-    submitted: list[tuple[str, str, str]] = []
+    submitted: list[tuple[str, str, str, str | None]] = []
 
-    async def fake_submit(session_id: str, text: str, attachments=(), *, steer=False, as_answer=True, origin="operator") -> str:  # type: ignore[no-untyped-def]
-        submitted.append((session_id, text, origin))
+    async def fake_submit(session_id: str, text: str, attachments=(), *, steer=False, as_answer=True,
+                          origin="operator", client_message_id=None) -> str:  # type: ignore[no-untyped-def]
+        submitted.append((session_id, text, origin, client_message_id))
         return "run-self"
 
     manager.submit = fake_submit  # type: ignore[method-assign]
@@ -246,12 +247,13 @@ async def test_agent_task_can_run_in_its_own_session(app: Any) -> None:
     row = dict(await app.db.fetchone("SELECT * FROM schedules WHERE id = ?", (created["id"],)))
     assert row["run_in"] == "self" and row["target_session"] == owner.session.id
     rev = await app.db.fetchone("SELECT revision FROM domain_collection_revisions WHERE scope_kind='project' AND scope_id=?", (row["project_id"],))
-    await app.extensions["recurring"].run_now(
+    fired = await app.extensions["recurring"].run_now(
         Principal("operator:1", "operator"), created["id"], expected_collection_revision=rev["revision"],
         expected_schedule_revision=1, client_operation_id="run-own-session",
     )
     assert await app.extensions["effects"].step()
     assert submitted and submitted[0][0] == owner.session.id and submitted[0][2] == "schedule" and "in this session" in submitted[0][1]
+    assert submitted[0][3] == f"schedule-cycle:{fired['cycle_id']}"
     assert scheduler._active[created["id"]] == owner.session.id and scheduler._active_runs[created["id"]] == "run-self"
     # another turn of the same session ending is not the task ending
     await scheduler.on_run_finished(owner.session.id, "run-operator", "completed")

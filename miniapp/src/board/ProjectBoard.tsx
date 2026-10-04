@@ -67,7 +67,7 @@ type LaunchReceipt = { effect_id: string; state: "queued"; entity_revision: numb
 type LaunchIntent = { id: string; body: { staff_id: string; resume_from: string | null; expected_entity_revision: number } };
 type ResumeSession = { id: string; started_at: string; owner_name: string; task_title: string; can_resume: boolean; resume_reason: string };
 
-export function acceptedAttemptCost(amount: number | null | undefined): string {
+export function acceptedResultCost(amount: number | null | undefined): string {
   if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0) return t("pboard.cost.unknown");
   if (amount % 10_000 === 0) return `$${(amount / 1_000_000).toFixed(2)}`;
   return `$${(amount / 1_000_000).toFixed(6).replace(/0+$/, "")}`;
@@ -737,7 +737,10 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
       {task && !resultReference && (task.status === "review" || task.acceptance_state === "operator_approved") && <ResultFlow task={task} onAccepted={onDone} toast={toast} />}
       {task?.status === "done" && task.acceptance_state === "operator_approved" && (
         <p className="sub pboard-attempt-cost" title={t("pboard.cost.scope")}>
-          {t("pboard.cost.label")} · <strong>{acceptedAttemptCost(task.accepted_attempt_cost_microusd)}</strong>
+          {t("pboard.cost.label")} · <strong>{acceptedResultCost(task.accepted_result_cost_microusd)}</strong>
+          {task.accepted_result_cost_unknown_reasons?.map((reason) => (
+            <span key={reason}> · {t(`pboard.cost.reason.${reason}`)}</span>
+          ))}
         </p>
       )}
       {task && (NEXT[task.status].length > 0 || task.status === "review") && (
