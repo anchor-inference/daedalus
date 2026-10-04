@@ -47,8 +47,10 @@ func WrapScopedRead(o ScopedOptions) (Plan, error) {
 	}
 	plan := Plan{}
 	closeOnError := func(err error) (Plan, error) { return Plan{}, errors.Join(err, plan.Close()) }
+	// A loopback service outside the filesystem could otherwise hand a child shell another
+	// account's state. Provider traffic needs a separate, scoped channel before it can be enabled.
 	argv := []string{o.Bwrap, "--tmpfs", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
-		"--unshare-pid", "--die-with-parent", "--clearenv", "--setenv", "HOME", "/home/operator",
+		"--unshare-pid", "--unshare-net", "--die-with-parent", "--clearenv", "--setenv", "HOME", "/home/operator",
 		"--setenv", "XDG_CONFIG_HOME", "/home/operator/.config", "--setenv", "XDG_CACHE_HOME", "/home/operator/.cache",
 		"--setenv", "XDG_DATA_HOME", "/home/operator/.local/share", "--setenv", "XDG_STATE_HOME", "/home/operator/.local/state",
 		"--setenv", "XDG_RUNTIME_DIR", "/home/operator/.run", "--setenv", "PATH", "/bin:/usr/bin",

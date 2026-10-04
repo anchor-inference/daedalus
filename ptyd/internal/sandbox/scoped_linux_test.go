@@ -131,6 +131,89 @@ func TestScopedReadPhysicalNestedCredentialBoundary(t *testing.T) {
 	t.Log(strings.TrimSpace(string(output)))
 }
 
+func TestScopedReadShellCannotUsePeerFilesOrHostNetwork(t *testing.T) {
+	bwrap, err := exec.LookPath("bwrap")
+	if err != nil {
+		t.Skip("bubblewrap is not installed")
+	}
+	busybox, err := exec.LookPath("busybox")
+	if err != nil {
+		t.Skip("a static shell is not installed")
+	}
+	hostNetwork, err := os.Readlink("/proc/self/ns/net")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	selected := filepath.Join(root, "selected")
+	peer := filepath.Join(root, "peer")
+	project := filepath.Join(root, "project")
+	for _, path := range []string{selected, peer, project} {
+		if err := os.Mkdir(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(selected, "auth"), []byte("selected-synthetic-account"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	peerFile := filepath.Join(peer, "auth")
+	if err := os.WriteFile(peerFile, []byte("peer-synthetic-account"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"peer-path": peerFile, "host-network": hostNetwork} {
+		if err := os.WriteFile(filepath.Join(project, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(peerFile, filepath.Join(project, "peer-link")); err != nil {
+		t.Fatal(err)
+	}
+	open := func(path string) *os.File {
+		t.Helper()
+		file, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { file.Close() })
+		return file
+	}
+	credential, err := SnapshotCredentialFile(open(selected), "auth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer credential.Close()
+	// The shell and every command substitution run under the same mount and network namespaces.
+	script := `
+test "$(/bin/busybox cat /home/operator/.codex/auth.json)" = selected-synthetic-account || exit 11
+test "$HOME" = /home/operator || exit 12
+test "$XDG_CONFIG_HOME" = /home/operator/.config || exit 13
+test -z "$GH_TOKEN" && test -z "$BASH_ENV" || exit 14
+peer=$(/bin/busybox cat /workspace/peer-path)
+if /bin/busybox cat "$peer" >/dev/null 2>&1; then exit 15; fi
+if /bin/busybox cat /workspace/peer-link >/dev/null 2>&1; then exit 16; fi
+host=$(/bin/busybox cat /workspace/host-network)
+child=$(/bin/busybox readlink /proc/self/ns/net)
+test "$host" != "$child" || exit 17
+/bin/busybox sh -c 'test -z "$GH_TOKEN" && ! /bin/busybox cat /workspace/peer-link >/dev/null 2>&1' || exit 18
+`
+	plan, err := WrapScopedRead(ScopedOptions{Bwrap: bwrap,
+		Argv: []string{"/bin/busybox", "sh", "-c", script}, Cwd: "/workspace",
+		ReadOnly: []ScopedRead{{Source: open(busybox), Destination: "/bin/busybox"},
+			{Source: open(project), Destination: "/workspace"}},
+		Credential: credential, Account: "/home/operator/.codex/auth.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plan.Close()
+	cmd := exec.Command(plan.Argv[0], plan.Argv[1:]...)
+	cmd.ExtraFiles = plan.ExtraFiles
+	cmd.Env = []string{"HOME=" + peer, "XDG_CONFIG_HOME=" + peer, "GH_TOKEN=peer-synthetic-account",
+		"BASH_ENV=/workspace/peer-link"}
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("shell escaped scoped read or network boundary: %v\n%s", err, output)
+	}
+}
+
 func TestScopedReadChild(t *testing.T) {
 	path, err := os.ReadFile("/workspace/peer-path")
 	if err != nil {
