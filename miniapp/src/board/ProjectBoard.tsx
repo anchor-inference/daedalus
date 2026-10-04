@@ -11,11 +11,12 @@ import { useEvent, useStreamUp } from "../events";
 import { absTime, relTime } from "../format";
 import { Icon } from "../icons";
 import { plural, t } from "../i18n";
-import { navigate, pathFor, projectHome, projectPagePath, projectSessionPath } from "../router";
+import { navigate, pathFor, projectHome, projectPagePath, projectSessionPath, useRoute } from "../router";
 import { PageHeader, useMedia } from "../shell";
 import { invalidate, useOffline, useQuery } from "../store";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { LifecycleCancel } from "../project/LifecycleCancel";
+import { CoordinatorAuthority } from "../project/CoordinatorAuthority";
 import { waitKey } from "../project/focus";
 import { ReviewPanel } from "./ReviewPanel";
 import { AcceptedResultDetail, ResultFlow, type AcceptedResultReference } from "./ResultFlow";
@@ -462,6 +463,7 @@ function RequirementsSection({ requirements }: { requirements: Requirement[] }) 
 
 /** Creating a task and changing one: the same sheet, because a task is its title, its brief, who does it and what it waits for. */
 function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, toast }: { projectId: string; data: BoardResponse; task?: ProjectTask; resultReference?: AcceptedResultReference | null; onClose: () => void; onDone: () => void; toast: (text: string) => void }) {
+  const route = useRoute();
   const offline = useOffline();
   const operation = useRef<{ fingerprint: string; id: string } | null>(null);
   const launchOperation = useRef<{ fingerprint: string; id: string } | null>(null);
@@ -535,6 +537,8 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
     } catch (error) { setResumeError(errorText(error)); }
   }
   const gone = task?.assignee && !team.some((m) => m.id === task.assignee!.id) ? task.assignee : null;
+  const granting = !!task && route.query.get("grant") === "assignment";
+  const taskPath = task ? projectPagePath(projectId, "board", { task: task.id }) : "";
   const missing = missingBrief(brief);
   const editorChanged = task
     ? title.trim() !== task.title ||
@@ -679,6 +683,14 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
   }
   const toggleDep = (id: string) => setDeps(deps.includes(id) ? deps.filter((d) => d !== id) : [...deps, id]);
 
+  if (granting && task) return (
+    <Sheet title={t("pboard.grant.title")} onClose={() => navigate(taskPath)} className="pboard-sheet">
+      <button type="button" className="linkbtn" onClick={() => navigate(taskPath)}>{t("pboard.grant.back")}</button>
+      <p className="sub">{t("pboard.grant.intro", { title: task.title })}</p>
+      <CoordinatorAuthority projectId={projectId} initialTaskId={task.id} toast={toast} onChanged={onDone} />
+    </Sheet>
+  );
+
   return (
     <Sheet
       title={task ? task.title : t("pboard.new")}
@@ -705,6 +717,13 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
           {task.branch && <code className="pcard-branch">{task.branch}</code>}
           <span className="sep">·</span>
           <span title={absTime(task.updated_at)}>{t("board.updated", { t: relTime(task.updated_at) })}</span>
+        </div>
+      )}
+      {/* The first assignment decision must appear before the longer task details, where a new operator can find it. */}
+      {task && team.length === 0 && !gone && (task.status === "todo" || task.status === "blocked") && (
+        <div className="sub">
+          {t("pboard.assignee.none")} <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "team"))}>{t("pboard.team.hire")}</button>
+          <div><button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id, grant: "assignment" }))}>{t("pboard.grant.open")}</button></div>
         </div>
       )}
       {task && task.status === "review" && task.branch && (
@@ -769,7 +788,7 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
       <label className="field" htmlFor="ptask-assignee">{t("pboard.assignee")}</label>
       {team.length === 0 && !gone ? (
         <div className="sub">
-          {t("pboard.assignee.none")} <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "team"))}>{t("pboard.team.hire")}</button>
+          {task && (task.status === "todo" || task.status === "blocked") ? t("pboard.assignee.nobody") : <>{t("pboard.assignee.none")} <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "team"))}>{t("pboard.team.hire")}</button></>}
         </div>
       ) : (
         <select id="ptask-assignee" className="field" value={assignee} onChange={(e) => setAssignee(e.target.value)}>

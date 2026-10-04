@@ -3,6 +3,7 @@ import { api, ApiError } from "../api";
 import { locale, t } from "../i18n";
 import { useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
+import { navigate, projectHome } from "../router";
 import { CoordinatorHandoff } from "./CoordinatorHandoff";
 
 type BundleId = "planning" | "assignment" | "execution" | "execution_project" | "review" | "watch" | "wake_internal";
@@ -60,10 +61,11 @@ function grantName(grant: Grant): string {
   return bundleName("");
 }
 
-export function CoordinatorAuthority({ projectId, toast, onChanged }: { projectId: string; toast: (message: string) => void; onChanged: () => void }) {
-  const [open, setOpen] = useState(false);
+export function CoordinatorAuthority({ projectId, toast, onChanged, initialTaskId }: { projectId: string; toast: (message: string) => void; onChanged: () => void; initialTaskId?: string }) {
+  const [open, setOpen] = useState(!!initialTaskId);
+  const [adding, setAdding] = useState(!!initialTaskId);
   const [bundleId, setBundleId] = useState<BundleId>("assignment");
-  const [taskId, setTaskId] = useState("");
+  const [taskId, setTaskId] = useState(initialTaskId ?? "");
   const [hours, setHours] = useState(1);
   const [withdrawId, setWithdrawId] = useState("");
   const [reason, setReason] = useState("");
@@ -160,7 +162,7 @@ export function CoordinatorAuthority({ projectId, toast, onChanged }: { projectI
     </li>;
   }
 
-  return <details className="sheet-section" onToggle={(event) => setOpen(event.currentTarget.open)}>
+  return <details className="sheet-section" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
     <summary>{t("authority.title")}</summary>
     {open && <div className="project-extension-list">
       <p className="sub">{t("authority.intro")}</p>
@@ -170,10 +172,10 @@ export function CoordinatorAuthority({ projectId, toast, onChanged }: { projectI
       {pending && <div className="result-warning" role="status">{t("authority.pending", { action: pending.label })} <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => void submit(pending)}>{t("authority.retry")}</button></div>}
       {current && <>
         {current.current_coordinator_session_id ? <p>{t("authority.activeCount", { n: active.length })}</p>
-          : <p className="result-warning">{t("authority.noCoordinator")}</p>}
+          : <p className="result-warning">{t("authority.noCoordinator")} {initialTaskId && <button type="button" className="linkbtn" onClick={() => navigate(projectHome(projectId))}>{t("pboard.grant.enable")}</button>}</p>}
         <ul className="plain-list">{active.map(grantRow)}</ul>
         {past.length > 0 && <details><summary>{t("authority.past", { n: past.length })}</summary><ul className="plain-list">{past.map(grantRow)}</ul></details>}
-        <details><summary>{t("authority.add")}</summary>
+        <details open={adding} onToggle={(event) => setAdding(event.currentTarget.open)}><summary>{t("authority.add")}</summary>
           <label className="field">{t("authority.bundle")}
             <select className="field" value={bundleId} onChange={(event) => { setBundleId(event.target.value as BundleId); setTaskId(""); }}>
               {current.available_bundles.filter((item) => bundleIds.includes(item.id as BundleId)).map((item) => <option key={item.id} value={item.id}>{bundleName(item.id)}</option>)}
