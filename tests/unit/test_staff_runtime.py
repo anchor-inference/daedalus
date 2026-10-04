@@ -517,7 +517,7 @@ async def test_a_status_change_cannot_replace_a_running_attempt(settings: Settin
     try:
         cli = FakeStaffRuntime(kind="claude")
         team.runtimes["claude"] = cli
-        cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="shared")
+        cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="readonly")
         scouting = await board_task(manager, project, "Scouting")
         assert (await operator_assignment(team, cleo, scouting))["state"] == "queued"
         live = await team.live_of(cleo)
@@ -644,7 +644,7 @@ async def test_cli_resume_lists_archived_staff_and_uses_the_selected_conversatio
     runtime.manager = manager
     team.runtimes["cursor"] = runtime
     try:
-        first = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
+        first = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="readonly")
         task_id = await board_task(manager, project, "Menu")
         assert (await operator_assignment(team, first, task_id))["state"] == "queued"
         original = await team.live_of(first)
@@ -653,7 +653,7 @@ async def test_cli_resume_lists_archived_staff_and_uses_the_selected_conversatio
         await observed_cli_exit(team, original)
         await manager.staff.end_session(original.id, "terminal closed")
         await manager.staff.archive(first.id)
-        again = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
+        again = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="readonly")
         next_task = await board_task(manager, project, "Prices")
         history = await team.resume_sessions(again, task_id=next_task)
         assert [(row["id"], row["owner_name"], row["can_resume"]) for row in history] == [(original.id, "Ada", True)]
@@ -676,7 +676,7 @@ async def test_cli_resume_rejects_another_folder_or_harness(settings: Settings, 
     team.runtimes["cursor"] = cursor_runtime
     team.runtimes["claude"] = FakeStaffRuntime(kind="claude")
     try:
-        cursor = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
+        cursor = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="readonly")
         task_id = await board_task(manager, project, "Menu")
         await operator_assignment(team, cursor, task_id)
         original = await team.live_of(cursor)
@@ -685,14 +685,14 @@ async def test_cli_resume_rejects_another_folder_or_harness(settings: Settings, 
         await observed_cli_exit(team, original)
         await manager.staff.end_session(original.id, "terminal closed")
         next_task = await board_task(manager, project, "Next menu")
-        claude = await manager.staff.hire(project.id, name="Ben", harness="claude", isolation="shared")
+        claude = await manager.staff.hire(project.id, name="Ben", harness="claude", isolation="readonly")
         with pytest.raises(AssertionError, match="selected harness"):
             await operator_assignment(team, claude, next_task, resume_from=original.id)
         other = tmp_path / "other"
         other.mkdir()
         folder = await manager.projects.add_folder(project.id, str(other))
         await manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (folder.id, next_task))
-        elsewhere = await manager.staff.hire(project.id, name="Cleo", harness="cursor", isolation="shared", folder_id=folder.id)
+        elsewhere = await manager.staff.hire(project.id, name="Cleo", harness="cursor", isolation="readonly", folder_id=folder.id)
         with pytest.raises(AssertionError, match="another folder path"):
             await operator_assignment(team, elsewhere, next_task, resume_from=original.id)
     finally:
@@ -707,7 +707,7 @@ async def test_cli_resume_follows_launch_path_after_folder_is_added_again(settin
     team.runtimes["cursor"] = runtime
     try:
         old_folder = project.primary
-        member = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
+        member = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="readonly")
         task_id = await board_task(manager, project, "Menu")
         await operator_assignment(team, member, task_id)
         original = await team.live_of(member)
@@ -724,7 +724,7 @@ async def test_cli_resume_follows_launch_path_after_folder_is_added_again(settin
         assert added_again.id != old_folder.id
         next_task = await board_task(manager, project, "Prices")
         await manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (added_again.id, next_task))
-        again = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared", folder_id=added_again.id)
+        again = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="readonly", folder_id=added_again.id)
         history = await team.resume_sessions(again, task_id=next_task)
         assert [row["id"] for row in history if row["can_resume"]] == [original.id]
         assert (await operator_assignment(team, again, next_task, resume_from=original.id))["state"] == "queued"
@@ -740,7 +740,7 @@ async def test_queued_cli_resume_survives_queue_rebuild(settings: Settings, db: 
     runtime.manager = manager
     team.runtimes["cursor"] = runtime
     try:
-        member = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="shared")
+        member = await manager.staff.hire(project.id, name="Ada", harness="cursor", isolation="readonly")
         task_id = await board_task(manager, project, "Menu")
         await operator_assignment(team, member, task_id)
         first = await team.live_of(member)
@@ -792,7 +792,7 @@ async def test_a_task_without_its_brief_or_runtime_is_refused(settings: Settings
         thin = await board_task(manager, project, "Thin", brief={"objective": "x"})
         with pytest.raises(AssertionError, match="task brief is incomplete"):
             await operator_assignment(team, ada, thin)
-        cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="shared")
+        cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="readonly")
         with pytest.raises(AssertionError, match="Claude Code staff cannot be started here yet"):
             await operator_assignment(team, cleo, await board_task(manager, project, "Full"))
         assert await manager.staff.live(cleo.id) is None
@@ -856,7 +856,7 @@ async def test_command_line_staff_wait_for_the_machine_and_daedalus_staff_do_not
     try:
         cli = FakeStaffRuntime(kind="claude")
         team.runtimes["claude"] = cli
-        cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="shared")
+        cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="readonly")
         ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
         waits = await operator_assignment(team, cleo, await board_task(manager, project, "Terminal work"),
                                           wait_for_admission=False)
@@ -890,13 +890,29 @@ async def test_without_the_terminals_service_command_line_staff_wait_with_the_re
     try:
         team.runtimes["codex"] = FakeStaffRuntime(kind="codex")
         assert team.capacity() is None
-        max_ = await manager.staff.hire(project.id, name="Max", harness="codex", isolation="shared")
+        max_ = await manager.staff.hire(project.id, name="Max", harness="codex", isolation="readonly")
         waits = await operator_assignment(team, max_, await board_task(manager, project, "Terminal work"),
                                           wait_for_admission=False)
         assert waits["state"] == "queued"
         view = await effect_waits(manager, waits["effect_id"], "terminals")
         assert "terminals service is not running" in view["wait_detail"]
         assert view["task_id"] and view["wait_position"] == 1
+    finally:
+        await close_team(manager)
+        await manager.close()
+
+
+async def test_writable_cli_without_containment_creates_no_assignment(settings: Settings, db: Database, tmp_path: Path) -> None:
+    manager, team, _runtime, project = await fake_team(settings, db, tmp_path, capacity=Capacity())
+    try:
+        team.runtimes["claude"] = FakeStaffRuntime(kind="claude")
+        member = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="shared")
+        task_id = await board_task(manager, project, "Menu")
+        with pytest.raises(ControlConflict, match="terminal daemon cannot prove resource containment"):
+            await operator_assignment(team, member, task_id, wait_for_admission=False)
+        row = await manager.db.fetchone("SELECT status,assignee_staff_id FROM board_tasks WHERE id = ?", (task_id,))
+        assert row is not None and (row["status"], row["assignee_staff_id"]) == ("todo", None)
+        assert await manager.db.fetchone("SELECT 1 FROM effect_outbox WHERE kind = 'task.launch'") is None
     finally:
         await close_team(manager)
         await manager.close()
@@ -939,7 +955,7 @@ async def test_the_team_server_takes_only_its_own_token(settings: Settings, db: 
         cli = FakeStaffRuntime(kind="claude")
         team.runtimes["claude"] = cli
         team._capacity = Capacity()
-        cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="shared")
+        cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="readonly")
         task_id = await board_task(manager, project, "Menu")
         await operator_assignment(team, cleo, task_id)
         [req] = cli.started
@@ -1041,7 +1057,7 @@ async def test_a_notification_answers_a_command_line_request_and_the_router_hold
     try:
         cli = FakeStaffRuntime(kind="claude")
         team.runtimes["claude"] = cli
-        cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="shared")
+        cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="readonly")
         await operator_assignment(team, cleo, await board_task(manager, project, "Menu"))
         live = await team.live_of(cleo)
         assert live is not None
