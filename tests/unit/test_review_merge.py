@@ -425,18 +425,68 @@ async def test_merge_keeps_approved_report_copy_if_source_changes_during_git(
             claim = Claim(action_id, outbox["receipt_id"], "review.merge", 1,
                           Principal.operator({"via": "token", "user_id": 1}), Scope("project", r.project.id),
                           task_id, None, ("git.merge",), "review.merge", payload, False)
-            merge = r.team.worktrees.merge
+            git_driver = type(r.team.worktrees._git(r.project.primary.env))
+            run_git = git_driver.run
 
-            async def change_during_git(*args: Any, **kwargs: Any) -> str:
-                await r.manager.db.execute("UPDATE result_receipts SET original_text = ? WHERE id = ?",
-                                           ("changed while Git ran", result_id))
-                return await merge(*args, **kwargs)
+            async def change_during_git(self: Any, args: list[str], **kwargs: Any) -> str:
+                if args[0] == "merge" and args[1] == "--no-ff":
+                    await r.manager.db.execute("UPDATE result_receipts SET original_text = ? WHERE id = ?",
+                                               ("changed while Git ran", result_id))
+                return await run_git(self, args, **kwargs)
 
-            monkeypatch.setattr(r.team.worktrees, "merge", change_during_git)
+            monkeypatch.setattr(git_driver, "run", change_during_git)
             outcome = await MergeEffect(r.team.app).run(claim, lambda _claim: asyncio.sleep(0))
             assert outcome.state == "completed", outcome.error
             source_copy = r.manager.db.path.parent / "result-originals" / "merge-sources" / action_id
             assert source_copy.read_bytes() == approved
+    finally:
+        await r.close()
+
+
+@pytest.mark.parametrize("change", ["report", "artifact"])
+async def test_source_changed_after_staging_cannot_reach_git_merge(
+    settings: Settings, db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        member = await r.hire()
+        task_id, _request = await r.reviewed(member, "Menu", {"menu.md": "bread\n"})
+        async with r.client() as client:
+            result_id, verdict_id = await r.approve(client, task_id)
+            r.team.app.extensions["effects"] = None
+            before = git(r.folder, "rev-parse", "HEAD").strip()
+            queued = await client.post(f"/api/board/{task_id}/results/{result_id}/merge", json={
+                "client_operation_id": f"merge:after-staging-{change}",
+                "expected_entity_revision": (await task_row(r.manager, task_id))["entity_revision"],
+                "verdict_id": verdict_id,
+            })
+            assert queued.status_code == 200, queued.text
+            action_id = queued.json()["action_id"]
+            outbox = await r.manager.db.fetchone("SELECT receipt_id,payload_json FROM effect_outbox WHERE id = ?",
+                                                 (action_id,))
+            assert outbox is not None
+            payload = json.loads(outbox["payload_json"])["data"]
+            claim = Claim(action_id, outbox["receipt_id"], "review.merge", 1,
+                          Principal.operator({"via": "token", "user_id": 1}), Scope("project", r.project.id),
+                          task_id, None, ("git.merge",), "review.merge", payload, False)
+            merge = r.team.worktrees.merge
+
+            async def change_before_git(*args: Any, **kwargs: Any) -> str:
+                if change == "report":
+                    await r.manager.db.execute("UPDATE result_receipts SET original_text = ? WHERE id = ?",
+                                               ("changed after staging", result_id))
+                else:
+                    artifact = next(item for item in payload["source"]["snapshot"]["artifacts"] if item["file_id"])
+                    path = r.manager.files.blobs.path_of(FILES_TENANT, artifact["digest"])
+                    path.write_bytes(b"changed after staging")
+                return await merge(*args, **kwargs)
+
+            monkeypatch.setattr(r.team.worktrees, "merge", change_before_git)
+            outcome = await MergeEffect(r.team.app).run(claim, lambda _claim: asyncio.sleep(0))
+            assert outcome.state == "failed" and "merge source" in outcome.error
+            assert git(r.folder, "rev-parse", "HEAD").strip() == before
+            assert (await r.manager.db.fetchone("SELECT state FROM task_merge_receipts WHERE id = ?",
+                                                 (action_id,)))["state"] == "queued"
     finally:
         await r.close()
 

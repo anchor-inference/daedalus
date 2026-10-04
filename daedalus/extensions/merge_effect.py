@@ -103,13 +103,35 @@ class MergeEffect:
                     raise ValueError("reviewed artifact bytes changed")
             stage_report(self.app.db.path.parent / "result-originals", claim.id, original,
                          pinned_source["report_digest"], pinned_source["report_size"])
-        except (OSError, ValueError) as exc:
+        except (KeyError, OSError, ValueError) as exc:
             return EffectOutcome("failed", f"merge source is unavailable or changed: {exc}")
+
+        async def before_merge() -> None:
+            # Staging preserves the approved copy, but cannot prove the source stayed intact while
+            # that copy and the artifact files were read. Recheck at the Git merge boundary.
+            async with self.app.db.transaction() as conn:
+                if await source_identity(conn, row["result_id"], row["verdict_id"]) != pinned_source:
+                    raise ValueError("reviewed report, verdict, evidence, or artifacts changed")
+            current = await OrchestratorDomain(self.app.db).original(claim.task_id, row["result_id"])
+            if current != original or file_identity(
+                    self.app.db.path.parent / "result-originals" / "merge-sources" / claim.id
+            ) != (pinned_source["report_digest"], pinned_source["report_size"]):
+                raise ValueError("kept merge source report bytes changed")
+            for artifact in pinned_source["snapshot"]["artifacts"]:
+                if artifact["file_id"]:
+                    path = self.app.manager.files.blobs.path_of(FILES_TENANT, artifact["digest"])
+                    digest, size = await asyncio.to_thread(file_identity, path)
+                    if (digest, size) != (artifact["digest"], artifact["size_bytes"]):
+                        raise ValueError("reviewed artifact bytes changed")
+
         try:
             merge_sha = await team.worktrees.merge(folder, str(task["branch"]),
                                                   message=f"Merge {task['branch']}: {task['title']}",
                                                   expected_head=row["base_sha"],
-                                                  expected_branch_tip=row["head_sha"])
+                                                  expected_branch_tip=row["head_sha"],
+                                                  before_merge=before_merge)
+        except (KeyError, OSError, ValueError) as exc:
+            return EffectOutcome("failed", f"merge source is unavailable or changed: {exc}")
         except WorktreeRefused as exc:
             return EffectOutcome("unknown", f"merge refused; inspect Git before retry: {exc}")
         # The external merge happened. If this write fails, the outcome is unknown and reconciliation

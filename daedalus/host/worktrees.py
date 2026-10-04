@@ -31,7 +31,7 @@ import logging
 import os
 import re
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -608,7 +608,8 @@ class StaffWorktrees:
         return BranchComparison(branch, True, current, merged, clean, commits[:max_commits], len(commits) > max_commits, files, patch[:max_chars], complete, conflicts)
 
     async def merge(self, folder: ProjectFolder, branch: str, *, message: str = "",
-                    expected_head: str | None = None, expected_branch_tip: str | None = None) -> str:
+                    expected_head: str | None = None, expected_branch_tip: str | None = None,
+                    before_merge: Callable[[], Awaitable[None]] | None = None) -> str:
         """Merge ``branch`` into the folder's current branch as a merge commit; the merge commit's id.
 
         Always ``--no-ff``, even when a fast-forward would do: the merge commit is the record that a
@@ -619,7 +620,8 @@ class StaffWorktrees:
 
         The merge commit is the operator's commit in the operator's repository, so it carries their
         identity; only a repository with none at all (a fresh container) gets the agent's, because git
-        would otherwise refuse the merge with "tell me who you are".
+        would otherwise refuse the merge with "tell me who you are". When the branch tip is pinned,
+        Git merges that exact commit even if the branch name moves after the final check.
         """
         if folder.readonly:
             raise WorktreeRefused(f"{folder.path} is read-only; nothing can be merged into it")
@@ -640,7 +642,20 @@ class StaffWorktrees:
                 await git.run(["var", "GIT_COMMITTER_IDENT"], cwd=folder.path)
             except GitError:
                 identity = {"GIT_AUTHOR_NAME": IDENTITY[0], "GIT_AUTHOR_EMAIL": IDENTITY[1], "GIT_COMMITTER_NAME": IDENTITY[0], "GIT_COMMITTER_EMAIL": IDENTITY[1]}
-            args = ["merge", "--no-ff", "--no-edit"] + (["-m", message] if message else []) + [branch]
+            if before_merge is not None:
+                # The reviewed source can change while the effect reads and stages it. Check it
+                # after the Git preflight, at the last host-controlled point before the merge.
+                await before_merge()
+                if expected_head is not None:
+                    actual_head = (await git.run(["rev-parse", "--verify", "HEAD^{commit}"], cwd=folder.path)).strip()
+                    if actual_head != expected_head:
+                        raise WorktreeRefused("the folder HEAD changed after review")
+                if expected_branch_tip is not None:
+                    actual_tip = (await git.run(["rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}"], cwd=folder.path)).strip()
+                    if actual_tip != expected_branch_tip:
+                        raise WorktreeRefused("the staff branch changed after review")
+            # A branch name can move after the check; Git must merge the reviewed object itself.
+            args = ["merge", "--no-ff", "--no-edit"] + (["-m", message] if message else []) + [expected_branch_tip or branch]
             try:
                 await git.run(args, cwd=folder.path, env=identity)
             except GitError as exc:
