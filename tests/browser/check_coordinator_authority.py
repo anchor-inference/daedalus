@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,6 +24,7 @@ PROJECT = {
     "folders": [folder("/work/site", label="Site")], "sessions": [],
 }
 RIGHTS = {
+    "assignment": {"scope_kind": "task", "operations": ["board.task.assign"], "effects": []},
     "planning": {"scope_kind": "project", "operations": ["board.task.create", "board.task.update", "contract.require", "contract.apply", "contract.withdraw"], "effects": []},
     "execution": {"scope_kind": "task", "operations": ["task.launch", "task.stop", "staff.release"], "effects": ["execution.start", "execution.stop"]},
     "execution_project": {"scope_kind": "project", "operations": ["task.launch", "task.stop", "staff.release"], "effects": ["execution.start", "execution.stop"]},
@@ -43,21 +45,22 @@ def run() -> int:
         browser = playwright.chromium.launch(executable_path=CHROMIUM)
         for language in ("en", "ru"):
             for width, height, mobile in ((320, 560, True), (390, 844, True), (1440, 900, False)):
-                context = browser.new_context(viewport={"width": width, "height": height}, is_mobile=mobile, has_touch=mobile)
-                page = context.new_page()
-                page.set_default_timeout(6000)
-                try:
-                    scenario(page, language, unhandled)
-                    print(f"ok {language} {width}")
-                except Exception as exc:  # noqa: BLE001 — retain each language and viewport result
-                    failures.append(f"{language} {width}: {exc}")
-                    print(f"FAILED {language} {width}: {exc}")
-                context.close()
+                for bundle_id in ("watch", "assignment"):
+                    context = browser.new_context(viewport={"width": width, "height": height}, is_mobile=mobile, has_touch=mobile)
+                    page = context.new_page()
+                    page.set_default_timeout(6000)
+                    try:
+                        scenario(page, language, unhandled, bundle_id)
+                        print(f"ok {language} {width} {bundle_id}")
+                    except Exception as exc:  # noqa: BLE001 — retain each language and viewport result
+                        failures.append(f"{language} {width} {bundle_id}: {exc}")
+                        print(f"FAILED {language} {width} {bundle_id}: {exc}")
+                    context.close()
         browser.close()
     return 1 if failures else unhandled.report()
 
 
-def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
+def scenario(page: Page, language: str, unhandled: Unhandled, bundle_id: str = "watch") -> None:
     words = WORDS[language]
     project = copy.deepcopy(PROJECT)
     max_expiry = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
@@ -86,7 +89,7 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
         if path == "/api/projects/p1/workspace-archive" and method == "GET":
             return answer(route, {"latest": None, "available": False})
         if path == "/api/projects/p1/board" and method == "GET":
-            return answer(route, {"project": {"id": "p1", "name": "Bakery"}, "tasks": [], "staff": [], "needs_you": [], "counts": {}})
+            return answer(route, {"project": {"id": "p1", "name": "Bakery"}, "tasks": [{"id": "first-task", "title": "Prepare menu", "status": "todo"}], "staff": [], "needs_you": [], "counts": {}})
         if path == base and method == "GET":
             return answer(route, {"project_id": "p1", "entity_revision": state["revision"],
                 "current_coordinator_session_id": state["office"], "readiness_blockers": [],
@@ -95,14 +98,14 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
         if path == base and method == "POST":
             assert isinstance(body, dict)
             assert set(body) == {"client_operation_id", "expected_entity_revision", "expected_coordinator_session_id", "bundle_id", "task_id", "expires_at"}
-            assert body["bundle_id"] == "watch" and body["task_id"] is None
+            assert body["bundle_id"] == bundle_id and body["task_id"] == ("first-task" if bundle_id == "assignment" else None)
             assert body["expected_coordinator_session_id"] == "coordinator-session"
             assert body["expected_entity_revision"] == 1 and body["client_operation_id"]
             assert datetime.fromisoformat(body["expires_at"]) <= datetime.fromisoformat(max_expiry)
             state["approvals"].append(body)
             if state["grant"] is None:
                 state["grant"] = {"grant_id": "grant-1", "generation": 1, "session_id": "coordinator-session",
-                    "scope": {"kind": "project", "id": "p1"}, **RIGHTS["watch"], "expires_at": body["expires_at"],
+                    "scope": {"kind": RIGHTS[bundle_id]["scope_kind"], "id": "first-task" if bundle_id == "assignment" else "p1"}, **RIGHTS[bundle_id], "expires_at": body["expires_at"],
                     "revoked_at": None, "state": "active", "receipt_id": "receipt-approval",
                     "parent_grant_id": None, "parent_grant_generation": None}
                 state["revision"] = 2
@@ -164,11 +167,17 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
     page.goto(f"{BASE}/agents?token=t&lang={language}")
     section = open_authority()
     section.get_by_text(words["add"]).click()
-    section.get_by_label("Allowed actions" if language == "en" else "Разрешённые действия").select_option("watch")
-    expect(section.get_by_text(words["wake"], exact=False)).to_be_visible()
+    section.get_by_label("Allowed actions" if language == "en" else "Разрешённые действия").select_option(bundle_id)
+    if bundle_id == "assignment":
+        section.get_by_label(re.compile("^Task" if language == "en" else "^Задача")).select_option("first-task")
+    else:
+        expect(section.get_by_text(words["wake"], exact=False)).to_be_visible()
     section.get_by_role("button", name=words["approve"]).click()
     dialog = page.locator(".dialog[role='alertdialog']")
-    expect(dialog.get_by_text("watch.wake", exact=False)).to_be_visible()
+    expect(dialog.get_by_text("board.task.assign" if bundle_id == "assignment" else "watch.wake", exact=False)).to_be_visible()
+    if bundle_id == "assignment":
+        expect(dialog).to_contain_text("Prepare menu")
+        assert "board.task.update" not in dialog.inner_text() and "execution.start" not in dialog.inner_text()
     dialog.get_by_role("button", name=words["approve"]).click()
     expect(section.get_by_role("button", name=words["retry"])).to_be_visible()
 

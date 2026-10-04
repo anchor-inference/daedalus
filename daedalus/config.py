@@ -1335,7 +1335,7 @@ class OrchestratorConfig(BaseModel):
     """Spend cap of one orchestrator turn; ``None`` is ``limits.usd_per_run``."""
     max_wakes_per_hour: int = Field(default=30, ge=1)
     """Past this, routine batches wait for the next hour and the operator is told; urgent ones still go."""
-    default_concurrency: int = Field(default=6, ge=1)
+    default_concurrency: int = Field(default=1, ge=1)
     """How many staff of a project work at once when the operator first switches its orchestrator on."""
     default_concurrency_cap: int = Field(default=10, ge=1)
     """The ceiling the orchestrator may raise that to, when first switched on; the operator moves it."""

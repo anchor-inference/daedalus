@@ -36,7 +36,7 @@ async def test_hire_list_edit_and_dismiss(settings: Settings, config: RuntimeCon
 
             empty = (await client.get(f"/api/projects/{pid}/staff", headers=HEADERS)).json()
             assert empty["staff"] == [] and empty["counts"] == {"staff": 0, "working": 0}
-            assert empty["project"]["concurrency"] == 6 and empty["project"]["local_env"] == "container"
+            assert empty["project"]["concurrency"] == 1 and empty["project"]["local_env"] == "container"
             assert empty["project"]["folders"][0]["is_git"] is True
             assert empty["choices"]["harnesses"] == ["daedalus", "claude", "codex", "grok", "opencode", "pi", "cursor"]
             assert [p["id"] for p in empty["choices"]["presets"]] == list(config.presets)

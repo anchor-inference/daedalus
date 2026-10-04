@@ -15,6 +15,7 @@ REVIEW_OPERATIONS = ("review.verdict", "review.return")
 AUTHORITY_BUNDLES = {
     "planning": {"operations": ["board.task.create", "board.task.update", "contract.require", "contract.apply", "contract.withdraw"],
                  "effects": [], "scope_kind": "project"},
+    "assignment": {"operations": ["board.task.assign"], "effects": [], "scope_kind": "task"},
     "execution": {"operations": ["task.launch", "task.stop", "staff.release"],
                   "effects": ["execution.start", "execution.stop"], "scope_kind": "task"},
     "execution_project": {"operations": ["task.launch", "task.stop", "staff.release"],

@@ -20,8 +20,8 @@ ENVIRONMENTS = ("container", "host")
 native mode the two are the same machine and this process's folders are all ``host``."""
 
 AUTONOMY = ("ask", "normal", "full")
-CONCURRENCY_DEFAULT = 6
-"""How many staff of one project may work at once unless the orchestrator or the operator says otherwise."""
+CONCURRENCY_DEFAULT = 1
+"""Start serially so a first task does not launch a team before its result can be checked."""
 CONCURRENCY_CAP_DEFAULT = 10
 """The most the orchestrator may raise that to by itself; the operator can move the cap."""
 

@@ -5,7 +5,7 @@ import { useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { CoordinatorHandoff } from "./CoordinatorHandoff";
 
-type BundleId = "planning" | "execution" | "execution_project" | "review" | "watch" | "wake_internal";
+type BundleId = "planning" | "assignment" | "execution" | "execution_project" | "review" | "watch" | "wake_internal";
 type Bundle = { id: string; operations: string[]; effects: string[]; scope_kind: "project" | "task"; max_expires_at: string; blockers: string[] };
 type Grant = { grant_id: string; generation: number; session_id: string; scope: { kind: string; id: string }; operations: string[]; effects: string[];
   expires_at: string; revoked_at: string | null; state: "active" | "expired" | "revoked" | "stale"; receipt_id: string | null;
@@ -14,9 +14,10 @@ type Authority = { project_id: string; entity_revision: number; current_coordina
   available_bundles: Bundle[]; grants: Grant[]; readiness_blockers: string[] };
 type Pending = { path: string; body: Record<string, unknown>; kind: "approve" | "revoke"; label: string };
 
-const bundleIds: BundleId[] = ["planning", "execution", "execution_project", "review", "watch", "wake_internal"];
+const bundleIds: BundleId[] = ["assignment", "execution", "planning", "execution_project", "review", "watch", "wake_internal"];
 const rights: Record<BundleId, { scope_kind: "project" | "task"; operations: string[]; effects: string[] }> = {
   planning: { scope_kind: "project", operations: ["board.task.create", "board.task.update", "contract.require", "contract.apply", "contract.withdraw"], effects: [] },
+  assignment: { scope_kind: "task", operations: ["board.task.assign"], effects: [] },
   execution: { scope_kind: "task", operations: ["task.launch", "task.stop", "staff.release"], effects: ["execution.start", "execution.stop"] },
   execution_project: { scope_kind: "project", operations: ["task.launch", "task.stop", "staff.release"], effects: ["execution.start", "execution.stop"] },
   review: { scope_kind: "project", operations: ["review.verdict", "review.return"], effects: [] },
@@ -61,7 +62,7 @@ function grantName(grant: Grant): string {
 
 export function CoordinatorAuthority({ projectId, toast, onChanged }: { projectId: string; toast: (message: string) => void; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
-  const [bundleId, setBundleId] = useState<BundleId>("planning");
+  const [bundleId, setBundleId] = useState<BundleId>("assignment");
   const [taskId, setTaskId] = useState("");
   const [hours, setHours] = useState(1);
   const [withdrawId, setWithdrawId] = useState("");
@@ -78,7 +79,7 @@ export function CoordinatorAuthority({ projectId, toast, onChanged }: { projectI
   const rule = rights[bundleId];
   const validBundle = !!bundle && bundle.scope_kind === rule.scope_kind && same(bundle.operations, rule.operations) && same(bundle.effects, rule.effects);
   const candidates = (tasks.data?.tasks ?? []).filter((task) => task.status !== "done" && task.status !== "dropped");
-  const taskReady = bundleId !== "execution" || (!tasks.error && candidates.some((task) => task.id === taskId));
+  const taskReady = rule.scope_kind !== "task" || (!tasks.error && candidates.some((task) => task.id === taskId));
   const expiryLimit = Date.parse(bundle?.max_expires_at ?? "");
   const canApprove = !offline && !busy && !pending && !!current?.current_coordinator_session_id && !!validBundle
     && !bundle?.blockers.length && taskReady && Number.isInteger(current.entity_revision) && current.entity_revision > 0 && Number.isFinite(expiryLimit)
@@ -180,13 +181,13 @@ export function CoordinatorAuthority({ projectId, toast, onChanged }: { projectI
           </label>
           <p className="sub">{t(`authority.bundle.help.${bundleId}`)}</p>
           {!validBundle && <div className="result-warning" role="status">{t("authority.definitionChanged")}</div>}
-          {bundleId === "execution" && <label className="field">{t("authority.task")}
+          {rule.scope_kind === "task" && <label className="field">{t("authority.task")}
             <select className="field" value={taskId} disabled={!!tasks.error} onChange={(event) => setTaskId(event.target.value)}>
               <option value="">{t("authority.task.choose")}</option>
               {candidates.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
             </select>
           </label>}
-          {bundleId === "execution" && tasks.error && <div className="result-warning" role="status">{t("authority.tasksFailed")} <button type="button" className="linkbtn" onClick={() => tasks.refresh()}>{t("common.retry")}</button></div>}
+          {rule.scope_kind === "task" && tasks.error && <div className="result-warning" role="status">{t("authority.tasksFailed")} <button type="button" className="linkbtn" onClick={() => tasks.refresh()}>{t("common.retry")}</button></div>}
           <label className="field">{t("authority.expiry")}
             <select className="field" value={hours} onChange={(event) => setHours(Number(event.target.value))}>
               {[1, 8, 23].map((value) => <option key={value} value={value}>{t("authority.hours", { n: value })}</option>)}

@@ -225,6 +225,30 @@ class BoardCommands:
         return await self._mutate(principal, scope, "board.task.create", client_operation_id,
                                   expected_collection_revision, Entity("collection", scope.id), payload, effect, "task.created")
 
+    async def assign(self, principal: Principal, scope: Scope, task_id: str, *,
+                     client_operation_id: str, expected_entity_revision: int,
+                     staff_id: str) -> dict[str, Any]:
+        """Assign an unowned, unstarted card without changing its contract or handoff."""
+        async def effect(conn: aiosqlite.Connection, _: Mutation) -> dict[str, Any]:
+            row = await _one(conn, "SELECT project_id,status,assignee_staff_id,current_attempt_id"
+                             " FROM board_tasks WHERE id = ?", (task_id,))
+            if row is None:
+                raise KeyError(task_id)
+            if row["status"] != "todo" or row["assignee_staff_id"] or row["current_attempt_id"]:
+                raise DomainConflict("assignment approval requires an unowned, unstarted task")
+            if await _one(conn, "SELECT 1 FROM effect_outbox WHERE kind = 'task.launch'"
+                          " AND state IN ('pending','claimed','unknown')"
+                          " AND json_extract(payload_json,'$.control.task_id') = ? LIMIT 1", (task_id,)):
+                raise DomainConflict("reconcile the pending launch before assigning")
+            await _assignee(conn, staff_id, row["project_id"])
+            await conn.execute("UPDATE board_tasks SET assignee_staff_id = ?,updated_at = ? WHERE id = ?",
+                               (staff_id, now(), task_id))
+            return {"task_id": task_id, "staff_id": staff_id}
+
+        return await self._mutate(principal, scope, "board.task.assign", client_operation_id,
+                                  expected_entity_revision, Entity("task", task_id), {"staff_id": staff_id},
+                                  effect, "task.changed")
+
     async def update(self, principal: Principal, scope: Scope, task_id: str, *,
                      client_operation_id: str, expected_entity_revision: int,
                      title: str | None = None, acceptance: str | None = None,

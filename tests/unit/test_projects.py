@@ -216,7 +216,7 @@ async def test_project_crud_and_a_session_that_works_in_one(settings: Settings, 
             assert [(f["path"], f["reachable"], f["env"], f["position"]) for f in project["folders"]] == [(str(root), True, "container", 0)]
             assert "root" not in project
             assert project["settings"]["snapshots"] is False and project["settings"]["system"] == "" and project["settings"]["ephemeral"] is False
-            assert project["settings"]["orchestrator"]["enabled"] is False and project["settings"]["orchestrator"]["concurrency"] == 6
+            assert project["settings"]["orchestrator"]["enabled"] is False and project["settings"]["orchestrator"]["concurrency"] == 1
 
             listing = (await client.get("/api/projects", headers=HEADERS)).json()
             assert [p["id"] for p in listing] == [project["id"]] and listing[0]["sessions"] == []
@@ -918,7 +918,7 @@ async def test_the_orchestrator_settings_stay_within_their_rules(db: Database, s
     (tmp_path / "site").mkdir()
     project = await store.create("Site", [str(tmp_path / "site")])
     orchestrator = project.settings.orchestrator
-    assert (orchestrator.enabled, orchestrator.autonomy, orchestrator.concurrency, orchestrator.concurrency_cap) == (False, "normal", 6, 10)
+    assert (orchestrator.enabled, orchestrator.autonomy, orchestrator.concurrency, orchestrator.concurrency_cap) == (False, "normal", 1, 10)
     changed = await store.update_orchestrator(project.id, enabled=True, model="strong", autonomy="full", concurrency=8)
     assert changed.settings.orchestrator.enabled and changed.settings.orchestrator.concurrency == 8
     with pytest.raises(ProjectError, match="between 1 and the cap of 10"):

@@ -636,7 +636,20 @@ async def assign(
                          and not renamed and not given and priority is None and depends_on is None
                          and folder is None and files is None and requirements is None and inputs is None
                          and checks is None and not handover and not reopen_after_exit)
-            if not unchanged:
+            first_assignment = (task["status"] == "todo" and not task["assignee_staff_id"]
+                                and not renamed and not given and priority is None and depends_on is None
+                                and folder is None and files is None and requirements is None and inputs is None
+                                and checks is None and not handover and not reopen_after_exit)
+            if first_assignment:
+                try:
+                    principal = await board_principal(orch, session_id, project.id, "board.task.assign", task["id"])
+                except Refused:
+                    first_assignment = False
+            if first_assignment:
+                changed = await commands.assign(principal, scope, task["id"], client_operation_id=client_operation_id,
+                                                expected_entity_revision=expected_entity_revision, staff_id=member.id)
+                task = await board.get(changed["task_id"], actor=session_id)
+            elif not unchanged:
                 # Requiring a planning grant to launch an already assigned card made task-scoped
                 # execution grants unusable, even though the card and its files were untouched.
                 principal = await board_principal(orch, session_id, project.id, "board.task.update", task["id"])

@@ -311,7 +311,7 @@ async def test_the_state_block_shows_the_project_and_stays_within_its_bound(sett
         for n in range(8):
             await r.manager.projects.record(r.project.id, "orchestrator", "decision", f"decision {n}")
         full = await r.orch.project_state(await r.refreshed())
-        assert full.startswith("Project: Bakery · default env container · autonomy normal · concurrency 6 of cap 10 · 0 working")
+        assert full.startswith("Project: Bakery · default env container · autonomy normal · concurrency 1 of cap 10 · 0 working")
         assert "goals: A bakery site with online orders" in full and "allowed without the operator: npm install" in full
         assert all(name in full for name in ("Ira", "Max", "Naya"))
         assert "Board: doing 0 · review 0 · todo 25" in full and "more (Tasks)" in full

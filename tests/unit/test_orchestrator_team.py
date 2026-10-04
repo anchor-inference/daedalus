@@ -79,6 +79,53 @@ async def admitted(r: Rig, task_id: str) -> bool:
     return row is not None and row["state"] == "completed"
 
 
+async def test_first_assignment_has_task_scope_and_cannot_edit_the_card(settings: Settings, db: Database, tmp_path: Path) -> None:
+    from daedalus.extensions.board_commands import BoardCommands
+    from daedalus.extensions.coordinator_authority import resolve_authority
+    from daedalus.stores.control import ControlDenied
+
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r)
+        sid = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
+        member = await r.manager.staff.hire(r.project.id, name="Ada", role="Menu", isolation="shared")
+        task_id = await board_task(r.manager, r.project, "Menu page")
+        other_id = await board_task(r.manager, r.project, "Other page")
+        await r.manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (r.project.folders[0].id, task_id))
+        scope = Scope("project", r.project.id)
+        operator = Principal.operator({"via": "token", "user_id": 1})
+        for bundle in ("assignment", "execution"):
+            revision = await ControlStore(r.manager.db).revision(scope, Entity("project", r.project.id))
+            await approve_authority(r.team.app, r.project.id, operator,
+                                    client_operation_id=f"task-{bundle}", expected_entity_revision=revision,
+                                    expected_coordinator_session_id=sid, bundle_id=bundle,
+                                    task_id=task_id, expires_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat())
+        for change in ({"title": "Renamed menu page", "reason": "This remains exactly the same task"},
+                       {"objective": "Replace the menu page with an updated menu"},
+                       {"priority": 1}, {"checks": ["Menu page renders"]}):
+            with pytest.raises(Refused, match="grant|scope|denied"):
+                await r.call(sid, "assign", staff=member.id, task_id=task_id, **change)
+        with pytest.raises(ControlDenied):
+            await resolve_authority(r.team.app, session_id=sid, project_id=r.project.id,
+                                    operation="board.task.assign", task_id=other_id)
+        before = dict(await r.manager.db.fetchone("SELECT * FROM board_tasks WHERE id = ?", (task_id,)))
+        said = await r.call(sid, "assign", staff=member.id, task_id=task_id)
+        assert said.startswith(f"Ada will start {task_id}")
+        after = dict(await r.manager.db.fetchone("SELECT * FROM board_tasks WHERE id = ?", (task_id,)))
+        for field in ("title", "brief_json", "checklist", "acceptance", "folder_id", "depends_on", "priority"):
+            assert after[field] == before[field]
+        assert after["assignee_staff_id"] == member.id
+        assert await admitted(r, task_id)
+        principal = await resolve_authority(r.team.app, session_id=sid, project_id=r.project.id,
+                                             operation="board.task.assign", task_id=task_id)
+        with pytest.raises(ControlDenied):
+            await BoardCommands(r.manager.db).update(principal, scope, task_id, client_operation_id="forbidden-edit",
+                                                     expected_entity_revision=after["entity_revision"], title="Changed")
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
 async def test_unchanged_assigned_task_starts_with_task_execution_grant_only(settings: Settings, db: Database, tmp_path: Path) -> None:
     r = await rig(settings, db, tmp_path)
     try:
@@ -880,6 +927,8 @@ async def test_a_card_held_by_a_member_who_is_gone_is_passed_on_released_or_free
         assert said == f"mediafix was already dismissed; the card {second} they left in doing went back to todo, unassigned"
         assert await r.call(sid, "dismiss", staff="mediafix") == "mediafix was already dismissed"
 
+        # This ownership check needs both workers active at the same time.
+        await r.orch.update(r.project.id, concurrency=2)
         # Silence is not gone: a member whose live session is on the card keeps it.
         ada, ada_live = await working(r, "Ada", "Menu page")
         await r.team.ingress.status(ada_live, "no_signal")
