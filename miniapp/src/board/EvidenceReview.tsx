@@ -75,7 +75,7 @@ export function EvidenceReview({ task, result, contract, review, blockingComment
     } finally { setBusy(false); }
   }
 
-  return <details className="result-details">
+  return <details className="result-details" open>
     <summary>{t("result.reviewEvidence")}</summary>
     <p className="sub">{t("result.manualEvidence")}</p>
     {evidence.error && <div className="result-warning" role="status">{t("result.block.unconfirmed")} <button type="button" className="linkbtn" onClick={() => evidence.refresh()}>{t("common.retry")}</button></div>}

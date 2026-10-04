@@ -1809,6 +1809,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "result.evidence": { en: "Evidence and original report", ru: "Доказательства и исходный отчёт" },
   "result.version": { en: "Contract revision {revision}", ru: "Редакция договора {revision}" },
   "result.original": { en: "Show original report", ru: "Показать исходный отчёт" },
+  "result.reviewReport": { en: "Review report and evidence", ru: "Проверить отчёт и доказательства" },
   "result.accept": { en: "Accept this result", ru: "Принять этот результат" },
   "result.accepted": { en: "Result accepted", ru: "Результат принят" },
   "result.merge": { en: "Merge reviewed branch", ru: "Влить проверенную ветку" },

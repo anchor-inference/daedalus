@@ -154,6 +154,7 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
   const [sourceError, setSourceError] = useState<{ resultId: string; text: string } | null>(null);
   const [loadingSources, setLoadingSources] = useState(false);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
   const [comparedId, setComparedId] = useState("");
   const [busy, setBusy] = useState(false);
   const [returning, setReturning] = useState(false);
@@ -183,6 +184,11 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
   const block = acceptanceBlock(task, result, contract.data ?? null, review.data ?? null, uncertain || annotationUncertain) ?? (blockingComments.length ? "comments" : null);
   const mergeReason = mergeGuard(task, result, contract.data ?? null, review.data ?? null, uncertain || annotationUncertain) ?? (blockingComments.length ? "comments" : null);
   const returnBlocked = uncertain || !result || !contract.data || result.current_result_id !== result.result_id || result.contract_revision !== contract.data.contract_revision || !result.verdict_id;
+
+  // Opening review fetches the complete report so the reviewer sees the source before recording a verdict.
+  useEffect(() => {
+    if (reviewing && result && original?.resultId !== result.result_id && !loadingOriginal && !originalError) void showOriginal();
+  }, [reviewing, result?.result_id, original?.resultId, loadingOriginal, originalError]);
 
   async function showOriginal() {
     if (!result || loadingOriginal) return;
@@ -343,7 +349,8 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
       <p className="result-state">{t("result.state", { outcome: t(`result.outcome.${result.outcome}`), verification: t(`result.verification.${result.verification}`), acceptance: t(`result.acceptance.${task.acceptance_state || "open"}`) })}</p>
       {(result.limitations ?? []).length > 0 && <div className="result-warning" role="status"><b>{t("result.limitations")}</b><ul>{result.limitations.map((item, index) => <li key={index}>{detail(item)}</li>)}</ul></div>}
       {(result.checks ?? []).length > 0 && <div className="result-checks"><b>{t("result.checks")}</b><ul>{result.checks.map((item, index) => <li key={index}>{detail(item)}</li>)}</ul></div>}
-      <details className="result-details" onToggle={(event) => setEvidenceOpen(event.currentTarget.open)}>
+      {task.status === "review" && result.origin_kind !== "operator_manual" && <button type="button" className="btn small" aria-expanded={reviewing} onClick={() => setReviewing((value) => !value)}>{t("result.reviewReport")}</button>}
+      <details className="result-details" open={reviewing} onToggle={(event) => { setEvidenceOpen(event.currentTarget.open); setReviewing(event.currentTarget.open); }}>
         <summary>{t("result.evidence")}</summary>
         <div>{t("result.version", { revision: result.contract_revision })} · {absTime(result.created_at)}</div>
         <ul>{(result.artifacts ?? []).map((artifact) => <li key={artifact.id}>{artifact.artifact_kind}: {artifact.artifact_key} · {artifact.digest}</li>)}</ul>
@@ -378,7 +385,7 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
       </details>}
       {contract.data && task.status === "review" && (result.origin_kind === "operator_manual"
         ? <ManualEvidenceReview task={task} result={result} contract={contract.data} blockingComments={blockingComments.length} toast={toast} onChanged={() => { results.refresh(); contract.refresh(); onAccepted(); }} />
-        : <EvidenceReview task={task} result={result} contract={contract.data} review={review.data ?? null} blockingComments={blockingComments.length} toast={toast} onChanged={() => { results.refresh(); contract.refresh(); review.refresh(); onAccepted(); }} />)}
+        : reviewing && <EvidenceReview task={task} result={result} contract={contract.data} review={review.data ?? null} blockingComments={blockingComments.length} toast={toast} onChanged={() => { results.refresh(); contract.refresh(); review.refresh(); onAccepted(); }} />)}
       {contract.data && task.status === "done" && result.origin_kind === "operator_manual" && <ManualReopen task={task} result={result} contract={contract.data} onChanged={() => { results.refresh(); contract.refresh(); onAccepted(); }} toast={toast} />}
       <details className="result-details">
         <summary>{t("result.annotations", { count: (comments.data ?? []).length })}</summary>
