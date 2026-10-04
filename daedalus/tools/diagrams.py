@@ -12,7 +12,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
-from daedalus.stores.diagrams import DiagramStore
+from daedalus.stores.diagrams import DiagramStore, shape_label
 from daedalus.tools import search_hint, tool_group
 from daedalus.tools._common import error, ok, services_for
 
@@ -98,6 +98,11 @@ async def diagram_edit(context: ToolContext, diagram_id: str, version: int, elem
             shape = _shape(spec, by_id.get(str(spec.get("id") or "")))
             by_id[shape["id"]] = shape
             added.append(shape["id"])
+            if shape["type"] in {"rectangle", "ellipse", "diamond"} and "text" in spec:
+                label = shape_label(shape, str(spec["text"]))
+                by_id[label["id"]] = label
+                added.append(label["id"])
+        remove |= {f"{shape_id}-label" for shape_id in remove}
         scene = {**result["scene"], "elements": [by_id[el["id"]] for el in current if el["id"] in by_id and el["id"] not in remove] + [by_id[shape_id] for shape_id in added if shape_id not in {el["id"] for el in current} and shape_id not in remove]}
         saved = await store.save(diagram_id, title or result["title"], scene, version)
     except (ValueError, RuntimeError) as exc:

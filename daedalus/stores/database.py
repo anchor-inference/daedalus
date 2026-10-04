@@ -1724,6 +1724,21 @@ CREATE TABLE diagrams (
 );
 """)
 
+MIGRATIONS.append("""
+ALTER TABLE diagrams ADD COLUMN share_token TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX diagrams_share_token ON diagrams(share_token) WHERE share_token != '';
+CREATE TABLE diagram_revisions (
+    diagram_id TEXT NOT NULL REFERENCES diagrams(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    scene_json TEXT NOT NULL,
+    saved_at TEXT NOT NULL,
+    PRIMARY KEY (diagram_id, version)
+);
+INSERT INTO diagram_revisions(diagram_id,version,title,scene_json,saved_at)
+SELECT id,version,title,scene_json,updated_at FROM diagrams;
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

@@ -4,7 +4,7 @@
 import { SelfDevMode, visibleScreens } from "./capabilities";
 import type { Screen } from "./router";
 
-export const DESKTOP_PLACES: Screen[] = ["inbox", "board", "calendar", "changes", "terminals", "voice", "schedules"];
+export const DESKTOP_PLACES: Screen[] = ["inbox", "board", "calendar", "diagrams", "changes", "terminals", "voice", "schedules"];
 
 /** The destinations in the order the old rail listed them, one group per key of `nav.group.*`. */
 export const GROUPS: { key: string; items: Screen[] }[] = [

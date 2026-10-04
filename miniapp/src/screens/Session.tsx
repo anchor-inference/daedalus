@@ -53,6 +53,7 @@ import { BrowserHeadButton, useFirstOpenToast } from "../browser/phone";
 import { pipGroup } from "../browser/model";
 import { orchestrationPathOf } from "../mode";
 import { FullResult, ToolResultView } from "../toolresult";
+import { useQuery } from "../store";
 
 /**
  * Markdown parsed once per text. `cacheKey` names a message that will never change again, so its
@@ -116,6 +117,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // embedded session reports itself, without anybody reading the address.
   usePresenceScope({ session: id || undefined });
   const [detail, setDetail] = useState<SessionDetail | null>(null);
+  const { data: sessionDiagrams } = useQuery<{ id: string; title: string }[]>(`/api/diagrams?session_id=${encodeURIComponent(id)}`, { pollMs: 5000, staleMs: 0 });
+  const [sendingMessages, setSendingMessages] = useState<{ id: string; text: string; at: number }[]>([]);
   // The streaming turn's state is not React state: a token must repaint the turn it belongs to,
   // not the screen. The components that show it subscribe; everything else never hears about it.
   const liveRef = useRef<LiveStore | null>(null);
@@ -324,6 +327,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // and an answer still on its way belongs to the one that was left.
   useEffect(() => {
     msgs.current = [];
+    setSendingMessages([]);
     historyReadSeq.current = ++readSeq.current;
     return () => forgetDisclosed(id);
   }, [id]);
@@ -694,6 +698,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     built.current = buildTurns(detail?.messages ?? [], built.current);
     return built.current;
   }, [detail?.messages]);
+  useEffect(() => {
+    setSendingMessages((current) => current.filter((pending) => !detail?.messages.some((message) => message.role === "user" && Date.parse(message.created_at) >= pending.at - 5000 && (message.text === pending.text || message.text.includes(pending.text)))));
+  }, [detail?.messages]);
   // What the receipts under the operator's messages measure "read" against.
   useAnsweredMark(id, detail?.messages, orchestrating);
   const tail = busy ? liveBase(turns, detail?.run_id) : null;
@@ -1040,14 +1047,25 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   async function send(text: string, files: File[], clientMessageId?: string, onProgress?: (fraction: number) => void) {
     const steer = busyRef.current && status === "running";
     const reply = orchestrating ? currentReply(id) : null;
-    if (files.length > 0) {
-      const form = new FormData();
-      form.append("text", uploadText(text, reply));
-      if (clientMessageId) form.append("client_message_id", clientMessageId);
-      for (const f of files) form.append("files", f, f.name);
-      await api.upload(`/api/sessions/${id}/upload`, form, onProgress);
-    } else {
-      await api.post(`/api/sessions/${id}/messages`, messageBody(text, { steer, clientMessageId, reply }));
+    const pendingId = clientMessageId ?? crypto.randomUUID();
+    const pendingText = text || files.map((file) => file.name).join(", ");
+    // Submission can wait behind a busy run for several seconds. Show the operator's words
+    // immediately, then let the durable transcript replace this temporary bubble.
+    setSendingMessages((current) => [...current, { id: pendingId, text: pendingText, at: Date.now() }]);
+    stick.current = true;
+    try {
+      if (files.length > 0) {
+        const form = new FormData();
+        form.append("text", uploadText(text, reply));
+        if (clientMessageId) form.append("client_message_id", clientMessageId);
+        for (const f of files) form.append("files", f, f.name);
+        await api.upload(`/api/sessions/${id}/upload`, form, onProgress);
+      } else {
+        await api.post(`/api/sessions/${id}/messages`, messageBody(text, { steer, clientMessageId, reply }));
+      }
+    } catch (error) {
+      setSendingMessages((current) => current.filter((message) => message.id !== pendingId));
+      throw error;
     }
     // Only once the message is out: a send that fails puts the words back and keeps what they answer.
     if (reply) setReply(id, null);
@@ -1318,6 +1336,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           )}
           {phone && browserShown && <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />}
           <ChatSearch sessionId={id} onPick={openMessage} />
+          {!!sessionDiagrams?.length && <a className="btn small" href={pathFor("diagrams", null, { session: id })} aria-label={`${t("diagrams.session")} (${sessionDiagrams.length})`} onClick={(event) => { event.preventDefault(); navigate(pathFor("diagrams", null, { session: id })); }}><Icon name="pen" size={16} /> {phone ? sessionDiagrams.length : `${t("diagrams.session")} (${sessionDiagrams.length})`}</a>}
           <TerminalButton dock={terminalDock} phone={phone} />
           {!phone && <button className={`iconbtn ${panel.state.tab ? "on" : ""}`} onClick={panel.toggle} aria-label={t("panel.toggle")} title={t("panel.toggle.title")} aria-pressed={!!panel.state.tab}>
             <Icon name="panel" />
@@ -1390,6 +1409,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                   )}
                 />
                 {busy && <LiveTurn base={tail} live={live} onTurnAction={turnAction} onRender={pinBottom} />}
+                {sendingMessages.filter((pending) => !detail?.messages.some((message) => message.role === "user" && Date.parse(message.created_at) >= pending.at - 5000 && (message.text === pending.text || message.text.includes(pending.text)))).map((pending) => <div className="turn" key={pending.id}><div className="turn-content"><div className="msg-wrap"><div className="msg user"><Md text={pending.text} /></div></div></div></div>)}
               </SessionContext.Provider>
               {flow}
               {/* Not while the Questions tab is the one open: the cards are already beside the chat,

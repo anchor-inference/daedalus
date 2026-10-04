@@ -68,11 +68,17 @@ const ProjectTabs = lazy(retried(() => import("./project/phone"), (m) => ({ defa
 const MainScreen = chunk(retried(() => import("./main/MainScreen"), (m) => ({ default: m.MainScreen })));
 const OnboardingScreen = lazy(retried(() => import("./screens/AddModel"), (m) => ({ default: m.OnboardingScreen })));
 const SharedDialog = lazy(retried(() => import("./screens/Shared"), (m) => ({ default: m.SharedDialog })));
+const SharedDiagram = lazy(retried(() => import("./screens/SharedDiagram"), (m) => ({ default: m.SharedDiagram })));
 
 /** A shared dialog lives at /app/c/<slug>. It is a page of its own, not a screen of the signed-in shell. */
 function sharedSlug(): string | null {
   const match = /^\/app\/c\/([^/]+)\/?$/.exec(window.location.pathname);
   return match ? decodeURIComponent(match[1]) : null;
+}
+
+function sharedDiagramToken(): string | null {
+  const match = /^\/app\/d\/([A-Za-z0-9_-]+)\/?$/.exec(window.location.pathname);
+  return match ? match[1] : null;
 }
 
 /** The conversation is what the operator opens next, whatever screen they landed on: fetch it while the browser is idle. */
@@ -469,6 +475,10 @@ export function App() {
   };
 
   const shared = sharedSlug();
+  const diagramToken = sharedDiagramToken();
+  if (diagramToken) {
+    return <ErrorBoundary><Suspense fallback={<div className="diagram-shared-state">{t("common.loading")}</div>}><SharedDiagram token={diagramToken} /></Suspense></ErrorBoundary>;
+  }
   if (shared) {
     return (
       <ErrorBoundary>
