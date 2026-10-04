@@ -281,6 +281,18 @@ async def test_a_sandboxed_terminal_is_given_its_owners_writable_folders_and_kee
         await service.close()
 
 
+async def test_a_refused_sandbox_scope_leaves_no_terminal_reservation(service: Terminals, owners: FakeOwners,
+                                                                     daemon: FakePtyd, db: Database) -> None:
+    async def refused(env: str, owner: Owner, project_id: str | None, cwd: str) -> list[str]:
+        raise ValueError("no current task workspace")
+
+    owners.sandbox_writable = refused  # type: ignore[method-assign]
+    with pytest.raises(ValueError, match="no current task workspace"):
+        await service.create(TerminalSpec(env="container", owner=Owner("free"), cwd="/tmp", sandbox=True))
+    assert await db.fetchall("SELECT id FROM terminals") == []
+    assert not any(method == "terminal.create" for method, _ in daemon.calls)
+
+
 def _writable(paths: list[str]) -> Any:
     async def writable(env: str, owner: Owner, project_id: str | None, cwd: str) -> list[str]:
         return paths

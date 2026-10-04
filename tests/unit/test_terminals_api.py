@@ -243,6 +243,38 @@ async def test_a_sandboxed_terminal_writes_what_its_owner_may(manager: SessionMa
     assert await owners.sandbox_writable("container", Owner("free"), None, "") == []
 
 
+async def test_a_staff_sandbox_writes_only_the_active_task_workspace(manager: SessionManager, tmp_path: Path) -> None:
+    owners = ManagerOwners(manager)
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    project = await manager.projects.create("Two folders", [FolderSpec(str(first)), FolderSpec(str(second))])
+    folder = project.folders[0]
+    member = await manager.staff.hire(project.id, name="Worker", harness="claude", isolation="shared")
+    owner = Owner("staff", member.id)
+    with pytest.raises(ValueError, match="current task workspace"):
+        await owners.sandbox_writable("container", owner, project.id, str(first))
+    session = await manager.staff.claim_session(member.id, kind="cli", folder_id=folder.id, launch_cwd=str(first))
+    assert await owners.sandbox_writable("container", owner, project.id, str(first)) == [str(first)]
+    with pytest.raises(ValueError, match="current task workspace"):
+        await owners.sandbox_writable("container", owner, project.id, str(second))
+    await manager.staff.end_session(session.id, "done")
+
+    reader = await manager.staff.hire(project.id, name="Reader", harness="claude", isolation="readonly")
+    await manager.staff.claim_session(reader.id, kind="cli", folder_id=folder.id, launch_cwd=str(first))
+    assert await owners.sandbox_writable("container", Owner("staff", reader.id), project.id, str(first)) == []
+
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    await manager.db.execute("UPDATE project_folders SET is_git = 1 WHERE id = ?", (folder.id,))
+    worktree_member = await manager.staff.hire(project.id, name="Branch", harness="claude", isolation="worktree")
+    await manager.staff.claim_session(worktree_member.id, kind="cli", folder_id=folder.id,
+                                      launch_cwd=str(tree / "src"), worktree_path=str(tree))
+    assert await owners.sandbox_writable("container", Owner("staff", worktree_member.id), project.id,
+                                         str(tree / "src")) == [str(tree)]
+
+
 async def test_the_doctor_reports_each_environment(terminal_settings: Settings, app: Any, run_dir: Path, tmp_path: Path) -> None:
     from daedalus.doctor import DoctorContext, _terminals  # noqa: PLC0415 — the probe alone, not the whole doctor
 

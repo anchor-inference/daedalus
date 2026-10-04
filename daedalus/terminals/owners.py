@@ -125,15 +125,39 @@ class ManagerOwners:
         return out
 
     async def sandbox_writable(self, env: str, owner: Owner, project_id: str | None, cwd: str) -> list[str]:
-        """What a sandboxed terminal may write: exactly what the owner's agent may write, when there is
-        one here; otherwise the owner's project folders of that environment, or only the directory it
-        starts in."""
+        """What a sandboxed terminal may write, scoped to a staff attempt when one owns it.
+
+        Other terminals retain their session walls or project folders.
+        """
         if owner.kind == "session" and env == self.local_env:
             services = self.manager.locator_services(str(owner.id))
             if services is None and await self.manager.get_state(str(owner.id)) is not None:
                 services = self.manager.locator_services(str(owner.id))
             if services is not None:
                 return [str(p) for p in services.sandbox_writable()]
+        if owner.kind == "staff":
+            # Project folders were once all bound writable for a staff terminal. A strict attempt
+            # assigned to one folder could therefore alter a sibling without crossing any mount.
+            rows = await self.db.fetchall(
+                "SELECT s.project_id,s.isolation,ss.launch_cwd,ss.worktree_path,f.env,f.path AS folder_path,"
+                " f.readonly FROM staff_sessions ss JOIN staff s ON s.id = ss.staff_id"
+                " JOIN project_folders f ON f.id = ss.folder_id"
+                " WHERE ss.staff_id = ? AND ss.kind = 'cli' AND ss.ended_at IS NULL",
+                (owner.id,),
+            )
+            if (len(rows) != 1 or rows[0]["project_id"] != project_id or rows[0]["env"] != env
+                    or rows[0]["launch_cwd"] != cwd):
+                raise ValueError("a staff terminal needs its current task workspace")
+            row = rows[0]
+            if row["isolation"] == "readonly" or row["readonly"]:
+                return []
+            if row["isolation"] == "worktree":
+                if not row["worktree_path"]:
+                    raise ValueError("a worktree member needs its current worktree")
+                return [row["worktree_path"]]
+            if row["isolation"] == "shared" and cwd == row["folder_path"]:
+                return [cwd]
+            raise ValueError("a staff terminal has no writable task workspace")
         project = await self.manager.projects.get(project_id) if project_id else None
         if project is not None:
             folders = [str(f.path) for f in project.folders if f.env == env and not f.readonly]

@@ -738,6 +738,7 @@ class Terminals(SideChannels):
                         or binding["launch_id"] != scope.get("launch_id") or binding["env"] != spec.env):
                     raise InvalidRequest("a writable staff terminal needs its exact attempt containment")
         cwd = spec.cwd or await self.owners.default_cwd(spec.env, spec.owner, project_id) or ""
+        writable = await self.owners.sandbox_writable(spec.env, spec.owner, project_id, cwd) if spec.sandbox else None
         terminal_id = secrets.token_hex(6)
         row = {
             "id": terminal_id,
@@ -783,7 +784,7 @@ class Terminals(SideChannels):
         if spec.log_to_disk:
             params["log_to_disk"] = True
         if spec.sandbox:
-            params["sandbox"] = {"writable": await self.owners.sandbox_writable(spec.env, spec.owner, project_id, cwd)}
+            params["sandbox"] = {"writable": writable}
         if spec.resources is not None:
             params["resources"] = spec.resources
         try:
