@@ -9,8 +9,11 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
+from fastapi import FastAPI, Header
 
+from daedalus.extensions.api_lifecycle import register as register_lifecycle_api
 from daedalus.extensions.launch_controls import prepare_attempt
 from daedalus.extensions.lifecycle import Lifecycle
 from daedalus.extensions.phase_expiry import BATCH_SIZE, PhaseExpiry
@@ -153,5 +156,71 @@ async def test_only_attested_queued_no_entry_can_drain(db: Database, state: str,
         async with db.transaction() as conn:
             assert await attempt_released_in(conn, identity.id) == proven
         assert await PhaseExpiry(app).step(at=due) == 0
+    finally:
+        app.executions.release()
+
+
+@pytest.mark.parametrize("previous_host", [False, True])
+async def test_unknown_stop_inspection_and_exact_observation_recovery(db: Database, previous_host: bool) -> None:
+    app, member, task, session = await launch_fixture(db)
+    try:
+        identity = await prepare_attempt(app, OPERATOR, member, task, session, fence_token=secrets.token_urlsafe(32))
+        due = datetime.now(UTC)
+        await db.execute("UPDATE attempt_phase_clocks SET deadline_at = ?", (due.isoformat(),))
+        await db.execute("UPDATE execution_attempts SET state = 'running',runtime_entered_at = ?,"
+                         "native_run_id = 'run',provider_session_ref = 'session:native-session'", (due.isoformat(),))
+        await db.execute("INSERT INTO sessions(id,tenant_id,project_id,title,created_at,last_message_at)"
+                         " VALUES ('native-session','tenant','project','Work','2026-01-01','2026-01-01')")
+        await db.execute("UPDATE staff_sessions SET session_id = 'native-session'")
+        app.extensions = {"lifecycle": Lifecycle(app)}
+        assert await PhaseExpiry(app).step(at=due) == 1
+        if previous_host:
+            app.executions.release()
+            app.executions.acquire()
+            await app.executions.boot()
+
+        api = FastAPI()
+
+        async def authenticated(x_user: int = Header(1)) -> dict[str, int | str]:
+            return {"via": "token" if x_user > 0 else "staff", "user_id": x_user}
+
+        register_lifecycle_api(api, app, authenticated)
+        path = "/api/projects/project/unknown-stops"
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
+            assert (await client.get(path, headers={"x-user": "-1"})).status_code == 403
+            assert (await client.get("/api/projects/missing/unknown-stops")).status_code == 404
+            assert (await client.get(path, params={"limit": 101})).status_code == 422
+            response = await client.get(path)
+            assert response.status_code == 200, response.text
+            item = response.json()["items"][0]
+            assert item["id"] == identity.id
+            assert item["phase"] == "prepare" and item["cancel_state"] == "unknown"
+            assert item["generation_matches_host_record"] is (not previous_host)
+            assert item["exit_observed"] is False
+            endpoint = f"{path}/{identity.id}/reconcile"
+            assert (await client.post(endpoint, headers={"x-user": "-1"})).status_code == 403
+            assert (await client.post(endpoint)).json() == {"cancel_state": "unknown"}
+            assert (await client.post(f"{path}/missing/reconcile")).status_code == 404
+
+            await db.execute("INSERT INTO runtime_exit_observations(attempt_id,runtime_ref,provider_session_ref,"
+                             "staff_session_id,contract_revision,host_generation,runtime_kind,runtime_instance,"
+                             "observed_status,observed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                             (identity.id, "other-run", "session:native-session", session.id,
+                              identity.contract_revision, identity.host_generation, "daedalus", None,
+                              "cancelled", due.isoformat()))
+            assert (await client.post(endpoint)).json() == {"cancel_state": "unknown"}
+            await db.execute("INSERT INTO runtime_exit_observations(attempt_id,runtime_ref,provider_session_ref,"
+                             "staff_session_id,contract_revision,host_generation,runtime_kind,runtime_instance,"
+                             "observed_status,observed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                             (identity.id, "run", "session:native-session", session.id,
+                              identity.contract_revision, identity.host_generation, "daedalus", None,
+                              "cancelled", due.isoformat()))
+            assert (await client.get(path)).json()["items"][0]["exit_observed"] is True
+            assert (await client.post(endpoint)).json() == {"cancel_state": "unknown" if previous_host else "drained"}
+            if previous_host:
+                assert (await db.fetchone("SELECT cancel_state FROM lifecycle_owners"))[0] == "unknown"
+            else:
+                assert (await client.get(path)).json()["items"] == []
+                assert (await db.fetchone("SELECT state FROM execution_attempts"))[0] == "cancelled"
     finally:
         app.executions.release()

@@ -473,6 +473,49 @@ class Lifecycle:
                         changed += 1
         return changed
 
+    async def reconcile_expired(self, attempt_id: str, project_id: str) -> str:
+        """Drain one timed-out owner only from its persisted exact runtime observation."""
+        async with self.app.db.transaction() as conn:
+            row = await one(conn, "SELECT a.id,a.staff_session_id,a.host_generation,a.provider_session_ref,"
+                            "a.runtime_kind,a.native_run_id,a.runtime_instance,a.contract_revision,"
+                            "o.cancel_state FROM execution_attempts a"
+                            " JOIN board_tasks t ON t.id = a.task_id"
+                            " JOIN lifecycle_owners o ON o.child_kind = 'execution_attempt' AND o.child_id = a.id"
+                            " WHERE a.id = ? AND t.project_id = ? AND o.project_id = ?"
+                            " AND o.source_revision = a.contract_revision"
+                            " AND EXISTS (SELECT 1 FROM attempt_phase_clocks c WHERE c.attempt_id = a.id"
+                            " AND c.outcome = 'timed_out')", (attempt_id, project_id, project_id))
+            if row is None:
+                raise KeyError(attempt_id)
+            if row["cancel_state"] != "unknown":
+                return row["cancel_state"]
+            if await record_owned_no_entry(conn, attempt_id=attempt_id):
+                return "drained"
+            # An old host's SQL rows cannot attest that its process exited after restart.
+            host = await self.app.executions._host(conn)
+            if row["host_generation"] != host or not row["provider_session_ref"]:
+                return "unknown"
+            proof = await one(conn, "SELECT 1 FROM runtime_exit_observations e"
+                              " JOIN staff_sessions s ON s.id = e.staff_session_id"
+                              " WHERE e.attempt_id = ? AND e.staff_session_id = ?"
+                              " AND e.host_generation = ? AND e.provider_session_ref = ?"
+                              " AND e.contract_revision = ? AND e.runtime_kind = ?"
+                              " AND ((e.runtime_kind = 'daedalus' AND e.runtime_ref = ?)"
+                              " OR (e.runtime_kind = 'cli' AND e.runtime_instance = ?"
+                              " AND e.runtime_ref = s.terminal_id"
+                              " AND e.provider_session_ref = 'terminal:' || s.terminal_id))",
+                              (attempt_id, row["staff_session_id"], host, row["provider_session_ref"],
+                               row["contract_revision"], row["runtime_kind"], row["native_run_id"],
+                               row["runtime_instance"]))
+            if proof is None:
+                return "unknown"
+            await conn.execute("UPDATE staff_sessions SET ended_at = COALESCE(ended_at,?),status = 'exited'"
+                               " WHERE id = ?", (_now(), row["staff_session_id"]))
+            if await record_owned_exit(conn, attempt_id=attempt_id, staff_session_id=row["staff_session_id"],
+                                       host_generation=host, provider_session_ref=row["provider_session_ref"]):
+                return "drained"
+            return "unknown"
+
     async def sweep(self) -> None:
         while True:
             try:
