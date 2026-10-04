@@ -2411,11 +2411,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             for block in message.content_blocks:
                 if isinstance(block, ToolResultBlock) and block.tool_call_id == call_id:
                     text, complete = await full_tool_result(block, manager.blobs, TENANT)
-                    return {"id": call_id, "content": redact.redact(text), "is_error": block.is_error, "length": len(text), "complete": complete}
+                    return {"id": call_id, "content": redact.shared().redact_tool_data(text), "is_error": block.is_error, "length": len(text), "complete": complete}
         streamed = await manager.events.session_tool_result(session_id, call_id)
         if streamed is not None:
             text, is_error = streamed
-            return {"id": call_id, "content": redact.redact(text), "is_error": is_error, "length": len(text), "complete": True}
+            return {"id": call_id, "content": redact.shared().redact_tool_data(text), "is_error": is_error, "length": len(text), "complete": True}
         if state.running:
             return {"id": call_id, "content": None, "is_error": False, "length": None, "complete": False, "pending": True}
         raise HTTPException(404, "no such tool result")

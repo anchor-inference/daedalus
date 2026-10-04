@@ -34,7 +34,7 @@ from daedalus.host.prompts import split_headline
 from daedalus.host.run_outcome import OUTCOME_METADATA_KEY
 from daedalus.security import redact
 
-VIEW_VERSION = 9
+VIEW_VERSION = 10
 """Bumped whenever the shape below changes; stored views from an older version are recomputed. It
 covers this file only — what the redactor masks is covered by the key, by value and by shape, so a
 new secret format does not depend on anyone remembering this number."""
@@ -72,7 +72,7 @@ def message_view(message: Message) -> dict[str, Any]:
                 args = json.loads(block.arguments_json or "{}")
             except json.JSONDecodeError:
                 args = {"raw": block.arguments_json}
-            tool_calls.append({"id": block.tool_call_id, "name": block.name, "arguments": redact.shared().redact_any(args)})
+            tool_calls.append({"id": block.tool_call_id, "name": block.name, "arguments": redact.shared().redact_tool_data(args)})
         elif isinstance(block, ToolResultBlock):
             tool_results.append(_result_preview(block))
     compaction = message.metadata.get("daedalus.compaction") if isinstance(message.metadata, dict) else None
@@ -162,13 +162,13 @@ def _result_preview(block: ToolResultBlock) -> dict[str, Any]:
     """
     content = block.content
     if is_compacted_placeholder(content):
-        return {"id": block.tool_call_id, "content": redact.redact(_readable_part(content)[:TOOL_RESULT_PREVIEW_CHARS]), "is_error": block.is_error, "length": None, "clipped": True}
+        return {"id": block.tool_call_id, "content": redact.shared().redact_tool_data(_readable_part(content)[:TOOL_RESULT_PREVIEW_CHARS]), "is_error": block.is_error, "length": None, "clipped": True}
     if block.canonical_content and _SPLIT_POINTER_RE.search(content):
         # The model was shown a first page; the listing measures what the tool returned.
         content = block.canonical_content
     return {
         "id": block.tool_call_id,
-        "content": redact.redact(content[:TOOL_RESULT_PREVIEW_CHARS]),
+        "content": redact.shared().redact_tool_data(content[:TOOL_RESULT_PREVIEW_CHARS]),
         "is_error": block.is_error,
         "length": len(content),
         "clipped": len(content) > TOOL_RESULT_PREVIEW_CHARS,

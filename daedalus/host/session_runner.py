@@ -4242,8 +4242,12 @@ class SessionManager:
                 )
             if content != original:
                 self._redact_history_result(state, str(p.get("tool_call_id")), content)
+        elif event.type is EventType.TOOL_USE_INPUT_DELTA:
+            # A credential or home path can be split across provider chunks, so a fragment cannot
+            # be redacted reliably. The completed input is retained by TOOL_USE_STOP below.
+            p["partial_input_json"] = ""
         elif event.type is EventType.TOOL_USE_STOP and isinstance(p.get("final_input"), dict):
-            p["final_input"] = self.redactor.redact_any(p["final_input"])
+            p["final_input"] = self.redactor.redact_tool_data(p["final_input"])
         elif event.type is EventType.ERROR and isinstance(p.get("message"), str):
             p["message"] = self.redactor.redact(p["message"])
             state.last_error_kind = str(p.get("kind") or state.last_error_kind)
@@ -4265,21 +4269,7 @@ class SessionManager:
         A home-relative path remains useful for locating an artifact without recording the
         machine's account name in durable events or their exports.
         """
-        home = str(Path.home())
-        if home == "/":
-            return self.redactor.redact_any(payload)
-        home_path = re.compile(rf"(?<![A-Za-z0-9]){re.escape(home)}(?=[/\\]|\b)")
-
-        def clean(value: Any) -> Any:
-            if isinstance(value, str):
-                return home_path.sub("~", value)
-            if isinstance(value, dict):
-                return {key: clean(item) for key, item in value.items()}
-            if isinstance(value, list):
-                return [clean(item) for item in value]
-            return value
-
-        return clean(self.redactor.redact_any(payload))
+        return self.redactor.redact_tool_data(payload)
 
     @staticmethod
     def _redact_history_result(state: SessionState, tool_call_id: str, cleaned: str) -> None:

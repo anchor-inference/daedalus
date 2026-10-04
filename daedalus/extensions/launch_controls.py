@@ -13,6 +13,7 @@ from daedalus.stores.control import ControlDenied, ControlStore, Principal, Scop
 from daedalus.stores.executions import ACTIVE, AttemptIdentity
 from daedalus.stores.phase_clocks import DEFAULT_TIMEOUTS, PhaseClocks
 from daedalus.stores.staff import Staff, StaffSession
+from daedalus.stores.writer_leases import WriterLeases
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -34,6 +35,10 @@ async def prepare_attempt(app: Application, principal: Principal, member: Staff,
     scope = Scope("project", member.project_id)
     async with app.db.transaction() as conn:
         await control.authorize(conn, principal, scope, "task.launch", task_id=task.id, effects=("execution.start",))
+        if launch_resources.get() is None and member.isolation != "readonly":
+            # The earlier admission check can race with another project's writer claim.
+            # The attempt and this final check must share one database transaction.
+            await WriterLeases.refuse_uncontained_in(conn)
         row = await one(conn, "SELECT contract_revision FROM board_tasks WHERE id = ?", (task.id,))
         if row is None:
             raise KeyError(task.id)

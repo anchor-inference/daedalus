@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import sys
 import traceback
@@ -177,6 +178,25 @@ class Redactor:
             items = [self.redact_any(v, secret_context=secret_context) for v in value]
             return type(value)(items) if not isinstance(value, list) else items
         return value
+
+    def redact_tool_data(self, value: Any) -> Any:
+        """Mask credentials and shorten the operator's home path in tool data shown or kept."""
+        home = os.path.expanduser("~")
+        cleaned = self.redact_any(value)
+        if home == "/":
+            return cleaned
+        home_path = re.compile(rf"(?<![A-Za-z0-9]){re.escape(home)}(?=[/\\]|\b)")
+
+        def shorten(item: Any) -> Any:
+            if isinstance(item, str):
+                return home_path.sub("~", item)
+            if isinstance(item, dict):
+                return {key: shorten(part) for key, part in item.items()}
+            if isinstance(item, list):
+                return [shorten(part) for part in item]
+            return item
+
+        return shorten(cleaned)
 
     def _redact_member(self, key: Any, value: Any, secret_context: bool = False) -> Any:
         """Redact a dict value, using its key as context for the key-name-based shapes.

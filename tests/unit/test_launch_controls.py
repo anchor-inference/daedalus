@@ -9,10 +9,11 @@ import pytest
 
 from daedalus.extensions.launch_controls import observe_bind, prepare_attempt
 from daedalus.staff_runtime import BoardTask, Started
-from daedalus.stores.control import ControlDenied, Principal
+from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.database import Database
 from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.staff import StaffStore
+from daedalus.stores.writer_leases import WriterLeases
 
 OPERATOR = Principal.operator({"via": "cookie", "user_id": 1})
 
@@ -55,6 +56,19 @@ async def test_attempt_and_its_report_grant_commit_together(db: Database) -> Non
             await prepare_attempt(app, OPERATOR, member, task, session, fence_token=secrets.token_urlsafe(32))
         assert (await db.fetchone("SELECT count(*) FROM actor_grants"))[0] == 1
         assert (await db.fetchone("SELECT count(*) FROM grant_events"))[0] == 1
+    finally:
+        app.executions.release()
+
+
+async def test_native_attempt_refuses_contained_writer_before_grant(db: Database) -> None:
+    app, member, task, session = await launch_fixture(db)
+    try:
+        await WriterLeases(app.executions).acquire("another-project")
+        with pytest.raises(ControlConflict, match="contained writer still owns"):
+            await prepare_attempt(app, OPERATOR, member, task, session,
+                                  fence_token=secrets.token_urlsafe(32))
+        assert (await db.fetchone("SELECT count(*) FROM actor_grants"))[0] == 0
+        assert (await db.fetchone("SELECT count(*) FROM execution_attempts"))[0] == 0
     finally:
         app.executions.release()
 

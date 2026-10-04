@@ -543,6 +543,51 @@ async def test_uncontained_start_does_not_claim_a_contained_writer_lease(db: Dat
         owner.release()
 
 
+async def test_uncontained_writable_start_refuses_an_existing_writer_claim(db: Database) -> None:
+    owner = await _owner(db)
+    team = object.__new__(Team)
+    team.app = SimpleNamespace(executions=owner)
+    team._execution_locks = {}
+    member = SimpleNamespace(id="ordinary", project_id="project", isolation="worktree")
+    leases = WriterLeases(owner)
+    claim = await leases.acquire("project")
+
+    async def check_authority():
+        pass
+
+    prepared = []
+
+    async def prepare(_self, _member, _task, **_kwargs):
+        prepared.append(True)
+        return "started"
+
+    team._start = MethodType(prepare, team)
+    try:
+        with pytest.raises(ControlConflict, match="contained writer still owns"):
+            await team.start(member, SimpleNamespace(), principal=SimpleNamespace(),
+                             check_authority=check_authority, resources=None)
+        assert prepared == []
+        assert await leases.release_if_safe(claim)
+        assert await team.start(member, SimpleNamespace(), principal=SimpleNamespace(),
+                                check_authority=check_authority, resources=None) == "started"
+        assert prepared == [True]
+    finally:
+        owner.release()
+
+
+async def test_contained_writer_refuses_an_active_uncontained_attempt(db: Database) -> None:
+    owner = await _owner(db)
+    try:
+        await _attempt(db, owner.generation, kind="daedalus", strict=False)
+        with pytest.raises(ControlConflict, match="uncontained writable worker"):
+            await WriterLeases(owner).acquire("other-project")
+        assert await db.kv_get(KEY) is None
+        await db.execute("UPDATE execution_attempts SET state = 'completed' WHERE id = 'attempt'")
+        assert (await WriterLeases(owner).acquire("other-project")).revision == 1
+    finally:
+        owner.release()
+
+
 async def test_failed_file_delivery_keeps_the_contained_attempt_claim(db: Database) -> None:
     owner = await _owner(db)
     try:

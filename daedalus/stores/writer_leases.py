@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from daedalus.stores.control import ControlConflict, canonical, now, one
-from daedalus.stores.executions import ExecutionStore
+from daedalus.stores.executions import ACTIVE, ExecutionStore
 from daedalus.stores.runtime_release import attempt_released_in
 
 KEY = "contained_writer_lease"
@@ -75,6 +75,17 @@ class WriterLeases:
                     and record["revision"] == lease.revision and record["host_generation"] == lease.host_generation
                     and record["token_hash"] == cls._hash(lease.token))
 
+    @staticmethod
+    async def refuse_uncontained_in(conn: Any) -> None:
+        """Stop an uncontained writable launch while a contained writer claim is held."""
+        record = await WriterLeases._read(conn)
+        if record is not None and record["state"] == "held":
+            raise ControlConflict("a contained writer still owns writable project folders")
+
+    async def refuse_uncontained(self) -> None:
+        async with self.db.transaction() as conn:
+            await self.refuse_uncontained_in(conn)
+
     async def acquire(self, project_id: str) -> WriterLease:
         token = secrets.token_urlsafe(32)
         async with self.db.transaction() as conn:
@@ -99,6 +110,18 @@ class WriterLeases:
             for row in existing:
                 if not await attempt_released_in(conn, row["attempt_id"]):
                     raise ControlConflict("an earlier contained worker has not proved its exit")
+            # An ordinary native or worktree CLI attempt has no kernel process-owner proof.
+            # Its active row is enough to refuse a new contained writer, even across projects.
+            states = (*ACTIVE, "recovering")
+            active = await one(conn, "SELECT 1 FROM execution_attempts a"
+                               " JOIN staff_sessions s ON s.id = a.staff_session_id"
+                               " JOIN staff m ON m.id = s.staff_id"
+                               " WHERE a.state IN (?,?,?,?,?) AND m.isolation != 'readonly'"
+                               " AND NOT EXISTS (SELECT 1 FROM attempt_resource_bindings r WHERE r.attempt_id = a.id)"
+                               " AND NOT EXISTS (SELECT 1 FROM writer_attempt_bindings w WHERE w.attempt_id = a.id)"
+                               " LIMIT 1", states)
+            if active is not None:
+                raise ControlConflict("an uncontained writable worker has not ended")
             revision = int(record["revision"]) + 1 if record is not None else 1
             await self._write(conn, {"project_id": project_id, "revision": revision,
                                      "host_generation": generation, "token_hash": self._hash(token),

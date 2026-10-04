@@ -796,6 +796,10 @@ class Team:
             # stopped. Claim before file handoff; an ordinary CLI or native worker makes no such claim.
             leases = WriterLeases(self.app.executions)
             lease = await leases.acquire(member.project_id) if member.isolation != "readonly" and resources is not None else None
+            if member.isolation != "readonly" and resources is None:
+                # An existing claim must stop worktree preparation and file delivery as well as
+                # provider entry. prepare_attempt repeats this under its attempt transaction.
+                await leases.refuse_uncontained()
             try:
                 return await self._start(member, task, principal=principal, check_authority=check_authority,
                                          by=by, resume_from=resume_from, capacity_slot_id=capacity_slot_id,

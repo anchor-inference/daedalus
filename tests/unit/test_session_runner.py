@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 import pytest
 from protocore.contracts.llm import ILLMProvider, LLMRequest, LLMResponse, ProviderDelta, ProviderDeltaKind
-from protocore.contracts.types import Message, MessageRole, StopReason, TextBlock, ToolResultBlock
+from protocore.contracts.types import Message, MessageRole, StopReason, TextBlock, ToolResultBlock, ToolUseBlock
 from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
 
@@ -165,6 +165,33 @@ async def test_tool_event_is_redacted_before_durable_storage_and_replay(settings
     assert "3 checks passed" in exported
     result = await manager.events.session_tool_result(state.session.id, "redaction-call")
     assert result is not None and "3 checks passed" in result[0] and token not in result[0]
+    arguments = {"command": f"cat {private_path}", "credential": token}
+    live_fragments = []
+    for fragment in (private_path[:len(private_path) // 2], private_path[len(private_path) // 2:], token):
+        delta = TurnEvent(
+            type=EventType.TOOL_USE_INPUT_DELTA, run_id="redaction-run",
+            payload={"tool_call_id": "another-call", "partial_input_json": fragment},
+        )
+        await manager._dispatch_event(state, delta)
+        live_fragments.append(delta.payload)
+    assert all(payload["partial_input_json"] == "" for payload in live_fragments)
+    await manager._dispatch_event(state, TurnEvent(
+        type=EventType.TOOL_USE_STOP, run_id="redaction-run",
+        payload={"tool_call_id": "another-call", "tool_name": "Exec", "final_input": arguments},
+    ))
+    stored_arguments = await db.fetchall("SELECT payload FROM events WHERE run_id = ?", ("redaction-run",))
+    assert len(stored_arguments) == 2
+    assert private_path not in stored_arguments[-1]["payload"] and token not in stored_arguments[-1]["payload"]
+    assert "~/private/report.txt" in stored_arguments[-1]["payload"]
+    session_rows = await db.fetchall("SELECT payload FROM session_events WHERE session_id = ?", (state.session.id,))
+    assert len(session_rows) == 2
+    assert all(private_path not in row["payload"] and token not in row["payload"] for row in session_rows)
+    replay = await manager.events.session_replay(state.session.id, after=0)
+    assert private_path not in json.dumps(replay) and token not in json.dumps(replay)
+    state.engine.history.append(Message(
+        role=MessageRole.assistant,
+        content_blocks=[ToolUseBlock(tool_call_id="another-call", name="Exec", arguments_json=json.dumps(arguments))],
+    ))
     await manager.sessions.append_transcript(state.session.id, state.engine.history)
     state.engine = None
     app = SimpleNamespace(settings=settings, config=manager.config, db=db, manager=manager, front=None,
@@ -182,6 +209,7 @@ async def test_tool_event_is_redacted_before_durable_storage_and_replay(settings
     assert "3 checks passed" in response.text and token not in response.text and private_path not in response.text
     assert export.status_code == 200
     assert "3 checks passed" in export.text and token not in export.text and private_path not in export.text
+    assert "~/private/report.txt" in export.text
     await manager.close()
 
 
