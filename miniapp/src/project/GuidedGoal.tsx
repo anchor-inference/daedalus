@@ -24,7 +24,7 @@ function keep(key: string, value: unknown): void {
 }
 
 /** The first goal uses the same revisioned project command as later goal changes. */
-export function GuidedGoal({ project, toast, wide, ready, embedded = false }: { project: Project; toast: (text: string) => void; wide: boolean; ready: ReactNode; embedded?: boolean }) {
+export function GuidedGoal({ project, toast, wide, ready, embedded = false, onSaved }: { project: Project; toast: (text: string) => void; wide: boolean; ready: ReactNode; embedded?: boolean; onSaved?: () => void }) {
   const endpoint = key(project.id);
   const { data, error, refresh } = useQuery<Goal>(endpoint, { staleMs: 5000 });
   const [initial] = useState(() => read<Draft>(draftKey(project.id)));
@@ -58,6 +58,7 @@ export function GuidedGoal({ project, toast, wide, ready, embedded = false }: { 
       invalidate(`/api/projects/${encodeURIComponent(project.id)}/brief`);
       invalidate("/api/projects");
       toast(t("goal.start.saved"));
+      onSaved?.();
     } catch (failure) {
       if (failure instanceof ApiError && failure.status === 409 &&
           !failure.message.includes("command identity was reused with a different request")) {

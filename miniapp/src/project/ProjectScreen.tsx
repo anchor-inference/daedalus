@@ -68,7 +68,7 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
     body = orchestrator?.enabled && orchestrator.session_id ? <>
       {ready}
       {goalOpen && <Sheet title={t("goal.start.title")} onClose={() => setGoalOpen(false)} size="narrow">
-        <GuidedGoal key={project.id} project={project} toast={toast} wide={wide} embedded ready={null} />
+        <GuidedGoal key={project.id} project={project} toast={toast} wide={wide} embedded ready={null} onSaved={() => setGoalOpen(false)} />
       </Sheet>}
     </> : <GuidedGoal key={project.id} project={project} toast={toast} wide={wide} ready={ready} />;
   } else if (view.kind === "session") {

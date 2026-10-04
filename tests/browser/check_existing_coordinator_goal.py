@@ -68,6 +68,49 @@ def scenario(language: str, width: int, unavailable: bool) -> None:
         browser.close()
 
 
+def saved_goal_returns_to_conversation(language: str, width: int) -> None:
+    focus = FocusStub.bakery(language)
+    goal = {"project_id": PID, "goal_revision": 1, "entity_revision": 1, "body": "", "checks": None}
+    writes: list[dict] = []
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(executable_path=CHROMIUM)
+        page = browser.new_page(viewport={"width": width, "height": 700})
+
+        def stub(route):
+            request = route.request
+            url = urlsplit(request.url)
+            if url.path == f"/api/projects/{PID}/scope-revisions/current":
+                return route.fulfill(status=200, content_type="application/json", body=json.dumps(goal))
+            if url.path == f"/api/projects/{PID}/scope-revisions" and request.method == "POST":
+                body = request.post_data_json
+                writes.append(body)
+                goal.update(goal_revision=goal["goal_revision"] + 1,
+                            entity_revision=goal["entity_revision"] + 1,
+                            body=body["body"], checks=body["checks"])
+                return route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                    "project_id": PID, "goal_revision": goal["goal_revision"],
+                    "entity_revision": goal["entity_revision"], "receipt_id": "goal-receipt"}))
+            answered = focus.answer(request.method, url.path, url.query, request.post_data_json if request.post_data else None)
+            if answered is not None:
+                status, payload = answered
+                return route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+            return installation(route)
+
+        page.route("**/api/**", stub)
+        page.goto(f"{BASE}/orchestration/project/{PID}?token=t&lang={language}")
+        composer = page.get_by_placeholder("Write to the orchestrator…" if language == "en" else "Напишите оркестратору…")
+        expect(composer).to_be_visible()
+        page.locator("[data-goal-setup]").get_by_role("button").click()
+        page.locator("#guided-goal-body").fill("Publish a clear menu")
+        page.locator("#guided-goal-checks").fill("All prices checked")
+        page.locator(".sheet").get_by_role("button", name="Save" if language == "en" else "Сохранить", exact=True).click()
+        expect(page.locator(".sheet")).to_have_count(0)
+        expect(composer).to_be_visible()
+        assert len(writes) == 1 and writes[0]["root_task_ids"] == [], writes
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        browser.close()
+
+
 if __name__ == "__main__":
     expect_app(BASE)
     for lang in ("en", "ru"):
@@ -75,4 +118,6 @@ if __name__ == "__main__":
             for failed_read in (False, True):
                 scenario(lang, viewport, failed_read)
                 print(f"existing coordinator goal {lang} {viewport} unavailable={failed_read}: PASS")
+            saved_goal_returns_to_conversation(lang, viewport)
+            print(f"existing coordinator saved goal {lang} {viewport}: PASS")
     raise SystemExit(UNHANDLED.report())
