@@ -17,7 +17,13 @@ from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.contract_changes import apply_change_in, link_stop_in, stage_change_in
 from daedalus.extensions.notifications import Draft
-from daedalus.extensions.orchestrator_domain import DomainConflict, OrchestratorDomain, record_verdict, return_result
+from daedalus.extensions.orchestrator_domain import (
+    DomainConflict,
+    OrchestratorDomain,
+    invalidate_moved_verdicts,
+    record_verdict,
+    return_result,
+)
 from daedalus.extensions.orchestrator_loops import DECIDED
 from daedalus.extensions.orchestrator_ops import Refused, board_principal
 from daedalus.extensions.task_contract import REQUIREMENT_KINDS, Contracts, Requirement
@@ -345,6 +351,13 @@ async def review_result(
     domain = OrchestratorDomain(orch.manager.db)
     if op == "inspect":
         results = await domain.results(task_id)
+        if task.get("branch") and any(row["verdict_id"] for row in results):
+            review = getattr(orch.team, "review", None) if orch.team is not None else None
+            try:
+                binding = await review.review(task_id) if review is not None else None
+            except (KeyError, ValueError, RuntimeError, OSError):
+                binding = None
+            invalidate_moved_verdicts(results, binding)
         if result_id:
             results = [item for item in results if item["result_id"] == result_id]
         contract = await domain.contract(task_id)

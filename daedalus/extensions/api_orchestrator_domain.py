@@ -22,6 +22,7 @@ from daedalus.extensions.orchestrator_domain import (
     apply_goal_revision,
     configure_workflow,
     dependency_readiness,
+    invalidate_moved_verdicts,
     manual_review_readiness,
     next_action_readiness,
     operator_attestation_in,
@@ -304,6 +305,14 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
     async def results(task_id: str, who: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
         try:
             rows = await domain().results(task_id)
+            task = await app.db.fetchone("SELECT branch FROM board_tasks WHERE id = ?", (task_id,))
+            if task is not None and task["branch"] and any(row["verdict_id"] for row in rows):
+                review = getattr(app.extensions.get("staff"), "review", None)
+                try:
+                    binding = await review.review(task_id) if review is not None else None
+                except (KeyError, ValueError, RuntimeError, OSError):
+                    binding = None
+                invalidate_moved_verdicts(rows, binding)
             actor = Principal.operator(who).actor_id
             for row in rows:
                 receipt = await app.db.fetchone("SELECT actor_id FROM result_receipts WHERE id = ?", (row["result_id"],))

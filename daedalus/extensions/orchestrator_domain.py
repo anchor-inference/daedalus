@@ -1513,6 +1513,15 @@ class OrchestratorDomain:
                  "state": row["resolution"] or "open", "created_at": row["created_at"]} for row in rows]
 
 
+def invalidate_moved_verdicts(rows: list[dict[str, Any]], binding: dict[str, Any] | None) -> None:
+    """Mark historical branch approvals stale when their reviewed commits no longer match."""
+    for row in rows:
+        if row["verdict_id"] and (binding is None or row["verdict_head"] != binding["head_sha"]
+                                  or row["verdict_base"] != binding["base_sha"]):
+            row["verification"] = "stale"
+            row["verdict_accepted"] = False
+
+
 __all__ = ["DomainConflict", "OriginalReports", "OrchestratorDomain", "replace_contract",
            "add_artifact_manifest", "submit_result", "add_review_evidence", "record_verdict", "accept_result",
            "dependency_readiness", "resolve_dependency", "claim_handoff", "configure_workflow",

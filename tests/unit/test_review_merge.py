@@ -249,6 +249,8 @@ async def test_new_failure_and_new_head_each_block_merge(settings: Settings, db:
             failed = await r.review.review(task_id)
             assert failed["ci_status"] == "blocked" and failed["ci_checks"][0]["state"] == "failed"
             assert "ci" in [blocker["code"] for blocker in failed["blockers"]]
+            prior = (await client.get(f"/api/board/{task_id}/results")).json()
+            assert next(item for item in prior if item["result_id"] == result_id)["verification"] == "verified"
             body = {"client_operation_id": "merge:failed-ci", "expected_entity_revision":
                     (await task_row(r.manager, task_id))["entity_revision"], "verdict_id": verdict_id}
             refused = await client.post(f"/api/board/{task_id}/results/{result_id}/merge", json=body)
@@ -257,6 +259,11 @@ async def test_new_failure_and_new_head_each_block_merge(settings: Settings, db:
             (request.worktree.cwd / "later.txt").write_text("later\n")
             git(request.worktree.path, "add", "-A")
             git(request.worktree.path, "commit", "-qm", "Later work")
+            projected = await client.get(f"/api/board/{task_id}/results")
+            assert projected.status_code == 200
+            current = next(item for item in projected.json() if item["result_id"] == result_id)
+            assert current["verification"] == "stale"
+            assert current["verdict_accepted"] is False
             stale = await r.review.review(task_id)
             assert stale["ci_status"] == "blocked" and stale["ci_checks"][0]["state"] == "unknown"
             assert {item["code"] for item in stale["blockers"]} == {"ci", "verdict_stale"}
