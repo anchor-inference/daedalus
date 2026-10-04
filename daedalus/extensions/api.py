@@ -1644,6 +1644,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 "personas": manager.staff.personas(),
                 "presets": [{"id": pid, "label": preset.display(pid)} for pid, preset in presets.items()],
                 "default_preset": default[0] if default else "",
+                "coordinator_default_preset": manager.config.orchestrator_preset() or "",
             },
         }
 
@@ -4480,6 +4481,14 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if body.get("context_window"):
             # Per-session window (in memory): smaller than the model's for cheap runs or tests.
             state.context_window = max(8_000, int(body["context_window"]))
+        orchestrators = app.extensions.get("orchestrator")
+        if orchestrators is not None and (body.get("preset") or body.get("clear")):
+            # The chip on an orchestrator's chat chooses the project's orchestrator model: the next
+            # orchestrator of the project, after a replacement, runs the same one.
+            try:
+                await orchestrators.preflight_model_chosen(session_id, body.get("preset") or None, clear=bool(body.get("clear")))
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
         try:
             await manager.set_model(
                 session_id,
@@ -4492,11 +4501,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        orchestrators = app.extensions.get("orchestrator")
         if orchestrators is not None and (body.get("preset") or body.get("clear")):
-            # The chip on an orchestrator's chat chooses the project's orchestrator model: the next
-            # orchestrator of the project, after a replacement, runs the same one.
-            await orchestrators.model_chosen(session_id, body.get("preset") or None, clear=bool(body.get("clear")))
+            try:
+                await orchestrators.model_chosen(session_id, body.get("preset") or None, clear=bool(body.get("clear")))
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
         dispatcher = app.extensions.get("dispatcher")
         if dispatcher is not None and (body.get("preset") or body.get("clear")):
             # The chip on the main chat chooses the main orchestrator's model in Settings.

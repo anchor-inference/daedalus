@@ -367,10 +367,13 @@ function EnableSheet({ project, onClose, toast }: { project: Project; onClose: (
   const [autonomy, setAutonomy] = useState<Autonomy>(settings?.autonomy ?? "normal");
   const [cap, setCap] = useState(settings?.concurrency_cap ?? 10);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const modelRefused = /^coordinator model .+ cannot run with spending limits:/i.test(error);
   const presets = team?.choices.presets ?? [];
-  const fallback = presets.find((p) => p.id === team?.choices.default_preset)?.label ?? "";
+  const fallback = presets.find((p) => p.id === team?.choices.coordinator_default_preset)?.label ?? "";
   async function go() {
     setBusy(true);
+    setError("");
     try {
       await api.post(`/api/projects/${encodeURIComponent(project.id)}/orchestrator`, { model, autonomy, concurrency_cap: cap });
       toast(t("focus.enable.done"));
@@ -378,7 +381,7 @@ function EnableSheet({ project, onClose, toast }: { project: Project; onClose: (
       invalidate("/api/sessions");
       onClose();
     } catch (e) {
-      toast(errorText(e));
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -387,10 +390,12 @@ function EnableSheet({ project, onClose, toast }: { project: Project; onClose: (
     <Sheet title={t("focus.enable.sheet", { name: project.name })} onClose={onClose} size="narrow" className="enable-sheet">
       <p className="focus-enable-intro">{t("focus.enable.first")}</p>
       <p className="focus-cost">{t("focus.enable.cost")}</p>
-      <details className="focus-enable-advanced">
+      {error && <p className="form-hint" role="alert">{modelRefused ? t("focus.enable.model.refused") : error}</p>}
+      {modelRefused && <p className="sub form-hint">{error}</p>}
+      <details className="focus-enable-advanced" open={error ? true : undefined}>
       <summary>{t("focus.enable.advanced")}</summary>
       <label className="field" htmlFor="orch-model">{t("focus.enable.model")}</label>
-      <select id="orch-model" className="field" value={model} onChange={(e) => setModel(e.target.value)}>
+      <select id="orch-model" className="field" value={model} onChange={(e) => { setModel(e.target.value); setError(""); }}>
         <option value="">{fallback ? t("focus.enable.model.default", { name: fallback }) : t("team.model.default.short")}</option>
         {presets.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
       </select>

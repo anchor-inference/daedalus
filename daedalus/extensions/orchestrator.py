@@ -43,12 +43,15 @@ from daedalus.extensions.watches import describe as describe_watch
 from daedalus.harness.capabilities import MODE_MEANINGS
 from daedalus.host import prompts
 from daedalus.host.events import AppEvent, EventFilter
+from daedalus.host.inference_admission import HostInferenceAdmission, model_quote
 from daedalus.host.peek import BridgedFolderAccess, FolderAccess, LocalFolderAccess, UnreachableFolder
 from daedalus.host.session_runner import HOME_KEY, WorkspaceUnreachable, home_of
 from daedalus.host.wake_queue import Batch, TargetState, Wake, WakeQueue
 from daedalus.staff_runtime import ReadRequest
 from daedalus.stores.control import Principal
 from daedalus.stores.files import refs_line
+from daedalus.stores.goal_budget import goal_constraints_in
+from daedalus.stores.inference_budget import BudgetRefused
 from daedalus.stores.projects import (
     BRIEF_SECTIONS,
     RULES_CHARS,
@@ -342,6 +345,7 @@ class Orchestrators:
                 return await self._update_locked(project, model=model, autonomy=autonomy, concurrency=None, concurrency_cap=concurrency_cap, by=by)
             if model is not None:
                 self._check_model(model)
+            await self._preflight_model(project, model)
             config = self.manager.config.orchestrator
             first = await self._never_had_one(project_id)
             cap = concurrency_cap if concurrency_cap is not None else (config.default_concurrency_cap if first else orchestrator.concurrency_cap)
@@ -380,6 +384,7 @@ class Orchestrators:
     async def _update_locked(self, project: Project, *, model: str | None, autonomy: str | None, concurrency: int | None, concurrency_cap: int | None, by: str) -> Project:
         if model is not None:
             self._check_model(model)
+            await self._preflight_model(project, model)
         if concurrency_cap is not None:
             self._check_cap(concurrency_cap)
         before = project.settings.orchestrator
@@ -463,6 +468,37 @@ class Orchestrators:
     def _check_model(self, model: str) -> None:
         if model and model not in self.manager.config.presets:
             raise ProjectError(f"no model preset {model!r}; the presets are in Settings → Models")
+
+    async def _preflight_model(self, project: Project, model: str | None) -> None:
+        """Refuse an unusable first call before publishing an office or model change."""
+        config = self.manager.config
+        selected = config.orchestrator_preset(project.settings.orchestrator.model if model is None else model)
+        if selected is None:
+            raise ProjectError("choose a coordinator model in Settings → Models before enabling it")
+        try:
+            rungs, preset = self.manager.resolve_model({"preset": selected})
+        except (KeyError, RuntimeError, ValueError) as exc:
+            raise ProjectError(f"coordinator model {selected!r} is unavailable; choose another model in Settings → Models") from exc
+        if not rungs:
+            raise ProjectError(f"coordinator model {selected!r} is unavailable; choose another model")
+        adapter, effective_model = rungs[0]
+        admission = HostInferenceAdmission(self.manager)
+        limits = admission.prelaunch_constraints((adapter.endpoint.id,))
+        async with self.manager.db.transaction() as conn:
+            goal_limits = await goal_constraints_in(conn, project.id, coordinator=True)
+        run_cap = config.orchestrator.usd_per_run
+        capped = bool(limits or goal_limits or (run_cap is not None) or config.limits.usd_per_run > 0)
+        if not capped:
+            return
+        try:
+            model_quote(adapter.endpoint, effective_model, preset.max_output_tokens)
+        except BudgetRefused as exc:
+            # Enable used to publish a working office that its very first capped call refused.
+            raise ProjectError(
+                f"coordinator model {selected!r} cannot run with spending limits: {exc}. "
+                "Choose a model with known prices and a documented provider input ceiling, "
+                "or configure those verified values in Settings → Models."
+            ) from exc
 
     def needs_home(self, project: Project) -> bool:
         """Whether the project's orchestrator must run in a directory of its own rather than in the
@@ -549,6 +585,24 @@ class Orchestrators:
             await self.manager.set_model(session_id, preset=preset)
         except (KeyError, ValueError):
             logger.warning("could not set the model of orchestrator %s", session_id, exc_info=True)
+
+    async def preflight_model_chosen(self, session_id: str, preset: str | None, *, clear: bool = False) -> None:
+        """Validate a coordinator chip without publishing its office before chat controls accept it."""
+        try:
+            project, _ = await self.current(session_id)
+        except NotCurrent:
+            return
+        if not clear and not preset:
+            return
+        async with self.lock(project.id):
+            try:
+                current, _ = await self.current(session_id)
+            except NotCurrent:
+                return
+            model = "" if clear else preset
+            if model is not None:
+                self._check_model(model)
+            await self._preflight_model(current, model)
 
     async def model_chosen(self, session_id: str, preset: str | None, *, clear: bool = False) -> bool:
         """The composer's model chip on an orchestrator's chat: the choice is the project's setting.

@@ -92,7 +92,7 @@ export type Team = {
   /** The project's whole launch queue, in the order it would start. */
   queue?: Queued[];
   counts: { staff: number; working: number };
-  choices: { harnesses: Harness[]; personas: string[]; presets: { id: string; label: string }[]; default_preset: string };
+  choices: { harnesses: Harness[]; personas: string[]; presets: { id: string; label: string }[]; default_preset: string; coordinator_default_preset: string };
 };
 
 /** What the harness manager knows about one command-line agent. Every field may be missing: the

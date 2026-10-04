@@ -4451,6 +4451,7 @@ Object.assign(DICT, {
   "focus.enable.first": { en: "Turn this on, then describe the result you want in the project conversation.", ru: "Включите управляющего, затем опишите нужный результат в разговоре проекта." },
   "focus.enable.advanced": { en: "Model and autonomy", ru: "Модель и самостоятельность" },
   "focus.enable.model": { en: "Model", ru: "Модель" },
+  "focus.enable.model.refused": { en: "This model cannot run with spending limits. Choose a model with verified prices and a provider input ceiling.", ru: "Эта модель не может работать с лимитами расходов. Выберите модель с подтверждёнными ценами и пределом входных токенов провайдера." },
   "focus.enable.model.hint": { en: "Choose the strongest you have: it decides for the whole team.", ru: "Выберите самую сильную: она решает за всю команду." },
   "focus.enable.model.default": { en: "Default · {name}", ru: "По умолчанию · {name}" },
   "focus.enable.autonomy": { en: "Autonomy", ru: "Самостоятельность" },

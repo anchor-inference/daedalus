@@ -667,7 +667,7 @@ class TeamStub:
             "project": self.project,
             "staff": rows,
             "counts": {"staff": sum(1 for m in self.staff if not m["archived_at"]), "working": working},
-            "choices": {"harnesses": ["daedalus", "claude", "codex", "grok", "opencode", "pi", "cursor"], "personas": self.personas, "presets": self.presets, "default_preset": self.presets[0]["id"] if self.presets else ""},
+            "choices": {"harnesses": ["daedalus", "claude", "codex", "grok", "opencode", "pi", "cursor"], "personas": self.personas, "presets": self.presets, "default_preset": self.presets[0]["id"] if self.presets else "", "coordinator_default_preset": self.presets[0]["id"] if self.presets else ""},
         }
 
     def answer(self, method: str, path: str, query: str, body: dict | None) -> tuple[int, object] | None:

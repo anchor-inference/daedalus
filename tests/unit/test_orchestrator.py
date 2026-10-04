@@ -27,6 +27,7 @@ from daedalus.extensions.staff import Team
 from daedalus.host import prompts
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.session_runner import SessionManager
+from daedalus.providers.openai_compat import ProviderEndpoint
 from daedalus.staff_runtime import ReadPage
 from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.coordinator_handoff_schema import MIGRATION as COORDINATOR_HANDOFF_MIGRATION
@@ -103,6 +104,7 @@ async def rig(settings: Settings, db: Database, tmp_path: Path, script: list[dic
     if await db.fetchone("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'coordinator_handoffs'") is None:
         await db.conn.executescript(COORDINATOR_HANDOFF_MIGRATION)
     provider = ScriptedProvider(script or [])
+    provider.endpoint = ProviderEndpoint(id="scripted", kind="llamacpp", base_url="http://127.0.0.1:1")
     manager = await _manager(settings, db, provider)
     # An orchestrator always runs a preset, so the scripted model answers for any of them.
     manager.providers.rungs_for = lambda config, preset=None: [(provider, "scripted-model")]  # type: ignore[method-assign]
