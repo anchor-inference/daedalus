@@ -231,14 +231,96 @@ Generated with a tool: see the session log at https://example.invalid/session_01
   )
   # The expected carriers are an independent contract. A catalog made only from files that
   # happened to be written cannot notice a kind whose writer was removed.
-  local expected_kinds missing_carriers
+  local expected_kinds missing_carriers rule_kinds rule_not_kinds rule_all declared_not_in_rule
   expected_kinds=$(printf '%s\n' config-ghp.env config-npm.env config-pat.env config-sk.env | sort)
   kinds=$(cd "$fixture" && for file in config-*.env; do
     [ -f "$file" ] && printf '%s\n' "$file"
   done | sort)
+  # The semantic class of an alternative is part of the rule: the alternatives that are
+  # NOT credential kinds are declared here, and the credential kinds are the rest of the
+  # rule, so a kind added to the rule and not declared here is a kind the self-check
+  # demands a carrier for.  Nothing has to guess it from the spelling of a character
+  # class -- POSIX classes and dash-first classes are equally valid spellings.
+  local NON_KIND_PATTERNS
+  NON_KIND_PATTERNS='192\.168\.[0-9.]+|10\.10\.[0-9.]+|Co-authored-by|Generated with|[Cc]laude-[Ss]ession|session_01|claude\.ai/code|Signed-off-by'
+  rule_all=$(printf '%s\n' "$PATTERNS" | tr '|' '\n' | sort)
+  rule_not_kinds=$(printf '%s\n' "$NON_KIND_PATTERNS" | tr '|' '\n' | sort)
+  rule_kinds=$(comm -23 <(printf '%s\n' "$rule_all") <(printf '%s\n' "$rule_not_kinds"))
+  # An alternative declared as not a credential kind must be an alternative of the rule:
+  # a declaration naming something the rule does not carry has drifted from the rule it
+  # describes.
+  declared_not_in_rule=$(comm -13 <(printf '%s\n' "$rule_all") <(printf '%s\n' "$rule_not_kinds"))
+  if [ -n "$declared_not_in_rule" ]; then
+    echo "SELF-CHECK FAILED: an alternative declared as not a credential kind is not in the rule:$(printf '%s' "$declared_not_in_rule" | tr '\n' ' ')"
+    rm -rf "$fixture"
+    return 1
+  fi
+  echo "self-check: rule alternatives read as credential kinds: $(printf '%s\n' "$rule_kinds" | tr '\n' ' ')"
+  echo "self-check: rule alternatives read as NOT credential kinds: $(printf '%s\n' "$rule_not_kinds" | tr '\n' ' ')"
+  echo "self-check: fixture carriers found: $(printf '%s\n' "$kinds" | tr '\n' ' ')"
   missing_carriers=$(comm -23 <(printf '%s\n' "$expected_kinds") <(printf '%s\n' "$kinds"))
   if [ -n "$missing_carriers" ]; then
     echo "SELF-CHECK FAILED: fixture carrier missing: $(printf '%s' "$missing_carriers" | tr '\n' ' ')"
+    rm -rf "$fixture"
+    return 1
+  fi
+
+  # Compare the two readings in both directions.  The rule supplies the kind
+  # alternatives; the fixture supplies independently named carriers.  Each
+  # alternative must have exactly one witness and each carrier must witness
+  # exactly one alternative.  No classification heuristic sits between them.
+  local alt matches matched_alt missing_rules unmapped_carriers ambiguous
+  missing_rules=""
+  unmapped_carriers=""
+  ambiguous=""
+  while read -r alt; do
+    [ -n "$alt" ] || continue
+    matches=0
+    while read -r file; do
+      [ -n "$file" ] || continue
+      if grep -qE "^$alt$" "$fixture/$file" 2>/dev/null; then
+        matches=$((matches + 1))
+      fi
+    done <<< "$kinds"
+    if [ "$matches" -eq 0 ]; then
+      missing_rules="$missing_rules $alt"
+    elif [ "$matches" -ne 1 ]; then
+      ambiguous="$ambiguous rule:$alt($matches-carriers)"
+    fi
+  done <<< "$rule_kinds"
+
+  while read -r file; do
+    [ -n "$file" ] || continue
+    matches=0
+    matched_alt=""
+    while read -r alt; do
+      [ -n "$alt" ] || continue
+      if grep -qE "^$alt$" "$fixture/$file" 2>/dev/null; then
+        matches=$((matches + 1))
+        matched_alt="$alt"
+      fi
+    done <<< "$rule_kinds"
+    if [ "$matches" -eq 0 ]; then
+      unmapped_carriers="$unmapped_carriers $file"
+    elif [ "$matches" -ne 1 ]; then
+      ambiguous="$ambiguous carrier:$file($matches-rules)"
+    else
+      echo "self-check: fixture carrier $file witnesses rule alternative: $matched_alt"
+    fi
+  done <<< "$kinds"
+
+  if [ -n "$unmapped_carriers" ]; then
+    echo "SELF-CHECK FAILED: fixture carrier without a matching credential rule:$unmapped_carriers"
+    rm -rf "$fixture"
+    return 1
+  fi
+  if [ -n "$missing_rules" ]; then
+    echo "SELF-CHECK FAILED: fixture carrier missing for credential rule:$missing_rules"
+    rm -rf "$fixture"
+    return 1
+  fi
+  if [ -n "$ambiguous" ]; then
+    echo "SELF-CHECK FAILED: credential rule/carrier mapping is not one-to-one:$ambiguous"
     rm -rf "$fixture"
     return 1
   fi
