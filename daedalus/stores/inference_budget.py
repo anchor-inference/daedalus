@@ -213,7 +213,11 @@ class InferenceBudget:
             # sees the individual quote; no parent allocation can bypass that narrower cap.
             increment = 0 if slot_id in covered_slots else quoted_microusd
             if spent + held + increment > limit.cap_microusd:
-                raise BudgetRefused(f"{limit.key}: the quote exceeds available balance")
+                available = max(0, limit.cap_microusd - spent - held)
+                need = Decimal(quoted_microusd) / 1_000_000
+                free = Decimal(available) / 1_000_000
+                raise BudgetRefused(f"{limit.key}: this call needs a ${need:.6f} worst-case reservation;"
+                                    f" ${free:.6f} is the available balance")
         await conn.execute("INSERT INTO inference_reservations(id,provider_id,model,session_id,run_id,"
                            "request_digest,quoted_microusd,rate_version,quote_json,state,created_at,execution_attempt_id,comparison_slot_id)"
                            " VALUES (?,?,?,?,?,?,?,?,?,'reserved',?,?,?)",

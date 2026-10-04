@@ -41,14 +41,16 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
                 "state": "unknown_usage" if state["unknown"] else "uncertain" if uncertain else "known"}
 
     def budget() -> dict:
+        quote = {"model": "deepseek-flash", "reserve_usd": "0.324404", "input_bound": 1_048_576,
+                 "output_bound": 8192}
         if not state["cap"]:
             return {"configured": False, "project_id": "p1", "goal_revision": state["goal"],
-                    "entity_revision": project["entity_revision"]}
+                    "entity_revision": project["entity_revision"], "coordinator_quote": quote}
         total, coordination = state["cap"]
         return {"configured": True, "project_id": "p1", "budget_id": "budget", "goal_revision": state["goal"],
                 "current_goal_revision": state["goal"], "activated_goal_revision": 1,
                 "entity_revision": project["entity_revision"], "total": balance(total, uncertain=True),
-                "coordination": balance(coordination)}
+                "coordination": balance(coordination), "coordinator_quote": quote}
 
     def stub(route) -> None:  # type: ignore[no-untyped-def]
         request = route.request
@@ -112,6 +114,10 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
     block = page.locator(".project-budget")
     expect(block).to_be_visible()
     block.locator("summary").click()
+    expect(block).to_contain_text("$0.324404")
+    block.locator("input").first.fill("0.250000")
+    block.locator("input").last.fill("0.150000")
+    expect(block).to_contain_text("below one coordinator call" if language == "en" else "ниже резерва для одного вызова")
     block.locator("input").first.fill("1.000000")
     block.locator("input").last.fill("0.500000")
     page.locator(".sheet-head button").click()

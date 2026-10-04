@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -75,12 +76,12 @@ async def bus(db: Database) -> AsyncIterator[EventBus]:
     await bus.close()
 
 
-def make(bus: EventBus, agent: Agent, clock: Clock, *, per_hour: int = 30) -> WakeQueue:
+def make(bus: EventBus, agent: Agent, clock: Clock, *, per_hour: int = 30, obsolete: Any = None, classify_event: Any = classify) -> WakeQueue:
     return WakeQueue(
         name="test",
         bus=bus,
         flt=EventFilter(types=("staff.status", "ask.pending"), project_id="p1"),
-        classify=classify,
+        classify=classify_event,
         render=render,
         state=agent.get_state,
         deliver=agent.deliver,
@@ -89,6 +90,7 @@ def make(bus: EventBus, agent: Agent, clock: Clock, *, per_hour: int = 30) -> Wa
         batch_seconds=lambda: 20,
         max_wakes_per_hour=lambda: per_hour,
         on_capped=agent.on_capped,
+        obsolete=obsolete,
         clock=clock,
     )
 
@@ -115,6 +117,94 @@ async def test_routine_events_wait_for_the_window_and_coalesce_per_member(bus: E
     # One line per member, the latest word about each, in the order the events happened.
     assert turn.splitlines() == ["staff.status:max:exited", "staff.status:ira:no_signal"]
     assert not queue.items and not await queue.pump()
+
+
+@pytest.mark.parametrize("same_key", [False, True])
+async def test_obsolete_batch_keeps_new_event_offered_during_check(bus: EventBus, same_key: bool) -> None:
+    agent, clock = Agent(), Clock()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def obsolete(batch: Batch) -> bool:
+        if batch.events[0].payload.get("status") != "exited":
+            return False
+        entered.set()
+        await release.wait()
+        return True
+
+    queue = make(bus, agent, clock, obsolete=obsolete)
+    old = await status(bus, "ira", "exited")
+    await queue.offer(old)
+    queue.stuck = "old refusal"
+    queue._backoff_until = clock.now + 20
+    clock.advance(20)
+    pumping = asyncio.create_task(queue.pump())
+    await entered.wait()
+    queue._held_for_run = True
+    fresh = await status(bus, "ira", "error") if same_key else await question(bus, "new")
+    await queue.offer(fresh)
+    release.set()
+    assert not await pumping
+    assert list(queue.items.values())[0].event is fresh
+    assert queue.cursor < fresh.seq and agent.cursor is not None and agent.cursor < fresh.seq
+    assert queue.stuck == "" and queue._backoff_until == 0 and not queue._held_for_run
+    clock.advance(1)
+    assert await queue.pump()
+    assert len(agent.turns) == 1 and agent.cursor == fresh.seq
+
+
+async def test_obsolete_batch_leaves_no_timer_or_stuck_state(bus: EventBus) -> None:
+    agent, clock = Agent(), Clock()
+
+    async def obsolete(_batch: Batch) -> bool:
+        queue._held_for_run = True
+        return True
+
+    queue = make(bus, agent, clock, obsolete=obsolete)
+    await queue.offer(await status(bus, "ira", "exited"))
+    queue.stuck = "old refusal"
+    queue._backoff_until = clock.now + 20
+    clock.advance(20)
+    assert not await queue.pump()
+    assert not queue.items and queue.due_at() is None
+    assert queue.stuck == "" and queue._backoff_until == 0 and not queue._held_for_run
+    assert agent.turns == [] and queue.stats.delivered == 0
+
+
+async def test_obsolete_batch_does_not_advance_past_event_still_being_classified(bus: EventBus) -> None:
+    agent, clock = Agent(), Clock()
+    checking, finish_check = asyncio.Event(), asyncio.Event()
+    classifying, finish_classifying = asyncio.Event(), asyncio.Event()
+
+    async def obsolete(batch: Batch) -> bool:
+        if batch.events[0].payload.get("status") != "exited":
+            return False
+        checking.set()
+        await finish_check.wait()
+        return True
+
+    async def classify_event(event: AppEvent) -> Wake | None:
+        if event.payload.get("status") == "error":
+            classifying.set()
+            await finish_classifying.wait()
+        return await classify(event)
+
+    queue = make(bus, agent, clock, obsolete=obsolete, classify_event=classify_event)
+    await queue.offer(await status(bus, "ira", "exited"))
+    clock.advance(20)
+    pumping = asyncio.create_task(queue.pump())
+    await checking.wait()
+    fresh = await status(bus, "ira", "error")
+    offering = asyncio.create_task(queue.offer(fresh))
+    await classifying.wait()
+    finish_check.set()
+    assert not await pumping
+    assert queue.cursor < fresh.seq and agent.cursor is not None and agent.cursor < fresh.seq
+    finish_classifying.set()
+    assert await offering
+    assert list(queue.items.values())[0].event is fresh
+    clock.advance(1)
+    assert await queue.pump()
+    assert agent.cursor == fresh.seq
 
 
 async def test_an_urgent_event_goes_at_once_and_takes_the_waiting_ones_with_it(bus: EventBus) -> None:

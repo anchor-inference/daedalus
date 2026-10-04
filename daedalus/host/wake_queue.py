@@ -105,6 +105,7 @@ class WakeQueue:
         lasting: Callable[[BaseException], bool] | None = None,
         on_stuck: Callable[[str], Awaitable[None]] | None = None,
         on_unstuck: Callable[[], Awaitable[None]] | None = None,
+        obsolete: Callable[[Batch], Awaitable[bool]] | None = None,
         clock: Callable[[], float] = time.monotonic,
         urgent_delay: float = URGENT_DELAY_SECONDS,
     ) -> None:
@@ -123,6 +124,7 @@ class WakeQueue:
         self._lasting = lasting
         self._on_stuck = on_stuck
         self._on_unstuck = on_unstuck
+        self._obsolete = obsolete
         self.stuck = ""
         """Why deliveries are refused for a reason that will not fix itself; empty while they are not.
         The owner hears of every such refusal (``on_stuck``) and decides what is news; it hears once
@@ -213,9 +215,11 @@ class WakeQueue:
 
     async def offer(self, event: AppEvent) -> bool:
         """Take one event from the bus; whether it is worth waking for."""
-        if event.seq:
-            self.last_seen = max(self.last_seen, event.seq)
         wake = await self._classify(event)
+        if event.seq:
+            # Classification can await storage while a due batch is being consumed. Until it has
+            # decided, this event must not extend the cursor past a wake that has not been queued.
+            self.last_seen = max(self.last_seen, event.seq)
         if wake is None:
             if not self.items and event.seq > self.cursor:
                 self.cursor = event.seq  # nothing waits before it, so nothing before it is owed
@@ -276,6 +280,17 @@ class WakeQueue:
             due = self.due_at()
             if due is None or due > now:
                 return False
+            if self._obsolete is not None:
+                batch = Batch(tuple(self.items.values()), urgent=bool(self._urgent()))
+                if await self._obsolete(batch):
+                    # A later state change can finish the work while its routine news is batched.
+                    # Consume that news without spending a turn; events offered meanwhile remain.
+                    for pending in batch.items:
+                        if self.items.get(pending.wake.key) is pending:
+                            del self.items[pending.wake.key]
+                    await self._clear_delivery_hold()
+                    await self._advance_cursor(batch)
+                    return False
             state = await self._state()
             if state in ("gone", "waiting"):
                 # Nobody to deliver to, or a question of its own is open and anything submitted now
@@ -307,16 +322,7 @@ class WakeQueue:
             logger.warning("wake queue %s could not deliver %d events: %s", self.name, len(items), exc)
             self._back_off()
             return False
-        self._backoff = 0.0
-        self._backoff_until = 0.0
-        if self.stuck:
-            self.stuck = ""
-            logger.info("wake queue %s delivers again", self.name)
-            if self._on_unstuck is not None:
-                try:
-                    await self._on_unstuck()
-                except Exception:  # noqa: BLE001 — the delivery stands; the all-clear is a courtesy
-                    logger.warning("wake queue %s could not say it delivers again", self.name, exc_info=True)
+        await self._clear_delivery_hold(clear_run_hold=not steer)
         for pending in items:
             if self.items.get(pending.wake.key) is pending:
                 del self.items[pending.wake.key]
@@ -325,9 +331,22 @@ class WakeQueue:
         else:
             self.stats.delivered += 1
             self.stats.wakes.append(self.clock())
-            self._held_for_run = False
         await self._advance_cursor(batch)
         return True
+
+    async def _clear_delivery_hold(self, *, clear_run_hold: bool = True) -> None:
+        self._backoff = 0.0
+        self._backoff_until = 0.0
+        if clear_run_hold:
+            self._held_for_run = False
+        if self.stuck:
+            self.stuck = ""
+            logger.info("wake queue %s can proceed again", self.name)
+            if self._on_unstuck is not None:
+                try:
+                    await self._on_unstuck()
+                except Exception:  # noqa: BLE001 — the delivery stands; the all-clear is a courtesy
+                    logger.warning("wake queue %s could not say it delivers again", self.name, exc_info=True)
 
     async def _advance_cursor(self, batch: Batch) -> None:
         """Up to the newest delivered event, but never past one still waiting: a held routine event

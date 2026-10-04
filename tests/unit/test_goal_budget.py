@@ -12,9 +12,11 @@ import pytest
 from fastapi import FastAPI
 from protocore.contracts.llm import LLMObservabilityContext, LLMProviderError
 
-from daedalus.config import RuntimeConfig
+from daedalus.config import ModelPresetConfig, RuntimeConfig
 from daedalus.extensions.api_goal_budget import register
 from daedalus.extensions.task_launch import queue_launch
+from daedalus.providers.openai_compat import ProviderEndpoint
+from daedalus.providers.pricing import BUILTIN
 from daedalus.stores.control import ControlConflict, canonical
 from daedalus.stores.database import Database
 from daedalus.stores.goal_budget import (
@@ -66,6 +68,9 @@ async def test_goal_cap_counts_concurrent_held_quotes_and_keeps_its_scope_after_
                             limit_usd="0.000100", coordination_limit_usd="0.000080")
     outcomes = await asyncio.gather(reserve(db, "first"), reserve(db, "second"), return_exceptions=True)
     assert sum(isinstance(outcome, BudgetRefused) for outcome in outcomes) == 1
+    refusal = next(outcome for outcome in outcomes if isinstance(outcome, BudgetRefused))
+    assert "$0.000070 worst-case reservation" in str(refusal)
+    assert "$0.000030 is the available balance" in str(refusal)
     assert (await db.fetchone("SELECT count(*) FROM goal_budget_admissions"))[0] == 1
     async with db.transaction() as conn:
         await InferenceBudget(db).unknown_in(conn, "first", "response lost")
@@ -177,6 +182,33 @@ async def test_http_budget_command_replays_and_exposes_exact_balance(db: Databas
         })
         assert invalid.status_code == 422
     assert (await db.fetchone("SELECT count(*) FROM operation_receipts WHERE operation_kind = 'budget.set'"))[0] == 1
+
+
+async def test_budget_read_shows_current_coordinator_reservation_without_changing_caps(db: Database) -> None:
+    await project(db)
+    config = RuntimeConfig()
+    config.presets["flash"] = ModelPresetConfig(provider="deepseek", model="deepseek-flash",
+                                                max_output_tokens=8192)
+    config.orchestrator.preset = "flash"
+    adapter = SimpleNamespace(endpoint=ProviderEndpoint(id="deepseek", kind="deepseek",
+                                                        base_url="http://127.0.0.1:1", pricing=BUILTIN["deepseek"]))
+    manager = SimpleNamespace(config=config, resolve_model=lambda _: ([(adapter, "deepseek-flash")], config.presets["flash"]))
+    app = SimpleNamespace(db=db, manager=manager)
+    api = FastAPI()
+
+    async def authenticated() -> dict[str, object]:
+        return {"via": "cookie", "user_id": 1}
+
+    register(api, app, authenticated)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
+        response = await client.get("/api/projects/project/budget")
+        assert response.status_code == 200
+        assert response.json()["configured"] is False
+        assert response.json()["coordinator_quote"] == {
+            "model": "deepseek-flash", "reserve_usd": "0.324404", "input_bound": 1_048_576,
+            "output_bound": 8192,
+        }
+    assert await db.fetchone("SELECT 1 FROM project_goal_budgets") is None
 
 
 async def test_native_provider_reserves_project_goal_before_transport(db: Database) -> None:

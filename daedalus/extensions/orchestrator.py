@@ -961,6 +961,9 @@ class Orchestrators:
         async def unstuck() -> None:
             await self.unstuck(project_id)
 
+        async def obsolete(batch: Batch) -> bool:
+            return await self.completion_is_final(project_id, batch)
+
         extra: dict[str, Any] = {"clock": self.clock} if self.clock is not None else {}
         queue = WakeQueue(
             name=project_id,
@@ -978,6 +981,7 @@ class Orchestrators:
             lasting=lasting,
             on_stuck=stuck,
             on_unstuck=unstuck,
+            obsolete=obsolete,
             **extra,
         )
         # A queue that was stuck before a restart still owes the all-clear: without this, the first
@@ -992,6 +996,33 @@ class Orchestrators:
         queue = self.queues.pop(project_id, None)
         if queue is not None:
             await queue.close()
+
+    async def completion_is_final(self, project_id: str, batch: Batch) -> bool:
+        """A completed project's terminal board news needs no coordinator turn.
+
+        Acceptance and the one-off worker's exit once arrived together after all work was done,
+        causing a provider request just before the operator switched the office off.
+        """
+        if not batch.events:
+            return False
+        task_ids: set[str] = set()
+        for event in batch.events:
+            payload = event.payload
+            if event.type in ("task.moved", "task.accepted", "task.assigned") and payload.get("task_id"):
+                task_ids.add(str(payload["task_id"]))
+                continue
+            if event.type == "staff.status" and payload.get("status") == "exited" and payload.get("detail") == "its task was done":
+                continue
+            return False
+        for task_id in task_ids:
+            task = await self.manager.db.fetchone("SELECT status FROM board_tasks WHERE id = ? AND project_id = ?", (task_id, project_id))
+            if task is None or task["status"] != "done":
+                return False
+        row = await self.manager.db.fetchone(
+            "SELECT 1 FROM board_tasks WHERE project_id = ? AND status NOT IN ('done', 'dropped') LIMIT 1",
+            (project_id,),
+        )
+        return row is None
 
     async def classify(self, project_id: str, event: AppEvent) -> Wake | None:
         """Whether an event of the project wakes its orchestrator, and whether it cannot wait.

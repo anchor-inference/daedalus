@@ -22,6 +22,7 @@ export type GoalBudget = {
   current_goal_revision?: number;
   total?: MoneyBalance;
   coordination?: MoneyBalance;
+  coordinator_quote?: { model: string; reserve_usd: string; input_bound: number; output_bound: number } | null;
 };
 
 export const budgetKey = (projectId: string) => `/api/projects/${encodeURIComponent(projectId)}/budget`;
@@ -48,6 +49,12 @@ export function budgetCompact(budget: GoalBudget | null | undefined): string | n
 
 function validAmount(value: string): boolean {
   return /^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/.test(value);
+}
+
+function micros(value: string): bigint | null {
+  if (!validAmount(value)) return null;
+  const [whole, fraction = ""] = value.split(".");
+  return BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, "0"));
 }
 
 type Write = (method: "PUT", path: string, fields: Record<string, unknown>, label: string,
@@ -115,6 +122,10 @@ export function ProjectBudget({ projectId, write, canWrite, confirmed }: {
     && Number(coordination) <= Number(total);
   const changed = !data?.configured || total !== data.total?.limit_usd
     || coordination !== data.coordination?.limit_usd;
+  const quoted = data?.coordinator_quote;
+  const quoteAmount = quoted ? micros(quoted.reserve_usd) : null;
+  const belowQuote = quoteAmount !== null && ((micros(total) !== null && micros(total)! < quoteAmount)
+    || (micros(coordination) !== null && micros(coordination)! < quoteAmount));
 
   async function save() {
     if (!data || !valid || !changed || sourceChanged || saving || offline || !canWrite) return;
@@ -140,6 +151,10 @@ export function ProjectBudget({ projectId, write, canWrite, confirmed }: {
       <div>{budgetCompact(data)}</div>
     </div>}
     <p className="sub">{t("budget.scope")}</p>
+    {quoted && <p className={belowQuote ? "sub attn" : "sub"} role={belowQuote ? "status" : undefined}>
+      {t("budget.coordinatorQuote", { model: quoted.model, amount: dollars(quoted.reserve_usd) })}
+      {belowQuote && <> {t("budget.belowQuote")}</>}
+    </p>}
     {sourceChanged && <p className="sub attn" role="status">{t("budget.draft.sourceChanged")}{" "}
       <button type="button" className="linkbtn" disabled={!data || offline} onClick={() => source && draft && remember({ ...draft, source })}>{t("budget.draft.review")}</button>
     </p>}

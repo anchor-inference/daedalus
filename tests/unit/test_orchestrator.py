@@ -562,6 +562,52 @@ async def test_what_wakes_the_orchestrator_and_what_never_does(settings: Setting
         await r.manager.close()
 
 
+async def test_completed_acceptance_batch_does_not_start_an_empty_turn(settings: Settings, db: Database, tmp_path: Path) -> None:
+    r = await rig(settings, db, tmp_path, [{"text": "I have new work."}])
+    try:
+        tick = [100.0]
+        r.orch.clock = lambda: tick[0]
+        r.manager.config.orchestrator.batch_seconds = 20
+        task_id = await board_task(r.manager, r.project, "One answer")
+        await r.orch.enable(r.project.id)
+        queue = r.orch.queues[r.project.id]
+
+        def event(kind: str, payload: dict[str, Any], *, staff_id: str | None = None) -> AppEvent:
+            return AppEvent(0, datetime.now(UTC).isoformat(), kind, payload, project_id=r.project.id, staff_id=staff_id)
+
+        # An earlier move may still be queued when acceptance finishes the only card.
+        await queue.offer(event("task.moved", {"task_id": task_id, "from": "doing", "to": "review"}))
+        await db.execute("UPDATE board_tasks SET status = 'done', acceptance_state = 'operator_approved' WHERE id = ?", (task_id,))
+        await queue.offer(event("task.accepted", {"task_id": task_id, "actor": "operator"}))
+        await queue.offer(event("staff.status", {"status": "exited", "detail": "its task was done"}, staff_id="one-off"))
+        tick[0] += 21
+        assert not await queue.pump()
+        assert not queue.items and not r.provider.requests
+
+        # A later task, answer, or error in the same window makes the whole batch actionable.
+        for kind, payload in (
+            ("task.created", {"task_id": "new", "title": "Next"}),
+            ("ask.answered", {"request_id": "answer"}),
+            ("staff.status", {"status": "error", "detail": "failed"}),
+        ):
+            batch = (event("task.accepted", {"task_id": task_id}), event(kind, payload, staff_id="worker"))
+            from daedalus.host.wake_queue import Batch, Pending, Wake
+            assert not await r.orch.completion_is_final(r.project.id, Batch(tuple(Pending(item, Wake(str(i)), tick[0]) for i, item in enumerate(batch)), urgent=False))
+
+        await board_task(r.manager, r.project, "Next answer")
+        await queue.offer(event("task.accepted", {"task_id": task_id}))
+        tick[0] += 21
+        assert await queue.pump(), "unfinished work keeps acceptance responsive"
+
+        async def answered() -> bool:
+            return bool(r.provider.requests) and await _idle(r.manager, (await r.refreshed()).settings.orchestrator.session_id)
+
+        await until_await(answered, "the coordinator received the pending work")
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
 async def test_a_finished_staff_turn_wakes_the_orchestrator_once_with_the_project_state(settings: Settings, db: Database, tmp_path: Path) -> None:
     """The acceptance: the operator enables an orchestrator, a staff member's turn finishes, and within the
     window the orchestrator receives one ``events`` message whose run's turn context holds the project state."""
