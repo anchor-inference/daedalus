@@ -370,11 +370,13 @@ function EnableSheet({ project, onClose, toast }: { project: Project; onClose: (
   const [error, setError] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [check, setCheck] = useState<{ key: string; state: "checking" | "ready" | "blocked" | "unavailable"; error: string }>({ key: "", state: "checking", error: "" });
+  const [suggestion, setSuggestion] = useState<{ key: string; id: string; label: string } | null>(null);
   const [retry, setRetry] = useState(0);
   const checkKey = JSON.stringify([project.id, model, cap]);
   const currentCheck = check.key === checkKey ? check : { key: checkKey, state: "checking", error: "" };
   const modelRefused = /^coordinator model .+ cannot run with spending limits:/i.test(error || currentCheck.error);
   const presets = team?.choices.presets ?? [];
+  const currentSuggestion = suggestion?.key === checkKey ? suggestion : null;
   const fallback = presets.find((p) => p.id === team?.choices.coordinator_default_preset)?.label ?? "";
   useEffect(() => {
     let active = true;
@@ -390,6 +392,27 @@ function EnableSheet({ project, onClose, toast }: { project: Project; onClose: (
       });
     return () => { active = false; };
   }, [project.id, model, cap, retry]);
+  useEffect(() => {
+    if (currentCheck.state !== "blocked" || !presets.length) return;
+    let active = true;
+    // An explicitly chosen alternative still needs the same preflight as the default.
+    void (async () => {
+      for (const preset of presets) {
+        if (!active) return;
+        if (preset.id === model || (!model && preset.id === team?.choices.coordinator_default_preset)) continue;
+        try {
+          const result = await api.post<{ effective_model: string }>(
+            `/api/projects/${encodeURIComponent(project.id)}/orchestrator/preflight`,
+            { model: preset.id, concurrency_cap: cap });
+          if (active && result.effective_model) setSuggestion({ key: checkKey, id: preset.id, label: preset.label });
+          return;
+        } catch (failure) {
+          if (!(failure instanceof ApiError && failure.status === 400)) return;
+        }
+      }
+    })();
+    return () => { active = false; };
+  }, [project.id, model, cap, checkKey, currentCheck.state, team?.choices.coordinator_default_preset, team?.choices.presets]);
   async function go() {
     if (currentCheck.state !== "ready" || busy) return;
     setBusy(true);
@@ -414,11 +437,15 @@ function EnableSheet({ project, onClose, toast }: { project: Project; onClose: (
       {currentCheck.state === "checking" && <p className="sub" role="status">{t("focus.enable.model.checking")}</p>}
       {(currentCheck.state === "blocked" || currentCheck.state === "unavailable") && <div className="form-hint" role="alert">
         {t(modelRefused ? "focus.enable.model.refused" : currentCheck.state === "blocked" ? "focus.enable.preflight.blocked" : "focus.enable.model.unavailable")}
-        {currentCheck.error && <p className="sub">{currentCheck.error}</p>}
+        {currentCheck.error && !modelRefused && <p className="sub">{currentCheck.error}</p>}
+        {currentCheck.state === "blocked" && currentSuggestion && <div>
+          <button type="button" className="linkbtn" onClick={() => { setModel(currentSuggestion.id); setError(""); }}>
+            {t("focus.enable.model.try", { name: currentSuggestion.label })}
+          </button>
+        </div>}
         {currentCheck.state === "unavailable" && <button type="button" className="linkbtn" onClick={() => setRetry((value) => value + 1)}>{t("common.retry")}</button>}
       </div>}
       {error && <p className="form-hint" role="alert">{modelRefused ? t("focus.enable.model.refused") : error}</p>}
-      {modelRefused && error && <p className="sub form-hint">{error}</p>}
       <details className="focus-enable-advanced" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
       <summary>{t("focus.enable.advanced")}</summary>
       <label className="field" htmlFor="orch-model">{t("focus.enable.model")}</label>

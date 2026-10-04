@@ -63,6 +63,7 @@ function grantName(grant: Grant): string {
 }
 
 export function CoordinatorAuthority({ projectId, toast, onChanged, initialTaskId, initialBundle }: { projectId: string; toast: (message: string) => void; onChanged: () => void; initialTaskId?: string; initialBundle?: "assignment_execution" | "execution" }) {
+  const guided = !!initialTaskId && !!initialBundle;
   const [open, setOpen] = useState(!!initialTaskId);
   const [adding, setAdding] = useState(!!initialTaskId);
   const [bundleId, setBundleId] = useState<BundleId>(initialBundle ?? (initialTaskId ? "assignment_execution" : "assignment"));
@@ -87,7 +88,9 @@ export function CoordinatorAuthority({ projectId, toast, onChanged, initialTaskI
   const canApprove = !offline && !busy && !pending && !!current?.current_coordinator_session_id && !!validBundle
     && !bundle?.blockers.length && taskReady && Number.isInteger(current.entity_revision) && current.entity_revision > 0 && Number.isFinite(expiryLimit)
     && expiryLimit > Date.now() + 120000;
-  const active = current?.grants.filter((grant) => grant.state === "active") ?? [];
+  const active = current?.grants.filter((grant) => grant.state === "active" && (!guided ||
+    (grant.scope.kind === "task" && grant.scope.id === initialTaskId &&
+      same(grant.operations, rights[initialBundle!].operations) && same(grant.effects, rights[initialBundle!].effects)))) ?? [];
   const past = current?.grants.filter((grant) => grant.state !== "active") ?? [];
 
   function remember(next: Pending | null) {
@@ -117,7 +120,8 @@ export function CoordinatorAuthority({ projectId, toast, onChanged, initialTaskI
   }
 
   async function approve() {
-    if (!canApprove || !current || !bundle || !current.current_coordinator_session_id) return;
+    if (!canApprove || !current || !bundle || !current.current_coordinator_session_id || (guided &&
+      (bundleId !== initialBundle || taskId !== initialTaskId || bundle.scope_kind !== "task"))) return;
     const expiry = new Date(Math.min(Date.now() + hours * 3600000, expiryLimit - 60000)).toISOString();
     const scope = bundle.scope_kind === "task" ? candidates.find((task) => task.id === taskId)?.title ?? "" : t("authority.scope.project");
     if (!(await confirmAsync(t("authority.approve.confirm"), {
@@ -175,16 +179,17 @@ export function CoordinatorAuthority({ projectId, toast, onChanged, initialTaskI
         {current.current_coordinator_session_id ? <p>{t("authority.activeCount", { n: active.length })}</p>
           : <p className="result-warning">{t("authority.noCoordinator")} {initialTaskId && <button type="button" className="linkbtn" onClick={() => navigate(projectHome(projectId))}>{t("pboard.grant.enable")}</button>}</p>}
         <ul className="plain-list">{active.map(grantRow)}</ul>
-        {past.length > 0 && <details><summary>{t("authority.past", { n: past.length })}</summary><ul className="plain-list">{past.map(grantRow)}</ul></details>}
-        <details open={adding} onToggle={(event) => setAdding(event.currentTarget.open)}><summary>{t("authority.add")}</summary>
-          <label className="field">{t("authority.bundle")}
+        {!guided && past.length > 0 && <details><summary>{t("authority.past", { n: past.length })}</summary><ul className="plain-list">{past.map(grantRow)}</ul></details>}
+        {(!guided || active.length === 0) && <details open={adding} onToggle={(event) => setAdding(event.currentTarget.open)}><summary>{t("authority.add")}</summary>
+          {guided ? <p>{bundleName(bundleId)}</p> : <label className="field">{t("authority.bundle")}
             <select className="field" value={bundleId} onChange={(event) => { setBundleId(event.target.value as BundleId); setTaskId(""); }}>
               {current.available_bundles.filter((item) => bundleIds.includes(item.id as BundleId)).map((item) => <option key={item.id} value={item.id}>{bundleName(item.id)}</option>)}
             </select>
-          </label>
+          </label>}
           <p className="sub">{t(`authority.bundle.help.${bundleId}`)}</p>
           {!validBundle && <div className="result-warning" role="status">{t("authority.definitionChanged")}</div>}
-          {rule.scope_kind === "task" && <label className="field">{t("authority.task")}
+          {guided && <p>{t("authority.task")} · {candidates.find((task) => task.id === taskId)?.title ?? t("authority.scope.task")}</p>}
+          {!guided && rule.scope_kind === "task" && <label className="field">{t("authority.task")}
             <select className="field" value={taskId} disabled={!!tasks.error} onChange={(event) => setTaskId(event.target.value)}>
               <option value="">{t("authority.task.choose")}</option>
               {candidates.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
@@ -198,10 +203,10 @@ export function CoordinatorAuthority({ projectId, toast, onChanged, initialTaskI
           </label>
           <details><summary>{t("authority.exact")}</summary><div className="mono">{[...(bundle?.operations ?? []), ...(bundle?.effects ?? [])].join(" · ")}</div></details>
           <button type="button" className="btn small" disabled={!canApprove} onClick={() => void approve()}>{t("authority.approve")}</button>
-        </details>
-        <CoordinatorHandoff projectId={projectId} revision={current.entity_revision}
+        </details>}
+        {!guided && <CoordinatorHandoff projectId={projectId} revision={current.entity_revision}
           sessionId={current.current_coordinator_session_id ?? ""} toast={toast}
-          onChanged={async () => { await authority.refresh(); onChanged(); }} />
+          onChanged={async () => { await authority.refresh(); onChanged(); }} />}
       </>}
     </div>}
   </details>;

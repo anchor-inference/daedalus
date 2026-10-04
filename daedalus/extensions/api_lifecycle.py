@@ -87,6 +87,31 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             row["no_entry_observed"] = bool(row["no_entry_observed"])
         return {"items": items, "next_after": items[-1]["id"] if len(rows) > limit else None}
 
+    @api.get("/api/projects/{project_id}/uncertain-launches")
+    async def uncertain_launches(project_id: str, after: str = Query("", max_length=160),
+                                 limit: int = Query(50, ge=1, le=100),
+                                 who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Expose in-flight and unknown launches without disclosing their command payloads."""
+        await authorize(project_id, who, "control.read")
+        async with app.db.transaction() as conn:
+            async with conn.execute(
+                "SELECT e.id,e.state,e.claim_generation,e.created_at,e.claimed_at,e.completed_at,"
+                "e.error,json_extract(e.payload_json,'$.data.attempt_id') AS attempt_id,"
+                "t.id AS task_id,"
+                "a.state AS attempt_state,a.provider_session_ref IS NOT NULL AS provider_session_recorded"
+                " FROM effect_outbox e JOIN operation_receipts r ON r.id = e.receipt_id"
+                " JOIN board_tasks t ON t.id = json_extract(e.payload_json,'$.control.task_id')"
+                " LEFT JOIN execution_attempts a ON a.id = json_extract(e.payload_json,'$.data.attempt_id')"
+                " WHERE r.scope_kind = 'project' AND r.scope_id = ? AND e.kind = 'task.launch'"
+                " AND t.project_id = ? AND e.state IN ('claimed','unknown') AND e.id > ? ORDER BY e.id LIMIT ?",
+                (project_id, project_id, after, limit + 1),
+            ) as cursor:
+                rows = [dict(row) for row in await cursor.fetchall()]
+        items = rows[:limit]
+        for row in items:
+            row["provider_session_recorded"] = bool(row["provider_session_recorded"])
+        return {"items": items, "next_after": items[-1]["id"] if len(rows) > limit else None}
+
     @api.post("/api/projects/{project_id}/unknown-stops/{attempt_id}/reconcile")
     async def reconcile_expired(project_id: str, attempt_id: str,
                                 who: dict[str, Any] = Depends(auth)) -> dict[str, str]:

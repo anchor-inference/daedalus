@@ -509,6 +509,8 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
         return 200, "application/json", json.dumps({"project_id": parts[3], "actions": []})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "unknown-stops":
         return 200, "application/json", json.dumps({"items": [], "next_after": None})
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "uncertain-launches":
+        return 200, "application/json", json.dumps({"items": [], "next_after": None})
     if method.upper() == "GET" and len(parts) == 6 and parts[2] == "projects" and parts[4:] == ["scope-revisions", "current"]:
         return 200, "application/json", json.dumps({"project_id": parts[3], "goal_revision": 1,
                                                       "entity_revision": 1, "body": "Existing project goal",
@@ -766,6 +768,7 @@ class BoardStub:
         self.workflow_unknowns = 0
         self.unknown_stops: list[dict] = []
         self.unknown_stops_failed = False
+        self.uncertain_launches: list[dict] = []
         self.stop_reconciliations: list[str] = []
 
     @staticmethod
@@ -831,6 +834,14 @@ class BoardStub:
         """``(status, body)`` for a route of the board, or None for anything else."""
         base = f"/api/projects/{self.project['id']}/board"
         stops = f"/api/projects/{self.project['id']}/unknown-stops"
+        launches = f"/api/projects/{self.project['id']}/uncertain-launches"
+        if path == launches and method == "GET":
+            from urllib.parse import parse_qs
+            params = parse_qs(query)
+            after = params.get("after", [""])[0]
+            limit = int(params.get("limit", ["50"])[0])
+            rows = [row for row in sorted(self.uncertain_launches, key=lambda row: row["id"]) if row["id"] > after]
+            return 200, {"items": rows[:limit], "next_after": rows[limit - 1]["id"] if len(rows) > limit else None}
         if path == stops and method == "GET":
             if self.unknown_stops_failed:
                 return 503, {"detail": "inspection unavailable"}

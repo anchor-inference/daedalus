@@ -41,9 +41,14 @@ def scenario(language: str, width: int, coordinator: bool, staff_state: str) -> 
             if request.method == "POST":
                 approvals.append(request.post_data_json)
                 return route.fulfill(status=200, content_type="application/json", body=json.dumps({"grant_id": "grant-one"}))
+            grants = [{"grant_id": "grant-one", "generation": 1, "session_id": "coordinator-one",
+                       "scope": {"kind": "task", "id": "first-task"}, "operations": operations,
+                       "effects": ["execution.start", "execution.stop"], "expires_at": approvals[-1]["expires_at"],
+                       "revoked_at": None, "state": "active", "receipt_id": "receipt-one",
+                       "parent_grant_id": None, "parent_grant_generation": None}] if approvals else []
             payload = {"project_id": PID, "entity_revision": 1,
                        "current_coordinator_session_id": "coordinator-one" if coordinator else None,
-                       "readiness_blockers": [], "grants": [], "available_bundles": [{
+                       "readiness_blockers": [], "grants": grants, "available_bundles": [{
                            "id": bundle_id, "scope_kind": "task", "operations": operations,
                            "effects": ["execution.start", "execution.stop"],
                            "max_expires_at": (datetime.now(UTC) + timedelta(hours=24)).isoformat(),
@@ -66,8 +71,9 @@ def scenario(language: str, width: int, coordinator: bool, staff_state: str) -> 
         expect(sheet).to_contain_text("Prepare menu")
         authority_section = sheet.locator(".sheet-section", has_text="Coordinator permissions" if language == "en" else "Полномочия координатора")
         expect(authority_section).to_be_visible()
-        expect(authority_section.get_by_label("Allowed actions" if language == "en" else "Разрешённые действия")).to_have_value(bundle_id)
-        expect(authority_section.locator("select.field").nth(1)).to_have_value("first-task")
+        expect(authority_section.get_by_label("Allowed actions" if language == "en" else "Разрешённые действия")).to_have_count(0)
+        expect(authority_section.get_by_text("Prepare menu")).to_be_visible()
+        expect(authority_section.locator("select.field")).to_have_count(1)
         approve = authority_section.get_by_role("button", name="Approve" if language == "en" else "Разрешить")
         if coordinator:
             expect(approve).to_be_enabled()
@@ -82,6 +88,8 @@ def scenario(language: str, width: int, coordinator: bool, staff_state: str) -> 
             assert "board.task.update" not in dialog.inner_text()
             dialog.get_by_role("button", name="Approve" if language == "en" else "Разрешить").click()
             expect(page.locator(".toast")).to_contain_text("Approval recorded" if language == "en" else "Разрешение записано")
+            expect(authority_section.get_by_role("button", name="Approve" if language == "en" else "Разрешить")).to_have_count(0)
+            expect(authority_section.get_by_text("Prepare menu")).to_be_visible()
             assert len(approvals) == 1
             assert approvals[0]["bundle_id"] == bundle_id and approvals[0]["task_id"] == "first-task"
         else:

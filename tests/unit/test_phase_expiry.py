@@ -224,3 +224,47 @@ async def test_unknown_stop_inspection_and_exact_observation_recovery(db: Databa
                 assert (await db.fetchone("SELECT state FROM execution_attempts"))[0] == "cancelled"
     finally:
         app.executions.release()
+
+
+async def test_uncertain_launch_inspection_is_project_scoped_and_does_not_change_claims(db: Database) -> None:
+    app, _, _, _ = await launch_fixture(db)
+    try:
+        await db.execute("INSERT INTO projects(id,name,created_at,settings) VALUES ('other','Other','2026-01-01','{}')")
+        await db.execute("INSERT INTO board_tasks(id,title,status,priority,project_id,created_at,updated_at)"
+                         " VALUES ('other-task','Other','todo',3,'other','2026-01-01','2026-01-01')")
+        for id_, project, task, state in (("first", "project", "task", "unknown"),
+                                           ("second", "project", "task", "claimed"),
+                                           ("third", "other", "other-task", "unknown")):
+            await db.execute("INSERT INTO operation_receipts(id,scope_kind,scope_id,project_id,actor_id,"
+                             "operation_kind,client_operation_id,payload_hash,entity_revision,state,response_json,created_at)"
+                             " VALUES (?,'project',?,?,'operator:1','task.launch',?,'hash',1,'committed','{}','2026-01-01')",
+                             (id_, project, project, id_))
+            await db.execute("INSERT INTO effect_outbox(id,receipt_id,kind,payload_json,state,claim_generation,"
+                             "claimed_at,created_at) VALUES (?,?,'task.launch',json_object('control',"
+                             "json_object('task_id',?),'data',json_object('attempt_id',?)),?,1,'2026-01-02','2026-01-01')",
+                             (id_, id_, task, f"attempt-{id_}", state))
+
+        api = FastAPI()
+
+        async def authenticated(x_user: int = Header(1)) -> dict[str, int | str]:
+            return {"via": "token" if x_user > 0 else "staff", "user_id": x_user}
+
+        register_lifecycle_api(api, app, authenticated)
+        path = "/api/projects/project/uncertain-launches"
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
+            assert (await client.get(path, headers={"x-user": "-1"})).status_code == 403
+            assert (await client.get("/api/projects/missing/uncertain-launches")).status_code == 404
+            first = (await client.get(path, params={"limit": 1})).json()
+            assert [row["id"] for row in first["items"]] == ["first"]
+            assert first["next_after"] == "first"
+            assert first["items"][0]["attempt_id"] == "attempt-first"
+            assert first["items"][0]["provider_session_recorded"] is False
+            assert "payload_json" not in first["items"][0]
+            second = (await client.get(path, params={"after": first["next_after"]})).json()
+            assert [row["id"] for row in second["items"]] == ["second"]
+            assert second["next_after"] is None
+            assert (await client.get("/api/projects/other/uncertain-launches")).json()["items"][0]["id"] == "third"
+            assert (await client.get(path, params={"limit": 101})).status_code == 422
+        assert [row["state"] for row in await db.fetchall("SELECT state FROM effect_outbox ORDER BY id")] == ["unknown", "claimed", "unknown"]
+    finally:
+        app.executions.release()

@@ -33,6 +33,21 @@ def check(width: int, language: str) -> None:
         expect_app(BASE)
         expect(page.locator(".pboard-unknown-stops")).to_have_count(0)
 
+        stub.uncertain_launches = [{"id": "launch-one", "task_id": "t-checkout", "state": "unknown",
+                                    "claim_generation": 2, "created_at": "2026-10-01T09:00:00Z",
+                                    "claimed_at": "2026-10-01T09:01:00Z", "completed_at": None,
+                                    "error": "response lost", "attempt_id": "attempt-one",
+                                    "attempt_state": "recovering", "provider_session_recorded": False}]
+        page.reload()
+        launches = page.locator(".pboard-uncertain-launches")
+        expect(launches).to_be_visible()
+        launches.locator(":scope > summary").click()
+        launches.locator(".pboard-unknown-row summary").click()
+        expect(launches).to_contain_text("attempt-one")
+        expect(launches).to_contain_text("response lost")
+        fits(page, f"{width}px {language} uncertain launch")
+        stub.uncertain_launches = []
+
         stub.unknown_stops_failed = True
         page.reload()
         disclosure = page.locator(".pboard-unknown-stops")
