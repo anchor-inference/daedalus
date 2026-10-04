@@ -49,6 +49,7 @@ EXTENSIONS = (
     "daedalus.extensions.skill_quality",
     "daedalus.extensions.board_workflows",
     "daedalus.extensions.lifecycle",
+    "daedalus.extensions.phase_expiry",
     "daedalus.extensions.issue_sync",
     "daedalus.extensions.launcher_updates",
     "daedalus.extensions.api",

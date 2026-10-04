@@ -15,6 +15,8 @@ from daedalus.stores.executions import ACTIVE, AttemptIdentity
 from daedalus.stores.lifecycle import record_owned_exit
 
 if TYPE_CHECKING:
+    import aiosqlite
+
     from daedalus.app import Application
     from daedalus.host.events import EventBus
 
@@ -41,29 +43,35 @@ async def observe_no_entry(app: Application, identity: AttemptIdentity, *, staff
                            reason: str) -> bool:
     """Called only by the host's local pre-entry failure path, never from a worker report."""
     async with app.db.transaction() as conn:
-        generation = await app.executions._host(conn)
-        row = await one(conn, "SELECT a.*,s.session_id,s.terminal_id FROM execution_attempts a"
-                        " JOIN staff_sessions s ON s.id = a.staff_session_id WHERE a.id = ?", (identity.id,))
-        if (row is None or app.executions._identity(row) != identity or identity.host_generation != generation
-                or row["staff_session_id"] != staff_session_id or row["state"] != "queued"
-                or row["runtime_entered_at"] is not None or row["provider_session_ref"] is not None
-                or row["native_run_id"] is not None or row["session_id"] is not None or row["terminal_id"] is not None):
-            return False
-        if await one(conn, "SELECT 1 FROM inference_reservations WHERE execution_attempt_id = ?"
-                     " OR comparison_slot_id IN (SELECT id FROM comparison_funding_slots WHERE attempt_id = ?)",
-                     (identity.id, identity.id)):
-            return False
-        if await one(conn, "SELECT 1 FROM comparison_funding_slots WHERE attempt_id = ?"
-                     " AND launch_started_at IS NOT NULL", (identity.id,)):
-            return False
-        await conn.execute("INSERT INTO runtime_no_entry_observations(attempt_id,staff_session_id,contract_revision,"
-                           "host_generation,runtime_kind,reason,observed_at) VALUES (?,?,?,?,?,?,?)",
-                           (identity.id, staff_session_id, identity.contract_revision, generation, row["runtime_kind"],
-                            reason[:500], now()))
-        await conn.execute("UPDATE execution_attempts SET state = 'failed',updated_at = ? WHERE id = ?", (now(), identity.id))
-        await conn.execute("UPDATE staff_sessions SET ended_at = ?,status = 'exited',status_at = ?,end_reason = ?"
-                           " WHERE id = ?", (now(), now(), reason[:500], staff_session_id))
-        return True
+        return await observe_no_entry_in(app, conn, identity, staff_session_id=staff_session_id, reason=reason)
+
+
+async def observe_no_entry_in(app: Application, conn: aiosqlite.Connection, identity: AttemptIdentity, *,
+                              staff_session_id: str, reason: str) -> bool:
+    """Attest a queued send boundary as unentered in the caller's safety transaction."""
+    generation = await app.executions._host(conn)
+    row = await one(conn, "SELECT a.*,s.session_id,s.terminal_id FROM execution_attempts a"
+                    " JOIN staff_sessions s ON s.id = a.staff_session_id WHERE a.id = ?", (identity.id,))
+    if (row is None or app.executions._identity(row) != identity or identity.host_generation != generation
+            or row["staff_session_id"] != staff_session_id or row["state"] != "queued"
+            or row["runtime_entered_at"] is not None or row["provider_session_ref"] is not None
+            or row["native_run_id"] is not None or row["session_id"] is not None or row["terminal_id"] is not None):
+        return False
+    if await one(conn, "SELECT 1 FROM inference_reservations WHERE execution_attempt_id = ?"
+                 " OR comparison_slot_id IN (SELECT id FROM comparison_funding_slots WHERE attempt_id = ?)",
+                 (identity.id, identity.id)):
+        return False
+    if await one(conn, "SELECT 1 FROM comparison_funding_slots WHERE attempt_id = ?"
+                 " AND launch_started_at IS NOT NULL", (identity.id,)):
+        return False
+    await conn.execute("INSERT INTO runtime_no_entry_observations(attempt_id,staff_session_id,contract_revision,"
+                       "host_generation,runtime_kind,reason,observed_at) VALUES (?,?,?,?,?,?,?)",
+                       (identity.id, staff_session_id, identity.contract_revision, generation, row["runtime_kind"],
+                        reason[:500], now()))
+    await conn.execute("UPDATE execution_attempts SET state = 'failed',updated_at = ? WHERE id = ?", (now(), identity.id))
+    await conn.execute("UPDATE staff_sessions SET ended_at = ?,status = 'exited',status_at = ?,end_reason = ?"
+                       " WHERE id = ?", (now(), now(), reason[:500], staff_session_id))
+    return True
 
 
 async def admit_native_run(app: Application, staff_session_id: str, session_id: str, run_id: str) -> None:

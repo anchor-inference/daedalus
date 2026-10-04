@@ -253,6 +253,27 @@ class Lifecycle:
         return EffectOutcome("unknown", "owned runtime exit needs observation") if unknown else EffectOutcome("completed")
 
     async def _stop_attempt(self, owner: dict[str, Any], claim: Claim, check: Any) -> str:
+        async def authorized() -> None:
+            await check(claim)
+
+        return await self._stop_owned_attempt(owner, authorized)
+
+    async def stop_expired(self, owner: dict[str, Any]) -> str:
+        """Stop one durably fenced timeout once; a worker grant is not cleanup authority."""
+        async def authorized() -> None:
+            async with self.app.db.transaction() as conn:
+                host = await self.app.executions._host(conn)
+                row = await one(conn, "SELECT 1 FROM execution_attempts a JOIN attempt_phase_clocks c"
+                                " ON c.attempt_id = a.id WHERE a.id = ? AND a.state = 'recovering'"
+                                " AND a.host_generation = ? AND c.outcome = 'timed_out'",
+                                (owner["child_id"], host))
+                if row is None or owner["host_generation"] != host:
+                    raise ControlConflict("expired runtime ownership changed")
+
+        await authorized()
+        return await self._stop_owned_attempt(owner, authorized)
+
+    async def _stop_owned_attempt(self, owner: dict[str, Any], authorized: Any) -> str:
         attempt_id = owner["child_id"]
         async with self.app.db.transaction() as conn:
             row = await one(
@@ -328,7 +349,7 @@ class Lifecycle:
                 live = await team.live(staff_session_id)
                 if live is None or live.id != staff_session_id or live.staff.id != row["staff_id"]:
                     return "unknown"
-                await check(claim)
+                await authorized()
                 current = await self.app.db.fetchone(
                     "SELECT a.id,a.provider_session_ref,a.host_generation,a.native_run_id,a.runtime_instance,"
                     "s.session_id,s.terminal_id,t.ptyd_instance FROM execution_attempts a"
@@ -351,7 +372,7 @@ class Lifecycle:
                       current["ptyd_instance"] != row["runtime_instance"] or
                       live.terminal_id != current["terminal_id"]):
                     return "unknown"
-                await check(claim)
+                await authorized()
                 async with asyncio.timeout(30):
                     if row["runtime_kind"] == "daedalus":
                         if not await self.app.manager.stop_run(current["session_id"], row["native_run_id"]):
