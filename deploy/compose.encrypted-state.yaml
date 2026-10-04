@@ -1,0 +1,27 @@
+# Use with the base compose file after mounting a LUKS filesystem on the host.
+# The required state identity also travels through the base file, so invoking the base file alone
+# after opt-in fails at process startup instead of writing to its named volume.
+services:
+  daedalus:
+    environment:
+      DAEDALUS_ENCRYPTED_STATE_REQUIRED: "1"
+      DAEDALUS_ENCRYPTED_STATE_ID: ${DAEDALUS_ENCRYPTED_STATE_ID:?set the encrypted state identity}
+      DAEDALUS_ENCRYPTED_STATE_SOURCE: ${DAEDALUS_ENCRYPTED_STATE_SOURCE:?set the mapped device}
+    volumes:
+      - type: bind
+        source: ${DAEDALUS_ENCRYPTED_STATE_DIR:?set the mounted encrypted state directory}
+        target: /srv/state
+        bind:
+          create_host_path: false
+  keyproxy:
+    environment:
+      DAEDALUS_ENCRYPTED_STATE_REQUIRED: "1"
+      DAEDALUS_ENCRYPTED_STATE_ID: ${DAEDALUS_ENCRYPTED_STATE_ID:?set the encrypted state identity}
+      DAEDALUS_ENCRYPTED_STATE_SOURCE: ${DAEDALUS_ENCRYPTED_STATE_SOURCE:?set the mapped device}
+    volumes:
+      - type: bind
+        source: ${DAEDALUS_ENCRYPTED_STATE_DIR:?set the mounted encrypted state directory}
+        target: /srv/state
+        read_only: true
+        bind:
+          create_host_path: false

@@ -98,6 +98,9 @@ services:
       TELEGRAM_API_BASE: http://telegram-bot-api:8081
       TELEGRAM_LOCAL_MODE: "true"
       STATE_DIR: /srv/state
+      DAEDALUS_ENCRYPTED_STATE_REQUIRED: ${DAEDALUS_ENCRYPTED_STATE_REQUIRED:-0}
+      DAEDALUS_ENCRYPTED_STATE_ID: ${DAEDALUS_ENCRYPTED_STATE_ID:-}
+      DAEDALUS_ENCRYPTED_STATE_SOURCE: ${DAEDALUS_ENCRYPTED_STATE_SOURCE:-}
       WORKSPACES_DIR: /srv/workspaces
       BOT_REPO_DIR: /srv/daedalus
       CORE_REPO_DIR: /srv/protocore-exp
@@ -153,6 +156,7 @@ services:
       # The browser daemon's socket and token. Sealed from the agent's commands like the terminal
       # daemons': the token drives a browser that holds the operator's logins for a project.
       - browser-run:/run/daedalus-browser
+    entrypoint: ["python3", "/opt/launcher/state_mount_guard.py", "--", "python3", "/opt/launcher/supervisor.py"]
     ports:
       - "127.0.0.1:${API_PORT:-8765}:${API_PORT:-8765}"
       # Services the agent hosts (ServiceStart) listen in this range; published on every interface so the
@@ -320,7 +324,7 @@ services:
     restart: unless-stopped
     # The image's entrypoint is the supervisor, which is not what this container is; it is replaced
     # rather than appended to.
-    entrypoint: ["/srv/venv/bin/python"]
+    entrypoint: ["python3", "/opt/launcher/state_mount_guard.py", "--", "/srv/venv/bin/python"]
     command: ["/opt/keyproxy/proxy.py"]
     healthcheck:
       test: ["CMD", "/srv/venv/bin/python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:3200/healthz', timeout=2).status == 200 else 1)"]
@@ -335,6 +339,9 @@ services:
       HOME: /home/keyproxy
       PYTHONPATH: /opt/keyproxy
       KEYPROXY_PORT: "3200"
+      DAEDALUS_ENCRYPTED_STATE_REQUIRED: ${DAEDALUS_ENCRYPTED_STATE_REQUIRED:-0}
+      DAEDALUS_ENCRYPTED_STATE_ID: ${DAEDALUS_ENCRYPTED_STATE_ID:-}
+      DAEDALUS_ENCRYPTED_STATE_SOURCE: ${DAEDALUS_ENCRYPTED_STATE_SOURCE:-}
       # Every interface here is the container's own, on a network only the agent is on; the proxy
       # binds the loopback address unless it is told otherwise, which is the right default on a
       # machine and the wrong one in here.
@@ -374,6 +381,10 @@ services:
     working_dir: ${DAEDALUS_COMPOSE_PROJECT_DIR:-/project}
     environment:
       COMPOSE_FILE: ${DAEDALUS_COMPOSE_FILE:-/project/deploy/compose.yaml}
+      DAEDALUS_ENCRYPTED_STATE_REQUIRED: ${DAEDALUS_ENCRYPTED_STATE_REQUIRED:-0}
+      DAEDALUS_ENCRYPTED_STATE_DIR: ${DAEDALUS_ENCRYPTED_STATE_DIR:-}
+      DAEDALUS_ENCRYPTED_STATE_ID: ${DAEDALUS_ENCRYPTED_STATE_ID:-}
+      DAEDALUS_ENCRYPTED_STATE_SOURCE: ${DAEDALUS_ENCRYPTED_STATE_SOURCE:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${DAEDALUS_COMPOSE_PROJECT_DIR:-..}:${DAEDALUS_COMPOSE_PROJECT_DIR:-/project}

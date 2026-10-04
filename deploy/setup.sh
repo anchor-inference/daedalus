@@ -110,7 +110,27 @@ fi
 say "4/5 Starting the stack (the first build takes a few minutes)."
 PROFILE=()
 [ -n "$(current TELEGRAM_BOT_TOKEN "$ENV_FILE")" ] && PROFILE=(--profile telegram)  # the local Bot API server is only for a bot
-docker compose -f deploy/compose.yaml --env-file "$ENV_FILE" "${PROFILE[@]}" up -d --build
+STATE_COMPOSE=()
+if [ "$(current DAEDALUS_ENCRYPTED_STATE_REQUIRED "$ENV_FILE")" = 1 ]; then
+  bash deploy/encrypted-state.sh check \
+    "$(current DAEDALUS_ENCRYPTED_STATE_DIR "$ENV_FILE")" \
+    "$(current DAEDALUS_ENCRYPTED_STATE_SOURCE "$ENV_FILE")" \
+    "$(current DAEDALUS_ENCRYPTED_STATE_ID "$ENV_FILE")"
+  # An existing named state volume may hold the installation's only database. Enabling the bind
+  # here would hide that volume and appear to start a fresh installation without migrating it.
+  STATE_VOLUME=$(docker compose -f deploy/compose.yaml --env-file "$ENV_FILE" config --format json | python3 -c 'import json, sys; print(json.load(sys.stdin)["volumes"]["daedalus-state"]["name"])')
+  if docker volume inspect "$STATE_VOLUME" >/dev/null 2>&1; then
+    echo "existing named state volume requires a separate, verified migration before encrypted setup" >&2
+    exit 1
+  fi
+  STATE_COMPOSE=(-f deploy/compose.encrypted-state.yaml)
+elif [ -n "$(current DAEDALUS_ENCRYPTED_STATE_DIR "$ENV_FILE")" ] || \
+     [ -n "$(current DAEDALUS_ENCRYPTED_STATE_SOURCE "$ENV_FILE")" ] || \
+     [ -n "$(current DAEDALUS_ENCRYPTED_STATE_ID "$ENV_FILE")" ]; then
+  echo "encrypted state settings are set without the required mount guard" >&2
+  exit 1
+fi
+docker compose -f deploy/compose.yaml "${STATE_COMPOSE[@]}" --env-file "$ENV_FILE" "${PROFILE[@]}" up -d --build
 say "Done. Logs: docker logs -f deploy-daedalus-1"
 
 say "5/5 Host terminal — optional."
