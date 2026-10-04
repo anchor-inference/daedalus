@@ -6,19 +6,57 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
+from fastapi import FastAPI
 
+from daedalus.extensions.api_orchestrator_domain import install_routes
 from daedalus.extensions.staff_results import StaffReportService
 from daedalus.host.events import EventBus
 from daedalus.stores.blobs import FileBlobStore
 from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Principal, Scope
 from daedalus.stores.database import Database
 from daedalus.stores.executions import ExecutionStore
+from daedalus.stores.files import FILES_TENANT
+
+
+async def accept_original(app: SimpleNamespace, result_id: str, manifest_id: str, original: str) -> None:
+    api = FastAPI()
+
+    async def authenticated() -> dict[str, int | str]:
+        return {"via": "token", "user_id": 1}
+
+    install_routes(api, app, authenticated)
+    base = f"/api/board/task/results/{result_id}"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
+        read = await client.get(base + "/original")
+        assert read.status_code == 200 and read.json()["original_text"] == original
+        revision = (await client.get("/api/board/task/contract")).json()["entity_revision"]
+        invalid = await client.post(base + "/evidence", json={
+            "client_operation_id": "wrong-manifest", "expected_entity_revision": revision,
+            "criterion_id": "result", "manifest_id": "missing", "observation": "Read original"})
+        assert invalid.status_code == 409
+        evidence = await client.post(base + "/evidence", json={
+            "client_operation_id": "original-evidence", "expected_entity_revision": revision,
+            "criterion_id": "result", "manifest_id": manifest_id, "observation": "Read exact original"})
+        assert evidence.status_code == 200, evidence.text
+        verdict = await client.post(base + "/verdicts", json={
+            "client_operation_id": "original-verdict", "expected_entity_revision": evidence.json()["entity_revision"],
+            "verification": "verified", "accepted": True, "evidence_ids": [evidence.json()["evidence_id"]],
+            "reason": "Read the immutable worker report"})
+        assert verdict.status_code == 200, verdict.text
+        decision = await client.post(base + "/accept", json={
+            "client_operation_id": "original-accept", "expected_entity_revision": verdict.json()["entity_revision"],
+            "verdict_id": verdict.json()["verdict_id"], "contract_revision": 1})
+        assert decision.status_code == 200, decision.text
+        assert decision.json()["acceptance_state"] == "operator_approved"
+        assert decision.json()["result_id"] == result_id
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("original", ["Text-only result", "Result complete.\n" + "details " * 10000])
 async def test_done_report_keeps_full_original_and_replays_without_second_event(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, original: str) -> None:
     db = Database(tmp_path / "state.sqlite")
     await db.open()
     executions = ExecutionStore(db)
@@ -95,7 +133,12 @@ async def test_done_report_keeps_full_original_and_replays_without_second_event(
         monkeypatch.setattr(bus, "persist_in", failed_event)
         with pytest.raises(RuntimeError, match="event insert failed"):
             await service.submit(live, "checkpoint", "transaction must roll back", call_id="call-failed")
+        with pytest.raises(RuntimeError, match="event insert failed"):
+            await service.submit(live, "done", original, call_id="call-failed-done")
         monkeypatch.setattr(bus, "persist_in", original_persist)
+        assert (await db.fetchone("SELECT count(*) AS n FROM files"))["n"] == 1
+        assert (await db.fetchone("SELECT count(*) AS n FROM artifact_manifests"))["n"] == 1
+        assert (await db.fetchone("SELECT count(*) AS n FROM result_receipts"))["n"] == 0
         assert (await db.fetchone("SELECT count(*) AS n FROM staff_report_records"))["n"] == 2
         assert (await db.fetchone("SELECT count(*) AS n FROM operation_receipts"
                                   " WHERE operation_kind = 'staff.report'"))["n"] == 2
@@ -110,12 +153,27 @@ async def test_done_report_keeps_full_original_and_replays_without_second_event(
         with pytest.raises(ValueError, match="uncommitted changes"):
             await service.submit(live, "done", "not committed", call_id="call-dirty")
         team.worktree_of = worktree_of
-        original = "Result complete.\n" + "details " * 10000
         first, event = await service.submit(live, "done", original, call_id="call-one")
         assert event is not None and first["result_id"] == first["report_id"]
         assert await service.original("project", "task", first["report_id"]) == original.encode("utf-8")
         second, replayed_event = await service.submit(live, "done", original, call_id="call-one")
         assert second == first and replayed_event is None
+        manifest = await db.fetchone("SELECT m.id,m.file_id,f.sha256,f.size,r.original_artifact_file_id"
+                                     " FROM result_receipts r JOIN result_artifacts a ON a.result_id = r.id"
+                                     " JOIN artifact_manifests m ON m.id = a.manifest_id"
+                                     " JOIN files f ON f.id = m.file_id WHERE r.id = ?", (first["result_id"],))
+        assert manifest is not None and manifest["file_id"] == manifest["original_artifact_file_id"]
+        assert manifest["size"] == len(original.encode("utf-8"))
+        assert await manager.files.blobs.get(FILES_TENANT, manifest["sha256"]) == original.encode("utf-8")
+        assert (await db.fetchone("SELECT count(*) AS n FROM files"))["n"] == 2
+        assert (await db.fetchone("SELECT count(*) AS n FROM file_access WHERE file_id = ? AND scope = 'project'",
+                                  (manifest["file_id"],)))["n"] == 1
+        assert (await db.fetchone("SELECT count(*) AS n FROM task_files WHERE file_id = ? AND task_id = 'task'",
+                                  (manifest["file_id"],)))["n"] == 1
+        assert (await db.fetchone("SELECT count(*) AS n FROM artifact_manifests"))["n"] == 2
+        await accept_original(app, first["result_id"], manifest["id"], original)
+        task = await db.fetchone("SELECT status,accepted_result_id FROM board_tasks WHERE id = 'task'")
+        assert task["status"] == "done" and task["accepted_result_id"] == first["result_id"]
         assert (await db.fetchone("SELECT count(*) AS n FROM app_events WHERE type = 'staff.report'"))["n"] == 3
         assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = 'attempt'"))["state"] == "completed"
         with pytest.raises(ControlConflict):

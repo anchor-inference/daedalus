@@ -205,6 +205,11 @@ class StaffReportService:
             name = f"operator-steps-{task_id}-{hashlib.sha256(body).hexdigest()[:12]}.md"
             staged.append(_Artifact(name, "operator_steps", body, hashlib.sha256(body).hexdigest(),
                                     "text/markdown"))
+        original_index = len(staged) if kind == "done" else None
+        if kind == "done":
+            # Review evidence needs the report itself as an immutable attachment, even when
+            # the worker hands in only text and has no workspace files to transfer.
+            staged.append(_Artifact("report.txt", "report_original", original, original_digest, "text/plain"))
         blobs: FileBlobStore = self.app.manager.files.blobs
         for item in staged:
             await blobs.put(FILES_TENANT, item.data, content_type=item.mime)
@@ -228,6 +233,7 @@ class StaffReportService:
                 await self._remember(conn, live.staff.id, remember.strip())
             file_refs = []
             manifest_ids = []
+            original_file_id = None
             for index, item in enumerate(staged):
                 file_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{mutation.object_id}:{index}:{item.digest}").hex[:12]
                 await conn.execute("INSERT INTO files(id,name,mime,size,sha256,origin,origin_ref,created_at)"
@@ -243,6 +249,9 @@ class StaffReportService:
                                    (now(), file_id, principal.actor_id, scope.id, item.origin_ref[:500],
                                     len(item.data), item.digest))
                 file_refs.append({"id": file_id, "name": item.name, "mime": item.mime, "size": len(item.data)})
+                if index == original_index:
+                    original_file_id = file_id
+                    continue
                 manifest_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{mutation.object_id}:manifest:{index}").hex
                 await add_artifact_manifest(conn, manifest_id=manifest_id, project_id=scope.id,
                                             task_id=task_id, artifact_kind="document" if item.mime.startswith("text/") else "other",
@@ -257,6 +266,7 @@ class StaffReportService:
                                             task_id=task_id, artifact_kind="document",
                                             artifact_key=f"report:{mutation.object_id}:original", artifact_revision=1,
                                             digest=original_digest, size_bytes=size,
+                                            file_id=original_file_id,
                                             provenance={"kind": "report_original", "attempt_id": identity.id,
                                                         "original_blob_ref": blob_ref, "inline": inline is not None})
                 manifest_ids.insert(0, original_manifest_id)
@@ -264,6 +274,7 @@ class StaffReportService:
                                     attempt_id=identity.id, contract_revision=identity.contract_revision,
                                     outcome="complete", original_text=inline, original_blob_ref=blob_ref,
                                     original_digest=original_digest, original_size_bytes=size,
+                                    original_artifact_file_id=original_file_id,
                                     actor_id=principal.actor_id, manifest_ids=manifest_ids,
                                     checks=checks, limitations=[])
                 if row["comparison_group_id"] is None:
