@@ -1,4 +1,4 @@
-"""A project on a phone, at 390 and 400 px with a touch screen, in both languages.
+"""A project on a phone, at 320, 390 and 400 px with a touch screen, in both languages.
 
 The project's three tabs take the place of the app's own; contextual tools stay behind the header.
 The header names
@@ -32,9 +32,9 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "b4k3ry20f0c5"
 
 WORDS = {
-    "en": {"tabs": ["Project", "Needs decision", "History"], "needs": "Needs you", "ira": "Ira asks:", "orchestrator": "The orchestrator asks:", "write": "Answer…", "head": "3 working · 1 in review",
+    "en": {"tabs": ["Orchestrator", "Needs decision", "History"], "needs": "Needs you", "ira": "Ira asks:", "orchestrator": "The orchestrator asks:", "write": "Answer…", "head": "3 working · 1 in review",
            "own": "Your own answer…", "send": "Answer", "working": "working", "review": "Review", "merge": "Merge", "board": "Board · Bakery 2.0"},
-    "ru": {"tabs": ["Проект", "Требуют решения", "История"], "needs": "Нужны вы", "ira": "Ira спрашивает:", "orchestrator": "Оркестратор спрашивает:", "write": "Ответить…", "head": "3 работают · 1 на проверке",
+    "ru": {"tabs": ["Оркестратор", "Требуют решения", "История"], "needs": "Нужны вы", "ira": "Ira спрашивает:", "orchestrator": "Оркестратор спрашивает:", "write": "Ответить…", "head": "3 работают · 1 на проверке",
            "own": "Свой ответ…", "send": "Ответить", "working": "работает", "review": "Проверка", "merge": "Слить", "board": "Доска · Bakery 2.0"},
 }
 
@@ -191,7 +191,7 @@ def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM)
         for lang in ("en", "ru"):
-            for width in (390, 400):
+            for width in (320, 390, 400):
                 context = browser.new_context(viewport={"width": width, "height": 844}, is_mobile=True, has_touch=True, color_scheme="dark")
                 run_one(context.new_page(), lang, width)
                 context.close()

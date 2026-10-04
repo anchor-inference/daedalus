@@ -4406,7 +4406,7 @@ Object.assign(DICT, {
   "focus.autonomy.normal.hint": { en: "Routine within the brief it decides itself; everything else comes to you.", ru: "Рутину в рамках брифа решает сам, всё остальное приходит к вам." },
   "focus.autonomy.full.hint": { en: "It answers the team's requests itself, always with a stated reason.", ru: "На запросы команды отвечает сам, всегда с указанием причины." },
   "focus.orchestrator": { en: "Orchestrator", ru: "Оркестратор" },
-  "focus.nav.orchestrator": { en: "Project", ru: "Проект" },
+  "focus.nav.orchestrator": { en: "Orchestrator", ru: "Оркестратор" },
   "focus.nav.attention": { en: "Needs decision", ru: "Требуют решения" },
   "focus.nav.journal": { en: "History", ru: "История" },
   "focus.nav.more": { en: "Project tools", ru: "Инструменты проекта" },
