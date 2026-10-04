@@ -91,6 +91,9 @@ type Proc struct {
 // Start runs spec on a new pseudoconsole, in a job of its own. The program is created suspended and
 // resumed only once it is in the job, so nothing it starts can be born outside the job.
 func Start(spec Spec) (*Proc, error) {
+	if len(spec.ExtraFiles) != 0 {
+		return nil, ErrUnsupported
+	}
 	if len(spec.Argv) == 0 {
 		return nil, errors.New("empty argv")
 	}

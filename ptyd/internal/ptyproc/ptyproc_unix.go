@@ -41,7 +41,7 @@ func Start(spec Spec) (*Proc, error) {
 		return nil, errors.New("empty argv")
 	}
 	DefaultSignalsForChildren()
-	cmd := &exec.Cmd{Path: spec.Path, Args: spec.Argv, Dir: spec.Dir, Env: spec.Env}
+	cmd := &exec.Cmd{Path: spec.Path, Args: spec.Argv, Dir: spec.Dir, Env: spec.Env, ExtraFiles: spec.ExtraFiles}
 	size := &pty.Winsize{Cols: uint16(spec.Cols), Rows: uint16(spec.Rows), X: uint16(spec.PxW), Y: uint16(spec.PxH)}
 	attrs := &syscall.SysProcAttr{Setsid: true, Setctty: true}
 	if err := containmentAttrs(attrs, spec); err != nil {
