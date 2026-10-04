@@ -15,6 +15,7 @@ import aiosqlite
 
 from daedalus.config import native_mode
 from daedalus.stores.attempt_fault_schema import MIGRATION as ATTEMPT_FAULT_MIGRATION
+from daedalus.stores.calendar_diagram_schema import migration as CALENDAR_DIAGRAM_MIGRATION
 from daedalus.stores.capacity_schema import MIGRATION as CAPACITY_MIGRATION
 from daedalus.stores.ci_schema import MIGRATION as CI_MIGRATION
 from daedalus.stores.comparison_funding_schema import MIGRATION as COMPARISON_FUNDING_MIGRATION
@@ -1769,6 +1770,9 @@ MIGRATIONS.append(CAPACITY_MIGRATION)
 MIGRATIONS.append(ATTEMPT_FAULT_MIGRATION)
 MIGRATIONS.append(RETRY_MIGRATION)
 MIGRATIONS.append(EFFECT_APPROVAL_MIGRATION)
+MIGRATIONS.append(CALENDAR_DIAGRAM_MIGRATION)
+
+BRANCH_BASE_SCHEMA = MIGRATIONS.index(CONTROL_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
@@ -1902,6 +1906,16 @@ class Database:
                 f"the database is at schema {current} and this build knows {known_schema}: it was written by a newer version of Daedalus. "
                 "Run the newer version, or restore the database from before the downgrade."
             )
+        if BRANCH_BASE_SCHEMA < current <= BRANCH_BASE_SCHEMA + 2:
+            tables = {item["name"] for item in await (await self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+                " AND name IN ('calendar_accounts', 'domain_collection_revisions')"
+            )).fetchall()}
+            if "calendar_accounts" in tables and "domain_collection_revisions" not in tables:
+                # Calendar and orchestration each extended the same base schema. A database from
+                # the calendar line must run the orchestration migrations it has not seen; the
+                # final calendar migration preserves its already populated tables.
+                current = BRANCH_BASE_SCHEMA
         for index, script in enumerate(MIGRATIONS, start=1):
             if index <= current:
                 continue

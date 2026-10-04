@@ -264,6 +264,8 @@ def run() -> int:
         page.get_by_role("button", name="existing", exact=True).click()
         expect(page.locator("#project-root")).to_have_value("/work/existing")
         page.get_by_role("button", name="Add", exact=True).click()
+        # The sheet closes once the request has been answered; read what was posted only then, as
+        # for the first project. Read at once, it raced the request on a loaded machine.
         expect(page.locator(".sheet")).to_have_count(0)
         assert created[1] == {"name": "Existing", "folders": [{"path": "/work/existing"}]}, created[1]
         page.locator(".project-chip").click()

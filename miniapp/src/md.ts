@@ -63,6 +63,9 @@ function inline(s: string): string {
   s = s.replace(/(^|[^\w_])_(?!\s)([^_\n]*?[^\s_])_(?![\w_])/g, "$1<i>$2</i>");
   s = s.replace(/~~(.+?)~~/g, "<s>$1</s>");
   s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+  // Only known app routes are accepted as relative links; arbitrary relative paths could
+  // turn model text into a request to an authenticated API endpoint.
+  s = s.replace(/\[([^\]]+)\]\((\/app\/diagrams\/[a-f0-9]{32})\)/g, '<a href="$2">$1</a>');
   s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noreferrer">$2</a>');
   return s.replace(/ \uE000(\d+)\uE000 /g, (_, i) => codes[Number(i)]);
 }

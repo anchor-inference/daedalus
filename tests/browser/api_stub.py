@@ -265,6 +265,9 @@ GATES: dict[str, object] = {
     "/api/asr": {"configured": False, "reason": "", "provider": "", "model": "", "max_seconds": 120, "autosend": False},
     "/api/proposals": [],
     "/api/schedules": [],
+    "/api/calendar/events": [],
+    "/api/calendar/accounts": [],
+    "/api/diagrams": [],
     # A project's requests: none waits, so a phone's project draws no banner.
     "/api/asks": {"asks": []},
     "/api/sessions": {"sessions": [], "projects": []},
@@ -314,6 +317,7 @@ SHARED_WRITES: dict[tuple[str, str], tuple[int, str, str]] = {
     ("POST", "/api/presence"): (204, "application/json", ""),
     # "Mark all read" in the bell's popover and on the Inbox.
     ("POST", "/api/notifications/seen"): (200, "application/json", json.dumps({"marked": 0, "summary": {"unseen": 0, "needs_you": 0}})),
+    ("POST", "/api/pet/react"): (200, "application/json", json.dumps({"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})),
 }
 
 

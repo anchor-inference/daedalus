@@ -80,6 +80,11 @@ RUN npm ci --no-audit --no-fund
 COPY ptyd/internal/emulator/ghostty/testdata/snapshots.json /build/ptyd/internal/emulator/ghostty/testdata/
 COPY ptyd/internal/emulator/conformance/testdata/cases.json /build/ptyd/internal/emulator/conformance/testdata/
 COPY ptyd/internal/answer/testdata/xterm-replies.json /build/ptyd/internal/answer/testdata/
+# The companion's stage is shared with the mascot studio and the launcher's setup page, and the app
+# imports it from beside itself; without these the bundle cannot resolve ../../mascot-studio.
+COPY mascot-studio/*.js /build/mascot-studio/
+COPY desktop/ui/assets/setup/stage3d.js desktop/ui/assets/setup/chibi2.js /build/desktop/ui/assets/setup/
+COPY desktop/ui/assets/setup/vendor /build/desktop/ui/assets/setup/vendor
 COPY miniapp ./
 RUN npm run build
 

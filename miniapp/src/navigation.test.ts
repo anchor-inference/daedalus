@@ -7,7 +7,7 @@ import { GROUPS, menuSections, moveIndex, shortcutFor } from "./navigation";
 describe("the sections", () => {
   it("list every destination once, in the rail's old order, with the terminals after the board and the command-line agents after them", () => {
     const all = menuSections("server").flatMap((g) => g.items);
-    expect(all).toEqual(["agents", "voice", "inbox", "board", "terminals", "harnesses", "changes", "schedules", "services", "memory", "usage", "health"]);
+    expect(all).toEqual(["agents", "voice", "inbox", "board", "calendar", "diagrams", "terminals", "harnesses", "changes", "schedules", "services", "memory", "usage", "health"]);
     expect(new Set(all).size).toBe(all.length);
     expect(menuSections("server").map((g) => g.key)).toEqual(GROUPS.map((g) => g.key));
   });

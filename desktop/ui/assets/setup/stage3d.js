@@ -114,6 +114,7 @@ export function createStage(o) {
   function loop(now) {
     raf = 0;
     if (!running) return;
+    if (o.maxFps && now - last < 1000 / o.maxFps) { schedule(); return; }
     // The readiness flag the screenshot harness waits on: no tween, no camera glide, the wizard
     // not between steps. It is read here, at the start of a frame, because a tween that finishes
     // often starts the next one from a promise callback, which only runs after the frame that
@@ -144,11 +145,12 @@ export function createStage(o) {
   }
   function schedule() { if (!raf && running) raf = requestAnimationFrame(loop); }
   // WebGL stops when the page is hidden: nothing is drawn for nobody, and the laptop stays cool.
-  document.addEventListener("visibilitychange", () => {
+  const visibility = () => {
     running = !document.hidden;
     if (running) { last = performance.now(); schedule(); }
     else if (raf) { cancelAnimationFrame(raf); raf = 0; }
-  });
+  };
+  document.addEventListener("visibilitychange", visibility);
   window.addEventListener("resize", measure);
 
   return {
@@ -157,6 +159,19 @@ export function createStage(o) {
     get zone() { return zone; }, get size() { return { W, H }; },
     onFrame: (f) => onFrame.push(f),
     start() { measure(); last = performance.now(); schedule(); },
+    dispose() {
+      running = false;
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("resize", measure);
+      scene.traverse((node) => {
+        if (node.geometry) node.geometry.dispose();
+        if (node.material) for (const material of (Array.isArray(node.material) ? node.material : [node.material])) material.dispose();
+      });
+      scene.environment?.dispose();
+      renderer.dispose();
+      renderer.forceContextLoss();
+    },
     frames: () => frames,
     time: () => clock,
   };

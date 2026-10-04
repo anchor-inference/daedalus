@@ -7,9 +7,9 @@ import { anchorHash, parseAnchor } from "./anchor";
 
 export const BASE = "/app";
 
-export type Screen = "agents" | "voice" | "inbox" | "board" | "terminals" | "harnesses" | "changes" | "schedules" | "services" | "memory" | "usage" | "health" | "settings" | "orchestration" | "browser";
+export type Screen = "agents" | "voice" | "inbox" | "board" | "terminals" | "harnesses" | "changes" | "schedules" | "calendar" | "diagrams" | "services" | "memory" | "usage" | "health" | "settings" | "orchestration" | "browser";
 
-export const SCREENS: Screen[] = ["agents", "voice", "inbox", "board", "terminals", "harnesses", "changes", "schedules", "services", "memory", "usage", "health", "settings"];
+export const SCREENS: Screen[] = ["agents", "voice", "inbox", "board", "terminals", "harnesses", "changes", "schedules", "calendar", "diagrams", "services", "memory", "usage", "health", "settings"];
 /** Orchestration is a mode of its own rather than a destination of the menu: its item on the rail
  *  (its tab on a phone) goes there, and so does everything that belongs to it. */
 const INNER: Screen[] = ["orchestration", "browser"];

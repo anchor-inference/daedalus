@@ -422,6 +422,23 @@ async def observed_cli_exit(team: Team, live: LiveSession) -> None:
     assert await observe_exit(team.app, staff_session_id=live.id, runtime_ref=terminal_id,
                               observed_status="exited", runtime_instance=row["ptyd_instance"])
 
+async def test_assignment_effort_overrides_member_default_and_survives_queue(settings: Settings, db: Database, tmp_path: Path) -> None:
+    manager, team, runtime, project = await fake_team(settings, db, tmp_path, concurrency=1)
+    try:
+        ada = await manager.staff.hire(project.id, name="Ada", isolation="shared", effort="low")
+        bo = await manager.staff.hire(project.id, name="Bo", isolation="shared", effort="medium")
+        first = await board_task(manager, project, "First")
+        later = await board_task(manager, project, "Later")
+        assert (await operator_assignment(team, ada, first, effort="high"))["state"] == "queued"
+        assert runtime.started[0].effort == "high"
+        assert ada.effort == "low", "a call does not change the member's standing setting"
+        assert (await operator_assignment(team, bo, later, effort="off", wait_for_admission=False))["state"] == "queued"
+        assert await db.kv_get(team._effort_key(bo.id, later)) == "off"
+        with pytest.raises(StaffError, match="Daedalus effort"):
+            await operator_assignment(team, bo, later, effort="extreme", wait_for_admission=False)
+    finally:
+        await manager.close()
+
 
 async def test_a_dirty_worktree_refuses_done_and_a_pause_commits_it(settings: Settings, db: Database, tmp_path: Path) -> None:
     manager, team, runtime, project = await fake_team(settings, db, tmp_path)

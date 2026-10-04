@@ -74,6 +74,7 @@ from daedalus.stores.projects import Project, ProjectFolder, ProjectSettings
 from daedalus.stores.runtime_release import physical_exit_in
 from daedalus.stores.staff import (
     ACTIVE_STATUSES,
+    DAEDALUS_EFFORTS,
     HARNESS_NAMES,
     Ask,
     Staff,
@@ -665,6 +666,10 @@ class Team:
     def _resume_key(staff_id: str, task_id: str) -> str:
         return f"staff_resume:{staff_id}:{task_id}"
 
+    @staticmethod
+    def _effort_key(staff_id: str, task_id: str) -> str:
+        return f"staff_effort:{staff_id}:{task_id}"
+
     async def resume_sessions(self, member: Staff, *, task_id: str | None = None, before: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         """Conversations in the member's launch folder, including those of dismissed namesakes."""
         if member.harness == "daedalus":
@@ -725,14 +730,16 @@ class Team:
 
     async def assign(self, member: Staff, task: str | dict[str, Any], *, principal: Principal,
                      client_operation_id: str, expected_entity_revision: int,
-                     resume_from: str | None = None) -> dict[str, Any]:
+                     resume_from: str | None = None, effort: str | None = None) -> dict[str, Any]:
         """Commit an authenticated launch; capacity waiting survives without inferred operator rights."""
         from daedalus.extensions.task_launch import queue_launch  # Lazy: the durable handler also calls Team.
 
+        if effort is not None and (member.harness != "daedalus" or effort not in DAEDALUS_EFFORTS[1:]):
+            raise StaffError("an assignment's effort is a Daedalus effort: off, low, medium, high or xhigh")
         task_id = str(task["id"]) if isinstance(task, dict) else task
         return await queue_launch(self.app, task_id, principal, staff_id=member.id,
                                   client_operation_id=client_operation_id,
-                                  expected_entity_revision=expected_entity_revision, resume_from=resume_from)
+                                  expected_entity_revision=expected_entity_revision, resume_from=resume_from, effort=effort)
 
     async def _holder(self, task: BoardTask) -> tuple[str, str]:
         """Who holds a card in doing, and, when nobody works it any more, why not (else ``""``).
@@ -904,7 +911,7 @@ class Team:
             staff_session_id=session.id,
             env=folder.env,
             model=member.model,
-            effort=member.effort,
+            effort=(await self.manager.db.kv_get(self._effort_key(member.id, task.id))) or member.effort,
             agent=member.agent,
             permission_level=self.permission_level(project),
             permission_mode=member.permission_mode,

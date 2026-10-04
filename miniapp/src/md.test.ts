@@ -9,6 +9,11 @@ describe("renderMarkdown", () => {
     expect(html).not.toContain('href="javascript');
     expect(html).toContain("<code>&lt;b&gt;</code>");
   });
+  it("opens an internal diagram link without accepting arbitrary app paths", () => {
+    const id = "0123456789abcdef0123456789abcdef";
+    expect(renderMarkdown(`[Open diagram](/app/diagrams/${id})`)).toContain(`<a href="/app/diagrams/${id}">Open diagram</a>`);
+    expect(renderMarkdown("[bad](/api/settings)")).not.toContain('<a href=');
+  });
   it("survives a header row followed by a bare rule", () => {
     expect(() => renderMarkdown("| a | b |\n---\nrest")).not.toThrow();
     expect(renderMarkdown("| a | b |\n---\nrest")).toContain("<hr/>");

@@ -18,7 +18,7 @@ function tagFor(s: Screen, selfdev: SelfDevMode): string {
   return screenTag(s, selfdev, BETA);
 }
 
-export const ICONS: Record<Screen, IconName> = { agents: "bots", voice: "mic", inbox: "inbox", board: "board", terminals: "terminal", harnesses: "wrench", changes: "changes", schedules: "clock", services: "globe", memory: "bulb", usage: "chart", health: "check", settings: "settings", orchestration: "compass", browser: "globe" };
+export const ICONS: Record<Screen, IconName> = { agents: "bots", voice: "mic", inbox: "inbox", board: "board", terminals: "terminal", harnesses: "wrench", changes: "changes", schedules: "clock", calendar: "calendar", diagrams: "pen", services: "globe", memory: "bulb", usage: "chart", health: "check", settings: "settings", orchestration: "compass", browser: "globe" };
 
 /** A destination's name, in the reader's language. The components below re-render with it because
  *  the shell's own `useLang` does; nothing here holds a translated string of its own. */
@@ -32,7 +32,7 @@ export function screenTitle(s: Screen): string {
 const PRIMARY: Screen[] = ["agents", "orchestration", "terminals", "board"];
 /** Screens that carry a beta tag beside their name: new, usable, not yet finished. */
 const BETA: Screen[] = ["voice"];
-const MORE: Screen[] = ["inbox", "voice", "harnesses", "changes", "schedules", "services", "memory", "usage", "health", "settings"];
+const MORE: Screen[] = ["inbox", "calendar", "diagrams", "voice", "harnesses", "changes", "schedules", "services", "memory", "usage", "health", "settings"];
 
 export function countFor(s: Screen, counts: Counts): number {
   if (s === "inbox") return counts.inbox ?? 0;

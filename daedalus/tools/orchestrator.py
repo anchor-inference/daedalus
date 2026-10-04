@@ -329,7 +329,7 @@ async def project_report(context: ToolContext, text: str, title: str = "", kind:
         "Add a member to the team. name (unique, it names their branch), role (their lasting area of work), harness "
         "(daedalus, or a command-line agent: claude, codex, cursor, grok, opencode, pi — Harnesses shows what is installed and "
         "what each offers), agent (a persona for daedalus, the CLI's agent otherwise), model (a preset for daedalus, "
-        "the CLI's model otherwise), effort, permission_mode (CLI only), env (container or host), folder (their "
+        "the CLI's model otherwise), effort (Daedalus: off, low, medium, high or xhigh; empty inherits the preset), permission_mode (CLI only), env (container or host), folder (their "
         "default folder), isolation (worktree: their own branch, the default in a git folder; shared; readonly), "
         "instructions (standing guidance), one_off=true for a helper dismissed when their task is done. Hire for a "
         "lasting need; a team of a few well-briefed members beats a crowd."
@@ -429,7 +429,8 @@ async def dismiss(context: ToolContext, staff: str, release: bool = False, keep_
         "project's durable queue; the answer says which and why. Give the collection revision from Tasks(list) "
         "for a new card or entity revision from Tasks(get) for an existing card. resume_from is an optional "
         "session id from StaffSessions: "
-        "it resumes that CLI conversation only in the same launch folder and worktree branch."
+        "it resumes that CLI conversation only in the same launch folder and worktree branch. "
+        "effort overrides a Daedalus member's default for this assignment: off, low, medium, high or xhigh."
     ),
 )
 async def assign(
@@ -453,13 +454,14 @@ async def assign(
     resume_from: str | None = None,
     expected_entity_revision: int | None = None,
     expected_collection_revision: int | None = None,
+    effort: str | None = None,
 ) -> ToolResult:
     return await _call(
         context, "assign", staff=staff, task_id=task_id, title=title, objective=objective, deliverable=deliverable, boundaries=boundaries,
         done_when=done_when, folder=folder, priority=priority, depends_on=depends_on, files=files, new=new,
         requirements=requirements, inputs=inputs, checks=checks, reason=reason, resume_from=resume_from,
         client_operation_id=call_id(context), expected_entity_revision=expected_entity_revision,
-        expected_collection_revision=expected_collection_revision,
+        expected_collection_revision=expected_collection_revision, effort=effort,
     )
 
 

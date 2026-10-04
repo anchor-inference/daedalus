@@ -40,8 +40,9 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
+from protocore.contracts.llm import LLMObservabilityContext, LLMRequest
 from protocore.contracts.memory import MemoryScope
-from protocore.contracts.types import ToolResultBlock, ToolUseBlock
+from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResultBlock, ToolUseBlock
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
@@ -92,15 +93,21 @@ from daedalus.extensions import (
     api_staff_reports,
     api_update_drains,
     api_workflows,
+    api_workspace,
     api_workspace_archive,
     launcher_updates,
 )
 from daedalus.extensions import commands as slash
 from daedalus.extensions.artifact_headers import artifact_headers
+from daedalus.extensions.calendar_sync import sync_loop
 from daedalus.extensions.ci_observations import record_signed_delivery
 from daedalus.extensions.heartbeat import TEMPLATE as HEARTBEAT_TEMPLATE
 from daedalus.extensions.inbound import PAYLOAD_MAX_CHARS, flatten_payload, verify_signature
 from daedalus.extensions.notifications import ActionConflict, ActionRefused, Draft, NotificationService
+from daedalus.extensions.pet import ACTIONS as PET_ACTIONS
+from daedalus.extensions.pet import EMOTIONS as PET_EMOTIONS
+from daedalus.extensions.pet import PROPS as PET_PROPS
+from daedalus.extensions.pet import normalize_reaction
 from daedalus.extensions.push import PushRefused, PushService
 from daedalus.extensions.review import ReviewRefused
 from daedalus.extensions.services import SHARE_COOKIE_PREFIX, SHARE_MODES, pid_alive
@@ -136,7 +143,9 @@ from daedalus.speech.tts_service import MEDIA_TYPE_HEADER, SEQUENCE_TYPE
 from daedalus.speech.tts_service import frame as speech_frame
 from daedalus.staff_runtime import LiveSession
 from daedalus.stores import pairing, passkeys
+from daedalus.stores.calendar import CalendarStore
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
+from daedalus.stores.database import Database
 from daedalus.stores.harness import HarnessStore
 from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.media import MEDIA_TENANT
@@ -413,6 +422,7 @@ class AssignBody(BaseModel):
 
     task_id: str
     resume_from: str | None = None
+    effort: str | None = None
     client_operation_id: str = Field(min_length=1, max_length=160)
     expected_entity_revision: int = Field(ge=1, strict=True)
 
@@ -1209,15 +1219,27 @@ class TerminalRestartBody(BaseModel):
     confirm: bool = False
 
 
+class PetReactionBody(BaseModel):
+    preset: str = Field(min_length=1, max_length=120)
+    event: str = Field(min_length=1, max_length=60, pattern=r"^[a-z_ ]+$")
+    lang: Literal["en", "ru"] = "ru"
+
+
 def build_app(app: Application, api_token: str) -> FastAPI:
     dependency_planner = DependencyPlanner(app)
     prompt_change_planner = PromptChangePlanner(app)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        calendar_stop = asyncio.Event()
+        calendar_db = getattr(app, "db", None)
+        calendar_task = asyncio.create_task(sync_loop(CalendarStore(calendar_db), calendar_stop)) if isinstance(calendar_db, Database) else None
         try:
             yield
         finally:
+            if calendar_task is not None:
+                calendar_stop.set()
+                await calendar_task
             await dependency_planner.close()
             await prompt_change_planner.close()
 
@@ -1532,6 +1554,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_staff.register(api, app, auth)
     # The files orchestration keeps by handle: the cards a chat draws, their bytes, the audit.
     api_files.register(api, app, auth)
+    if isinstance(getattr(app, "db", None), Database):
+        api_workspace.register(api, app, auth)
     # The agent's browser: its groups, the live view's ticket and socket, control, the audit.
     api_browsers.register(api, app, auth)
 
@@ -1732,7 +1756,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         return await team_call(team.assign(member, body.task_id, principal=Principal.operator(authenticated),
                                           client_operation_id=body.client_operation_id,
                                           expected_entity_revision=body.expected_entity_revision,
-                                          resume_from=body.resume_from))  # type: ignore[no-any-return]
+                                          resume_from=body.resume_from, effort=body.effort))  # type: ignore[no-any-return]
 
     @api.post("/api/staff/{staff_id}/interrupt")
     async def interrupt_staff(staff_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -5552,6 +5576,50 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         for entry in view["search_backends"]:
             entry["available"] = True if not entry["needs_key"] else (None if keyed is None else entry["id"] in keyed)
         return view
+
+    pet_calls: dict[str, Any] = {"day": "", "count": 0, "last": 0.0}
+
+    @api.post("/api/pet/react")
+    async def pet_reaction(body: PetReactionBody, _: dict[str, Any] = Depends(auth)) -> dict[str, str]:
+        """A rare, tiny model call; the browser sends an event label, never conversation text."""
+        today = datetime.now(UTC).date().isoformat()
+        if pet_calls["day"] != today:
+            pet_calls.update(day=today, count=0, last=0.0)
+        if pet_calls["count"] >= 24 or time.monotonic() - pet_calls["last"] < 30:
+            raise HTTPException(429, "companion reaction limit reached")
+        preset = app.config.presets.get(body.preset)
+        if preset is None:
+            raise HTTPException(404, "unknown model preset")
+        try:
+            provider = manager.providers.get(preset.provider)
+        except KeyError as exc:
+            raise HTTPException(503, "model provider is unavailable") from exc
+        pet_calls["count"] += 1
+        pet_calls["last"] = time.monotonic()
+        prompt = (
+            "You are Daedalus, a tiny warm companion inside an app. The line must be a string "
+            f"containing one cozy, useful sentence in {'Russian' if body.lang == 'ru' else 'English'}, never a number. "
+            "Avoid claims about actions you did not see or the time of day. "
+            "Return only JSON: {line, emotion, action, prop}. Keep line under 100 characters. "
+            f"emotion: {', '.join(sorted(PET_EMOTIONS))}. action: {', '.join(sorted(PET_ACTIONS))}. "
+            f"prop: empty string or {', '.join(sorted(PET_PROPS))}. "
+            f"Event label: {body.event}."
+        )
+        request = LLMRequest(
+            model=preset.model,
+            messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text=prompt)])],
+            max_tokens=110,
+            temperature=0.5,
+            extra={"enable_thinking": False},
+            observability=LLMObservabilityContext(tenant_id="operator", session_id="pet", call_purpose="pet_reaction", call_category="session"),
+        )
+        try:
+            with manager.providers.hold([provider]):
+                response = await asyncio.wait_for(provider.complete_text(request), timeout=15)
+            raw = "".join(block.text for block in response.message.content_blocks if isinstance(block, TextBlock))
+            return normalize_reaction(raw)
+        except (TimeoutError, ValueError) as exc:
+            raise HTTPException(502, "companion reaction failed") from exc
 
     def _settings_candidate(body: SettingsBody) -> dict[str, Any]:
         current = app.config.model_dump(mode="json")

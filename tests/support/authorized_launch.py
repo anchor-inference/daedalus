@@ -26,6 +26,7 @@ async def operator_task(db: Any, project_id: str, title: str, *, priority: int =
 
 async def operator_assignment(team: Any, member: Any, task_id: str | dict[str, Any], *,
                               resume_from: str | None = None,
+                              effort: str | None = None,
                               wait_for_admission: bool = True) -> dict[str, Any]:
     """Return the real queued receipt; optionally wait until its effect admitted a worker."""
     db = team.app.db
@@ -38,7 +39,7 @@ async def operator_assignment(team: Any, member: Any, task_id: str | dict[str, A
     result = await team.assign(
         member, task_id, principal=Principal.operator({"via": "token", "user_id": 1}),
         client_operation_id=f"test-launch:{uuid.uuid4().hex}",
-        expected_entity_revision=revision, resume_from=resume_from,
+        expected_entity_revision=revision, resume_from=resume_from, effort=effort,
     )
     if wait_for_admission:
         async with asyncio.timeout(30):

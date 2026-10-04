@@ -110,6 +110,9 @@ const BOX_ALLOWED = [
   ".chat-scroll", ".chat-head", ".composer", ".composer-box", ".pagehead", ".panel-body", ".panel-tabs", ".panel-toolbar",
   ".tabbar", ".thought", ".attachment-open", ".attachment.image .attachment-open", ".img-loading", ".preview-body",
   ".kanban-col", ".kanban-empty", ".voice-", ".addmodel", ".addmodel-foot", ".more-item",
+  // The companion's canvas is a scene rather than a row or control; its measured height is the
+  // viewport for a full 3D pose, and the phone version deliberately uses a smaller viewport.
+  ".pet-host", ".pet-figure",
 ];
 
 /** The height a box is given outright, in px, or 0 where it is a token, a calc or a proportion. */

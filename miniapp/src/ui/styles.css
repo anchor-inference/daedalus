@@ -4438,3 +4438,35 @@ button.staff-row:hover { background: var(--surface-2); }
 .project-extension p { margin: 8px 0; }
 .project-extension details { margin: 8px 0; }
 .project-extension .mono { overflow-wrap: anywhere; }
+
+.pet-host { position:fixed; z-index:45; width:264px; height:310px; pointer-events:none; right:12px; bottom:12px; }
+.pet-host.corner-bl { right:auto; left:12px; }
+.pet-host.corner-tr { bottom:auto; top:12px; }
+.pet-host.corner-tl { right:auto; bottom:auto; left:12px; top:12px; }
+.pet-host.in-settings { width:180px; height:220px; }
+.pet-host.in-settings .pet-figure { height:180px; }
+.pet-host.in-settings .pet-bubble { left:auto; right:calc(100% + 22px); bottom:132px; width:200px; }
+.pet-host.in-settings.corner-bl .pet-bubble, .pet-host.in-settings.corner-tl .pet-bubble { left:calc(100% + 22px); right:auto; }
+.pet-host.in-settings .pet-menu { bottom:150px; }
+.pet-figure { position:absolute; bottom:0; left:0; width:100%; height:255px; pointer-events:auto; }
+.pet-canvas { display:block; width:100%; height:100%; }
+.pet-bubble { position:absolute; bottom:286px; left:0; width:100%; max-height:116px; overflow:auto; padding:10px 14px; border:1px solid var(--line); border-radius:16px; background:var(--surface); color:var(--fg); box-shadow:0 12px 30px #0004; text-align:left; pointer-events:auto; }
+.pet-bubble small { display:block; margin-top:5px; color:var(--fg-2); }
+.pet-menu { position:absolute; right:4px; bottom:200px; display:grid; gap:5px; width:210px; padding:10px; border:1px solid var(--line); border-radius:12px; background:var(--surface); box-shadow:0 12px 30px #0005; pointer-events:auto; }
+.pet-menu button, .pet-menu select { width:100%; text-align:left; padding:5px; }
+.pet-menu label { display:grid; gap:2px; font-size:var(--fs-12); }
+.pet-host.corner-tr .pet-bubble, .pet-host.corner-tl .pet-bubble { bottom:auto; top:326px; }
+.pet-host.corner-tr .pet-menu, .pet-host.corner-tl .pet-menu { bottom:auto; top:220px; }
+@media (max-width: 700px) {
+  .pet-host { width:130px; height:170px; bottom:55px; }
+  .pet-host.in-settings { width:130px; height:170px; }
+  .pet-figure { height:130px; }
+  .pet-host.in-settings .pet-figure { height:130px; }
+  .pet-bubble { bottom:154px; }
+  .pet-host.in-settings .pet-bubble { bottom:154px; }
+  .pet-menu { bottom:110px; }
+  .pet-host.corner-tr, .pet-host.corner-tl { top:8px; bottom:auto; }
+  .pet-host.corner-tr .pet-bubble { top:40px; bottom:auto; left:auto; right:calc(100% + 8px); width:185px; }
+  .pet-host.corner-tl .pet-bubble { top:40px; bottom:auto; left:calc(100% + 8px); width:185px; }
+  .pet-host.corner-tr .pet-menu, .pet-host.corner-tl .pet-menu { top:140px; bottom:auto; }
+}

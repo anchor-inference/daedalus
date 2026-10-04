@@ -10,10 +10,12 @@ import { DESKTOP_PLACES, menuSections, moveIndex } from "./navigation";
 import { Screen, pathFor } from "./router";
 import { SelfDevMode, screenTag } from "./capabilities";
 import { Counts, ICONS, countFor, go, screenTitle } from "./shell";
+import { usePetPreference } from "./ui/pet";
 
 const BETA: Screen[] = ["voice"];
 
 export function NavMenu({ screen, counts, selfdev, onClose, opener }: { screen: Screen; counts: Counts; selfdev: SelfDevMode; onClose: () => void; opener?: HTMLElement | null }) {
+  const [pet, setPet] = usePetPreference();
   const panel = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left:8, top:8 });
   useLayoutEffect(() => {
@@ -83,6 +85,10 @@ export function NavMenu({ screen, counts, selfdev, onClose, opener }: { screen: 
           </div>
         ))}
         <div className="navmenu-section">
+          <button role="menuitem" className="navmenu-item" onClick={() => { setPet(!pet); onClose(); }} aria-pressed={pet}>
+            <Icon name="bots" size={18} />
+            <span className="truncate">{pet ? t("pet.off") : t("pet.on")}</span>
+          </button>
           <div className="navmenu-lang">
             <span><Icon name="globe" size={18} /> {t("lang.menu")}</span>
             <LangPicker />

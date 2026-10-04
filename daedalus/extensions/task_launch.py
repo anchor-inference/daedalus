@@ -37,7 +37,7 @@ from daedalus.stores.goal_budget import view_in as goal_budget_view_in
 from daedalus.stores.outbox import Claim, OutboxStore
 from daedalus.stores.resource_profiles import disk_snapshot, latest_in, record_disk_entry_in, strict_target
 from daedalus.stores.runtime_release import attempt_released_in, no_entry_in
-from daedalus.stores.staff import StaffError, daedalus_cannot_reach
+from daedalus.stores.staff import DAEDALUS_EFFORTS, StaffError, daedalus_cannot_reach
 from daedalus.stores.update_drains import UpdateDrainActive, assert_admission_open_in
 
 if TYPE_CHECKING:
@@ -55,7 +55,8 @@ def member_digest(member: Any) -> str:
 
 async def queue_launch(app: Application, task_id: str, principal: Principal, *, staff_id: str,
                        client_operation_id: str, expected_entity_revision: int,
-                       resume_from: str | None = None, fallback_from_attempt_id: str | None = None,
+                       resume_from: str | None = None, effort: str | None = None,
+                       fallback_from_attempt_id: str | None = None,
                        fallback_preview_digest: str | None = None,
                        handoff_fingerprint: str | None = None) -> dict[str, Any]:
     row = await app.db.fetchone("SELECT project_id FROM board_tasks WHERE id = ?", (task_id,))
@@ -67,7 +68,7 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
     if fallback_from_attempt_id and (resume_from or not fallback_preview_digest):
         raise ControlConflict("a runtime handoff needs its reviewed preview, not provider-session resume")
     operation = "task.continue" if fallback_from_attempt_id else "task.launch"
-    payload = {"staff_id": staff_id, "resume_from": resume_from,
+    payload = {"staff_id": staff_id, "resume_from": resume_from, "effort": effort,
                "fallback_from_attempt_id": fallback_from_attempt_id,
                "fallback_preview_digest": fallback_preview_digest}
     if handoff_fingerprint is not None:
@@ -190,6 +191,8 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
                 raise ControlConflict("this dependency handoff was already claimed")
         if member is None or member["project_id"] != task["project_id"] or member["archived_at"]:
             raise ControlDenied("the worker is not an active member of this project")
+        if effort is not None and (member["harness"] != "daedalus" or effort not in DAEDALUS_EFFORTS[1:]):
+            raise ControlConflict("an assignment's effort is a Daedalus effort: off, low, medium, high or xhigh")
         folder = None
         for folder_id in (task["folder_id"], member["default_folder_id"]):
             if folder_id:
@@ -250,10 +253,17 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
                      " AND json_extract(payload_json,'$.control.task_id') = ?", (task_id,)):
             raise ControlConflict("this task already has a queued or uncertain launch")
         await conn.execute("UPDATE board_tasks SET assignee_staff_id = ? WHERE id = ?", (staff_id, task_id))
+        effort_key = f"staff_effort:{staff_id}:{task_id}"
+        if effort is None:
+            await conn.execute("DELETE FROM kv WHERE key = ?", (effort_key,))
+        else:
+            await conn.execute("INSERT INTO kv(key,value) VALUES (?,?)"
+                               " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                               (effort_key, canonical(effort)))
         assigned = await one(conn, "SELECT * FROM board_tasks WHERE id = ?", (task_id,))
         action_id = uuid.uuid5(uuid.NAMESPACE_URL, f"effect:{mutation.receipt_id}:task.launch").hex
         attempt_id = uuid.uuid5(uuid.NAMESPACE_URL, f"attempt:{action_id}").hex
-        target = {"task_id": task_id, "staff_id": staff_id, "resume_from": resume_from,
+        target = {"task_id": task_id, "staff_id": staff_id, "resume_from": resume_from, "effort": effort,
                   "previous_attempt_id": task["current_attempt_id"], "attempt_id": attempt_id,
                   "folder_id": task["folder_id"], "source_head": source_head,
                   "source_folder_id": source_folder_id, "source_path_digest": source_path_digest,
@@ -304,6 +314,10 @@ class TaskLaunchEffect:
         member = await self.app.db.fetchone("SELECT * FROM staff WHERE id = ?", (target["staff_id"],))
         if task is None or member is None or member["archived_at"] or task_digest(task) != target["task_digest"] or member_digest(member) != target["member_digest"]:
             raise ControlDenied("the task contract or worker configuration changed after the launch command")
+        current_effort = await self.app.db.fetchone("SELECT value FROM kv WHERE key = ?",
+                                                    (f"staff_effort:{target['staff_id']}:{target['task_id']}",))
+        if (json.loads(current_effort["value"]) if current_effort else None) != target.get("effort"):
+            raise ControlDenied("the assignment effort changed after the launch command")
         if target.get("handoff_fingerprint"):
             async with self.app.db.transaction() as conn:
                 readiness = await dependency_readiness(conn, task["id"])

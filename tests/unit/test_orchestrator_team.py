@@ -321,6 +321,25 @@ async def test_editing_is_journaled_and_dismissing_a_working_member_needs_releas
 # -- assigning ----------------------------------------------------------------------------------------------------
 
 
+async def test_assign_can_override_daedalus_effort_without_changing_member_default(settings: Settings, db: Database, tmp_path: Path) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        runtime = fake(r)
+        sid = await office(r)
+        member = await r.manager.staff.hire(r.project.id, name="Ada", role="Menu", isolation="shared", effort="medium")
+        before = await r.board.list(actor=sid)
+        with pytest.raises(Refused, match="Daedalus effort"):
+            await r.call(sid, "assign", staff="Ada", title="Invalid", effort="extreme", **BRIEF)
+        assert await r.board.list(actor=sid) == before
+        said = await r.call(sid, "assign", staff="Ada", title="Menu page", effort="high", **BRIEF)
+        assert said.startswith("Ada will start ") and "effect " in said
+        await until(lambda: len(runtime.started) == 1, "the effort override reached runtime admission")
+        assert runtime.started[0].effort == "high"
+        assert (await r.manager.staff.get(member.id)).effort == "medium"
+    finally:
+        await r.manager.close()
+
+
 async def test_assign_needs_the_whole_contract_and_creates_the_task_as_the_orchestrator(settings: Settings, db: Database, tmp_path: Path) -> None:
     r = await rig(settings, db, tmp_path)
     try:

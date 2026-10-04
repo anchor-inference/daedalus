@@ -21,6 +21,8 @@ dependencies = [
     "webauthn>=3.0.0",
     "cryptography>=44.0",  # Remote host identity proof uses Ed25519 signatures, not a declared fingerprint alone.
     "tzdata>=2024.1",  # quiet hours run in the operator's zone; neither the container nor Windows ships a zone database
+    "icalendar>=6,<7",
+    "defusedxml>=0.7,<1",
 ]
 
 [project.optional-dependencies]

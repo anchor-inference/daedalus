@@ -1,4 +1,3 @@
-import { useDesktopPet } from "./ui/pet";
 import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, SessionList, SessionSummary, telegram, TerminalList } from "./api";
 import { StatusLabel } from "./ui/components";
@@ -26,6 +25,7 @@ import { insideTerminal } from "./terminal/keys";
 import { startEvents } from "./events";
 import { useSummary } from "./notifications";
 import { NotificationToasts } from "./toasts";
+import { PetHost } from "./pethost";
 import { UpdateHost } from "./updatedialog";
 import { listenForOpen, syncPush } from "./push";
 import { focusView, phoneTab } from "./project/focus";
@@ -51,6 +51,8 @@ const BoardScreen = lazy(retried(() => import("./screens/Board"), (m) => ({ defa
 const VoiceScreen = lazy(retried(() => import("./screens/Voice"), (m) => ({ default: m.VoiceScreen })));
 const ProposalsScreen = lazy(retried(() => import("./screens/Proposals"), (m) => ({ default: m.ProposalsScreen })));
 const SchedulesScreen = lazy(retried(() => import("./screens/Schedules"), (m) => ({ default: m.SchedulesScreen })));
+const CalendarScreen = lazy(retried(() => import("./screens/Calendar"), (m) => ({ default: m.CalendarScreen })));
+const DiagramsScreen = lazy(retried(() => import("./screens/Diagrams"), (m) => ({ default: m.DiagramsScreen })));
 const UsageScreen = lazy(retried(() => import("./screens/Usage"), (m) => ({ default: m.UsageScreen })));
 const SettingsScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ default: m.SettingsScreen })));
 const HealthScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ default: m.HealthScreen })));
@@ -67,11 +69,17 @@ const ProjectTabs = lazy(retried(() => import("./project/phone"), (m) => ({ defa
 const MainScreen = chunk(retried(() => import("./main/MainScreen"), (m) => ({ default: m.MainScreen })));
 const OnboardingScreen = lazy(retried(() => import("./screens/AddModel"), (m) => ({ default: m.OnboardingScreen })));
 const SharedDialog = lazy(retried(() => import("./screens/Shared"), (m) => ({ default: m.SharedDialog })));
+const SharedDiagram = lazy(retried(() => import("./screens/SharedDiagram"), (m) => ({ default: m.SharedDiagram })));
 
 /** A shared dialog lives at /app/c/<slug>. It is a page of its own, not a screen of the signed-in shell. */
 function sharedSlug(): string | null {
   const match = /^\/app\/c\/([^/]+)\/?$/.exec(window.location.pathname);
   return match ? decodeURIComponent(match[1]) : null;
+}
+
+function sharedDiagramToken(): string | null {
+  const match = /^\/app\/d\/([A-Za-z0-9_-]+)\/?$/.exec(window.location.pathname);
+  return match ? match[1] : null;
 }
 
 /** The conversation is what the operator opens next, whatever screen they landed on: fetch it while the browser is idle. */
@@ -212,7 +220,11 @@ export function App() {
       .catch(() => setOnboarding({ has_model: true } as OnboardingState)); // an older bot has no such route: let the app through
   }, [authed]);
   const notifications = useSummary(!!authed);
-  useDesktopPet(!!authed, notifications.needs_you > 0);
+  useEffect(() => {
+    // A desktop window opened by the former Pet switch can survive a web reload. Close it when
+    // the signed-in in-app companion takes over, so the operator never gets two mascots.
+    if (authed) void window.daedalus?.pet?.(false);
+  }, [authed]);
   useAppBadge(notifications.unseen);
   const projects = useProjects();
   const projectList = projects.data ?? [];
@@ -484,6 +496,10 @@ export function App() {
   };
 
   const shared = sharedSlug();
+  const diagramToken = sharedDiagramToken();
+  if (diagramToken) {
+    return <ErrorBoundary><Suspense fallback={<div className="diagram-shared-state">{t("common.loading")}</div>}><SharedDiagram token={diagramToken} /></Suspense></ErrorBoundary>;
+  }
   if (shared) {
     return (
       <ErrorBoundary>
@@ -559,6 +575,8 @@ export function App() {
             <ProposalsScreen toast={showToast} selected={route.detail} />
           ))}
         {route.screen === "schedules" && <SchedulesScreen toast={showToast} onOpen={open} selected={route.detail} />}
+        {route.screen === "calendar" && <CalendarScreen toast={showToast} />}
+        {route.screen === "diagrams" && <DiagramsScreen toast={showToast} selected={route.detail} />}
         {route.screen === "terminals" && !route.detail && <TerminalsScreen toast={showToast} project={project} projects={projectList} />}
         {route.screen === "terminals" && route.detail && <TerminalFullScreen id={route.detail} beside={route.query.get("with")} toast={showToast} />}
         {route.screen === "browser" && route.detail && <BrowserFullScreen id={route.detail} toast={showToast} />}
@@ -657,6 +675,7 @@ export function App() {
       {more && <MoreSheet screen={route.screen} counts={counts} selfdev={selfdev} onClose={() => setMore(false)} />}
       {picking && sessionId && <SessionPicker exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
       <NotificationToasts />
+      <PetHost needsReply={notifications.needs_you > 0} activity={route.screen} />
       <UpdateHost />
       <ToastHost />
       <ConfirmHost />
