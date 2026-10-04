@@ -6,7 +6,7 @@ import { confirmAsync, errorText } from "../ui";
 import { navigate, projectHome } from "../router";
 import { CoordinatorHandoff } from "./CoordinatorHandoff";
 
-type BundleId = "planning" | "assignment" | "execution" | "execution_project" | "review" | "watch" | "wake_internal";
+type BundleId = "planning" | "assignment" | "assignment_execution" | "execution" | "execution_project" | "review" | "watch" | "wake_internal";
 type Bundle = { id: string; operations: string[]; effects: string[]; scope_kind: "project" | "task"; max_expires_at: string; blockers: string[] };
 type Grant = { grant_id: string; generation: number; session_id: string; scope: { kind: string; id: string }; operations: string[]; effects: string[];
   expires_at: string; revoked_at: string | null; state: "active" | "expired" | "revoked" | "stale"; receipt_id: string | null;
@@ -15,10 +15,11 @@ type Authority = { project_id: string; entity_revision: number; current_coordina
   available_bundles: Bundle[]; grants: Grant[]; readiness_blockers: string[] };
 type Pending = { path: string; body: Record<string, unknown>; kind: "approve" | "revoke"; label: string };
 
-const bundleIds: BundleId[] = ["assignment", "execution", "planning", "execution_project", "review", "watch", "wake_internal"];
+const bundleIds: BundleId[] = ["assignment_execution", "assignment", "execution", "planning", "execution_project", "review", "watch", "wake_internal"];
 const rights: Record<BundleId, { scope_kind: "project" | "task"; operations: string[]; effects: string[] }> = {
   planning: { scope_kind: "project", operations: ["board.task.create", "board.task.update", "contract.require", "contract.apply", "contract.withdraw"], effects: [] },
   assignment: { scope_kind: "task", operations: ["board.task.assign"], effects: [] },
+  assignment_execution: { scope_kind: "task", operations: ["board.task.assign", "task.launch", "task.stop", "staff.release"], effects: ["execution.start", "execution.stop"] },
   execution: { scope_kind: "task", operations: ["task.launch", "task.stop", "staff.release"], effects: ["execution.start", "execution.stop"] },
   execution_project: { scope_kind: "project", operations: ["task.launch", "task.stop", "staff.release"], effects: ["execution.start", "execution.stop"] },
   review: { scope_kind: "project", operations: ["review.verdict", "review.return"], effects: [] },
@@ -64,7 +65,7 @@ function grantName(grant: Grant): string {
 export function CoordinatorAuthority({ projectId, toast, onChanged, initialTaskId }: { projectId: string; toast: (message: string) => void; onChanged: () => void; initialTaskId?: string }) {
   const [open, setOpen] = useState(!!initialTaskId);
   const [adding, setAdding] = useState(!!initialTaskId);
-  const [bundleId, setBundleId] = useState<BundleId>("assignment");
+  const [bundleId, setBundleId] = useState<BundleId>(initialTaskId ? "assignment_execution" : "assignment");
   const [taskId, setTaskId] = useState(initialTaskId ?? "");
   const [hours, setHours] = useState(1);
   const [withdrawId, setWithdrawId] = useState("");

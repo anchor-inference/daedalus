@@ -94,12 +94,11 @@ async def test_first_assignment_has_task_scope_and_cannot_edit_the_card(settings
         await r.manager.db.execute("UPDATE board_tasks SET folder_id = ? WHERE id = ?", (r.project.folders[0].id, task_id))
         scope = Scope("project", r.project.id)
         operator = Principal.operator({"via": "token", "user_id": 1})
-        for bundle in ("assignment", "execution"):
-            revision = await ControlStore(r.manager.db).revision(scope, Entity("project", r.project.id))
-            await approve_authority(r.team.app, r.project.id, operator,
-                                    client_operation_id=f"task-{bundle}", expected_entity_revision=revision,
-                                    expected_coordinator_session_id=sid, bundle_id=bundle,
-                                    task_id=task_id, expires_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat())
+        revision = await ControlStore(r.manager.db).revision(scope, Entity("project", r.project.id))
+        await approve_authority(r.team.app, r.project.id, operator,
+                                client_operation_id="task-assignment-and-run", expected_entity_revision=revision,
+                                expected_coordinator_session_id=sid, bundle_id="assignment_execution",
+                                task_id=task_id, expires_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat())
         for change in ({"title": "Renamed menu page", "reason": "This remains exactly the same task"},
                        {"objective": "Replace the menu page with an updated menu"},
                        {"priority": 1}, {"checks": ["Menu page renders"]}):

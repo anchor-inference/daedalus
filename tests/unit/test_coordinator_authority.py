@@ -121,3 +121,27 @@ async def test_new_contract_and_stop_rights_require_fresh_explicit_approval(db: 
     assert set(json.loads(row[0])) == {"board.task.create", "board.task.update", "task.launch", "staff.release"}
     view = await authority_view(app, "project")
     assert any(bundle["id"] == "watch" and "watch.deliver" in bundle["operations"] for bundle in view["available_bundles"])
+
+
+async def test_one_task_grant_covers_first_assignment_and_launch_without_edit_or_review(db: Database) -> None:
+    app, _ = await office(db)
+    await db.execute("INSERT INTO board_tasks(id,title,status,priority,project_id,created_at,updated_at)"
+                     " VALUES ('other','Other','todo',3,'project','2026-01-01','2026-01-01')")
+    expiry = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    issued = await approve_authority(app, "project", OPERATOR, client_operation_id="first-task-run",
+                                     expected_entity_revision=1, expected_coordinator_session_id="coordinator",
+                                     bundle_id="assignment_execution", task_id="task", expires_at=expiry)
+    grant = await db.fetchone("SELECT scope_kind,scope_id,operations_json,effects_json FROM actor_grants WHERE id = ?",
+                              (issued["grant_id"],))
+    assert grant["scope_kind"] == "task" and grant["scope_id"] == "task"
+    assert set(json.loads(grant["operations_json"])) == {"board.task.assign", "task.launch", "task.stop", "staff.release"}
+    assert set(json.loads(grant["effects_json"])) == {"execution.start", "execution.stop"}
+    for operation in ("board.task.assign", "task.launch", "task.stop", "staff.release"):
+        principal = await resolve_authority(app, session_id="coordinator", project_id="project",
+                                            task_id="task", operation=operation)
+        assert principal.grant_id == issued["grant_id"]
+    for operation, task_id in (("board.task.update", "task"), ("review.verdict", "task"),
+                               ("board.task.assign", "other"), ("task.launch", "other")):
+        with pytest.raises(ControlDenied, match="no current grant"):
+            await resolve_authority(app, session_id="coordinator", project_id="project",
+                                    task_id=task_id, operation=operation)

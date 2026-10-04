@@ -538,7 +538,7 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
     } catch (error) { setResumeError(errorText(error)); }
   }
   const gone = task?.assignee && !team.some((m) => m.id === task.assignee!.id) ? task.assignee : null;
-  const granting = !!task && route.query.get("grant") === "assignment";
+  const granting = !!task && route.query.get("grant") === "assignment_execution";
   const taskPath = task ? projectPagePath(projectId, "board", { task: task.id }) : "";
   const missing = missingBrief(brief);
   const editorChanged = task
@@ -724,7 +724,7 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
       {task && team.length === 0 && !gone && (task.status === "todo" || task.status === "blocked") && (
         <div className="sub">
           {t("pboard.assignee.none")} <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "team"))}>{t("pboard.team.hire")}</button>
-          <div><button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id, grant: "assignment" }))}>{t("pboard.grant.open")}</button></div>
+          <div><button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id, grant: "assignment_execution" }))}>{t("pboard.grant.open")}</button></div>
         </div>
       )}
       {task && task.status === "review" && task.branch && (
