@@ -313,6 +313,43 @@ async def test_ci_failure_arriving_during_merge_lease_check_stops_git(settings: 
         await r.close()
 
 
+async def test_original_report_corruption_during_merge_lease_check_stops_git(
+    settings: Settings, db: Database, tmp_path: Path,
+) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        member = await r.hire()
+        task_id, _request = await r.reviewed(member, "Menu", {"menu.md": "bread\n"})
+        async with r.client() as client:
+            result_id, verdict_id = await r.approve(client, task_id)
+            r.team.app.extensions["effects"] = None
+            review = await r.review.review(task_id)
+            before = git(r.folder, "rev-parse", "HEAD").strip()
+            queued = await client.post(f"/api/board/{task_id}/results/{result_id}/merge", json={
+                "client_operation_id": "merge:corrupt-report",
+                "expected_entity_revision": (await task_row(r.manager, task_id))["entity_revision"],
+                "verdict_id": verdict_id,
+            })
+            assert queued.status_code == 200, queued.text
+            action_id = queued.json()["action_id"]
+            claim = Claim(action_id, queued.json().get("receipt_id", ""), "review.merge", 1,
+                          Principal.operator({"via": "token", "user_id": 1}), Scope("project", r.project.id),
+                          task_id, None, ("git.merge",), "review.merge",
+                          {"task_id": task_id, "result_id": result_id, "verdict_id": verdict_id,
+                           "head_sha": review["head_sha"], "base_sha": review["base_sha"]},
+                          False)
+
+            async def corrupt_report(_claim: Claim) -> None:
+                await r.manager.db.execute("UPDATE result_receipts SET original_text = ? WHERE id = ?",
+                                           ("changed after approval", result_id))
+
+            outcome = await MergeEffect(r.team.app).run(claim, corrupt_report)
+            assert outcome.state == "failed" and "original report" in outcome.error
+            assert git(r.folder, "rev-parse", "HEAD").strip() == before
+    finally:
+        await r.close()
+
+
 @pytest.mark.parametrize("change,code", [("dirty", "dirty"), ("head", "verdict_stale"),
                                            ("conflict", "conflicts")])
 async def test_merge_preflight_preserves_work_and_requires_fresh_review(

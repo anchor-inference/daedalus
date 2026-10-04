@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.ci_observations import ci_readiness
 from daedalus.extensions.effects import EffectOutcome, EffectResolution
-from daedalus.extensions.orchestrator_domain import unresolved_review_comments
+from daedalus.extensions.orchestrator_domain import OrchestratorDomain, unresolved_review_comments
 from daedalus.host.worktrees import WorktreeError, WorktreeRefused
 from daedalus.stores.control import ControlDenied, now
 from daedalus.stores.outbox import Claim
@@ -79,6 +79,11 @@ class MergeEffect:
                                     require_policy=True)
             if ci["state"] != "passed":
                 return EffectOutcome("failed", "required CI changed or is missing for the reviewed head")
+        try:
+            # The report can be damaged after approval without changing its receipt or the Git head.
+            await OrchestratorDomain(self.app.db).original(claim.task_id, row["result_id"])
+        except (OSError, ValueError) as exc:
+            return EffectOutcome("failed", f"original report is unavailable or changed: {exc}")
         try:
             merge_sha = await team.worktrees.merge(folder, str(task["branch"]),
                                                   message=f"Merge {task['branch']}: {task['title']}",
