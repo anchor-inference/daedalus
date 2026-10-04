@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import Depends, FastAPI, HTTPException
 
 from daedalus.extensions.board import Board
+from daedalus.extensions.merge_source import source_identity
 from daedalus.extensions.orchestrator_domain import (
     DomainConflict,
     OrchestratorDomain,
@@ -695,6 +696,7 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
             await latest.close()
             if latest_result is None or latest_result["id"] != result_id or await unresolved_review_comments(conn, result_id):
                 raise DomainConflict("a newer result or blocking review comment prevents merge")
+            payload["source"] = await source_identity(conn, result_id, body["verdict_id"])
             action_id = await OutboxStore.enqueue(conn, mutation, principal, kind="review.merge",
                                                    operation="review.merge", payload=payload,
                                                    effects=("git.merge",), task_id=task_id)

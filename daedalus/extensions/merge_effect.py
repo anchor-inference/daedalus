@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.ci_observations import ci_readiness
 from daedalus.extensions.effects import EffectOutcome, EffectResolution
+from daedalus.extensions.merge_source import file_identity, source_identity, stage_report
 from daedalus.extensions.orchestrator_domain import OrchestratorDomain, unresolved_review_comments
 from daedalus.host.worktrees import WorktreeError, WorktreeRefused
 from daedalus.stores.control import ControlDenied, now
+from daedalus.stores.files import FILES_TENANT
 from daedalus.stores.outbox import Claim
 
 if TYPE_CHECKING:
@@ -44,6 +47,9 @@ class MergeEffect:
         if (row["result_id"] != claim.payload.get("result_id") or row["verdict_id"] != claim.payload.get("verdict_id") or
                 row["head_sha"] != claim.payload.get("head_sha") or row["base_sha"] != claim.payload.get("base_sha")):
             return EffectOutcome("failed", "merge payload no longer matches its provenance")
+        pinned_source = claim.payload.get("source")
+        if not isinstance(pinned_source, dict) or not pinned_source.get("digest"):
+            return EffectOutcome("failed", "merge source snapshot is missing")
         if row["state"] == "merged":
             return EffectOutcome("completed")
         if (row["state"] != "queued" or row["verification"] != "verified" or not row["verdict_accepted"] or
@@ -79,11 +85,26 @@ class MergeEffect:
                                     require_policy=True)
             if ci["state"] != "passed":
                 return EffectOutcome("failed", "required CI changed or is missing for the reviewed head")
+            try:
+                current_source = await source_identity(conn, row["result_id"], row["verdict_id"])
+            except ValueError as exc:
+                return EffectOutcome("failed", str(exc))
+            if current_source != pinned_source:
+                return EffectOutcome("failed", "reviewed report, verdict, evidence, or artifacts changed")
         try:
             # The report can be damaged after approval without changing its receipt or the Git head.
-            await OrchestratorDomain(self.app.db).original(claim.task_id, row["result_id"])
+            original = await OrchestratorDomain(self.app.db).original(claim.task_id, row["result_id"])
+            for artifact in pinned_source["snapshot"]["artifacts"]:
+                if not artifact["file_id"]:
+                    continue
+                path = self.app.manager.files.blobs.path_of(FILES_TENANT, artifact["digest"])
+                digest, size = await asyncio.to_thread(file_identity, path)
+                if size != artifact["size_bytes"] or digest != artifact["digest"]:
+                    raise ValueError("reviewed artifact bytes changed")
+            stage_report(self.app.db.path.parent / "result-originals", claim.id, original,
+                         pinned_source["report_digest"], pinned_source["report_size"])
         except (OSError, ValueError) as exc:
-            return EffectOutcome("failed", f"original report is unavailable or changed: {exc}")
+            return EffectOutcome("failed", f"merge source is unavailable or changed: {exc}")
         try:
             merge_sha = await team.worktrees.merge(folder, str(task["branch"]),
                                                   message=f"Merge {task['branch']}: {task['title']}",

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import uuid
 from pathlib import Path
 from typing import Any
@@ -17,12 +19,14 @@ from daedalus.extensions.api_orchestrator_domain import install_routes
 from daedalus.extensions.board import Board
 from daedalus.extensions.ci_observations import observation_from_webhook, record_observation
 from daedalus.extensions.merge_effect import MergeEffect
+from daedalus.extensions.orchestrator_domain import OrchestratorDomain
 from daedalus.extensions.review import Review, ReviewRefused
 from daedalus.extensions.staff import Team
 from daedalus.host.session_runner import SessionManager
 from daedalus.staff_runtime import StartRequest
 from daedalus.stores.control import Principal, Scope
 from daedalus.stores.database import Database
+from daedalus.stores.files import FILES_TENANT
 from daedalus.stores.outbox import Claim
 from daedalus.stores.projects import Project
 from daedalus.stores.staff import Staff
@@ -294,11 +298,14 @@ async def test_ci_failure_arriving_during_merge_lease_check_stops_git(settings: 
             })
             assert queued.status_code == 200, queued.text
             action_id = queued.json()["action_id"]
+            outbox = await r.manager.db.fetchone("SELECT payload_json FROM effect_outbox WHERE id = ?", (action_id,))
+            assert outbox is not None
+            source = json.loads(outbox["payload_json"])["data"]["source"]
             claim = Claim(action_id, queued.json().get("receipt_id", ""), "review.merge", 1,
                           Principal.operator({"via": "token", "user_id": 1}), Scope("project", r.project.id),
                           task_id, None, ("git.merge",), "review.merge",
                           {"task_id": task_id, "result_id": result_id, "verdict_id": verdict_id,
-                           "head_sha": review["head_sha"], "base_sha": review["base_sha"]},
+                           "head_sha": review["head_sha"], "base_sha": review["base_sha"], "source": source},
                           False)
 
             async def newer_failure(_claim: Claim) -> None:
@@ -332,11 +339,14 @@ async def test_original_report_corruption_during_merge_lease_check_stops_git(
             })
             assert queued.status_code == 200, queued.text
             action_id = queued.json()["action_id"]
+            outbox = await r.manager.db.fetchone("SELECT payload_json FROM effect_outbox WHERE id = ?", (action_id,))
+            assert outbox is not None
+            source = json.loads(outbox["payload_json"])["data"]["source"]
             claim = Claim(action_id, queued.json().get("receipt_id", ""), "review.merge", 1,
                           Principal.operator({"via": "token", "user_id": 1}), Scope("project", r.project.id),
                           task_id, None, ("git.merge",), "review.merge",
                           {"task_id": task_id, "result_id": result_id, "verdict_id": verdict_id,
-                           "head_sha": review["head_sha"], "base_sha": review["base_sha"]},
+                           "head_sha": review["head_sha"], "base_sha": review["base_sha"], "source": source},
                           False)
 
             async def corrupt_report(_claim: Claim) -> None:
@@ -344,8 +354,130 @@ async def test_original_report_corruption_during_merge_lease_check_stops_git(
                                            ("changed after approval", result_id))
 
             outcome = await MergeEffect(r.team.app).run(claim, corrupt_report)
-            assert outcome.state == "failed" and "original report" in outcome.error
+            assert outcome.state == "failed" and "report" in outcome.error
             assert git(r.folder, "rev-parse", "HEAD").strip() == before
+    finally:
+        await r.close()
+
+
+async def test_rewritten_report_and_digest_cannot_replace_queued_merge_source(
+    settings: Settings, db: Database, tmp_path: Path,
+) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        member = await r.hire()
+        task_id, _request = await r.reviewed(member, "Menu", {"menu.md": "bread\n"})
+        async with r.client() as client:
+            result_id, verdict_id = await r.approve(client, task_id)
+            r.team.app.extensions["effects"] = None
+            before = git(r.folder, "rev-parse", "HEAD").strip()
+            queued = await client.post(f"/api/board/{task_id}/results/{result_id}/merge", json={
+                "client_operation_id": "merge:rewritten-report",
+                "expected_entity_revision": (await task_row(r.manager, task_id))["entity_revision"],
+                "verdict_id": verdict_id,
+            })
+            assert queued.status_code == 200, queued.text
+            action_id = queued.json()["action_id"]
+            outbox = await r.manager.db.fetchone("SELECT receipt_id,payload_json FROM effect_outbox WHERE id = ?",
+                                                 (action_id,))
+            assert outbox is not None
+            payload = json.loads(outbox["payload_json"])["data"]
+            claim = Claim(action_id, outbox["receipt_id"], "review.merge", 1,
+                          Principal.operator({"via": "token", "user_id": 1}), Scope("project", r.project.id),
+                          task_id, None, ("git.merge",), "review.merge", payload, False)
+
+            async def rewrite_report(_claim: Claim) -> None:
+                replacement = "different approved text"
+                await r.manager.db.execute("UPDATE result_receipts SET original_text = ?,original_digest = ?,"
+                                           " original_size_bytes = ? WHERE id = ?",
+                                           (replacement, hashlib.sha256(replacement.encode()).hexdigest(),
+                                            len(replacement), result_id))
+
+            outcome = await MergeEffect(r.team.app).run(claim, rewrite_report)
+            assert outcome.state == "failed" and "reviewed report" in outcome.error
+            assert git(r.folder, "rev-parse", "HEAD").strip() == before
+    finally:
+        await r.close()
+
+
+async def test_merge_keeps_approved_report_copy_if_source_changes_during_git(
+    settings: Settings, db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        member = await r.hire()
+        task_id, _request = await r.reviewed(member, "Menu", {"menu.md": "bread\n"})
+        async with r.client() as client:
+            result_id, verdict_id = await r.approve(client, task_id)
+            approved = await OrchestratorDomain(r.manager.db).original(task_id, result_id)
+            r.team.app.extensions["effects"] = None
+            queued = await client.post(f"/api/board/{task_id}/results/{result_id}/merge", json={
+                "client_operation_id": "merge:source-copy",
+                "expected_entity_revision": (await task_row(r.manager, task_id))["entity_revision"],
+                "verdict_id": verdict_id,
+            })
+            assert queued.status_code == 200, queued.text
+            action_id = queued.json()["action_id"]
+            outbox = await r.manager.db.fetchone("SELECT receipt_id,payload_json FROM effect_outbox WHERE id = ?",
+                                                 (action_id,))
+            assert outbox is not None
+            payload = json.loads(outbox["payload_json"])["data"]
+            claim = Claim(action_id, outbox["receipt_id"], "review.merge", 1,
+                          Principal.operator({"via": "token", "user_id": 1}), Scope("project", r.project.id),
+                          task_id, None, ("git.merge",), "review.merge", payload, False)
+            merge = r.team.worktrees.merge
+
+            async def change_during_git(*args: Any, **kwargs: Any) -> str:
+                await r.manager.db.execute("UPDATE result_receipts SET original_text = ? WHERE id = ?",
+                                           ("changed while Git ran", result_id))
+                return await merge(*args, **kwargs)
+
+            monkeypatch.setattr(r.team.worktrees, "merge", change_during_git)
+            outcome = await MergeEffect(r.team.app).run(claim, lambda _claim: asyncio.sleep(0))
+            assert outcome.state == "completed", outcome.error
+            source_copy = r.manager.db.path.parent / "result-originals" / "merge-sources" / action_id
+            assert source_copy.read_bytes() == approved
+    finally:
+        await r.close()
+
+
+@pytest.mark.parametrize("change", ["evidence", "artifact_bytes"])
+async def test_queued_merge_rejects_changed_review_source(
+    settings: Settings, db: Database, tmp_path: Path, change: str,
+) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        member = await r.hire()
+        task_id, _request = await r.reviewed(member, "Menu", {"menu.md": "bread\n"})
+        async with r.client() as client:
+            result_id, verdict_id = await r.approve(client, task_id)
+            r.team.app.extensions["effects"] = None
+            before = git(r.folder, "rev-parse", "HEAD").strip()
+            queued = await client.post(f"/api/board/{task_id}/results/{result_id}/merge", json={
+                "client_operation_id": f"merge:changed-{change}",
+                "expected_entity_revision": (await task_row(r.manager, task_id))["entity_revision"],
+                "verdict_id": verdict_id,
+            })
+            assert queued.status_code == 200, queued.text
+            action_id = queued.json()["action_id"]
+            outbox = await r.manager.db.fetchone("SELECT receipt_id,payload_json FROM effect_outbox WHERE id = ?",
+                                                 (action_id,))
+            assert outbox is not None
+            payload = json.loads(outbox["payload_json"])["data"]
+            claim = Claim(action_id, outbox["receipt_id"], "review.merge", 1,
+                          Principal.operator({"via": "token", "user_id": 1}), Scope("project", r.project.id),
+                          task_id, None, ("git.merge",), "review.merge", payload, False)
+            if change == "evidence":
+                await r.manager.db.execute("UPDATE review_evidence SET command = ? WHERE result_id = ?",
+                                           ("changed after approval", result_id))
+            else:
+                artifact = next(item for item in payload["source"]["snapshot"]["artifacts"] if item["file_id"])
+                path = r.manager.files.blobs.path_of(FILES_TENANT, artifact["digest"])
+                path.write_bytes(b"changed after approval")
+            outcome = await MergeEffect(r.team.app).run(claim, lambda _claim: asyncio.sleep(0))
+            assert outcome.state == "failed", outcome
+            assert git(r.folder, "rev-parse", "HEAD").strip() == before
+            assert not (r.manager.db.path.parent / "result-originals" / "merge-sources" / action_id).exists()
     finally:
         await r.close()
 
