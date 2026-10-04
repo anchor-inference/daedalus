@@ -19,6 +19,7 @@ import { LifecycleCancel } from "../project/LifecycleCancel";
 import { CoordinatorAuthority } from "../project/CoordinatorAuthority";
 import { waitKey } from "../project/focus";
 import { ReviewPanel } from "./ReviewPanel";
+import { TaskDiagnostics } from "./TaskDiagnostics";
 import { AcceptedResultDetail, ResultFlow, type AcceptedResultReference } from "./ResultFlow";
 import { TaskWorkflow } from "./TaskWorkflow";
 import { TaskComparison } from "./TaskComparison";
@@ -748,6 +749,7 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
       {stopEffectId && <div className="result-warning" role="status">{t(stopEffect.error ? "result.stopTaskUnconfirmed" : stopEffect.data?.state === "completed" ? "result.stopTaskObserved" : stopEffect.data?.state === "unknown" ? "result.stopTaskUnconfirmed" : "result.stopTaskPending")} <button type="button" className="linkbtn" onClick={() => stopEffect.refresh()}>{t("common.retry")}</button></div>}
       {task && <LifecycleCancel kind="task" id={task.id} projectId={projectId} onDone={onDone} toast={toast} />}
       {task && <TaskWorkflow projectId={projectId} task={task} tasks={data.tasks} />}
+      {task && <TaskDiagnostics task={task} />}
       {task && <TaskContext task={task} staff={data.staff} />}
       {task && !task.branch && (task.status === "todo" || task.status === "blocked" || task.status === "review") && <ManualResult task={task} toast={toast} onChanged={onDone} />}
       {task && task.status !== "done" && <ManualReopenRecovery task={task} toast={toast} onChanged={onDone} />}
