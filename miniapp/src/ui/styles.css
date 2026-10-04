@@ -3006,6 +3006,18 @@ button.staff-row:hover { background: var(--surface-2); }
 /* A project's board. On a phone and in a narrow panel it is one list under chips; from 1024 px the
    columns stand side by side and each scrolls with the page, so a long queue never hides the review. */
 .pboard-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.pboard-unknown-stops { min-width: 0; margin-bottom: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); font-size: var(--fs-12); }
+.pboard-unknown-stops > summary { cursor: pointer; color: var(--warn); font-weight: 600; }
+.pboard-unknown-stops > p { margin: 8px 0; }
+.pboard-unknown-row { min-width: 0; padding: 8px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.pboard-unknown-row:first-of-type { margin-top: 8px; }
+.pboard-unknown-row > details { margin: 6px 0; }
+.pboard-unknown-row > details summary { cursor: pointer; color: var(--fg-2); }
+.pboard-unknown-row dl { margin: 8px 0; }
+.pboard-unknown-row dl > div { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 2fr); gap: 6px; padding: 2px 0; }
+.pboard-unknown-row dt { color: var(--fg-3); }
+.pboard-unknown-row dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.pboard-unknown-stops > .linkbtn { margin-right: 12px; }
 .pboard-section { display: flex; flex-direction: column; gap: var(--space-2); }
 .pboard-section .section-title, .pboard-list > .section-title { margin: 10px 2px 2px; }
 .pboard-none { color: var(--fg-3); font-size: var(--fs-12); padding: 6px 4px; }

@@ -1,0 +1,87 @@
+import { useState } from "react";
+import { api } from "../api";
+import { t } from "../i18n";
+import { useOffline, useQuery } from "../store";
+import { errorText } from "../ui";
+
+type UnknownStop = {
+  id: string; task_id: string; state: string; host_generation: number;
+  staff_session_id: string | null; runtime_kind: string; provider_session_ref: string;
+  native_run_id: string | null; runtime_instance: string | null;
+  parent_kind: string; parent_id: string; generation: number; cancel_state: string;
+  updated_at: string; phase: string | null; deadline_at: string | null;
+  exit_observed: boolean; no_entry_observed: boolean; generation_matches_host_record: boolean;
+};
+type Inspection = { items: UnknownStop[]; next_after: string | null };
+
+/** Keep uncertain stops beside the board's work, with an explicit read after each reconcile. */
+export function UnknownStops({ projectId }: { projectId: string }) {
+  const base = `/api/projects/${encodeURIComponent(projectId)}/unknown-stops`;
+  const first = useQuery<Inspection>(`${base}?limit=25`, { staleMs: 0 });
+  const [extra, setExtra] = useState<UnknownStop[]>([]);
+  const [next, setNext] = useState<string | null | undefined>(undefined);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [warning, setWarning] = useState("");
+  const [outcome, setOutcome] = useState("");
+  const offline = useOffline();
+  const items = [...(first.data?.items ?? []), ...extra];
+  const cursor = next === undefined ? first.data?.next_after : next;
+
+  async function reload() {
+    setExtra([]);
+    setNext(undefined);
+    await first.refresh();
+  }
+
+  async function more() {
+    if (!cursor || busy) return;
+    setBusy("more");
+    setWarning("");
+    try {
+      const page = await api.get<Inspection>(`${base}?limit=25&after=${encodeURIComponent(cursor)}`);
+      setExtra((rows) => [...rows, ...page.items]);
+      setNext(page.next_after);
+    } catch (error) { setWarning(errorText(error)); }
+    finally { setBusy(null); }
+  }
+
+  async function reconcile(id: string) {
+    if (busy || offline) return;
+    setBusy(id);
+    setWarning("");
+    setOutcome("");
+    try {
+      const result = await api.post<{ cancel_state: string }>(`${base}/${encodeURIComponent(id)}/reconcile`, {});
+      setOutcome(t("pboard.unknown.result", { id, state: result.cancel_state }));
+    } catch (error) { setWarning(errorText(error)); }
+    finally {
+      await reload();
+      setBusy(null);
+    }
+  }
+
+  // An empty inspection leaves the usual board entirely quiet.
+  if (!items.length && !outcome && !warning && !first.error) return null;
+  return <details className="pboard-unknown-stops" open={!!outcome || !!warning}>
+    <summary>{first.error && !items.length ? t("pboard.unknown.unavailable") : t("pboard.unknown.title", { count: items.length })}</summary>
+    <p className="sub">{t("pboard.unknown.help")}</p>
+    {first.error && <p className="result-warning" role="alert">{first.error}</p>}
+    {warning && <p className="result-warning" role="alert">{warning}</p>}
+    {outcome && <p className="sub" role="status">{outcome}</p>}
+    {items.map((item) => <div className="pboard-unknown-row" key={item.id}>
+      <div><b>{item.task_id}</b> · <code>{item.id}</code></div>
+      <div className="sub">{t("pboard.unknown.phase", { phase: item.phase ?? "—", deadline: item.deadline_at ?? "—" })}</div>
+      <details><summary>{t("pboard.unknown.observation")}</summary>
+        <dl>
+          {(["state", "cancel_state", "parent_kind", "parent_id", "generation", "host_generation",
+            "generation_matches_host_record", "staff_session_id", "runtime_kind", "provider_session_ref",
+            "native_run_id", "runtime_instance", "exit_observed", "no_entry_observed", "updated_at"] as const).map((key) =>
+            <div key={key}><dt>{t(`pboard.unknown.${key}`)}</dt><dd><code>{typeof item[key] === "boolean" ? t(item[key] ? "pboard.unknown.yes" : "pboard.unknown.no") : String(item[key] ?? "—")}</code></dd></div>)}
+        </dl>
+      </details>
+      <button type="button" className="linkbtn" disabled={!!busy || offline} onClick={() => void reconcile(item.id)}>{t("pboard.unknown.reconcile")}</button>
+    </div>)}
+    {cursor && <button type="button" className="linkbtn" disabled={!!busy} onClick={() => void more()}>{t("pboard.unknown.more")}</button>}
+    <button type="button" className="linkbtn" disabled={!!busy} onClick={() => void reload()}>{t("pboard.unknown.reload")}</button>
+  </details>;
+}

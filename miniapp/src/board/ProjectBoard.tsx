@@ -23,6 +23,7 @@ import { TaskWorkflow } from "./TaskWorkflow";
 import { TaskComparison } from "./TaskComparison";
 import { RuntimeHandoff } from "./RuntimeHandoff";
 import { HostCapacity } from "./HostCapacity";
+import { UnknownStops } from "./UnknownStops";
 import { TaskContext } from "./TaskContext";
 import { ManualResult } from "./ManualResult";
 import { ManualReopenRecovery } from "./ManualReopen";
@@ -186,6 +187,7 @@ export function ProjectBoard({ projectId, toast, selected, selectedResult, layou
       )}
       {embedded && listChips}
       <div className={`screen wide pboard ${wide ? "is-wide" : "is-list"} ${embedded ? "embedded" : ""}`}>
+        <UnknownStops key={projectId} projectId={projectId} />
         {loading && !data && !error && <Skeleton rows={4} />}
         {error && !data && (
           <div className="empty">

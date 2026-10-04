@@ -503,6 +503,8 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
         return 200, "application/json", json.dumps(empty_focus_state(parts[3]))
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "next-actions":
         return 200, "application/json", json.dumps({"project_id": parts[3], "actions": []})
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "unknown-stops":
+        return 200, "application/json", json.dumps({"items": [], "next_after": None})
     if method.upper() == "GET" and len(parts) == 6 and parts[2] == "projects" and parts[4:] == ["scope-revisions", "current"]:
         return 200, "application/json", json.dumps({"project_id": parts[3], "goal_revision": 1,
                                                       "entity_revision": 1, "body": "Existing project goal",
@@ -758,6 +760,9 @@ class BoardStub:
         self.workflow_runs: dict[str, dict] = {}
         self.workflow_commands: dict[str, dict] = {}
         self.workflow_unknowns = 0
+        self.unknown_stops: list[dict] = []
+        self.unknown_stops_failed = False
+        self.stop_reconciliations: list[str] = []
 
     @staticmethod
     def task(id_: str, title: str, *, status: str = "todo", priority: int = 3, assignee: dict | None = None, **fields: object) -> dict:
@@ -821,6 +826,24 @@ class BoardStub:
     def answer(self, method: str, path: str, query: str, body: dict | None) -> tuple[int, object] | None:
         """``(status, body)`` for a route of the board, or None for anything else."""
         base = f"/api/projects/{self.project['id']}/board"
+        stops = f"/api/projects/{self.project['id']}/unknown-stops"
+        if path == stops and method == "GET":
+            if self.unknown_stops_failed:
+                return 503, {"detail": "inspection unavailable"}
+            from urllib.parse import parse_qs
+            params = parse_qs(query)
+            after = params.get("after", [""])[0]
+            limit = int(params.get("limit", ["50"])[0])
+            rows = [row for row in sorted(self.unknown_stops, key=lambda row: row["id"]) if row["id"] > after]
+            return 200, {"items": rows[:limit], "next_after": rows[limit - 1]["id"] if len(rows) > limit else None}
+        if path.startswith(stops + "/") and path.endswith("/reconcile") and method == "POST":
+            attempt_id = path[len(stops) + 1:-len("/reconcile")]
+            self.stop_reconciliations.append(attempt_id)
+            row = next((item for item in self.unknown_stops if item["id"] == attempt_id), None)
+            if row is None:
+                return 404, {"detail": "no such timed-out attempt"}
+            self.unknown_stops.remove(row)
+            return 200, {"cancel_state": "completed"}
         if method == "GET" and path.startswith("/api/board/") and path.endswith("/context-history"):
             task_id = path.split("/")[3]
             if not any(task["id"] == task_id for task in self.tasks):
