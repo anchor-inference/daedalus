@@ -795,11 +795,14 @@ class Team:
             # Strict CLI containment is the only runtime that can attest that escaped children
             # stopped. Claim before file handoff; an ordinary CLI or native worker makes no such claim.
             leases = WriterLeases(self.app.executions)
-            lease = await leases.acquire(member.project_id) if member.isolation != "readonly" and resources is not None else None
             if member.isolation != "readonly" and resources is None:
-                # An existing claim must stop worktree preparation and file delivery as well as
-                # provider entry. prepare_attempt repeats this under its attempt transaction.
-                await leases.refuse_uncontained()
+                # Preparation precedes its attempt row. Keep a contained claim from entering
+                # between this check and the first durable attempt observation.
+                async with leases.uncontained_start():
+                    return await self._start(member, task, principal=principal, check_authority=check_authority,
+                                             by=by, resume_from=resume_from, capacity_slot_id=capacity_slot_id,
+                                             resources=resources, source_head=source_head, writer_lease=None)
+            lease = await leases.acquire(member.project_id) if member.isolation != "readonly" else None
             try:
                 return await self._start(member, task, principal=principal, check_authority=check_authority,
                                          by=by, resume_from=resume_from, capacity_slot_id=capacity_slot_id,

@@ -543,6 +543,46 @@ async def test_uncontained_start_does_not_claim_a_contained_writer_lease(db: Dat
         owner.release()
 
 
+async def test_contained_writer_waits_for_uncontained_preparation_to_publish_its_attempt(db: Database,
+                                                                                        tmp_path: Path) -> None:
+    owner = await _owner(db)
+    team = object.__new__(Team)
+    team.app = SimpleNamespace(executions=owner)
+    team._execution_locks = {}
+    member = SimpleNamespace(id="ordinary", project_id="project", isolation="worktree")
+    preparing = asyncio.Event()
+    finish_preparation = asyncio.Event()
+
+    async def check_authority():
+        pass
+
+    async def prepare(_self, _member, _task, **_kwargs):
+        preparing.set()
+        await finish_preparation.wait()
+        await asyncio.to_thread((tmp_path / "prepared").write_text, "ordinary worker")
+        await _attempt(db, owner.generation, strict=False)
+        return "ordinary"
+
+    team._start = MethodType(prepare, team)
+    try:
+        ordinary = asyncio.create_task(team.start(member, SimpleNamespace(),
+                                                   principal=SimpleNamespace(),
+                                                   check_authority=check_authority))
+        await asyncio.wait_for(preparing.wait(), 2)
+        contained = asyncio.create_task(WriterLeases(owner).acquire("other-project"))
+        await asyncio.sleep(0)
+        assert not contained.done(), "the contained claim entered during uncontained preparation"
+        finish_preparation.set()
+        assert await ordinary == "ordinary"
+        assert (tmp_path / "prepared").read_text() == "ordinary worker"
+        with pytest.raises(ControlConflict, match="uncontained writable worker"):
+            await contained
+        assert await db.kv_get(KEY) is None
+    finally:
+        finish_preparation.set()
+        owner.release()
+
+
 async def test_uncontained_writable_start_refuses_an_existing_writer_claim(db: Database) -> None:
     owner = await _owner(db)
     team = object.__new__(Team)

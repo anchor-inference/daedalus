@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import secrets
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,6 +17,11 @@ from daedalus.stores.runtime_release import attempt_released_in
 
 KEY = "contained_writer_lease"
 OWNERS_KEY = "writer_effect_owners:"
+
+# A native or ordinary CLI worker has no attempt row while it prepares its folder. Keep a
+# contained claim from entering that gap in this host process. A restart still needs physical
+# owner evidence; this lock deliberately makes no claim about abandoned external effects.
+_startup_admission = asyncio.Lock()
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +94,18 @@ class WriterLeases:
         async with self.db.transaction() as conn:
             await self.refuse_uncontained_in(conn)
 
+    @asynccontextmanager
+    async def uncontained_start(self) -> AsyncIterator[None]:
+        """Serialize uncontained preparation against a contained claim until startup settles."""
+        async with _startup_admission:
+            await self.refuse_uncontained()
+            yield
+
     async def acquire(self, project_id: str) -> WriterLease:
+        async with _startup_admission:
+            return await self._acquire(project_id)
+
+    async def _acquire(self, project_id: str) -> WriterLease:
         token = secrets.token_urlsafe(32)
         async with self.db.transaction() as conn:
             generation = await self.executions._host(conn)
