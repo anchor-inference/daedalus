@@ -49,6 +49,8 @@ const SAME_IN_BOTH = [
   "nset.channel.telegram",
   "nset.out.device",
   "nset.test.line",
+  // GitHub check names are exact job identifiers, so translating this example would name another check.
+  "pboard.review.ci.namesPlaceholder",
   "sched.cron",
   "sched.when.cron",
   "session.mcp.toggled",

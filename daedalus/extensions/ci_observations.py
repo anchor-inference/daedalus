@@ -138,7 +138,7 @@ async def set_required_checks(conn: aiosqlite.Connection, *, task_id: str, provi
     )
 
     if (provider != "github" or not repository_id.isdecimal() or
-            int(repository_id) <= 0 or len(check_names) > 32 or
+            int(repository_id) <= 0 or not check_names or len(check_names) > 32 or
             any(not name.strip() or len(name) > 200 for name in check_names)):
         raise ValueError("CI checks need a provider, repository identity and bounded names")
     names = sorted({name.strip() for name in check_names})
@@ -148,8 +148,16 @@ async def set_required_checks(conn: aiosqlite.Connection, *, task_id: str, provi
     await cursor.close()
     if task is None:
         raise KeyError(task_id)
-    if task["status"] in ("review", "done", "archived", "dropped"):
-        raise DomainConflict("return the reviewed result before changing required CI")
+    if task["status"] in ("done", "archived", "dropped"):
+        raise DomainConflict("reopen the task before changing required CI")
+    if task["status"] == "review":
+        cursor = await conn.execute("SELECT 1 FROM task_merge_receipts m JOIN effect_outbox e ON e.id = m.id"
+                                    " WHERE m.task_id = ? AND e.state IN ('pending','claimed','unknown') LIMIT 1",
+                                    (task_id,))
+        pending_merge = await cursor.fetchone()
+        await cursor.close()
+        if pending_merge is not None:
+            raise DomainConflict("reconcile the pending merge before changing required CI")
     if task["current_attempt_id"]:
         cursor = await conn.execute("SELECT state FROM execution_attempts WHERE id = ?",
                                     (task["current_attempt_id"],))
@@ -178,11 +186,24 @@ async def set_required_checks(conn: aiosqlite.Connection, *, task_id: str, provi
         await conn.execute("INSERT INTO ci_required_checks(task_id,contract_revision,provider,repository_id,"
                            "check_name,created_at) VALUES (?,?,?,?,?,?)",
                            (task_id, revision, provider, repository_id, name, datetime.now(UTC).isoformat()))
-    await conn.execute("UPDATE board_tasks SET contract_revision = ?,acceptance_state = 'returned' WHERE id = ?",
-                       (revision, task_id))
+    if task["status"] == "review":
+        # A new CI contract cannot inherit an old review result or verdict. The policy change is the
+        # operator's explicit return, even when no verdict exists to use the result-return command.
+        await conn.execute("UPDATE board_tasks SET contract_revision = ?,status = 'todo',"
+                           " current_attempt_id = NULL,acceptance_state = 'returned' WHERE id = ?",
+                           (revision, task_id))
+        await conn.execute("UPDATE open_loops SET closed_at = ?,closed_by = 'system',decision = ?"
+                           " WHERE task_id = ? AND contract_revision = ? AND cause = 'report_done'"
+                           " AND closed_at IS NULL",
+                           (datetime.now(UTC).isoformat(), "returned for CI requirements", task_id,
+                            task["contract_revision"]))
+    else:
+        await conn.execute("UPDATE board_tasks SET contract_revision = ?,acceptance_state = 'returned' WHERE id = ?",
+                           (revision, task_id))
     await conn.execute("UPDATE next_actions SET state = 'cancelled' WHERE task_id = ?"
                        " AND contract_revision < ? AND state = 'active'", (task_id, revision))
-    return {"task_id": task_id, "contract_revision": revision, "required_checks": selected}
+    return {"task_id": task_id, "contract_revision": revision, "required_checks": selected,
+            "returned_from_review": task["status"] == "review"}
 
 
 async def ci_readiness(conn: aiosqlite.Connection, task_id: str, contract_revision: int,

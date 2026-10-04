@@ -104,6 +104,7 @@ def desktop(page: Page, lang: str) -> None:
     expect(panel.locator(".review-files li")).to_have_count(2)
     expect(panel.locator(".review-receipts").first.locator("li.ok")).to_contain_text(words["checked"])
     expect(panel).to_contain_text(words["ci"])
+    expect(panel.locator(".review-ci-setup")).to_have_count(0)
     evidence = sheet.locator(".result-flow")
     expect(evidence).to_contain_text("Endpoint implemented and tested")
     expect(evidence.get_by_role("button", name=words["merge"])).to_be_enabled()
@@ -194,6 +195,53 @@ def conflicting(page: Page, lang: str) -> None:
     expect(page.locator(".sheet.pboard-sheet .result-flow").get_by_role("button", name=words["merge"])).to_be_disabled()
 
 
+def configure_ci(page: Page, lang: str) -> None:
+    focus = FocusStub.bakery(lang)
+    task = endpoint(focus)
+    review = BoardStub.review(task, blockers=[{"code": "ci", "text": "required CI checks missing"}])
+    review["ci_status"] = "blocked"
+    review["ci_checks"] = []
+    focus.board.reviews[task["id"]] = review
+    focus.board.ci_requirement_conflicts = 1
+    serve(page, focus)
+    page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
+    page.locator(".pcard", has_text=task["title"]).locator(".pcard-title").click()
+    panel = page.locator(".sheet.pboard-sheet .review-panel")
+    missing = "required CI checks are not configured" if lang == "en" else "обязательные проверки CI не настроены"
+    expect(panel.locator(".review-why")).to_contain_text(missing)
+    setup = panel.locator(".review-ci-setup")
+    expect(setup.locator(".review-ci-fields")).not_to_be_visible()
+    setup.locator("summary").click()
+    expect(setup).to_contain_text("GitHub")
+    save = setup.locator("button.btn")
+    expect(save).to_be_disabled()
+    setup.locator("input").fill("7")
+    setup.locator("textarea").fill("unit\nbuild")
+    expect(save).to_be_enabled()
+    save.click()
+    changed = "The task changed before saving" if lang == "en" else "Задача изменилась до сохранения"
+    expect(setup.get_by_role("alert")).to_contain_text(changed)
+    assert len(focus.board.ci_requirement_requests) == 1
+    focus.board.ci_requirement_failures = 1
+    save.click()
+    assert len(focus.board.ci_requirement_requests) == 2
+    unknown = "The outcome is unknown" if lang == "en" else "Результат неизвестен"
+    expect(setup.get_by_role("alert")).to_contain_text(unknown)
+    save.click()
+    assert len(focus.board.ci_requirement_requests) == 3
+    first, second, retry = focus.board.ci_requirement_requests
+    assert first["client_operation_id"] != second["client_operation_id"]
+    assert retry == second
+    assert second["expected_entity_revision"] == task["entity_revision"] - 1
+    assert second["provider"] == "github" and second["repository_id"] == "7"
+    assert second["check_names"] == ["unit", "build"]
+    receipt = "Required checks saved; result returned to queue" if lang == "en" else "Проверки сохранены; результат возвращён в очередь"
+    expect(page.locator(".toast")).to_contain_text(receipt)
+    expect(page.locator(".toast")).to_contain_text("ci-receipt")
+    expect(page.locator(".sheet.pboard-sheet .review-panel")).to_have_count(0)
+    fits(page, f"{lang} CI requirements")
+
+
 def main() -> int:
     expect_app(BASE)
     with sync_playwright() as playwright:
@@ -203,6 +251,7 @@ def main() -> int:
             desktop(context.new_page(), lang)
             merging(context.new_page(), lang, phone=False)
             conflicting(context.new_page(), lang)
+            configure_ci(context.new_page(), lang)
             context.close()
             context = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
             merging(context.new_page(), lang, phone=True)

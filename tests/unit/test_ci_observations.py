@@ -177,6 +177,31 @@ async def test_required_checks_revision_survives_later_contract_change(ci_db: Da
     assert [row["check_name"] for row in rows] == ["build", "unit"]
 
 
+async def test_review_without_verdict_can_set_policy_only_by_returning_result(ci_db: Database) -> None:
+    await ci_db.execute("UPDATE board_tasks SET acceptance_state = 'handed_in' WHERE id = 'task1'")
+    async with ci_db.transaction() as conn:
+        revised = await set_required_checks(conn, task_id="task1", provider="github",
+                                            repository_id="7", check_names=["unit", "build"],
+                                            origin_ref="receipt")
+    assert revised["returned_from_review"] is True
+    assert revised["contract_revision"] == 2
+    task = await ci_db.fetchone("SELECT status,contract_revision,acceptance_state,current_attempt_id"
+                                " FROM board_tasks WHERE id = 'task1'")
+    assert (task["status"], task["contract_revision"], task["acceptance_state"],
+            task["current_attempt_id"]) == ("todo", 2, "returned", None)
+    assert (await ci_db.fetchone("SELECT COUNT(*) FROM task_contract_versions"
+                                 " WHERE task_id = 'task1'"))[0] == 2
+
+
+async def test_policy_change_does_not_return_finished_review(ci_db: Database) -> None:
+    await ci_db.execute("UPDATE board_tasks SET status = 'done' WHERE id = 'task1'")
+    async with ci_db.transaction() as conn:
+        with pytest.raises(DomainConflict, match="reopen the task"):
+            await set_required_checks(conn, task_id="task1", provider="github",
+                                      repository_id="7", check_names=["unit", "build"],
+                                      origin_ref="receipt")
+
+
 async def test_final_result_survives_late_running_but_conflicting_finals_are_unknown(ci_db: Database) -> None:
     head = "d" * 40
     for delivery, status, conclusion in (("final", "completed", "success"),
@@ -221,6 +246,7 @@ async def test_required_checks_http_command_replays_and_rejects_stale_or_coerced
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
         assert (await client.post(path, json={**body, "expected_entity_revision": True})).status_code == 422
         assert (await client.post(path, json={**body, "repository_id": 7})).status_code == 422
+        assert (await client.post(path, json={**body, "check_names": []})).status_code == 422
         assert (await client.post(path, json={**body, "ignored": "extra"})).status_code == 422
         first = await client.post(path, json=body)
         assert first.status_code == 200, first.text

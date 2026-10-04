@@ -1,0 +1,160 @@
+"""Serialize contained writers even when different projects name the same physical folder."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import secrets
+from dataclasses import dataclass
+from typing import Any
+
+from daedalus.stores.control import ControlConflict, canonical, now, one
+from daedalus.stores.executions import ExecutionStore
+from daedalus.stores.runtime_release import attempt_released_in
+
+KEY = "contained_writer_lease"
+
+
+@dataclass(frozen=True, slots=True)
+class WriterLease:
+    project_id: str
+    revision: int
+    host_generation: int
+    token: str
+
+
+class WriterLeases:
+    """A global claim only for strict CLI attempts with a kernel-owned process group.
+
+    A missing attempt proves no provider entered, but interrupted file handoff or git preparation
+    may still write. Once preparation begins, unknown outcomes survive host restarts.
+    """
+
+    def __init__(self, executions: ExecutionStore) -> None:
+        self.executions = executions
+        self.db = executions.db
+
+    @staticmethod
+    def _hash(token: str) -> str:
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    @staticmethod
+    async def _read(conn: Any) -> dict[str, Any] | None:
+        row = await one(conn, "SELECT value FROM kv WHERE key = ?", (KEY,))
+        return json.loads(row["value"]) if row is not None else None
+
+    @staticmethod
+    async def _write(conn: Any, record: dict[str, Any]) -> None:
+        await conn.execute("INSERT INTO kv(key,value) VALUES (?,?)"
+                           " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (KEY, canonical(record)))
+
+    @classmethod
+    def _matches(cls, record: dict[str, Any] | None, lease: WriterLease) -> bool:
+        return bool(record and record["state"] == "held" and record["project_id"] == lease.project_id
+                    and record["revision"] == lease.revision and record["host_generation"] == lease.host_generation
+                    and record["token_hash"] == cls._hash(lease.token))
+
+    async def acquire(self, project_id: str) -> WriterLease:
+        token = secrets.token_urlsafe(32)
+        async with self.db.transaction() as conn:
+            generation = await self.executions._host(conn)
+            record = await self._read(conn)
+            if record is not None and record["state"] == "held":
+                # A pre-preparation reservation may be reclaimed after host restart. Once anything
+                # could have written, only exact no-entry or whole-container exit proof can free it.
+                if record.get("handoffs"):
+                    released = False
+                elif record["attempt_id"]:
+                    released = await attempt_released_in(conn, record["attempt_id"])
+                else:
+                    released = not record["effects_started"] and record["host_generation"] != generation
+                if not released:
+                    raise ControlConflict("a contained writer still owns writable project folders")
+            # An attempt launched before this gate was installed has no claim row. Its cgroup
+            # remains an owner until the same exact release proof is durable.
+            async with conn.execute("SELECT attempt_id FROM attempt_resource_bindings") as cursor:
+                existing = await cursor.fetchall()
+            for row in existing:
+                if not await attempt_released_in(conn, row["attempt_id"]):
+                    raise ControlConflict("an earlier contained worker has not proved its exit")
+            revision = int(record["revision"]) + 1 if record is not None else 1
+            await self._write(conn, {"project_id": project_id, "revision": revision,
+                                     "host_generation": generation, "token_hash": self._hash(token),
+                                     "attempt_id": None, "effects_started": False, "handoffs": [],
+                                     "state": "held", "changed_at": now()})
+        return WriterLease(project_id, revision, generation, token)
+
+    async def begin_effects(self, lease: WriterLease) -> None:
+        """Cross the uncertain boundary before worktree preparation or file handoff."""
+        async with self.db.transaction() as conn:
+            await self.executions._host(conn)
+            record = await self._read(conn)
+            if not self._matches(record, lease) or record["effects_started"]:
+                raise ControlConflict("the writer lease changed before preparation")
+            record["effects_started"] = True
+            record["changed_at"] = now()
+            await self._write(conn, record)
+
+    async def bind(self, lease: WriterLease, attempt_id: str) -> None:
+        """Bind before runtime entry; only an exact strict containment binding is accepted."""
+        async with self.db.transaction() as conn:
+            await self.executions._host(conn)
+            row = await one(conn, "SELECT a.runtime_kind,r.state,r.host_generation FROM execution_attempts a"
+                            " JOIN attempt_resource_bindings r ON r.attempt_id = a.id"
+                            " WHERE a.id = ? AND a.task_id IN (SELECT id FROM board_tasks WHERE project_id = ?)",
+                            (attempt_id, lease.project_id))
+            if row is None or row["runtime_kind"] != "cli" or row["state"] != "reserved" or int(row["host_generation"]) != lease.host_generation:
+                raise ControlConflict("the writer has no exact strict CLI containment binding")
+            record = await self._read(conn)
+            if not self._matches(record, lease) or not record["effects_started"] or record["attempt_id"]:
+                raise ControlConflict("the writer lease changed before runtime entry")
+            record["attempt_id"] = attempt_id
+            record["changed_at"] = now()
+            await self._write(conn, record)
+
+    async def begin_handoff(self, attempt_id: str) -> str:
+        """Reserve a host file copy against the exact still-running contained attempt."""
+        handoff = secrets.token_urlsafe(24)
+        async with self.db.transaction() as conn:
+            generation = await self.executions._host(conn)
+            record = await self._read(conn)
+            if (record is None or record["state"] != "held" or record["host_generation"] != generation
+                    or record["attempt_id"] != attempt_id or await attempt_released_in(conn, attempt_id)):
+                raise ControlConflict("the contained writer no longer owns its file handoff")
+            record["handoffs"].append(handoff)
+            record["changed_at"] = now()
+            await self._write(conn, record)
+        return handoff
+
+    async def finish_handoff(self, attempt_id: str, handoff: str) -> None:
+        """A completed awaited copy can be removed; an interrupted copy stays unknown."""
+        async with self.db.transaction() as conn:
+            generation = await self.executions._host(conn)
+            record = await self._read(conn)
+            if (record is None or record["state"] != "held" or record["host_generation"] != generation
+                    or record["attempt_id"] != attempt_id or handoff not in record["handoffs"]):
+                raise ControlConflict("the file handoff no longer belongs to this writer")
+            record["handoffs"].remove(handoff)
+            record["changed_at"] = now()
+            await self._write(conn, record)
+
+    async def release_if_safe(self, lease: WriterLease) -> bool:
+        """Release only this generation's claim after exact exit proof or before any effect."""
+        async with self.db.transaction() as conn:
+            generation = await self.executions._host(conn)
+            if generation != lease.host_generation:
+                return False
+            record = await self._read(conn)
+            if not self._matches(record, lease):
+                return False
+            if record.get("handoffs"):
+                return False
+            if record["attempt_id"]:
+                if not await attempt_released_in(conn, record["attempt_id"]):
+                    return False
+            elif record["effects_started"]:
+                return False
+            record["state"] = "released"
+            record["changed_at"] = now()
+            await self._write(conn, record)
+            return True

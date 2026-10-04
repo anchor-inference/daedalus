@@ -165,7 +165,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // What waits for the operator: the orchestrator's project's list, or every project's in the main
   // chat. The cards live in the panel's Questions tab; the chat carries one line that opens it.
   const questionScope = useMemo<QuestionScope | null>(() => (orchestrating ? { projectId: focus!.projectId } : main ? "all" : null), [orchestrating, focus?.projectId, main]);
-  const waiting = useQuestions(questionScope).questions?.length ?? 0;
+  const questions = useQuestions(questionScope);
+  const waiting = questions.questions?.length ?? 0;
+  // A direct question already has an actionable line beside the composer. Its generic goal alert
+  // used to add a second amber callout and another Open button for the same decision.
+  const showGoalLine = questions.questions?.length === 0 || (questions.questions === null && Boolean(questions.error));
   // In the orchestrator's chat anything can be answered: the quote waits over the composer, which
   // takes the focus so the operator types the answer straight away.
   const focusChat = useMemo<FocusChat | null>(() => (focus ? {
@@ -1440,7 +1444,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           {staffId && <StaffMessages staffId={staffId} />}
           <Composer
             ref={composer}
-            above={orchestrating ? <><GoalStrip projectId={focus!.projectId} /><ReplyChip sessionId={id} /></> : undefined}
+            above={orchestrating ? <>{showGoalLine && <GoalStrip projectId={focus!.projectId} />}<ReplyChip sessionId={id} /></> : undefined}
             sessionId={id}
             status={status}
             onSend={send}

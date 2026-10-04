@@ -66,6 +66,9 @@ def check(page: Page, lang: str, width: int) -> None:
     phone = width < 1024
     where = f"{lang} {width}"
     focus = FocusStub.bakery(lang)
+    pending_asks = focus.asks
+    # With no direct question to open, the goal line still carries other project decisions.
+    focus.asks = []
     serve(page, focus)
     page.goto(f"{BASE}/orchestration/project/{PID}?token=t&lang={lang}")
     chat = page.locator(".chat.in-project.orchestrator")
@@ -178,6 +181,12 @@ def check(page: Page, lang: str, width: int) -> None:
     page.goto(exact_url)
     expect(page.locator(".result-flow [role=alert]")).to_contain_text(words["unavailable"])
     expect(page.locator(".result-original")).to_have_count(0)
+
+    # When a direct question arrives, its own actionable line replaces the generic goal alert.
+    focus.asks = pending_asks
+    page.goto(f"{BASE}/orchestration/project/{PID}?token=t&lang={lang}")
+    expect(page.locator(".chat.in-project.orchestrator .questions-line")).to_be_visible()
+    expect(page.locator(".chat.in-project.orchestrator .goal-strip")).to_have_count(0)
 
 
 def run() -> int:

@@ -706,7 +706,7 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
         </div>
       )}
       {task && task.status === "review" && task.branch && (
-        <ReviewPanel taskId={task.id} />
+        <ReviewPanel taskId={task.id} onChanged={onDone} toast={toast} />
       )}
       {task && resultReference && <AcceptedResultDetail task={task} reference={resultReference} />}
       {task && !resultReference && (task.status === "review" || task.acceptance_state === "operator_approved") && <ResultFlow task={task} onAccepted={onDone} toast={toast} />}

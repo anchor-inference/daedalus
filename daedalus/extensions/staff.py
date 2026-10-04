@@ -83,6 +83,7 @@ from daedalus.stores.staff import (
     StaffSession,
 )
 from daedalus.stores.staff_context import ContextPinRefused, pin_staff_context
+from daedalus.stores.writer_leases import WriterLease, WriterLeases
 from daedalus.terminals.bridge import HostBridge
 
 if TYPE_CHECKING:
@@ -791,14 +792,23 @@ class Team:
                     resume_from: str | None = None, capacity_slot_id: str | None = None,
                     resources: dict[str, Any] | None = None, source_head: str | None = None) -> LiveSession:
         async with self.execution_lock(member.id):
-            return await self._start(member, task, principal=principal, check_authority=check_authority,
-                                     by=by, resume_from=resume_from, capacity_slot_id=capacity_slot_id,
-                                     resources=resources, source_head=source_head)
+            # Strict CLI containment is the only runtime that can attest that escaped children
+            # stopped. Claim before file handoff; an ordinary CLI or native worker makes no such claim.
+            leases = WriterLeases(self.app.executions)
+            lease = await leases.acquire(member.project_id) if member.isolation != "readonly" and resources is not None else None
+            try:
+                return await self._start(member, task, principal=principal, check_authority=check_authority,
+                                         by=by, resume_from=resume_from, capacity_slot_id=capacity_slot_id,
+                                         resources=resources, source_head=source_head, writer_lease=lease)
+            finally:
+                if lease is not None:
+                    await leases.release_if_safe(lease)
 
     async def _start(self, member: Staff, task: BoardTask, *, principal: Principal,
                      check_authority: Callable[[], Awaitable[None]], by: str,
                      resume_from: str | None, capacity_slot_id: str | None,
-                     resources: dict[str, Any] | None = None, source_head: str | None = None) -> LiveSession:
+                     resources: dict[str, Any] | None = None, source_head: str | None = None,
+                     writer_lease: WriterLease | None = None) -> LiveSession:
         """Start a session of ``member`` for ``task`` now; the launch queue calls this once it admits it."""
         if principal.origin_class != "operator" and not principal.grant_id:
             raise StaffError("a host-attested launch principal is required")
@@ -819,6 +829,10 @@ class Team:
         folder = self.folder_for(project, member, task)
         source = await self._resume_source(member, task, folder, resume_from) if resume_from else None
         previous = await self.live_of(member)
+        if writer_lease is not None:
+            # The checks above are reads. From here, settling an old worker, preparing a worktree
+            # or delivering files may leave a write in flight if this host loses the outcome.
+            await WriterLeases(self.app.executions).begin_effects(writer_lease)
         if previous is not None:
             previous = await self.settle_stale(previous)
             # Every launch has its own session and attempt binding; reusing a CLI turn would let
@@ -933,6 +947,8 @@ class Team:
 
             identity = await prepare_attempt(self.app, principal, member, task, session, fence_token=token,
                                              capacity_slot_id=capacity_slot_id)
+            if writer_lease is not None:
+                await WriterLeases(self.app.executions).bind(writer_lease, identity.id)
             if resources is not None:
                 request = replace(request, resources={**resources, "attempt_id": identity.id,
                                                       "host_generation": str(identity.host_generation)})
@@ -1127,7 +1143,15 @@ class Team:
         delivered: list[Delivered] = []
         if files:
             folder, cwd = await self.cwd_of(live)
+            strict = await self.manager.db.fetchone(
+                "SELECT b.attempt_id FROM attempt_resource_bindings b JOIN execution_attempts a"
+                " ON a.id = b.attempt_id WHERE a.staff_session_id = ?", (live.id,)
+            )
+            leases = WriterLeases(self.app.executions) if strict is not None else None
+            handoff = await leases.begin_handoff(strict["attempt_id"]) if leases is not None else None
             delivered = await self.hand_files(member, files, folder=folder, cwd=cwd, task_id=live.session.task_id, by=by)
+            if leases is not None and handoff is not None:
+                await leases.finish_handoff(strict["attempt_id"], handoff)
             if live.session.task_id:
                 await self.manager.files.attach_to_task(live.session.task_id, files, actor=by)
             text = text.rstrip() + "\n\n" + prompts.STAFF_FILES.format(lines="\n".join(d.line() for d in delivered)).strip()

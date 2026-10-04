@@ -744,6 +744,10 @@ class BoardStub:
         self.cancel_states: dict[str, str] = {}
         self.accepted: list[str] = []
         self.reviews: dict[str, dict] = {}
+        self.ci_requirement_requests: list[dict] = []
+        self.ci_requirement_conflicts = 0
+        self.ci_requirement_failures = 0
+        self.ci_requirement_receipts: dict[str, dict] = {}
         """A task's review as the host would read it from git; a branch task without one gets :meth:`review`."""
         self.merged: list[str] = []
         self.result_rows: dict[str, list[dict]] = {}
@@ -964,6 +968,31 @@ class BoardStub:
             row = next((t for t in self.tasks if t["id"] == parts[3]), None)
             if row is None:
                 return 404, {"detail": "no such task"}
+            if path.endswith("/ci/requirements") and method == "POST":
+                payload = dict(body or {})
+                self.ci_requirement_requests.append(payload)
+                operation = payload.get("client_operation_id")
+                if operation in self.ci_requirement_receipts:
+                    return 200, self.ci_requirement_receipts[operation]
+                if self.ci_requirement_conflicts:
+                    self.ci_requirement_conflicts -= 1
+                    row["entity_revision"] += 1
+                    return 409, {"detail": "task changed"}
+                if self.ci_requirement_failures:
+                    self.ci_requirement_failures -= 1
+                    return 503, {"detail": "receipt unavailable"}
+                if payload.get("expected_entity_revision") != row["entity_revision"]:
+                    return 409, {"detail": "task changed"}
+                if payload.get("provider") != "github" or not str(payload.get("repository_id", "")).isdigit() or not payload.get("check_names"):
+                    return 422, {"detail": "invalid checks"}
+                row["entity_revision"] += 1
+                row["contract_revision"] = row.get("contract_revision", 1) + 1
+                row["status"] = "todo"
+                row["acceptance_state"] = "returned"
+                receipt = {"receipt_id": "ci-receipt", "entity_revision": row["entity_revision"],
+                           "contract_revision": row["contract_revision"], "returned_from_review": True}
+                self.ci_requirement_receipts[operation] = receipt
+                return 200, receipt
             if path.endswith("/handoff-options") and method == "GET":
                 source_harness = row.get("source_harness") or (row.get("assignee") or {}).get("harness")
                 source_id = row.get("current_attempt_id")

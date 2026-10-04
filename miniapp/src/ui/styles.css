@@ -3105,6 +3105,14 @@ button.staff-row:hover { background: var(--surface-2); }
 .review-diff .diff-view { font-size: var(--fs-mono); }
 .review-why.bad { color: var(--bad); }
 .review-why.attn { color: var(--warn); }
+.review-ci-setup { min-width: 0; font-size: var(--fs-12); }
+.review-ci-setup summary { color: var(--link); cursor: pointer; }
+.review-ci-fields { display: flex; flex-direction: column; gap: 7px; margin-top: 8px; }
+.review-ci-fields p { margin: 0; }
+.review-ci-fields label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.review-ci-fields .field { width: 100%; min-width: 0; box-sizing: border-box; }
+.review-ci-fields textarea.field { resize: vertical; font: inherit; }
+.review-ci-fields .btn { align-self: flex-start; }
 @media (min-width: 1024px) {
   .pboard-cols { display: grid; grid-template-columns: repeat(4, minmax(200px, 1fr)) minmax(170px, 0.8fr); gap: 12px; align-items: start; }
   .pboard-col { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: 4px 6px 8px; border-radius: var(--radius-md); }
