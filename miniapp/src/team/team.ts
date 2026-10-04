@@ -2,7 +2,7 @@
 // makes from them — which executor can be chosen and why not, what a status is called, what branch a
 // worktree will be given. Pure, so each one is tested without a browser.
 
-import type { ChannelHealth } from "../api";
+import type { ChannelHealth, TerminalEnv } from "../api";
 
 export const HARNESSES = ["daedalus", "claude", "codex", "grok", "opencode", "pi", "cursor"] as const;
 export type Harness = (typeof HARNESSES)[number];
@@ -219,4 +219,10 @@ export function foldersFor(folders: TeamFolder[], env: Env): TeamFolder[] {
 /** The isolation a new member starts with: its own worktree where there is a repository to make one in. */
 export function defaultIsolation(folder: TeamFolder | undefined): Isolation {
   return folder && folder.is_git && !folder.readonly ? "worktree" : "shared";
+}
+
+/** A shared CLI writer needs the same daemon proof that task launch checks again. */
+export function sharedWriterAvailable(harness: Harness, env: TerminalEnv | undefined): boolean {
+  return harness !== "daedalus" && harness !== "opencode" && env?.available === true && env.sandbox === "ok"
+    && env.containment?.available === true && env.containment.kind === "cgroup_v2";
 }

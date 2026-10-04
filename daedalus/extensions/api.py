@@ -3819,6 +3819,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         """What the running terminals cost, and what the machine would carry at ``cap`` of them."""
         return await terminal_service().load(cap=cap)
 
+    @api.get("/api/terminals/envs")
+    async def terminals_envs(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Expose the current daemon capabilities without loading every terminal into a form."""
+        return {"envs": [env.view() for env in terminal_service().environments()]}
+
     @api.post("/api/terminals/envs/{env}/update", status_code=202)
     async def terminals_daemon_update(env: str, body: TerminalDaemonUpdateBody | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Recreate the terminals service from the image, which updates its daemon and ends its

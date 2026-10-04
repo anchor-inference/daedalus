@@ -260,6 +260,8 @@ export type TerminalEnv = {
   version: string;
   /** "ok" when a terminal here can run in the sandbox; otherwise why not, in the daemon's words. */
   sandbox: string;
+  /** The connected daemon's attempt containment probe; launch checks it again before execution. */
+  containment?: { kind?: string; available?: boolean; reason?: string };
   shell: string;
   home: string;
   /** The ports a server started in this environment is reachable on, as "lo-hi". */

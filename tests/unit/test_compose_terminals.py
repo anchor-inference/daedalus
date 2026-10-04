@@ -310,6 +310,15 @@ async def test_a_daemon_older_than_the_image_is_offered_for_update(client: httpx
     assert host["image_version"] == "" and host["update_available"] is False
 
 
+async def test_hiring_can_check_environment_containment_without_listing_terminals(client: httpx.AsyncClient) -> None:
+    response = await client.get("/api/terminals/envs", headers=H)
+    assert response.status_code == 200
+    assert [row["env"] for row in response.json()["envs"]] == ["container", "host"]
+    assert "containment" in response.json()["envs"][0]
+    assert "terminals" not in response.json()
+    assert (await client.get("/api/terminals/envs")).status_code == 401
+
+
 async def test_the_update_names_the_terminals_it_ends_until_the_operator_confirms(client: httpx.AsyncClient, app: Any, db: Database) -> None:
     service: Terminals = app.extensions["terminals"]
     await service.create(TerminalSpec(env="container", owner=Owner("free"), cwd="/tmp"))

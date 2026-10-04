@@ -25,8 +25,8 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "9f3c2a1b7d40"
 
 WORDS = {
-    "en": {"title": "Team · Bakery", "hire": "Hire", "save": "Save", "dismiss": "Dismiss", "signedout": "not signed in", "missing": "not installed", "working": "working", "edit": "Edit {name}", "empty": "No staff yet"},
-    "ru": {"title": "Команда · Bakery", "hire": "Нанять", "save": "Сохранить", "dismiss": "Уволить", "signedout": "нет входа", "missing": "не установлен", "working": "работает", "edit": "Изменить: {name}", "empty": "Сотрудников пока нет"},
+    "en": {"title": "Team · Bakery", "hire": "Hire", "save": "Save", "dismiss": "Dismiss", "signedout": "not signed in", "missing": "not installed", "working": "working", "edit": "Edit {name}", "empty": "No staff yet", "shared": "Shared folder", "worktree": "Own worktree", "blocked": "This environment cannot safely write in a shared folder"},
+    "ru": {"title": "Команда · Bakery", "hire": "Нанять", "save": "Сохранить", "dismiss": "Уволить", "signedout": "нет входа", "missing": "не установлен", "working": "работает", "edit": "Изменить: {name}", "empty": "Сотрудников пока нет", "shared": "Общая папка", "worktree": "Свой worktree", "blocked": "Эта среда не может безопасно писать в общую папку"},
 }
 
 
@@ -107,10 +107,23 @@ def run_one(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
     expect(ada.locator(".harness-badge")).to_have_text("D")
 
     # A command-line member: its own agents and models come from the catalog, and it takes a permission mode.
+    def unavailable_shared(route) -> None:  # type: ignore[no-untyped-def]
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"envs": [
+            {"env": "container", "available": True, "sandbox": "ok", "containment": {"kind": "cgroup_v2", "available": False}},
+            {"env": "host", "available": True, "sandbox": "ok", "containment": {"kind": "cgroup_v2", "available": False}},
+        ]}))
+
+    page.route("**/api/terminals/envs", unavailable_shared)
     page.get_by_role("button", name=words["hire"], exact=True).first.click()
     expect(sheet).to_be_visible()
     sheet.locator(".executor", has_text="Claude Code").click()
     expect(sheet.locator("#staff-permissions")).to_be_visible()
+    isolation = sheet.get_by_role("group", name="Isolation" if lang == "en" else "Изоляция")
+    isolation.get_by_role("button", name=words["shared"]).click()
+    expect(sheet.get_by_text(words["blocked"], exact=False)).to_be_visible()
+    expect(sheet.locator(".sheet-foot").get_by_role("button", name=words["hire"], exact=True)).to_be_disabled()
+    fits(page, f"{lang} {width} shared refusal")
+    isolation.get_by_role("button", name=words["worktree"]).click()
     sheet.locator("#staff-name").fill("Rex")
     sheet.locator("#staff-agent").select_option("code-reviewer")
     sheet.locator("#staff-model").select_option("opus")

@@ -218,6 +218,10 @@ class LauncherStub:
 
 
 GATES: dict[str, object] = {
+    "/api/terminals/envs": {"envs": [
+        {"env": "container", "available": True, "sandbox": "ok", "containment": {"kind": "cgroup_v2", "available": True}},
+        {"env": "host", "available": True, "sandbox": "ok", "containment": {"kind": "cgroup_v2", "available": True}},
+    ]},
     "/api/admission/capacity": {"host_id": "local", "cap": 4, "active": 1, "reserved": 0, "available": 3},
     "/api/admission/queue": {"entries": []},
     # Settings → Tools opens on the tool groups.
