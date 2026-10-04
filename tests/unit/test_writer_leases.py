@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import shlex
+import shutil
+import sys
+from dataclasses import replace
+from pathlib import Path
 from types import MethodType, SimpleNamespace
 
 import pytest
@@ -12,6 +19,157 @@ from daedalus.stores.database import Database
 from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.staff import StaffError
 from daedalus.stores.writer_leases import KEY, WriterLeases
+
+
+async def _wait_for(path: Path) -> None:
+    async with asyncio.timeout(5):
+        while not path.exists():
+            await asyncio.sleep(0.01)
+
+
+@pytest.mark.parametrize("observation", ["reserved", "entered", "returned", "unknown"])
+async def test_registered_effect_survives_worker_release_and_host_restart(db: Database, monkeypatch,
+                                                                         observation: str) -> None:
+    owner = await _owner(db)
+    leases = WriterLeases(owner)
+    lease = await leases.acquire("project")
+    try:
+        effect = await leases.register_effect(lease, kind="file", owner_instance="daemon", operation_id="copy-one")
+        assert await leases.register_effect(lease, kind="file", owner_instance="daemon", operation_id="copy-one") == effect
+        await _attempt(db, lease.host_generation)
+        await leases.bind(lease, "attempt")
+        if observation != "reserved":
+            if observation == "returned":
+                await leases.observe_effect(lease, effect, state="entered")
+            await leases.observe_effect(lease, effect, state=observation,
+                                        result_digest="a" * 64 if observation == "returned" else None)
+
+        async def exited(_conn, _attempt_id):
+            return True
+
+        monkeypatch.setattr("daedalus.stores.writer_leases.attempt_released_in", exited)
+        assert not await leases.release_if_safe(lease)
+        with pytest.raises(ControlConflict, match="still owns"):
+            await leases.acquire("project")
+        saved = await leases.effect_owners()
+        assert saved[0]["state"] == observation
+    finally:
+        owner.release()
+    await db.close()
+    await db.open()
+    successor = ExecutionStore(db)
+    successor.acquire()
+    try:
+        await successor.boot()
+        recovered = WriterLeases(successor)
+        assert await recovered.effect_owners() == saved
+        with pytest.raises(ControlConflict, match="still owns"):
+            await recovered.acquire("project")
+        with pytest.raises(ControlConflict, match="earlier writer claim"):
+            await recovered.observe_effect(lease, effect, state="unknown")
+        with pytest.raises(ControlConflict, match="claim changed"):
+            await recovered.register_effect(lease, kind="file", owner_instance="daemon", operation_id="copy-two")
+    finally:
+        successor.release()
+
+
+async def test_effect_reservation_and_preparation_marker_commit_together(db: Database, monkeypatch) -> None:
+    owner = await _owner(db)
+    try:
+        leases = WriterLeases(owner)
+        lease = await leases.acquire("project")
+
+        async def interrupted(_conn, _record):
+            raise RuntimeError("interrupted before preparation marker commit")
+
+        monkeypatch.setattr(leases, "_write", interrupted)
+        with pytest.raises(RuntimeError, match="interrupted"):
+            await leases.register_effect(lease, kind="file", owner_instance="daemon", operation_id="copy")
+        assert await leases.effect_owners() == []
+        assert not (await db.kv_get(KEY))["effects_started"]
+        assert await WriterLeases(owner).release_if_safe(lease)
+    finally:
+        owner.release()
+
+
+async def test_effect_identity_and_result_cannot_be_replayed_for_another_owner(db: Database) -> None:
+    owner = await _owner(db)
+    try:
+        leases = WriterLeases(owner)
+        lease = await leases.acquire("project")
+        effect = await leases.register_effect(lease, kind="process", owner_instance="daemon", operation_id="prepare")
+        with pytest.raises(ControlConflict, match="changed its physical owner"):
+            await leases.register_effect(lease, kind="process", owner_instance="other", operation_id="prepare")
+        with pytest.raises(ControlConflict, match="changed its physical owner"):
+            await leases.observe_effect(lease, replace(effect, owner_instance="other"), state="entered")
+        with pytest.raises(ControlConflict, match="immutable outcome"):
+            await leases.observe_effect(lease, effect, state="returned", result_digest="a" * 64)
+        await leases.observe_effect(lease, effect, state="entered")
+        await leases.observe_effect(lease, effect, state="returned", result_digest="a" * 64)
+        saved = await leases.effect_owners()
+        await leases.observe_effect(lease, effect, state="returned", result_digest="a" * 64)
+        assert await leases.effect_owners() == saved
+        with pytest.raises(ControlConflict, match="immutable outcome"):
+            await leases.observe_effect(lease, effect, state="returned", result_digest="b" * 64)
+        with pytest.raises(ValueError, match="only entry"):
+            await leases.observe_effect(lease, effect, state="quiescent")
+        with pytest.raises(ValueError, match="result digest"):
+            await leases.observe_effect(lease, effect, state="returned", result_digest="not-a-digest")
+        assert not await leases.release_if_safe(lease)
+    finally:
+        owner.release()
+
+
+@pytest.mark.skipif(sys.platform != "linux" or shutil.which("git") is None or shutil.which("setsid") is None,
+                    reason="the physical escaped-writer probe needs Linux, git and setsid")
+async def test_successful_command_cannot_free_its_escaped_writer_owner(db: Database, tmp_path: Path, monkeypatch) -> None:
+    owner = await _owner(db)
+    shared, ready, permit, finished = (tmp_path / name for name in ("shared", "ready", "permit", "finished"))
+    script = tmp_path / "writer.py"
+    script.write_text("from pathlib import Path\nimport time\n"
+                      "root = Path(__file__).parent\n(root / 'ready').touch()\n"
+                      "deadline = time.monotonic() + 10\n"
+                      "while not (root / 'permit').exists() and time.monotonic() < deadline: time.sleep(.01)\n"
+                      "if (root / 'permit').exists(): (root / 'shared').write_text('old-owner')\n"
+                      "(root / 'finished').touch()\n")
+    leases = WriterLeases(owner)
+    lease = await leases.acquire("project")
+    effect = await leases.register_effect(lease, kind="process", owner_instance="daemon", operation_id="prepare")
+    try:
+        await _attempt(db, lease.host_generation)
+        await leases.bind(lease, "attempt")
+        await leases.observe_effect(lease, effect, state="entered")
+        alias = f"!setsid {shlex.quote(sys.executable)} {shlex.quote(str(script))} </dev/null >/dev/null 2>&1 &"
+        leader = await asyncio.create_subprocess_exec("git", "-c", f"alias.effect={alias}", "effect",
+                                                      cwd=tmp_path, stdout=asyncio.subprocess.PIPE,
+                                                      stderr=asyncio.subprocess.PIPE, start_new_session=True)
+        stdout, stderr = await asyncio.wait_for(leader.communicate(), timeout=5)
+        assert leader.returncode == 0, stderr
+        await _wait_for(ready)
+        await leases.observe_effect(lease, effect, state="returned",
+                                    result_digest=hashlib.sha256(stdout + stderr).hexdigest())
+
+        async def exited(_conn, _attempt_id):
+            return True
+
+        monkeypatch.setattr("daedalus.stores.writer_leases.attempt_released_in", exited)
+        assert not await leases.release_if_safe(lease)
+        with pytest.raises(ControlConflict, match="still owns"):
+            await leases.acquire("project")
+        # A successful leader response coexists with an old child that can still mutate the folder.
+        shared.write_text("replacement-probe")
+        permit.touch()
+        await _wait_for(finished)
+        assert shared.read_text() == "old-owner"
+        assert (await leases.effect_owners())[0]["state"] == "returned"
+        assert not await leases.release_if_safe(lease)
+    finally:
+        try:
+            permit.touch()
+            if ready.exists():
+                await _wait_for(finished)
+        finally:
+            owner.release()
 
 
 async def _owner(db: Database) -> ExecutionStore:

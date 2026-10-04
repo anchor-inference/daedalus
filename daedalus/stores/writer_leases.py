@@ -13,6 +13,7 @@ from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.runtime_release import attempt_released_in
 
 KEY = "contained_writer_lease"
+OWNERS_KEY = "writer_effect_owners:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,11 +24,20 @@ class WriterLease:
     token: str
 
 
+@dataclass(frozen=True, slots=True)
+class WriterEffect:
+    id: str
+    kind: str
+    owner_instance: str
+    operation_id: str
+
+
 class WriterLeases:
     """A global claim only for strict CLI attempts with a kernel-owned process group.
 
     A missing attempt proves no provider entered, but interrupted file handoff or git preparation
-    may still write. Once preparation begins, unknown outcomes survive host restarts.
+    may still write. Registered host effects keep their own identity and cannot be freed by the
+    worker's exit. Once preparation begins, unknown outcomes survive host restarts.
     """
 
     def __init__(self, executions: ExecutionStore) -> None:
@@ -48,6 +58,17 @@ class WriterLeases:
         await conn.execute("INSERT INTO kv(key,value) VALUES (?,?)"
                            " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (KEY, canonical(record)))
 
+    @staticmethod
+    async def _owners(conn: Any, record: dict[str, Any]) -> list[dict[str, Any]]:
+        row = await one(conn, "SELECT value FROM kv WHERE key = ?", (OWNERS_KEY + record["token_hash"],))
+        return json.loads(row["value"]) if row is not None else []
+
+    @staticmethod
+    async def _write_owners(conn: Any, record: dict[str, Any], owners: list[dict[str, Any]]) -> None:
+        await conn.execute("INSERT INTO kv(key,value) VALUES (?,?)"
+                           " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                           (OWNERS_KEY + record["token_hash"], canonical(owners)))
+
     @classmethod
     def _matches(cls, record: dict[str, Any] | None, lease: WriterLease) -> bool:
         return bool(record and record["state"] == "held" and record["project_id"] == lease.project_id
@@ -62,7 +83,7 @@ class WriterLeases:
             if record is not None and record["state"] == "held":
                 # A pre-preparation reservation may be reclaimed after host restart. Once anything
                 # could have written, only exact no-entry or whole-container exit proof can free it.
-                if record.get("handoffs"):
+                if record.get("handoffs") or await self._owners(conn, record):
                     released = False
                 elif record["attempt_id"]:
                     released = await attempt_released_in(conn, record["attempt_id"])
@@ -83,6 +104,73 @@ class WriterLeases:
                                      "attempt_id": None, "effects_started": False, "handoffs": [],
                                      "state": "held", "changed_at": now()})
         return WriterLease(project_id, revision, generation, token)
+
+    async def register_effect(self, lease: WriterLease, *, kind: str, owner_instance: str,
+                              operation_id: str) -> WriterEffect:
+        """Persist one owner's identity before external admission; retries keep the original effect.
+
+        This records identity, not permission to replay an external effect. Command results are
+        not barriers, so every registered owner stays held even after the bound worker's exit.
+        """
+        if kind not in ("process", "file") or any(not value or len(value) > 256
+                                                  for value in (owner_instance, operation_id)):
+            raise ValueError("an effect kind and bounded exact owner and operation identities are required")
+        async with self.db.transaction() as conn:
+            generation = await self.executions._host(conn)
+            record = await self._read(conn)
+            if generation != lease.host_generation or not self._matches(record, lease):
+                raise ControlConflict("the writer claim changed before effect registration")
+            owners = await self._owners(conn, record)
+            for entry in owners:
+                if entry["operation_id"] == operation_id:
+                    if (entry["kind"], entry["owner_instance"]) != (kind, owner_instance):
+                        raise ControlConflict("the effect operation changed its physical owner")
+                    return WriterEffect(entry["id"], kind, owner_instance, operation_id)
+            if len(owners) >= 256:
+                raise ControlConflict("the writer claim has too many unresolved physical owners")
+            effect = WriterEffect(secrets.token_urlsafe(24), kind, owner_instance, operation_id)
+            owners.append({"id": effect.id, "kind": kind, "owner_instance": owner_instance,
+                           "operation_id": operation_id, "state": "reserved", "result_digest": None,
+                           "observed_at": now()})
+            record["effects_started"] = True
+            record["changed_at"] = now()
+            await self._write_owners(conn, record, owners)
+            await self._write(conn, record)
+        return effect
+
+    async def observe_effect(self, lease: WriterLease, effect: WriterEffect, *, state: str,
+                             result_digest: str | None = None) -> None:
+        """Record entry, a returned result, or uncertainty without certifying physical quiescence."""
+        if state not in ("entered", "returned", "unknown"):
+            raise ValueError("only entry, command result and unknown observations are supported")
+        if state == "returned":
+            if result_digest is None or len(result_digest) != 64 or any(c not in "0123456789abcdef" for c in result_digest):
+                raise ValueError("a returned effect requires the exact result digest")
+        elif result_digest is not None:
+            raise ValueError("only a returned result has a result digest")
+        async with self.db.transaction() as conn:
+            generation = await self.executions._host(conn)
+            record = await self._read(conn)
+            if generation != lease.host_generation or not self._matches(record, lease):
+                raise ControlConflict("the effect observation belongs to an earlier writer claim")
+            owners = await self._owners(conn, record)
+            entry = next((entry for entry in owners if entry["id"] == effect.id), None)
+            if entry is None or (entry["kind"], entry["owner_instance"], entry["operation_id"]) != (
+                    effect.kind, effect.owner_instance, effect.operation_id):
+                raise ControlConflict("the effect observation changed its physical owner")
+            if entry["state"] == state and entry["result_digest"] == result_digest:
+                return
+            if entry["state"] in ("returned", "unknown") or (state == "returned" and entry["state"] != "entered"):
+                raise ControlConflict("the effect observation changed an immutable outcome")
+            entry["state"], entry["result_digest"], entry["observed_at"] = state, result_digest, now()
+            await self._write_owners(conn, record, owners)
+
+    async def effect_owners(self) -> list[dict[str, Any]]:
+        """Inspect held physical owners after restart without exposing the claim's secret."""
+        async with self.db.transaction() as conn:
+            await self.executions._host(conn)
+            record = await self._read(conn)
+            return await self._owners(conn, record) if record is not None and record["state"] == "held" else []
 
     async def begin_effects(self, lease: WriterLease) -> None:
         """Cross the uncertain boundary before worktree preparation or file handoff."""
@@ -147,7 +235,7 @@ class WriterLeases:
             record = await self._read(conn)
             if not self._matches(record, lease):
                 return False
-            if record.get("handoffs"):
+            if record.get("handoffs") or await self._owners(conn, record):
                 return False
             if record["attempt_id"]:
                 if not await attempt_released_in(conn, record["attempt_id"]):
