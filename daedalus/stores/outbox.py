@@ -100,6 +100,13 @@ class OutboxStore:
                 rows = await cursor.fetchall()
             return [await self._decode(conn, row) for row in rows]
 
+    async def unknown_one(self, action_id: str, kind: str) -> Claim | None:
+        """Read one uncertain command for a trusted handler without authorizing redelivery."""
+        async with self.db.transaction() as conn:
+            row = await one(conn, "SELECT * FROM effect_outbox WHERE id = ? AND kind = ? AND state = 'unknown'",
+                            (action_id, kind))
+            return await self._decode(conn, row) if row is not None else None
+
     async def begin_status_read(self, claim: Claim) -> bool:
         """Reserve one read of an unknown resume's exact receipt without authorizing a resend."""
         if claim.kind != "provider.resume":

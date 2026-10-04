@@ -175,6 +175,9 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
   const list = Array.isArray(results.data) ? results.data : [];
   const currentId = list[0]?.current_result_id;
   const result = list.find((item) => item.result_id === currentId) ?? list[0] ?? null;
+  // A failed original read once left the positive verdict available after evidence arrived.
+  // Bind the loaded text to the selected immutable result before enabling that decision.
+  const originalAvailable = !!result && original?.resultId === result.result_id && !!original.text.trim() && !originalError;
   const earlier = list.filter((item) => item.result_id !== result?.result_id);
   const compared = earlier.find((item) => item.result_id === comparedId) ?? earlier[0] ?? null;
   const comments = useQuery<Comment[]>(result ? `${base}/results/${encodeURIComponent(result.result_id)}/comments` : null, { staleMs: 2000 });
@@ -385,7 +388,9 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
       </details>}
       {contract.data && task.status === "review" && (result.origin_kind === "operator_manual"
         ? <ManualEvidenceReview task={task} result={result} contract={contract.data} blockingComments={blockingComments.length} toast={toast} onChanged={() => { results.refresh(); contract.refresh(); onAccepted(); }} />
-        : reviewing && <EvidenceReview task={task} result={result} contract={contract.data} review={review.data ?? null} blockingComments={blockingComments.length} toast={toast} onChanged={() => { results.refresh(); contract.refresh(); review.refresh(); onAccepted(); }} />)}
+        : reviewing && <EvidenceReview task={task} result={result} contract={contract.data} review={review.data ?? null} blockingComments={blockingComments.length}
+          originalAvailable={originalAvailable}
+          toast={toast} onChanged={() => { results.refresh(); contract.refresh(); review.refresh(); onAccepted(); }} />)}
       {contract.data && task.status === "done" && result.origin_kind === "operator_manual" && <ManualReopen task={task} result={result} contract={contract.data} onChanged={() => { results.refresh(); contract.refresh(); onAccepted(); }} toast={toast} />}
       <details className="result-details">
         <summary>{t("result.annotations", { count: (comments.data ?? []).length })}</summary>

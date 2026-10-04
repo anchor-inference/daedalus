@@ -13,7 +13,7 @@ from typing import Any
 import aiosqlite
 
 from daedalus.stores.control import ControlDenied, ControlStore, Principal, Scope, one
-from daedalus.stores.runtime_release import no_entry_in
+from daedalus.stores.runtime_release import attempt_released_in, no_entry_in
 
 
 class LifecycleRefused(ValueError):
@@ -137,7 +137,7 @@ async def record_owned_exit(
     """
     row = await one(
         conn, "SELECT a.task_id,a.contract_revision,a.state,a.host_generation,a.provider_session_ref,"
-        "a.staff_session_id,t.current_attempt_id,s.ended_at,o.parent_kind,o.parent_id,o.generation,"
+        "a.staff_session_id,a.runtime_kind,t.current_attempt_id,s.ended_at,o.parent_kind,o.parent_id,o.generation,"
         "o.source_revision,o.cancel_state FROM execution_attempts a "
         "JOIN board_tasks t ON t.id = a.task_id "
         "JOIN staff_sessions s ON s.id = a.staff_session_id "
@@ -157,7 +157,14 @@ async def record_owned_exit(
                       " AND ((a.runtime_kind = 'daedalus' AND e.runtime_ref = a.native_run_id)"
                       " OR (a.runtime_kind = 'cli' AND e.runtime_instance = a.runtime_instance))",
                       (attempt_id, staff_session_id, host_generation, provider_session_ref))
-    if host is None or json.loads(host["value"]) != host_generation or proof is None:
+    # An exit callback can precede the contained process group's empty observation. Keep the
+    # cancellation owner until the same kernel-backed release gate used for writer claims passes.
+    contained_cli = (row["runtime_kind"] != "cli" or await one(conn,
+                     "SELECT 1 FROM attempt_resource_bindings WHERE attempt_id = ?"
+                     " UNION ALL SELECT 1 FROM writer_attempt_bindings WHERE attempt_id = ?",
+                     (attempt_id, attempt_id)) is not None)
+    if (host is None or json.loads(host["value"]) != host_generation or proof is None or not contained_cli
+            or not await attempt_released_in(conn, attempt_id)):
         return False
     if row["state"] in {"queued", "starting", "running", "waiting", "recovering"}:
         await conn.execute(

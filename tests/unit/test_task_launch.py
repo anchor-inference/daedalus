@@ -10,14 +10,16 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Header
 
 from daedalus.config import Settings
 from daedalus.extensions.api_control import register
+from daedalus.extensions.api_lifecycle import register as register_lifecycle_api
 from daedalus.extensions.board import Board
 from daedalus.extensions.effects import EffectDispatcher
-from daedalus.extensions.launch_controls import observe_bind, prepare_attempt
+from daedalus.extensions.launch_controls import launch_attempt, observe_bind, prepare_attempt
 from daedalus.extensions.lifecycle import Lifecycle
+from daedalus.extensions.runtime_observations import observe_no_entry
 from daedalus.extensions.task_controls import TaskStopEffect, queue_stop
 from daedalus.extensions.task_launch import TaskLaunchEffect, queue_launch
 from daedalus.host.launch_queue import LaunchQueue
@@ -96,6 +98,71 @@ async def test_lost_response_replays_one_receipt_and_one_observed_attempt(db: Da
         assert len(starts) == 1
         assert starts[0].id == (await db.fetchone("SELECT current_attempt_id FROM board_tasks"))[0]
         assert (await db.fetchone("SELECT provider_session_ref FROM execution_attempts"))[0] == "session:native-session"
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
+@pytest.mark.parametrize("observed", ["none", "entered", "refused"])
+async def test_unknown_launch_operator_check_requires_saved_runtime_proof(
+    db: Database, observed: str,
+) -> None:
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    receipt = await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                                 client_operation_id="interrupted", expected_entity_revision=revision)
+    store = dispatcher.store
+    claim = await store.claim(("task.launch",))
+    assert claim is not None
+    if observed == "entered":
+        assert (await TaskLaunchEffect(app).run(claim, store.check)).state == "completed"
+        assert len(starts) == 1
+    elif observed == "refused":
+        member = await team.member("worker")
+        task = await team.task("task")
+        session = await StaffStore(db).session("staff-session")
+        bound = launch_attempt.set(claim.payload["attempt_id"])
+        try:
+            identity = await prepare_attempt(app, OPERATOR, member, task, session,
+                                             fence_token=secrets.token_urlsafe(32))
+        finally:
+            launch_attempt.reset(bound)
+        assert await observe_no_entry(app, identity, staff_session_id=session.id,
+                                      reason="host refused before runtime entry")
+    try:
+        await db.close()
+        await db.open()
+        assert await store.recover() == 1
+        api = FastAPI()
+
+        async def authenticated(x_user: int = Header(1)):
+            return {"via": "token" if x_user > 0 else "staff", "user_id": x_user}
+
+        register_lifecycle_api(api, app, authenticated)
+        path = f"/api/projects/project/uncertain-launches/{receipt['effect_id']}/reconcile"
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
+            first = await client.get("/api/projects/project/uncertain-launches")
+            assert first.status_code == 200
+            item = first.json()["items"][0]
+            assert item["state"] == "unknown"
+            assert item["no_entry_observed"] is (observed == "refused")
+            assert item["provider_session_recorded"] is (observed == "entered")
+            assert (await client.post(path.replace("/project/", "/missing/"))).status_code == 404
+            assert (await client.post(path, headers={"x-user": "-1"})).status_code == 403
+            assert (await db.fetchone("SELECT state FROM effect_outbox WHERE id = ?",
+                                      (receipt["effect_id"],)))[0] == "unknown"
+            checked = await client.post(path)
+            assert checked.status_code == 200
+            result = checked.json()
+            if observed == "none":
+                assert result["state"] == "unknown" and not result["reconciled"]
+                assert (await db.fetchone("SELECT state FROM effect_outbox WHERE id = ?",
+                                          (receipt["effect_id"],)))[0] == "unknown"
+                assert starts == []
+            else:
+                assert result["state"] == ("completed" if observed == "entered" else "failed")
+                assert result["reconciled"]
+                assert (await client.post(path)).json()["reconciled"] is False
+                assert (await db.fetchone("SELECT count(*) FROM effect_outbox"))[0] == 1
     finally:
         team.queue.close()
         app.executions.release()

@@ -32,6 +32,7 @@ def scenario(language: str, width: int) -> None:
     originals = []
     verdicts = []
     accepts = []
+    original_unavailable = False
     unhandled = Unhandled()
 
     with sync_playwright() as playwright:
@@ -40,12 +41,16 @@ def scenario(language: str, width: int) -> None:
         serve(page, stub, unhandled)
 
         def review_api(route):
+            nonlocal original_unavailable
             request = route.request
             path = urlsplit(request.url).path
             body = request.post_data_json if request.post_data else None
             value = None
             if path == "/api/board/t-hero/results/res-hero/original":
                 originals.append(path)
+                if original_unavailable:
+                    original_unavailable = False
+                    return route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "original temporarily unavailable"}))
                 value = {"original_text": "Prepared the menu\nPrices copied from the approved list."}
             elif path == "/api/board/t-hero/results/res-hero/evidence":
                 if request.method == "POST":
@@ -88,16 +93,24 @@ def scenario(language: str, width: int) -> None:
         action.click()
         expect(action).to_have_attribute("aria-expanded", "true")
         expect(sheet.locator(".result-original")).to_contain_text("Prices copied from the approved list")
+        original_unavailable = True
         page.reload()
         action = sheet.get_by_role("button", name="Review report and evidence" if language == "en" else "Проверить отчёт и доказательства")
         expect(action).to_have_attribute("aria-expanded", "false")
         action.click()
-        expect(sheet.locator(".result-original")).to_contain_text("Prices copied from the approved list")
+        expect(sheet.get_by_text("original temporarily unavailable")).to_be_visible()
+        expect(sheet.locator(".result-original")).to_have_count(0)
         sheet.get_by_role("textbox", name="What did you observe?" if language == "en" else "Что вы наблюдали?").fill("Compared every listed price")
         sheet.get_by_role("button", name="Record observation" if language == "en" else "Записать наблюдение").click()
         expect(sheet).to_contain_text("Compared every listed price")
         sheet.get_by_role("textbox", name="Review conclusion" if language == "en" else "Вывод проверки").fill("All prices match")
-        sheet.get_by_role("button", name="Approve reviewed result" if language == "en" else "Одобрить проверенный результат").click()
+        approve = sheet.get_by_role("button", name="Approve reviewed result" if language == "en" else "Одобрить проверенный результат")
+        page.wait_for_timeout(300)
+        expect(approve).to_be_disabled()
+        sheet.get_by_role("button", name="Show original report" if language == "en" else "Показать исходный отчёт").click()
+        expect(sheet.locator(".result-original")).to_contain_text("Prices copied from the approved list")
+        expect(approve).to_be_enabled()
+        approve.click()
         accept = sheet.get_by_role("button", name="Accept this result" if language == "en" else "Принять этот результат")
         expect(accept).to_be_enabled()
         accept.click()

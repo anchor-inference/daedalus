@@ -18,7 +18,8 @@ def stop(id_: str) -> dict:
             "parent_id": "t-checkout", "generation": 2, "cancel_state": "unknown",
             "updated_at": "2026-10-01T09:00:00Z", "phase": "observing_exit",
             "deadline_at": "2026-10-01T08:59:00Z", "exit_observed": True,
-            "no_entry_observed": False, "generation_matches_host_record": True}
+            "no_entry_observed": False, "generation_matches_host_record": True,
+            "recovery_blocker": "ready"}
 
 
 def check(width: int, language: str) -> None:
@@ -37,7 +38,8 @@ def check(width: int, language: str) -> None:
                                     "claim_generation": 2, "created_at": "2026-10-01T09:00:00Z",
                                     "claimed_at": "2026-10-01T09:01:00Z", "completed_at": None,
                                     "error": "response lost", "attempt_id": "attempt-one",
-                                    "attempt_state": "recovering", "provider_session_recorded": False}]
+                                    "attempt_state": "recovering", "provider_session_recorded": False,
+                                    "no_entry_observed": False, "exit_observed": False}]
         page.reload()
         launches = page.locator(".pboard-uncertain-launches")
         expect(launches).to_be_visible()
@@ -45,6 +47,15 @@ def check(width: int, language: str) -> None:
         launches.locator(".pboard-unknown-row summary").click()
         expect(launches).to_contain_text("attempt-one")
         expect(launches).to_contain_text("response lost")
+        launches.get_by_role("button", name="Check observed outcome" if language == "en" else "Проверить подтверждённый исход").click()
+        expect(launches).to_contain_text("launch remains fenced" if language == "en" else "запуск остаётся заблокированным")
+        expect(launches.locator(".pboard-unknown-row")).to_have_count(1)
+        assert stub.launch_reconciliations == ["launch-one"]
+        stub.uncertain_launches[0]["provider_session_recorded"] = True
+        launches.get_by_role("button", name="Check observed outcome" if language == "en" else "Проверить подтверждённый исход").click()
+        expect(launches).to_contain_text("completed")
+        expect(launches.locator(".pboard-unknown-row")).to_have_count(0)
+        assert stub.launch_reconciliations == ["launch-one", "launch-one"]
         fits(page, f"{width}px {language} uncertain launch")
         stub.uncertain_launches = []
 
@@ -58,7 +69,9 @@ def check(width: int, language: str) -> None:
         disclosure.get_by_role("button", name="Reload stops" if language == "en" else "Обновить остановки").click()
         expect(disclosure).to_have_count(0)
 
-        stub.unknown_stops = [stop("attempt-one")]
+        blocked = stop("attempt-one")
+        blocked["recovery_blocker"] = "containment_unavailable"
+        stub.unknown_stops = [blocked]
         page.reload()
         disclosure = page.locator(".pboard-unknown-stops")
         expect(disclosure).to_be_visible()
@@ -70,9 +83,17 @@ def check(width: int, language: str) -> None:
         expect(disclosure).to_contain_text("observing_exit")
         expect(disclosure).to_contain_text("7")
         expect(disclosure).to_contain_text("Yes" if language == "en" else "Да")
+        expect(disclosure).to_contain_text("no recorded process containment" if language == "en" else "не записана изоляция процессов")
+        reconcile = disclosure.locator(".pboard-unknown-row button")
+        expect(reconcile).to_be_disabled()
+        assert stub.stop_reconciliations == [], stub.stop_reconciliations
         fits(page, f"{width}px {language} expanded stop")
 
-        disclosure.locator(".pboard-unknown-row button").click()
+        stub.unknown_stops = [stop("attempt-one")]
+        disclosure.get_by_role("button", name="Reload stops" if language == "en" else "Обновить остановки").click()
+        expect(disclosure).to_contain_text("Exact release evidence" if language == "en" else "Точное подтверждение")
+        expect(reconcile).to_be_enabled()
+        reconcile.click()
         expect(disclosure).to_contain_text("completed")
         expect(disclosure.locator(".pboard-unknown-row")).to_have_count(0)
         assert stub.stop_reconciliations == ["attempt-one"], stub.stop_reconciliations

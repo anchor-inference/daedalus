@@ -506,6 +506,10 @@ async def assign(
             existing = await board.get(task_id, actor=session_id)
         except KeyError as exc:
             raise Refused(f"no task {task_id} on {project.name}'s board; Tasks() lists them") from exc
+        # Repeating the saved brief while naming a card must not turn a first assignment
+        # into an edit that requires project-wide planning authority.
+        given = {key: value for key, value in given.items()
+                 if value != str(existing.get("brief", {}).get(key) or "").strip()}
         if existing["status"] in HANDED_IN and existing.get("branch"):
             raise Refused(
                 f"task {task_id} has work on branch {existing['branch']}, which the operator reviews and merges; "
@@ -542,7 +546,11 @@ async def assign(
                 f"without staff gives it to {owner.name}. To hand it to {member.name} instead, say why in reason (a sentence; the card and the journal keep it)"
             )
         handover = why
-    brief_text = " ".join([*given.values(), wanted, *(text for text, _, _, _ in wanted_requirements)])
+    merged = {k: str((existing or {}).get("brief", {}).get(k) or "").strip() for k in CONTRACT_FIELDS}
+    merged.update(given)
+    # The model preflight must read the whole effective brief even when repeated fields
+    # are not edits. A saved model request cannot disappear with a task-scoped assignment.
+    brief_text = " ".join([*merged.values(), wanted, *(text for text, _, _, _ in wanted_requirements)])
     await _grants_kept(orch, existing, wanted_requirements)
     await _able(orch, member, existing, wanted_requirements, reason)
     mismatch = await other_models(orch, project, member, brief_text)
@@ -566,8 +574,6 @@ async def assign(
                 f"For its next round, Assign(task_id='{previous['id']}', …) reopens that card and keeps its history; for separate work, repeat this with new=true"
             )
     # Checked before anything is written, so a refused hand-over leaves no half-briefed task behind.
-    merged = {k: str((existing or {}).get("brief", {}).get(k) or "").strip() for k in CONTRACT_FIELDS}
-    merged.update(given)
     if existing is None:
         await refuse_twin(orch, project, wanted, merged["objective"], new=new, reason=reason)
     short = [k.replace("_", "-") for k in CONTRACT_FIELDS if len(merged[k]) < CONTRACT_MIN]

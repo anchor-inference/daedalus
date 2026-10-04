@@ -18,7 +18,7 @@ export function evidenceCoverage(checklist: { id: string }[], evidence: Evidence
   return evidence.some((row) => row.verification === "verified") && checklist.every((item) => valid.has(item.id));
 }
 
-export function EvidenceReview({ task, result, contract, review, blockingComments, toast, onChanged }: { task: ProjectTask; result: ResultReceipt; contract: ResultContract; review: Review | null; blockingComments: number; toast: (message: string) => void; onChanged: () => void }) {
+export function EvidenceReview({ task, result, contract, review, blockingComments, originalAvailable, toast, onChanged }: { task: ProjectTask; result: ResultReceipt; contract: ResultContract; review: Review | null; blockingComments: number; originalAvailable: boolean; toast: (message: string) => void; onChanged: () => void }) {
   const offline = useOffline();
   const base = `/api/board/${encodeURIComponent(task.id)}/results/${encodeURIComponent(result.result_id)}`;
   const evidence = useQuery<Evidence[]>(`${base}/evidence`, { staleMs: 2000 });
@@ -35,7 +35,7 @@ export function EvidenceReview({ task, result, contract, review, blockingComment
   const current = result.current_result_id === result.result_id && result.contract_revision === contract.contract_revision;
   const branchCurrent = !task.branch || !result.verdict_id || (!!review?.head_sha && !!review.base_sha && review.head_sha === result.verdict_head && review.base_sha === result.verdict_base);
   const evidenceReady = !!evidence.data && evidenceCoverage(checks, evidence.data);
-  const canVerdict = !offline && !busy && current && result.self_review_waiver_required !== true && !!evidence.data && evidenceReady && blockingComments === 0 && !!reason.trim() && (!task.branch || !!review?.head_sha && !!review.base_sha);
+  const canVerdict = !offline && !busy && current && originalAvailable && result.self_review_waiver_required !== true && !!evidence.data && evidenceReady && blockingComments === 0 && !!reason.trim() && (!task.branch || !!review?.head_sha && !!review.base_sha);
 
   async function attest() {
     if (offline || busy || !current || !selectedArtifact || !observation.trim()) return;
@@ -92,6 +92,7 @@ export function EvidenceReview({ task, result, contract, review, blockingComment
       <textarea id={`verdict-${task.id}`} className="field" rows={2} value={reason} onChange={(event) => setReason(event.target.value)} />
       {result.self_review_waiver_required && <div className="result-warning" role="status">{t("result.selfReviewBlocked")}</div>}
       <button type="button" className="btn small primary" disabled={!canVerdict} onClick={() => void verdict()}>{t("result.recordVerdict")}</button>
+      {!originalAvailable && <div className="result-warning" role="status">{t("result.originalRequiredForReview")}</div>}
       {!evidenceReady && <div className="result-warning" role="status">{t("result.evidenceMissing")}</div>}
       {blockingComments > 0 && <div className="result-warning" role="status">{t("result.block.comments")}</div>}
       {!branchCurrent && <div className="result-warning" role="status">{t("result.block.changedBranch")}</div>}

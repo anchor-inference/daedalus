@@ -770,6 +770,7 @@ class BoardStub:
         self.unknown_stops_failed = False
         self.uncertain_launches: list[dict] = []
         self.stop_reconciliations: list[str] = []
+        self.launch_reconciliations: list[str] = []
 
     @staticmethod
     def task(id_: str, title: str, *, status: str = "todo", priority: int = 3, assignee: dict | None = None, **fields: object) -> dict:
@@ -842,6 +843,17 @@ class BoardStub:
             limit = int(params.get("limit", ["50"])[0])
             rows = [row for row in sorted(self.uncertain_launches, key=lambda row: row["id"]) if row["id"] > after]
             return 200, {"items": rows[:limit], "next_after": rows[limit - 1]["id"] if len(rows) > limit else None}
+        if path.startswith(launches + "/") and path.endswith("/reconcile") and method == "POST":
+            effect_id = path[len(launches) + 1:-len("/reconcile")]
+            self.launch_reconciliations.append(effect_id)
+            row = next((item for item in self.uncertain_launches if item["id"] == effect_id), None)
+            if row is None:
+                return 404, {"detail": "no such project launch"}
+            if not row.get("provider_session_recorded") and not row.get("no_entry_observed"):
+                return 200, {"state": "unknown", "reconciled": False}
+            self.uncertain_launches.remove(row)
+            return 200, {"state": "completed" if row.get("provider_session_recorded") else "failed",
+                         "reconciled": True}
         if path == stops and method == "GET":
             if self.unknown_stops_failed:
                 return 503, {"detail": "inspection unavailable"}

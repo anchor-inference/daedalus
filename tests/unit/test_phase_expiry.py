@@ -94,6 +94,10 @@ async def test_exact_runtime_gets_one_stop_and_retains_unknown_exit(
         assert (await db.fetchone("SELECT cancel_state FROM lifecycle_owners"))[0] == "unknown"
         assert (await db.fetchone("SELECT count(*) FROM runtime_exit_observations"))[0] == 0
         assert (await db.fetchone("SELECT count(*) FROM effect_outbox"))[0] == 0
+        # A lost stop response and a terminal SQL projection do not prove physical exit.
+        await db.execute("UPDATE execution_attempts SET state = 'failed'")
+        await db.execute("UPDATE staff_sessions SET ended_at = ?", (due.isoformat(),))
+        assert (await db.fetchone("SELECT cancel_state FROM lifecycle_owners"))[0] == "unknown"
     finally:
         app.executions.release()
 
@@ -160,6 +164,63 @@ async def test_only_attested_queued_no_entry_can_drain(db: Database, state: str,
         app.executions.release()
 
 
+async def test_terminal_exit_without_containment_keeps_stop_unknown(db: Database) -> None:
+    app, member, task, session = await launch_fixture(db)
+    try:
+        identity = await prepare_attempt(app, OPERATOR, member, task, session, fence_token=secrets.token_urlsafe(32))
+        due = datetime.now(UTC)
+        await db.execute("UPDATE attempt_phase_clocks SET deadline_at = ?", (due.isoformat(),))
+        await db.execute("INSERT INTO terminals(id,env,owner_kind,cwd,status,created_at,ptyd_instance)"
+                         " VALUES ('terminal','container','staff','/tmp','exited',?,'daemon')", (due.isoformat(),))
+        await db.execute("UPDATE staff_sessions SET kind = 'cli',terminal_id = 'terminal',ended_at = ?",
+                         (due.isoformat(),))
+        await db.execute("UPDATE execution_attempts SET state = 'running',runtime_kind = 'cli',"
+                         "runtime_entered_at = ?,provider_session_ref = 'terminal:terminal',runtime_instance = 'daemon'",
+                         (due.isoformat(),))
+        app.extensions = {"lifecycle": Lifecycle(app)}
+        assert await PhaseExpiry(app).step(at=due) == 1
+        await db.execute("INSERT INTO runtime_exit_observations(attempt_id,runtime_ref,provider_session_ref,"
+                         "staff_session_id,contract_revision,host_generation,runtime_kind,runtime_instance,"
+                         "observed_status,observed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                         (identity.id, "terminal", "terminal:terminal", session.id,
+                          identity.contract_revision, identity.host_generation, "cli", "daemon",
+                          "exited", due.isoformat()))
+        assert await app.extensions["lifecycle"].reconcile_expired(identity.id, "project") == "unknown"
+        assert (await db.fetchone("SELECT cancel_state FROM lifecycle_owners"))[0] == "unknown"
+
+        api = FastAPI()
+
+        async def authenticated() -> dict[str, int | str]:
+            return {"via": "token", "user_id": 1}
+
+        register_lifecycle_api(api, app, authenticated)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
+            item = (await client.get("/api/projects/project/unknown-stops")).json()["items"][0]
+            assert item["exit_observed"] is True
+            assert item["recovery_blocker"] == "containment_unavailable"
+            await db.execute("INSERT INTO project_folders(id,project_id,path,env,position,created_at)"
+                             " VALUES ('folder','project','/tmp/fixture-worktree','container',0,'2026-01-01')")
+            await db.execute("INSERT INTO writer_attempt_bindings(attempt_id,project_id,host_generation,env,"
+                             "daemon_instance,folder_id,folder_path_digest,launch_workspace_digest,launch_id,"
+                             "state,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                             (identity.id, "project", str(identity.host_generation), "container", "daemon", "folder",
+                              "folder-digest", "workspace-digest", "launch", "enforced", due.isoformat(), due.isoformat()))
+            assert (await client.get("/api/projects/project/unknown-stops")).json()["items"][0][
+                "recovery_blocker"] == "container_not_empty"
+            assert await app.extensions["lifecycle"].reconcile_expired(identity.id, "project") == "unknown"
+            await db.execute("INSERT INTO writer_attempt_observations(id,attempt_id,host_generation,daemon_instance,"
+                             "launch_id,observation_kind,enforced,populated,observed_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                             ("empty", identity.id, str(identity.host_generation), "daemon", "launch",
+                              "exit", 1, 0, due.isoformat()))
+            await db.execute("UPDATE writer_attempt_bindings SET state = 'released' WHERE attempt_id = ?",
+                             (identity.id,))
+            assert (await client.get("/api/projects/project/unknown-stops")).json()["items"][0][
+                "recovery_blocker"] == "ready"
+            assert await app.extensions["lifecycle"].reconcile_expired(identity.id, "project") == "drained"
+    finally:
+        app.executions.release()
+
+
 @pytest.mark.parametrize("previous_host", [False, True])
 async def test_unknown_stop_inspection_and_exact_observation_recovery(db: Database, previous_host: bool) -> None:
     app, member, task, session = await launch_fixture(db)
@@ -197,6 +258,7 @@ async def test_unknown_stop_inspection_and_exact_observation_recovery(db: Databa
             assert item["phase"] == "prepare" and item["cancel_state"] == "unknown"
             assert item["generation_matches_host_record"] is (not previous_host)
             assert item["exit_observed"] is False
+            assert item["recovery_blocker"] == ("previous_host" if previous_host else "exit_unobserved")
             endpoint = f"{path}/{identity.id}/reconcile"
             assert (await client.post(endpoint, headers={"x-user": "-1"})).status_code == 403
             assert (await client.post(endpoint)).json() == {"cancel_state": "unknown"}
@@ -216,6 +278,24 @@ async def test_unknown_stop_inspection_and_exact_observation_recovery(db: Databa
                               identity.contract_revision, identity.host_generation, "daedalus", None,
                               "cancelled", due.isoformat()))
             assert (await client.get(path)).json()["items"][0]["exit_observed"] is True
+            if not previous_host:
+                await db.execute("INSERT INTO project_folders(id,project_id,path,env,position,created_at)"
+                                 " VALUES ('folder','project','/tmp/fixture-worktree','container',0,'2026-01-01')")
+                await db.execute("INSERT INTO writer_attempt_bindings(attempt_id,project_id,host_generation,env,"
+                                 "daemon_instance,folder_id,folder_path_digest,launch_workspace_digest,launch_id,"
+                                 "state,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                                 (identity.id, "project", str(identity.host_generation), "container", "daemon", "folder",
+                                  "folder-digest", "workspace-digest", "launch", "enforced", due.isoformat(), due.isoformat()))
+                assert (await client.get(path)).json()["items"][0]["recovery_blocker"] == "container_not_empty"
+                assert (await client.post(endpoint)).json() == {"cancel_state": "unknown"}
+                await db.execute("INSERT INTO writer_attempt_observations(id,attempt_id,host_generation,daemon_instance,"
+                                 "launch_id,observation_kind,enforced,populated,observed_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                                 ("empty", identity.id, str(identity.host_generation), "daemon", "launch",
+                                  "exit", 1, 0, due.isoformat()))
+                await db.execute("UPDATE writer_attempt_bindings SET state = 'released' WHERE attempt_id = ?",
+                                 (identity.id,))
+            assert (await client.get(path)).json()["items"][0]["recovery_blocker"] == (
+                "previous_host" if previous_host else "ready")
             assert (await client.post(endpoint)).json() == {"cancel_state": "unknown" if previous_host else "drained"}
             if previous_host:
                 assert (await db.fetchone("SELECT cancel_state FROM lifecycle_owners"))[0] == "unknown"

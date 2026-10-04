@@ -107,7 +107,7 @@ def scenario(language: str, width: int, coordinator: bool, staff_state: str) -> 
 if __name__ == "__main__":
     expect_app(BASE)
     for lang in ("en", "ru"):
-        for viewport in (390, 1440):
+        for viewport in (320, 1440):
             for enabled in (False, True):
                 for staff_state in ("empty", "hired", "assigned"):
                     scenario(lang, viewport, enabled, staff_state)

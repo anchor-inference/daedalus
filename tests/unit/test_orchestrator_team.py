@@ -108,13 +108,17 @@ async def test_first_assignment_has_task_scope_and_cannot_edit_the_card(settings
             await resolve_authority(r.team.app, session_id=sid, project_id=r.project.id,
                                     operation="board.task.assign", task_id=other_id)
         before = dict(await r.manager.db.fetchone("SELECT * FROM board_tasks WHERE id = ?", (task_id,)))
-        said = await r.call(sid, "assign", staff=member.id, task_id=task_id)
+        card = await r.orch.board.get(task_id, actor=sid)
+        said = await r.call(sid, "assign", staff=member.id, task_id=task_id,
+                            **card["brief"])
         assert said.startswith(f"Ada will start {task_id}")
         after = dict(await r.manager.db.fetchone("SELECT * FROM board_tasks WHERE id = ?", (task_id,)))
         for field in ("title", "brief_json", "checklist", "acceptance", "folder_id", "depends_on", "priority"):
             assert after[field] == before[field]
         assert after["assignee_staff_id"] == member.id
         assert await admitted(r, task_id)
+        assert (await r.manager.db.fetchone("SELECT count(*) FROM operation_receipts"
+                                            " WHERE operation_kind = 'board.task.update'"))[0] == 0
         principal = await resolve_authority(r.team.app, session_id=sid, project_id=r.project.id,
                                              operation="board.task.assign", task_id=task_id)
         with pytest.raises(ControlDenied):
@@ -147,6 +151,39 @@ async def test_unchanged_assigned_task_starts_with_task_execution_grant_only(set
             with pytest.raises(Refused, match="grant|scope|denied"):
                 await r.call(sid, "assign", task_id=task_id, **change)
         said = await r.call(sid, "assign", task_id=task_id)
+        assert said.startswith(f"Ada will start {task_id}")
+        assert await admitted(r, task_id)
+        assert (await r.manager.db.fetchone("SELECT count(*) FROM operation_receipts"
+                                            " WHERE operation_kind = 'board.task.update'"))[0] == 0
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
+async def test_repeated_saved_brief_keeps_model_preflight_with_task_grant(settings: Settings, db: Database, tmp_path: Path) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r)
+        sid = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
+        member = await r.manager.staff.hire(r.project.id, name="Ada", role="Menu", isolation="shared")
+        brief = {**BRIEF, "objective": "Build the menu page with qwen/qwen3.7-flash"}
+        task_id = await board_task(r.manager, r.project, "Menu page", brief=brief)
+        scope = Scope("project", r.project.id)
+        operator = Principal.operator({"via": "token", "user_id": 1})
+        revision = await ControlStore(r.manager.db).revision(scope, Entity("project", r.project.id))
+        await approve_authority(r.team.app, r.project.id, operator,
+                                client_operation_id="model-brief-assignment", expected_entity_revision=revision,
+                                expected_coordinator_session_id=sid, bundle_id="assignment_execution",
+                                task_id=task_id, expires_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat())
+
+        with pytest.raises(Refused, match=r"the brief names qwen/qwen3\.7-flash"):
+            await r.call(sid, "assign", staff=member.id, task_id=task_id, **brief)
+        row = await r.manager.db.fetchone("SELECT assignee_staff_id FROM board_tasks WHERE id = ?", (task_id,))
+        assert row["assignee_staff_id"] is None
+        assert not await admitted(r, task_id)
+
+        said = await r.call(sid, "assign", staff=member.id, task_id=task_id, **brief,
+                            reason="The operator explicitly accepts the available model")
         assert said.startswith(f"Ada will start {task_id}")
         assert await admitted(r, task_id)
         assert (await r.manager.db.fetchone("SELECT count(*) FROM operation_receipts"

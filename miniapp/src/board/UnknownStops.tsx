@@ -11,6 +11,7 @@ type UnknownStop = {
   parent_kind: string; parent_id: string; generation: number; cancel_state: string;
   updated_at: string; phase: string | null; deadline_at: string | null;
   exit_observed: boolean; no_entry_observed: boolean; generation_matches_host_record: boolean;
+  recovery_blocker: "ready" | "previous_host" | "runtime_identity_missing" | "exit_unobserved" | "containment_unavailable" | "container_not_empty";
 };
 type Inspection = { items: UnknownStop[]; next_after: string | null };
 
@@ -71,6 +72,7 @@ export function UnknownStops({ projectId }: { projectId: string }) {
     {items.map((item) => <div className="pboard-unknown-row" key={item.id}>
       <div><b>{item.task_id}</b> · <code>{item.id}</code></div>
       <div className="sub">{t("pboard.unknown.phase", { phase: item.phase ?? "—", deadline: item.deadline_at ?? "—" })}</div>
+      <p className="sub" role="status">{t(`pboard.unknown.blocker.${item.recovery_blocker}`)}</p>
       <details><summary>{t("pboard.unknown.observation")}</summary>
         <dl>
           {(["state", "cancel_state", "parent_kind", "parent_id", "generation", "host_generation",
@@ -79,7 +81,7 @@ export function UnknownStops({ projectId }: { projectId: string }) {
             <div key={key}><dt>{t(`pboard.unknown.${key}`)}</dt><dd><code>{typeof item[key] === "boolean" ? t(item[key] ? "pboard.unknown.yes" : "pboard.unknown.no") : String(item[key] ?? "—")}</code></dd></div>)}
         </dl>
       </details>
-      <button type="button" className="linkbtn" disabled={!!busy || offline} onClick={() => void reconcile(item.id)}>{t("pboard.unknown.reconcile")}</button>
+      <button type="button" className="linkbtn" disabled={!!busy || offline || item.recovery_blocker !== "ready"} onClick={() => void reconcile(item.id)}>{t("pboard.unknown.reconcile")}</button>
     </div>)}
     {cursor && <button type="button" className="linkbtn" disabled={!!busy} onClick={() => void more()}>{t("pboard.unknown.more")}</button>}
     <button type="button" className="linkbtn" disabled={!!busy} onClick={() => void reload()}>{t("pboard.unknown.reload")}</button>

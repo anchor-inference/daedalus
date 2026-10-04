@@ -10,8 +10,11 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.extensions.lifecycle import Lifecycle
+from daedalus.extensions.task_launch import TaskLaunchEffect
 from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Principal, Scope, one
 from daedalus.stores.lifecycle import LifecycleRefused
+from daedalus.stores.outbox import OutboxStore
+from daedalus.stores.runtime_release import attempt_released_in, no_entry_in, physical_exit_in
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -81,10 +84,29 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             ) as cursor:
                 rows = [dict(row) for row in await cursor.fetchall()]
         items = rows[:limit]
-        for row in items:
-            row["generation_matches_host_record"] = row["host_generation"] == host
-            row["exit_observed"] = bool(row["exit_observed"])
-            row["no_entry_observed"] = bool(row["no_entry_observed"])
+        async with app.db.transaction() as conn:
+            for row in items:
+                row["generation_matches_host_record"] = row["host_generation"] == host
+                row["exit_observed"] = bool(row["exit_observed"])
+                row["no_entry_observed"] = bool(row["no_entry_observed"])
+                if row["no_entry_observed"] and await no_entry_in(conn, row["id"]):
+                    row["recovery_blocker"] = "ready"
+                elif not row["generation_matches_host_record"]:
+                    row["recovery_blocker"] = "previous_host"
+                elif not row["staff_session_id"] or not row["provider_session_ref"]:
+                    row["recovery_blocker"] = "runtime_identity_missing"
+                elif not row["exit_observed"]:
+                    row["recovery_blocker"] = "exit_unobserved"
+                elif row["runtime_kind"] == "cli" and await one(
+                    conn, "SELECT 1 FROM attempt_resource_bindings WHERE attempt_id = ?"
+                    " UNION ALL SELECT 1 FROM writer_attempt_bindings WHERE attempt_id = ?",
+                    (row["id"], row["id"]),
+                ) is None:
+                    row["recovery_blocker"] = "containment_unavailable"
+                elif not await attempt_released_in(conn, row["id"]):
+                    row["recovery_blocker"] = "container_not_empty"
+                else:
+                    row["recovery_blocker"] = "ready"
         return {"items": items, "next_after": items[-1]["id"] if len(rows) > limit else None}
 
     @api.get("/api/projects/{project_id}/uncertain-launches")
@@ -108,9 +130,42 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             ) as cursor:
                 rows = [dict(row) for row in await cursor.fetchall()]
         items = rows[:limit]
+        async with app.db.transaction() as conn:
+            for row in items:
+                attempt_id = row["attempt_id"]
+                row["no_entry_observed"] = bool(attempt_id and await no_entry_in(conn, attempt_id))
+                row["exit_observed"] = bool(attempt_id and await physical_exit_in(conn, attempt_id))
         for row in items:
             row["provider_session_recorded"] = bool(row["provider_session_recorded"])
         return {"items": items, "next_after": items[-1]["id"] if len(rows) > limit else None}
+
+    @api.post("/api/projects/{project_id}/uncertain-launches/{effect_id}/reconcile")
+    async def reconcile_launch(project_id: str, effect_id: str,
+                               who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Apply only the launch handler's exact observation to one uncertain receipt."""
+        await authorize(project_id, who, "task.launch")
+        row = await app.db.fetchone(
+            "SELECT e.state FROM effect_outbox e JOIN operation_receipts r ON r.id = e.receipt_id"
+            " JOIN board_tasks t ON t.id = json_extract(e.payload_json,'$.control.task_id')"
+            " WHERE e.id = ? AND e.kind = 'task.launch' AND r.scope_kind = 'project'"
+            " AND r.scope_id = ? AND t.project_id = ?", (effect_id, project_id, project_id),
+        )
+        if row is None:
+            raise HTTPException(404, "no such project launch")
+        if row["state"] != "unknown":
+            return {"state": row["state"], "reconciled": False}
+        store = OutboxStore(app.db)
+        claim = await store.unknown_one(effect_id, "task.launch")
+        if claim is None:
+            return {"state": (await store.view(effect_id))["state"], "reconciled": False}
+        resolution = await TaskLaunchEffect(app).reconcile(claim)
+        if resolution is None:
+            return {"state": "unknown", "reconciled": False,
+                    "reason": "exact runtime outcome is unobserved; the launch remains fenced"}
+        changed = await store.reconcile(effect_id, generation=claim.generation,
+                                        state=resolution.state, evidence=resolution.evidence)
+        return {"state": resolution.state if changed else (await store.view(effect_id))["state"],
+                "reconciled": changed, "proof": resolution.evidence if changed else None}
 
     @api.post("/api/projects/{project_id}/unknown-stops/{attempt_id}/reconcile")
     async def reconcile_expired(project_id: str, attempt_id: str,
