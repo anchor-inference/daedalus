@@ -1125,7 +1125,7 @@ class FocusStub:
                 if reply is not None and not any(m.get("seq") == reply.get("seq") for m in messages):
                     return 404, {"detail": "that message is not in this conversation"}
                 now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-                messages.append({"role": "user", "seq": seq, "origin": "operator", "text": payload.get("text", ""), "thinking": "", "tool_calls": [], "tool_results": [], "created_at": now,
+                messages.append({"role": "user", "seq": seq, "origin": "operator", "client_message_id": payload.get("client_message_id"), "text": payload.get("text", ""), "thinking": "", "tool_calls": [], "tool_results": [], "created_at": now,
                                  "delivery": "steer" if payload.get("steer") else None, "reply_to": reply})
                 return 200, {"run_id": f"run-{seq}"}
         if path.startswith("/api/projects/") and path.endswith("/orchestrator") and method == "POST":

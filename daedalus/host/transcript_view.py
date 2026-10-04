@@ -34,7 +34,7 @@ from daedalus.host.prompts import split_headline
 from daedalus.host.run_outcome import OUTCOME_METADATA_KEY
 from daedalus.security import redact
 
-VIEW_VERSION = 9
+VIEW_VERSION = 10
 """Bumped whenever the shape below changes; stored views from an older version are recomputed. It
 covers this file only — what the redactor masks is covered by the key, by value and by shape, so a
 new secret format does not depend on anyone remembering this number."""
@@ -109,6 +109,8 @@ def message_view(message: Message) -> dict[str, Any]:
         "summary": is_summary,
         "internal": internal,
         "origin": origin or ("operator" if message.role is MessageRole.user and not internal else ""),
+        "client_message_id": message.metadata.get("daedalus.client_message_id") if message.role is MessageRole.user else None,
+        "client_message_ids": message.metadata.get("daedalus.client_message_ids") if message.role is MessageRole.user else None,
         "seq": message.metadata.get("daedalus.seq") if isinstance(message.metadata, dict) else None,
         "compaction": compaction,
         "archived": archived,

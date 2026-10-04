@@ -700,6 +700,8 @@ export type OperatorSteps = {
 export type MessageView = {
   run_id?: string | null;
   role: "system" | "user" | "assistant" | "tool";
+  client_message_id?: string | null;
+  client_message_ids?: string[] | null;
   summary?: boolean;
   internal?: boolean;
   origin?: string;

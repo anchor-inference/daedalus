@@ -3943,8 +3943,12 @@ class SessionManager:
                     # A placed prompt the queue no longer lists: its words are the operator's only
                     # when the operator sent it, and the text as placed is the best copy there is.
                     message.metadata.update(operator_words_metadata(origin, prompts.without_turn_context(message.text)))
-                for client_message_id in placed:
+                # The core may combine queued prompts into one visible row; carry each receipt id
+                # so the app keeps its temporary bubble until that row is actually shown.
+                client_message_ids = []
+                for client_message_id in sorted(placed):
                     if await self.live.receipt(state.session.id, str(client_message_id)) is not None:
+                        client_message_ids.append(str(client_message_id))
                         await self.live.consume(
                             state.session.id,
                             str(client_message_id),
@@ -3952,6 +3956,8 @@ class SessionManager:
                             step_id=str(event.payload.get("step_id") or "queue"),
                             message_seq=None,
                         )
+                if client_message_ids:
+                    message.metadata["daedalus.client_message_ids"] = client_message_ids
         change = self._model_change(state, event)
         if change is not None:
             # Before the message it explains, not after it: the header says which model is speaking
