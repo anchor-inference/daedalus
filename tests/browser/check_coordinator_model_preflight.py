@@ -1,4 +1,4 @@
-"""An enable refusal keeps its model controls and an actionable error in the same dialog."""
+"""The first coordinator model is checked before an office is created."""
 
 from __future__ import annotations
 
@@ -29,23 +29,35 @@ def main() -> int:
             serve(page, focus)
             def team_choices(route, _request, *, focus=focus) -> None:  # type: ignore[no-untyped-def]
                 _, payload = focus.answer("GET", f"/api/projects/{GARDEN}/staff", "", None)
-                payload["choices"]["coordinator_default_preset"] = "fast"
+                payload["choices"]["presets"] = [{"id": "subscription", "label": "Subscription"}, {"id": "fast", "label": "DeepSeek Flash"}]
+                payload["choices"]["coordinator_default_preset"] = "subscription"
                 route.fulfill(content_type="application/json", body=json.dumps(payload))
 
             page.route(f"**/api/projects/{GARDEN}/staff*", team_choices)
-            page.route(f"**/api/projects/{GARDEN}/orchestrator", lambda route: route.fulfill(
-                status=400, content_type="application/json", body=json.dumps({"detail": REFUSAL})))
+            def preflight(route) -> None:  # type: ignore[no-untyped-def]
+                selected = (route.request.post_data_json or {}).get("model")
+                route.fulfill(status=200 if selected == "fast" else 400, content_type="application/json",
+                              body=json.dumps({"effective_model": "fast"} if selected == "fast" else {"detail": REFUSAL}))
+
+            page.route(f"**/api/projects/{GARDEN}/orchestrator/preflight", preflight)
             page.goto(f"{BASE}/project/{GARDEN}?token=t&lang={lang}")
             page.get_by_role("button", name=WORDS[lang]["enable"], exact=True).click()
             sheet = page.locator(".enable-sheet")
-            expect(sheet.locator("details")).not_to_have_attribute("open", "")
-            sheet.get_by_role("button", name=WORDS[lang]["on"], exact=True).click()
+            expect(sheet.get_by_role("button", name=WORDS[lang]["on"], exact=True)).to_be_disabled()
             expect(sheet.get_by_role("alert")).to_contain_text("This model cannot run with spending limits" if lang == "en" else "Эта модель не может работать с лимитами расходов")
-            expect(sheet.locator("p.sub.form-hint")).to_contain_text(REFUSAL[0].upper() + REFUSAL[1:])
+            expect(sheet.locator("details")).to_have_attribute("open", "")
+            expect(sheet.get_by_role("alert")).to_contain_text(REFUSAL[0].upper() + REFUSAL[1:])
             expect(sheet.locator("#orch-model")).to_be_visible()
             expect(sheet.locator("#orch-model")).to_have_value("")
-            expect(sheet.locator("#orch-model option[value='']")).to_contain_text("DeepSeek Flash")
+            expect(sheet.locator("#orch-model option[value='']")).to_contain_text("Subscription")
             assert focus.enabled == []
+            sheet.locator("#orch-model").select_option("fast")
+            expect(sheet.get_by_role("alert")).to_have_count(0)
+            expect(sheet.get_by_role("button", name=WORDS[lang]["on"], exact=True)).to_be_enabled()
+            expect(sheet.locator("details")).to_have_attribute("open", "")
+            sheet.get_by_role("button", name=WORDS[lang]["on"], exact=True).click()
+            expect(page.locator(".chat.in-project.orchestrator textarea")).to_be_visible()
+            assert focus.enabled == [(GARDEN, {"model": "fast", "autonomy": "normal", "concurrency_cap": 10})]
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             context.close()
         browser.close()

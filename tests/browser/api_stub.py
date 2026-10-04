@@ -1521,6 +1521,11 @@ class FocusStub:
                 return 200, {"handoff_id": handoff["handoff_id"], "state": "retirement_pending",
                              "old_active": False, "receipt_id": handoff["receipt_id"], "session_id": office["session_id"],
                              "entity_revision": project["entity_revision"]}
+        if path.startswith("/api/projects/") and path.endswith("/orchestrator/preflight") and method == "POST":
+            pid = path.split("/")[3]
+            if self.project(pid) is None:
+                return 404, {"detail": "no such project"}
+            return 200, {"effective_model": (body or {}).get("model") or "strong"}
         if path.startswith("/api/projects/") and path.endswith("/orchestrator") and method == "POST":
             pid = path.split("/")[3]
             project = self.project(pid)

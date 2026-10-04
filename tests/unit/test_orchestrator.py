@@ -639,6 +639,11 @@ async def test_the_orchestrator_routes_and_the_model_chip(settings: Settings, db
         headers = {"X-Daedalus-Token": "tok"}
         base = f"/api/projects/{r.project.id}"
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:  # type: ignore[arg-type]
+            preview = await client.post(f"{base}/orchestrator/preflight", json={"model": "", "concurrency_cap": 12}, headers=headers)
+            assert preview.status_code == 200 and preview.json() == {"effective_model": DEFAULT_PRESET}
+            assert not (await r.refreshed()).settings.orchestrator.enabled
+            invalid = await client.post(f"{base}/orchestrator/preflight", json={"model": "nope"}, headers=headers)
+            assert invalid.status_code == 400 and not (await r.refreshed()).settings.orchestrator.enabled
             on = await client.post(f"{base}/orchestrator", json={"autonomy": "full", "concurrency_cap": 12}, headers=headers)
             assert on.status_code == 200, on.text
             body = on.json()

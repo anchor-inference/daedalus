@@ -27,6 +27,14 @@ async def test_enable_refuses_missing_quote_before_creating_office(settings: Set
         r.manager.config.orchestrator.preset = "subscription"
         r.provider.endpoint = ProviderEndpoint(id="proxy", kind="openai", base_url="http://127.0.0.1:1",
                                               pricing={} if price is None else {"scripted-model": price})
+        r.team.app.bus = r.manager.bus
+        api = build_app(r.team.app, "tok")
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
+            preview = await client.post(f"/api/projects/{r.project.id}/orchestrator/preflight",
+                                        json={"model": "", "concurrency_cap": 10}, headers={"X-Daedalus-Token": "tok"})
+            assert preview.status_code == 400
+            assert "documented provider input ceiling" in preview.json()["detail"]
+        assert not (await r.refreshed()).settings.orchestrator.enabled
         with pytest.raises(ProjectError, match="coordinator model 'subscription'.*spending limits") as refused:
             await r.orch.enable(r.project.id)
         assert "Choose a model with known prices" in str(refused.value)

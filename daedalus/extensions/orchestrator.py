@@ -328,6 +328,23 @@ class Orchestrators:
 
     # -- the office --------------------------------------------------------------------------------
 
+    async def preflight_enable(self, project_id: str, *, model: str | None = None,
+                               concurrency_cap: int | None = None) -> str:
+        """Check the selected model and capacity without creating a coordinator session.
+
+        Enable repeats these checks under its lock because configuration can change after a preview.
+        """
+        project = await self.project(project_id)
+        if model is not None:
+            self._check_model(model)
+        await self._preflight_model(project, model)
+        first = await self._never_had_one(project_id)
+        cap = concurrency_cap if concurrency_cap is not None else (
+            self.manager.config.orchestrator.default_concurrency_cap if first
+            else project.settings.orchestrator.concurrency_cap)
+        self._check_cap(cap)
+        return self.manager.config.orchestrator_preset(project.settings.orchestrator.model if model is None else model)
+
     async def enable(self, project_id: str, *, model: str | None = None, autonomy: str | None = None, concurrency_cap: int | None = None, by: str = "operator") -> Project:
         """Switch the project's orchestrator on: a session of its own, its settings, its wake-ups.
 

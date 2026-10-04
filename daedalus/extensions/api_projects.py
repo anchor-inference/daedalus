@@ -524,6 +524,17 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         orchestrator = project.settings.orchestrator
         return {**orchestrator.dump(), "effective_model": orchestrators().model_of(project), "project_id": project.id}
 
+    @api.post("/api/projects/{project_id}/orchestrator/preflight")
+    async def preflight_orchestrator(project_id: str, body: OrchestratorBody, _: dict[str, Any] = Depends(auth)) -> dict[str, str]:
+        """Check the first coordinator call before the operator creates its session."""
+        await existing(project_id)
+        try:
+            selected = await orchestrators().preflight_enable(project_id, model=body.model,
+                                                                concurrency_cap=body.concurrency_cap)
+        except ProjectError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"effective_model": selected}
+
     @api.post("/api/projects/{project_id}/orchestrator")
     async def enable_orchestrator(project_id: str, body: OrchestratorBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Switch the orchestrator on; a project that has one already only changes what is sent."""

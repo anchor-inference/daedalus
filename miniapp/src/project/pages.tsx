@@ -4,7 +4,7 @@
 // so there is one brief editor and not two that drift apart.
 
 import { useEffect, useState } from "react";
-import { api, type BriefSection, type JournalEntry, type Project } from "../api";
+import { api, ApiError, type BriefSection, type JournalEntry, type Project } from "../api";
 import { Skeleton } from "../ui/components";
 import { Sheet } from "../ui/dialogs";
 import { absTime, relTime } from "../format";
@@ -368,10 +368,30 @@ function EnableSheet({ project, onClose, toast }: { project: Project; onClose: (
   const [cap, setCap] = useState(settings?.concurrency_cap ?? 10);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const modelRefused = /^coordinator model .+ cannot run with spending limits:/i.test(error);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [check, setCheck] = useState<{ key: string; state: "checking" | "ready" | "blocked" | "unavailable"; error: string }>({ key: "", state: "checking", error: "" });
+  const [retry, setRetry] = useState(0);
+  const checkKey = JSON.stringify([project.id, model, cap]);
+  const currentCheck = check.key === checkKey ? check : { key: checkKey, state: "checking", error: "" };
+  const modelRefused = /^coordinator model .+ cannot run with spending limits:/i.test(error || currentCheck.error);
   const presets = team?.choices.presets ?? [];
   const fallback = presets.find((p) => p.id === team?.choices.coordinator_default_preset)?.label ?? "";
+  useEffect(() => {
+    let active = true;
+    setCheck({ key: checkKey, state: "checking", error: "" });
+    void api.post<{ effective_model: string }>(`/api/projects/${encodeURIComponent(project.id)}/orchestrator/preflight`,
+      { model, concurrency_cap: cap }).then((result) => {
+        if (active) setCheck({ key: checkKey, state: result.effective_model ? "ready" : "unavailable", error: "" });
+      }).catch((failure) => {
+        if (active) {
+          if (failure instanceof ApiError && failure.status === 400) setAdvancedOpen(true);
+          setCheck({ key: checkKey, state: failure instanceof ApiError && failure.status === 400 ? "blocked" : "unavailable", error: errorText(failure) });
+        }
+      });
+    return () => { active = false; };
+  }, [project.id, model, cap, retry]);
   async function go() {
+    if (currentCheck.state !== "ready" || busy) return;
     setBusy(true);
     setError("");
     try {
@@ -382,6 +402,7 @@ function EnableSheet({ project, onClose, toast }: { project: Project; onClose: (
       onClose();
     } catch (e) {
       setError(errorText(e));
+      setAdvancedOpen(true);
     } finally {
       setBusy(false);
     }
@@ -390,9 +411,15 @@ function EnableSheet({ project, onClose, toast }: { project: Project; onClose: (
     <Sheet title={t("focus.enable.sheet", { name: project.name })} onClose={onClose} size="narrow" className="enable-sheet">
       <p className="focus-enable-intro">{t("focus.enable.first")}</p>
       <p className="focus-cost">{t("focus.enable.cost")}</p>
+      {currentCheck.state === "checking" && <p className="sub" role="status">{t("focus.enable.model.checking")}</p>}
+      {(currentCheck.state === "blocked" || currentCheck.state === "unavailable") && <div className="form-hint" role="alert">
+        {t(modelRefused ? "focus.enable.model.refused" : currentCheck.state === "blocked" ? "focus.enable.preflight.blocked" : "focus.enable.model.unavailable")}
+        {currentCheck.error && <p className="sub">{currentCheck.error}</p>}
+        {currentCheck.state === "unavailable" && <button type="button" className="linkbtn" onClick={() => setRetry((value) => value + 1)}>{t("common.retry")}</button>}
+      </div>}
       {error && <p className="form-hint" role="alert">{modelRefused ? t("focus.enable.model.refused") : error}</p>}
-      {modelRefused && <p className="sub form-hint">{error}</p>}
-      <details className="focus-enable-advanced" open={error ? true : undefined}>
+      {modelRefused && error && <p className="sub form-hint">{error}</p>}
+      <details className="focus-enable-advanced" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
       <summary>{t("focus.enable.advanced")}</summary>
       <label className="field" htmlFor="orch-model">{t("focus.enable.model")}</label>
       <select id="orch-model" className="field" value={model} onChange={(e) => { setModel(e.target.value); setError(""); }}>
@@ -417,7 +444,7 @@ function EnableSheet({ project, onClose, toast }: { project: Project; onClose: (
       <div className="sub form-hint">{t("focus.enable.cap.hint")} {plural("team.count.staff", cap)}</div>
       </details>
       <div className="btnrow">
-        <button className="btn primary" disabled={busy} onClick={() => void go()}>{t("focus.enable.go")}</button>
+        <button className="btn primary" disabled={busy || currentCheck.state !== "ready"} onClick={() => void go()}>{t("focus.enable.go")}</button>
         <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
       </div>
     </Sheet>
