@@ -238,7 +238,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     assert sum(task["title"] == "Retry launch" for task in stub.tasks) == 1
     expect(page.locator(".toast")).to_contain_text("Task saved; launch outcome unconfirmed" if lang == "en" else "Задача сохранена; результат запроса на запуск не подтверждён")
     cols.locator(".pcard", has_text="Retry launch").click()
-    sheet.get_by_role("button", name="Start task" if lang == "en" else "Запустить задачу").click()
+    sheet.get_by_role("button", name="Start task" if lang == "en" else "Запустить задачу", exact=True).click()
     expect(page.locator(".toast")).to_contain_text(words["queued"])
     assert stub.launched[-1][0] == next(task["id"] for task in stub.tasks if task["title"] == "Retry launch")
     page.keyboard.press("Escape")
@@ -256,7 +256,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     assert stub.launched[-1][1]["client_operation_id"] == unknown_body["client_operation_id"]
     assert stub.launched[-1][1]["expected_entity_revision"] == unknown_body["expected_entity_revision"]
     expect(sheet.locator(".result-warning", has_text="pending" if lang == "en" else "ожидает")).to_be_visible()
-    expect(sheet.get_by_role("button", name="Start task" if lang == "en" else "Запустить задачу")).to_be_disabled()
+    expect(sheet.get_by_role("button", name="Start task" if lang == "en" else "Запустить задачу", exact=True)).to_be_disabled()
     page.keyboard.press("Escape")
     fits(page, f"{lang} desktop")
 

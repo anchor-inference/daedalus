@@ -538,7 +538,8 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
     } catch (error) { setResumeError(errorText(error)); }
   }
   const gone = task?.assignee && !team.some((m) => m.id === task.assignee!.id) ? task.assignee : null;
-  const granting = !!task && route.query.get("grant") === "assignment_execution";
+  const grantBundle = route.query.get("grant");
+  const granting = !!task && (grantBundle === "assignment_execution" || grantBundle === "execution");
   const taskPath = task ? projectPagePath(projectId, "board", { task: task.id }) : "";
   const missing = missingBrief(brief);
   const editorChanged = task
@@ -685,10 +686,10 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
   const toggleDep = (id: string) => setDeps(deps.includes(id) ? deps.filter((d) => d !== id) : [...deps, id]);
 
   if (granting && task) return (
-    <Sheet title={t("pboard.grant.title")} onClose={() => navigate(taskPath)} className="pboard-sheet">
+    <Sheet title={t(grantBundle === "execution" ? "pboard.grant.execution.title" : "pboard.grant.title")} onClose={() => navigate(taskPath)} className="pboard-sheet">
       <button type="button" className="linkbtn" onClick={() => navigate(taskPath)}>{t("pboard.grant.back")}</button>
-      <p className="sub">{t("pboard.grant.intro", { title: task.title })}</p>
-      <CoordinatorAuthority projectId={projectId} initialTaskId={task.id} toast={toast} onChanged={onDone} />
+      <p className="sub">{t(grantBundle === "execution" ? "pboard.grant.execution.intro" : "pboard.grant.intro", { title: task.title })}</p>
+      <CoordinatorAuthority projectId={projectId} initialTaskId={task.id} initialBundle={grantBundle === "execution" ? "execution" : "assignment_execution"} toast={toast} onChanged={onDone} />
     </Sheet>
   );
 
@@ -720,11 +721,11 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
           <span title={absTime(task.updated_at)}>{t("board.updated", { t: relTime(task.updated_at) })}</span>
         </div>
       )}
-      {/* The first assignment decision must appear before the longer task details, where a new operator can find it. */}
-      {task && team.length === 0 && !gone && (task.status === "todo" || task.status === "blocked") && (
+      {/* Hiring or assigning the first member must not hide the remaining coordinator permission. */}
+      {task && !gone && (task.status === "todo" || task.status === "blocked") && (
         <div className="sub">
-          {t("pboard.assignee.none")} <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "team"))}>{t("pboard.team.hire")}</button>
-          <div><button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id, grant: "assignment_execution" }))}>{t("pboard.grant.open")}</button></div>
+          {team.length === 0 && !task.assignee && <div>{t("pboard.assignee.none")} <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "team"))}>{t("pboard.team.hire")}</button></div>}
+          <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id, grant: task.assignee ? "execution" : "assignment_execution" }))}>{t(task.assignee ? "pboard.grant.execution.open" : "pboard.grant.open")}</button>
         </div>
       )}
       {task && task.status === "review" && task.branch && (

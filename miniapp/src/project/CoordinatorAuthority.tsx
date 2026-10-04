@@ -62,10 +62,10 @@ function grantName(grant: Grant): string {
   return bundleName("");
 }
 
-export function CoordinatorAuthority({ projectId, toast, onChanged, initialTaskId }: { projectId: string; toast: (message: string) => void; onChanged: () => void; initialTaskId?: string }) {
+export function CoordinatorAuthority({ projectId, toast, onChanged, initialTaskId, initialBundle }: { projectId: string; toast: (message: string) => void; onChanged: () => void; initialTaskId?: string; initialBundle?: "assignment_execution" | "execution" }) {
   const [open, setOpen] = useState(!!initialTaskId);
   const [adding, setAdding] = useState(!!initialTaskId);
-  const [bundleId, setBundleId] = useState<BundleId>(initialTaskId ? "assignment_execution" : "assignment");
+  const [bundleId, setBundleId] = useState<BundleId>(initialBundle ?? (initialTaskId ? "assignment_execution" : "assignment"));
   const [taskId, setTaskId] = useState(initialTaskId ?? "");
   const [hours, setHours] = useState(1);
   const [withdrawId, setWithdrawId] = useState("");

@@ -15,10 +15,17 @@ BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 
 
-def scenario(language: str, width: int, coordinator: bool) -> None:
+def scenario(language: str, width: int, coordinator: bool, staff_state: str) -> None:
+    assigned = staff_state == "assigned"
+    bundle_id = "execution" if assigned else "assignment_execution"
+    operations = ["task.launch", "task.stop", "staff.release"] if assigned else ["board.task.assign", "task.launch", "task.stop", "staff.release"]
+    grant_name = ("Let the coordinator run this task" if assigned else "Let the coordinator assign and run this task") if language == "en" else (
+        "Разрешить координатору запустить задачу" if assigned else "Разрешить координатору назначить и запустить задачу")
+    assignee = BoardStub.assignee("first-worker", "First worker", harness="daedalus") if assigned else None
     task = BoardStub.task("first-task", "Prepare menu", project_id=PID, entity_revision=1,
-                          checklist=[{"text": "All items listed", "done": False}])
-    stub = BoardStub(project(), tasks=[task])
+                          assignee=assignee, checklist=[{"text": "All items listed", "done": False}])
+    staff = [{"id": "first-worker", "name": "First worker", "color": "blue", "harness": "daedalus"}] if staff_state != "empty" else []
+    stub = BoardStub(project(), staff=staff, tasks=[task])
     unhandled = Unhandled()
     approvals: list[dict] = []
     with sync_playwright() as playwright:
@@ -37,8 +44,7 @@ def scenario(language: str, width: int, coordinator: bool) -> None:
             payload = {"project_id": PID, "entity_revision": 1,
                        "current_coordinator_session_id": "coordinator-one" if coordinator else None,
                        "readiness_blockers": [], "grants": [], "available_bundles": [{
-                           "id": "assignment_execution", "scope_kind": "task",
-                           "operations": ["board.task.assign", "task.launch", "task.stop", "staff.release"],
+                           "id": bundle_id, "scope_kind": "task", "operations": operations,
                            "effects": ["execution.start", "execution.stop"],
                            "max_expires_at": (datetime.now(UTC) + timedelta(hours=24)).isoformat(),
                            "blockers": [],
@@ -49,35 +55,42 @@ def scenario(language: str, width: int, coordinator: bool) -> None:
         page.goto(f"{BASE}/project/{PID}/board?task=first-task&token=t&lang={language}")
         sheet = page.locator(".sheet.pboard-sheet")
         expect(sheet).to_be_visible()
-        grant = sheet.get_by_role("button", name="Let the coordinator assign and run this task" if language == "en" else "Разрешить координатору назначить и запустить задачу")
+        if staff_state != "empty":
+            expect(sheet.get_by_text("The project has no team yet." if language == "en" else "У проекта пока нет команды.")).to_have_count(0)
+        else:
+            expect(sheet.get_by_role("button", name="Hire someone" if language == "en" else "Нанять сотрудника")).to_be_visible()
+        grant = sheet.get_by_role("button", name=grant_name)
         assert grant.evaluate("(node) => !!(node.compareDocumentPosition(document.querySelector('.pboard-sheet .task-workflow')) & Node.DOCUMENT_POSITION_FOLLOWING)")
         grant.click()
-        expect(page).to_have_url(f"{BASE}/orchestration/project/{PID}/board?task=first-task&grant=assignment_execution")
+        expect(page).to_have_url(f"{BASE}/orchestration/project/{PID}/board?task=first-task&grant={bundle_id}")
         expect(sheet).to_contain_text("Prepare menu")
         authority_section = sheet.locator(".sheet-section", has_text="Coordinator permissions" if language == "en" else "Полномочия координатора")
         expect(authority_section).to_be_visible()
-        expect(authority_section.get_by_label("Allowed actions" if language == "en" else "Разрешённые действия")).to_have_value("assignment_execution")
+        expect(authority_section.get_by_label("Allowed actions" if language == "en" else "Разрешённые действия")).to_have_value(bundle_id)
         expect(authority_section.locator("select.field").nth(1)).to_have_value("first-task")
         approve = authority_section.get_by_role("button", name="Approve" if language == "en" else "Разрешить")
         if coordinator:
             expect(approve).to_be_enabled()
             approve.click()
             dialog = page.locator(".dialog[role='alertdialog']")
-            expect(dialog).to_contain_text("board.task.assign")
+            if assigned:
+                assert "board.task.assign" not in dialog.inner_text()
+            else:
+                expect(dialog).to_contain_text("board.task.assign")
             expect(dialog).to_contain_text("task.launch")
             expect(dialog).to_contain_text("execution.start")
             assert "board.task.update" not in dialog.inner_text()
             dialog.get_by_role("button", name="Approve" if language == "en" else "Разрешить").click()
             expect(page.locator(".toast")).to_contain_text("Approval recorded" if language == "en" else "Разрешение записано")
             assert len(approvals) == 1
-            assert approvals[0]["bundle_id"] == "assignment_execution" and approvals[0]["task_id"] == "first-task"
+            assert approvals[0]["bundle_id"] == bundle_id and approvals[0]["task_id"] == "first-task"
         else:
             expect(approve).to_be_disabled()
             expect(authority_section.get_by_role("button", name="Enable the coordinator" if language == "en" else "Включить координатора")).to_be_visible()
         assert len(approvals) == (1 if coordinator else 0)
         sheet.get_by_role("button", name="Back to task" if language == "en" else "Назад к задаче").click()
         expect(page).to_have_url(f"{BASE}/orchestration/project/{PID}/board?task=first-task")
-        expect(sheet.get_by_role("button", name="Let the coordinator assign and run this task" if language == "en" else "Разрешить координатору назначить и запустить задачу")).to_be_visible()
+        expect(sheet.get_by_role("button", name=grant_name)).to_be_visible()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         browser.close()
     assert unhandled.report() == 0
@@ -88,5 +101,6 @@ if __name__ == "__main__":
     for lang in ("en", "ru"):
         for viewport in (390, 1440):
             for enabled in (False, True):
-                scenario(lang, viewport, enabled)
-                print(f"first task grant {lang} {viewport} coordinator={enabled}: PASS")
+                for staff_state in ("empty", "hired", "assigned"):
+                    scenario(lang, viewport, enabled, staff_state)
+                    print(f"first task grant {lang} {viewport} coordinator={enabled} staff={staff_state}: PASS")
