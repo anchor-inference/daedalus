@@ -7,6 +7,7 @@ import itertools
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ import pytest
 from protocore.contracts.tools import ToolContext
 
 from daedalus.config import ORCHESTRATOR_ONLY_TOOLS, Settings
+from daedalus.extensions.coordinator_authority import approve_authority
 from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.harness.catalog import HarnessCatalog
 from daedalus.harness.contract import AgentEntry, Catalog, InstallInfo, LoginState
@@ -21,6 +23,7 @@ from daedalus.host.events import AppEvent
 from daedalus.host.services import SessionServices, locator
 from daedalus.host.wake_queue import Batch, Pending, Wake
 from daedalus.staff_runtime import Availability, FakeStaffRuntime, LiveSession, ReadPage, Receipt
+from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
 from daedalus.stores.harness import HarnessStore
 from daedalus.stores.outbox import OutboxStore
@@ -74,6 +77,37 @@ async def admitted(r: Rig, task_id: str) -> bool:
         " ORDER BY created_at DESC LIMIT 1", (task_id,),
     )
     return row is not None and row["state"] == "completed"
+
+
+async def test_unchanged_assigned_task_starts_with_task_execution_grant_only(settings: Settings, db: Database, tmp_path: Path) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r)
+        sid = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
+        member = await r.manager.staff.hire(r.project.id, name="Ada", role="Menu", isolation="shared")
+        task_id = await board_task(r.manager, r.project, "Menu page")
+        await r.manager.db.execute("UPDATE board_tasks SET assignee_staff_id = ? WHERE id = ?", (member.id, task_id))
+        scope = Scope("project", r.project.id)
+        operator = Principal.operator({"via": "token", "user_id": 1})
+        revision = await ControlStore(r.manager.db).revision(scope, Entity("project", r.project.id))
+        await approve_authority(r.team.app, r.project.id, operator,
+                                client_operation_id="task-execution-only", expected_entity_revision=revision,
+                                expected_coordinator_session_id=sid, bundle_id="execution",
+                                task_id=task_id, expires_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat())
+
+        for change in ({"title": "Renamed menu page", "reason": "This remains exactly the same task"},
+                       {"objective": "Replace the menu page with an updated menu"},
+                       {"priority": 1}, {"checks": ["Menu page renders"]}):
+            with pytest.raises(Refused, match="grant|scope|denied"):
+                await r.call(sid, "assign", task_id=task_id, **change)
+        said = await r.call(sid, "assign", task_id=task_id)
+        assert said.startswith(f"Ada will start {task_id}")
+        assert await admitted(r, task_id)
+        assert (await r.manager.db.fetchone("SELECT count(*) FROM operation_receipts"
+                                            " WHERE operation_kind = 'board.task.update'"))[0] == 0
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
 
 
 async def journal_texts(r: Rig) -> list[str]:

@@ -632,18 +632,25 @@ async def assign(
             task = existing
             if expected_entity_revision is None:
                 raise Refused("existing assignments need expected_entity_revision from Tasks(get)")
-            principal = await board_principal(orch, session_id, project.id, "board.task.update", task["id"])
-            changed = await commands.update(principal, scope, task["id"], client_operation_id=client_operation_id,
-                                            expected_entity_revision=expected_entity_revision,
-                                            title=renamed, brief=given or None, depends_on=depends_on, priority=priority,
-                                            status="todo" if reopen_after_exit else None,
-                                            checklist=wanted_checks or (split_checks(merged["done_when"])
-                                                                          if "done_when" in given else None),
-                                            note=(f"reassigned from {owner.name}: {handover}" if handover and owner else ""),
-                                            reassignment_reason=handover or None,
-                                            assignee_staff_id=member.id, folder_id=target.id if target else None,
-                                            file_ids=file_ids, requirements=handoff_requirements)
-            task = await board.get(changed["task_id"], actor=session_id)
+            unchanged = (task["status"] == "todo" and task["assignee_staff_id"] == member.id
+                         and not renamed and not given and priority is None and depends_on is None
+                         and folder is None and files is None and requirements is None and inputs is None
+                         and checks is None and not handover and not reopen_after_exit)
+            if not unchanged:
+                # Requiring a planning grant to launch an already assigned card made task-scoped
+                # execution grants unusable, even though the card and its files were untouched.
+                principal = await board_principal(orch, session_id, project.id, "board.task.update", task["id"])
+                changed = await commands.update(principal, scope, task["id"], client_operation_id=client_operation_id,
+                                                expected_entity_revision=expected_entity_revision,
+                                                title=renamed, brief=given or None, depends_on=depends_on, priority=priority,
+                                                status="todo" if reopen_after_exit else None,
+                                                checklist=wanted_checks or (split_checks(merged["done_when"])
+                                                                              if "done_when" in given else None),
+                                                note=(f"reassigned from {owner.name}: {handover}" if handover and owner else ""),
+                                                reassignment_reason=handover or None,
+                                                assignee_staff_id=member.id, folder_id=target.id if target else None,
+                                                file_ids=file_ids, requirements=handoff_requirements)
+                task = await board.get(changed["task_id"], actor=session_id)
     except KeyError as exc:
         raise Refused(f"no task {exc.args[0] if exc.args else ''} on {project.name}'s board") from exc
     except ValueError as exc:
