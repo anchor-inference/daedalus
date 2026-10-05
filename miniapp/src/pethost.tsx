@@ -23,35 +23,42 @@ type Corner = "br" | "bl" | "tr" | "tl";
 type Placement = { x: number; y: number; corner: Corner | "custom" };
 const mobile = () => window.matchMedia("(max-width: 700px)").matches;
 const storageKey = () => `daedalus.pet.position.${mobile() ? "mobile" : "desktop"}`;
-const dimensions = (activity: string) => ({ width: mobile() ? 130 : activity === "settings" ? 180 : 264, height: mobile() ? 170 : activity === "settings" ? 220 : 310 });
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(value, high));
+const dimensions = (activity: string, scale: number) => ({ width: (mobile() ? 130 : activity === "settings" ? 180 : 264) * scale, height: (mobile() ? 170 : activity === "settings" ? 220 : 310) * scale });
 const edgeLimit = (activity: string) => mobile() && activity !== "voice" ? 55 : 8;
-function boundPosition(position: Placement, activity: string): Placement {
-  const { width, height } = dimensions(activity);
+function savedScale(): number {
+  try {
+    const value = Number(localStorage.getItem("daedalus.pet.scale"));
+    if (Number.isFinite(value) && value >= 0.6 && value <= 1) return value;
+  } catch { /* Storage can be unavailable in private mode. */ }
+  return 1;
+}
+function boundPosition(position: Placement, activity: string, scale: number): Placement {
+  const { width, height } = dimensions(activity, scale);
   return { ...position, x: clamp(position.x, 8, Math.max(8, window.innerWidth - width - 8)), y: clamp(position.y, 8, Math.max(8, window.innerHeight - height - edgeLimit(activity))) };
 }
-function cornerPosition(corner: Corner, activity: string): Placement {
-  const { width, height } = dimensions(activity);
-  return boundPosition({ corner, x: corner.endsWith("r") ? window.innerWidth - width - 12 : 12, y: corner.startsWith("b") ? window.innerHeight - height - edgeLimit(activity) : 8 }, activity);
+function cornerPosition(corner: Corner, activity: string, scale: number): Placement {
+  const { width, height } = dimensions(activity, scale);
+  return boundPosition({ corner, x: corner.endsWith("r") ? window.innerWidth - width - 12 : 12, y: corner.startsWith("b") ? window.innerHeight - height - edgeLimit(activity) : 8 }, activity, scale);
 }
-function savedPosition(activity: string): Placement {
+function savedPosition(activity: string, scale: number): Placement {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey()) || "null");
-    if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) && ["br", "bl", "tr", "tl", "custom"].includes(saved.corner)) return boundPosition(saved, activity);
+    if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) && ["br", "bl", "tr", "tl", "custom"].includes(saved.corner)) return boundPosition(saved, activity, scale);
     const oldCorner = localStorage.getItem("daedalus.pet.corner");
-    if (["br", "bl", "tr", "tl"].includes(oldCorner || "")) return cornerPosition(oldCorner as Corner, activity);
+    if (["br", "bl", "tr", "tl"].includes(oldCorner || "")) return cornerPosition(oldCorner as Corner, activity, scale);
   } catch { /* Storage can be unavailable in private mode. */ }
-  return cornerPosition(mobile() ? "tr" : "br", activity);
+  return cornerPosition(mobile() ? "tr" : "br", activity, scale);
 }
 function savePosition(position: Placement) {
   try { localStorage.setItem(storageKey(), JSON.stringify(position)); } catch { /* Private mode. */ }
 }
 
-function placePopup(popup: HTMLElement | null, anchor: HTMLElement | null, fallback: HTMLElement | null, obstacle?: HTMLElement | null) {
+function placePopup(popup: HTMLElement | null, anchor: HTMLElement | null, fallback: HTMLElement | null, scale: number, obstacle?: HTMLElement | null) {
   if (!popup || !fallback) return;
   const hostRect = fallback.getBoundingClientRect();
   // Voice has no floating canvas, so keep its text near the saved mascot position.
-  const voicePoint = hostRect.top + dimensions("voice").height - 50;
+  const voicePoint = hostRect.top + dimensions("voice", scale).height - 50 * scale;
   const rect = anchor ? anchor.getBoundingClientRect() : { left: hostRect.left, right: hostRect.right, width: hostRect.width, top: voicePoint, bottom: voicePoint, height: 0 };
   const width = popup.offsetWidth, height = popup.offsetHeight, gap = 10, margin = 8;
   const hostTop = hostRect.top;
@@ -89,7 +96,8 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
   const [notice, setNotice] = useState<Notification | null>(null);
   const [speaking, setSpeaking] = useState(0);
   const [menu, setMenu] = useState(false);
-  const [position, setPosition] = useState<Placement>(() => savedPosition(activity));
+  const [scale, setScale] = useState(savedScale);
+  const [position, setPosition] = useState<Placement>(() => savedPosition(activity, scale));
   const [busy, setBusy] = useState(false);
   const lastReaction = useRef(0);
   const lastActivity = useRef(activity);
@@ -189,30 +197,30 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
     const update = () => {
       if (viewport.current !== mobile()) {
         viewport.current = mobile();
-        setPosition(savedPosition(activity));
+        setPosition(savedPosition(activity, scale));
       } else setPosition((current) => {
-        const next = current.corner === "custom" ? boundPosition(current, activity) : cornerPosition(current.corner, activity);
+        const next = current.corner === "custom" ? boundPosition(current, activity, scale) : cornerPosition(current.corner, activity, scale);
         return next.x === current.x && next.y === current.y ? current : next;
       });
-      placePopup(bubbleRef.current, figureRef.current, hostRef.current);
-      placePopup(menuRef.current, figureRef.current, hostRef.current, bubbleRef.current);
+      placePopup(bubbleRef.current, figureRef.current, hostRef.current, scale);
+      placePopup(menuRef.current, figureRef.current, hostRef.current, scale, bubbleRef.current);
     };
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
-  }, [activity, enabled]);
+  }, [activity, enabled, scale]);
   useLayoutEffect(() => {
     if (!enabled) return;
     const update = () => {
-      placePopup(bubbleRef.current, figureRef.current, hostRef.current);
-      placePopup(menuRef.current, figureRef.current, hostRef.current, bubbleRef.current);
+      placePopup(bubbleRef.current, figureRef.current, hostRef.current, scale);
+      placePopup(menuRef.current, figureRef.current, hostRef.current, scale, bubbleRef.current);
     };
     update();
     const observer = new ResizeObserver(update);
     if (bubbleRef.current) observer.observe(bubbleRef.current);
     if (menuRef.current) observer.observe(menuRef.current);
     return () => observer.disconnect();
-  }, [enabled, line, notice, menu, position, activity]);
+  }, [enabled, line, notice, menu, position, activity, scale]);
   const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || menu) return;
     drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, origin: position, moved: false };
@@ -227,7 +235,7 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
     if (!current.moved && Math.hypot(dx, dy) < 6) return;
     current.moved = true;
     window.clearTimeout(holdTimer.current);
-    setPosition(boundPosition({ x: current.origin.x + dx, y: current.origin.y + dy, corner: "custom" }, activity));
+    setPosition(boundPosition({ x: current.origin.x + dx, y: current.origin.y + dy, corner: "custom" }, activity, scale));
   };
   const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     const current = drag.current;
@@ -235,13 +243,13 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
     drag.current = null;
     window.clearTimeout(holdTimer.current);
     if (current.moved) {
-      const next = boundPosition({ x: current.origin.x + event.clientX - current.x, y: current.origin.y + event.clientY - current.y, corner: "custom" }, activity);
+      const next = boundPosition({ x: current.origin.x + event.clientX - current.x, y: current.origin.y + event.clientY - current.y, corner: "custom" }, activity, scale);
       setPosition(next);
       savePosition(next);
     }
   };
   if (!enabled) return null;
-  return <div ref={hostRef} className={`pet-host ${activity === "settings" ? "in-settings" : ""} ${activity === "voice" ? "in-voice" : ""}`} style={{ left: position.x, top: position.y }} aria-label={t("pet.title")}>
+  return <div ref={hostRef} className={`pet-host ${activity === "settings" ? "in-settings" : ""} ${activity === "voice" ? "in-voice" : ""}`} style={{ left: position.x, top: position.y, "--pet-scale": scale } as React.CSSProperties} aria-label={t("pet.title")}>
     {line && <button ref={bubbleRef} className="pet-bubble" role="status" onClick={() => { if (notice) navigate(pathFor("inbox")); else setLine(""); }}>
       {line}{notice?.body && <small>{notice.body}</small>}
     </button>}
@@ -260,10 +268,15 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
       <label>{t("pet.emotion")}<select value={pose.emotion} onChange={(event) => setPose({ ...pose, emotion: event.target.value })}>{EMOTIONS.map((id) => <option key={id} value={id}>{id}</option>)}</select></label>
       <label>{t("pet.action")}<select value={pose.action} onChange={(event) => setPose({ ...pose, action: event.target.value })}>{ACTIONS.map((id) => <option key={id} value={id}>{id}</option>)}</select></label>
       <label>{t("pet.prop")}<select value={pose.prop} onChange={(event) => setPose({ ...pose, prop: event.target.value })}>{PROPS.map((id) => <option key={id} value={id}>{id || t("pet.none")}</option>)}</select></label>
-      <label>{t("pet.move")}<select value={position.corner} onChange={(event) => { const next = cornerPosition(event.target.value as Corner, activity); setPosition(next); savePosition(next); }}>
+      <label>{t("pet.move")}<select value={position.corner} onChange={(event) => { const next = cornerPosition(event.target.value as Corner, activity, scale); setPosition(next); savePosition(next); }}>
         {(["br", "bl", "tr", "tl"] as const).map((id) => <option key={id} value={id}>{t(`pet.corner.${id}`)}</option>)}
         {position.corner === "custom" && <option value="custom">{t("pet.corner.custom")}</option>}
       </select></label>
+      <label className="pet-menu-size">{t("pet.size")}<span><input type="range" min="60" max="100" step="5" value={Math.round(scale * 100)} onChange={(event) => {
+        const next = Number(event.target.value) / 100;
+        setScale(next);
+        try { localStorage.setItem("daedalus.pet.scale", String(next)); } catch { /* Private mode. */ }
+      }} /><output>{Math.round(scale * 100)}%</output></span></label>
       </div>
       <div className="pet-menu-actions">
         <button className="pet-menu-generate" onClick={() => { setMenu(false); void generateReaction("operator asks for a brief greeting", true); }} disabled={!model || busy}>{t("pet.generate")}</button>

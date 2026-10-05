@@ -263,6 +263,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "pet.action": { en: "Animation", ru: "Анимация" },
   "pet.prop": { en: "Object", ru: "Предмет" },
   "pet.move": { en: "Position", ru: "Положение" },
+  "pet.size": { en: "Size", ru: "Размер" },
   "pet.corner.br": { en: "Bottom right", ru: "Справа внизу" },
   "pet.corner.bl": { en: "Bottom left", ru: "Слева внизу" },
   "pet.corner.tr": { en: "Top right", ru: "Справа вверху" },

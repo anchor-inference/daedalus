@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 import legacy from "./ui/styles.css?raw";
 import tokens from "./ui/tokens.css?raw";
 import desktop from "./ui/desktop.css?raw";
+import petHost from "./pethost.tsx?raw";
 const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop;
 
 type Rule = { selector: string; media: string; body: string };
@@ -68,6 +69,9 @@ const BODY_PX = 14;
 function pixels(value: string): number | null {
   const v = value.trim();
   if (v === "inherit" || v === "unset" || v === "initial" || v === "revert") return null;
+  // The companion slider only shrinks; a scaled font cannot exceed its named step.
+  const petScale = /^calc\(var\((--fs-[a-z0-9]+)\)\s*\*\s*var\(--pet-scale\)\)$/.exec(v);
+  if (petScale) return TOKENS[petScale[1]] ?? Number.POSITIVE_INFINITY;
   const token = /^var\((--fs-[a-z0-9]+)\)/.exec(v);
   if (token) return TOKENS[token[1]] ?? Number.POSITIVE_INFINITY;
   const clamp = /^clamp\(\s*([\d.]+)px/.exec(v);
@@ -207,6 +211,10 @@ function oversizeBoxes(all: Rule[]): string[] {
 const all = rules(css);
 
 describe("the scale", () => {
+  it("keeps the companion slider at or below the normal size", () => {
+    expect(petHost).toContain('min="60" max="100"');
+    expect(petHost).toContain('value >= 0.6 && value <= 1');
+  });
   it("is declared once, in :root", () => {
     const root = all.find((r) => r.selector === ":root" && !r.media);
     expect(root).toBeDefined();

@@ -47,6 +47,28 @@ def main() -> None:
         page.get_by_label("Object").select_option("mug")
         page.evaluate("""() => window.dispatchEvent(new CustomEvent('daedalus:pet-notice', {detail: {id: 7, title: 'A task finished', body: 'Open the inbox', tone: 'success', category: 'run_finished', needs_you: false}}))""")
         page.locator(".pet-bubble").get_by_text("A task finished").wait_for(timeout=5000)
+        background = page.locator(".pet-bubble").evaluate("node => getComputedStyle(node).backgroundColor")
+        assert background.startswith("rgb("), background
+        original_figure = page.locator(".pet-figure").bounding_box()
+        original_bubble = page.locator(".pet-bubble").bounding_box()
+        original_font = page.locator(".pet-bubble").evaluate("node => parseFloat(getComputedStyle(node).fontSize)")
+        assert original_figure and original_bubble
+        page.get_by_role("slider", name="Size").press("Home")
+        assert page.get_by_role("slider", name="Size").input_value() == "60"
+        small_figure = page.locator(".pet-figure").bounding_box()
+        small_bubble = page.locator(".pet-bubble").bounding_box()
+        small_font = page.locator(".pet-bubble").evaluate("node => parseFloat(getComputedStyle(node).fontSize)")
+        assert small_figure and small_bubble
+        assert abs(small_figure["height"] / original_figure["height"] - 0.6) < 0.02
+        assert abs(small_bubble["width"] / original_bubble["width"] - 0.6) < 0.02
+        assert abs(small_font / original_font - 0.6) < 0.02
+        page.reload()
+        page.wait_for_selector(".pet-figure", timeout=15000)
+        assert abs(page.locator(".pet-figure").bounding_box()["height"] / original_figure["height"] - 0.6) < 0.02
+        page.locator(".pet-figure").click(button="right")
+        assert page.get_by_role("slider", name="Size").input_value() == "60"
+        page.get_by_role("slider", name="Size").press("End")
+        assert page.get_by_role("slider", name="Size").input_value() == "100"
         page.keyboard.press("Escape")
         figure = page.locator(".pet-figure")
         before = figure.bounding_box()
@@ -104,6 +126,12 @@ def main() -> None:
         phone.locator(".pet-figure").evaluate("node => node.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, pointerType: 'touch', clientX: 330, clientY: 120}))")
         phone.locator(".pet-menu").wait_for(timeout=3000)
         phone.locator(".pet-figure").evaluate("node => node.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, pointerType: 'touch'}))")
+        phone.get_by_role("slider", name="Size").press("Home")
+        small_phone = phone.locator(".pet-figure").bounding_box()
+        assert small_phone and abs(small_phone["width"] - 78) < 2, small_phone
+        phone_bubble = phone.locator(".pet-bubble").bounding_box()
+        assert phone_bubble and phone_bubble["x"] >= 8 and phone_bubble["y"] >= 8, phone_bubble
+        assert phone_bubble["x"] + phone_bubble["width"] <= 382 and phone_bubble["y"] + phone_bubble["height"] <= 836, phone_bubble
         browser.close()
     assert UNHANDLED.report() == 0
 
