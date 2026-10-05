@@ -561,6 +561,8 @@ class Board:
                     # Entered work with no metered call cannot be called free from this ledger.
                     reasons.add("unobserved")
             task["accepted_result_cost_microusd"] = None if reasons else entry["amount"]
+            # A missing subscription or charge price must not erase spend already observed.
+            task["accepted_result_known_cost_microusd"] = entry["amount"] if entry is not None else 0
             task["accepted_result_cost_unknown_reasons"] = sorted(reasons)
 
     async def _contracts(self, tasks: list[dict[str, Any]]) -> None:

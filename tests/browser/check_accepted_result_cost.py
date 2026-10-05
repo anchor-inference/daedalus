@@ -9,7 +9,7 @@ from check_project_board import BASE, PID, fits, project, serve
 from playwright.sync_api import sync_playwright
 
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
-LABEL = {"en": "Worker inference through acceptance", "ru": "Инференс исполнителей до приёмки"}
+LABEL = {"en": "Worker inference estimate through acceptance", "ru": "Оценка инференса исполнителей до приёмки"}
 UNKNOWN = {"en": "unknown", "ru": "неизвестно"}
 
 
@@ -24,7 +24,8 @@ def check() -> None:
                     unhandled = Unhandled()
                     tasks = [
                         BoardStub.task("priced", "Priced result", status="done", acceptance_state="operator_approved",
-                                       accepted_result_cost_microusd=12000, accepted_result_cost_unknown_reasons=[]),
+                                       accepted_result_cost_microusd=None, accepted_result_known_cost_microusd=12000,
+                                       accepted_result_cost_unknown_reasons=["subscription"]),
                         BoardStub.task("unknown", "Unpriced result", status="done", acceptance_state="operator_approved",
                                        accepted_result_cost_microusd=None,
                                        accepted_result_cost_unknown_reasons=["subscription"]),
@@ -36,6 +37,9 @@ def check() -> None:
                         row.wait_for()
                         assert LABEL[language] in row.inner_text()
                         assert value in row.inner_text()
+                        if task_id == "priced":
+                            assert UNKNOWN[language] in row.inner_text()
+                            assert ("known estimate" if language == "en" else "известная оценка") in row.inner_text()
                         if task_id == "unknown":
                             assert ("subscription price unavailable" if language == "en" else "цена подписки недоступна") in row.inner_text()
                         fits(page, f"{language} {width}px {task_id}")

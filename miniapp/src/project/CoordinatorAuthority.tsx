@@ -188,7 +188,7 @@ export function CoordinatorAuthority({ projectId, toast, onChanged, initialTaskI
           <button type="button" className="btn small primary" onClick={() => navigate(projectHome(projectId))}>{t("pboard.grant.continue")}</button>
         </div>}
         {!guided && past.length > 0 && <details><summary>{t("authority.past", { n: past.length })}</summary><ul className="plain-list">{past.map(grantRow)}</ul></details>}
-        {(!guided || active.length === 0) && <details open={adding} onToggle={(event) => setAdding(event.currentTarget.open)}><summary>{t("authority.add")}</summary>
+        {(!guided || !readyForTask) && <details open={adding} onToggle={(event) => setAdding(event.currentTarget.open)}><summary>{t("authority.add")}</summary>
           {guided ? <p>{bundleName(bundleId)}</p> : <label className="field">{t("authority.bundle")}
             <select className="field" value={bundleId} onChange={(event) => { setBundleId(event.target.value as BundleId); setTaskId(""); }}>
               {current.available_bundles.filter((item) => bundleIds.includes(item.id as BundleId)).map((item) => <option key={item.id} value={item.id}>{bundleName(item.id)}</option>)}

@@ -77,6 +77,7 @@ export type ProjectTask = {
   acceptance_state?: AcceptanceState;
   /** Priced worker inference across attempts through the accepted receipt; null if any cost is unknown. */
   accepted_result_cost_microusd?: number | null;
+  accepted_result_known_cost_microusd?: number;
   accepted_result_cost_unknown_reasons?: Array<"subscription" | "unpriced" | "unobserved">;
   /** What the card must satisfy, each with who was given it; absent from an older host. */
   requirements?: Requirement[];

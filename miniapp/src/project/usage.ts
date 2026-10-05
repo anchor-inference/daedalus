@@ -4,7 +4,7 @@
 
 import { num, plural, t } from "../i18n";
 
-export type Spend = { usd: number; tokens: number; unpriced: number };
+export type Spend = { usd: number; tokens: number; unpriced: number; subscriptions: number };
 export type UsageLine = { today: Spend; week: Spend; all: Spend; subscription: { window_used_pct: number | null; source: string } | null };
 export type StaffUsage = UsageLine & { staff_id: string; name: string; harness: string; archived: boolean };
 export type ProjectUsage = { project_id: string; staff: StaffUsage[]; orchestrator: UsageLine; other: UsageLine; total: UsageLine };
@@ -28,14 +28,15 @@ export function tokens(value: number): string {
 export function spendLine(line: UsageLine | undefined | null): string | null {
   if (!line) return null;
   const sub = line.subscription;
-  if (sub && sub.source === "subscription" && sub.window_used_pct !== null && line.today.usd === 0) {
-    return t("pusage.subscription", { pct: Math.round(sub.window_used_pct) });
-  }
   const today = line.today;
-  if (today.usd === 0 && today.tokens === 0 && today.unpriced === 0) return null;
-  const parts = [t("pusage.today", { usd: usd(today.usd) })];
-  if (today.tokens) parts.push(t("pusage.tokens", { n: tokens(today.tokens) }));
+  if (today.usd === 0 && today.tokens === 0 && today.unpriced === 0 && today.subscriptions === 0) return null;
+  const parts = today.usd > 0 || (today.unpriced === 0 && today.subscriptions === 0)
+    ? [t("pusage.today", { usd: usd(today.usd) })] : [];
+  if (today.tokens && today.subscriptions === 0) parts.push(t("pusage.tokens", { n: tokens(today.tokens) }));
   if (today.unpriced) parts.push(plural("pusage.unpriced", today.unpriced));
+  if (today.subscriptions) parts.push(sub?.source === "subscription" && sub.window_used_pct !== null
+    ? t("pusage.subscription", { pct: Math.round(sub.window_used_pct) })
+    : plural("pusage.subscription.sessions", today.subscriptions));
   return parts.join(" · ");
 }
 
@@ -43,12 +44,13 @@ export function spendLine(line: UsageLine | undefined | null): string | null {
 export function totalsLine(usage: ProjectUsage): string {
   const total = usage.total;
   const parts = [
-    t("pusage.window.today", { usd: usd(total.today.usd) }),
-    t("pusage.window.week", { usd: usd(total.week.usd) }),
-    t("pusage.window.all", { usd: usd(total.all.usd) }),
+    t(total.today.unpriced || total.today.subscriptions ? "pusage.window.today.known" : "pusage.window.today", { usd: usd(total.today.usd) }),
+    t(total.week.unpriced || total.week.subscriptions ? "pusage.window.week.known" : "pusage.window.week", { usd: usd(total.week.usd) }),
+    t(total.all.unpriced || total.all.subscriptions ? "pusage.window.all.known" : "pusage.window.all", { usd: usd(total.all.usd) }),
     t("pusage.tokens", { n: tokens(total.all.tokens) }),
   ];
   if (total.all.unpriced) parts.push(plural("pusage.unpriced", total.all.unpriced));
+  if (total.all.subscriptions) parts.push(plural("pusage.subscription.sessions", total.all.subscriptions));
   return parts.join(" · ");
 }
 
@@ -56,7 +58,8 @@ export function totalsLine(usage: ProjectUsage): string {
 export function chipText(usage: ProjectUsage | null | undefined): string | null {
   if (!usage) return null;
   const today = usage.total.today;
-  if (today.usd === 0 && today.tokens === 0) return null;
+  if (today.usd === 0 && today.tokens === 0 && today.unpriced === 0 && today.subscriptions === 0) return null;
+  if (today.unpriced || today.subscriptions) return t("pusage.today.unknown", { usd: usd(today.usd) });
   return t("pusage.today", { usd: usd(today.usd) });
 }
 

@@ -738,9 +738,13 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
       {task?.status === "done" && task.acceptance_state === "operator_approved" && (
         <p className="sub pboard-attempt-cost" title={t("pboard.cost.scope")}>
           {t("pboard.cost.label")} · <strong>{acceptedResultCost(task.accepted_result_cost_microusd)}</strong>
+          {task.accepted_result_cost_microusd == null && (task.accepted_result_known_cost_microusd ?? 0) > 0 && (
+            <span> · {t("pboard.cost.known", { usd: acceptedResultCost(task.accepted_result_known_cost_microusd) })}</span>
+          )}
           {task.accepted_result_cost_unknown_reasons?.map((reason) => (
             <span key={reason}> · {t(`pboard.cost.reason.${reason}`)}</span>
           ))}
+          <span> · <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "journal"))}>{t("pboard.cost.coordination")}</button></span>
         </p>
       )}
       {task && (NEXT[task.status].length > 0 || task.status === "review") && (

@@ -202,6 +202,12 @@ class UpdateDrainClient:
         if not isinstance(generation, int) or generation < 1:
             raise DrainRefused('the host generation is unavailable')
         current = first.get('drain')
+        if isinstance(current, dict) and current.get('state') in ('aborted', 'resumed'):
+            # The host retains the last drain for inspection. Its terminal record
+            # cannot be reused for a new candidate, but open admission permits a new one.
+            if first.get('admission_open') is not True:
+                raise DrainRefused('the terminal update drain did not reopen admission')
+            current = None
         if current is not None:
             # A previous lost response may have closed admission. Only the exact pinned
             # candidate can be resumed; a committed unknown update cannot be repurposed.

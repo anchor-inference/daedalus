@@ -42,6 +42,7 @@ async def test_accepted_result_cost_includes_failed_attempts_and_preserves_unkno
                 ('pending-attempt','pending',1,'daedalus','2026-01-02'),
                 ('refused','priced',1,'daedalus','2026-01-02'),
                 ('cli-refused','priced',1,'cli','2026-01-02'),
+                ('cli-live','priced',1,'cli','2026-01-02'),
                 ('zero-attempt','zero',1,'daedalus','2026-01-02'),
                 ('manual-old','manual',1,'daedalus','2026-01-01');
             INSERT INTO runtime_no_entry_observations VALUES ('refused'),('cli-refused');
@@ -63,7 +64,9 @@ async def test_accepted_result_cost_includes_failed_attempts_and_preserves_unkno
         await board._accepted_result_costs(tasks)
 
     costs = {task["id"]: task["accepted_result_cost_microusd"] for task in tasks}
+    known = {task["id"]: task["accepted_result_known_cost_microusd"] for task in tasks}
     reasons = {task["id"]: task["accepted_result_cost_unknown_reasons"] for task in tasks}
-    assert costs == {"priced": 912000, "cli": None, "pending": None, "zero": 0, "manual": None}
-    assert reasons == {"priced": [], "cli": ["subscription"], "pending": ["unpriced"],
+    assert costs == {"priced": None, "cli": None, "pending": None, "zero": 0, "manual": None}
+    assert known == {"priced": 912000, "cli": 0, "pending": 10000, "zero": 0, "manual": 50000}
+    assert reasons == {"priced": ["subscription"], "cli": ["subscription"], "pending": ["unpriced"],
                        "zero": [], "manual": ["unobserved"]}

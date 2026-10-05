@@ -14,6 +14,8 @@ from launcher.update_drain import DrainRefused, UpdateDrainClient, candidate_dig
 
 BOT = 'a' * 40
 CORE = 'b' * 40
+NEXT_BOT = 'c' * 40
+NEXT_CORE = 'd' * 40
 
 
 class Host(UpdateDrainClient):
@@ -27,20 +29,26 @@ class Host(UpdateDrainClient):
         self.drain: dict[str, Any] | None = None
         self.calls: list[str] = []
         self.revision = 1
+        self.generation = 1
+        self.next_drain = 1
+        self.force_closed = False
 
     def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         self.calls.append(f'{method} {path}')
         if method == 'GET':
-            return {'host_generation': 2 if self.generation_drift and self.drain else 1,
-                    'collection_revision': self.revision, 'admission_open': self.drain is None,
+            return {'host_generation': self.generation + 1 if self.generation_drift and self.drain else self.generation,
+                    'collection_revision': self.revision,
+                    'admission_open': not self.force_closed and (self.drain is None or self.drain['state'] in ('aborted', 'resumed')),
                     'drain': self.drain}
         assert body is not None
         if path == '/api/runtime/updates/drain':
-            self.drain = {'id': 'drain-1', 'receipt_id': 'receipt-1', 'host_generation': 1,
+            self.drain = {'id': f'drain-{self.next_drain}', 'receipt_id': f'receipt-{self.next_drain}',
+                          'host_generation': self.generation,
                           'policy': body['policy'], 'candidate_bot_sha': body['candidate_bot_sha'],
                           'candidate_core_sha': body['candidate_core_sha'],
                           'candidate_compatibility_digest': body['candidate_compatibility_digest'],
                           'state': self.state_name, 'checkpoint_refs': []}
+            self.next_drain += 1
             if self.mismatch:
                 self.drain['candidate_core_sha'] = 'c' * 40
             self.revision += 1
@@ -58,7 +66,7 @@ class Host(UpdateDrainClient):
             self.revision += 1
             if self.lost == 'commit':
                 raise DrainRefused('response lost')
-        return {'drain': self.drain, 'host_generation': 1, 'admission_open': False,
+        return {'drain': self.drain, 'host_generation': self.generation, 'admission_open': False,
                 'collection_revision': self.revision}
 
 
@@ -72,6 +80,41 @@ async def test_lost_response_is_resolved_by_exact_durable_receipt(lost: str) -> 
         await host.commit(BOT, CORE, 'checked')
     assert host.calls.count('POST /api/runtime/updates/drain') == 1
     assert host.calls.count('POST /api/runtime/updates/drain/drain-1/decision') == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('terminal_state', ['aborted', 'resumed'])
+async def test_terminal_drain_history_allows_an_independent_next_update(terminal_state: str) -> None:
+    host = Host()
+    if terminal_state == 'resumed':
+        first = await host.commit(BOT, CORE, 'checked')
+        assert first['id'] == 'drain-1'
+        host.generation = 2
+    else:
+        host.drain = {'id': 'drain-1', 'receipt_id': 'receipt-1', 'host_generation': 1,
+                      'policy': 'stop_all', 'candidate_bot_sha': BOT, 'candidate_core_sha': CORE,
+                      'candidate_compatibility_digest': candidate_digest(BOT, CORE, 'checked'),
+                      'state': 'aborted', 'checkpoint_refs': []}
+        host.next_drain = 2
+    host.drain['state'] = terminal_state
+
+    next_update = await host.commit(NEXT_BOT, NEXT_CORE, 'next checked update')
+    assert next_update['id'] == 'drain-2' and next_update['state'] == 'committed'
+    assert next_update['candidate_bot_sha'] == NEXT_BOT
+    assert host.calls.count('POST /api/runtime/updates/drain') == (2 if terminal_state == 'resumed' else 1)
+
+
+@pytest.mark.asyncio
+async def test_terminal_history_without_open_admission_cannot_start_another_update() -> None:
+    host = Host()
+    host.drain = {'id': 'drain-1', 'receipt_id': 'receipt-1', 'host_generation': 1,
+                  'policy': 'stop_all', 'candidate_bot_sha': BOT, 'candidate_core_sha': CORE,
+                  'candidate_compatibility_digest': candidate_digest(BOT, CORE, 'checked'),
+                  'state': 'aborted', 'checkpoint_refs': []}
+    host.force_closed = True
+    with pytest.raises(DrainRefused):
+        await host.commit(NEXT_BOT, NEXT_CORE, 'next checked update')
+    assert 'POST /api/runtime/updates/drain' not in host.calls
 
 
 @pytest.mark.asyncio

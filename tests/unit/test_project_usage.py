@@ -64,15 +64,16 @@ async def test_the_spend_is_split_by_who_spent_it(settings: Settings, db: Databa
         usage = await ProjectUsage(manager).summary(project.id, now=NOW)
         rows = {row["name"]: row for row in usage["staff"]}
         # Ada: her session and both generations of subagents, once each; her snapshot is not added on top.
-        assert rows["Ada"]["today"] == {"usd": 1.2, "tokens": 5000, "unpriced": 1}
-        assert rows["Ada"]["all"] == {"usd": 3.2, "tokens": 13000, "unpriced": 1}
-        assert rows["Cleo"]["today"] == {"usd": 0.0, "tokens": 412_000, "unpriced": 0}
-        assert rows["Cleo"]["all"] == {"usd": 0.4, "tokens": 413_000, "unpriced": 0}
+        assert rows["Ada"]["today"] == {"usd": 1.2, "tokens": 5000, "unpriced": 1, "subscriptions": 0}
+        assert rows["Ada"]["all"] == {"usd": 3.2, "tokens": 13000, "unpriced": 1, "subscriptions": 0}
+        assert rows["Cleo"]["today"] == {"usd": 0.0, "tokens": 412_000, "unpriced": 0, "subscriptions": 1}
+        assert rows["Cleo"]["all"] == {"usd": 0.4, "tokens": 413_000, "unpriced": 0, "subscriptions": 1}
         assert rows["Cleo"]["subscription"]["window_used_pct"] == 23.0 and rows["Cleo"]["harness"] == "claude"
         # Every generation of the orchestrator is the orchestrator's.
         assert usage["orchestrator"]["today"]["usd"] == 0.5 and usage["orchestrator"]["week"]["usd"] == 0.75
         assert usage["other"]["today"]["usd"] == 0.0 and usage["other"]["week"]["usd"] == 0.1
-        assert usage["total"]["all"] == {"usd": 4.45, "tokens": 427_600, "unpriced": 1}, "another project's spend is not here"
+        assert usage["total"]["all"] == {"usd": 4.45, "tokens": 427_600, "unpriced": 1,
+                                         "subscriptions": 1}, "another project's spend is not here"
         assert usage["since"]["today"] == NOW.replace(hour=0).isoformat()
     finally:
         await manager.close()
@@ -98,7 +99,8 @@ async def test_the_usage_route(settings: Settings, db: Database, tmp_path: Path)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:  # type: ignore[arg-type]
             assert (await client.get(f"/api/projects/{project.id}/usage")).status_code == 401
             got = await client.get(f"/api/projects/{project.id}/usage", headers={"X-Daedalus-Token": "tok"})
-            assert got.status_code == 200 and got.json()["total"]["all"] == {"usd": 0.0, "tokens": 0, "unpriced": 0}
+            assert got.status_code == 200 and got.json()["total"]["all"] == {"usd": 0.0, "tokens": 0,
+                                                                              "unpriced": 0, "subscriptions": 0}
             assert (await client.get("/api/projects/nope/usage", headers={"X-Daedalus-Token": "tok"})).status_code == 404
     finally:
         await manager.close()

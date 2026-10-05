@@ -33,16 +33,19 @@ WINDOWS = ("today", "week", "all")
 class Spend:
     usd: float = 0.0
     tokens: int = 0
+    # Missing USD from provider calls and subscriptions must remain separate from known zero.
     unpriced: int = 0
-    """Calls (or command-line sessions) whose price nobody reported."""
+    subscriptions: int = 0
 
-    def add(self, usd: float | None, tokens: int, unpriced: int = 0) -> None:
+    def add(self, usd: float | None, tokens: int, unpriced: int = 0, subscriptions: int = 0) -> None:
         self.usd += float(usd or 0.0)
         self.tokens += int(tokens or 0)
         self.unpriced += int(unpriced or 0)
+        self.subscriptions += int(subscriptions or 0)
 
     def view(self) -> dict[str, Any]:
-        return {"usd": round(self.usd, 4), "tokens": self.tokens, "unpriced": self.unpriced}
+        return {"usd": round(self.usd, 4), "tokens": self.tokens, "unpriced": self.unpriced,
+                "subscriptions": self.subscriptions}
 
 
 @dataclass(slots=True)
@@ -52,8 +55,9 @@ class Line:
     spend: dict[str, Spend] = field(default_factory=lambda: {w: Spend() for w in WINDOWS})
     subscription: dict[str, Any] | None = None
 
-    def add(self, window: str, usd: float | None, tokens: int, unpriced: int = 0) -> None:
-        self.spend[window].add(usd, tokens, unpriced)
+    def add(self, window: str, usd: float | None, tokens: int, unpriced: int = 0,
+            subscriptions: int = 0) -> None:
+        self.spend[window].add(usd, tokens, unpriced, subscriptions)
 
     def view(self) -> dict[str, Any]:
         return {**{w: self.spend[w].view() for w in WINDOWS}, "subscription": self.subscription}
@@ -160,10 +164,11 @@ class ProjectUsage:
             tokens = int(snapshot.get("input_tokens") or 0) + int(snapshot.get("output_tokens") or 0)
             usd = snapshot.get("cost_usd")
             unpriced = 1 if usd is None and snapshot.get("source") != "subscription" else 0
+            subscriptions = 1 if snapshot.get("source") == "subscription" else 0
             active = str(r["status_at"] or r["started_at"] or "")
             for window in WINDOWS:
                 if window == "all" or active >= since[window]:
-                    target.add(window, usd, tokens, unpriced)
+                    target.add(window, usd, tokens, unpriced, subscriptions)
             if snapshot.get("window_used_pct") is not None or snapshot.get("source") == "subscription":
                 current = target.subscription
                 if current is None or active >= str(current.get("at") or ""):
@@ -173,7 +178,7 @@ class ProjectUsage:
         for line in (*lines.values(), orchestrator, other):
             for window in WINDOWS:
                 s = line.spend[window]
-                total.add(window, s.usd, s.tokens, s.unpriced)
+                total.add(window, s.usd, s.tokens, s.unpriced, s.subscriptions)
         staff = []
         for member_id, line in lines.items():
             member = members.get(member_id, {"name": member_id, "harness": "", "archived_at": None})
