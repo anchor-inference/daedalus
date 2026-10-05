@@ -1442,7 +1442,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             </div>
           )}
           {staffId && <StaffMessages staffId={staffId} />}
-          <Composer
+          {/* A draft written before the first session read would bind to an empty model and workspace,
+              then ask for target approval when those initial values arrived. */}
+          {detail?.id === id && <Composer
             ref={composer}
             above={orchestrating ? <>{showGoalLine && <GoalStrip projectId={focus!.projectId} />}<ReplyChip sessionId={id} /></> : undefined}
             sessionId={id}
@@ -1479,7 +1481,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             onPreviewFile={(file) => setPreview({ file })}
             phone={phone}
             toast={toast}
-          />
+          />}
           {!phone && <TerminalDock dock={terminalDock} workspace={detail?.workspace} fileOpener={openTerminalFile} />}
         </div>
         {detail && (

@@ -52,6 +52,9 @@ def run() -> None:
                     {"action_id": "blocked-review", "task_id": "t-checkout", "contract_revision": 0,
                      "kind": "review", "owner_kind": "operator", "context_ref": None,
                      "enabled": False, "blockers": ["stale_contract", "result_not_verified"]},
+                    {"action_id": "same-review", "task_id": "t-endpoint", "contract_revision": 1,
+                     "kind": "review", "owner_kind": "operator", "context_ref": None,
+                     "enabled": True, "blockers": []},
                 ]
                 focus.budget_views[PROJECT] = {"configured": True, "project_id": PROJECT,
                     "entity_revision": 1, "goal_revision": 1, "budget_id": "goal-budget",
@@ -62,6 +65,8 @@ def run() -> None:
                 expect(cards).to_have_count(7)
                 if width < 600:
                     expect(page.locator("nav.project-tabs a[data-tab='attention'] .tab-badge")).to_have_text("7")
+                else:
+                    expect(page.locator("nav.project-sidebar a.focus-row[href$='/attention'] .focus-row-meta")).to_have_text("7")
                 assert not page.get_by_text("same-ask").count()
                 expect(cards.filter(has_text="Input needed" if lang == "en" else "Нужны данные")).to_have_count(1)
                 expect(cards.filter(has_text="Assignment needed" if lang == "en" else "Нужно назначение")).to_have_count(1)
@@ -83,6 +88,13 @@ def run() -> None:
                 expect(cards).to_have_count(7)
                 expect(cards.filter(has_text="Answer needed" if lang == "en" else "Нужен ответ")).to_have_count(1)
 
+                review["status"] = "done"
+                review["acceptance_state"] = "operator_approved"
+                focus.next_actions[PROJECT] = [row for row in focus.next_actions[PROJECT]
+                                               if row["action_id"] != "same-review"]
+                page.reload()
+                expect(cards.filter(has_text="Result to review" if lang == "en" else "Результат на проверке")).to_have_count(0)
+
                 focus.budget_views[PROJECT]["total"] = balance(None, "unknown_usage")
                 page.reload()
                 expect(cards.filter(has_text="Available budget is unknown" if lang == "en" else "Доступный бюджет неизвестен")).to_have_count(1)
@@ -91,6 +103,11 @@ def run() -> None:
                 expect(page.locator(".focus-attention-warning").first).to_be_visible()
                 if width < 600:
                     expect(page.locator("nav.project-tabs a[data-tab='attention'] .tab-badge")).to_have_text("?")
+                else:
+                    expect(page.locator("nav.project-sidebar a.focus-row[href$='/attention'] .focus-row-meta")).to_have_text("?")
+                    expect(page.locator("nav.project-sidebar a.focus-row[href$='/attention'] .focus-row-meta"))\
+                        .to_have_attribute("title", "Decision count unconfirmed" if lang == "en"
+                                           else "Число решений не подтверждено")
                 expect(page.get_by_text("No decision needs you now" if lang == "en" else "Сейчас решений от вас не требуется")).to_have_count(0)
                 context.close()
                 print(f"attention {lang} {width}: ok")

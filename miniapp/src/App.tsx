@@ -587,7 +587,7 @@ export function App() {
         {route.screen === "health" && <HealthScreen toast={showToast} />}
         {route.screen === "settings" && <SettingsScreen toast={showToast} section={route.detail} />}
         {mainChat && <MainScreen toast={showToast} />}
-        {orchestrationList && !listInColumn && <OrchestrationList />}
+        {orchestrationList && !listInColumn && <OrchestrationList onProjects={() => setSwitching(true)} />}
         {focusProject !== null &&
           (!route.project ? (
             <div className="empty"><b>{t("team.noproject")}</b></div>

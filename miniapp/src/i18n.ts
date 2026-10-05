@@ -5282,6 +5282,7 @@ Object.assign(DICT, {
   "orch.label": { en: "Orchestration", ru: "Оркестрация" },
   "orch.projects": { en: "Projects", ru: "Проекты" },
   "orch.empty.touch": { en: "No project has an orchestrator yet. Ask the main orchestrator to start one, or open a project under Agents and switch its orchestrator on.", ru: "Пока ни у одного проекта нет оркестратора. Попросите главного оркестратора начать проект или откройте проект в разделе «Агенты» и включите ему оркестратор." },
+  "orch.empty.noProjects": { en: "Create a project with a clear first task to get started.", ru: "Создайте проект с понятной первой задачей, чтобы начать работу." },
   "orch.empty": { en: "No project has an orchestrator yet. Ask the main orchestrator to start one, or find a project with ⌘K and switch its orchestrator on.", ru: "Пока ни у одного проекта нет оркестратора. Попросите главного оркестратора начать проект или найдите проект через ⌘K и включите ему оркестратор." },
   "orch.row.setup": { en: "setting up", ru: "настройка" },
   "orch.row.working": { en: "working…", ru: "работает…" },

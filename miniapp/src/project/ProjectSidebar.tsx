@@ -6,6 +6,9 @@
 // move when a project is entered. Folded, it is gone like the other columns, and the rail is left.
 
 import { useState, type ReactNode, type RefObject } from "react";
+import type { Ask } from "../api";
+import type { ProjectBoardData } from "../board/board";
+import { useStreamUp } from "../events";
 import { Bell } from "../bell";
 import { plural, t } from "../i18n";
 import { EnvPill } from "../envpill";
@@ -17,11 +20,12 @@ import { go } from "../shell";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { StaffSheet } from "../team/StaffSheet";
 import type { Staff } from "../team/team";
-import { invalidate } from "../store";
-import { useFocus, useProject, useUsage, staffKey } from "./data";
+import { invalidate, useOffline, useQuery } from "../store";
+import { boardKey, useFocus, useProject, useUsage, staffKey } from "./data";
 import { chipText, totalsLine } from "./usage";
-import { FocusView, firstWait, operatorReviewReady, splitTeam, staffTone, waitKey } from "./focus";
+import { FocusView, firstWait, splitTeam, staffTone, waitKey } from "./focus";
 import { budgetCompact, useGoalBudget } from "./ProjectBudget";
+import { operatorAttentionCount, type NextAction } from "./attention-model";
 
 export type ProjectSidebarProps = {
   projectId: string;
@@ -38,7 +42,16 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
   const { project } = useProject(p.projectId);
   const { team, board, terminals, sessions, wakeups: alarms, watches } = useFocus(p.projectId);
   const usage = useUsage(p.projectId);
-  const { data: budget } = useGoalBudget(p.projectId);
+  const live = useStreamUp();
+  const offline = useOffline();
+  const asks = useQuery<{ asks: Ask[] }>(`/api/asks?project=${encodeURIComponent(p.projectId)}&routed_to=operator`, { pollMs: live ? 60000 : 10000, staleMs: 2000 });
+  const countBoard = useQuery<ProjectBoardData>(boardKey(p.projectId), { pollMs: live ? 60000 : 15000, staleMs: 3000 });
+  const next = useQuery<{ actions: NextAction[] }>(`/api/projects/${encodeURIComponent(p.projectId)}/next-actions`, { pollMs: live ? 60000 : 15000, staleMs: 3000 });
+  const budgetQuery = useGoalBudget(p.projectId);
+  const budget = budgetQuery.data;
+  const countKnown = !offline && !!asks.data && !asks.error && !!countBoard.data && !countBoard.error
+    && !!next.data && !next.error && !!budget && !budgetQuery.error;
+  const decisions = operatorAttentionCount(asks.data?.asks ?? [], countBoard.data?.tasks ?? [], next.data?.actions ?? [], budget);
   const spent = chipText(usage);
   const remaining = budgetCompact(budget);
   const [hiring, setHiring] = useState(false);
@@ -92,7 +105,7 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
           className={`orchestrator ${orchestratorRow?.status === "running" ? "live" : ""} ${!orchestrator?.enabled ? "off" : ""}`}
         />
 
-        <FocusRow icon="alert" label={t("focus.nav.attention")} href={projectPagePath(p.projectId, "attention")} current={here("attention")} meta={board ? String((board.needs_you?.length ?? 0) + (board.tasks?.filter(operatorReviewReady).length ?? 0)) : ""} />
+        <FocusRow icon="alert" label={t("focus.nav.attention")} href={projectPagePath(p.projectId, "attention")} current={here("attention")} meta={countKnown ? String(decisions) : "?"} metaTitle={countKnown ? undefined : t("focus.attention.countUnknown")} />
         <FocusRow icon="journal" label={t("focus.nav.journal")} href={projectPagePath(p.projectId, "journal")} current={here("journal")} />
 
         <details className="focus-advanced">
@@ -147,12 +160,12 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
   );
 }
 
-function FocusRow({ icon, label, href, current, meta, className = "" }: { icon: IconName; label: string; href: string; current: boolean; meta?: string; className?: string }) {
+function FocusRow({ icon, label, href, current, meta, metaTitle, className = "" }: { icon: IconName; label: string; href: string; current: boolean; meta?: string; metaTitle?: string; className?: string }) {
   return (
     <a className={`focus-row ${current ? "current" : ""} ${className}`} href={href} onClick={(e) => go(e, href)} aria-current={current ? "page" : undefined}>
       <Icon name={icon} size={16} />
       <span className="focus-row-label truncate">{label}</span>
-      {meta && <span className="focus-row-meta">{meta}</span>}
+      {meta && <span className="focus-row-meta" title={metaTitle} aria-label={metaTitle}>{meta}</span>}
     </a>
   );
 }

@@ -44,7 +44,7 @@ WORDS = {
         "questions": "Questions", "events": "3 events since 09:51", "onlyyou": "edited by you only", "byorch": "changed by the orchestrator", "older": "Older entries",
         "note": "Add a note", "enable": "Switch the orchestrator on", "on": "Switch on", "cost": "total may be unknown", "pause": "Pause after the turn", "accepted": "accepted",
         "staff": "6 staff", "needs": "1 needs you", "autonomy": "autonomy: normal",
-        "spent": "$2.05 today", "levspend": "$1.20 today · 412k tokens", "iraspend": "subscription · window 23 %", "totals": "Today $2.05 · 7 days $10.90 · All $33.80",
+        "spent": "Known $2.05 today + unknown price", "levspend": "$1.20 today · 412k tokens", "iraspend": "380k tokens · subscription · window 23 %", "totals": "Today known $2.05 · 7 days known $10.90 · All known $33.80",
         "orchspend": "Orchestrator: $0.85 today · 96k tokens",
     },
     "ru": {
@@ -56,7 +56,7 @@ WORDS = {
         "questions": "Вопросы", "events": "3 события с 09:51", "onlyyou": "правите только вы", "byorch": "изменено оркестратором", "older": "Более ранние записи",
         "note": "Добавить заметку", "enable": "Включить оркестратор", "on": "Включить", "cost": "Итоговая сумма может быть неизвестна", "pause": "После хода — пауза", "accepted": "принято",
         "staff": "6 сотрудников", "needs": "1 ждёт вас", "autonomy": "самостоятельность: обычная",
-        "spent": "$2.05 сегодня", "levspend": "$1.20 сегодня · токенов: 412k", "iraspend": "подписка · окно 23 %", "totals": "Сегодня $2.05 · 7 дней $10.90 · Всего $33.80",
+        "spent": "Известно $2.05 сегодня + неизвестная цена", "levspend": "$1.20 сегодня · токенов: 412k", "iraspend": "токенов: 380k · подписка · окно 23 %", "totals": "Сегодня известно $2.05 · За 7 дней известно $10.90 · Всего известно $33.80",
         "orchspend": "Оркестратор: $0.85 сегодня · токенов: 96k",
     },
 }

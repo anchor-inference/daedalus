@@ -22,7 +22,7 @@ describe("project spend in words", () => {
     expect(spendLine(null)).toBeNull();
   });
   it("shows a subscription by the window used, never as free", () => {
-    expect(spendLine(line({ tokens: 412_000, subscriptions: 1 }, { window_used_pct: 23.4, source: "subscription" }))).toBe("subscription · window 23 %");
+    expect(spendLine(line({ tokens: 412_000, subscriptions: 1 }, { window_used_pct: 23.4, source: "subscription" }))).toBe("412k tokens · subscription · window 23 %");
   });
   it("sums the project over the three windows, in both languages", () => {
     const usage: ProjectUsage = { project_id: "p", staff: [], orchestrator: line({}), other: line({}), total: { today: { ...none, usd: 3.05, tokens: 2000 }, week: { ...none, usd: 12.4, tokens: 9000 }, all: { ...none, usd: 40.1, tokens: 1_200_000, unpriced: 1 }, subscription: null } };
@@ -35,7 +35,7 @@ describe("project spend in words", () => {
   it("shows priced and subscription activity together without claiming the subscription was free", () => {
     const member = line({ usd: 0.4, tokens: 1000, subscriptions: 1 }, { window_used_pct: 40, source: "subscription" });
     const usage: ProjectUsage = { project_id: "p", staff: [], orchestrator: line({}), other: line({}), total: member };
-    expect(spendLine(member)).toBe("$0.40 today · subscription · window 40 %");
+    expect(spendLine(member)).toBe("$0.40 today · 1k tokens · subscription · window 40 %");
     expect(totalsLine(usage)).toContain("Today known $0.40");
     expect(totalsLine(usage)).toContain("1 subscription session (USD unavailable)");
     expect(chipText(usage)).toBe("Known $0.40 today + unknown price");

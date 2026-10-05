@@ -643,7 +643,8 @@ class TeamStub:
     @staticmethod
     def spent(usd: float = 0.0, tokens: int = 0, *, unpriced: int = 0, week: float | None = None, total: float | None = None, subscription: float | None = None) -> dict:
         """One usage line: today's spend, the week and all-time totals (at least today's), a subscription window."""
-        today = {"usd": usd, "tokens": tokens, "unpriced": unpriced}
+        today = {"usd": usd, "tokens": tokens, "unpriced": unpriced,
+                 "subscriptions": 1 if subscription is not None else 0}
         return {
             "today": today, "week": {**today, "usd": week if week is not None else usd}, "all": {**today, "usd": total if total is not None else (week if week is not None else usd)},
             "subscription": {"window_used_pct": subscription, "source": "subscription"} if subscription is not None else None,
@@ -654,7 +655,8 @@ class TeamStub:
         nothing = self.spent()
         rows = [{"staff_id": m["id"], "name": m["name"], "harness": m["harness"], "archived": bool(m["archived_at"]), **self.spend.get(m["id"], nothing)} for m in self.staff]
         orchestrator = self.orchestrator_spend or nothing
-        total = {w: {k: round(sum(line[w][k] for line in [*rows, orchestrator]), 4) for k in ("usd", "tokens", "unpriced")} for w in ("today", "week", "all")}
+        total = {w: {k: round(sum(line[w][k] for line in [*rows, orchestrator]), 4)
+                     for k in ("usd", "tokens", "unpriced", "subscriptions")} for w in ("today", "week", "all")}
         return {"project_id": self.project["id"], "since": {}, "staff": rows, "orchestrator": orchestrator, "other": nothing, "total": {**total, "subscription": None}}
 
     @staticmethod

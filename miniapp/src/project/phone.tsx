@@ -28,11 +28,11 @@ import type { Staff, Team } from "../team/team";
 import type { ProjectBoardData } from "../board/board";
 import { errorText } from "../ui";
 import { boardKey, staffKey, terminalsKey, useProject, useUsage } from "./data";
-import { firstWait, oldestOpen, operatorReviewReady, PHONE_TABS, type PhoneTab, splitTeam, staffTone, teamCounts, waitKey } from "./focus";
+import { firstWait, oldestOpen, PHONE_TABS, type PhoneTab, splitTeam, staffTone, teamCounts, waitKey } from "./focus";
 import { useMember } from "./staff";
 import { spendLine, staffUsage } from "./usage";
 import { budgetCompact, useGoalBudget } from "./ProjectBudget";
-import { budgetAttention, distinctOperatorActions, type NextAction } from "./attention-model";
+import { operatorAttentionCount, type NextAction } from "./attention-model";
 
 const enc = encodeURIComponent;
 const operatorAsksKey = (projectId: string) => `/api/asks?project=${enc(projectId)}&routed_to=operator`;
@@ -80,9 +80,7 @@ export function ProjectTabs({ projectId, current }: { projectId: string; current
   const budget = useGoalBudget(projectId);
   const countKnown = !offline && !asksUnverified && !!board.data && !board.error
     && !!next.data && !next.error && !!budget.data && !budget.error;
-  const decisions = openAsks.length + (board.data?.tasks ?? []).filter(operatorReviewReady).length
-    + distinctOperatorActions(next.data?.actions ?? [], openAsks, board.data?.tasks ?? []).length
-    + (budgetAttention(budget.data) ? 1 : 0);
+  const decisions = operatorAttentionCount(openAsks, board.data?.tasks ?? [], next.data?.actions ?? [], budget.data);
   return (
     <nav className="tabbar project-tabs" aria-label={t("phone.tabs")}>
       {PHONE_TABS.map((tab) => {

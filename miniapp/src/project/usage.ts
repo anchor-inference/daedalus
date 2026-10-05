@@ -32,7 +32,7 @@ export function spendLine(line: UsageLine | undefined | null): string | null {
   if (today.usd === 0 && today.tokens === 0 && today.unpriced === 0 && today.subscriptions === 0) return null;
   const parts = today.usd > 0 || (today.unpriced === 0 && today.subscriptions === 0)
     ? [t("pusage.today", { usd: usd(today.usd) })] : [];
-  if (today.tokens && today.subscriptions === 0) parts.push(t("pusage.tokens", { n: tokens(today.tokens) }));
+  if (today.tokens) parts.push(t("pusage.tokens", { n: tokens(today.tokens) }));
   if (today.unpriced) parts.push(plural("pusage.unpriced", today.unpriced));
   if (today.subscriptions) parts.push(sub?.source === "subscription" && sub.window_used_pct !== null
     ? t("pusage.subscription", { pct: Math.round(sub.window_used_pct) })

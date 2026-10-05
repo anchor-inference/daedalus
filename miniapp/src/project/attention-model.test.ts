@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Ask } from "../api";
 import type { ProjectTask } from "../board/board";
-import { actionBlockerKeys, budgetAttention, distinctOperatorActions, type NextAction } from "./attention-model";
+import { actionBlockerKeys, budgetAttention, distinctOperatorActions, operatorAttentionCount, type NextAction } from "./attention-model";
 import type { GoalBudget, MoneyBalance } from "./ProjectBudget";
 
 const task = { id: "task-one", contract_revision: 4 } as ProjectTask;
@@ -25,6 +25,17 @@ describe("attention source identity", () => {
   it("does not treat a matching request ID on a different task as the same source", () => {
     expect(distinctOperatorActions([action("action-one", "answer_question", ask.id)],
       [{ ...ask, task_id: "another-task" }], [task])).toHaveLength(1);
+  });
+
+  it("shows one operator decision when a current review is also the next action", () => {
+    const review = { ...task, status: "review", acceptance_state: "accepted" } as ProjectTask;
+    const actions = [action("same-review", "review", null), action("stale-review", "review", null, 3),
+      { ...action("blocked-review", "review", null), enabled: false },
+      action("source-review", "review", "another-result"), action("retry", "retry", null)];
+    expect(distinctOperatorActions(actions, [], [review]).map((row) => row.action_id))
+      .toEqual(["stale-review", "blocked-review", "source-review", "retry"]);
+    expect(distinctOperatorActions(actions, [], [{ ...review, status: "done" }]).map((row) => row.action_id))
+      .toEqual(["same-review", "stale-review", "blocked-review", "source-review", "retry"]);
   });
 });
 
@@ -55,5 +66,18 @@ describe("project budget attention", () => {
     expect(budgetAttention({ ...budget, total: balance("uncertain", "0.000000") }))
       .toEqual({ scopes: ["total"], reason: "unknown" });
     expect(budgetAttention({ configured: false } as GoalBudget)).toBeNull();
+  });
+});
+
+describe("navigation decision count", () => {
+  it("counts each current source once, including separate actions and the budget", () => {
+    const review = { ...task, status: "review", acceptance_state: "accepted" } as ProjectTask;
+    const budget = { configured: true, total: balance("known", "0.000000"),
+      coordination: balance("known", "2.000000") } as GoalBudget;
+    const actions = [action("same-ask", "answer_question", ask.id), action("same-review", "review", null),
+      action("input", "provide_input", null)];
+    expect(operatorAttentionCount([ask, ask], [review], actions, budget)).toBe(4);
+    expect(operatorAttentionCount([{ ...ask, resolved_at: "2026-01-01" }],
+      [{ ...review, status: "done" }], [], { ...budget, total: balance("known", "2.000000") })).toBe(0);
   });
 });

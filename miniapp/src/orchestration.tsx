@@ -65,7 +65,7 @@ function ProjectRow({ project, sessions }: { project: ProjectFolder; sessions: S
 
 /** Main first, then every project with an orchestrator; the same in the column and on a phone's page.
  *  A project opened leaves this list for its own column (focus mode), so no row here is ever current. */
-function OrchestrationRows({ onMain }: { onMain: boolean }) {
+function OrchestrationRows({ onMain, onProjects }: { onMain: boolean; onProjects?: () => void }) {
   const { data, loading } = useListing();
   const projects = orchestratedProjects(data?.projects ?? []);
   // The palette is a keyboard's way in; a phone or a tablet without a pointer has no ⌘K to press,
@@ -76,7 +76,12 @@ function OrchestrationRows({ onMain }: { onMain: boolean }) {
       <div className="orch-main"><MainEntry current={onMain} /></div>
       <div className="orch-section sub">{t("orch.projects")}</div>
       {projects.map((p) => <ProjectRow key={p.id} project={p} sessions={data?.sessions ?? []} />)}
-      {!loading && data && projects.length === 0 && <div className="orch-empty sub">{t(keyboard ? "orch.empty" : "orch.empty.touch")}</div>}
+      {!loading && data && projects.length === 0 && <div className="orch-empty sub">
+        {onProjects ? <>
+          <p>{t(data.projects.length === 0 ? "orch.empty.noProjects" : "orch.empty.touch")}</p>
+          <button className="btn primary" onClick={onProjects}>{t(data.projects.length === 0 ? "shell.projects.add" : "shell.projects")}</button>
+        </> : t(keyboard ? "orch.empty" : "orch.empty.touch")}
+      </div>}
     </>
   );
 }
@@ -107,12 +112,12 @@ export function OrchestrationSidebar(p: OrchestrationSidebarProps) {
 }
 
 /** A phone's stand-in for the column: the main orchestrator and the projects, as a page. */
-export function OrchestrationList() {
+export function OrchestrationList({ onProjects }: { onProjects: () => void }) {
   return (
     <>
       <PageHeader title={t("mode.orchestration")} />
       <div className="screen orch-list">
-        <OrchestrationRows onMain={false} />
+        <OrchestrationRows onMain={false} onProjects={onProjects} />
       </div>
     </>
   );
