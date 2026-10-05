@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, type Notification } from "./api";
 import { lang, t } from "./i18n";
 import { navigate, pathFor } from "./router";
@@ -19,6 +19,67 @@ const IDLE_POSES: PetPose[] = [
 ];
 const random = <T,>(items: T[]): T => items[Math.floor(Math.random() * items.length)];
 type Reaction = { line: string; emotion: string; action: string; prop: string };
+type Corner = "br" | "bl" | "tr" | "tl";
+type Placement = { x: number; y: number; corner: Corner | "custom" };
+const mobile = () => window.matchMedia("(max-width: 700px)").matches;
+const storageKey = () => `daedalus.pet.position.${mobile() ? "mobile" : "desktop"}`;
+const dimensions = (activity: string) => ({ width: mobile() ? 130 : activity === "settings" ? 180 : 264, height: mobile() ? 170 : activity === "settings" ? 220 : 310 });
+const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(value, high));
+const edgeLimit = (activity: string) => mobile() && activity !== "voice" ? 55 : 8;
+function boundPosition(position: Placement, activity: string): Placement {
+  const { width, height } = dimensions(activity);
+  return { ...position, x: clamp(position.x, 8, Math.max(8, window.innerWidth - width - 8)), y: clamp(position.y, 8, Math.max(8, window.innerHeight - height - edgeLimit(activity))) };
+}
+function cornerPosition(corner: Corner, activity: string): Placement {
+  const { width, height } = dimensions(activity);
+  return boundPosition({ corner, x: corner.endsWith("r") ? window.innerWidth - width - 12 : 12, y: corner.startsWith("b") ? window.innerHeight - height - edgeLimit(activity) : 8 }, activity);
+}
+function savedPosition(activity: string): Placement {
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey()) || "null");
+    if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) && ["br", "bl", "tr", "tl", "custom"].includes(saved.corner)) return boundPosition(saved, activity);
+    const oldCorner = localStorage.getItem("daedalus.pet.corner");
+    if (["br", "bl", "tr", "tl"].includes(oldCorner || "")) return cornerPosition(oldCorner as Corner, activity);
+  } catch { /* Storage can be unavailable in private mode. */ }
+  return cornerPosition(mobile() ? "tr" : "br", activity);
+}
+function savePosition(position: Placement) {
+  try { localStorage.setItem(storageKey(), JSON.stringify(position)); } catch { /* Private mode. */ }
+}
+
+function placePopup(popup: HTMLElement | null, anchor: HTMLElement | null, fallback: HTMLElement | null, obstacle?: HTMLElement | null) {
+  if (!popup || !fallback) return;
+  const hostRect = fallback.getBoundingClientRect();
+  // Voice has no floating canvas, so keep its text near the saved mascot position.
+  const voicePoint = hostRect.top + dimensions("voice").height - 50;
+  const rect = anchor ? anchor.getBoundingClientRect() : { left: hostRect.left, right: hostRect.right, width: hostRect.width, top: voicePoint, bottom: voicePoint, height: 0 };
+  const width = popup.offsetWidth, height = popup.offsetHeight, gap = 10, margin = 8;
+  const hostTop = hostRect.top;
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  // The canvas has transparent padding above the head; use its visible centre as the anchor.
+  const top = anchor ? rect.top + Math.min(36, rect.height * 0.16) : rect.top;
+  const choices = [
+    { x: centerX - width / 2, y: top - height - gap },
+    { x: rect.left - width - gap, y: centerY - height / 2 },
+    { x: rect.right + gap, y: centerY - height / 2 },
+    { x: centerX - width / 2, y: rect.bottom + gap },
+  ];
+  const placed = choices.map(({ x, y }) => {
+    const left = clamp(x, margin, Math.max(margin, window.innerWidth - width - margin));
+    const top = clamp(y, margin, Math.max(margin, window.innerHeight - height - margin));
+    return { x: left, y: top, displacement: Math.abs(left - x) + Math.abs(top - y) };
+  });
+  const occupied = obstacle?.getBoundingClientRect();
+  const overlap = (x: number, y: number) => occupied ? Math.max(0, Math.min(x + width, occupied.right) - Math.max(x, occupied.left)) * Math.max(0, Math.min(y + height, occupied.bottom) - Math.max(y, occupied.top)) : 0;
+  const fitting = placed.find(({ x, y, displacement }, index) => (index !== 0 || hostTop >= height + gap + margin) && displacement <= width / 2 && overlap(x, y) === 0);
+  const ranked = placed.map((candidate, index) => ({ candidate, penalty: candidate.displacement * 1000 + overlap(candidate.x, candidate.y) + (index === 0 && hostTop < height + gap + margin ? 1_000_000 : 0) }));
+  ranked.sort((a, b) => a.penalty - b.penalty);
+  const choice = fitting || ranked[0].candidate;
+  popup.style.left = `${choice.x}px`;
+  popup.style.top = `${choice.y}px`;
+  popup.style.visibility = "visible";
+}
 
 export function PetHost({ needsReply, activity }: { needsReply: boolean; activity: string }) {
   const [enabled, setEnabled] = usePetPreference();
@@ -28,20 +89,19 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
   const [notice, setNotice] = useState<Notification | null>(null);
   const [speaking, setSpeaking] = useState(0);
   const [menu, setMenu] = useState(false);
-  const [corner, setCorner] = useState<"br" | "bl" | "tr" | "tl">(() => {
-    try {
-      const value = localStorage.getItem("daedalus.pet.corner");
-      if (value === "br" || value === "bl" || value === "tr" || value === "tl") return value;
-    } catch { /* private mode */ }
-    return window.matchMedia("(max-width: 700px)").matches ? "tr" : "br";
-  });
+  const [position, setPosition] = useState<Placement>(() => savedPosition(activity));
   const [busy, setBusy] = useState(false);
   const lastReaction = useRef(0);
   const lastActivity = useRef(activity);
   const lineTimer = useRef<number | undefined>(undefined);
   const poseTimer = useRef<number | undefined>(undefined);
   const holdTimer = useRef<number | undefined>(undefined);
-  const touchStart = useRef<[number, number] | null>(null);
+  const drag = useRef<{ id: number; x: number; y: number; origin: Placement; moved: boolean } | null>(null);
+  const hostRef = useRef<HTMLDivElement>(null);
+  const figureRef = useRef<HTMLDivElement>(null);
+  const bubbleRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const viewport = useRef(mobile());
 
   const say = (text: string, next: PetPose, entry: Notification | null = null, duration = entry ? 12000 : 7000) => {
     window.clearTimeout(lineTimer.current);
@@ -124,28 +184,85 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
     window.addEventListener("keydown", escape);
     return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("keydown", escape); };
   }, [menu]);
+  useLayoutEffect(() => {
+    if (!enabled) return;
+    const update = () => {
+      if (viewport.current !== mobile()) {
+        viewport.current = mobile();
+        setPosition(savedPosition(activity));
+      } else setPosition((current) => {
+        const next = current.corner === "custom" ? boundPosition(current, activity) : cornerPosition(current.corner, activity);
+        return next.x === current.x && next.y === current.y ? current : next;
+      });
+      placePopup(bubbleRef.current, figureRef.current, hostRef.current);
+      placePopup(menuRef.current, figureRef.current, hostRef.current, bubbleRef.current);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [activity, enabled]);
+  useLayoutEffect(() => {
+    if (!enabled) return;
+    const update = () => {
+      placePopup(bubbleRef.current, figureRef.current, hostRef.current);
+      placePopup(menuRef.current, figureRef.current, hostRef.current, bubbleRef.current);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    if (bubbleRef.current) observer.observe(bubbleRef.current);
+    if (menuRef.current) observer.observe(menuRef.current);
+    return () => observer.disconnect();
+  }, [enabled, line, notice, menu, position, activity]);
+  const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || menu) return;
+    drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, origin: position, moved: false };
+    // Synthetic pointer events in the browser harness have no active pointer to capture.
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* No active pointer. */ }
+    if (event.pointerType === "touch") holdTimer.current = window.setTimeout(() => { drag.current = null; setMenu(true); }, 650);
+  };
+  const moveDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const current = drag.current;
+    if (!current || event.pointerId !== current.id) return;
+    const dx = event.clientX - current.x, dy = event.clientY - current.y;
+    if (!current.moved && Math.hypot(dx, dy) < 6) return;
+    current.moved = true;
+    window.clearTimeout(holdTimer.current);
+    setPosition(boundPosition({ x: current.origin.x + dx, y: current.origin.y + dy, corner: "custom" }, activity));
+  };
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const current = drag.current;
+    if (!current || event.pointerId !== current.id) return;
+    drag.current = null;
+    window.clearTimeout(holdTimer.current);
+    if (current.moved) {
+      const next = boundPosition({ x: current.origin.x + event.clientX - current.x, y: current.origin.y + event.clientY - current.y, corner: "custom" }, activity);
+      setPosition(next);
+      savePosition(next);
+    }
+  };
   if (!enabled) return null;
-  return <div className={`pet-host corner-${corner} ${activity === "settings" ? "in-settings" : ""} ${activity === "voice" ? "in-voice" : ""}`} aria-label={t("pet.title")}>
-    {line && <button className="pet-bubble" role="status" onClick={() => { if (notice) navigate(pathFor("inbox")); else setLine(""); }}>
+  return <div ref={hostRef} className={`pet-host ${activity === "settings" ? "in-settings" : ""} ${activity === "voice" ? "in-voice" : ""}`} style={{ left: position.x, top: position.y }} aria-label={t("pet.title")}>
+    {line && <button ref={bubbleRef} className="pet-bubble" role="status" onClick={() => { if (notice) navigate(pathFor("inbox")); else setLine(""); }}>
       {line}{notice?.body && <small>{notice.body}</small>}
     </button>}
-    {activity !== "voice" && <div className="pet-figure" role="button" tabIndex={0} aria-label={t("pet.title")}
+    {activity !== "voice" && <div ref={figureRef} className="pet-figure" role="button" tabIndex={0} aria-label={t("pet.title")}
       onContextMenu={(event) => { event.preventDefault(); setMenu(true); }}
       onKeyDown={(event) => { if (event.key === "Enter" || event.key === "ContextMenu" || event.shiftKey && event.key === "F10") { event.preventDefault(); setMenu(true); } }}
-      onPointerDown={(event) => { if (event.pointerType === "touch") { touchStart.current = [event.clientX, event.clientY]; holdTimer.current = window.setTimeout(() => setMenu(true), 650); } }}
-      onPointerMove={(event) => { if (touchStart.current && Math.hypot(event.clientX - touchStart.current[0], event.clientY - touchStart.current[1]) > 10) window.clearTimeout(holdTimer.current); }}
-      onPointerUp={() => { touchStart.current = null; window.clearTimeout(holdTimer.current); }}
-      onPointerCancel={() => { touchStart.current = null; window.clearTimeout(holdTimer.current); }}>
+      onPointerDown={startDrag}
+      onPointerMove={moveDrag}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}>
       <Suspense fallback={null}><PetStage pose={pose} speaking={speaking} /></Suspense>
     </div>}
-    {menu && activity !== "voice" && <div className="pet-menu" role="dialog" aria-label={t("pet.title")}>
+    {menu && activity !== "voice" && <div ref={menuRef} className="pet-menu" role="dialog" aria-label={t("pet.title")}>
       <div className="pet-menu-head"><strong>{t("pet.title")}</strong><button className="pet-menu-close" onClick={() => setMenu(false)} aria-label={t("common.close")}>×</button></div>
       <div className="pet-menu-fields">
       <label>{t("pet.emotion")}<select value={pose.emotion} onChange={(event) => setPose({ ...pose, emotion: event.target.value })}>{EMOTIONS.map((id) => <option key={id} value={id}>{id}</option>)}</select></label>
       <label>{t("pet.action")}<select value={pose.action} onChange={(event) => setPose({ ...pose, action: event.target.value })}>{ACTIONS.map((id) => <option key={id} value={id}>{id}</option>)}</select></label>
       <label>{t("pet.prop")}<select value={pose.prop} onChange={(event) => setPose({ ...pose, prop: event.target.value })}>{PROPS.map((id) => <option key={id} value={id}>{id || t("pet.none")}</option>)}</select></label>
-      <label>{t("pet.move")}<select value={corner} onChange={(event) => { const next = event.target.value as typeof corner; setCorner(next); try { localStorage.setItem("daedalus.pet.corner", next); } catch { /* private mode */ } }}>
+      <label>{t("pet.move")}<select value={position.corner} onChange={(event) => { const next = cornerPosition(event.target.value as Corner, activity); setPosition(next); savePosition(next); }}>
         {(["br", "bl", "tr", "tl"] as const).map((id) => <option key={id} value={id}>{t(`pet.corner.${id}`)}</option>)}
+        {position.corner === "custom" && <option value="custom">{t("pet.corner.custom")}</option>}
       </select></label>
       </div>
       <div className="pet-menu-actions">

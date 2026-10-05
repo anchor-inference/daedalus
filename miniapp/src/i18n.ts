@@ -267,6 +267,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "pet.corner.bl": { en: "Bottom left", ru: "Слева внизу" },
   "pet.corner.tr": { en: "Top right", ru: "Справа вверху" },
   "pet.corner.tl": { en: "Top left", ru: "Слева вверху" },
+  "pet.corner.custom": { en: "Custom position", ru: "Своё положение" },
   "pet.none": { en: "None", ru: "Нет" },
   "voice.mascot.full": { en: "Mascot", ru: "Маскот" },
   "voice.mascot.head": { en: "Head", ru: "Голова" },

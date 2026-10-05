@@ -40,12 +40,14 @@ export function createStage(o) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "default", alpha: !!o.transparent, premultipliedAlpha: true });
   // A laptop GPU at 2x on a 1440 window draws four times the pixels for little visible gain
   // on soft, rounded shapes; 1.5 is the compromise the film's still frames were judged at.
-  const dpr = () => Math.min(window.devicePixelRatio || 1, o.maxDpr || 1.5);
-  renderer.setPixelRatio(dpr());
+  const dpr = (width, height) => Math.max(1, Math.min(
+    Math.max(o.minDpr || 1, Math.min(window.devicePixelRatio || 1, o.maxDpr || 1.5)),
+    o.maxPixels ? Math.sqrt(o.maxPixels / (width * height)) : Infinity,
+  ));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NeutralToneMapping;
   renderer.toneMappingExposure = o.exposure || 1.05;
-  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.enabled = o.shadows !== false;
   renderer.shadowMap.type = THREE.PCFShadowMap; // the soft variant is deprecated and three falls back to this one anyway
   const scene = new THREE.Scene();
   // transparent: the canvas sits over a page that draws its own background (a strip, a card)
@@ -92,7 +94,7 @@ export function createStage(o) {
     // a canvas that is not full-window (a strip, a slot) sizes to its own box
     if (o.fitCanvas) { const r = canvas.getBoundingClientRect(); W = Math.max(1, r.width); H = Math.max(1, r.height); }
     else { W = window.innerWidth; H = window.innerHeight; }
-    renderer.setPixelRatio(dpr());
+    renderer.setPixelRatio(dpr(W, H));
     renderer.setSize(W, H, false);
     camera.aspect = W / H;
     const z = o.zone && o.zone();

@@ -26,11 +26,13 @@ function bodyRadius(y) { // the lathe profile of chibi2.js's body (its mesh sits
 export class MascotStage {
   constructor(canvas, options = {}) {
     this.canvas = canvas;
-    // The old 1x compact canvas was visibly blocky on high-density phones.
-    this.stage = createStage({ canvas, fitCanvas: true, transparent: true, fov: 30, maxDpr: options.compact ? 2.5 : 2, maxFps: options.compact ? 24 : options.embedded ? 30 : undefined, exposure: 1.06, envIntensity: 0.6 });
+    // The compact scene gets more detail on 1x screens while its pixel budget limits GPU work.
+    this.stage = createStage({ canvas, fitCanvas: true, transparent: true, fov: 30, minDpr: options.compact ? 1.5 : 1, maxDpr: options.compact ? 3 : 2, maxPixels: options.compact ? 200000 : undefined, maxFps: options.compact ? 40 : options.embedded ? 30 : undefined, shadows: !options.embedded, exposure: 1.06, envIntensity: 0.6 });
     this.scene = this.stage.scene;
     this.lights = studioLights(this.scene, { target: new THREE.Vector3(0, 2.0, 0), key: 2.4, rim: 8, fill: 0.9, hemi: 0.42, shadowRadius: 3 });
     if (options.compact) this.lights.key.shadow.mapSize.set(512, 512);
+    // Embedded scenes have no plinth to receive a shadow; the contact mesh supplies grounding.
+    if (options.embedded) this.lights.key.castShadow = false;
     // a low warm light from the front, so the bronze and the face read warm and close
     const warm = new THREE.PointLight(0xffc89a, 1.1, 9, 2); warm.position.set(-1.2, 1.3, 3.2); this.scene.add(warm);
     this.floor = options.embedded ? 0 : PLINTH;
@@ -80,7 +82,7 @@ export class MascotStage {
     this.framing = "full";
     this.trail = new Trail(this.scene);
     this.tmp = new THREE.Vector3(); this.tmp2 = new THREE.Vector3(); this.tmpQ = new THREE.Quaternion(); this.tmpE = new THREE.Euler();
-    this.bindDrag();
+    if (!options.embedded) this.bindDrag();
     this.stage.onFrame((dt, t) => this.update(dt, t));
     this.onResize = () => this.frame(true);
     window.addEventListener("resize", this.onResize);
