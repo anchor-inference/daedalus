@@ -19,6 +19,17 @@ def stop(id_: str) -> dict:
             "updated_at": "2026-10-01T09:00:00Z", "phase": "observing_exit",
             "deadline_at": "2026-10-01T08:59:00Z", "exit_observed": True,
             "no_entry_observed": False, "generation_matches_host_record": True,
+            "exit_evidence": {"runtime_ref": "terminal-one", "host_generation": 7, "contract_revision": 1,
+                              "observed_status": "exited", "observed_at": "2026-10-01T09:02:00Z"},
+            "no_entry_evidence": None,
+            "containment_evidence": {"source": "writer", "state": "released", "host_generation": "7",
+                                     "latest_observation": {"id": "observation-one", "host_generation": "7",
+                                                            "observation_kind": "exit", "enforced": 1,
+                                                            "populated": 0, "observed_at": "2026-10-01T09:03:00Z"},
+                                     "release_observation": {"id": "observation-one", "host_generation": "7",
+                                                             "observation_kind": "exit", "enforced": 1,
+                                                             "populated": 0, "observed_at": "2026-10-01T09:03:00Z"},
+                                     "stale_observation": None},
             "recovery_blocker": "ready"}
 
 
@@ -71,6 +82,7 @@ def check(width: int, language: str) -> None:
 
         blocked = stop("attempt-one")
         blocked["recovery_blocker"] = "containment_unavailable"
+        blocked["containment_evidence"] = None
         stub.unknown_stops = [blocked]
         page.reload()
         disclosure = page.locator(".pboard-unknown-stops")
@@ -84,14 +96,34 @@ def check(width: int, language: str) -> None:
         expect(disclosure).to_contain_text("7")
         expect(disclosure).to_contain_text("Yes" if language == "en" else "Да")
         expect(disclosure).to_contain_text("no recorded process containment" if language == "en" else "не записана изоляция процессов")
+        expect(disclosure).to_contain_text("No binding recorded" if language == "en" else "Привязка не записана")
+        expect(disclosure).to_contain_text("terminal-one")
         reconcile = disclosure.locator(".pboard-unknown-row button")
         expect(reconcile).to_be_disabled()
         assert stub.stop_reconciliations == [], stub.stop_reconciliations
         fits(page, f"{width}px {language} expanded stop")
 
+        stale = stop("attempt-one")
+        stale["recovery_blocker"] = "container_not_empty"
+        stale["containment_evidence"]["state"] = "released"
+        stale["containment_evidence"]["latest_observation"] = None
+        stale["containment_evidence"]["release_observation"] = None
+        stale["containment_evidence"]["stale_observation"] = {
+            "id": "stale-observation", "host_generation": "6", "observation_kind": "exit",
+            "enforced": 1, "populated": 0, "observed_at": "2026-10-01T09:03:00Z"}
+        stub.unknown_stops = [stale]
+        disclosure.get_by_role("button", name="Reload stops" if language == "en" else "Обновить остановки").click()
+        expect(disclosure).to_contain_text("stale-observation")
+        expect(disclosure).to_contain_text("not release proof" if language == "en" else "не подтверждает освобождение")
+        expect(reconcile).to_be_disabled()
+        assert stub.stop_reconciliations == []
+
         stub.unknown_stops = [stop("attempt-one")]
         disclosure.get_by_role("button", name="Reload stops" if language == "en" else "Обновить остановки").click()
         expect(disclosure).to_contain_text("Exact release evidence" if language == "en" else "Точное подтверждение")
+        expect(disclosure).to_contain_text("observation-one")
+        expect(disclosure).to_contain_text("Writer claim" if language == "en" else "Заявка на запись")
+        expect(disclosure).to_contain_text("populated No" if language == "en" else "есть процессы Нет")
         expect(reconcile).to_be_enabled()
         reconcile.click()
         expect(disclosure).to_contain_text("completed")

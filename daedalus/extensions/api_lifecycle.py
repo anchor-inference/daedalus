@@ -60,20 +60,11 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                 "SELECT a.id,a.task_id,a.state,a.host_generation,a.staff_session_id,a.runtime_kind,"
                 "a.provider_session_ref,a.native_run_id,a.runtime_instance,o.parent_kind,o.parent_id,"
                 "o.generation,o.cancel_state,o.updated_at,c.phase,c.deadline_at,"
-                "EXISTS (SELECT 1 FROM runtime_exit_observations e WHERE e.attempt_id = a.id"
-                " AND e.staff_session_id = a.staff_session_id AND e.host_generation = a.host_generation"
-                " AND e.provider_session_ref = a.provider_session_ref"
-                " AND e.contract_revision = a.contract_revision AND e.runtime_kind = a.runtime_kind"
-                " AND ((a.runtime_kind = 'daedalus' AND e.runtime_ref = a.native_run_id)"
-                " OR (a.runtime_kind = 'cli' AND e.runtime_instance = a.runtime_instance"
-                " AND e.runtime_ref = s.terminal_id"
-                " AND e.provider_session_ref = 'terminal:' || s.terminal_id))) AS exit_observed,"
                 "EXISTS (SELECT 1 FROM runtime_no_entry_observations n WHERE n.attempt_id = a.id"
                 " AND n.staff_session_id = a.staff_session_id AND n.host_generation = a.host_generation"
                 " AND n.contract_revision = a.contract_revision) AS no_entry_observed"
                 " FROM lifecycle_owners o JOIN execution_attempts a ON a.id = o.child_id"
                 " JOIN board_tasks t ON t.id = a.task_id"
-                " LEFT JOIN staff_sessions s ON s.id = a.staff_session_id"
                 " JOIN attempt_phase_clocks c ON c.attempt_id = a.id AND c.outcome = 'timed_out'"
                 " AND c.phase = (SELECT latest.phase FROM attempt_phase_clocks latest"
                 " WHERE latest.attempt_id = a.id AND latest.outcome = 'timed_out'"
@@ -87,9 +78,63 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         async with app.db.transaction() as conn:
             for row in items:
                 row["generation_matches_host_record"] = row["host_generation"] == host
-                row["exit_observed"] = bool(row["exit_observed"])
                 row["no_entry_observed"] = bool(row["no_entry_observed"])
-                if row["no_entry_observed"] and await no_entry_in(conn, row["id"]):
+                # An exit flag alone hid which immutable observation matched the blocked attempt.
+                exit_proof = await one(
+                    conn, "SELECT e.runtime_ref,e.host_generation,e.contract_revision,e.observed_status,e.observed_at"
+                    " FROM runtime_exit_observations e JOIN execution_attempts a ON a.id = e.attempt_id"
+                    " LEFT JOIN staff_sessions s ON s.id = a.staff_session_id"
+                    " WHERE a.id = ? AND e.staff_session_id = a.staff_session_id"
+                    " AND e.host_generation = a.host_generation AND e.provider_session_ref = a.provider_session_ref"
+                    " AND e.contract_revision = a.contract_revision AND e.runtime_kind = a.runtime_kind"
+                    " AND ((a.runtime_kind = 'daedalus' AND e.runtime_ref = a.native_run_id)"
+                    " OR (a.runtime_kind = 'cli' AND e.runtime_instance = a.runtime_instance"
+                    " AND e.runtime_ref = s.terminal_id AND e.provider_session_ref = 'terminal:' || s.terminal_id))"
+                    " ORDER BY e.observed_at DESC LIMIT 1", (row["id"],),
+                )
+                row["exit_evidence"] = dict(exit_proof) if exit_proof else None
+                row["exit_observed"] = exit_proof is not None
+                no_entry_proven = row["no_entry_observed"] and await no_entry_in(conn, row["id"])
+                no_entry_proof = await one(conn,
+                    "SELECT n.host_generation,n.contract_revision,n.observed_at"
+                    " FROM runtime_no_entry_observations n JOIN execution_attempts a ON a.id = n.attempt_id"
+                    " WHERE a.id = ? AND n.staff_session_id = a.staff_session_id"
+                    " AND n.runtime_kind = a.runtime_kind AND n.host_generation = a.host_generation"
+                    " AND n.contract_revision = a.contract_revision",
+                    (row["id"],)) if no_entry_proven else None
+                row["no_entry_evidence"] = dict(no_entry_proof) if no_entry_proof else None
+                binding = await one(conn,
+                    "SELECT 'profile' AS source,state,host_generation,daemon_instance,launch_id FROM attempt_resource_bindings"
+                    " WHERE attempt_id = ? UNION ALL"
+                    " SELECT 'writer' AS source,state,host_generation,daemon_instance,launch_id FROM writer_attempt_bindings"
+                    " WHERE attempt_id = ?", (row["id"], row["id"]))
+                row["containment_evidence"] = None
+                release = None
+                if binding is not None:
+                    table = "attempt_resource_observations" if binding["source"] == "profile" else "writer_attempt_observations"
+                    latest = await one(conn,
+                        f"SELECT id,host_generation,observation_kind,enforced,populated,observed_at FROM {table}"
+                        " WHERE attempt_id = ? AND launch_id = ? AND host_generation = ?"
+                        " AND daemon_instance = ? ORDER BY observed_at DESC,id DESC LIMIT 1",
+                        (row["id"], binding["launch_id"], binding["host_generation"], binding["daemon_instance"]))
+                    release = await one(conn,
+                        f"SELECT id,host_generation,observation_kind,enforced,populated,observed_at FROM {table}"
+                        " WHERE attempt_id = ? AND launch_id = ? AND observation_kind IN ('stop','exit')"
+                        " AND host_generation = ? AND daemon_instance = ? AND enforced = 1 AND populated = 0"
+                        " ORDER BY observed_at DESC,id DESC LIMIT 1",
+                        (row["id"], binding["launch_id"], binding["host_generation"], binding["daemon_instance"]))
+                    stale = await one(conn,
+                        f"SELECT id,host_generation,observation_kind,enforced,populated,observed_at FROM {table}"
+                        " WHERE attempt_id = ? AND launch_id = ?"
+                        " AND (host_generation != ? OR daemon_instance != ?)"
+                        " ORDER BY observed_at DESC,id DESC LIMIT 1",
+                        (row["id"], binding["launch_id"], binding["host_generation"], binding["daemon_instance"]))
+                    row["containment_evidence"] = {"source": binding["source"], "state": binding["state"],
+                        "host_generation": binding["host_generation"],
+                        "latest_observation": dict(latest) if latest else None,
+                        "release_observation": dict(release) if release else None,
+                        "stale_observation": dict(stale) if stale else None}
+                if no_entry_proven:
                     row["recovery_blocker"] = "ready"
                 elif not row["generation_matches_host_record"]:
                     row["recovery_blocker"] = "previous_host"
@@ -97,12 +142,10 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                     row["recovery_blocker"] = "runtime_identity_missing"
                 elif not row["exit_observed"]:
                     row["recovery_blocker"] = "exit_unobserved"
-                elif row["runtime_kind"] == "cli" and await one(
-                    conn, "SELECT 1 FROM attempt_resource_bindings WHERE attempt_id = ?"
-                    " UNION ALL SELECT 1 FROM writer_attempt_bindings WHERE attempt_id = ?",
-                    (row["id"], row["id"]),
-                ) is None:
+                elif row["runtime_kind"] == "cli" and binding is None:
                     row["recovery_blocker"] = "containment_unavailable"
+                elif row["runtime_kind"] == "cli" and binding is not None and release is None:
+                    row["recovery_blocker"] = "container_not_empty"
                 elif not await attempt_released_in(conn, row["id"]):
                     row["recovery_blocker"] = "container_not_empty"
                 else:

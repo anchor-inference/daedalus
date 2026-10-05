@@ -198,6 +198,10 @@ async def test_terminal_exit_without_containment_keeps_stop_unknown(db: Database
             item = (await client.get("/api/projects/project/unknown-stops")).json()["items"][0]
             assert item["exit_observed"] is True
             assert item["recovery_blocker"] == "containment_unavailable"
+            assert item["exit_evidence"] == {"runtime_ref": "terminal", "host_generation": identity.host_generation,
+                                             "contract_revision": identity.contract_revision,
+                                             "observed_status": "exited", "observed_at": due.isoformat()}
+            assert item["containment_evidence"] is None
             await db.execute("INSERT INTO project_folders(id,project_id,path,env,position,created_at)"
                              " VALUES ('folder','project','/tmp/fixture-worktree','container',0,'2026-01-01')")
             await db.execute("INSERT INTO writer_attempt_bindings(attempt_id,project_id,host_generation,env,"
@@ -205,18 +209,76 @@ async def test_terminal_exit_without_containment_keeps_stop_unknown(db: Database
                              "state,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                              (identity.id, "project", str(identity.host_generation), "container", "daemon", "folder",
                               "folder-digest", "workspace-digest", "launch", "enforced", due.isoformat(), due.isoformat()))
-            assert (await client.get("/api/projects/project/unknown-stops")).json()["items"][0][
-                "recovery_blocker"] == "container_not_empty"
+            item = (await client.get("/api/projects/project/unknown-stops")).json()["items"][0]
+            assert item["recovery_blocker"] == "container_not_empty"
+            assert item["containment_evidence"] == {"source": "writer", "state": "enforced",
+                "host_generation": str(identity.host_generation), "latest_observation": None,
+                "release_observation": None, "stale_observation": None}
             assert await app.extensions["lifecycle"].reconcile_expired(identity.id, "project") == "unknown"
+            await db.execute("INSERT INTO writer_attempt_observations(id,attempt_id,host_generation,daemon_instance,"
+                             "launch_id,observation_kind,enforced,populated,observed_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                             ("busy", identity.id, str(identity.host_generation), "daemon", "launch",
+                              "sample", 1, 1, due.isoformat()))
+            item = (await client.get("/api/projects/project/unknown-stops")).json()["items"][0]
+            assert item["recovery_blocker"] == "container_not_empty"
+            assert item["containment_evidence"]["latest_observation"]["id"] == "busy"
+            assert item["containment_evidence"]["release_observation"] is None
+            await db.execute("INSERT INTO writer_attempt_observations(id,attempt_id,host_generation,daemon_instance,"
+                             "launch_id,observation_kind,enforced,populated,observed_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                             ("stale", identity.id, str(identity.host_generation + 1), "earlier-daemon", "launch",
+                              "exit", 1, 0, due.isoformat()))
+            await db.execute("UPDATE writer_attempt_bindings SET state = 'released' WHERE attempt_id = ?",
+                             (identity.id,))
+            item = (await client.get("/api/projects/project/unknown-stops")).json()["items"][0]
+            assert item["recovery_blocker"] == "container_not_empty"
+            assert item["containment_evidence"]["release_observation"] is None
+            assert item["containment_evidence"]["stale_observation"]["id"] == "stale"
             await db.execute("INSERT INTO writer_attempt_observations(id,attempt_id,host_generation,daemon_instance,"
                              "launch_id,observation_kind,enforced,populated,observed_at) VALUES (?,?,?,?,?,?,?,?,?)",
                              ("empty", identity.id, str(identity.host_generation), "daemon", "launch",
                               "exit", 1, 0, due.isoformat()))
-            await db.execute("UPDATE writer_attempt_bindings SET state = 'released' WHERE attempt_id = ?",
-                             (identity.id,))
-            assert (await client.get("/api/projects/project/unknown-stops")).json()["items"][0][
-                "recovery_blocker"] == "ready"
+            item = (await client.get("/api/projects/project/unknown-stops")).json()["items"][0]
+            assert item["recovery_blocker"] == "ready"
+            assert item["containment_evidence"]["release_observation"] == {
+                "id": "empty", "host_generation": str(identity.host_generation), "observation_kind": "exit",
+                "enforced": 1, "populated": 0, "observed_at": due.isoformat()}
+            assert "daemon_instance" not in str(item) and "launch_id" not in str(item)
             assert await app.extensions["lifecycle"].reconcile_expired(identity.id, "project") == "drained"
+    finally:
+        app.executions.release()
+
+
+@pytest.mark.parametrize("generation_delta", [0, 1])
+async def test_unknown_stop_no_entry_projection_requires_matching_generation(
+    db: Database, generation_delta: int,
+) -> None:
+    app, member, task, session = await launch_fixture(db)
+    try:
+        identity = await prepare_attempt(app, OPERATOR, member, task, session, fence_token=secrets.token_urlsafe(32))
+        due = datetime.now(UTC)
+        await db.execute("UPDATE attempt_phase_clocks SET deadline_at = ?", (due.isoformat(),))
+        await db.execute("UPDATE execution_attempts SET state = 'starting'")
+        app.extensions = {}
+        assert await PhaseExpiry(app).step(at=due) == 1
+        await db.execute("UPDATE execution_attempts SET state = 'failed'")
+        await db.execute("UPDATE staff_sessions SET ended_at = ?", (due.isoformat(),))
+        await db.execute("INSERT INTO runtime_no_entry_observations(attempt_id,staff_session_id,"
+                         "contract_revision,host_generation,runtime_kind,reason,observed_at)"
+                         " VALUES (?,?,?,?,?,?,?)",
+                         (identity.id, session.id, identity.contract_revision,
+                          identity.host_generation + generation_delta, "daedalus", "host refused", due.isoformat()))
+        api = FastAPI()
+
+        async def authenticated() -> dict[str, int | str]:
+            return {"via": "token", "user_id": 1}
+
+        register_lifecycle_api(api, app, authenticated)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
+            item = (await client.get("/api/projects/project/unknown-stops")).json()["items"][0]
+        assert item["no_entry_evidence"] == ({"host_generation": identity.host_generation,
+            "contract_revision": identity.contract_revision, "observed_at": due.isoformat()}
+            if generation_delta == 0 else None)
+        assert item["recovery_blocker"] == ("ready" if generation_delta == 0 else "runtime_identity_missing")
     finally:
         app.executions.release()
 
