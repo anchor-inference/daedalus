@@ -851,6 +851,8 @@ class Team:
             # unresolved write even though no execution attempt was ever created.
             uncontained_token = await WriterLeases(self.app.executions).begin_uncontained_preparation(
                 member.project_id, member.id)
+            await WriterLeases(self.app.executions).enter_uncontained_preparation(
+                uncontained_token, project_id=member.project_id, staff_id=member.id)
         if previous is not None:
             previous = await self.settle_stale(previous)
             # Every launch has its own session and attempt binding; reusing a CLI turn would let

@@ -251,8 +251,9 @@ async def released_in(conn: aiosqlite.Connection, attempt_id: str) -> bool:
     observations = "attempt_resource_observations" if table == "attempt_resource_bindings" else "writer_attempt_observations"
     return row["state"] == "released" and await one(conn,
         f"SELECT 1 FROM {observations} WHERE attempt_id = ? AND launch_id = ?"
+        " AND host_generation = ? AND daemon_instance = ?"
         " AND observation_kind IN ('stop','exit') AND enforced = 1 AND populated = 0",
-        (attempt_id, row["launch_id"])) is not None
+        (attempt_id, row["launch_id"], row["host_generation"], row["daemon_instance"])) is not None
 
 
 async def for_staff_in(conn: aiosqlite.Connection, staff_session_id: str) -> dict[str, Any] | None:

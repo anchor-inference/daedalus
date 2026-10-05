@@ -107,8 +107,24 @@ class WriterLeases:
             await conn.execute("INSERT INTO kv(key,value) VALUES (?,?)",
                                (PREPARATION_KEY + token, canonical({"project_id": project_id,
                                 "staff_id": staff_id, "host_generation": generation,
-                                "created_at": now()})))
+                                "state": "reserved", "created_at": now()})))
         return token
+
+    async def enter_uncontained_preparation(self, token: str, *, project_id: str, staff_id: str) -> None:
+        """Cross the durable boundary before any uncontained external effect can start."""
+        async with self.db.transaction() as conn:
+            generation = await self.executions._host(conn)
+            row = await one(conn, "SELECT value FROM kv WHERE key = ?", (PREPARATION_KEY + token,))
+            if row is None:
+                raise ControlConflict("the uncontained preparation reservation is missing")
+            record = json.loads(row["value"])
+            if (record.get("project_id"), record.get("staff_id"), record.get("host_generation"),
+                    record.get("state")) != (project_id, staff_id, generation, "reserved"):
+                raise ControlConflict("the uncontained preparation changed before external entry")
+            record["state"] = "entered"
+            record["entered_at"] = now()
+            await conn.execute("UPDATE kv SET value = ? WHERE key = ?",
+                               (canonical(record), PREPARATION_KEY + token))
 
     @staticmethod
     async def bind_uncontained_in(conn: Any, token: str, *, attempt_id: str,
@@ -121,6 +137,8 @@ class WriterLeases:
         if (record["project_id"], record["staff_id"], record["host_generation"]) != (
                 project_id, staff_id, host_generation):
             raise ControlConflict("the uncontained preparation belongs to another worker generation")
+        if record.get("state") != "entered":
+            raise ControlConflict("the uncontained preparation never entered its external boundary")
         attempt = await one(conn, "SELECT a.host_generation,t.project_id,s.staff_id FROM execution_attempts a"
                             " JOIN board_tasks t ON t.id = a.task_id"
                             " JOIN staff_sessions s ON s.id = a.staff_session_id WHERE a.id = ?", (attempt_id,))
@@ -144,8 +162,17 @@ class WriterLeases:
         token = secrets.token_urlsafe(32)
         async with self.db.transaction() as conn:
             generation = await self.executions._host(conn)
-            if await one(conn, "SELECT 1 FROM kv WHERE key GLOB ? LIMIT 1", (PREPARATION_KEY + "*",)):
-                raise ControlConflict("an uncontained writer's preparation has no physical exit proof")
+            async with conn.execute("SELECT key,value FROM kv WHERE key GLOB ?",
+                                    (PREPARATION_KEY + "*",)) as cursor:
+                preparations = await cursor.fetchall()
+            for preparation in preparations:
+                record = json.loads(preparation["value"])
+                if record.get("state") == "reserved" and record.get("host_generation") != generation:
+                    # A reservation that never entered an external effect cannot leave a writer.
+                    # The old host cannot cross entry now: its host generation is no longer current.
+                    await conn.execute("DELETE FROM kv WHERE key = ?", (preparation["key"],))
+                else:
+                    raise ControlConflict("an uncontained writer's preparation has no physical exit proof")
             record = await self._read(conn)
             if record is not None and record["state"] == "held":
                 # A pre-preparation reservation may be reclaimed after host restart. Once anything

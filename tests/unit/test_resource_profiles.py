@@ -184,6 +184,18 @@ async def test_resource_binding_needs_exact_launch_and_empty_observation(db: Dat
             with pytest.raises(ControlConflict, match="different terminal daemon"):
                 await observe_in(conn, attempt_id=identity.id, launch_id="launch-one", kind="exit",
                                  evidence={**evidence, "daemon_instance": "daemon-two", "populated": False})
+            await conn.execute("INSERT INTO attempt_resource_observations(id,attempt_id,host_generation,"
+                               "daemon_instance,launch_id,observation_kind,enforced,populated,observed_at)"
+                               " VALUES ('old-exit',?,'older','daemon-one','launch-one','exit',1,0,'2026-01-01')",
+                               (identity.id,))
+            await conn.execute("UPDATE attempt_resource_bindings SET state = 'released' WHERE attempt_id = ?",
+                               (identity.id,))
+            assert not await released_in(conn, identity.id)
+            await conn.execute("INSERT INTO attempt_resource_observations(id,attempt_id,host_generation,"
+                               "daemon_instance,launch_id,observation_kind,enforced,populated,observed_at)"
+                               " VALUES ('other-daemon',?,?,'daemon-two','launch-one','exit',1,0,'2026-01-01')",
+                               (identity.id, str(identity.host_generation)))
+            assert not await released_in(conn, identity.id)
             await observe_in(conn, attempt_id=identity.id, launch_id="launch-one", kind="exit",
                              evidence={**evidence, "populated": False})
             assert await released_in(conn, identity.id)

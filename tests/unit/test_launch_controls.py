@@ -78,6 +78,11 @@ async def test_uncontained_preparation_transfers_to_attempt_atomically(db: Datab
     leases = WriterLeases(app.executions)
     try:
         token = await leases.begin_uncontained_preparation(member.project_id, member.id)
+        with pytest.raises(ControlConflict, match="never entered"):
+            await prepare_attempt(app, OPERATOR, member, task, session,
+                                  fence_token=secrets.token_urlsafe(32), uncontained_token=token)
+        assert (await db.fetchone("SELECT count(*) FROM execution_attempts"))[0] == 0
+        await leases.enter_uncontained_preparation(token, project_id=member.project_id, staff_id=member.id)
         with pytest.raises(ControlConflict, match="reservation is missing"):
             await prepare_attempt(app, OPERATOR, member, task, session,
                                   fence_token=secrets.token_urlsafe(32),

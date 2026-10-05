@@ -16,7 +16,7 @@ import pytest
 
 from daedalus.extensions.resource_runtime import reconcile as reconcile_containment
 from daedalus.extensions.staff import Team
-from daedalus.stores.control import ControlConflict
+from daedalus.stores.control import ControlConflict, ControlDenied
 from daedalus.stores.database import Database
 from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.resource_profiles import bind_launch_in, observe_in
@@ -100,7 +100,9 @@ async def test_abandoned_uncontained_file_preparation_blocks_contained_writer_af
     owner = await _owner(db)
     await db.execute("INSERT INTO staff(id,project_id,name,harness,created_by,created_at)"
                      " VALUES ('worker','project','Worker','daedalus','operator','2026-01-01')")
-    token = await WriterLeases(owner).begin_uncontained_preparation("project", "worker")
+    leases = WriterLeases(owner)
+    token = await leases.begin_uncontained_preparation("project", "worker")
+    await leases.enter_uncontained_preparation(token, project_id="project", staff_id="worker")
     await asyncio.to_thread((tmp_path / "prepared").write_text, "old worker")
     assert (tmp_path / "prepared").read_text() == "old worker"
     owner.release()
@@ -119,6 +121,29 @@ async def test_abandoned_uncontained_file_preparation_blocks_contained_writer_af
         with pytest.raises(ControlConflict, match="preparation has no physical exit proof"):
             await WriterLeases(successor).acquire("other-project")
         assert await db.kv_get(KEY) is None
+    finally:
+        successor.release()
+
+
+async def test_never_entered_uncontained_reservation_is_reclaimed_after_host_restart(db: Database) -> None:
+    owner = await _owner(db)
+    await db.execute("INSERT INTO staff(id,project_id,name,harness,created_by,created_at)"
+                     " VALUES ('worker','project','Worker','daedalus','operator','2026-01-01')")
+    token = await WriterLeases(owner).begin_uncontained_preparation("project", "worker")
+    assert (await db.kv_get(PREPARATION_KEY + token))["state"] == "reserved"
+    owner.release()
+    await db.close()
+    await db.open()
+    successor = ExecutionStore(db)
+    successor.acquire()
+    try:
+        await successor.boot()
+        with pytest.raises(ControlDenied, match="no longer owns the execution generation"):
+            await WriterLeases(owner).enter_uncontained_preparation(
+                token, project_id="project", staff_id="worker")
+        lease = await WriterLeases(successor).acquire("other-project")
+        assert await db.kv_get(PREPARATION_KEY + token) is None
+        assert await WriterLeases(successor).release_if_safe(lease)
     finally:
         successor.release()
 
