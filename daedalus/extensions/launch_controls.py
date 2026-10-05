@@ -25,7 +25,8 @@ launch_resources: ContextVar[dict | None] = ContextVar("launch_resources", defau
 
 async def prepare_attempt(app: Application, principal: Principal, member: Staff, task: BoardTask,
                           session: StaffSession, *, fence_token: str,
-                          capacity_slot_id: str | None = None) -> AttemptIdentity:
+                          capacity_slot_id: str | None = None,
+                          uncontained_token: str | None = None) -> AttemptIdentity:
     """Issue only report authority and claim the current contract in one transaction."""
     if task.project_id != member.project_id or session.staff_id != member.id or session.task_id != task.id:
         raise ControlDenied("the worker, session and task must belong to the same project")
@@ -52,6 +53,8 @@ async def prepare_attempt(app: Application, principal: Principal, member: Staff,
         await PhaseClocks(app.executions).start(conn, identity, "prepare",
                                                 timeout_seconds=DEFAULT_TIMEOUTS["prepare"])
         resource = launch_resources.get()
+        if resource is not None and uncontained_token is not None:
+            raise ControlDenied("a contained launch cannot consume an uncontained preparation reservation")
         if resource is not None:
             from daedalus.stores.resource_profiles import bind_attempt_in  # Lazy: resource profiles are optional.
 
@@ -59,6 +62,10 @@ async def prepare_attempt(app: Application, principal: Principal, member: Staff,
                 raise ControlDenied("in-process workers cannot use a strict attempt resource profile")
             await bind_attempt_in(conn, attempt_id=identity.id, project_id=member.project_id,
                                   host_generation=identity.host_generation, resource=resource)
+        if uncontained_token is not None:
+            await WriterLeases.bind_uncontained_in(conn, uncontained_token, attempt_id=identity.id,
+                                                   project_id=member.project_id, staff_id=member.id,
+                                                   host_generation=identity.host_generation)
         return identity
 
 

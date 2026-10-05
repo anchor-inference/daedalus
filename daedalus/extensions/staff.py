@@ -845,6 +845,12 @@ class Team:
             # The checks above are reads. From here, settling an old worker, preparing a worktree
             # or delivering files may leave a write in flight if this host loses the outcome.
             await WriterLeases(self.app.executions).begin_effects(writer_lease)
+        uncontained_token = None
+        if member.isolation != "readonly" and writer_lease is None:
+            # If the host disappears during preparation, a later contained claim must see the
+            # unresolved write even though no execution attempt was ever created.
+            uncontained_token = await WriterLeases(self.app.executions).begin_uncontained_preparation(
+                member.project_id, member.id)
         if previous is not None:
             previous = await self.settle_stale(previous)
             # Every launch has its own session and attempt binding; reusing a CLI turn would let
@@ -958,7 +964,8 @@ class Team:
             )
 
             identity = await prepare_attempt(self.app, principal, member, task, session, fence_token=token,
-                                             capacity_slot_id=capacity_slot_id)
+                                             capacity_slot_id=capacity_slot_id,
+                                             uncontained_token=uncontained_token)
             if writer_lease is not None:
                 await WriterLeases(self.app.executions).bind(writer_lease, identity.id)
             if resources is not None:

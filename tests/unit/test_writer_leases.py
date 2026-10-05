@@ -21,7 +21,7 @@ from daedalus.stores.database import Database
 from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.resource_profiles import bind_launch_in, observe_in
 from daedalus.stores.staff import StaffError
-from daedalus.stores.writer_leases import KEY, WriterLeases
+from daedalus.stores.writer_leases import KEY, PREPARATION_KEY, WriterLeases
 
 
 async def _wait_for(path: Path) -> None:
@@ -90,6 +90,57 @@ async def test_effect_reservation_and_preparation_marker_commit_together(db: Dat
             await leases.register_effect(lease, kind="file", owner_instance="daemon", operation_id="copy")
         assert await leases.effect_owners() == []
         assert not (await db.kv_get(KEY))["effects_started"]
+        assert await WriterLeases(owner).release_if_safe(lease)
+    finally:
+        owner.release()
+
+
+async def test_abandoned_uncontained_file_preparation_blocks_contained_writer_after_restart(db: Database,
+                                                                                            tmp_path: Path) -> None:
+    owner = await _owner(db)
+    await db.execute("INSERT INTO staff(id,project_id,name,harness,created_by,created_at)"
+                     " VALUES ('worker','project','Worker','daedalus','operator','2026-01-01')")
+    token = await WriterLeases(owner).begin_uncontained_preparation("project", "worker")
+    await asyncio.to_thread((tmp_path / "prepared").write_text, "old worker")
+    assert (tmp_path / "prepared").read_text() == "old worker"
+    owner.release()
+    await db.close()
+    await db.open()
+    successor = ExecutionStore(db)
+    successor.acquire()
+    try:
+        await successor.boot()
+        assert await db.kv_get(PREPARATION_KEY + token) is not None
+        async with db.transaction() as conn:
+            with pytest.raises(ControlConflict, match="another worker generation"):
+                await WriterLeases.bind_uncontained_in(conn, token, attempt_id="new-attempt",
+                                                       project_id="project", staff_id="worker",
+                                                       host_generation=successor.generation)
+        with pytest.raises(ControlConflict, match="preparation has no physical exit proof"):
+            await WriterLeases(successor).acquire("other-project")
+        assert await db.kv_get(KEY) is None
+    finally:
+        successor.release()
+
+
+async def test_refused_uncontained_start_before_effects_leaves_no_preparation_reservation(db: Database) -> None:
+    owner = await _owner(db)
+    team = object.__new__(Team)
+    team.app = SimpleNamespace(executions=owner)
+    team._execution_locks = {}
+    member = SimpleNamespace(id="worker", project_id="project", isolation="worktree")
+
+    async def check_authority():
+        raise AssertionError("authority should not be checked after invalid principal")
+
+    try:
+        with pytest.raises(StaffError, match="host-attested launch principal"):
+            await team.start(member, SimpleNamespace(),
+                             principal=SimpleNamespace(origin_class="agent", grant_id=None),
+                             check_authority=check_authority)
+        assert await db.fetchone("SELECT 1 FROM kv WHERE key GLOB ?",
+                                 (PREPARATION_KEY + "*",)) is None
+        lease = await WriterLeases(owner).acquire("other-project")
         assert await WriterLeases(owner).release_if_safe(lease)
     finally:
         owner.release()

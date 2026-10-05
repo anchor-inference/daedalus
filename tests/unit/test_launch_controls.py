@@ -13,7 +13,7 @@ from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.database import Database
 from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.staff import StaffStore
-from daedalus.stores.writer_leases import WriterLeases
+from daedalus.stores.writer_leases import PREPARATION_KEY, WriterLeases
 
 OPERATOR = Principal.operator({"via": "cookie", "user_id": 1})
 
@@ -69,6 +69,27 @@ async def test_native_attempt_refuses_contained_writer_before_grant(db: Database
                                   fence_token=secrets.token_urlsafe(32))
         assert (await db.fetchone("SELECT count(*) FROM actor_grants"))[0] == 0
         assert (await db.fetchone("SELECT count(*) FROM execution_attempts"))[0] == 0
+    finally:
+        app.executions.release()
+
+
+async def test_uncontained_preparation_transfers_to_attempt_atomically(db: Database) -> None:
+    app, member, task, session = await launch_fixture(db)
+    leases = WriterLeases(app.executions)
+    try:
+        token = await leases.begin_uncontained_preparation(member.project_id, member.id)
+        with pytest.raises(ControlConflict, match="reservation is missing"):
+            await prepare_attempt(app, OPERATOR, member, task, session,
+                                  fence_token=secrets.token_urlsafe(32),
+                                  uncontained_token=secrets.token_urlsafe(24))
+        assert await db.kv_get(PREPARATION_KEY + token) is not None
+        assert (await db.fetchone("SELECT count(*) FROM execution_attempts"))[0] == 0
+        identity = await prepare_attempt(app, OPERATOR, member, task, session,
+                                         fence_token=secrets.token_urlsafe(32), uncontained_token=token)
+        assert await db.kv_get(PREPARATION_KEY + token) is None
+        assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "queued"
+        with pytest.raises(ControlConflict, match="uncontained writable worker"):
+            await leases.acquire("another-project")
     finally:
         app.executions.release()
 

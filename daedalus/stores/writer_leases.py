@@ -17,6 +17,7 @@ from daedalus.stores.runtime_release import attempt_released_in
 
 KEY = "contained_writer_lease"
 OWNERS_KEY = "writer_effect_owners:"
+PREPARATION_KEY = "uncontained_writer_preparation:"
 
 # A native or ordinary CLI worker has no attempt row while it prepares its folder. Keep a
 # contained claim from entering that gap in this host process. A restart still needs physical
@@ -94,6 +95,40 @@ class WriterLeases:
         async with self.db.transaction() as conn:
             await self.refuse_uncontained_in(conn)
 
+    async def begin_uncontained_preparation(self, project_id: str, staff_id: str) -> str:
+        """Persist the gap before an uncontained worker has an attempt row."""
+        token = secrets.token_urlsafe(24)
+        async with self.db.transaction() as conn:
+            generation = await self.executions._host(conn)
+            await self.refuse_uncontained_in(conn)
+            if await one(conn, "SELECT 1 FROM staff WHERE id = ? AND project_id = ?"
+                         " AND archived_at IS NULL", (staff_id, project_id)) is None:
+                raise ControlConflict("the uncontained preparation has no active project member")
+            await conn.execute("INSERT INTO kv(key,value) VALUES (?,?)",
+                               (PREPARATION_KEY + token, canonical({"project_id": project_id,
+                                "staff_id": staff_id, "host_generation": generation,
+                                "created_at": now()})))
+        return token
+
+    @staticmethod
+    async def bind_uncontained_in(conn: Any, token: str, *, attempt_id: str,
+                                  project_id: str, staff_id: str, host_generation: int) -> None:
+        """Transfer an exact preparation reservation to its attempt in one transaction."""
+        row = await one(conn, "SELECT value FROM kv WHERE key = ?", (PREPARATION_KEY + token,))
+        if row is None:
+            raise ControlConflict("the uncontained preparation reservation is missing")
+        record = json.loads(row["value"])
+        if (record["project_id"], record["staff_id"], record["host_generation"]) != (
+                project_id, staff_id, host_generation):
+            raise ControlConflict("the uncontained preparation belongs to another worker generation")
+        attempt = await one(conn, "SELECT a.host_generation,t.project_id,s.staff_id FROM execution_attempts a"
+                            " JOIN board_tasks t ON t.id = a.task_id"
+                            " JOIN staff_sessions s ON s.id = a.staff_session_id WHERE a.id = ?", (attempt_id,))
+        if attempt is None or (attempt["host_generation"], attempt["project_id"], attempt["staff_id"]) != (
+                host_generation, project_id, staff_id):
+            raise ControlConflict("the uncontained preparation has no matching durable attempt")
+        await conn.execute("DELETE FROM kv WHERE key = ?", (PREPARATION_KEY + token,))
+
     @asynccontextmanager
     async def uncontained_start(self) -> AsyncIterator[None]:
         """Serialize uncontained preparation against a contained claim until startup settles."""
@@ -109,6 +144,8 @@ class WriterLeases:
         token = secrets.token_urlsafe(32)
         async with self.db.transaction() as conn:
             generation = await self.executions._host(conn)
+            if await one(conn, "SELECT 1 FROM kv WHERE key GLOB ? LIMIT 1", (PREPARATION_KEY + "*",)):
+                raise ControlConflict("an uncontained writer's preparation has no physical exit proof")
             record = await self._read(conn)
             if record is not None and record["state"] == "held":
                 # A pre-preparation reservation may be reclaimed after host restart. Once anything
