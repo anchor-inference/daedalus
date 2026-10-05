@@ -249,8 +249,9 @@ async def test_terminal_exit_without_containment_keeps_stop_unknown(db: Database
 
 
 @pytest.mark.parametrize("generation_delta", [0, 1])
+@pytest.mark.parametrize("owner_revision_delta", [0, 1])
 async def test_unknown_stop_no_entry_projection_requires_matching_generation(
-    db: Database, generation_delta: int,
+    db: Database, generation_delta: int, owner_revision_delta: int,
 ) -> None:
     app, member, task, session = await launch_fixture(db)
     try:
@@ -262,6 +263,8 @@ async def test_unknown_stop_no_entry_projection_requires_matching_generation(
         assert await PhaseExpiry(app).step(at=due) == 1
         await db.execute("UPDATE execution_attempts SET state = 'failed'")
         await db.execute("UPDATE staff_sessions SET ended_at = ?", (due.isoformat(),))
+        if owner_revision_delta:
+            await db.execute("UPDATE lifecycle_owners SET source_revision = source_revision + 1")
         await db.execute("INSERT INTO runtime_no_entry_observations(attempt_id,staff_session_id,"
                          "contract_revision,host_generation,runtime_kind,reason,observed_at)"
                          " VALUES (?,?,?,?,?,?,?)",
@@ -272,13 +275,21 @@ async def test_unknown_stop_no_entry_projection_requires_matching_generation(
         async def authenticated() -> dict[str, int | str]:
             return {"via": "token", "user_id": 1}
 
+        app.extensions = {"lifecycle": Lifecycle(app)}
         register_lifecycle_api(api, app, authenticated)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
             item = (await client.get("/api/projects/project/unknown-stops")).json()["items"][0]
+            result = await client.post(f"/api/projects/project/unknown-stops/{identity.id}/reconcile")
         assert item["no_entry_evidence"] == ({"host_generation": identity.host_generation,
             "contract_revision": identity.contract_revision, "observed_at": due.isoformat()}
             if generation_delta == 0 else None)
-        assert item["recovery_blocker"] == ("ready" if generation_delta == 0 else "runtime_identity_missing")
+        assert item["recovery_blocker"] == ("source_revision_changed" if owner_revision_delta else
+            "ready" if generation_delta == 0 else "runtime_identity_missing")
+        if owner_revision_delta:
+            assert result.status_code == 404
+        else:
+            assert result.status_code == 200
+            assert result.json()["cancel_state"] == ("drained" if generation_delta == 0 else "unknown")
     finally:
         app.executions.release()
 

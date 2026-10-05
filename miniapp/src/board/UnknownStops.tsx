@@ -11,7 +11,7 @@ type UnknownStop = {
   parent_kind: string; parent_id: string; generation: number; cancel_state: string;
   updated_at: string; phase: string | null; deadline_at: string | null;
   exit_observed: boolean; no_entry_observed: boolean; generation_matches_host_record: boolean;
-  recovery_blocker: "ready" | "previous_host" | "runtime_identity_missing" | "exit_unobserved" | "containment_unavailable" | "container_not_empty";
+  recovery_blocker: "ready" | "source_revision_changed" | "previous_host" | "runtime_identity_missing" | "exit_unobserved" | "containment_unavailable" | "container_not_empty";
   exit_evidence: { runtime_ref: string; host_generation: number; contract_revision: number; observed_status: string; observed_at: string } | null;
   no_entry_evidence: { host_generation: number; contract_revision: number; observed_at: string } | null;
   containment_evidence: { source: "profile" | "writer"; state: string; host_generation: string;

@@ -118,6 +118,14 @@ def check(width: int, language: str) -> None:
         expect(reconcile).to_be_disabled()
         assert stub.stop_reconciliations == []
 
+        changed_scope = stop("attempt-one")
+        changed_scope["recovery_blocker"] = "source_revision_changed"
+        stub.unknown_stops = [changed_scope]
+        disclosure.get_by_role("button", name="Reload stops" if language == "en" else "Обновить остановки").click()
+        expect(disclosure).to_contain_text("source revision differs" if language == "en" else "Ревизия источника владельца отличается")
+        expect(reconcile).to_be_disabled()
+        assert stub.stop_reconciliations == []
+
         stub.unknown_stops = [stop("attempt-one")]
         disclosure.get_by_role("button", name="Reload stops" if language == "en" else "Обновить остановки").click()
         expect(disclosure).to_contain_text("Exact release evidence" if language == "en" else "Точное подтверждение")

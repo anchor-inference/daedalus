@@ -59,7 +59,8 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             async with conn.execute(
                 "SELECT a.id,a.task_id,a.state,a.host_generation,a.staff_session_id,a.runtime_kind,"
                 "a.provider_session_ref,a.native_run_id,a.runtime_instance,o.parent_kind,o.parent_id,"
-                "o.generation,o.cancel_state,o.updated_at,c.phase,c.deadline_at,"
+                "o.generation,o.source_revision AS owner_source_revision,a.contract_revision,"
+                "o.cancel_state,o.updated_at,c.phase,c.deadline_at,"
                 "EXISTS (SELECT 1 FROM runtime_no_entry_observations n WHERE n.attempt_id = a.id"
                 " AND n.staff_session_id = a.staff_session_id AND n.host_generation = a.host_generation"
                 " AND n.contract_revision = a.contract_revision) AS no_entry_observed"
@@ -134,7 +135,11 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                         "latest_observation": dict(latest) if latest else None,
                         "release_observation": dict(release) if release else None,
                         "stale_observation": dict(stale) if stale else None}
-                if no_entry_proven:
+                # The POST path also pins the owner to this attempt's contract. A valid exit or
+                # no-entry observation alone must not advertise a reconciliation it will refuse.
+                if row["owner_source_revision"] != row["contract_revision"]:
+                    row["recovery_blocker"] = "source_revision_changed"
+                elif no_entry_proven:
                     row["recovery_blocker"] = "ready"
                 elif not row["generation_matches_host_record"]:
                     row["recovery_blocker"] = "previous_host"
