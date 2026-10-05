@@ -36,12 +36,15 @@ import type { AgentNews, VoiceCenter, VoicePreset, VoiceUi } from "../voice";
 import { agentNote, micReady, modelRow, orbVisual, recognitionSupported, recorderSupported, smoothLevel } from "../voice";
 import { holdVoiceSession, voiceSession } from "../voicesession";
 import { usePresenceScope } from "../presence";
+import { useVoiceMascot } from "../ui/pet";
+import type { PetPose } from "../petstage";
 
 // The session view is most of the app's weight — the timeline, the markdown, the windowing, the
 // composer — and the voice page is a page that has to be on the screen before the first sentence of
 // an answer arrives. Loaded when a transcript is first opened, which is the first moment it is worth
 // anything, and never on the way to the orb.
 const SessionScreen = lazy(retried(() => import("./Session"), (m) => ({ default: m.SessionScreen })));
+const PetStage = lazy(retried(() => import("../petstage"), (m) => ({ default: m.PetStage })));
 
 type Agent = AgentNews;
 type VoiceState = {
@@ -92,6 +95,7 @@ export function VoiceScreen({ onOpen, toast }: { onOpen: (id: string) => void; t
   const session = useMemo(() => voiceSession(), []);
   useEffect(() => holdVoiceSession(), []);
   const ui = useSyncExternalStore(session.subscribe, session.state);
+  const [voiceMascot, setVoiceMascot] = useVoiceMascot();
   const [typed, setTyped] = useState("");
   // Whether the agents are showing on a phone, where a transcript takes the whole screen and they
   // have nowhere to stand beside it. On a wide window the panel is always there and this is unused.
@@ -323,6 +327,13 @@ export function VoiceScreen({ onOpen, toast }: { onOpen: (id: string) => void; t
             : ui.micOn
               ? t("voice.tap.stop")
               : t("voice.tap");
+  const mascotPose: PetPose = ui.phase === "listening"
+    ? { emotion: "curious", action: "listen", prop: "" }
+    : ui.phase === "speaking"
+      ? { emotion: "joy", action: "speak", prop: "" }
+      : ui.phase === "thinking" || ui.phase === "delegating"
+        ? { emotion: "focused", action: "think", prop: "" }
+        : { emotion: "calm", action: "idle", prop: "" };
   const composer = (
     <form
       className="voice-compose"
@@ -371,13 +382,16 @@ export function VoiceScreen({ onOpen, toast }: { onOpen: (id: string) => void; t
                     <PhaseChip ui={ui} />
                     <span className="chip quiet">{spokenBy}</span>
                   </div>
+                  <div className="voice-mascot-options" role="group" aria-label={t("voice.mascot.choose")}>
+                    {(["full", "head", "off"] as const).map((mode) => <button key={mode} type="button" aria-pressed={voiceMascot === mode} onClick={() => setVoiceMascot(mode)}>{t(`voice.mascot.${mode}`)}</button>)}
+                  </div>
 
                   {/* The page where the absence is felt: the chip above says "the browser's own" and
                       this says what would change that, with the size on the button. It renders
                       nothing once the runtime is installed. */}
                   <SpeechRuntimeNotice toast={toast} onInstalled={refresh} />
 
-                  <div className="voice-orb-wrap">
+                  {voiceMascot === "off" ? <div className="voice-orb-wrap">
                     <button
                       ref={orb}
                       className={`voice-orb ${ui.micOn ? "on" : ""}`}
@@ -395,7 +409,12 @@ export function VoiceScreen({ onOpen, toast }: { onOpen: (id: string) => void; t
                         <Icon name="mic" size={36} />
                       </span>
                     </button>
-                  </div>
+                  </div> : <div className="voice-mascot-wrap">
+                    <button ref={orb} className={`voice-mascot ${ui.micOn ? "on" : ""}`} onClick={toggleMic} disabled={!canTalk || !ready} aria-pressed={ui.micOn} aria-label={ui.micOn ? t("voice.mic.stop") : t("voice.mic.start")}>
+                      <Suspense fallback={null}><PetStage key={voiceMascot} pose={mascotPose} speaking={ui.phase === "speaking" ? ui.spoken.length + 1 : 0} large variant={voiceMascot === "head" ? "head" : "daedalus"} framing={voiceMascot === "head" ? "portrait" : "full"} voiceLevel={ui.phase === "speaking" ? .8 : ui.phase === "listening" ? .5 : 0} /></Suspense>
+                      <span className="voice-mascot-mic" aria-hidden><Icon name="mic" size={20} /></span>
+                    </button>
+                  </div>}
 
                   <div className="voice-hint sub">{hint}</div>
 

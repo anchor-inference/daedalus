@@ -30,6 +30,7 @@ def main() -> None:
         assert page.locator(".pet-host").count() == 0
         assert not any("/assets/stage-" in address for address in requests)
         page.locator('[data-rail="menu"]').click()
+        assert page.get_by_role("menuitem", name="Show companion").evaluate("node => getComputedStyle(node).backgroundColor") == "rgba(0, 0, 0, 0)"
         page.get_by_role("menuitem", name="Show companion").click()
         page.wait_for_selector(".pet-canvas", timeout=15000)
         page.wait_for_timeout(1500)
@@ -50,11 +51,14 @@ def main() -> None:
         page.get_by_role("button", name="Hide companion").click()
         assert page.locator(".pet-host").count() == 0
         assert not errors, errors
-        phone = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+        phone = browser.new_page(viewport={"width": 390, "height": 844}, device_scale_factor=3, is_mobile=True, has_touch=True)
         phone.add_init_script("localStorage.setItem('daedalus.pet', 'on')")
         phone.route("**/api/**", stub)
         phone.goto(base + "/?token=t&scheme=dark&lang=en")
         phone.wait_for_selector(".pet-figure", timeout=15000)
+        phone.wait_for_function("document.querySelector('.pet-figure canvas')?.width > 0")
+        ratio = phone.locator(".pet-figure canvas").evaluate("canvas => canvas.width / canvas.getBoundingClientRect().width")
+        assert ratio >= 2, ratio
         phone.locator(".pet-figure").evaluate("node => node.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, pointerType: 'touch', clientX: 330, clientY: 120}))")
         phone.locator(".pet-menu").wait_for(timeout=3000)
         phone.locator(".pet-figure").evaluate("node => node.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, pointerType: 'touch'}))")

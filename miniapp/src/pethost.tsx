@@ -114,12 +114,22 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
     }
   }, [activity, enabled, model]);
   useEffect(() => () => { window.clearTimeout(lineTimer.current); window.clearTimeout(poseTimer.current); window.clearTimeout(holdTimer.current); }, []);
+  useEffect(() => {
+    if (!menu) return;
+    const close = (event: PointerEvent) => {
+      if (!(event.target as Element).closest(".pet-menu, .pet-figure")) setMenu(false);
+    };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setMenu(false); };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", escape);
+    return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("keydown", escape); };
+  }, [menu]);
   if (!enabled) return null;
-  return <div className={`pet-host corner-${corner} ${activity === "settings" ? "in-settings" : ""}`} aria-label={t("pet.title")}>
+  return <div className={`pet-host corner-${corner} ${activity === "settings" ? "in-settings" : ""} ${activity === "voice" ? "in-voice" : ""}`} aria-label={t("pet.title")}>
     {line && <button className="pet-bubble" role="status" onClick={() => { if (notice) navigate(pathFor("inbox")); else setLine(""); }}>
       {line}{notice?.body && <small>{notice.body}</small>}
     </button>}
-    <div className="pet-figure" role="button" tabIndex={0} aria-label={t("pet.title")}
+    {activity !== "voice" && <div className="pet-figure" role="button" tabIndex={0} aria-label={t("pet.title")}
       onContextMenu={(event) => { event.preventDefault(); setMenu(true); }}
       onKeyDown={(event) => { if (event.key === "Enter" || event.key === "ContextMenu" || event.shiftKey && event.key === "F10") { event.preventDefault(); setMenu(true); } }}
       onPointerDown={(event) => { if (event.pointerType === "touch") { touchStart.current = [event.clientX, event.clientY]; holdTimer.current = window.setTimeout(() => setMenu(true), 650); } }}
@@ -127,17 +137,21 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
       onPointerUp={() => { touchStart.current = null; window.clearTimeout(holdTimer.current); }}
       onPointerCancel={() => { touchStart.current = null; window.clearTimeout(holdTimer.current); }}>
       <Suspense fallback={null}><PetStage pose={pose} speaking={speaking} /></Suspense>
-    </div>
-    {menu && <div className="pet-menu" role="menu">
-      <button onClick={() => { setMenu(false); void generateReaction("operator asks for a brief greeting", true); }} disabled={!model || busy}>{t("pet.generate")}</button>
+    </div>}
+    {menu && activity !== "voice" && <div className="pet-menu" role="dialog" aria-label={t("pet.title")}>
+      <div className="pet-menu-head"><strong>{t("pet.title")}</strong><button className="pet-menu-close" onClick={() => setMenu(false)} aria-label={t("common.close")}>×</button></div>
+      <div className="pet-menu-fields">
       <label>{t("pet.emotion")}<select value={pose.emotion} onChange={(event) => setPose({ ...pose, emotion: event.target.value })}>{EMOTIONS.map((id) => <option key={id} value={id}>{id}</option>)}</select></label>
       <label>{t("pet.action")}<select value={pose.action} onChange={(event) => setPose({ ...pose, action: event.target.value })}>{ACTIONS.map((id) => <option key={id} value={id}>{id}</option>)}</select></label>
       <label>{t("pet.prop")}<select value={pose.prop} onChange={(event) => setPose({ ...pose, prop: event.target.value })}>{PROPS.map((id) => <option key={id} value={id}>{id || t("pet.none")}</option>)}</select></label>
       <label>{t("pet.move")}<select value={corner} onChange={(event) => { const next = event.target.value as typeof corner; setCorner(next); try { localStorage.setItem("daedalus.pet.corner", next); } catch { /* private mode */ } }}>
         {(["br", "bl", "tr", "tl"] as const).map((id) => <option key={id} value={id}>{t(`pet.corner.${id}`)}</option>)}
       </select></label>
-      <button onClick={() => { setEnabled(false); setMenu(false); }}>{t("pet.off")}</button>
-      <button onClick={() => setMenu(false)}>{t("common.close")}</button>
+      </div>
+      <div className="pet-menu-actions">
+        <button className="pet-menu-generate" onClick={() => { setMenu(false); void generateReaction("operator asks for a brief greeting", true); }} disabled={!model || busy}>{t("pet.generate")}</button>
+        <button className="pet-menu-hide" onClick={() => { setEnabled(false); setMenu(false); }}>{t("pet.off")}</button>
+      </div>
     </div>}
   </div>;
 }
