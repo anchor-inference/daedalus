@@ -46,6 +46,13 @@ def scenario(language: str, width: int, coordinator: bool, staff_state: str) -> 
                        "effects": ["execution.start", "execution.stop"], "expires_at": approvals[-1]["expires_at"],
                        "revoked_at": None, "state": "active", "receipt_id": "receipt-one",
                        "parent_grant_id": None, "parent_grant_generation": None}] if approvals else []
+            if coordinator:
+                grants.append({"grant_id": "grant-other", "generation": 1, "session_id": "coordinator-one",
+                               "scope": {"kind": "task", "id": "another-task"}, "operations": operations,
+                               "effects": ["execution.start", "execution.stop"],
+                               "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+                               "revoked_at": None, "state": "active", "receipt_id": "receipt-other",
+                               "parent_grant_id": None, "parent_grant_generation": None})
             payload = {"project_id": PID, "entity_revision": 1,
                        "current_coordinator_session_id": "coordinator-one" if coordinator else None,
                        "readiness_blockers": [], "grants": grants, "available_bundles": [{
@@ -75,6 +82,8 @@ def scenario(language: str, width: int, coordinator: bool, staff_state: str) -> 
         expect(authority_section.get_by_text("Prepare menu")).to_be_visible()
         expect(authority_section.locator("select.field")).to_have_count(1)
         approve = authority_section.get_by_role("button", name="Approve" if language == "en" else "Разрешить")
+        continue_label = "Continue in project conversation" if language == "en" else "Продолжить в разговоре проекта"
+        expect(authority_section.get_by_role("button", name=continue_label)).to_have_count(0)
         if coordinator:
             expect(approve).to_be_enabled()
             approve.click()
@@ -90,6 +99,8 @@ def scenario(language: str, width: int, coordinator: bool, staff_state: str) -> 
             expect(page.locator(".toast")).to_contain_text("Approval recorded" if language == "en" else "Разрешение записано")
             expect(authority_section.get_by_role("button", name="Approve" if language == "en" else "Разрешить")).to_have_count(0)
             expect(authority_section.get_by_text("Prepare menu")).to_be_visible()
+            expect(authority_section.get_by_role("button", name=continue_label)).to_be_visible()
+            expect(authority_section).to_contain_text("permission alone does not start work" if language == "en" else "само разрешение не начинает работу")
             assert len(approvals) == 1
             assert approvals[0]["bundle_id"] == bundle_id and approvals[0]["task_id"] == "first-task"
         else:
@@ -99,6 +110,11 @@ def scenario(language: str, width: int, coordinator: bool, staff_state: str) -> 
         sheet.get_by_role("button", name="Back to task" if language == "en" else "Назад к задаче").click()
         expect(page).to_have_url(f"{BASE}/orchestration/project/{PID}/board?task=first-task")
         expect(sheet.get_by_role("button", name=grant_name)).to_be_visible()
+        if coordinator:
+            sheet.get_by_role("button", name=grant_name).click()
+            expect(authority_section.get_by_role("button", name=continue_label)).to_be_visible()
+            authority_section.get_by_role("button", name=continue_label).click()
+            expect(page).to_have_url(f"{BASE}/orchestration/project/{PID}")
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         browser.close()
     assert unhandled.report() == 0

@@ -91,6 +91,9 @@ export function CoordinatorAuthority({ projectId, toast, onChanged, initialTaskI
   const active = current?.grants.filter((grant) => grant.state === "active" && (!guided ||
     (grant.scope.kind === "task" && grant.scope.id === initialTaskId &&
       same(grant.operations, rights[initialBundle!].operations) && same(grant.effects, rights[initialBundle!].effects)))) ?? [];
+  const readyForTask = guided && active.some((grant) => grant.session_id === current?.current_coordinator_session_id
+    && grant.scope.kind === "task" && grant.scope.id === initialTaskId
+    && same(grant.operations, rights[initialBundle!].operations) && same(grant.effects, rights[initialBundle!].effects));
   const past = current?.grants.filter((grant) => grant.state !== "active") ?? [];
 
   function remember(next: Pending | null) {
@@ -179,6 +182,11 @@ export function CoordinatorAuthority({ projectId, toast, onChanged, initialTaskI
         {current.current_coordinator_session_id ? <p>{t("authority.activeCount", { n: active.length })}</p>
           : <p className="result-warning">{t("authority.noCoordinator")} {initialTaskId && <button type="button" className="linkbtn" onClick={() => navigate(projectHome(projectId))}>{t("pboard.grant.enable")}</button>}</p>}
         <ul className="plain-list">{active.map(grantRow)}</ul>
+        {/* Another task's permission cannot authorize the first run from this guided sheet. */}
+        {readyForTask && <div className="project-extension">
+          <p>{t(initialBundle === "execution" ? "pboard.grant.execution.ready" : "pboard.grant.ready")}</p>
+          <button type="button" className="btn small primary" onClick={() => navigate(projectHome(projectId))}>{t("pboard.grant.continue")}</button>
+        </div>}
         {!guided && past.length > 0 && <details><summary>{t("authority.past", { n: past.length })}</summary><ul className="plain-list">{past.map(grantRow)}</ul></details>}
         {(!guided || active.length === 0) && <details open={adding} onToggle={(event) => setAdding(event.currentTarget.open)}><summary>{t("authority.add")}</summary>
           {guided ? <p>{bundleName(bundleId)}</p> : <label className="field">{t("authority.bundle")}
