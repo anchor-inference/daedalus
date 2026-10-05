@@ -23,12 +23,13 @@ type ScopedRead struct {
 // ScopedOptions is a deliberately separate launch plan. No ordinary sandbox option can turn a
 // whole-root read mount into credential isolation by adding masks on top of it.
 type ScopedOptions struct {
-	Bwrap      string
-	Argv       []string
-	Cwd        string
-	ReadOnly   []ScopedRead
-	Credential *os.File // a sealed snapshot returned by SnapshotCredentialFile
-	Account    string   // clean absolute destination below the private home
+	Bwrap          string
+	Argv           []string
+	Cwd            string
+	ReadOnly       []ScopedRead
+	Credential     *os.File // a sealed snapshot returned by SnapshotCredentialFile
+	Account        string   // clean absolute destination below the private home
+	ProviderSocket *os.File // a private directory containing only provider.sock
 }
 
 // WrapScopedRead constructs a default-deny filesystem for one program and its descendants.
@@ -77,7 +78,15 @@ func WrapScopedRead(o ScopedOptions) (Plan, error) {
 			return closeOnError(err)
 		}
 		plan.ExtraFiles = append(plan.ExtraFiles, os.NewFile(uintptr(fd), "scoped read"))
-		argv = append(argv, "--ro-bind-fd", strconv.Itoa(len(plan.ExtraFiles)+2), mount.Destination)
+		if seals, sealErr := unix.FcntlInt(mount.Source.Fd(), unix.F_GET_SEALS, 0); sealErr == nil &&
+			seals&(unix.F_SEAL_WRITE|unix.F_SEAL_GROW|unix.F_SEAL_SHRINK|unix.F_SEAL_SEAL) ==
+				unix.F_SEAL_WRITE|unix.F_SEAL_GROW|unix.F_SEAL_SHRINK|unix.F_SEAL_SEAL {
+			// Bubblewrap copies sealed anonymous files into the namespace; a bind through /proc/self/fd
+			// stops resolving when its private proc mount replaces the host's proc filesystem.
+			argv = append(argv, "--perms", "0555", "--ro-bind-data", strconv.Itoa(len(plan.ExtraFiles)+2), mount.Destination)
+		} else {
+			argv = append(argv, "--ro-bind-fd", strconv.Itoa(len(plan.ExtraFiles)+2), mount.Destination)
+		}
 		visible = append(visible, mount.Destination)
 	}
 	if !coveredBy(o.Argv[0], visible) || !coveredBy(o.Cwd, visible) || seen[o.Account] {
@@ -88,6 +97,15 @@ func WrapScopedRead(o ScopedOptions) (Plan, error) {
 			return closeOnError(errors.New("sandbox: runtime mount overlaps the private account"))
 		}
 	}
+	if o.ProviderSocket != nil {
+		provider, err := scopedProviderDirectory(o.ProviderSocket)
+		if err != nil {
+			return closeOnError(err)
+		}
+		plan.ExtraFiles = append(plan.ExtraFiles, provider)
+		argv = append(argv, "--ro-bind-fd", strconv.Itoa(len(plan.ExtraFiles)+2), "/run/provider",
+			"--setenv", "DAEDALUS_PROVIDER_SOCKET", "/run/provider/provider.sock")
+	}
 	fd, err := unix.FcntlInt(o.Credential.Fd(), unix.F_DUPFD_CLOEXEC, 3)
 	if err != nil {
 		return closeOnError(err)
@@ -96,6 +114,11 @@ func WrapScopedRead(o ScopedOptions) (Plan, error) {
 	argv = append(argv, "--perms", "0600", "--ro-bind-data", strconv.Itoa(len(plan.ExtraFiles)+2), o.Account,
 		"--chdir", o.Cwd, "--")
 	plan.Argv = append(argv, o.Argv...)
+	executor, err := os.Executable()
+	if err != nil || !scopedPath(executor) {
+		return closeOnError(errors.New("sandbox: scoped executor is unavailable"))
+	}
+	plan.Argv = append([]string{executor, "--scoped-exec", strconv.Itoa(len(plan.ExtraFiles))}, plan.Argv...)
 	return plan, nil
 }
 
@@ -104,7 +127,7 @@ func scopedPath(path string) bool {
 }
 
 func scopedReserved(path string) bool {
-	for _, root := range []string{"/dev", "/proc", "/sys", "/tmp", "/home/operator"} {
+	for _, root := range []string{"/dev", "/proc", "/sys", "/tmp", "/home/operator", "/run/provider"} {
 		if within(path, root) || within(root, path) {
 			return true
 		}

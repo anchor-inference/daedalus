@@ -56,6 +56,11 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "--scoped-exec":
+		if err := sandbox.RunScopedExec(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "ptyd:", err)
+			os.Exit(1)
+		}
 	case "version", "--version":
 		fmt.Printf("ptyd %s (protocol %d)\n", version.Version, version.Protocol)
 	case "serve":
