@@ -269,12 +269,15 @@ export type Review = {
   patch: string;
   patch_complete: boolean;
   conflicts: string[] | null;
-  receipts: { criterion: string; command: string; exit_code: number; passed: boolean; at: string }[];
+  receipts: ReviewReceipt[];
   ci_status: "passed" | "blocked" | "not_required";
   ci_checks: { provider: string; repository_id: string; check_name: string; head_sha: string | null; state: string; delivery_id: string | null }[];
   can_merge: boolean;
   blockers: ReviewBlocker[];
 };
+
+/** A Verify run from the worker's session; ``tree`` is the commit it ran on, marked "+worktree" when dirty. */
+export type ReviewReceipt = { id?: number; criterion: string; command: string; exit_code: number; passed: boolean; at: string; tree?: string };
 
 /** The blocker codes the app has words for; any other is shown in the host's words. */
 export const BLOCKER_CODES = ["status", "branch", "merged", "dirty", "moved", "unknown", "conflicts", "checklist"] as const;

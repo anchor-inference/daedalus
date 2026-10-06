@@ -83,11 +83,12 @@ class Review:
     async def _receipts(self, task_id: str) -> list[dict[str, Any]]:
         """The verifications the member's sessions on this task ran: what they say they checked."""
         rows = await self.app.db.fetchall(
-            "SELECT v.criterion, v.command, v.exit_code, v.passed, v.at FROM verifications v WHERE v.session_id IN "
+            "SELECT v.id, v.criterion, v.command, v.exit_code, v.passed, v.at, v.tree FROM verifications v WHERE v.session_id IN "
             "(SELECT session_id FROM staff_sessions WHERE task_id = ? AND session_id IS NOT NULL) ORDER BY v.at DESC LIMIT ?",
             (task_id, RECEIPTS_MAX),
         )
-        return [{"criterion": r["criterion"], "command": r["command"], "exit_code": int(r["exit_code"]), "passed": bool(r["passed"]), "at": r["at"]} for r in rows]
+        # The id and the commit let the card offer a passing receipt as evidence for the exact head.
+        return [{"id": int(r["id"]), "criterion": r["criterion"], "command": r["command"], "exit_code": int(r["exit_code"]), "passed": bool(r["passed"]), "at": r["at"], "tree": r["tree"] or ""} for r in rows]
 
     @staticmethod
     def blockers(task: dict[str, Any], comparison: BranchComparison, base: str,

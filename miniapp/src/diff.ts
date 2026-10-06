@@ -96,3 +96,22 @@ export function diffFileName(f: DiffFile): string {
   if (f.oldPath && f.oldPath !== "/dev/null") return f.oldPath;
   return "";
 }
+
+/**
+ * Where a review note on the clicked row lands: the file at the branch head and a line in it.
+ *
+ * Notes are pinned to the reviewed commit, so they speak in new-file lines. A removed line has no
+ * number there; it is pinned to the line the removal sits before (or after, at the end of a hunk),
+ * which is where the reader of the new file would look for it. A deleted file has no head path and
+ * a "\ No newline" mark is no line at all, so both give nothing and the typed fields remain.
+ */
+export function lineAnchor(file: DiffFile, hunk: DiffHunk, index: number): { path: string; line: number } | null {
+  const path = file.newPath && file.newPath !== "/dev/null" ? file.newPath : "";
+  const row = hunk.lines[index];
+  if (!path || !row || row.type === "meta") return null;
+  if (row.newNo != null) return { path, line: row.newNo };
+  for (let i = index + 1; i < hunk.lines.length; i++) if (hunk.lines[i].newNo != null) return { path, line: hunk.lines[i].newNo! };
+  for (let i = index - 1; i >= 0; i--) if (hunk.lines[i].newNo != null) return { path, line: hunk.lines[i].newNo! };
+  const start = Number(HUNK_RE.exec(hunk.header)?.[3] ?? 1);
+  return { path, line: Math.max(1, start) };
+}

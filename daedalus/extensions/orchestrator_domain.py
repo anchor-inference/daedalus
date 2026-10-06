@@ -439,6 +439,53 @@ async def add_review_evidence(
             "verification": "stale" if stale else "verified" if exit_code == 0 else "failed"}
 
 
+CHECK_TREE_PREFIX = "tree:"
+
+
+async def add_check_evidence(
+    conn: aiosqlite.Connection, *, evidence_id: str, result_id: str, criterion_id: str,
+    verification_id: int, head: str | None,
+) -> dict[str, Any]:
+    """Bind a worker's passing Verify receipt to one criterion of the exact reviewed result.
+
+    The receipt must come from a session on the result's task and must have run against ``head``,
+    the commit the review card shows for the branch, with a clean tree: a receipt recorded on an
+    earlier commit or on uncommitted edits says nothing about what would be merged. The tree is
+    written into both manifest digests as ``tree:<commit>`` so the existing verdict rule (a passing
+    exit with an unchanged digest) accepts it, and the verdict later refuses it if the reviewed head
+    moved away from that commit.
+    """
+    result = await _one(conn, "SELECT task_id,contract_revision FROM result_receipts WHERE id = ?", (result_id,))
+    if result is None:
+        raise KeyError(result_id)
+    receipt = await _one(conn, "SELECT v.id,v.criterion,v.command,v.exit_code,v.passed,v.tree FROM verifications v"
+                         " WHERE v.id = ? AND v.session_id IN (SELECT session_id FROM staff_sessions"
+                         " WHERE task_id = ? AND session_id IS NOT NULL)", (verification_id, result["task_id"]))
+    if receipt is None:
+        raise DomainConflict("the check was not run for this task")
+    if not receipt["passed"] or receipt["exit_code"] != 0:
+        raise DomainConflict("only a passing check can count as evidence")
+    if not head or receipt["tree"] != head:
+        raise DomainConflict("the check ran against another commit than the reviewed branch head")
+    contract = await _one(conn, "SELECT snapshot_json FROM task_contract_versions"
+                          " WHERE task_id = ? AND contract_revision = ?",
+                          (result["task_id"], result["contract_revision"]))
+    snapshot = _json(contract["snapshot_json"], {}) if contract is not None else {}
+    criteria = {item["id"]: item for item in [*snapshot.get("checklist", []),
+                                               *snapshot.get("requirements", [])]}
+    if criterion_id not in criteria and not (criterion_id in ("result", "completion") and not criteria):
+        raise DomainConflict("evidence criterion is outside the current contract")
+    if criterion_id in criteria and criteria[criterion_id].get("file_id"):
+        # A file-bound requirement is proven by the digest of its attached file, which a commit
+        # identity cannot stand in for.
+        raise DomainConflict("this criterion needs its attached file evidence")
+    tree = CHECK_TREE_PREFIX + head
+    return await add_review_evidence(conn, evidence_id=evidence_id, result_id=result_id, criterion_id=criterion_id,
+                                     command=f"verify: {receipt['criterion'] or receipt['command']}", exit_code=0,
+                                     environment_digest=None, manifest_digest_before=tree,
+                                     manifest_digest_after=tree, original_verification_id=int(receipt["id"]))
+
+
 async def manual_result_origin(conn: aiosqlite.Connection, result_id: str, task_id: str,
                                actor_id: str) -> bool:
     """A human-authored report needs its committed authenticated command, not an actor string alone."""
@@ -572,9 +619,14 @@ async def record_verdict(
     evidence = []
     for evidence_id in evidence_ids:
         row = await _one(conn, "SELECT result_id, contract_revision, command, exit_code, manifest_digest_before,"
-                         " manifest_digest_after FROM review_evidence WHERE id = ?", (evidence_id,))
+                         " manifest_digest_after, original_verification_id FROM review_evidence WHERE id = ?",
+                         (evidence_id,))
         if row is None or row["result_id"] != result_id or row["contract_revision"] != result["contract_revision"]:
             raise DomainConflict("evidence does not bind to the reviewed result")
+        if (accepted and row["original_verification_id"] is not None
+                and row["manifest_digest_before"] != CHECK_TREE_PREFIX + str(head)):
+            # A check binds the commit it ran on; once the branch moves it no longer covers the merge.
+            raise DomainConflict("a check ran against another commit than the reviewed head")
         human_statement = manual_origin and await operator_attestation_in(conn, evidence_id)
         file_proof = (row["exit_code"] == 0 and row["manifest_digest_before"] is not None
                       and row["manifest_digest_before"] == row["manifest_digest_after"])
