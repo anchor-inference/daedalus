@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import traceback
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -494,3 +495,16 @@ async def test_resolving_waits_for_a_running_sync_so_its_cursor_reset_survives(d
     await resolving
     # The resolve's own sync read from scratch, without the token the first sync stored.
     assert "syncToken" not in queries[-1]
+
+
+
+@pytest.mark.asyncio
+async def test_a_failed_feed_raises_without_its_address(db, monkeypatch):
+    """The stored error was already scrubbed; what sync raises must be too, its chain included."""
+    store = CalendarStore(db)
+    feed = await store.subscribe("Team", "https://feeds.example.invalid/private/SECRET-TOKEN/basic.ics?key=SECRET-KEY")
+    _fake_network(monkeypatch, lambda request: httpx.Response(403))
+    with pytest.raises(calendar_sync.CalendarSyncFailed) as caught:
+        await CalendarSync(store).sync(feed["id"])
+    printed = "".join(traceback.format_exception(caught.value))
+    assert "SECRET" not in printed and "HTTP 403 from feeds.example.invalid" in printed, printed

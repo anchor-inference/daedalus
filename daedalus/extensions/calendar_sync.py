@@ -56,6 +56,10 @@ ICS_MAX_EVENTS = 5000
 _URL = re.compile(r"(?:https?|webcal)://[^\s'\"<>]+")
 
 
+class CalendarSyncFailed(RuntimeError):
+    """A provider failure, worded by :func:`describe`: the status and the host, never the address."""
+
+
 def describe(exc: BaseException) -> str:
     """A failure as it may be shown and stored: the status and the host, never the address.
 
@@ -344,6 +348,10 @@ class CalendarSync:
                     "UPDATE calendar_accounts SET sync_error=?,failures=?,next_sync_at=? WHERE id=?",
                     (describe(exc), failures, retry.isoformat(), account_id),
                 )
+                if isinstance(exc, httpx.HTTPError):
+                    # httpx's own message and its chained frames carry the full address, which for a
+                    # feed is its secret; a caller that printed this exception would leak it.
+                    raise CalendarSyncFailed(describe(exc)) from None
                 raise
             finally:
                 SYNCING.discard(account_id)
@@ -951,4 +959,4 @@ async def sync_loop(store: CalendarStore, stopping: asyncio.Event) -> None:
             pass
 
 
-__all__ = ["CalendarSync", "backoff", "describe", "sync_due", "sync_loop"]
+__all__ = ["CalendarSync", "CalendarSyncFailed", "backoff", "describe", "sync_due", "sync_loop"]
