@@ -47,7 +47,7 @@ It is built to run for weeks: sessions survive restarts, runs resume from snapsh
 - **🖥️ An app, not a deployment** — one download opens a window of its own on macOS, Linux and Windows; native mode needs no Docker at all and is ready four seconds after launch.
 - **🛠️ Real tools** — shell, files, search, web fetch and search, a vision model, a Chromium you watch and take over, verification runs, MCP servers, skills loaded on demand.
 - **📁 Projects** — add a folder of your own and the agents started in it work there; a path that leads out of it is refused, not followed.
-- **🧭 Orchestration** — a main orchestrator hands work to each project's orchestrator, which runs a team of staff (Daedalus agents or command-line agents such as Claude Code and Codex) and asks you only what it has to.
+- **🧭 Orchestration** — a main orchestrator hands work to each project's orchestrator, which runs a team of staff (Daedalus agents or command-line agents such as Claude Code and Codex) and asks you only what it has to. [From a goal to an accepted result](docs/ORCHESTRATION.md).
 - **🔁 Autonomy on a leash** — loops, cron tasks, a heartbeat and boards, each run bounded by turn, spend and time limits; a provider outage pauses work instead of ending it.
 - **🧬 Self-development** — the agent changes its own code in a worktree and a pull request you approve in the chat, and a bad build is rolled back on its own.
 - **🔐 Keys it never sees** — provider keys live in a key proxy that stops paying once the daily budget is spent; ChatGPT, Claude Code and SuperGrok logins work as providers too.
@@ -280,6 +280,7 @@ Every session command also works from the app's composer with the same `/` palet
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | `.env`, `config.toml`, MCP servers and the guard rails |
 | [docs/POLICY.md](docs/POLICY.md) | what the agent may do, and where the boundary is |
 | [docs/SELF-DEVELOPMENT.md](docs/SELF-DEVELOPMENT.md) | the three self-development modes in full |
+| [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md) | a project from its goal to an accepted result: autonomy, review, the team, host folders |
 | [docs/API.md](docs/API.md) | the HTTP API: files, steers, the event stream, notifications, projects, orchestration, push |
 | [docs/VOICE.md](docs/VOICE.md) | voice mode (beta): hearing you, speaking back, the local voices |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | the repository's layout, and benchmark runs |
