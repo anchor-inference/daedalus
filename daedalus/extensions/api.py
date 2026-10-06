@@ -5020,23 +5020,33 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     async def download(session_id: str, path: str, folder_id: str = "", _: dict[str, Any] = Depends(auth)) -> FileResponse:
         return _file_response(*_pane_target(session_id, folder_id, await _files_root(session_id, folder_id), path))
 
-    # -- the steer queue: what was sent to a working agent and has not reached it yet -------
+    # -- the queue: what was sent to a working agent and has not reached it yet -------------
 
     @api.get("/api/sessions/{session_id}/steer")
     async def list_steer(session_id: str, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
-        """Steers this session has taken in and not yet handed to the model, oldest first."""
+        """Messages this session has taken in and not yet handed to the model, steers first."""
         state = await manager.get_state(session_id)
         if state is None:
             raise HTTPException(404, "no such session")
-        return await manager.queued_steers(session_id)
+        return await manager.queued_input(session_id)
+
+    @api.post("/api/sessions/{session_id}/steer/{msg_id}")
+    async def steer_queued(session_id: str, msg_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Hand a message waiting for the end of the turn to the run now, before its next model call."""
+        state = await manager.get_state(session_id)
+        if state is None:
+            raise HTTPException(404, "no such session")
+        if not await manager.steer_queued(session_id, msg_id):
+            raise HTTPException(409, "that message has already reached the agent")
+        return {"steered": True}
 
     @api.delete("/api/sessions/{session_id}/steer/{msg_id}")
     async def drop_steer(session_id: str, msg_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """Take a queued steer back. 409 once the run has read it: by then it is in the history, not in a queue."""
+        """Take a waiting message back. 409 once the run has read it: by then it is in the history, not in a queue."""
         state = await manager.get_state(session_id)
         if state is None:
             raise HTTPException(404, "no such session")
-        if not await manager.drop_queued_steer(session_id, msg_id):
+        if not await manager.drop_queued_input(session_id, msg_id):
             raise HTTPException(409, "that message has already reached the agent")
         return {"deleted": True}
 

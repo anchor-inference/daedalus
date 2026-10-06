@@ -16,7 +16,7 @@ import { useReply } from "./project/chat";
 import {
   Approval,
   ComposerStatus,
-  QueuedSteer,
+  QueuedMessage,
   answersComplete,
   questionsKey,
   clearDraft,
@@ -55,8 +55,8 @@ export type ComposerHandle = {
 export type ComposerProps = {
   sessionId: string;
   status: ComposerStatus;
-  /** Send the text and the files; while a run is on, the host queues it as a steer. Rejects on failure. */
-  onSend: (text: string, files: File[], intent: "send" | "steer" | "queue", clientMessageId?: string, onProgress?: (fraction: number) => void) => Promise<"sent" | "steered" | "queued">;
+  /** Send the text and the files; with `queue` (a run is on) the host holds it for the end of the turn. Rejects on failure. */
+  onSend: (text: string, files: File[], queue: boolean, clientMessageId?: string, onProgress?: (fraction: number) => void) => Promise<"sent" | "queued">;
   onStop: () => void;
   commands: SlashCommand[];
   /** Installed skills, offered in the same palette: picking one asks the agent to use it. */
@@ -86,8 +86,11 @@ export type ComposerProps = {
   onContext?: () => void;
   asr?: AsrStatus | null;
   /** The voice page, when the installation has one. */
-  steers: QueuedSteer[];
-  onWithdraw?: (steer: QueuedSteer) => void;
+  /** What the host holds for the running agent, drawn as cards above the field. */
+  queued: QueuedMessage[];
+  onWithdraw?: (message: QueuedMessage) => void;
+  /** Hand a waiting follow-up to the run now, before its next model call. */
+  onSteer?: (message: QueuedMessage) => void;
   questions?: Question[] | null;
   onAnswer?: (answers: Answer[]) => Promise<void>;
   approval?: Approval | null;
@@ -111,8 +114,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const replyTarget = useReply(sessionId);
   const [draft, setDraftState] = useState(() => readDraft(sessionId));
   const [savedTarget, setSavedTarget] = useState<DraftTarget | null>(() => readDraftTarget(sessionId));
-  const [intent, setIntent] = useState<"send" | "steer" | "queue">(() => readDraftTarget(sessionId)?.intent ?? "send");
-  const [sendOpen, setSendOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [fileReadySession, setFileReadySession] = useState<string | null>(null);
   const [fileStorageError, setFileStorageError] = useState(false);
@@ -124,15 +125,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const fileInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   const plusButton = useRef<HTMLButtonElement>(null);
-  const sendButton = useRef<HTMLButtonElement>(null);
   const dock = useRef<HTMLDivElement>(null);
 
   // The draft is the session's: leaving and coming back finds it, another session does not.
   useEffect(() => {
     setDraftState(readDraft(sessionId));
-    const saved = readDraftTarget(sessionId);
-    setSavedTarget(saved);
-    setIntent(saved?.intent ?? "send");
+    setSavedTarget(readDraftTarget(sessionId));
     setFileReadySession(null);
     setFileStorageError(false);
     let active = true;
@@ -150,8 +148,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }, [sessionId]);
   const currentTarget: DraftTarget = { session: sessionId, project: props.targetProject ?? "", workspace: props.targetWorkspace ?? "", model: props.model, mode: props.mode ?? "", effort: props.reasoningEffort ?? "", reply: replyTarget ? `${replyTarget.seq}:${replyTarget.excerpt}` : "" };
   const needsReview = draftTargetChanged(savedTarget, currentTarget);
-  const rememberTarget = (nextIntent = intent) => {
-    const target = { ...(savedTarget ?? currentTarget), intent: nextIntent };
+  const rememberTarget = () => {
+    const target = savedTarget ?? currentTarget;
     setSavedTarget(target);
     writeDraftTarget(sessionId, target);
   };
@@ -172,7 +170,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       if (next.trim() || files.length) rememberTarget();
       else { setSavedTarget(null); writeDraftTarget(sessionId, null); }
     },
-    [sessionId, files, savedTarget, currentTarget, intent],
+    [sessionId, files, savedTarget, currentTarget],
   );
 
   // Measure the placeholder too, and refit when a panel or viewport changes the width.
@@ -280,23 +278,24 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   // ── send / stop / queue ──
   const { action, enabled } = primaryAction({ status, hasDraft: !!draft.trim(), hasFiles: files.length > 0, asking, sending });
-  async function send(override?: string, selectedIntent = intent) {
+  async function send(override?: string) {
     const text = (override ?? draft).trim();
     const going = files;
     if (sending || fileReadySession !== sessionId || (!text && going.length === 0)) return;
-    if (needsReview || (status === "running" ? selectedIntent === "send" : selectedIntent !== "send")) return;
+    if (needsReview) return;
+    const queue = status === "running";
     if (text.startsWith("/") && going.length === 0 && commands.some((c) => c.name === text.slice(1).split(" ")[0].toLowerCase())) {
       await runCommand(text);
       return;
     }
     setSending(true);
-    const fingerprint = JSON.stringify({ text, files: going.map((file) => [file.name, file.size, file.lastModified, file.type]), target: currentTarget, intent: selectedIntent });
+    const fingerprint = JSON.stringify({ text, files: going.map((file) => [file.name, file.size, file.lastModified, file.type]), target: currentTarget, queue });
     const clientMessageId = sendIntent(sessionId, fingerprint);
     // Keep the complete draft until the server confirms it. A dropped reply may be an unknown
     // outcome; the same client message id is used if the operator explicitly retries.
     if (going.length) setProgress(0);
     try {
-      const delivery = await onSend(text, going, selectedIntent, clientMessageId, going.length ? setProgress : undefined);
+      const delivery = await onSend(text, going, queue, clientMessageId, going.length ? setProgress : undefined);
       clearSendIntent(sessionId);
       setDraftState("");
       clearDraft(sessionId);
@@ -320,11 +319,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     if (action === "stop") onStop();
     else if (action === "reply") void reply();
     else void send();
-  }
-  function chooseIntent(next: "send" | "steer" | "queue") {
-    setIntent(next);
-    rememberTarget(next);
-    setSendOpen(false);
   }
 
   // ── the voice note ──
@@ -441,20 +435,22 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const ctx = props.context ?? null;
   const pct = ctx && ctx.window > 0 ? Math.round((100 * ctx.tokens) / ctx.window) : null;
-  const primaryLabel = action === "stop" ? t("session.stop") : action === "reply" ? t("composer.reply") : t(intent === "queue" ? "composer.queue" : intent === "steer" ? "composer.steer" : "session.send");
-  const intentFits = status === "running" ? intent !== "send" : intent === "send";
+  const primaryLabel = action === "stop" ? t("session.stop") : action === "reply" ? t("composer.reply") : action === "queue" ? t("composer.queue") : t("session.send");
   const place = composerContext(props.place);
 
   return (
     <div className="composer" data-primary={action}>
       {props.above}
-      {props.steers.length > 0 && (
+      {props.queued.length > 0 && (
         <div className="steers" aria-label={t("composer.steers")}>
-          {props.steers.map((s) => (
-            <div key={s.id} className="steer" data-steer={s.id}>
+          {props.queued.map((s) => (
+            <div key={s.id} className="steer" data-steer={s.id} data-kind={s.kind}>
               <Icon name="forward" size={14} />
               <span className="steer-text clamp-2">{s.text}</span>
-              <span className="steer-hint sub">{t("composer.queue.hint")}</span>
+              <span className="steer-hint sub">{t(s.kind === "follow_up" ? "composer.queued.hint" : "composer.steered.hint")}</span>
+              {s.kind === "follow_up" && props.onSteer && status === "running" && (
+                <button type="button" className="btn small steer-now" onClick={() => props.onSteer!(s)} title={t("composer.steer.now.title")}>{t("composer.steer.now")}</button>
+              )}
               {props.onWithdraw && (
                 <button type="button" className="iconbtn small steer-x" onClick={() => props.onWithdraw!(s)} aria-label={t("composer.steer.withdraw")} title={t("composer.steer.withdraw")}>
                   <Icon name="close" size={13} />
@@ -542,7 +538,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {progress !== null && <div className="sub upload-progress" role="status">{t("upload.progress", { percent: Math.floor(progress * 100) })}</div>}
         {fileStorageError && files.length > 0 && <div className="sub upload-progress" role="status">{t("composer.attachments.unsaved")}</div>}
         {fileReadySession !== sessionId && <div className="sub upload-progress" role="status">{t("composer.attachments.restoring")}</div>}
-        {needsReview && <div className="sub upload-progress" role="status">{t("composer.draft.targetChanged")} <button type="button" className="btn small" onClick={() => { const next = { ...currentTarget, intent }; setSavedTarget(next); writeDraftTarget(sessionId, next); clearSendIntent(sessionId); }}>{t("composer.draft.useCurrent")}</button></div>}
+        {needsReview && <div className="sub upload-progress" role="status">{t("composer.draft.targetChanged")} <button type="button" className="btn small" onClick={() => { setSavedTarget(currentTarget); writeDraftTarget(sessionId, currentTarget); clearSendIntent(sessionId); }}>{t("composer.draft.useCurrent")}</button></div>}
         {files.length > 0 && !voiceBar && (
           <div className="attachments" aria-label={t("session.attachments")}>
             {files.map((f, i) => (
@@ -590,16 +586,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               </button>
             )}
             {props.asr?.configured && <MicButton note={note} />}
-            <button ref={sendButton} type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled || fileReadySession !== sessionId || needsReview || (action !== "stop" && action !== "reply" && !intentFits)} aria-label={primaryLabel} title={primaryLabel} data-action={action}>
+            {/* A written pill turns the circle into Queue, and Stop must not go with it: the run is
+                still on, and the shortcut alone is not a way to stop it on a phone. */}
+            {action === "queue" && <button type="button" className="iconbtn flat stop-aside" onClick={onStop} aria-label={t("session.stop")} title={t("session.stop")}><Icon name="stop" size={16} /></button>}
+            <button type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled || fileReadySession !== sessionId || needsReview} aria-label={primaryLabel} title={primaryLabel} data-action={action}>
               <Icon name={action === "stop" ? "stop" : action === "reply" ? "send" : "up"} />
             </button>
-            {(draft.trim() || files.length > 0) && <button type="button" className="iconbtn flat" onClick={() => setSendOpen((open) => !open)} disabled={sending || fileReadySession !== sessionId} aria-label={t("composer.draft.actions")} aria-haspopup="menu" aria-expanded={sendOpen}><Icon name="chevron" size={14} /></button>}
-            {sendOpen && <Popover anchor={sendButton.current} onClose={() => setSendOpen(false)} className="plus-menu" label={t("composer.draft.actions")}>
-              {status === "running" ? <>
-                <button type="button" role="menuitem" onClick={() => chooseIntent("steer")}>{t("composer.steer")}</button>
-                <button type="button" role="menuitem" onClick={() => chooseIntent("queue")}>{t("composer.queue")}</button>
-              </> : <button type="button" role="menuitem" onClick={() => chooseIntent("send")}>{t("session.send")}</button>}
-            </Popover>}
           </div>
         </div>
       </div>

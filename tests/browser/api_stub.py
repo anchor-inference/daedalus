@@ -1642,6 +1642,14 @@ class FocusStub:
                 run_id = f"run-{seq}"
                 return 200, {"run_id": run_id, "receipt": {"status": "consumed", "run_id": run_id,
                                                           "client_message_id": payload.get("client_message_id")}}
+        if path.startswith("/api/sessions/") and "/steer" in path and path.split("/")[3] in self.details:
+            # Every message here is consumed as it is posted, so nothing ever waits: the list is
+            # empty, and steering or withdrawing a waiting message answers as the host does for one
+            # that has already reached the agent.
+            if path.endswith("/steer") and method == "GET":
+                return 200, []
+            if path.count("/") == 5 and method in ("POST", "DELETE"):
+                return 409, {"detail": "that message has already reached the agent"}
         if path.startswith("/api/projects/") and path.endswith("/orchestrator/replace"):
             pid = path.split("/")[3]
             if method == "GET":

@@ -2,8 +2,9 @@
 
 The composer's one circle has a unit test for what it means (miniapp/src/composer.test.ts); this is
 the part that only exists once it is drawn against a host: a message goes out and the primary is
-Send; while a run is on an empty pill is Stop and a written one queues a steer, which appears as a
-card above the pill and is withdrawn with its ×; a tool call the policy refused is a dock above the
+Send; while a run is on an empty pill is Stop and a written one is queued for after the turn with no
+choice asked, appearing as a card above the pill whose Steer hands it to the run now and whose ×
+withdraws it, with Stop still beside the circle; a tool call the policy refused is a dock above the
 pill whose Allow once spends the key; the agent's question is a dock whose answer the circle sends
 as Reply; the model list opens from inside the pill and a pick reaches the host; and while another
 model stands in the selector says so and offers the way back.
@@ -105,11 +106,22 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         data = json.loads(req.post_data) if req.post_data else None
         HOST.posted.append((req.method, rel, data))
         if rel == f"/api/sessions/{SESSION}/messages":
-            if HOST.status == "running" and (data or {}).get("steer"):
+            if HOST.status == "running":
+                # The host keys a queued message by the client's id, which is what the card's
+                # buttons quote back.
                 HOST.n += 1
-                HOST.queue.append({"id": f"q_{HOST.n:04d}", "text": str((data or {}).get("text", "")), "queued_at": "2026-09-18T12:01:00+00:00"})
+                kind = "steer" if (data or {}).get("steer") else "follow_up"
+                item_id = str((data or {}).get("client_message_id") or f"q_{HOST.n:04d}")
+                HOST.queue.append({"id": item_id, "kind": kind, "text": str((data or {}).get("text", "")), "queued_at": "2026-09-18T12:01:00+00:00"})
             receipt = {"status": "queued" if HOST.status == "running" else "consumed"}
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"run_id": "r2", "receipt": receipt}))
+        if rel.startswith(f"/api/sessions/{SESSION}/steer/") and req.method == "POST":
+            sid = rel.rsplit("/", 1)[1]
+            waiting = [q for q in HOST.queue if q["id"] == sid and q["kind"] == "follow_up"]
+            if not waiting:
+                return route.fulfill(status=409, content_type="application/json", body=json.dumps({"detail": "that message has already reached the agent"}))
+            waiting[0]["kind"] = "steer"
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"steered": True}))
         if rel.startswith(f"/api/sessions/{SESSION}/steer/"):
             sid = rel.rsplit("/", 1)[1]
             before = len(HOST.queue)
@@ -307,7 +319,8 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if page.evaluate("() => localStorage.getItem('daedalus.draft.sess-1')"):
         problems.append("the stored draft was not cleared after sending")
 
-    # A run is on: an empty pill is Stop; a written one queues a steer, which becomes a card with a ×.
+    # A run is on: an empty pill is Stop; a written one is queued for after the turn, with no choice
+    # asked, and becomes a card whose Steer hands it to the run now and whose × takes it back.
     idle_box = page.locator(".composer-box").bounding_box()
     HOST.status = "running"
     page.reload()
@@ -323,49 +336,55 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.wait_for_timeout(100)
     queue_box = page.locator(".composer-box").bounding_box()
     if running_box and queue_box and abs(running_box["y"] - queue_box["y"]) > 1:
-        problems.append("typing a steer moved the composer")
+        problems.append("typing during a run moved the composer")
     if page.locator(".composer-foot").count():
         problems.append("a dynamic footer still changes the composer's height")
-    hint = page.locator(".composer .roundbtn.primary").get_attribute("title") or ""
-    if not page.locator(".composer .roundbtn.primary").is_disabled():
-        problems.append("a running draft can be sent without choosing steer or queue")
-    page.locator(".composer [aria-label='Message actions']").click()
-    page.get_by_role("menuitem", name="Steer the current run").click()
-    hint = page.locator(".composer .roundbtn.primary").get_attribute("title") or ""
-    if "Steer" not in hint or page.locator(".composer .roundbtn.primary").is_disabled():
-        problems.append(f"the chosen steer is not ready ({hint!r})")
-    page.locator(".composer .roundbtn.primary").click()
+    circle = page.locator(".composer .roundbtn.primary")
+    hint = circle.get_attribute("title") or ""
+    if circle.is_disabled() or "Queue after this turn" not in hint:
+        problems.append(f"a running draft is not ready to queue ({hint!r}, disabled={circle.is_disabled()})")
+    if page.locator("[aria-label='Message actions'], [role='menuitem']").count():
+        problems.append("a delivery menu is still offered beside the circle")
+    stop_aside = page.locator(".composer .stop-aside")
+    if stop_aside.count() != 1 or not stop_aside.is_visible() or stop_aside.get_attribute("aria-label") != "Stop the run":
+        problems.append("with a draft written during a run, Stop is no longer within reach")
+    page.keyboard.press("Enter")
+    reached(page, "/messages", 1, "Enter during a run", problems)
     page.wait_for_selector(".composer .steer", timeout=5000)
-    steered = posts("/messages")[-1]
-    print("steered:", steered)
-    steer_id = steered[2].get("client_message_id")
-    if steered[2].get("text") != "also look at the log" or steered[2].get("steer") is not True or not steer_id or len(steer_id) > 64 or steer_id == first_id:
-        problems.append(f"the steer was not posted as one ({steered})")
+    queued = posts("/messages")[-1]
+    print("queued:", queued)
+    queued_id = queued[2].get("client_message_id")
+    if queued[2].get("text") != "also look at the log" or queued[2].get("follow_up") is not True or queued[2].get("steer") or queued[2].get("expected_running") is not True or not queued_id or queued_id == first_id:
+        problems.append(f"Enter during a run did not queue a follow-up ({queued})")
     card = page.locator(".composer .steer")
-    if card.count() != 1 or "also look at the log" not in card.inner_text():
-        problems.append("the queued steer is not a card above the pill")
+    if card.count() != 1 or "also look at the log" not in card.inner_text() or card.get_attribute("data-kind") != "follow_up":
+        problems.append("the queued message is not a follow-up card above the pill")
+    if page.locator(".msg.user", has_text="also look at the log").count():
+        problems.append("the queued message is drawn twice: as its card and as a bubble in the conversation")
     if primary(page) != "stop":
         problems.append(f"after queuing, the circle is {primary(page)!r}, not stop")
+    steer_now = card.locator(".steer-now")
+    if steer_now.count() != 1 or steer_now.inner_text().strip() != "Steer":
+        problems.append("the queued card offers no Steer")
+    steer_now.click()
+    reached(page, f"/steer/{queued_id}", 0, "the card's Steer", problems, method="POST")
+    page.wait_for_selector(".composer .steer[data-kind='steer']", timeout=5000)
+    if card.locator(".steer-now").count() or "will be read on the next step" not in card.inner_text():
+        problems.append(f"a steered card does not say it is read at the next step ({card.inner_text()!r})")
     card.locator(".steer-x").click()
-    reached(page, "/steer/q_0001", 0, "the steer's ×", problems, method="DELETE")
+    reached(page, f"/steer/{queued_id}", 0, "the card's ×", problems, method="DELETE")
     page.wait_for_timeout(100)
     if page.locator(".composer .steer").count():
         problems.append("the card stayed after its × was pressed")
-    deleted = [p for p in HOST.posted if p[0] == "DELETE"]
-    print("withdrawn:", deleted)
-    if not deleted or not deleted[-1][1].endswith("/steer/q_0001"):
-        problems.append(f"the × did not DELETE the steer ({deleted})")
 
     field(page).fill("after this run")
-    page.locator(".composer [aria-label='Message actions']").click()
-    page.get_by_role("menuitem", name="Queue for the next step").click()
     before_queue = len(posts("/messages"))
     page.locator(".composer .roundbtn.primary").click()
-    reached(page, "/messages", before_queue, "explicit queue", problems)
+    reached(page, "/messages", before_queue, "the circle during a run", problems)
     page.wait_for_function("() => document.querySelector('.composer textarea')?.value === ''")
     queued = posts("/messages")[-1][2]
     if queued.get("follow_up") is not True or queued.get("steer") is True:
-        problems.append(f"the explicit queue was not a follow-up ({queued})")
+        problems.append(f"the circle during a run did not queue a follow-up ({queued})")
 
     # Ctrl+Shift+S stops the run, after the confirm.
     field(page).click()

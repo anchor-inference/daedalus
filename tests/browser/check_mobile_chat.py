@@ -1,4 +1,4 @@
-"""Exercise disclosure, steering and keyboard geometry in the built mobile app."""
+"""Exercise disclosure, queueing during a run and keyboard geometry in the built mobile app."""
 from __future__ import annotations
 
 import os
@@ -17,7 +17,7 @@ def run() -> None:
             page = open_page(context, phone=True)
             assert page.locator(".thinking-head").last.get_attribute("aria-expanded") == "false"
             assert page.locator(".activity").count() == 0
-            assert page.locator(".composer textarea").get_attribute("placeholder") == "Steer the agent…"
+            assert page.locator(".composer textarea").get_attribute("placeholder") == "Message for after this turn…"
             assert page.locator(".composer .model-select").count() == 0
             assert page.locator(".composer .effort-select").count() == 0
             assert page.locator(".head-actions > button[aria-pressed]").count() == 0
@@ -25,9 +25,10 @@ def run() -> None:
             assert page.locator(".activity").last.is_visible()
             page.locator(".thinking-head").last.click()
             page.locator(".composer textarea").fill("Please use fewer files.")
-            page.locator('.composer button[aria-label="Message actions"]').click()
-            page.get_by_role("menuitem", name="Queue for the next step").click()
+            # Written during a run, the circle queues it at once and Stop stays beside it.
             assert page.locator('.composer [data-action="queue"]').is_enabled()
+            assert page.locator('.composer [aria-label="Message actions"]').count() == 0
+            assert page.locator(".composer .stop-aside").is_visible()
             for height in (844, 440, 320, 844):
                 page.set_viewport_size({"width": width, "height": height})
                 page.wait_for_timeout(150)
@@ -61,7 +62,7 @@ def run() -> None:
             assert page.locator(".model-select").evaluate("el => el === document.activeElement")
             if os.environ.get("SHOTS"):
                 page.screenshot(path=f"{os.environ['SHOTS']}/mobile-chat-{width}.png")
-            print(f"mobile {width}: disclosure, steering, settings, keyboard geometry OK")
+            print(f"mobile {width}: disclosure, queueing, settings, keyboard geometry OK")
             context.close()
         browser.close()
 

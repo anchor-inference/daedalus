@@ -350,10 +350,14 @@ class SessionState:
     still waiting, and an id that was handed over and not returned is one the model has read."""
     follow_up_seen: list[str] = field(default_factory=list)
     """The same for the follow-up queue."""
-    steer_withdrawn: set[str] = field(default_factory=set)
-    """Ids taken back since that reload. A reload already waiting on the database returns the row as
-    it was before the removal, so it is filtered through this on the way into the engine; cleared at
-    the next persist, by which time the store and the engine agree."""
+    queue_withdrawn: set[str] = field(default_factory=set)
+    """Ids taken back since that reload, from either queue. A reload already waiting on the database
+    returns the row as it was before the removal, so it is filtered through this on the way into the
+    engine; cleared at the next persist, by which time the store and the engine agree."""
+    follow_up_steered: set[str] = field(default_factory=set)
+    """Follow-ups the operator turned into steers since that reload. The same stale reload would hand
+    the item back to the engine's follow-up queue while the store already holds it as a steer, and the
+    message would then reach the model twice; and its leaving the follow-up queue is not consumption."""
 
     @property
     def running(self) -> bool:
@@ -442,16 +446,22 @@ def _ensure_inbox(workspace: Path, folder: ProjectFolder | None) -> None:
         _exclude_artefacts(workspace)
 
 
-def _steer_cards(items: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The waiting steers as the composer draws them: a recognisable amount of each, and not all of them."""
+def _waiting(queued: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Both queues as the operator reads them, steers first: they reach the model sooner."""
+    return [(kind, item) for kind in ("steer", "follow_up") for item in queued[kind] if str(item.get("text") or "").strip()]
+
+
+def _steer_cards(items: Sequence[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
+    """The waiting messages as the composer draws them: a recognisable amount of each, and not all of them.
+
+    ``kind`` says which queue holds the card, because a follow-up offers to become a steer and a
+    steer has nothing sooner left to become."""
     cards: list[dict[str, Any]] = []
-    for item in items:
+    for kind, item in items:
         text = str(item.get("text") or "")
-        if not text.strip():
-            continue
         if len(cards) >= STEER_CARD_LIMIT:
             break
-        card: dict[str, Any] = {"id": str(item.get("id") or ""), "text": text[:STEER_CARD_CHARS], "queued_at": item.get("queued_at")}
+        card: dict[str, Any] = {"id": str(item.get("id") or ""), "kind": kind, "text": text[:STEER_CARD_CHARS], "queued_at": item.get("queued_at")}
         if len(text) > STEER_CARD_CHARS:
             card["truncated"] = True
         cards.append(card)
@@ -2564,10 +2574,10 @@ class SessionManager:
 
     # -- the steer queue, as the app sees it ----------------------------------------
 
-    async def queued_steers(self, session_id: str) -> list[dict[str, Any]]:
-        """The steers this session has taken in and not yet given to the model, oldest first.
+    async def queued_input(self, session_id: str) -> list[dict[str, Any]]:
+        """What this session has taken in and not yet given to the model, steers first, oldest first.
 
-        The store is the record: a run reloads the queue from it before every model call and writes
+        The store is the record: a run reloads the queues from it before every model call and writes
         back what it did not place. Between those two moments a running engine holds the only copy,
         so a listing taken exactly then can name an item the model is already reading; the change
         event that follows the write corrects it within the round.
@@ -2576,14 +2586,13 @@ class SessionManager:
         there is more. Three long pasted messages otherwise travel whole to every open stream on
         every later change of the queue.
         """
-        queued = await self.live.load(session_id)
-        return _steer_cards(queued["steer"])
+        return _steer_cards(_waiting(await self.live.load(session_id)))
 
-    async def drop_queued_steer(self, session_id: str, item_id: str) -> bool:
-        """Take one steer back before the run reads it; ``False`` when it is already gone.
+    async def drop_queued_input(self, session_id: str, item_id: str) -> bool:
+        """Take one waiting message back before the run reads it; ``False`` when it is already gone.
 
         The engine is asked first and the store second. A run between its reload and its next model
-        call holds the queue in memory and would write that copy back over any store-only removal —
+        call holds the queues in memory and would write that copy back over any store-only removal —
         emptying its list first is what actually stops the message, and the store write behind it
         stops a reload from bringing the item round again.
         """
@@ -2591,31 +2600,67 @@ class SessionManager:
         removed = False
         engine = state.engine if state is not None else None
         if engine is not None:
-            queue = list(getattr(engine, "_steer_queue", []) or [])
-            kept = [item for item in queue if str(item.get("id") or "") != item_id]
-            if len(kept) != len(queue):
-                engine._steer_queue = kept  # type: ignore[attr-defined]
-                removed = True
+            for attribute in ("_steer_queue", "_follow_up_queue"):
+                queue = list(getattr(engine, attribute, []) or [])
+                kept = [item for item in queue if str(item.get("id") or "") != item_id]
+                if len(kept) != len(queue):
+                    setattr(engine, attribute, kept)
+                    removed = True
         receipt = await self.live.receipt(session_id, item_id)
         if receipt is not None:
             withdrawn = await self.live.withdraw(session_id, item_id)
             if withdrawn is not None and withdrawn["status"] == "withdrawn":
                 removed = True
-        elif await self.live.remove(session_id, "steer", item_id):
+        elif await self.live.remove(session_id, "steer", item_id) or await self.live.remove(session_id, "follow_up", item_id):
             removed = True
         if removed and state is not None:
             # A reload that was already waiting on the database when this ran will be handed the row
             # as it stood before the removal. Remembering the id here is what stops that answer from
             # putting the withdrawn message back into the engine's queue, where it is authoritative.
-            state.steer_withdrawn.add(item_id)
+            state.queue_withdrawn.add(item_id)
         if removed:
             await self.steer_changed(session_id, reason="withdrawn")
         return removed
 
-    async def steer_changed(self, session_id: str, *, reason: str) -> None:
-        """Tell the session's listeners that its steer queue is not what they last drew."""
+    async def steer_queued(self, session_id: str, item_id: str) -> bool:
+        """Turn a waiting follow-up into a steer of the run under way; ``False`` when it cannot be.
+
+        A message sent during a run waits for the turn to end; this is the operator deciding it should
+        not wait. The engine's copy is taken out first, for the reason ``drop_queued_input`` gives: once
+        it is out of the engine's list the core can no longer start placing it, so the store move that
+        follows cannot race a placement into a message the model reads twice. An item the run was
+        handed and no longer holds is being placed right now, and that answers ``False``.
+        """
         state = self._states.get(session_id)
-        waiting = [item for item in (await self.live.load(session_id))["steer"] if str(item.get("text") or "").strip()]
+        if state is None or not state.running:
+            # Nothing to steer: a follow-up left behind by a finished run opens the next one anyway.
+            return False
+        engine = state.engine
+        taken: tuple[int, dict[str, Any]] | None = None
+        if engine is not None:
+            queue = list(getattr(engine, "_follow_up_queue", []) or [])
+            index = next((i for i, item in enumerate(queue) if str(item.get("id") or "") == item_id), None)
+            if index is not None:
+                taken = (index, queue.pop(index))
+                engine._follow_up_queue = queue  # type: ignore[attr-defined]
+            elif item_id in state.follow_up_seen:
+                return False
+        if not await self.live.promote(session_id, item_id):
+            if taken is not None and engine is not None:
+                # The store says it is gone (withdrawn, or consumed from another path): the engine's
+                # list goes back as it was, because the store is the record and the engine only a copy.
+                queue = list(getattr(engine, "_follow_up_queue", []) or [])
+                queue.insert(taken[0], taken[1])
+                engine._follow_up_queue = queue  # type: ignore[attr-defined]
+            return False
+        state.follow_up_steered.add(item_id)
+        await self.steer_changed(session_id, reason="steered")
+        return True
+
+    async def steer_changed(self, session_id: str, *, reason: str) -> None:
+        """Tell the session's listeners that what waits for the model is not what they last drew."""
+        state = self._states.get(session_id)
+        waiting = _waiting(await self.live.load(session_id))
         await self._notify_sinks(
             session_id,
             HostEvent(
@@ -2789,6 +2834,7 @@ class SessionManager:
                 await self.sessions.append_transcript(
                     session_id, [Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], metadata={"daedalus.delivery": "follow_up", "daedalus.origin": origin, **words, "daedalus.queued": True, **({"daedalus.client_message_id": client_message_id} if client_message_id else {})})]
                 )
+                await self.steer_changed(session_id, reason="queued")
                 return state.run_id or ""
             provider_id: str | None = None
             if not state.running:
@@ -2847,8 +2893,7 @@ class SessionManager:
                 await self.sessions.append_transcript(
                     session_id, [Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], metadata={"daedalus.delivery": kind, "daedalus.origin": origin, **words, "daedalus.queued": True, **({"daedalus.client_message_id": client_message_id} if client_message_id else {})})]
                 )
-                if kind == "steer":
-                    await self.steer_changed(session_id, reason="queued")
+                await self.steer_changed(session_id, reason="queued")
                 return state.run_id or ""
             # A new run starts. The one before it may still be tidying up behind the answer, and most
             # of that is none of this run's business — but the files are: a revert of the turn that
@@ -3375,8 +3420,8 @@ class SessionManager:
 
         async def reload_live_control(eng: QueryEngine) -> None:
             data = await self.live.load(session_id)
-            steer = [item for item in data["steer"] if str(item.get("id") or "") not in state.steer_withdrawn]
-            follow_up = list(data["follow_up"])
+            steer = [item for item in data["steer"] if str(item.get("id") or "") not in state.queue_withdrawn]
+            follow_up = [item for item in data["follow_up"] if str(item.get("id") or "") not in state.queue_withdrawn | state.follow_up_steered]
             state.steer_seen = [str(item.get("id") or "") for item in steer]
             state.follow_up_seen = [str(item.get("id") or "") for item in follow_up]
             eng._steer_queue = steer  # type: ignore[attr-defined]
@@ -3391,10 +3436,11 @@ class SessionManager:
             gone = await self.live.replace_seen(
                 session_id, steer, follow_up, seen_steer=state.steer_seen, seen_follow_up=state.follow_up_seen,
             )
-            consumed = [item_id for item_id in gone if item_id not in state.steer_withdrawn]
+            consumed = [item_id for item_id in gone if item_id not in state.queue_withdrawn | state.follow_up_steered]
             state.steer_seen = [str(item.get("id") or "") for item in steer]
             state.follow_up_seen = [str(item.get("id") or "") for item in follow_up]
-            state.steer_withdrawn.clear()
+            state.queue_withdrawn.clear()
+            state.follow_up_steered.clear()
             if consumed:
                 # The round placed queued text into the history, so the cards the app draws above its
                 # composer are stale. Only what this round was handed and did not hand back counts,

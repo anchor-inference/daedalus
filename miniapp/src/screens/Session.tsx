@@ -17,7 +17,7 @@ import { ArtifactCard, KeptFiles } from "../artifact";
 import { withoutAttachedList } from "../keptfiles";
 import { InlineMedia, mediaCopyText, splitMediaAnswer } from "../media";
 import { Answer, Composer, ComposerHandle } from "../composerbox";
-import { Approval, QueuedSteer, pendingApproval, readSteers, steersAfter } from "../composer";
+import { Approval, QueuedMessage, pendingApproval, queuedAfter, readQueued } from "../composer";
 import { ModelChoice } from "../modelselect";
 import { ModeInfo, modeName } from "../modeselect";
 import { MoveSessionSheet } from "../projects";
@@ -204,9 +204,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [asr, setAsr] = useState<AsrStatus | null>(null);
   const [snapshots, setSnapshots] = useState<SessionCheckpoints | null>(null);
-  // The steers the host is holding for the next model call. `none` is a host without the route:
-  // the cards are simply not drawn, and the route is not asked again.
-  const [steers, setSteers] = useState<QueuedSteer[]>([]);
+  // What the host is holding for the running agent: follow-ups for the end of the turn, steers for
+  // its next model call. `none` is a host without the route: the cards are simply not drawn, and the
+  // route is not asked again.
+  const [queuedInput, setQueuedInput] = useState<QueuedMessage[]>([]);
   const steerRoute = useRef<"unknown" | "ok" | "none">("unknown");
   // Approval keys the operator has spent or waved away, so the dock does not offer them twice.
   const [seenKeys, setSeenKeys] = useState<Set<string>>(() => new Set());
@@ -500,40 +501,55 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const busyRef = useRef(busy);
   busyRef.current = busy;
 
-  // What the host is holding for the next step. Read when a run begins and after every steer
-  // this screen sends; kept current from the stream, which carries the whole queue in each event.
-  const loadSteers = useCallback(async () => {
+  // What the host is holding for the running agent. Read when a run begins and after every message
+  // this screen queues; kept current from the stream, which carries the whole queue in each event.
+  const loadQueued = useCallback(async () => {
     if (steerRoute.current === "none") return;
     try {
       const raw = await api.get<unknown>(`/api/sessions/${id}/steer`);
       steerRoute.current = "ok";
-      setSteers(readSteers(raw));
+      setQueuedInput(readQueued(raw));
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) steerRoute.current = "none";
-      setSteers([]);
+      setQueuedInput([]);
     }
   }, [id]);
   useEffect(() => {
     steerRoute.current = "unknown";
-    setSteers([]);
+    setQueuedInput([]);
   }, [id]);
   useEffect(() => {
-    if (busy) void loadSteers();
-    else setSteers([]);
-  }, [busy, loadSteers]);
+    if (busy) void loadQueued();
+    else setQueuedInput([]);
+  }, [busy, loadQueued]);
   const withdraw = useCallback(
-    async (steer: QueuedSteer) => {
+    async (message: QueuedMessage) => {
       try {
-        await api.delete(`/api/sessions/${id}/steer/${encodeURIComponent(steer.id)}`);
-        setSteers((q) => q.filter((x) => x.id !== steer.id));
+        await api.delete(`/api/sessions/${id}/steer/${encodeURIComponent(message.id)}`);
+        setQueuedInput((q) => q.filter((x) => x.id !== message.id));
         toast(t("composer.steer.withdrawn"));
       } catch (e) {
         // A 409 is the message having gone through after all; the list is re-read either way.
         toast(e instanceof ApiError && e.status === 409 ? t("composer.steer.gone") : errorText(e));
-        void loadSteers();
+        void loadQueued();
       }
     },
-    [id, toast, loadSteers],
+    [id, toast, loadQueued],
+  );
+  // A follow-up the operator decides should not wait for the turn to end: the host moves it to the
+  // steer queue, and the card stays, saying it is now read at the next step.
+  const steerNow = useCallback(
+    async (message: QueuedMessage) => {
+      try {
+        await api.post(`/api/sessions/${id}/steer/${encodeURIComponent(message.id)}`, {});
+        setQueuedInput((q) => q.map((x) => (x.id === message.id ? { ...x, kind: "steer" } : x)));
+        toast(t("composer.delivery.steered"));
+      } catch (e) {
+        toast(e instanceof ApiError && e.status === 409 ? t("composer.steer.gone") : errorText(e));
+        void loadQueued();
+      }
+    },
+    [id, toast, loadQueued],
   );
 
   // A tool call the policy refused, waiting on the operator: the dock above the pill offers it once.
@@ -717,7 +733,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         void load(true);
       } else if (event === "steer_changed") {
         steerRoute.current = "ok";
-        setSteers((q) => steersAfter(q, p));
+        setQueuedInput((q) => queuedAfter(q, p));
         if (p.reason === "consumed") refreshSoon("tail");
       } else if (event === "compaction_completed") refreshSoon("tail");
       else if (event === "state_changed" || event === "tool_call_pending") refreshSoon("state");
@@ -1080,11 +1096,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     load();
   }
 
-  // The message goes out; while a run is on the host holds it as a steer for the next step, and the
-  // queue is re-read so the card is there before the stream says so.
-  async function send(text: string, files: File[], intent: "send" | "steer" | "queue", clientMessageId?: string, onProgress?: (fraction: number) => void): Promise<"sent" | "steered" | "queued"> {
-    const steer = intent === "steer";
-    const followUp = intent === "queue";
+  // The message goes out; while a run is on the host holds it until the turn ends, and the queue is
+  // re-read so its card — the one that offers to steer instead — is there before the stream says so.
+  async function send(text: string, files: File[], followUp: boolean, clientMessageId?: string, onProgress?: (fraction: number) => void): Promise<"sent" | "queued"> {
     const reply = orchestrating ? currentReply(id) : null;
     let result: { receipt?: { status: string } };
     const pendingId = clientMessageId ?? crypto.randomUUID();
@@ -1098,13 +1112,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         const form = new FormData();
         form.append("text", uploadText(text, reply));
         form.append("client_message_id", pendingId);
-        if (steer) form.append("steer", "true");
         if (followUp) form.append("follow_up", "true");
-        form.append("expected_running", steer || followUp ? "true" : "false");
+        form.append("expected_running", followUp ? "true" : "false");
         for (const f of files) form.append("files", f, f.name);
         result = await api.upload<{ receipt?: { status: string } }>(`/api/sessions/${id}/upload`, form, onProgress);
       } else {
-        result = await api.post<{ receipt?: { status: string } }>(`/api/sessions/${id}/messages`, messageBody(text, { steer, followUp, clientMessageId: pendingId, reply }));
+        result = await api.post<{ receipt?: { status: string } }>(`/api/sessions/${id}/messages`, messageBody(text, { followUp, clientMessageId: pendingId, reply }));
       }
       if (result.receipt?.status !== "queued" && result.receipt?.status !== "consumed") throw new Error(t("composer.delivery.unconfirmed"));
     } catch (error) {
@@ -1114,9 +1127,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     // Only once the message is out: a send that fails puts the words back and keeps what they answer.
     if (reply) setReply(id, null);
     stick.current = true;
-    if (steer) void loadSteers();
+    if (followUp) void loadQueued();
     load();
-    return result.receipt!.status === "queued" ? steer ? "steered" : "queued" : "sent";
+    return result.receipt!.status === "queued" ? "queued" : "sent";
   }
 
   async function answer(answers: Answer[]) {
@@ -1454,7 +1467,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                   )}
                 />
                 {busy && <LiveTurn base={tail} live={live} onTurnAction={turnAction} onRender={pinBottom} />}
-                {sendingMessages.filter((pending) => !sentMessageReachedTranscript(detail?.messages, pending.id)).map((pending) => <div className="turn" key={pending.id}><div className="turn-content"><div className="msg-wrap"><div className="msg user"><Md text={pending.text} /></div></div></div></div>)}
+                {/* A message the host is holding is drawn once, as its card above the composer, where
+                    its Steer and × are; the bubble here would be the same words a second time. */}
+                {sendingMessages.filter((pending) => !sentMessageReachedTranscript(detail?.messages, pending.id) && !queuedInput.some((queued) => queued.id === pending.id)).map((pending) => <div className="turn" key={pending.id}><div className="turn-content"><div className="msg-wrap"><div className="msg user"><Md text={pending.text} /></div></div></div></div>)}
               </SessionContext.Provider>
               {flow}
               {/* Not while the Questions tab is the one open: the cards are already beside the chat,
@@ -1506,8 +1521,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             context={detail?.context ?? null}
             onContext={hasDetails ? () => { setDetailsFocus("context"); panel.open("details"); } : undefined}
             asr={asr}
-            steers={steers}
+            queued={queuedInput}
             onWithdraw={withdraw}
+            onSteer={steerNow}
             questions={detail?.pending?.questions ?? null}
             onAnswer={answer}
             approval={approval}

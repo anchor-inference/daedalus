@@ -203,12 +203,11 @@ export function excerptOf(text: string, max = EXCERPT_MAX): string {
 }
 
 /** The body a message is posted with, with what it answers when the operator chose something. */
-export function messageBody(text: string, opts: { steer: boolean; followUp?: boolean; clientMessageId?: string; reply?: ReplyRef | null }): Record<string, unknown> {
+export function messageBody(text: string, opts: { followUp?: boolean; clientMessageId?: string; reply?: ReplyRef | null }): Record<string, unknown> {
   return {
     text,
-    ...(opts.steer ? { steer: true } : {}),
     ...(opts.followUp ? { follow_up: true } : {}),
-    expected_running: opts.steer || !!opts.followUp,
+    expected_running: !!opts.followUp,
     client_message_id: opts.clientMessageId,
     ...(opts.reply ? { reply_to: { seq: opts.reply.seq, excerpt: opts.reply.excerpt } } : {}),
   };

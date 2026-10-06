@@ -134,9 +134,8 @@ describe("a reply", () => {
   });
 
   it("carries what it answers in the body, and nothing when it answers nothing", () => {
-    expect(messageBody("yes", { steer: false, clientMessageId: "c1", reply: { seq: 14, excerpt: "09:51 Max finished" } })).toEqual({ text: "yes", expected_running: false, client_message_id: "c1", reply_to: { seq: 14, excerpt: "09:51 Max finished" } });
-    expect(messageBody("yes", { steer: true, clientMessageId: "c1", reply: null })).toEqual({ text: "yes", steer: true, expected_running: true, client_message_id: "c1" });
-    expect(messageBody("later", { steer: false, followUp: true, clientMessageId: "c2" })).toEqual({ text: "later", follow_up: true, expected_running: true, client_message_id: "c2" });
+    expect(messageBody("yes", { clientMessageId: "c1", reply: { seq: 14, excerpt: "09:51 Max finished" } })).toEqual({ text: "yes", expected_running: false, client_message_id: "c1", reply_to: { seq: 14, excerpt: "09:51 Max finished" } });
+    expect(messageBody("later", { followUp: true, clientMessageId: "c2", reply: null })).toEqual({ text: "later", follow_up: true, expected_running: true, client_message_id: "c2" });
   });
 
   it("travels in the words of an upload, which takes no reference", () => {

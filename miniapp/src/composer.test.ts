@@ -17,9 +17,9 @@ import {
   primaryAction,
   readDraft,
   readDraftTarget,
-  readSteers,
+  readQueued,
   sendIntent,
-  steersAfter,
+  queuedAfter,
   writeDraft,
   writeDraftTarget,
 } from "./composer";
@@ -33,7 +33,7 @@ describe("the primary circle", () => {
     expect(primaryAction({ ...idle, hasFiles: true })).toEqual({ action: "send", enabled: true });
   });
 
-  it("stops a run when the pill is empty and queues a steer when it is not", () => {
+  it("stops a run when the pill is empty and queues the message for after the turn when it is not", () => {
     expect(primaryAction({ ...idle, status: "running" })).toEqual({ action: "stop", enabled: true });
     expect(primaryAction({ ...idle, status: "running", hasDraft: true })).toEqual({ action: "queue", enabled: true });
     expect(primaryAction({ ...idle, status: "running", hasFiles: true })).toEqual({ action: "queue", enabled: true });
@@ -119,15 +119,14 @@ class MemoryStorage {
 }
 
 describe("the draft", () => {
-  it("keeps the exact target and intent until an explicit review accepts changed settings", () => {
+  it("keeps the exact target until an explicit review accepts changed settings", () => {
     const store = new MemoryStorage();
-    const target = { session: "s1", project: "p1", workspace: "one", model: "m1", mode: "agent", effort: "high", reply: "12:answer", intent: "queue" as const };
+    const target = { session: "s1", project: "p1", workspace: "one", model: "m1", mode: "agent", effort: "high", reply: "12:answer" };
     writeDraftTarget("s1", target, store);
     expect(readDraftTarget("s1", store)).toEqual(target);
     expect(readDraftTarget("s2", store)).toBeNull();
     expect(draftTargetChanged(target, { ...target, model: "m2" })).toBe(true);
     expect(draftTargetChanged(target, { ...target, reply: "13:answer" })).toBe(true);
-    expect(draftTargetChanged(target, { ...target, intent: "steer" })).toBe(false);
     writeDraftTarget("s1", null, store);
     expect(readDraftTarget("s1", store)).toBeNull();
   });
@@ -162,19 +161,27 @@ describe("the draft", () => {
   });
 });
 
-describe("the steer queue", () => {
-  it("reads the host's list and drops what is not a steer", () => {
-    const raw = [{ id: "q_1", text: "also the log", queued_at: "2026-09-18T11:04:22+00:00" }, { id: "q_2", text: "   " }, { text: "no id" }, null, "junk"];
-    expect(readSteers(raw)).toEqual([{ id: "q_1", text: "also the log", queued_at: "2026-09-18T11:04:22+00:00" }]);
-    expect(readSteers({ detail: "not found" })).toEqual([]);
-    expect(readSteers(undefined)).toEqual([]);
+describe("the queue", () => {
+  it("reads the host's list, keeps which queue holds each message, and drops what is not a message", () => {
+    const raw = [
+      { id: "q_1", kind: "steer", text: "also the log", queued_at: "2026-09-18T11:04:22+00:00" },
+      { id: "q_3", kind: "follow_up", text: "then the docs", queued_at: null },
+      { id: "q_2", text: "   " }, { text: "no id" }, null, "junk",
+    ];
+    expect(readQueued(raw)).toEqual([
+      { id: "q_1", kind: "steer", text: "also the log", queued_at: "2026-09-18T11:04:22+00:00" },
+      { id: "q_3", kind: "follow_up", text: "then the docs", queued_at: null },
+    ]);
+    expect(readQueued({ detail: "not found" })).toEqual([]);
+    expect(readQueued(undefined)).toEqual([]);
   });
 
   it("is replaced whole by every steer_changed event, whatever the reason", () => {
-    const before = [{ id: "q_1", text: "one", queued_at: null }];
-    expect(steersAfter(before, { reason: "queued", queued: [{ id: "q_1", text: "one" }, { id: "q_2", text: "two" }] })).toHaveLength(2);
-    expect(steersAfter(before, { reason: "consumed", count: 0, queued: [] })).toEqual([]);
-    expect(steersAfter(before, { reason: "cleared" })).toEqual([]);
+    const before = [{ id: "q_1", kind: "follow_up" as const, text: "one", queued_at: null }];
+    expect(queuedAfter(before, { reason: "queued", queued: [{ id: "q_1", kind: "follow_up", text: "one" }, { id: "q_2", kind: "follow_up", text: "two" }] })).toHaveLength(2);
+    expect(queuedAfter(before, { reason: "steered", queued: [{ id: "q_1", kind: "steer", text: "one" }] })[0].kind).toBe("steer");
+    expect(queuedAfter(before, { reason: "consumed", count: 0, queued: [] })).toEqual([]);
+    expect(queuedAfter(before, { reason: "cleared" })).toEqual([]);
   });
 });
 

@@ -141,7 +141,7 @@ async def test_a_retried_input_returns_one_receipt_and_one_queue_item(settings: 
         assert first.status_code == repeated.status_code == 200
         assert first.json()["receipt"] == repeated.json()["receipt"]
         assert first.json()["receipt"]["status"] == "queued"
-        assert [item["id"] for item in await manager.queued_steers(sid)] == [body["client_message_id"]]
+        assert [item["id"] for item in await manager.queued_input(sid)] == [body["client_message_id"]]
         conflict = await client.post(
             f"/api/sessions/{sid}/messages",
             json={**body, "text": "different"},
@@ -288,11 +288,11 @@ async def test_the_id_the_app_holds_is_the_id_the_store_wrote(settings: Settings
     await asyncio.sleep(0.3)
     await manager.submit(sid, "one", steer=True)
     await manager.submit(sid, "two", steer=True)
-    listed = await manager.queued_steers(sid)
+    listed = await manager.queued_input(sid)
     stored = [item["id"] for item in (await manager.live.load(sid))[kind]]
     assert [item["id"] for item in listed] == stored and len(stored) == 2
-    assert await manager.drop_queued_steer(sid, stored[0])
-    assert [item["id"] for item in await manager.queued_steers(sid)] == stored[1:]
+    assert await manager.drop_queued_input(sid, stored[0])
+    assert [item["id"] for item in await manager.queued_input(sid)] == stored[1:]
     await manager.close()
 
 
@@ -314,7 +314,7 @@ async def test_a_steer_queued_after_the_round_read_the_queue_survives_the_round(
     assert list(getattr(engine, "_steer_queue", [])) == []
 
     await engine.persist_live_control(engine)
-    waiting = await manager.queued_steers(sid)
+    waiting = await manager.queued_input(sid)
     assert [item["text"] for item in waiting] == ["and while you are there"]
     assert [c["reason"] for c in changes] == ["queued"]
 
@@ -323,7 +323,7 @@ async def test_a_steer_queued_after_the_round_read_the_queue_survives_the_round(
     assert [item["id"] for item in engine._steer_queue] == [waiting[0]["id"]]
     engine._steer_queue = []
     await engine.persist_live_control(engine)
-    assert await manager.queued_steers(sid) == []
+    assert await manager.queued_input(sid) == []
     assert [c["reason"] for c in changes] == ["queued", "consumed"]
     await manager.close()
 
@@ -339,11 +339,11 @@ async def test_a_withdrawn_steer_is_not_brought_back_by_a_reload_that_raced_it(s
     assert engine is not None
     await engine.reload_live_control(engine)
     await manager.submit(sid, "forget this", steer=True)
-    item_id = (await manager.queued_steers(sid))[0]["id"]
+    item_id = (await manager.queued_input(sid))[0]["id"]
 
     # The row as a reload that started before the withdrawal would be handed it.
     stale = await manager.live.load(sid)
-    assert await manager.drop_queued_steer(sid, item_id)
+    assert await manager.drop_queued_input(sid, item_id)
 
     original = manager.live.load
 
@@ -356,7 +356,7 @@ async def test_a_withdrawn_steer_is_not_brought_back_by_a_reload_that_raced_it(s
     assert list(getattr(engine, "_steer_queue", [])) == []
 
     await engine.persist_live_control(engine)
-    assert await manager.queued_steers(sid) == []
+    assert await manager.queued_input(sid) == []
     await manager.close()
 
 
@@ -369,11 +369,108 @@ async def test_a_change_event_carries_cards_and_the_true_count(settings: Setting
     for i in range(STEER_CARD_LIMIT + 5):
         await manager.live.enqueue(sid, "steer", {"id": f"q_{i}", "text": "x" * (STEER_CARD_CHARS + 50), "queued_at": None})
 
-    cards = await manager.queued_steers(sid)
+    cards = await manager.queued_input(sid)
     assert len(cards) == STEER_CARD_LIMIT
     assert all(len(card["text"]) == STEER_CARD_CHARS and card["truncated"] for card in cards)
 
     await manager.steer_changed(sid, reason="queued")
     assert changes[-1]["count"] == STEER_CARD_LIMIT + 5 and len(changes[-1]["queued"]) == STEER_CARD_LIMIT
     assert state.session.id == sid
+    await manager.close()
+
+
+async def test_a_follow_up_waits_as_a_card_and_can_be_turned_into_a_steer(settings: Settings, db: Database) -> None:
+    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    manager = await _manager(settings, db, provider)
+    changes = _watch(manager)
+    state = await manager.create_session("steer a follow-up")
+    sid = state.session.id
+    async with _client(settings, db, manager) as client:
+        await manager.submit(sid, "start")
+        await asyncio.sleep(0.3)
+        assert state.running
+        body = {"text": "check the log too", "follow_up": True, "expected_running": True, "client_message_id": "later-1"}
+        assert (await client.post(f"/api/sessions/{sid}/messages", json=body, headers=H)).status_code == 200
+        listed = (await client.get(f"/api/sessions/{sid}/steer", headers=H)).json()
+        assert [(item["id"], item["kind"]) for item in listed] == [("later-1", "follow_up")]
+        assert changes[-1]["reason"] == "queued" and changes[-1]["queued"][0]["kind"] == "follow_up"
+
+        steered = await client.post(f"/api/sessions/{sid}/steer/later-1", headers=H)
+        assert steered.status_code == 200 and steered.json() == {"steered": True}
+        listed = (await client.get(f"/api/sessions/{sid}/steer", headers=H)).json()
+        assert [(item["id"], item["kind"]) for item in listed] == [("later-1", "steer")]
+        assert changes[-1]["reason"] == "steered"
+        queues = await manager.live.load(sid)
+        assert queues["follow_up"] == [] and [item["id"] for item in queues["steer"]] == ["later-1"]
+        # A steer has nothing sooner left to become.
+        assert (await client.post(f"/api/sessions/{sid}/steer/later-1", headers=H)).status_code == 409
+
+        await _await_run(manager)
+        # Read before the run's last model call, not in a turn of its own after it.
+        assert len(provider.requests) == 2
+        texts = [b.text for m in provider.requests[-1].messages for b in m.content_blocks if isinstance(b, TextBlock)]
+        assert sum("check the log too" in t for t in texts) == 1
+        visible = [m for m in await manager.transcript_page(sid) if not m.get("internal")]
+        assert [m["text"] for m in visible if m["role"] == "user"] == ["start", "check the log too"]
+        receipt = await manager.live.receipt(sid, "later-1")
+        assert receipt is not None and receipt["status"] == "consumed"
+        assert (await client.post(f"/api/sessions/{sid}/steer/later-1", headers=H)).status_code == 409
+    await manager.close()
+
+
+async def test_a_follow_up_the_engine_holds_is_steered_once_even_past_a_stale_reload(settings: Settings, db: Database) -> None:
+    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    manager = await _manager(settings, db, provider)
+    changes = _watch(manager)
+    state = await manager.create_session("held")
+    sid = state.session.id
+    await manager.submit(sid, "start")
+    await asyncio.sleep(0.3)
+    engine = state.engine
+    assert engine is not None
+    await manager.submit(sid, "after this", follow_up=True)
+    item_id = (await manager.queued_input(sid))[0]["id"]
+    stale = await manager.live.load(sid)
+    await engine.reload_live_control(engine)
+    assert [item["id"] for item in engine._follow_up_queue] == [item_id]
+
+    assert await manager.steer_queued(sid, item_id)
+    assert list(engine._follow_up_queue) == []
+
+    # A reload that read the row before the move must not give the engine its follow-up copy back.
+    original = manager.live.load
+
+    async def stale_once(session_id: str) -> Any:
+        manager.live.load = original  # type: ignore[method-assign]
+        return stale
+
+    manager.live.load = stale_once  # type: ignore[method-assign]
+    await engine.reload_live_control(engine)
+    assert list(engine._follow_up_queue) == []
+    await engine.persist_live_control(engine)
+    assert [(item["id"], item["kind"]) for item in await manager.queued_input(sid)] == [(item_id, "steer")]
+    assert [c["reason"] for c in changes] == ["queued", "steered"]
+
+    await engine.reload_live_control(engine)
+    assert [item["id"] for item in engine._steer_queue] == [item_id]
+    assert list(engine._follow_up_queue) == []
+    await manager.close()
+
+
+async def test_a_follow_up_the_run_is_placing_cannot_be_steered(settings: Settings, db: Database) -> None:
+    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    manager = await _manager(settings, db, provider)
+    state = await manager.create_session("placing")
+    sid = state.session.id
+    await manager.submit(sid, "start")
+    await asyncio.sleep(0.3)
+    engine = state.engine
+    assert engine is not None
+    await manager.submit(sid, "after this", follow_up=True)
+    item_id = (await manager.queued_input(sid))[0]["id"]
+    await engine.reload_live_control(engine)
+    # The core took it out of its list to place it; the store has not heard yet.
+    engine._follow_up_queue = []
+    assert not await manager.steer_queued(sid, item_id)
+    assert (await manager.live.load(sid))["steer"] == []
     await manager.close()

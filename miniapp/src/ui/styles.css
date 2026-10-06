@@ -685,21 +685,23 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .voicenote-failed-actions .btn, .voicenote-failed-actions .iconbtn { min-height:var(--row-h-touch); min-width:var(--row-h-touch); }
 }
 
-/* the steers the host is holding, as small cards above the pill */
+/* the messages the host is holding for a running agent, as small cards above the pill; a card
+   grows a column for each control it carries (Steer only on a follow-up, the × only when allowed) */
 .steers { display:flex; flex-direction:column; gap:4px; }
-.steer { display:grid; grid-template-columns:auto minmax(0, 1fr) auto auto; align-items:center; gap:8px; padding:6px 6px 6px 10px; background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius-md); font-size:var(--fs-12); color:var(--fg-2); }
+.steer { display:grid; grid-template-columns:auto minmax(0, 1fr); grid-auto-flow:column; grid-auto-columns:auto; align-items:center; gap:8px; padding:6px 6px 6px 10px; background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius-md); font-size:var(--fs-12); color:var(--fg-2); }
 .steer .ic { color:var(--accent); flex:none; }
 .steer-text { color:var(--fg); }
 .steer-hint { white-space:nowrap; }
 .steer-x { background:transparent; }
+.steer-now { white-space:nowrap; }
 /* Narrow, the hint goes under the message instead of away: it is the only thing on the card that
    says the message is waiting and not yet read. */
 @media (max-width: 719px) {
-  .steer { grid-template-columns:auto minmax(0, 1fr) auto; row-gap:2px; }
+  .steer { row-gap:2px; }
   .steer > .ic { grid-row:1; grid-column:1; }
   .steer-text { grid-row:1; grid-column:2; }
   .steer-hint { grid-row:2; grid-column:2; white-space:normal; font-size:var(--fs-11); }
-  .steer-x { grid-row:1 / span 2; grid-column:3; }
+  .steer-now, .steer-x { grid-row:1 / span 2; }
 }
 /* A narrow pill — a phone, or a pane of the dual view — has room for the field, the model and the
    circle: the ring lives in Details there, and the model name is cut short. */

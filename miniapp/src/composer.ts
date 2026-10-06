@@ -1,5 +1,5 @@
 // The composer as a value: what its one circle means right now, what a key press asks for, the
-// draft that survives leaving the session, and the queue of steers the host is holding. Nothing in
+// draft that survives leaving the session, and the messages the host is holding for a running agent. Nothing in
 // here touches the screen, so every state the pill can be in can be read back without a browser.
 
 import type { Question } from "./api";
@@ -20,8 +20,12 @@ export type PrimaryInput = {
 
 /**
  * One circle, four meanings. While a run is on, an empty pill stops it and a written one queues
- * a steer; while the agent waits for an answer the circle is Reply; otherwise it sends. The
- * second value says whether pressing it does anything at all.
+ * the message for when the turn ends (its card then offers to steer the run instead); while the
+ * agent waits for an answer the circle is Reply; otherwise it sends. The second value says
+ * whether pressing it does anything at all.
+ *
+ * There is no choice of delivery at the moment of sending: asking "steer or queue?" on every
+ * message during a run made each one a decision, when nearly all of them can simply wait.
  */
 export function primaryAction(i: PrimaryInput): { action: Primary; enabled: boolean } {
   const filled = i.hasDraft || i.hasFiles;
@@ -127,7 +131,7 @@ export function clearDraft(sessionId: string, storage: StorageLike | null = safe
   writeDraft(sessionId, "", storage);
 }
 
-export type DraftTarget = { session: string; project: string; workspace: string; model: string; mode: string; effort: string; reply: string; intent?: "send" | "steer" | "queue" };
+export type DraftTarget = { session: string; project: string; workspace: string; model: string; mode: string; effort: string; reply: string };
 const TARGET_PREFIX = "daedalus.draft-target.";
 
 /** Keep the settings the words were written for, so a later screen or model change asks for a decision. */
@@ -189,30 +193,31 @@ export function rememberCustomModel(value: string, storage: StorageLike | null =
   }
 }
 
-// ── the steer queue ──────────────────────────────────────────────────────────────────────
+// ── the queue ────────────────────────────────────────────────────────────────────────────
 
-/** A message the host is holding for the next model call. */
-export type QueuedSteer = { id: string; text: string; queued_at: string | null };
+/** A message the host is holding for a running agent: a `steer` reaches it at the next model call,
+ *  a `follow_up` when the turn ends. */
+export type QueuedMessage = { id: string; kind: "steer" | "follow_up"; text: string; queued_at: string | null };
 
 /** What the stream says about the queue; the whole queue rides in every event. */
-export type SteerChange = { reason?: string; count?: number; queued?: unknown };
+export type QueueChange = { reason?: string; count?: number; queued?: unknown };
 
 /** The queue after a `steer_changed` event: the payload's list, whatever the reason, or nothing. */
-export function steersAfter(_current: QueuedSteer[], payload: SteerChange): QueuedSteer[] {
-  return readSteers(payload.queued);
+export function queuedAfter(_current: QueuedMessage[], payload: QueueChange): QueuedMessage[] {
+  return readQueued(payload.queued);
 }
 
 /** The queue as the API answers it, guarded: a route that is not there answers something else. */
-export function readSteers(raw: unknown): QueuedSteer[] {
+export function readQueued(raw: unknown): QueuedMessage[] {
   if (!Array.isArray(raw)) return [];
-  const out: QueuedSteer[] = [];
+  const out: QueuedMessage[] = [];
   for (const it of raw) {
     if (!it || typeof it !== "object") continue;
     const r = it as Record<string, unknown>;
     const id = typeof r.id === "string" ? r.id : "";
     const text = typeof r.text === "string" ? r.text : "";
     if (!id || !text.trim()) continue;
-    out.push({ id, text, queued_at: typeof r.queued_at === "string" ? r.queued_at : null });
+    out.push({ id, kind: r.kind === "follow_up" ? "follow_up" : "steer", text, queued_at: typeof r.queued_at === "string" ? r.queued_at : null });
   }
   return out;
 }

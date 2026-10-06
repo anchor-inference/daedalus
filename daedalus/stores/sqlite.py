@@ -1240,8 +1240,8 @@ class LiveControlStore:
         operator queued things in. A blind write of the run's lists would drop it, and the operator
         would be told it had been delivered.
 
-        Returns the steer ids that are genuinely gone — handed to the run and not handed back — so
-        the caller can say ``consumed`` about those and only those.
+        Returns the ids of either queue that are genuinely gone — handed to the run and not handed
+        back — so the caller can say ``consumed`` about those and only those.
         """
         async with self._db.transaction() as conn:
             cursor = await conn.execute("SELECT steer_queue, follow_up_queue FROM live_control WHERE session_id = ?", (session_id,))
@@ -1257,8 +1257,45 @@ class LiveControlStore:
                 " follow_up_queue = excluded.follow_up_queue, updated_at = excluded.updated_at",
                 (session_id, json.dumps(merged_steer), json.dumps(merged_follow_up), _now()),
             )
-        kept = {_queue_item_id(item) for item in merged_steer}
-        return [item_id for item_id in seen_steer if item_id not in kept]
+        kept = {_queue_item_id(item) for item in merged_steer} | {_queue_item_id(item) for item in merged_follow_up}
+        return [item_id for item_id in [*seen_steer, *seen_follow_up] if item_id not in kept]
+
+    async def promote(self, session_id: str, item_id: str) -> bool:
+        """Move one waiting follow-up to the back of the steer queue; ``False`` when it is not waiting.
+
+        One transaction, so no reader sees the message in both queues or in neither. A receipt that
+        is no longer ``queued`` is the authority even if a stale copy of the item is still listed:
+        consumed input moved to the steer queue would be read by the model a second time.
+        """
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "SELECT status FROM input_receipts WHERE session_id = ? AND client_message_id = ?",
+                (session_id, item_id),
+            )
+            receipt = await cursor.fetchone()
+            await cursor.close()
+            if receipt is not None and receipt["status"] != "queued":
+                return False
+            cursor = await conn.execute(
+                "SELECT steer_queue, follow_up_queue, queue_revision FROM live_control WHERE session_id = ?",
+                (session_id,),
+            )
+            control = await cursor.fetchone()
+            await cursor.close()
+            if control is None:
+                return False
+            follow_up = json.loads(control["follow_up_queue"] or "[]")
+            moving = [item for item in follow_up if _queue_item_id(item) == item_id]
+            if not moving:
+                return False
+            steer = json.loads(control["steer_queue"] or "[]")
+            steer.extend({**item, "kind": "steer"} if "kind" in item else item for item in moving)
+            kept = [item for item in follow_up if _queue_item_id(item) != item_id]
+            await conn.execute(
+                "UPDATE live_control SET steer_queue = ?, follow_up_queue = ?, queue_revision = ?, updated_at = ? WHERE session_id = ?",
+                (json.dumps(steer), json.dumps(kept), int(control["queue_revision"] or 0) + 1, _now(), session_id),
+            )
+        return True
 
     async def enqueue(self, session_id: str, kind: str, item: dict[str, Any]) -> None:
         column = "steer_queue" if kind == "steer" else "follow_up_queue"
