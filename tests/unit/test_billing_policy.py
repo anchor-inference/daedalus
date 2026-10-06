@@ -15,6 +15,7 @@ import httpx
 import pytest
 from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
+from protocore.runtime.soft_stop import CAUSE_PROVIDER_ERROR
 
 from daedalus.config import ModelPresetConfig, ProviderConfig, RuntimeConfig, Settings
 from daedalus.host import session_runner
@@ -88,6 +89,50 @@ async def run(manager: SessionManager, session_id: str, text: str) -> tuple[str,
 
 def errors(events: list[TurnEvent]) -> list[str]:
     return [str(event.payload.get("message")) for event in events if event.type is EventType.ERROR]
+
+
+async def test_a_priced_model_over_the_measured_daily_cap_is_refused_and_says_why(
+        settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager, sent = await started(settings, db, monkeypatch)
+    try:
+        await manager.usage.record(UsageRecord(provider_id="deepseek", model="deepseek-flash", purpose="stream",
+                                               raw={}, normalized={}, cost_usd=2.99, duration_ms=1,
+                                               run_id="earlier", session_id=None))
+        priced = await manager.create_session("priced")
+        await manager.set_model(priced.session.id, preset="deepseek.flash")
+        outcome, events = await run(manager, priced.session.id, "spend")
+        assert outcome == "failed"
+        assert sent == []
+        message = " ".join(errors(events))
+        assert "daily spending cap" in message and "usd_per_day" in message
+
+        # The subscription model beside it still answers under the same exhausted day.
+        state = await manager.create_session("subscription")
+        outcome, events = await run(manager, state.session.id, "still works")
+        assert outcome == "completed", errors(events)
+    finally:
+        await manager.close()
+
+
+async def test_a_cap_that_ends_a_run_midway_is_not_reported_as_the_provider(
+        settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager, _ = await started(settings, db, monkeypatch)
+    try:
+        state = await manager.create_session("winding down")
+        events: list[TurnEvent] = []
+
+        async def sink(_sid: str, event: TurnEvent) -> None:
+            events.append(event)
+
+        manager.add_sink(sink)
+        state.soft_stop_cause = CAUSE_PROVIDER_ERROR
+        state.soft_stop_detail = "inference budget: run:r: the available balance under this run's spending cap"
+        assert await manager._report_provider_refusal(state, "r")
+        payload = events[-1].payload
+        assert payload["kind"] == "spending_cap"
+        assert "a spending cap stopped this run" in payload["message"] and "provider refused" not in payload["message"]
+    finally:
+        await manager.close()
 
 
 async def test_a_closed_daily_flag_stops_priced_calls_only(settings: Settings, db: Database,

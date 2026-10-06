@@ -3909,6 +3909,9 @@ class SessionManager:
     PROVIDER_REFUSED_NOTE = "⚠️ the model provider refused this run's requests, so it was closed early — {detail}"
     """What the operator is shown when a run ends on the provider rather than on its work. It quotes the provider."""
 
+    SPENDING_CAP_NOTE = "💸 a spending cap stopped this run before its next model call — {detail}"
+    """What the operator is shown when the host's own cap, not the provider, ended the run."""
+
     async def _report_provider_refusal(self, state: SessionState, run_id: str) -> bool:
         """A run the provider refused ends as an error, whatever the model wrote on the way out.
 
@@ -3934,12 +3937,17 @@ class SessionManager:
             return True
         if state.soft_stop_cause != CAUSE_PROVIDER_ERROR or not state.soft_stop_detail:
             return False
+        # The host's own spending cap is not the provider: saying the provider refused sent the
+        # operator to check a key or an outage when the fix was a limit in the settings.
+        capped = "inference budget:" in state.soft_stop_detail
+        note = self.SPENDING_CAP_NOTE if capped else self.PROVIDER_REFUSED_NOTE
         await self._dispatch_event(
             state,
             TurnEvent(
                 type=EventType.ERROR,
                 run_id=run_id,
-                payload={"kind": "llm_provider_error", "message": self.PROVIDER_REFUSED_NOTE.format(detail=state.soft_stop_detail)},
+                payload={"kind": "spending_cap" if capped else "llm_provider_error",
+                         "message": note.format(detail=state.soft_stop_detail)},
             ),
         )
         return True
