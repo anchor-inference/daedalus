@@ -27,12 +27,15 @@ class ResultStub(BoardStub):
         base = "/api/board/review-one"
         result = f"{base}/results/result-one"
         task = self.tasks[0]
-        if path == "/api/artifact-manifests/artifact-one/transfer-readiness" and method == "GET":
+        if path == "/api/files" and method == "GET" and "file-shot" in query:
+            return 200, {"files": [{"id": "file-shot", "handle": "att:shot", "name": "checkout.png", "mime": "image/png", "size": 68,
+                                    "sha256": "c" * 64, "origin": "staff", "created_at": "2026-10-03T00:00:00Z"}]}
+        if path.startswith("/api/artifact-manifests/") and path.endswith("/transfer-readiness") and method == "GET":
             return 200, {"manifest_id": "artifact-one", "project_id": PID, "available": False, "reason": "file_unavailable", "transfers": []}
         if path == f"{base}/contract" and method == "GET":
             return 200, {"task_id": task["id"], "contract_revision": 1, "entity_revision": task["entity_revision"], "checklist": [{"id": "C1", "text": "Export opens"}]}
         if path == f"{base}/results" and method == "GET":
-            current = {"result_id": "result-one", "current_result_id": "result-one", "task_id": task["id"], "contract_revision": 1, "outcome": "complete", "original_preview": "An export was generated", "original_digest": "a" * 64, "original_size_bytes": 23, "artifacts": [{"id": "artifact-one", "artifact_kind": "file", "artifact_key": "export.json", "artifact_revision": 1, "digest": "b" * 64, "size_bytes": 28}], "checks": [], "limitations": [], "verification": "verified" if self.verdict else "unverified", "verdict_id": "verdict-one" if self.verdict else None, "verdict_accepted": bool(self.verdict), "verdict_head": "head" if self.verdict else None, "verdict_base": "base" if self.verdict else None, "self_review_waiver_required": False, "acceptance_state": task["acceptance_state"], "accepted": task["acceptance_state"] == "operator_approved", "created_at": "2026-10-03T00:00:00Z"}
+            current = {"result_id": "result-one", "current_result_id": "result-one", "task_id": task["id"], "contract_revision": 1, "outcome": "complete", "original_preview": "An export was generated", "original_digest": "a" * 64, "original_size_bytes": 23, "artifacts": [{"id": "artifact-one", "artifact_kind": "file", "artifact_key": "export.json", "artifact_revision": 1, "digest": "b" * 64, "size_bytes": 28}, {"id": "artifact-shot", "artifact_kind": "screenshot", "artifact_key": "checkout page", "artifact_revision": 1, "digest": "c" * 64, "size_bytes": 68, "file_id": "file-shot"}], "checks": [], "limitations": [], "verification": "verified" if self.verdict else "unverified", "verdict_id": "verdict-one" if self.verdict else None, "verdict_accepted": bool(self.verdict), "verdict_head": "head" if self.verdict else None, "verdict_base": "base" if self.verdict else None, "self_review_waiver_required": False, "acceptance_state": task["acceptance_state"], "accepted": task["acceptance_state"] == "operator_approved", "created_at": "2026-10-03T00:00:00Z"}
             previous = {**current, "result_id": "result-previous", "outcome": "partial", "original_preview": "Export was missing a field", "original_digest": "c" * 64, "checks": ["Required field absent"], "limitations": ["Schema incomplete"], "verification": "stale", "verdict_id": None, "verdict_accepted": False, "created_at": "2026-10-03T00:01:00Z"}
             return 200, [previous, current]
         if path == f"{result}/original" and method == "GET":
@@ -113,6 +116,9 @@ def run() -> int:
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "result comparison overflow"
         expect(flow.get_by_role("button", name="Accept this result")).to_be_disabled()
         flow.get_by_text("Evidence and original report").click()
+        # A stored screenshot shows as a picture card, named by its file and captioned by its key.
+        shot = flow.locator(".result-artifacts .artifact.image", has_text="checkout.png")
+        expect(shot).to_contain_text("checkout page")
         expect(flow.get_by_text("Send artifact to a host")).to_be_visible()
         flow.get_by_role("button", name="Show original report").click()
         expect(flow.locator(".result-original")).to_contain_text("Full source report")

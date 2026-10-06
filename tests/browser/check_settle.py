@@ -143,7 +143,8 @@ class Stub(BaseHTTPRequestHandler):
                 return self._send(json.dumps({"user_id": 1, "via": "token"}).encode(), "application/json")
             shared = answer_shared("GET", raw)
             if shared is not None:
-                return self._send(shared[2].encode(), shared[1])
+                body = shared[2]
+                return self._send(body if isinstance(body, bytes) else body.encode(), shared[1])
             if raw.startswith(f"/api/sessions/{SESSION}/"):
                 return self._send(b"[]", "application/json")
             Stub.unhandled.record(raw)

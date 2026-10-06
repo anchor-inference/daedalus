@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
-import { absTime } from "../format";
+import { absTime, bytes } from "../format";
 import { t } from "../i18n";
 import { navigate, projectSessionPath, sessionPath } from "../router";
 import { useOffline, useQuery, invalidate } from "../store";
@@ -15,6 +15,9 @@ import { EvidenceReview, type ResultContract } from "./EvidenceReview";
 import { ResultTransfer } from "./ResultTransfer";
 import { ManualEvidenceReview } from "./ManualEvidenceReview";
 import { ManualReopen } from "./ManualReopen";
+import { ArtifactCard } from "../artifact";
+import { filesKey, keptBase, type KeptFile } from "../keptfiles";
+import { downloadHref } from "../preview";
 
 export type ResultReceipt = {
   result_id: string;
@@ -85,6 +88,26 @@ function detail(value: unknown): string {
 }
 
 /** The content hashes prove which bytes were reviewed; a person rarely reads them, so they wait behind a fold. */
+/** A result's artifacts as cards: a picture shows inline, any stored file opens or downloads.
+ * Listing only "kind: key" made the operator leave the review to look at a screenshot. */
+function ResultArtifacts({ artifacts }: { artifacts: ResultReceipt["artifacts"] }) {
+  const ids = artifacts.map((artifact) => artifact.file_id).filter((id): id is string => !!id);
+  const { data } = useQuery<{ files: KeptFile[] }>(filesKey(ids), { staleMs: 60000 });
+  const files = new Map((data?.files ?? []).map((file) => [file.id, file]));
+  if (!artifacts.length) return null;
+  return <div className="artifacts result-artifacts">
+    {artifacts.map((artifact) => {
+      const file = artifact.file_id ? files.get(artifact.file_id) : undefined;
+      if (!file) return <div key={artifact.id} className="sub">{artifact.artifact_kind}: {artifact.artifact_key}</div>;
+      const src = { base: keptBase(file.id), path: file.name };
+      const href = downloadHref(src.base, src.path);
+      return <ArtifactCard key={artifact.id} item={{ callId: artifact.id, path: file.handle, name: file.name, how: "kept",
+        caption: artifact.artifact_key, size: bytes(file.size) }} src={src} downloadUrl={href}
+        onOpen={() => window.open(href, "_blank", "noopener")} />;
+    })}
+  </div>;
+}
+
 function Fingerprints({ artifacts, original }: { artifacts: ResultReceipt["artifacts"]; original: string }) {
   return <details><summary>{t("common.details")}</summary>
     <ul>{artifacts.map((artifact) => <li key={artifact.id} className="mono">{artifact.artifact_key} · {artifact.digest}</li>)}</ul>
@@ -142,7 +165,7 @@ export function AcceptedResultDetail({ task, reference }: { task: ProjectTask; r
         <p className="result-state">{t("result.acceptance.operator_approved")} · {t("result.version", { revision: receipt.contract_revision })} · {absTime(receipt.created_at)}</p>
         {(receipt.checks ?? []).length > 0 && <div className="result-checks"><b>{t("result.checks")}</b><ul>{receipt.checks.map((item, index) => <li key={index}>{detail(item)}</li>)}</ul></div>}
         {(receipt.limitations ?? []).length > 0 && <div className="result-warning"><b>{t("result.limitations")}</b><ul>{receipt.limitations.map((item, index) => <li key={index}>{detail(item)}</li>)}</ul></div>}
-        <div className="result-details"><b>{t("result.evidence")}</b><ul>{(receipt.artifacts ?? []).map((artifact) => <li key={artifact.id}>{artifact.artifact_kind}: {artifact.artifact_key}</li>)}</ul>
+        <div className="result-details"><b>{t("result.evidence")}</b><ResultArtifacts artifacts={receipt.artifacts ?? []} />
           <Fingerprints artifacts={receipt.artifacts ?? []} original={receipt.original_digest} /></div>
         <h4>{t("result.original")}</h4>
         {originalError ? <p className="result-warning" role="alert">{t("goal.resultUnavailable")} <button type="button" className="linkbtn" onClick={() => setReadAttempt((attempt) => attempt + 1)}>{t("common.retry")}</button></p>
@@ -380,7 +403,7 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
       <details className="result-details" open={reviewing} onToggle={(event) => { setEvidenceOpen(event.currentTarget.open); setReviewing(event.currentTarget.open); }}>
         <summary>{t("result.evidence")}</summary>
         <div>{t("result.version", { revision: result.contract_revision })} · {absTime(result.created_at)}</div>
-        <ul>{(result.artifacts ?? []).map((artifact) => <li key={artifact.id}>{artifact.artifact_kind}: {artifact.artifact_key}</li>)}</ul>
+        <ResultArtifacts artifacts={result.artifacts ?? []} />
         {evidenceOpen && task.project_id && (result.artifacts ?? []).length > 0 && <ResultTransfer projectId={task.project_id} artifacts={result.artifacts} toast={toast} />}
         <Fingerprints artifacts={result.artifacts ?? []} original={result.original_digest} />
         <button type="button" className="btn small" disabled={loadingOriginal} onClick={() => void showOriginal()}>{t("result.original")}</button>

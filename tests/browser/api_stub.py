@@ -19,6 +19,7 @@ port. It is checked once, in a sentence, rather than discovered as a selector th
 
 from __future__ import annotations
 
+import base64
 import json
 import sys
 import urllib.error
@@ -423,7 +424,7 @@ def long_history(detail: dict, pairs: int = 700, planted: dict[int, str] | None 
     return questions
 
 
-def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
+def answer_shared(method: str, path: str) -> tuple[int, str, str | bytes] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 
     ``path`` may be a whole URL; the query string and everything before ``/api/`` are ignored. A
@@ -487,6 +488,10 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
     if method.upper() == "GET" and path == "/api/files":
         # Handles a harness did not invent name no file: the chat draws no card for them.
         return 200, "application/json", json.dumps({"files": []})
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "files" and parts[4] == "download":
+        # A stored picture a harness names: one transparent pixel, enough for a thumbnail to draw.
+        return 200, "image/png", base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")
     parts = path.split("/")
     if method.upper() == "GET" and path == "/api/control/revisions":
         return 200, "application/json", json.dumps({"scope": {"kind": "global", "id": "global"},
