@@ -1373,9 +1373,13 @@ async def check_planning_capacity(conn: aiosqlite.Connection, project_id: str,
     budget = await _one(conn, "SELECT max_depth,max_tasks FROM planning_budgets WHERE project_id = ?", (project_id,))
     if budget is None:
         raise DomainConflict("the project has no planning budget")
-    tasks = await _many(conn, "SELECT id,depends_on FROM board_tasks WHERE project_id = ?", (project_id,))
-    if len(tasks) + additional_tasks > budget["max_tasks"]:
-        raise DomainConflict("the project task count exceeds its planning budget")
+    tasks = await _many(conn, "SELECT id,depends_on,status FROM board_tasks WHERE project_id = ?", (project_id,))
+    # The budget bounds work in flight, not the project's history. Counting finished and dropped
+    # tasks made it a lifetime cap: a busy project stopped accepting any task after its fiftieth.
+    open_tasks = sum(1 for row in tasks if row["status"] not in ("done", "dropped"))
+    if open_tasks + additional_tasks > budget["max_tasks"]:
+        raise DomainConflict(f"the project already has {open_tasks} open tasks, its planning budget allows "
+                             f"{budget['max_tasks']}; finish or drop some, or raise the budget")
     graph = {row["id"]: _json(row["depends_on"], []) for row in tasks}
 
     def depth(task_id: str, visited: set[str]) -> int:
@@ -1389,7 +1393,7 @@ async def check_planning_capacity(conn: aiosqlite.Connection, project_id: str,
     new_depth = 1 + max((depth(dependency, set()) for dependency in dependencies), default=0)
     if new_depth > budget["max_depth"]:
         raise DomainConflict("the plan exceeds its dependency depth budget")
-    return {"depth": new_depth, "remaining_tasks": budget["max_tasks"] - len(tasks) - additional_tasks}
+    return {"depth": new_depth, "remaining_tasks": budget["max_tasks"] - open_tasks - additional_tasks}
 
 
 async def update_role_profile(

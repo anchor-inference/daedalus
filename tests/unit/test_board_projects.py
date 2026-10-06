@@ -49,12 +49,23 @@ async def test_project_task_count_and_depth_are_reserved_before_insert(app: Any,
     await app.db.execute("UPDATE planning_budgets SET max_tasks = 1,max_depth = 1 WHERE project_id = ?",
                          (team.project,))
     first = await board.add(title="First", project_id=team.project, operator=True)
-    with pytest.raises(ValueError, match="task count"):
+    with pytest.raises(ValueError, match="1 open tasks"):
         await board.add(title="Second", project_id=team.project, operator=True)
     await app.db.execute("UPDATE planning_budgets SET max_tasks = 2 WHERE project_id = ?", (team.project,))
     with pytest.raises(ValueError, match="depth"):
         await board.add(title="Dependent", project_id=team.project, depends_on=[first["id"]], operator=True)
     assert (await app.db.fetchone("SELECT count(*) AS n FROM board_tasks WHERE project_id = ?", (team.project,)))["n"] == 1
+
+
+async def test_finished_tasks_free_the_planning_budget(app: Any, tmp_path: Path) -> None:
+    team = await _team(app, tmp_path)
+    board = Board(app)
+    await app.db.execute("UPDATE planning_budgets SET max_tasks = 1 WHERE project_id = ?", (team.project,))
+    first = await board.add(title="First", project_id=team.project, operator=True)
+    await app.db.execute("UPDATE board_tasks SET status = 'dropped' WHERE id = ?", (first["id"],))
+    second = await board.add(title="Second", project_id=team.project, operator=True)
+    await app.db.execute("UPDATE board_tasks SET status = 'done' WHERE id = ?", (second["id"],))
+    assert (await board.add(title="Third", project_id=team.project, operator=True))["title"] == "Third"
 
 
 async def _team(app: Any, tmp_path: Path) -> SimpleNamespace:
