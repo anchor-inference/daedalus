@@ -68,6 +68,7 @@ from daedalus.staff_runtime import (
     StartRequest,
     UsageSnapshot,
 )
+from daedalus.stores.capacity import claim_in, finish_in
 from daedalus.stores.control import ControlDenied, Principal, one
 from daedalus.stores.files import FileRefused, StoredFile
 from daedalus.stores.projects import Project, ProjectFolder, ProjectSettings
@@ -201,6 +202,33 @@ def _returned(row: Any) -> str:
     return ""
 
 
+async def claim_host_slot(app: Any, entry: Entry) -> str | None:
+    """Take one of the machine's staff places for a launch, or say what it waits for.
+
+    Each project's own limit let several projects' built-in workers together run past the one
+    machine cap, and nothing kept a place free for a coordinator or reviewer. An entry without a
+    durable attempt has no command to hold the place for, so it is not charged here.
+    """
+    if entry.attempt_id is None:
+        return None
+    async with app.db.transaction() as conn:
+        generation = await app.executions._host(conn)
+        return await claim_in(conn, attempt_id=entry.attempt_id, project_id=entry.project_id,
+                              runtime_kind="cli" if entry.terminal else "daedalus",
+                              role_class=entry.role_class, generation=generation,
+                              cap=app.manager.config.terminals.running_cap)
+
+
+async def finish_host_slot(app: Any, entry: Entry, started: bool) -> None:
+    """Settle a launch's machine place: a failed start returns it, a started one stays charged
+    until the worker's end is observed. A launch still waiting in the durable order needs no call:
+    its claim is cancelled when its command settles."""
+    if entry.attempt_id is None:
+        return
+    async with app.db.transaction() as conn:
+        await finish_in(conn, entry.attempt_id, started=started)
+
+
 class Team:
     """The project teams of this installation at work."""
 
@@ -237,6 +265,8 @@ class Team:
             check_reserved=self._reserved_capacity,
             active_in=self._active_in,
             concurrency_in=self._concurrency_in,
+            claim_host=lambda entry: claim_host_slot(app, entry),
+            finish_host=lambda entry, started: finish_host_slot(app, entry, started),
         )
         self._pause_commits: set[asyncio.Task[None]] = set()
         self.review: Any = None
