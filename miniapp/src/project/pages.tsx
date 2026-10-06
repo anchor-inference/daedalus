@@ -23,6 +23,7 @@ import { errorText } from "../ui";
 import { briefKey, journalKey, staffKey, terminalsKey, useFocus, useProject, useUsage } from "./data";
 import { spendLine, totalsLine } from "./usage";
 import { AUTONOMIES, type Autonomy } from "./focus";
+import { GuidedGoal } from "./GuidedGoal";
 
 /** The six sections of a brief, in the host's order (daedalus/stores/projects.py). */
 export const BRIEF_SECTIONS = ["goals", "constraints", "preferences", "done_when", "allowed_without_operator", "notes"] as const;
@@ -37,7 +38,7 @@ export function BriefPage({ projectId, back, compact, toast }: { projectId: stri
     <div className={`brief ${compact ? "compact" : ""}`}>
       {!data && !error && <Skeleton rows={3} />}
       {error && !data && <div className="empty"><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
-      {data && sections.map((s) => <BriefCard key={s.section} projectId={projectId} section={s} toast={toast} />)}
+      {data && sections.map((s) => <BriefCard key={s.section} projectId={projectId} project={project} section={s} toast={toast} />)}
     </div>
   );
   if (compact) return body;
@@ -49,8 +50,14 @@ export function BriefPage({ projectId, back, compact, toast }: { projectId: stri
   );
 }
 
-function BriefCard({ projectId, section, toast }: { projectId: string; section: BriefSection; toast: (text: string) => void }) {
+// The goal and its criteria are one versioned record; editing either section as free text would let
+// the brief and the goal the coordinator works to drift apart, so both open the goal change instead.
+const GOAL_SECTIONS: readonly string[] = ["goals", "done_when"];
+
+function BriefCard({ projectId, project, section, toast }: { projectId: string; project?: Project | null; section: BriefSection; toast: (text: string) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
+  const [changing, setChanging] = useState(false);
+  const goal = GOAL_SECTIONS.includes(section.section) && !!project;
   const [busy, setBusy] = useState(false);
   const name = t(`focus.brief.section.${section.section}`);
   const onlyYou = section.section === "allowed_without_operator";
@@ -75,8 +82,12 @@ function BriefCard({ projectId, section, toast }: { projectId: string; section: 
         {onlyYou && <span className="chip tiny attn">{t("focus.brief.onlyyou")}</span>}
         {section.updated_by === "orchestrator" && <span className="chip tiny accent" title={absTime(section.updated_at)}>{t("focus.brief.byorch")}</span>}
         <span className="grow" />
-        {draft === null && <button className="btn small ghost" onClick={() => setDraft(section.body)}>{t("common.edit")}</button>}
+        {draft === null && <button className="btn small ghost" onClick={() => (goal ? setChanging(true) : setDraft(section.body))}>{t("common.edit")}</button>}
       </div>
+      {changing && project && <Sheet title={t("goal.change.title")} onClose={() => setChanging(false)} size="narrow">
+        <GuidedGoal project={project} toast={toast} wide embedded change ready={null}
+          onSaved={() => { setChanging(false); invalidate(briefKey(projectId)); }} />
+      </Sheet>}
       {onlyYou && draft !== null && <div className="brief-hint sub">{t("focus.brief.hint.allowed_without_operator")}</div>}
       {draft === null ? (
         section.body ? <div className="brief-body">{section.body}</div> : <div className="brief-body empty-line">{t("focus.brief.empty")}</div>

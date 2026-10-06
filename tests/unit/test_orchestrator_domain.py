@@ -415,6 +415,23 @@ async def test_goal_change_fences_only_named_dependency_closure(domain_db: Datab
     assert len(await domain_db.fetchall("SELECT id FROM scope_impacts WHERE project_id = 'project1'")) == 4
 
 
+async def test_goal_reworded_without_named_tasks_leaves_the_board_alone(domain_db: Database) -> None:
+    await domain_db.execute("INSERT INTO projects(id,name,created_at,settings)"
+                            " VALUES ('project1','Example','2026-01-01','{}')")
+    await domain_db.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at)"
+                            " VALUES ('project1',1,'Old goal','legacy','2026-01-01')")
+    await domain_db.execute("INSERT INTO board_tasks(id,title,status,priority,acceptance,checklist,depends_on,"
+                            " created_at,updated_at,brief_json,project_id) VALUES"
+                            " ('kept','kept','todo',3,'','[]','[]','2026-01-01','2026-01-01','{}','project1')")
+    async with domain_db.transaction() as conn:
+        applied = await apply_goal_revision(conn, project_id="project1", expected_goal_revision=1,
+                                            body="Clearer goal", root_task_ids=[], origin_kind="operator", origin_ref="",
+                                            control=ControlStore(domain_db),
+                                            principal=Principal.operator({"via": "token", "user_id": 1}))
+    assert (applied["goal_revision"], applied["affected_task_ids"]) == (2, [])
+    assert (await domain_db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'kept'"))[0] == 1
+
+
 async def test_guided_goal_criteria_are_versioned_and_ordinary_revision_preserves_them(domain_db: Database) -> None:
     await domain_db.execute("INSERT INTO projects(id,name,created_at,settings)"
                             " VALUES ('project1','Example','2026-01-01','{}')")

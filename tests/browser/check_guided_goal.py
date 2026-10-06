@@ -197,11 +197,80 @@ def remembered_view_respects_scope_and_direct_links() -> None:
         browser.close()
 
 
+def change_from_the_brief(language: str, width: int) -> None:
+    """A set goal is changed from the brief, starting from its current words, naming the task it changes."""
+    project = {"id": "p-guided", "name": "Bakery", "entity_revision": 2,
+               "folders": folders("/managed/bakery"), "created_at": "2026-10-03T00:00:00Z",
+               "settings": {"snapshots": True, "orchestrator": {"enabled": True, "session_id": "coordinator",
+                                                               "autonomy": "normal"}},
+               "system": "", "sessions": []}
+    goal = {"project_id": project["id"], "goal_revision": 2, "entity_revision": 2,
+            "body": "Publish a clear menu", "checks": ["All items listed"]}
+    tasks = [{"id": "t-menu", "title": "Menu page", "status": "doing"},
+             {"id": "t-old", "title": "Old flyer", "status": "done"}]
+    writes: list[dict] = []
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(executable_path=CHROMIUM)
+        page = browser.new_page(viewport={"width": width, "height": 800})
+
+        def answer(route, value, status=200):
+            route.fulfill(status=status, content_type="application/json", body=json.dumps(value))
+
+        def stub(route):
+            request = route.request
+            url = urlsplit(request.url)
+            if url.path == "/api/projects":
+                return answer(route, [project])
+            if url.path == "/api/projects/p-guided/scope-revisions/current":
+                return answer(route, goal)
+            if url.path == "/api/projects/p-guided/scope-revisions" and request.method == "GET":
+                assert url.query == "roots=t-menu", url.query
+                return answer(route, {"affected_task_ids": ["t-menu", "t-site"], "affected_attempts": [{"id": "a1", "task_id": "t-menu"}]})
+            if url.path == "/api/projects/p-guided/scope-revisions" and request.method == "POST":
+                body = request.post_data_json
+                writes.append(body)
+                goal.update(goal_revision=3, entity_revision=3, body=body["body"], checks=body["checks"])
+                return answer(route, {"project_id": project["id"], "goal_revision": 3, "entity_revision": 3,
+                                      "receipt_id": "goal-receipt"})
+            if url.path == "/api/projects/p-guided/board":
+                return answer(route, {"tasks": tasks, "needs_you": [], "counts": {}, "staff": [],
+                                      "project": {"id": "p-guided", "name": "Bakery"}})
+            if url.path == "/api/projects/p-guided/brief":
+                return answer(route, {"sections": [{"section": "goals", "body": goal["body"], "updated_at": None, "updated_by": "operator"}]})
+            if url.path == "/api/sessions":
+                return answer(route, {"sessions": [], "projects": []})
+            if url.path == "/api/settings":
+                return answer(route, {"presets": {}, "model": {}})
+            if fulfil_shared(route):
+                return None
+            return answer(route, [])
+
+        page.route("**/api/**", stub)
+        page.goto(f"{BASE}/orchestration/project/p-guided/brief?token=t&lang={language}")
+        goals = page.locator(".brief-card.goals")
+        goals.get_by_role("button", name="Edit" if language == "en" else "Изменить").click()
+        sheet = page.locator(".sheet")
+        expect(sheet.locator("#guided-goal-body")).to_have_value("Publish a clear menu")
+        expect(sheet.locator("#guided-goal-checks")).to_have_value("All items listed")
+        expect(sheet.get_by_text("Old flyer")).to_have_count(0)
+        sheet.locator("#guided-goal-body").fill("Publish a clear menu with holiday hours")
+        sheet.get_by_label("Menu page").check()
+        expect(sheet.get_by_role("status")).to_contain_text("2")
+        sheet.get_by_role("button", name="Save" if language == "en" else "Сохранить", exact=True).click()
+        expect(page.get_by_text("Goal and criteria saved" if language == "en" else "Цель и критерии сохранены")).to_be_visible()
+        assert len(writes) == 1 and writes[0]["root_task_ids"] == ["t-menu"], writes
+        assert writes[0]["body"] == "Publish a clear menu with holiday hours" and writes[0]["expected_goal_revision"] == 2
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+        browser.close()
+
+
 if __name__ == "__main__":
     expect_app(BASE)
     for language in ("en", "ru"):
         for width in (320, 390, 1440):
             scenario(language, width)
+        change_from_the_brief(language, 390)
+        change_from_the_brief(language, 1440)
     failed_reply_keeps_the_exact_request()
     remembered_view_respects_scope_and_direct_links()
     print("Guided goal: RU/EN at 320/390/1440, stale draft, read failure, replay, direct links and scoped view")

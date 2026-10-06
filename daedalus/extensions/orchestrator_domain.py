@@ -1215,11 +1215,11 @@ async def next_action_readiness(conn: aiosqlite.Connection, task_id: str) -> dic
 
 async def scope_impact_preview(conn: aiosqlite.Connection, project_id: str,
                                root_task_ids: list[str]) -> dict[str, Any]:
-    """Follow accepted-result dependencies from explicitly named changed work."""
+    """Follow accepted-result dependencies from explicitly named changed work.
+
+    No roots is a goal change that leaves every task as it is. Requiring roots once a project had
+    any task made its goal impossible to reword from the app, which only knew the first goal."""
     if not root_task_ids:
-        existing = await _one(conn, "SELECT id FROM board_tasks WHERE project_id = ? LIMIT 1", (project_id,))
-        if existing is not None:
-            raise DomainConflict("scope change needs explicit affected roots")
         return {"project_id": project_id, "affected_task_ids": [], "affected_attempts": [], "root_task_ids": []}
     roots = set(root_task_ids)
     for task_id in roots:
