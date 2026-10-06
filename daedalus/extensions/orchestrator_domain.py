@@ -374,9 +374,12 @@ async def submit_result(
     contract_revision: int, outcome: str, original_text: str | None, original_blob_ref: str | None,
     original_digest: str, original_size_bytes: int, actor_id: str, manifest_ids: list[str],
     checks: list[dict[str, Any]], limitations: list[str], original_artifact_file_id: str | None = None,
-    allow_empty_manifest: bool = False,
+    allow_empty_manifest: bool = False, head: str | None = None,
 ) -> dict[str, Any]:
-    """Insert a full immutable report for the current attempt or a bounded comparison member."""
+    """Insert a full immutable report for the current attempt or a bounded comparison member.
+
+    ``head`` is the commit the worker's branch pointed at when it reported, kept so a later attempt
+    can be shown as the change since this one."""
     if outcome not in RESULT_OUTCOMES:
         raise ValueError("invalid result outcome")
     if (original_text is None) == (original_blob_ref is None):
@@ -403,10 +406,10 @@ async def submit_result(
     await conn.execute(
         "INSERT INTO result_receipts(id, task_id, contract_revision, attempt_id, outcome, original_text,"
         " original_blob_ref, original_digest, original_size_bytes, original_artifact_file_id, checks_json,"
-        " limitations_json, actor_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " limitations_json, actor_id, created_at, head) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (result_id, task_id, contract_revision, attempt_id, outcome, original_text, original_blob_ref,
          original_digest, original_size_bytes, original_artifact_file_id, _canonical(checks),
-         _canonical(limitations), actor_id, _now()),
+         _canonical(limitations), actor_id, _now(), head),
     )
     for manifest_id in manifest_ids:
         await conn.execute("INSERT INTO result_artifacts(result_id, manifest_id) VALUES (?, ?)",

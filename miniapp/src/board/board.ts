@@ -274,10 +274,28 @@ export type Review = {
   patch_complete: boolean;
   conflicts: string[] | null;
   receipts: ReviewReceipt[];
+  /** The newest result handed in at a head other than the branch's head now; null when there is none. */
+  previous_result?: { id: string; head_sha: string; at: string } | null;
+  /** The fork point and how far the base branch, and its tracking ref as last fetched, have moved past it. */
+  freshness?: { base_sha: string; base: string; behind: number; upstream: string; upstream_behind: number | null } | null;
   ci_status: "passed" | "blocked" | "not_required";
   ci_checks: { provider: string; repository_id: string; check_name: string; head_sha: string | null; state: string; delivery_id: string | null }[];
   can_merge: boolean;
   blockers: ReviewBlocker[];
+};
+
+/** The branch's change between the previous result's head and its head now. */
+export type ReviewSince = {
+  task_id: string;
+  previous_result: { id: string; head_sha: string; at: string };
+  since: string;
+  until: string;
+  commits: number;
+  files: { path: string; added: number | null; removed: number | null }[];
+  added: number;
+  removed: number;
+  patch: string;
+  patch_complete: boolean;
 };
 
 /** A Verify run from the worker's session; ``tree`` is the commit it ran on, marked "+worktree" when dirty. */

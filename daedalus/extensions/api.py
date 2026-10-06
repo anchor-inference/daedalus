@@ -4313,6 +4313,16 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         except ReviewRefused as exc:
             raise HTTPException(409, str(exc)) from exc
 
+    @api.get("/api/board/{task_id}/review/since-previous")
+    async def board_review_since_previous(task_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The branch's change since the previous result's head: what the latest attempt did; read-only."""
+        try:
+            return await _review().since_previous(task_id)  # type: ignore[no-any-return]
+        except KeyError:
+            raise HTTPException(404, "no such task") from None
+        except ReviewRefused as exc:
+            raise HTTPException(409, str(exc)) from exc
+
     @api.get("/api/peers")
     async def peers_list(_: dict[str, Any] = Depends(auth)) -> dict[str, str]:
         peers = app.extensions.get("peers")

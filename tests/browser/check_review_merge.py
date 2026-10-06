@@ -3,7 +3,8 @@
 What is checked is what the operator relies on: a branch review opens its changes and recorded
 checks; a merge requires the exact result, verdict and current branch, and queues only once. A dirty
 or conflicting folder blocks it; a result may be returned with a note. A task without a branch has
-no merge action.
+no merge action. A reworked task's diff can show only what the rework changed, and the card says
+how far the base branch moved on.
 Nothing scrolls sideways at 390 px, and the buttons are big enough to tap.
 """
 
@@ -116,6 +117,9 @@ def desktop(page: Page, lang: str) -> None:
     diff = page.locator(".sheet.review-diff")
     expect(diff.locator(".diff-file")).to_have_count(2)
     expect(diff.locator(".diff-line.diff-add").first).to_contain_text("if order.paid")
+    # A first result has nothing earlier to compare with, so the diff offers no second view.
+    expect(diff.locator(".review-diff-scope")).to_have_count(0)
+    expect(panel.locator(".review-base")).to_have_count(0)
     page.keyboard.press("Escape")
     expect(diff).to_have_count(0)
 
@@ -174,6 +178,54 @@ def merging(page: Page, lang: str, *, phone: bool) -> None:
     refused = page.evaluate("async () => (await fetch('/api/board/t-hero/results/res-hero/merge', {method: 'POST'})).status")
     assert refused == 409 and len(focus.board.merge_requests) == 1, (refused, focus.board.merge_requests)
     fits(page, f"{lang} {'phone' if phone else 'desktop'} merged")
+
+
+def reworked(page: Page, lang: str, *, phone: bool) -> None:
+    """A returned and redone task: the diff can show only what the rework changed, and the card says
+    the base moved on since the work was cut."""
+    words = WORDS[lang]
+    focus = FocusStub.bakery(lang)
+    reviewed_result(focus)
+    task = endpoint(focus)
+    review = BoardStub.review(task)
+    review["previous_result"] = {"id": "res-first", "head_sha": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b", "at": "2026-09-24T09:10:00Z"}
+    review["freshness"] = {"base_sha": "7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b", "base": "main", "behind": 3, "upstream": "origin/main", "upstream_behind": 5}
+    focus.board.reviews[task["id"]] = review
+    focus.board.since_previous[task["id"]] = {
+        "task_id": task["id"], "previous_result": review["previous_result"],
+        "since": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b", "until": "4f2a9c1d0b7e6a5f4c3b2a1d0e9f8a7b6c5d4e3f", "commits": 1,
+        "files": [{"path": "api/notify.py", "added": 1, "removed": 0}], "added": 1, "removed": 0, "patch_complete": True,
+        "patch": "diff --git a/api/notify.py b/api/notify.py\n--- a/api/notify.py\n+++ b/api/notify.py\n@@ -2,3 +2,4 @@ def notify(order):\n     if order.paid:\n         send(order)\n+    log(order)\n     return True\n",
+    }
+    serve(page, focus)
+    page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}&task=t-endpoint")
+    panel = page.locator(".sheet.pboard-sheet .review-panel")
+    expect(panel).to_be_visible()
+    base = panel.locator(".review-base")
+    expect(base).to_contain_text("7c6b5a4")
+    expect(base).to_contain_text("3 commits behind main" if lang == "en" else "main впереди на 3 коммита")
+    expect(base).to_contain_text("origin/main")
+    panel.get_by_role("button", name=words["diff"]).click()
+    diff = page.locator(".sheet.review-diff")
+    scope = diff.locator(".review-diff-scope button")
+    expect(scope).to_have_count(2)
+    expect(scope.nth(0)).to_have_attribute("aria-pressed", "true")
+    expect(diff.locator(".diff-file")).to_have_count(2)
+    # The rework's own change is fetched only when asked for.
+    assert focus.board.since_requests == [], focus.board.since_requests
+    scope.nth(1).click()
+    expect(scope.nth(1)).to_have_attribute("aria-pressed", "true")
+    expect(diff.locator(".diff-file")).to_have_count(1)
+    expect(diff.locator(".review-since-range")).to_contain_text("1a2b3c4")
+    expect(diff.locator(".review-since-range")).to_contain_text("4f2a9c1")
+    expect(diff.locator(".diff-line.diff-add").first).to_contain_text("log(order)")
+    assert focus.board.since_requests == ["t-endpoint"], focus.board.since_requests
+    if phone:
+        box = scope.nth(1).bounding_box()
+        assert box is not None and box["height"] >= 28, box
+    fits(page, f"{lang} {'phone' if phone else 'desktop'} rework diff")
+    scope.nth(0).click()
+    expect(diff.locator(".diff-file")).to_have_count(2)
 
 
 def conflicting(page: Page, lang: str) -> None:
@@ -252,10 +304,12 @@ def main() -> int:
             desktop(context.new_page(), lang)
             merging(context.new_page(), lang, phone=False)
             conflicting(context.new_page(), lang)
+            reworked(context.new_page(), lang, phone=False)
             configure_ci(context.new_page(), lang)
             context.close()
             context = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
             merging(context.new_page(), lang, phone=True)
+            reworked(context.new_page(), lang, phone=True)
             context.close()
         browser.close()
     print("review and merge: ok")

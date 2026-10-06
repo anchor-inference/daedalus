@@ -189,16 +189,18 @@ class StaffReportService:
             response = await self.control.mutate(principal, scope, operation, operation_id,
                                                  saved_revision, Entity("task", task_id), payload, replay_effect)
             return response, None
+        head: str | None = None
         if kind == "done":
             worktree = await self.app.extensions["staff"].worktree_of(live.session)
             if worktree is not None:
                 try:
                     status = await self.app.extensions["staff"].worktrees.status(worktree)
+                    if status.dirty:
+                        raise ValueError(f"{worktree.path} has uncommitted changes; commit them on "
+                                         f"{worktree.branch} and report again")
+                    head = await self.app.extensions["staff"].worktrees.head(worktree)
                 except WorktreeError as exc:
                     raise RuntimeError(f"the worktree could not be checked: {exc}") from exc
-                if status.dirty:
-                    raise ValueError(f"{worktree.path} has uncommitted changes; commit them on "
-                                     f"{worktree.branch} and report again")
         inline, blob_ref, _, size = self.originals.stage(original)
         staged, not_kept = await self._artifacts(live, refs)
         if steps is not None:
@@ -280,7 +282,7 @@ class StaffReportService:
                                     original_digest=original_digest, original_size_bytes=size,
                                     original_artifact_file_id=original_file_id,
                                     actor_id=principal.actor_id, manifest_ids=manifest_ids,
-                                    checks=checks, limitations=[])
+                                    checks=checks, limitations=[], head=head)
                 await self._anchor(conn, mutation.object_id, live.session_id)
                 if row["comparison_group_id"] is None:
                     await conn.execute("UPDATE board_tasks SET status = 'review',"

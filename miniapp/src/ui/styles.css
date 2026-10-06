@@ -3161,6 +3161,8 @@ button.staff-row:hover { background: var(--surface-2); }
 .review-reject { display: flex; flex-direction: column; gap: 4px; }
 .review-reject textarea.field { resize: vertical; font: inherit; }
 .review-diff .diff-view { font-size: var(--fs-mono); }
+.review-diff-scope { max-width: 420px; margin-bottom: 8px; }
+.review-base { font-size: var(--fs-12); overflow-wrap: anywhere; }
 .review-why.bad { color: var(--bad); }
 .review-why.attn { color: var(--warn); }
 .review-ci-setup { min-width: 0; font-size: var(--fs-12); }

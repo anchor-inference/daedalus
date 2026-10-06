@@ -800,6 +800,9 @@ class BoardStub:
         self.cancel_states: dict[str, str] = {}
         self.accepted: list[str] = []
         self.reviews: dict[str, dict] = {}
+        self.since_previous: dict[str, dict] = {}
+        """A reworked task's change since its previous result, as ``/review/since-previous`` answers it."""
+        self.since_requests: list[str] = []
         self.ci_requirement_requests: list[dict] = []
         self.ci_requirement_conflicts = 0
         self.ci_requirement_failures = 0
@@ -1231,6 +1234,12 @@ class BoardStub:
                 if row.get("branch"):
                     row["merge_state"] = "merged"
                 return 200, row
+            if path.endswith("/review/since-previous") and method == "GET":
+                since = self.since_previous.get(row["id"])
+                if since is None:
+                    return 409, {"detail": "no earlier result was handed in at a different commit"}
+                self.since_requests.append(row["id"])
+                return 200, since
             if path.endswith("/review") and method == "GET":
                 if not row.get("branch"):
                     return 409, {"detail": f"task {row['id']} has no staff branch to review"}

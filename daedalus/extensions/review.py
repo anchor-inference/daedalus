@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from daedalus.extensions.staff import Team
 
 RECEIPTS_MAX = 20
+PREVIOUS_RESULTS_SCANNED = 50
+"""Results looked through for one at another head; a task reworked more often than this is not real."""
 
 
 class ReviewRefused(ValueError):
@@ -95,6 +97,56 @@ class Review:
         # The id and the commit let the card offer a passing receipt as evidence for the exact head.
         return [{"id": int(r["id"]), "criterion": r["criterion"], "command": r["command"], "exit_code": int(r["exit_code"]), "passed": bool(r["passed"]), "at": r["at"], "tree": r["tree"] or ""} for r in rows]
 
+    async def _previous_result(self, task_id: str, head_sha: str | None) -> dict[str, Any] | None:
+        """The newest result handed in at a head other than the branch's head now.
+
+        After a rework the latest result usually sits at the current head, so this is the attempt
+        before it; while a worker is still committing it is the latest result itself. Either way the
+        diff from its head is what has changed since the operator last had a result to read. A result
+        from before heads were recorded falls back to the head its verdict named. A comparison
+        contender's result is left out: its head lives on a branch of its own, not on the task's."""
+        if not head_sha:
+            return None
+        rows = await self.app.db.fetchall(
+            "SELECT r.id,r.created_at,COALESCE(r.head,(SELECT v.head FROM review_verdicts v WHERE v.result_id = r.id"
+            " AND v.head IS NOT NULL ORDER BY v.created_at DESC,v.rowid DESC LIMIT 1)) AS head"
+            " FROM result_receipts r WHERE r.task_id = ? AND NOT EXISTS (SELECT 1 FROM comparison_group_attempts m"
+            " WHERE m.attempt_id = r.attempt_id) ORDER BY r.created_at DESC,r.rowid DESC LIMIT ?",
+            (task_id, PREVIOUS_RESULTS_SCANNED))
+        for row in rows:
+            if row["head"] and row["head"] != head_sha:
+                return {"id": row["id"], "head_sha": row["head"], "at": row["created_at"]}
+        return None
+
+    async def since_previous(self, task_id: str) -> dict[str, Any]:
+        """What the branch changed since the previous result's head, for the diff view's second choice."""
+        task, _, folder = await self._where(task_id)
+        try:
+            head_sha = await self.team.worktrees.commit_identity(folder, str(task["branch"]))
+        except (WorktreeError, OSError) as exc:
+            raise ReviewRefused(f"the branch could not be read in {folder.path}: {exc}") from exc
+        previous = await self._previous_result(task_id, head_sha)
+        if previous is None:
+            raise ReviewRefused("no earlier result was handed in at a different commit")
+        try:
+            diff = await self.team.worktrees.diff_commits(folder, previous["head_sha"], head_sha)
+        except (WorktreeError, OSError) as exc:
+            raise ReviewRefused(f"the change since the previous result could not be read: {exc}") from exc
+        return {"task_id": task_id, "previous_result": previous, "since": diff.since, "until": diff.until,
+                "commits": diff.commits, "files": [{"path": f.path, "added": f.added, "removed": f.removed} for f in diff.files],
+                "added": diff.added, "removed": diff.removed, "patch": diff.patch, "patch_complete": diff.patch_complete}
+
+    async def _freshness(self, folder: ProjectFolder, branch: str, base: str) -> dict[str, Any] | None:
+        """How far the base branch moved since the work was cut, or ``None`` when git cannot say."""
+        try:
+            fresh = await self.team.worktrees.freshness(folder, branch, base)
+        except (WorktreeError, OSError):
+            return None
+        if fresh is None:
+            return None
+        return {"base_sha": fresh.base_sha, "base": fresh.base, "behind": fresh.behind,
+                "upstream": fresh.upstream, "upstream_behind": fresh.upstream_behind}
+
     @staticmethod
     def blockers(task: dict[str, Any], comparison: BranchComparison, base: str,
                  *, comparison_member: bool = False) -> list[dict[str, str]]:
@@ -169,6 +221,9 @@ class Review:
             async with self.app.db.transaction() as conn:
                 if await unresolved_review_comments(conn, result["id"]):
                     blockers.append({"code": "comments", "text": "blocking review comments remain unresolved"})
+        previous = await self._previous_result(task_id, head_sha) if member is None else None
+        freshness = await self._freshness(folder, branch, base or comparison.current) \
+            if comparison.exists and not comparison.merged else None
         return {
             "task_id": task["id"],
             "comparison_group_id": member["group_id"] if member is not None else None,
@@ -204,6 +259,8 @@ class Review:
             "patch_complete": comparison.patch_complete,
             "conflicts": comparison.conflicts,
             "receipts": await self._receipts(task["id"]),
+            "previous_result": previous,
+            "freshness": freshness,
             "can_merge": member is None and not blockers,
             "can_choose": member is not None and not blockers,
             "blockers": blockers,

@@ -175,6 +175,42 @@ class BranchComparison:
 
 
 @dataclass(frozen=True, slots=True)
+class RangeDiff:
+    """What changed between two commits of one branch, bounded the way a review comparison is."""
+
+    since: str
+    until: str
+    commits: int
+    """Commits reachable from ``until`` and not from ``since``: zero after a rewrite that kept the tree."""
+    files: list[BranchFile]
+    patch: str
+    patch_complete: bool
+
+    @property
+    def added(self) -> int:
+        return sum(f.added or 0 for f in self.files)
+
+    @property
+    def removed(self) -> int:
+        return sum(f.removed or 0 for f in self.files)
+
+
+@dataclass(frozen=True, slots=True)
+class BaseFreshness:
+    """Where a branch's work starts and how far the branch it was cut from has gone on since."""
+
+    base_sha: str
+    """The fork point: the newest commit the branch shares with its base branch."""
+    base: str
+    behind: int
+    """Commits on the base branch after the fork point."""
+    upstream: str
+    """The base branch's tracking ref as the folder last fetched it; empty when it tracks nothing."""
+    upstream_behind: int | None
+    """Commits on that tracking ref after the fork point; ``None`` when there is no such ref locally."""
+
+
+@dataclass(frozen=True, slots=True)
 class WorktreeEntry:
     """One staff worktree of a folder as git and the disk describe it, for the operator's list."""
 
@@ -352,6 +388,9 @@ class RemoteGit:
                 f"{folder} does not exclude /{prefix}.agents/ from git, and the host bridge cannot write it; "
                 f"add the line /{prefix}.agents/ to the repository's .git/info/exclude on the host, then assign again"
             ) from None
+
+
+_COMMIT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
 def _literal(paths: Sequence[str]) -> list[str]:
@@ -710,7 +749,20 @@ class StaffWorktrees:
         merged = await self.merged(folder, branch)
         log = await git.run(["log", "--no-color", f"--max-count={max_commits + 1}", "--format=%H%x1f%an%x1f%aI%x1f%s", f"HEAD..{ref}"], cwd=where)
         commits = [BranchCommit(*(line.split("\x1f") + ["", "", "", ""])[:4]) for line in log.splitlines() if line.strip()]
-        numstat = await git.run(["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--numstat", f"HEAD...{ref}"], cwd=where)
+        files, patch, complete = await self._bounded_patch(git, where, f"HEAD...{ref}", max_files=max_files, max_lines=max_lines, max_chars=max_chars)
+        conflicts: list[str] | None = []
+        if not merged and commits:
+            try:
+                await git.run(["merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", ref], cwd=where)
+            except GitError as exc:
+                # Exit 1 is git's "the merge has conflicts"; its output is the tree and then the names.
+                # Anything else is a git that could not answer, and the merge is not called safe.
+                conflicts = _conflicted_names(str(exc)) if exc.returncode == 1 else None
+        return BranchComparison(branch, True, current, merged, clean, commits[:max_commits], len(commits) > max_commits, files, patch, complete, conflicts)
+
+    async def _bounded_patch(self, git: _Git, where: Path, spec: str, *, max_files: int, max_lines: int, max_chars: int) -> tuple[list[BranchFile], str, bool]:
+        """The files ``git diff <spec>`` touches, and its patch cut to the files and characters allowed."""
+        numstat = await git.run(["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--numstat", spec], cwd=where)
         files: list[BranchFile] = []
         for line in numstat.splitlines():
             parts = line.split("\t", 2)
@@ -726,17 +778,62 @@ class StaffWorktrees:
             lines += size
         patch = ""
         if kept:
-            patch = await git.run(["diff", "--no-color", "--no-ext-diff", "--no-textconv", f"HEAD...{ref}", "--", *_literal(kept)], cwd=where)
+            patch = await git.run(["diff", "--no-color", "--no-ext-diff", "--no-textconv", spec, "--", *_literal(kept)], cwd=where)
         complete = len(kept) == len(files) and len(patch) <= max_chars
-        conflicts: list[str] | None = []
-        if not merged and commits:
+        return files, patch[:max_chars], complete
+
+    async def head(self, worktree: Worktree) -> str:
+        """The commit the worktree's branch points at: what a report handed in from it is about."""
+        git = self._git(worktree.env)
+        return (await git.run(["rev-parse", "--verify", "HEAD^{commit}"], cwd=worktree.path)).strip()
+
+    async def diff_commits(self, folder: ProjectFolder, since: str, until: str, *, max_files: int = 100, max_lines: int = 8000, max_chars: int = 200_000) -> RangeDiff:
+        """What changed from commit ``since`` to commit ``until``, both full commit ids.
+
+        A two-dot diff of the trees, not the three-dot one :meth:`compare` makes: after a rework the
+        question is what the newer attempt changed, and that is the difference between the two heads
+        even when the worker rebased in between. Only commit ids are accepted, so nothing a stored row
+        holds can be read by git as an option or a moving branch name."""
+        if not (_COMMIT_ID.fullmatch(since) and _COMMIT_ID.fullmatch(until)):
+            raise WorktreeRefused("a range diff needs two full commit ids")
+        git = self._git(folder.env)
+        where = folder.path
+        for sha in (since, until):
             try:
-                await git.run(["merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", ref], cwd=where)
-            except GitError as exc:
-                # Exit 1 is git's "the merge has conflicts"; its output is the tree and then the names.
-                # Anything else is a git that could not answer, and the merge is not called safe.
-                conflicts = _conflicted_names(str(exc)) if exc.returncode == 1 else None
-        return BranchComparison(branch, True, current, merged, clean, commits[:max_commits], len(commits) > max_commits, files, patch[:max_chars], complete, conflicts)
+                await git.run(["cat-file", "-e", f"{sha}^{{commit}}"], cwd=where)
+            except GitError:
+                raise WorktreeRefused(f"the commit {sha[:10]} is no longer in {where}") from None
+        count = int((await git.run(["rev-list", "--count", f"{since}..{until}"], cwd=where)).strip() or 0)
+        files, patch, complete = await self._bounded_patch(git, where, f"{since}..{until}", max_files=max_files, max_lines=max_lines, max_chars=max_chars)
+        return RangeDiff(since, until, count, files, patch, complete)
+
+    async def freshness(self, folder: ProjectFolder, branch: str, base: str) -> BaseFreshness | None:
+        """How far ``base`` and its tracking ref have moved past the point ``branch`` was cut from.
+
+        Read from the refs the folder already has: nothing is fetched, so the upstream figure is as old
+        as the operator's last fetch, and that is said rather than paid for with a network call on every
+        card. ``None`` when the base cannot be resolved here (a deleted branch, a detached base that is
+        gone) — the card then simply says nothing."""
+        git = self._git(folder.env)
+        where = folder.path
+        base_ref = base if _COMMIT_ID.fullmatch(base) else f"refs/heads/{base}"
+        try:
+            fork = (await git.run(["merge-base", f"refs/heads/{branch}", base_ref], cwd=where)).strip()
+            behind = int((await git.run(["rev-list", "--count", f"{fork}..{base_ref}"], cwd=where)).strip() or 0)
+        except GitError:
+            return None
+        upstream, upstream_behind = "", None
+        if not _COMMIT_ID.fullmatch(base):
+            # for-each-ref answers an empty line, not an error, for a branch that tracks nothing.
+            tracking = (await git.run(["for-each-ref", "--format=%(upstream)", f"refs/heads/{base}"], cwd=where)).strip()
+            if tracking:
+                upstream = tracking.removeprefix("refs/remotes/")
+                try:
+                    upstream_behind = int((await git.run(["rev-list", "--count", f"{fork}..{tracking}"], cwd=where)).strip() or 0)
+                except GitError:
+                    # Configured but never fetched: the ref is named and absent.
+                    upstream_behind = None
+        return BaseFreshness(fork, base, behind, upstream, upstream_behind)
 
     async def merge(self, folder: ProjectFolder, branch: str, *, message: str = "",
                     expected_head: str | None = None, expected_branch_tip: str | None = None,

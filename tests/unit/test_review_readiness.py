@@ -36,6 +36,9 @@ async def test_review_projection_blocks_missing_and_stale_result_binding(tmp_pat
             async def commit_identity(self, folder, branch: str | None = None) -> str:  # type: ignore[no-untyped-def]
                 return "head1" if branch else "base1"
 
+            async def freshness(self, folder, branch: str, base: str) -> None:  # type: ignore[no-untyped-def]
+                return None
+
         class Team:
             worktrees = Worktrees()
 
