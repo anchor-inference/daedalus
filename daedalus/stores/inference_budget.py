@@ -94,7 +94,11 @@ async def held_in(conn: aiosqlite.Connection, limit: Constraint) -> tuple[int, s
              if (limit.key in row["scopes"] if limit.scope_only else pool_matches(row, limit))]
     covered = {row['id'] for row in pools}
     total = sum(row['held'] for row in pools)
-    clauses = ["r.state IN ('reserved','inflight','unknown')"]
+    # Only a call still on the wire holds its quote. An unknown one has ended without a usage
+    # report: holding its worst case for good let a few lost responses, or one restart during a
+    # call, close a daily or total cap for every later call. Its spend stays shown as unknown.
+    # A prepaid comparison pool above still keeps its unknown requests inside its allowance.
+    clauses = ["r.state IN ('reserved','inflight')"]
     args: list[Any] = []
     if limit.scope_only:
         clauses.append("s.scope_key = ?")
@@ -269,6 +273,24 @@ class InferenceBudget:
                            (state, cost, usage_event_seq, now(), "provider usage exceeded its quote" if state == "overrun" else "",
                             reservation_id))
         return state
+
+    async def recover_interrupted(self) -> int:
+        """Close the sends a previous process left open; returns how many it found.
+
+        Only this process sends, so at start nothing is on the wire. A call that was mid-flight when
+        the process stopped is unknown, not inflight: left inflight it held its quote against every
+        cap and kept an update drain blocked, with nothing ever to settle it.
+        """
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute("UPDATE inference_reservations SET state = 'unknown',last_error = ?"
+                                        " WHERE state = 'inflight'", ("the process stopped during the call",))
+            started = cursor.rowcount
+            await cursor.close()
+            cursor = await conn.execute("UPDATE inference_reservations SET state = 'released',last_error = ?"
+                                        " WHERE state = 'reserved'", ("the process stopped before the call was sent",))
+            unsent = cursor.rowcount
+            await cursor.close()
+        return started + unsent
 
     async def unknown_in(self, conn: aiosqlite.Connection, reservation_id: str, reason: str) -> None:
         await conn.execute("UPDATE inference_reservations SET state = 'unknown',last_error = ?"

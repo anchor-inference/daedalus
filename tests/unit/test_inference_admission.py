@@ -181,12 +181,16 @@ async def test_parallel_provider_calls_cannot_cross_the_same_remaining_balance(m
         await adapter.aclose()
 
 
-async def test_lost_response_keeps_balance_after_restart_and_refuses_an_unfunded_retry(manager) -> None:
+async def test_lost_response_stays_unknown_after_restart_but_does_not_hold_the_cap(manager) -> None:
+    # A lost response used to hold its worst case for good, so a few of them closed the cap for every
+    # later call. The retry goes ahead; the lost call's spend stays recorded as unknown.
     sends = []
 
     def lost(req):
         sends.append(req)
-        raise httpx.ReadTimeout("the response was lost")
+        if len(sends) == 1:
+            raise httpx.ReadTimeout("the response was lost")
+        return answer()
 
     adapter = provider(manager, lost)
     try:
@@ -195,21 +199,35 @@ async def test_lost_response_keeps_balance_after_restart_and_refuses_an_unfunded
         assert (await manager.db.fetchone("SELECT state FROM inference_reservations"))[0] == "unknown"
         await manager.db.close()
         await manager.db.open()
-        with pytest.raises(LLMProviderError, match="available balance"):
-            await adapter.complete_text(request())
-        assert len(sends) == 1 and await manager.db.fetchall("SELECT seq FROM usage_events") == []
+        await adapter.complete_text(request())
+        assert len(sends) == 2
+        states = [row[0] for row in await manager.db.fetchall("SELECT state FROM inference_reservations ORDER BY created_at")]
+        assert sorted(states) == ["settled", "unknown"]
     finally:
         await adapter.aclose()
 
 
-async def test_missing_usage_retains_the_quote_and_is_not_recorded_as_zero(manager) -> None:
+async def test_missing_usage_is_unknown_not_zero_and_does_not_block_the_next_call(manager) -> None:
     adapter = provider(manager, lambda _: answer(raw={}))
     try:
         await adapter.complete_text(request())
         assert (await manager.db.fetchone("SELECT state FROM inference_reservations"))[0] == "unknown"
         assert (await manager.db.fetchone("SELECT cost_usd FROM usage_events"))[0] is None
-        with pytest.raises(LLMProviderError, match="available balance"):
+        await adapter.complete_text(request())
+        assert (await manager.db.fetchone("SELECT count(*) FROM usage_events WHERE cost_usd IS NULL"))[0] == 2
+    finally:
+        await adapter.aclose()
+
+
+async def test_a_priced_call_over_a_measured_cap_is_still_refused_with_the_balance(manager) -> None:
+    await manager.db.execute("INSERT INTO usage_events(at,provider_id,model,purpose,cost_usd,raw)"
+                             " VALUES ('2026-01-01','test','model','text',0.00005,'{}')")
+    sends = []
+    adapter = provider(manager, lambda req: sends.append(req) or answer())
+    try:
+        with pytest.raises(LLMProviderError, match=r"\$0\.000050 is the available balance"):
             await adapter.complete_text(request())
+        assert sends == []
     finally:
         await adapter.aclose()
 
@@ -265,7 +283,8 @@ async def test_child_call_consumes_each_ancestor_session_balance(manager) -> Non
     parent_request = request(observability=LLMObservabilityContext(tenant_id="tenant", session_id="parent"))
     child_request = request(observability=LLMObservabilityContext(tenant_id="tenant", session_id="child"))
     calls = []
-    adapter = provider(manager, lambda req: calls.append(req) or answer(raw={}))
+    adapter = provider(manager, lambda req: calls.append(req) or answer(
+        raw={"prompt_tokens": 2, "completion_tokens": 3, "cost": 0.00005}))
     try:
         await adapter.complete_text(child_request)
         row = await manager.db.fetchone("SELECT scope_key FROM inference_reservation_scopes WHERE scope_key = 'session:parent'")
@@ -305,8 +324,9 @@ async def test_cancelled_text_call_cannot_refund_a_send_that_already_started(man
     sent = asyncio.Event()
 
     async def respond(_):
-        sent.set()
-        await asyncio.Event().wait()
+        if not sent.is_set():
+            sent.set()
+            await asyncio.Event().wait()
         return answer()
 
     adapter = provider(manager, respond)
@@ -317,8 +337,8 @@ async def test_cancelled_text_call_cannot_refund_a_send_that_already_started(man
         with pytest.raises(asyncio.CancelledError):
             await running
         assert (await manager.db.fetchone("SELECT state FROM inference_reservations"))[0] == "unknown"
-        with pytest.raises(LLMProviderError, match="available balance"):
-            await adapter.complete_text(request())
+        # The cancelled call is not refunded as zero, and it does not stop the next one either.
+        await adapter.complete_text(request())
     finally:
         await adapter.aclose()
 

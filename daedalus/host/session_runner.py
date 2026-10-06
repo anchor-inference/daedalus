@@ -96,6 +96,7 @@ from daedalus.stores.dispatches import DispatchStore
 from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.files import MAIN as MAIN_FILES
 from daedalus.stores.files import FileRefused, FileStore
+from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.knowledge import KnowledgeStore, project_facts_note
 from daedalus.stores.media import MediaStore
 from daedalus.stores.persistent import PersistentMemory, PersistentWorkspace
@@ -651,6 +652,8 @@ class SessionManager:
         # roots it compares against are read — and where a folder of our own that is not on disk is
         # put back, so the first run after a start is not the thing that discovers it missing.
         await self.projects.ensure_roots()
+        if interrupted := await InferenceBudget(self.db).recover_interrupted():
+            logger.warning("%d provider call(s) were open when the last process stopped; their spend is unknown", interrupted)
         # New runs wait until resume_unfinished() has continued what the previous process left behind;
         # a process that finds nothing to resume (tests, a first start) opens the gate at once.
         self.recovering = recovering if recovering is not None else bool(await self.events.unfinished_snapshots())

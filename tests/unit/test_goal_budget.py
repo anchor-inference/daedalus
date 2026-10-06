@@ -80,12 +80,14 @@ async def test_goal_cap_counts_concurrent_held_quotes_and_keeps_its_scope_after_
         view = await view_in(conn, "project")
         assert view is not None
         assert view["current_goal_revision"] == 2 and view["activated_goal_revision"] == 1
-        assert view["total"]["held_usd"] == "0.000070"
+        # The lost call shows as uncertain spend; it no longer holds the balance a later call needs.
+        assert view["total"]["held_usd"] == "0.000000"
         assert view["total"]["uncertain_usd"] == "0.000070"
         assert view["total"]["state"] == "uncertain"
-        assert view["total"]["available_usd"] == "0.000030"
+        assert view["total"]["available_usd"] == "0.000100"
+    await reserve(db, "after-revision")
     with pytest.raises(BudgetRefused, match="available balance"):
-        await reserve(db, "after-revision")
+        await reserve(db, "over-the-goal")
 
 
 async def test_settled_charge_remains_after_run_and_session_rows_are_removed(db: Database) -> None:
