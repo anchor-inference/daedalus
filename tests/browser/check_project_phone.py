@@ -1,9 +1,10 @@
 """A project on a phone, at 320, 390 and 400 px with a touch screen, in both languages.
 
-The project's three tabs take the place of the app's own; contextual tools stay behind the header.
-The header names
-the project, says how its work goes and leads back to orchestration's list of projects, where the app's
-own tabs return.
+The project's four tabs and a More take the place of the app's own; More opens a sheet with the
+project's other pages (the decisions, the history, the brief, the wake-ups, the folders), its settings
+and the way back to every project, and carries the count of decisions waiting so nothing hides behind
+it. The header names the project, says how its work goes and leads back to orchestration's list of
+projects, where the app's own tabs return.
 The request that has waited longest for the operator is a banner answered with one tap — an option, or
 words of the operator's own — and the next one takes its place until none is left. The team lists its
 members with what each is on and opens a member's conversation, which gives the whole height to it and
@@ -32,9 +33,11 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "b4k3ry20f0c5"
 
 WORDS = {
-    "en": {"tabs": ["Orchestrator", "Needs decision", "History"], "needs": "Needs you", "ira": "Ira asks:", "orchestrator": "The orchestrator asks:", "write": "Answer…", "head": "3 working · 1 in review",
+    "en": {"tabs": ["Orchestrator", "Board", "Team", "Terminals", "More"],
+           "more": ["Needs decision", "History", "Brief", "Wake-ups", "Folders", "Project settings", "All projects"], "needs": "Needs you", "ira": "Ira asks:", "orchestrator": "The orchestrator asks:", "write": "Answer…", "head": "3 working · 1 in review",
            "own": "Your own answer…", "send": "Answer", "working": "working", "review": "Review", "merge": "Merge", "board": "Board · Bakery 2.0"},
-    "ru": {"tabs": ["Оркестратор", "Требуют решения", "История"], "needs": "Нужны вы", "ira": "Ira спрашивает:", "orchestrator": "Оркестратор спрашивает:", "write": "Ответить…", "head": "3 работают · 1 на проверке",
+    "ru": {"tabs": ["Оркестратор", "Доска", "Команда", "Терминалы", "Ещё"],
+           "more": ["Требуют решения", "История", "Бриф", "Будильники", "Папки", "Настройки проекта", "Все проекты"], "needs": "Нужны вы", "ira": "Ira спрашивает:", "orchestrator": "Оркестратор спрашивает:", "write": "Ответить…", "head": "3 работают · 1 на проверке",
            "own": "Свой ответ…", "send": "Ответить", "working": "работает", "review": "Проверка", "merge": "Слить", "board": "Доска · Bakery 2.0"},
 }
 
@@ -70,14 +73,41 @@ def tabs(page: Page, words: dict, active: str | None) -> None:
     expect(page.locator("nav.tabbar:not(.project-tabs)")).to_have_count(0)
     # While the bar's code is still loading, App.tsx holds its place with an empty bar of the same
     # class, so the tabs are waited for rather than read at once from that placeholder.
-    expect(bar.locator("a")).to_have_count(len(words["tabs"]))
-    labels = [x.strip() for x in bar.locator("a").all_inner_texts()]
+    items = bar.locator(":scope > a, :scope > button")
+    expect(items).to_have_count(len(words["tabs"]))
+    assert items.evaluate_all("els => els.map(e => e.dataset.tab)") == ["orchestrator", "board", "team", "terminals", "more"]
+    labels = [x.strip() for x in items.all_inner_texts()]
     assert [lbl.split("\n")[-1] for lbl in labels] == words["tabs"], labels
-    current = bar.locator("a.active")
+    # Five equal slots across the whole width: no item cut off, none left hanging with space beside it.
+    boxes = [b for b in (it.bounding_box() for it in items.all()) if b]
+    width = page.evaluate("innerWidth")
+    assert boxes[0]["x"] < 16 and boxes[-1]["x"] + boxes[-1]["width"] > width - 16, boxes
+    assert max(b["width"] for b in boxes) - min(b["width"] for b in boxes) < 1.5, boxes
+    # At 320 px a slot is 60 px and "Orchestrator" ends in an ellipsis, as the app's own bar's longest
+    # names do there; from the common phone widths up every name is read whole.
+    for label in bar.locator(".tab-label").all() if width >= 360 else []:
+        assert label.evaluate("e => e.scrollWidth <= e.clientWidth + 1"), f"{label.inner_text()} is cut at {width}px"
+    current = bar.locator(".active")
     if active is None:
         expect(current).to_have_count(0)
     else:
         expect(current).to_have_attribute("data-tab", active)
+
+
+def more_sheet(page: Page, words: dict, badge: str | None) -> None:
+    """Opens the More sheet and checks it lists the project's other pages, with the decisions' count."""
+    page.locator("nav.project-tabs button[data-tab='more']").tap()
+    sheet = page.locator(".sheet.more-sheet")
+    expect(sheet).to_be_visible()
+    items = sheet.locator(".more-item")
+    expect(items).to_have_count(len(words["more"]))
+    assert [x.strip().split("\n")[0] for x in items.all_inner_texts()] == words["more"], items.all_inner_texts()
+    count = sheet.locator(".more-item[data-more='attention'] .tab-badge")
+    if badge is None:
+        expect(count).to_have_count(0)
+    else:
+        expect(count).to_have_text(badge)
+    expect(page.locator("nav.project-tabs button[data-tab='more']")).to_have_attribute("aria-expanded", "true")
 
 
 def run_one(page: Page, lang: str, width: int) -> None:
@@ -91,12 +121,19 @@ def run_one(page: Page, lang: str, width: int) -> None:
     page.goto(f"{BASE}/project/{PID}/team?token=t&lang={lang}")
     expect(page.locator(".pagehead h1")).to_have_text("Bakery 2.0")
     expect(page.locator(".pagehead .sub")).to_have_text(words["head"])
-    tabs(page, words, None)
+    tabs(page, words, "team")
     banner = page.locator(".needs-banner")
     expect(banner).to_have_attribute("data-ask", "q9w2e1")
     expect(banner).to_contain_text(words["needs"])
     expect(banner).to_contain_text(words["ira"])
-    expect(page.locator("nav.project-tabs a[data-tab='attention'] .tab-badge")).to_have_text("2")
+    # The team's tab counts the requests waiting; More counts every decision, the requests among them.
+    expect(page.locator("nav.project-tabs a[data-tab='team'] .tab-badge")).to_have_text("2")
+    expect(page.locator("nav.project-tabs button[data-tab='more'] .tab-badge")).to_have_text("2")
+    # The sheet repeats the count on the decisions' own item, so it is clear where the badge leads.
+    more_sheet(page, words, "2")
+    page.keyboard.press("Escape")
+    expect(page.locator(".sheet.more-sheet")).to_have_count(0)
+    tabs(page, words, "team")
     tall_enough(page, ".needs-banner .ask-answers-row .btn", where)
     items = page.locator(".phone-staff-item")
     expect(items).to_have_count(6)
@@ -130,7 +167,8 @@ def run_one(page: Page, lang: str, width: int) -> None:
     banner.locator(".ask-answers-own .btn.primary").tap()
     expect(page.locator(".needs-banner")).to_have_count(0)
     assert focus.answers[-1] == ("ask-spring", {"text": "after, like last spring"}), focus.answers
-    expect(page.locator("nav.project-tabs a[data-tab='attention'] .tab-badge")).to_have_count(0)
+    expect(page.locator("nav.project-tabs a[data-tab='team'] .tab-badge")).to_have_count(0)
+    expect(page.locator("nav.project-tabs button[data-tab='more'] .tab-badge")).to_have_count(0)
 
     # A member with a conversation opens it without the tabs, and its back returns to the team.
     items.filter(has_text="Lev").locator(".phone-staff-row").tap()
@@ -141,10 +179,10 @@ def run_one(page: Page, lang: str, width: int) -> None:
     page.locator(".chat-head .iconbtn").first.tap()
     page.wait_for_url(f"**/project/{PID}/team**")
 
-    # The board remains a contextual project tool, under chips.
-    page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
+    # The board is a tab of its own: the list under chips.
+    page.locator("nav.project-tabs a[data-tab='board']").tap()
     page.wait_for_url(f"**/project/{PID}/board**")
-    tabs(page, words, None)
+    tabs(page, words, "board")
     expect(page.locator(".pagehead h1")).to_have_text(words["board"])
     expect(page.locator(".pboard-cols")).to_have_count(0)
     page.locator(".pboard-chips .chip", has_text=words["review"]).tap()
@@ -154,10 +192,12 @@ def run_one(page: Page, lang: str, width: int) -> None:
     assert not focus.board.accepted
     fits(page, f"{where} board")
 
-    # The terminals: rows that lead to the phone's terminal.
-    page.goto(f"{BASE}/project/{PID}/terminals?token=t&lang={lang}")
+    # The terminals: rows that lead to the phone's terminal. The task's sheet is closed first.
+    page.keyboard.press("Escape")
+    expect(page.locator(".sheet.pboard-sheet")).to_have_count(0)
+    page.locator("nav.project-tabs a[data-tab='terminals']").tap()
     page.wait_for_url(f"**/project/{PID}/terminals**")
-    tabs(page, words, None)
+    tabs(page, words, "terminals")
     rows = page.locator(".phone-term")
     expect(rows).to_have_count(3)
     expect(rows.first).to_have_attribute("href", "/app/terminals/tm-ira")
@@ -173,10 +213,34 @@ def run_one(page: Page, lang: str, width: int) -> None:
     assert composer and bar and composer["y"] + composer["height"] <= bar["y"] + 0.5, (composer, bar)
     fits(page, f"{where} orchestrator")
 
-    # A page behind the header's menu keeps the tabs with none lit.
-    page.goto(f"{BASE}/project/{PID}/journal?token=t&lang={lang}")
+    # More opens its sheet over the page; the history opens from it, and the bar stays with More lit.
+    more_sheet(page, words, None)
+    fits(page, f"{where} more")
+    page.locator(".sheet.more-sheet .more-item[data-more='journal']").tap()
+    page.wait_for_url(f"**/project/{PID}/journal**")
     page.wait_for_selector(".journal-entry", timeout=10000)
-    tabs(page, words, "journal")
+    expect(page.locator(".sheet.more-sheet")).to_have_count(0)
+    tabs(page, words, "more")
+    # Every other page of the sheet keeps the bar too, and its own item is the one marked.
+    for key in ("attention", "brief", "wakeups", "folders"):
+        more_sheet(page, words, None)
+        page.locator(f".sheet.more-sheet .more-item[data-more='{key}']").tap()
+        page.wait_for_url(f"**/project/{PID}/{key}**")
+        tabs(page, words, "more")
+        fits(page, f"{where} {key}")
+    more_sheet(page, words, None)
+    expect(page.locator(".sheet.more-sheet .more-item.active")).to_have_attribute("data-more", "folders")
+    # The project's settings open in place of the sheet.
+    page.locator(".sheet.more-sheet .more-item[data-more='settings']").tap()
+    expect(page.locator(".sheet.more-sheet")).to_have_count(0)
+    expect(page.get_by_role("dialog").get_by_role("textbox", name="Name" if lang == "en" else "Название")).to_have_value("Bakery 2.0")
+    page.keyboard.press("Escape")
+    expect(page.get_by_role("dialog")).to_have_count(0)
+    # And "All projects" leaves for orchestration's list.
+    more_sheet(page, words, None)
+    page.locator(".sheet.more-sheet .more-item[data-more='projects']").tap()
+    page.wait_for_url("**/app/orchestration/projects**")
+    expect(page.locator("nav.project-tabs")).to_have_count(0)
 
     # The header's back leaves the project for orchestration's list, and the app's own tabs come back.
     page.goto(f"{BASE}/project/{PID}/team?token=t&lang={lang}")

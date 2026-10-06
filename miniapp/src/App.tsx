@@ -616,7 +616,7 @@ export function App() {
   // A terminal full screen takes the column the way a conversation does: no scrolling page around it
   // and, on a phone, no tab bar under it.
   const terminalOpen = (route.screen === "terminals" || route.screen === "browser") && !!route.detail;
-  // A project on a phone has its own four tabs in the place of the app's (project/phone.tsx); a
+  // A project on a phone has its own four tabs and a More in the place of the app's (project/phone.tsx); a
   // session inside it is a detail with a back of its own and no bar under it.
   const projectBar = !wide && focusProject ? phoneTab(focusView(route.page, route.inner)) : null;
   // The main chat on a phone is a detail of orchestration's list, with a back of its own and no bar under it.
@@ -681,7 +681,7 @@ export function App() {
       {tabBar && <TabBar screen={route.screen} counts={counts} waiting={waiting} selfdev={selfdev} onMore={() => setMore((m) => !m)} moreOpen={more} />}
       {projectBar?.bar && focusProject && (
         <ErrorBoundary key={`tabs-${focusProject}`}>
-          <Suspense fallback={<nav className="tabbar project-tabs" aria-hidden />}>
+          <Suspense fallback={<nav className="tabbar five project-tabs" aria-hidden />}>
             <ProjectTabs projectId={focusProject} current={projectBar.tab} />
           </Suspense>
         </ErrorBoundary>

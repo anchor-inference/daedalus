@@ -64,7 +64,7 @@ def run() -> None:
                 cards = page.locator(".focus-attention-item")
                 expect(cards).to_have_count(7)
                 if width < 600:
-                    expect(page.locator("nav.project-tabs a[data-tab='attention'] .tab-badge")).to_have_text("7")
+                    expect(page.locator("nav.project-tabs button[data-tab='more'] .tab-badge")).to_have_text("7")
                 else:
                     expect(page.locator("nav.project-sidebar a.focus-row[href$='/attention'] .focus-row-meta")).to_have_text("7")
                 assert not page.get_by_text("same-ask").count()
@@ -102,7 +102,7 @@ def run() -> None:
                 page.reload()
                 expect(page.locator(".focus-attention-warning").first).to_be_visible()
                 if width < 600:
-                    expect(page.locator("nav.project-tabs a[data-tab='attention'] .tab-badge")).to_have_text("?")
+                    expect(page.locator("nav.project-tabs button[data-tab='more'] .tab-badge")).to_have_text("?")
                 else:
                     expect(page.locator("nav.project-sidebar a.focus-row[href$='/attention'] .focus-row-meta")).to_have_text("?")
                     expect(page.locator("nav.project-sidebar a.focus-row[href$='/attention'] .focus-row-meta"))\
