@@ -797,6 +797,12 @@ class BoardStub:
         self.uncertain_launches: list[dict] = []
         self.stop_reconciliations: list[str] = []
         self.launch_reconciliations: list[str] = []
+        self.issue_repository: str | None = None
+        """What the host reads from the project folder's git remote for the issue import sheet."""
+        self.github_issues: list[dict] = []
+        """Open issues as the host's listing reads them: number, title, labels and an optional body_length."""
+        self.issue_lists: list[dict] = []
+        self.issue_imports: list[dict] = []
 
     @staticmethod
     def task(id_: str, title: str, *, status: str = "todo", priority: int = 3, assignee: dict | None = None, **fields: object) -> dict:
@@ -857,10 +863,50 @@ class BoardStub:
         row["assignee_staff_id"] = member["id"] if member else None
         row["assignee"] = self.assignee(member["id"], member["name"], harness=member["harness"], color=member["color"]) if member else None
 
+    def _issues(self, method: str, path: str, body: dict | None) -> tuple[int, object]:
+        """The GitHub issue import: the guessed repository, the previewed listing and the ticked apply."""
+        if path == "/api/issues/sync/source" and method == "GET":
+            return 200, {"project_id": self.project["id"], "repository": self.issue_repository, "configured": True}
+        if path == "/api/issues/sync/list" and method == "POST":
+            assert body is not None
+            self.issue_lists.append(body)
+            linked = {t["issue"]["number"]: t for t in self.tasks if t.get("issue")}
+            entries = []
+            for issue in self.github_issues:
+                if body.get("label") and body["label"] not in issue.get("labels", []):
+                    continue
+                card = linked.get(issue["number"])
+                too_large = issue.get("body_length", 0) > 2000
+                entries.append({
+                    "number": issue["number"], "title": issue["title"], "labels": issue.get("labels", []),
+                    "url": f"https://github.com/{body['repository']}/issues/{issue['number']}", "body_length": issue.get("body_length", 0),
+                    "action": "linked" if card else "too_large" if too_large else "import",
+                    "task_id": card["id"] if card else None, "task_title": card["title"] if card else None,
+                    "preview_digest": f"{issue['number']:064d}", "expected_entity_revision": card.get("entity_revision") if card else None,
+                })
+            return 200, {"project_id": self.project["id"], "repository": body["repository"], "label": body.get("label"),
+                         "collection_revision": len(self.tasks) + 1, "limit": 100, "issues": entries}
+        if path == "/api/issues/sync/import" and method == "POST":
+            assert body is not None
+            self.issue_imports.append(body)
+            applied = []
+            for item in body["items"]:
+                issue = next(i for i in self.github_issues if i["number"] == item["issue_number"])
+                row = self.task(f"t-issue-{issue['number']}", issue["title"], project_id=self.project["id"], acceptance="From the issue",
+                                issue={"repository": body["repository"], "number": issue["number"], "state": "linked",
+                                       "url": f"https://github.com/{body['repository']}/issues/{issue['number']}"})
+                self.tasks.append(row)
+                applied.append({"issue_number": issue["number"], "action": "import", "task_id": row["id"]})
+            return 200, {"project_id": self.project["id"], "repository": body["repository"], "applied": applied, "skipped": [],
+                         "collection_revision": len(self.tasks) + 1}
+        return 404, {"detail": "no such issue sync route"}
+
     def answer(self, method: str, path: str, query: str, body: dict | None) -> tuple[int, object] | None:
         """``(status, body)`` for a route of the board, or None for anything else."""
         base = f"/api/projects/{self.project['id']}/board"
         stops = f"/api/projects/{self.project['id']}/unknown-stops"
+        if path.startswith("/api/issues/sync/"):
+            return self._issues(method, path, body)
         launches = f"/api/projects/{self.project['id']}/uncertain-launches"
         if path == launches and method == "GET":
             from urllib.parse import parse_qs

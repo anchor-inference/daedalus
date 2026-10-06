@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import uuid
+from pathlib import Path
 from typing import Any
 
 import aiosqlite
@@ -14,6 +15,8 @@ import httpx
 from daedalus.extensions.board_commands import insert_task
 from daedalus.extensions.effects import EffectOutcome, EffectResolution
 from daedalus.extensions.orchestrator_domain import capture_contract_change
+from daedalus.host.forge import remote_slug
+from daedalus.host.gitrun import GitError
 from daedalus.stores.control import (
     ControlConflict,
     ControlDenied,
@@ -32,6 +35,16 @@ from daedalus.stores.outbox import Claim, OutboxStore
 
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}\Z")
 ORIGIN = re.compile(r"\n?<!-- daedalus-issue-origin:([0-9a-f]{32}) -->\s*\Z")
+LABEL = re.compile(r"[^,\x00-\x1f]{1,50}\Z")
+LIST_LIMIT = 100
+"""One page of open issues. A repository with more is narrowed with a label, rather than the host
+walking pages of an API that answers slowly and counts every request against the token."""
+TITLE_LIMIT, BODY_LIMIT = 200, 2000
+"""A task's title and contract limits; an issue past them cannot become a card unedited."""
+IMPORT_OPERATION, UPDATE_OPERATION = "board.task.create", "board.task.update"
+"""An import makes a card and a field resolution rewrites one, so they are authorized as exactly
+that. A coordinator's planning grant carries these two names; no grant was ever issued with a name of
+the issue sync's own, so one would have refused every coordinator import."""
 
 
 class IssueSyncRefused(ValueError):
@@ -90,6 +103,105 @@ class GitHubIssues:
 
     async def read(self, repository: str, number: int) -> dict[str, Any]:
         return await self.request("GET", repository, number)
+
+    async def list(self, repository: str, label: str | None = None) -> list[dict[str, Any]]:
+        """Open issues, newest first, each as the snapshot :meth:`read` returns plus what a list shows.
+
+        The snapshot fields are the ones a single read answers with, so a digest computed from this
+        listing is the one an apply recomputes from its own fresh read."""
+        _remote_id(repository, 1)
+        if label is not None and not LABEL.fullmatch(label):
+            raise IssueSyncRefused("a label is one name of at most fifty characters, without commas")
+        if not self.token.strip():
+            raise IssueSyncRefused("GitHub is not configured")
+        params: dict[str, Any] = {"state": "open", "per_page": LIST_LIMIT, "sort": "created", "direction": "desc"}
+        if label:
+            params["labels"] = label
+        async with httpx.AsyncClient(timeout=10, transport=self.transport) as client:
+            try:
+                response = await client.get(f"https://api.github.com/repos/{repository}/issues", params=params,
+                                            headers={"Accept": "application/vnd.github+json", "Authorization": f"Bearer {self.token}"})
+            except httpx.HTTPError as exc:
+                raise IssueSyncRefused("GitHub issues are unavailable") from exc
+        if response.status_code == 404:
+            raise IssueSyncRefused(f"GitHub has no repository {repository} this token can read")
+        if response.status_code != 200:
+            raise IssueSyncRefused(f"GitHub issue listing returned {response.status_code}")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise IssueSyncRefused("GitHub returned an invalid issue list") from exc
+        if not isinstance(payload, list):
+            raise IssueSyncRefused("GitHub returned an invalid issue list")
+        issues = []
+        for item in payload:
+            # The issues endpoint lists pull requests too; they are outside issue sync.
+            if not isinstance(item, dict) or "pull_request" in item or type(item.get("number")) is not int:
+                continue
+            labels = [entry.get("name") for entry in item.get("labels") or [] if isinstance(entry, dict)]
+            url = item.get("html_url")
+            issues.append({"number": item["number"], "remote": _snapshot(item),
+                           "labels": [name for name in labels if isinstance(name, str)],
+                           "url": url if isinstance(url, str) else f"https://github.com/{repository}/issues/{item['number']}"})
+        return issues
+
+
+def guess_repository(folder: Path) -> str | None:
+    """The ``owner/repo`` a folder's git remote names, read from its git config on disk.
+
+    It reads the file rather than running git: no network, and no refusal over a folder owned by
+    another user, which git answers with a safe-directory error instead of the remote. ``origin``
+    is preferred; otherwise the first GitHub remote. A worktree's ``.git`` is a file naming its
+    git directory, whose ``commondir`` holds the shared config."""
+    try:
+        git = folder / ".git"
+        if git.is_file():
+            pointer = git.read_text(encoding="utf-8").strip()
+            if not pointer.startswith("gitdir:"):
+                return None
+            git = (folder / pointer.partition(":")[2].strip()).resolve()
+        common = git / "commondir"
+        if common.is_file():
+            git = (git / common.read_text(encoding="utf-8").strip()).resolve()
+        text = (git / "config").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    remotes: dict[str, str] = {}
+    section = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        header = re.fullmatch(r'\[remote\s+"([^"]+)"\]', stripped)
+        if header:
+            section = header.group(1)
+            continue
+        if stripped.startswith("["):
+            section = None
+            continue
+        key, _, value = stripped.partition("=")
+        if section is not None and key.strip() == "url" and section not in remotes:
+            remotes[section] = value.strip()
+    for name in ("origin", *remotes):
+        url = remotes.get(name)
+        if url is None:
+            continue
+        try:
+            owner, repo = remote_slug(url)
+        except GitError:
+            continue
+        if REPOSITORY.fullmatch(f"{owner}/{repo}"):
+            return f"{owner}/{repo}"
+    return None
+
+
+def repository_of(folders: Any, local_env: str) -> str | None:
+    """The repository a project's own folders point at: the first local, reachable folder whose git
+    remote is on GitHub, the primary first because the store keeps it first."""
+    for folder in folders:
+        if folder.local(local_env) and folder.reachable:
+            found = guess_repository(folder.path)
+            if found:
+                return found
+    return None
 
 
 class IssueSync:
@@ -161,6 +273,9 @@ class IssueSync:
         if project is None:
             raise KeyError(project_id)
         remote = await self.github.read(repository, number)
+        return await self._preview_of(project_id, remote_id, remote)
+
+    async def _preview_of(self, project_id: str, remote_id: str, remote: dict[str, Any]) -> dict[str, Any]:
         link, task = await self._local(project_id, remote_id)
         local = {"title": task["title"], "body": task["acceptance"], "state": task["status"],
                  "entity_revision": task["entity_revision"]} if task else None
@@ -202,7 +317,7 @@ class IssueSync:
         remote_id = _remote_id(repository, number)
         scope = Scope("project", project_id)
         payload = {"remote_id": remote_id, "preview_digest": preview_digest}
-        replay = await self._replay(principal, scope, "issues.sync.import", client_operation_id,
+        replay = await self._replay(principal, scope, IMPORT_OPERATION, client_operation_id,
                                     expected_collection_revision, Entity("collection", project_id), payload)
         if replay is not None:
             return replay
@@ -210,7 +325,7 @@ class IssueSync:
         if preview["preview_digest"] != preview_digest or preview["link"] is not None:
             raise ControlConflict("the issue preview changed; inspect the current issue")
         remote = preview["remote"]
-        if len(remote["title"]) > 200 or len(remote["body"]) > 2000:
+        if len(remote["title"]) > TITLE_LIMIT or len(remote["body"]) > BODY_LIMIT:
             raise IssueSyncRefused("the issue exceeds the task contract limits")
 
         async def effect(conn: aiosqlite.Connection, mutation: Mutation) -> dict[str, Any]:
@@ -228,7 +343,7 @@ class IssueSync:
             await self._observe(conn, project_id, preview["remote_id"], remote, link_id, 1)
             return {**task, "link_id": link_id, "remote_id": preview["remote_id"]}
 
-        return await self.control.mutate(principal, scope, "issues.sync.import", client_operation_id,
+        return await self.control.mutate(principal, scope, IMPORT_OPERATION, client_operation_id,
                                          expected_collection_revision, Entity("collection", project_id), payload, effect)
 
     async def queue_push(self, principal: Principal, project_id: str, repository: str, number: int, *,
@@ -290,7 +405,7 @@ class IssueSync:
         existing, _ = await self._local(project_id, remote_id)
         if existing is None:
             raise IssueSyncRefused("the issue has no linked task")
-        replay = await self._replay(principal, scope, "issues.sync.resolve", client_operation_id,
+        replay = await self._replay(principal, scope, UPDATE_OPERATION, client_operation_id,
                                     expected_entity_revision, Entity("task", existing["task_id"]), payload)
         if replay is not None:
             return replay
@@ -333,8 +448,97 @@ class IssueSync:
             return {"task_id": task["id"], "link_id": link["id"], "field_sources": fields,
                     "status_mapping": status_mapping}
 
-        return await self.control.mutate(principal, scope, "issues.sync.resolve", client_operation_id,
+        return await self.control.mutate(principal, scope, UPDATE_OPERATION, client_operation_id,
                                          expected_entity_revision, Entity("task", link["task_id"]), payload, effect)
+
+    async def list_issues(self, project_id: str, repository: str, label: str | None = None) -> dict[str, Any]:
+        """Preview a repository's open issues against the project's board, one entry per issue.
+
+        Each entry carries the per-issue preview digest :meth:`preview` would compute, so applying a
+        ticked entry goes through the same reviewed path as a single issue. ``action`` is what the
+        entry offers: ``import`` (no card yet), ``update`` (the issue changed since its card was made
+        and the card did not), or nothing to do with a reason: ``linked`` (up to date), ``conflict``
+        (both sides changed: the fields are chosen one by one), ``too_large`` (past the task limits)
+        or ``elsewhere`` (linked to another project)."""
+        if await self.db.fetchone("SELECT id FROM projects WHERE id = ?", (project_id,)) is None:
+            raise KeyError(project_id)
+        listed = await self.github.list(repository, label or None)
+        revision = await self.control.revision(Scope("project", project_id), Entity("collection", project_id))
+        entries = []
+        for item in listed:
+            remote = item["remote"]
+            remote_id = _remote_id(repository, item["number"])
+            entry = {"number": item["number"], "title": remote["title"], "url": item["url"],
+                     "labels": item["labels"], "body_length": len(remote["body"]),
+                     "task_id": None, "task_title": None, "preview_digest": None,
+                     "expected_entity_revision": None}
+            try:
+                preview = await self._preview_of(project_id, remote_id, remote)
+            except IssueSyncRefused:
+                entries.append({**entry, "action": "elsewhere"})
+                continue
+            local = preview["local"]
+            entry["preview_digest"] = preview["preview_digest"]
+            if preview["link"] is not None:
+                entry["task_id"] = preview["link"]["task_id"]
+                entry["task_title"] = local["title"] if local else None
+                entry["expected_entity_revision"] = local["entity_revision"] if local else None
+            too_large = len(remote["title"]) > TITLE_LIMIT or len(remote["body"]) > BODY_LIMIT or not remote["title"].strip()
+            if preview["link"] is None:
+                action = "too_large" if too_large else "import"
+            elif "remote_changed" not in preview["conflicts"]:
+                action = "linked"
+            elif "local_changed" in preview["conflicts"] or local is None:
+                action = "conflict"
+            else:
+                action = "too_large" if too_large else "update"
+            entries.append({**entry, "action": action})
+        return {"project_id": project_id, "repository": repository, "label": label or None,
+                "collection_revision": revision, "limit": LIST_LIMIT, "issues": entries}
+
+    async def apply_selection(self, principal: Principal, project_id: str, repository: str,
+                              items: list[dict[str, Any]], *, expected_collection_revision: int,
+                              client_operation_id: str) -> dict[str, Any]:
+        """Import or update the ticked entries of a listing, in order, each through its own receipt.
+
+        The listing was read at one collection revision, and each import advances it by one; the
+        next import expects the revision the previous one published, so anything else that changed
+        the board meanwhile refuses the rest instead of being overrun. Each entry's command identity
+        is derived from the batch's, so a retried batch replays its receipts rather than making
+        twins. One entry refused for its own reason (it changed on GitHub, it was linked meanwhile)
+        is reported and the others go on; a refused authority stops the batch."""
+        revision = expected_collection_revision
+        done: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for item in items:
+            number, action = item["issue_number"], item["action"]
+            operation_id = f"{client_operation_id}:{number}"[:160]
+            try:
+                if action == "import":
+                    result = await self.apply_import(principal, project_id, repository, number,
+                                                     preview_digest=item["preview_digest"],
+                                                     expected_collection_revision=revision,
+                                                     client_operation_id=operation_id)
+                    revision = int(result["entity_revision"])
+                    done.append({"issue_number": number, "action": "import", "task_id": result["task_id"]})
+                elif action == "update":
+                    expected = item.get("expected_entity_revision")
+                    if type(expected) is not int:
+                        raise IssueSyncRefused("an update needs the card's entity revision from the listing")
+                    result = await self.resolve_remote(principal, project_id, repository, number,
+                                                       preview_digest=item["preview_digest"],
+                                                       expected_entity_revision=expected,
+                                                       client_operation_id=operation_id,
+                                                       fields={"title": "remote", "body": "remote"})
+                    done.append({"issue_number": number, "action": "update", "task_id": result["task_id"]})
+                else:
+                    raise IssueSyncRefused(f"{action!r} is not an import or an update")
+            except (ControlConflict, IssueSyncRefused) as exc:
+                skipped.append({"issue_number": number, "reason": str(exc)})
+            except KeyError:
+                skipped.append({"issue_number": number, "reason": "the project or the card is gone"})
+        return {"project_id": project_id, "repository": repository, "applied": done, "skipped": skipped,
+                "collection_revision": revision}
 
     async def run(self, claim: Claim, check: Any) -> EffectOutcome:
         # GitHub does not offer a conditional issue PATCH, so host writes to this adapter

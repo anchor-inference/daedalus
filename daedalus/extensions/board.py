@@ -501,12 +501,27 @@ class Board:
             }
         await self._contracts(tasks)
         await self._accepted_result_costs(tasks)
+        await self._issue_links(project_id, tasks)
         needs = await self.needs_you(project_id)
         counts_rows = await self.app.db.fetchall("SELECT status, count(*) AS n FROM board_tasks WHERE project_id = ? GROUP BY status", (project_id,))
         counts = {status: 0 for status in STATUSES}
         counts.update({r["status"]: int(r["n"]) for r in counts_rows if r["status"] in counts})
         team = [{"id": m["id"], "name": m["name"], "color": m["color"], "harness": m["harness"], "isolation": m["isolation"]} for m in members.values() if m["archived_at"] is None]
         return {"tasks": tasks, "needs_you": needs, "counts": {**counts, "needs_you": len(needs)}, "staff": team}
+
+    async def _issue_links(self, project_id: str, tasks: list[dict[str, Any]]) -> None:
+        """The GitHub issue a card was imported from, so the card can link back to it."""
+        rows = await self.app.db.fetchall("SELECT task_id,remote_id,state FROM issue_links WHERE project_id = ? AND provider = 'github'",
+                                          (project_id,))
+        links = {row["task_id"]: row for row in rows}
+        for task in tasks:
+            row = links.get(task["id"])
+            if row is None:
+                task["issue"] = None
+                continue
+            repository, _, number = row["remote_id"].rpartition("#")
+            task["issue"] = {"repository": repository, "number": int(number), "state": row["state"],
+                             "url": f"https://github.com/{repository}/issues/{number}"}
 
     async def _accepted_result_costs(self, tasks: list[dict[str, Any]]) -> None:
         """Price worker attempts through the accepted receipt, retaining every unpriced path."""

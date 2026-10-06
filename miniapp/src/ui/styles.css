@@ -3066,6 +3066,20 @@ button.staff-row:hover { background: var(--surface-2); }
 .pcard.need { cursor: default; border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); background: color-mix(in srgb, var(--warn) 7%, var(--surface-1)); }
 .pcard.need:hover { background: color-mix(in srgb, var(--warn) 7%, var(--surface-1)); }
 .pcard-head { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; }
+/* The issue number is a link inside a clickable card; it keeps the chip's look and does not shrink away. */
+.pcard-issue { flex: none; text-decoration: none; color: inherit; font-variant-numeric: tabular-nums; }
+.pcard-issue:hover { text-decoration: underline; }
+.issue-import-repo { display: flex; gap: var(--space-2); align-items: center; }
+.issue-import-repo input.field { flex: 1; min-width: 0; }
+.issue-import-repo .btn { flex: none; }
+.issue-import-head { display: flex; align-items: center; gap: var(--space-2); margin-top: 12px; }
+.issue-row { align-items: flex-start; margin: 8px 0 0; }
+.issue-row input { margin-top: 2px; flex: none; }
+.issue-row.is-off { cursor: default; }
+.issue-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.issue-row-title { overflow-wrap: anywhere; }
+.issue-row-number { color: var(--muted); font-variant-numeric: tabular-nums; }
+.pboard-import { display: block; margin: 0 0 8px; }
 .pcard-title { flex: 1; min-width: 0; font-size: var(--fs-14); font-weight: 500; overflow-wrap: anywhere; }
 .pcard-line { font-size: var(--fs-12); min-width: 0; }
 .pcard-meta { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--fg-2); font-size: var(--fs-12); }

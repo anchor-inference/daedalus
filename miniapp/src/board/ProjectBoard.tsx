@@ -30,6 +30,7 @@ import { UncertainLaunches } from "./UncertainLaunches";
 import { TaskContext } from "./TaskContext";
 import { ManualResult } from "./ManualResult";
 import { ManualReopenRecovery } from "./ManualReopen";
+import { IssueImport } from "./IssueImport";
 import { Harness, statusTone } from "../team/team";
 import { confirmAsync, errorText } from "../ui";
 import {
@@ -115,6 +116,7 @@ export function ProjectBoard({ projectId, toast, selected, selectedResult, layou
   const [picked, setPicked] = useState<string | null>(null);
   const [filter, setFilter] = useState<Column | null>(null);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const reload = () => {
     invalidate(boardKey(projectId));
@@ -242,7 +244,8 @@ export function ProjectBoard({ projectId, toast, selected, selectedResult, layou
           </div>
         )}
       </div>
-      {creating && data && <TaskSheet projectId={projectId} data={data} onClose={() => setCreating(false)} onDone={reload} toast={toast} />}
+      {creating && data && <TaskSheet projectId={projectId} data={data} onClose={() => setCreating(false)} onDone={reload} toast={toast} onImport={() => { setCreating(false); setImporting(true); }} />}
+      {importing && <IssueImport projectId={projectId} onClose={() => setImporting(false)} onDone={reload} toast={toast} />}
       {open && data && <TaskSheet key={open.id} projectId={projectId} data={data} task={open} resultReference={resultReference} onClose={closeTask} onDone={reload} toast={toast} />}
     </>
   );
@@ -326,6 +329,7 @@ function TaskCard({ task, titles, onOpen }: { task: ProjectTask; titles: Record<
       <div className="pcard-head">
         <span className="pcard-title clamp-3">{task.title}</span>
         {task.priority <= 2 && <span className={`chip tiny ${task.priority === 1 ? "bad" : "attn"}`}>P{task.priority}</span>}
+        {task.issue && <IssueChip issue={task.issue} />}
       </div>
       {task.checklist.length > 0 && (
         <div className="task-check">
@@ -350,6 +354,18 @@ function TaskCard({ task, titles, onOpen }: { task: ProjectTask; titles: Record<
         {task.status === "review" && <span className="sub">{t("result.openReview")}</span>}
       </div>
     </div>
+  );
+}
+
+/** The issue a card came from, as its number linking to GitHub. The click stops at the link, so it
+ *  opens the issue rather than the card underneath it. */
+function IssueChip({ issue }: { issue: NonNullable<ProjectTask["issue"]> }) {
+  return (
+    <a className={`chip tiny pcard-issue ${issue.state === "conflict" ? "attn" : ""}`} href={issue.url} target="_blank" rel="noreferrer"
+      data-issue={issue.number} title={t("issues.card.title", { repository: issue.repository, n: issue.number })}
+      onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      #{issue.number}
+    </a>
   );
 }
 
@@ -465,7 +481,7 @@ function RequirementsSection({ requirements }: { requirements: Requirement[] }) 
 }
 
 /** Creating a task and changing one: the same sheet, because a task is its title, its brief, who does it and what it waits for. */
-function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, toast }: { projectId: string; data: BoardResponse; task?: ProjectTask; resultReference?: AcceptedResultReference | null; onClose: () => void; onDone: () => void; toast: (text: string) => void }) {
+function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, toast, onImport }: { projectId: string; data: BoardResponse; task?: ProjectTask; resultReference?: AcceptedResultReference | null; onClose: () => void; onDone: () => void; toast: (text: string) => void; onImport?: () => void }) {
   const route = useRoute();
   const offline = useOffline();
   const operation = useRef<{ fingerprint: string; id: string } | null>(null);
@@ -722,6 +738,7 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
         <div className="erow-meta pboard-sheet-status">
           <span className="chip">{t(`board.col.${task.status}`)}</span>
           {task.branch && <code className="pcard-branch">{task.branch}</code>}
+          {task.issue && <IssueChip issue={task.issue} />}
           <span className="sep">·</span>
           <span title={absTime(task.updated_at)}>{t("board.updated", { t: relTime(task.updated_at) })}</span>
         </div>
@@ -770,6 +787,10 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
       {task && <RuntimeHandoff task={task} onChanged={onDone} toast={toast} />}
 
       {task && hasAcceptance(task) && <AcceptanceSection task={task} />}
+
+      {/* Bringing in work that is already written down as issues sits beside making a card by hand,
+          rather than as another button in the board's header. */}
+      {!task && onImport && <button type="button" className="linkbtn pboard-import" onClick={onImport}>{t("issues.open")}</button>}
 
       <label className="field" htmlFor="ptask-title">{t("board.title")}</label>
       <input id="ptask-title" className="field" autoFocus={!task} value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} />

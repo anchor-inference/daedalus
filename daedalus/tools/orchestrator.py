@@ -134,8 +134,8 @@ async def team(context: ToolContext, staff: str | None = None, concurrency: int 
 
 
 @search_hint(
-    "project board tasks of the team create assign update tasks for staff project backlog "
-    "задачи проекта доска проекта таски команды задачу создать создай бэклог проекта статус задачи"
+    "project board tasks of the team create assign update tasks for staff project backlog import github issues "
+    "задачи проекта доска проекта таски команды задачу создать создай бэклог проекта статус задачи импорт issues гитхаб"
 )
 @tool(
     name="Tasks",
@@ -151,7 +151,11 @@ async def team(context: ToolContext, staff: str | None = None, concurrency: int 
         "use their exact receipt commands. 'list' and 'get' show the collection and entity revisions required "
         "for writes; 'get' also shows the card's "
         "checks (C…), requirements (R…) and acceptance. A new card for work already on the board is refused with "
-        "that card's id — hand the card on instead, or new=true with a reason saying how the work differs."
+        "that card's id — hand the card on instead, or new=true with a reason saying how the work differs. "
+        "GitHub issues: op='issues' previews the open issues of repository (owner/repo; default: the project "
+        "folder's GitHub remote), label narrows them, and says which would become cards or update theirs; "
+        "op='import_issues' with issues=[numbers] and the collection revision 'issues' showed imports them as cards "
+        "linked to their issue. Use these, not a shell gh call or hand-copied cards."
     ),
 )
 async def tasks(
@@ -175,6 +179,9 @@ async def tasks(
     owner: str = "",
     expected_entity_revision: int | None = None,
     expected_collection_revision: int | None = None,
+    repository: str = "",
+    label: str = "",
+    issues: list[int] | None = None,
 ) -> ToolResult:
     return await _call(
         context, "tasks", op=op, task_id=task_id, title=title, objective=objective, deliverable=deliverable, boundaries=boundaries,
@@ -182,6 +189,7 @@ async def tasks(
         new=new, reason=reason, next_kind=next_kind, owner=owner, client_operation_id=call_id(context),
         expected_entity_revision=expected_entity_revision,
         expected_collection_revision=expected_collection_revision,
+        repository=repository, label=label, issues=issues,
     )
 
 

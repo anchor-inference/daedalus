@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions import wakeups
 from daedalus.extensions.board_commands import BoardCommands
+from daedalus.extensions.issue_sync import IssueSync, IssueSyncRefused, repository_of
 from daedalus.extensions.likeness import same_question
 from daedalus.extensions.notifications import Draft
 from daedalus.extensions.orchestrator_domain import clear_next_action, set_next_action
@@ -50,7 +51,7 @@ JOURNAL_TEXT_MAX = 4000
 REPORT_TEXT_MAX = 4000
 REPORT_KINDS = ("progress", "done", "blocked", "decision")
 PEEK_OPS = ("read", "ls", "find", "search", "git_log", "git_diff", "git_status", "files", "dispatch")
-TASK_OPS = ("list", "get", "create", "update", "move", "next")
+TASK_OPS = ("list", "get", "create", "update", "move", "next", "issues", "import_issues")
 NEXT_KINDS = ("answer_question", "provide_input", "review", "retry", "assign", "wait")
 FOLDER_OPS = ("list", "add", "update", "remove")
 TEAM_MESSAGES = 5
@@ -382,12 +383,18 @@ async def tasks(
     client_operation_id: str = "",
     expected_entity_revision: int | None = None,
     expected_collection_revision: int | None = None,
+    repository: str = "",
+    label: str = "",
+    issues: list[int] | None = None,
 ) -> str:
     board = orch.board
     if board is None:
         raise Refused("the board is not available on this installation")
     if op not in TASK_OPS:
         raise Refused(f"op is one of {', '.join(TASK_OPS)}")
+    if op in ("issues", "import_issues"):
+        return await _issues(orch, project, session_id, op, repository, label, issues or [],
+                             client_operation_id, expected_collection_revision)
     names = {m.id: m.name for m in await orch.manager.staff.list(project.id, archived=True)}
     scope = Scope("project", project.id)
     commands = BoardCommands(orch.manager.db, bus=orch.manager.bus)
@@ -485,6 +492,71 @@ async def tasks(
         where = f" (queue position {launched.get('position')}: {launched.get('detail')})" if state == "queued" else ""
         return f"{line}\n{member.name if member else 'the assignee'}: {state}{where}"
     return line
+
+
+def _issue_line(entry: dict[str, Any]) -> str:
+    what = {"import": "would become a new card", "update": f"changed on GitHub; would update card {entry['task_id']}",
+            "linked": f"already card {entry['task_id']}", "conflict": f"changed on GitHub and on card {entry['task_id']}: the operator resolves it",
+            "too_large": "longer than a card's title or contract allows: the operator shortens it first",
+            "elsewhere": "linked to another project"}[entry["action"]]
+    return f"#{entry['number']} {entry['title']} ({what})"
+
+
+async def _issues(orch: Orchestrators, project: Project, session_id: str, op: str, repository: str, label: str,
+                  numbers: list[int], client_operation_id: str, expected_collection_revision: int | None) -> str:
+    """Preview a repository's open issues against the board, or import the named ones.
+
+    The import goes through the same listing and per-issue preview digests as the operator's sheet,
+    under the coordinator's own board grant: an issue becomes a card exactly as a card it created
+    would, and a coordinator without a planning grant is refused here as there."""
+    sync = orch.app.extensions.get("issue_sync")
+    if not isinstance(sync, IssueSync):
+        raise Refused("GitHub issue sync is not available on this installation")
+    repository = repository.strip() or repository_of(project.folders, orch.manager.projects.local_env) or ""
+    if not repository:
+        raise Refused("name the repository (owner/repo): the project's folders have no GitHub remote")
+    try:
+        listing = await sync.list_issues(project.id, repository, label.strip() or None)
+    except IssueSyncRefused as exc:
+        raise Refused(str(exc)) from exc
+    entries = listing["issues"]
+    if op == "issues":
+        head = (f"{repository}: {len(entries)} open issue(s)" + (f" labelled {label.strip()!r}" if label.strip() else "")
+                + f"; collection revision {listing['collection_revision']}")
+        more = f"\nonly the newest {listing['limit']} are shown; narrow with label" if len(entries) >= listing["limit"] else ""
+        return head + more + "\n" + ("\n".join(_issue_line(entry) for entry in entries) or "(none)")
+    if not numbers:
+        raise Refused("import_issues needs issues: the numbers to import, from Tasks(op='issues')")
+    if not client_operation_id or expected_collection_revision is None:
+        raise Refused("import_issues needs its trusted call id and expected_collection_revision from Tasks(op='issues')")
+    by_number = {entry["number"]: entry for entry in entries}
+    items, refused = [], []
+    for number in dict.fromkeys(numbers):
+        entry = by_number.get(number)
+        if entry is None:
+            refused.append(f"#{number}: not an open issue of {repository}" + (f" labelled {label.strip()!r}" if label.strip() else ""))
+        elif entry["action"] not in ("import", "update"):
+            refused.append(_issue_line(entry))
+        else:
+            items.append({"issue_number": number, "action": entry["action"], "preview_digest": entry["preview_digest"],
+                          "expected_entity_revision": entry["expected_entity_revision"]})
+    lines = []
+    if items:
+        principal = await board_principal(orch, session_id, project.id, "board.task.create")
+        try:
+            result = await sync.apply_selection(principal, project.id, repository, items,
+                                                expected_collection_revision=expected_collection_revision,
+                                                client_operation_id=client_operation_id)
+        except ControlDenied as exc:
+            raise Refused(str(exc)) from exc
+        lines += [f"#{done['issue_number']} {'imported as' if done['action'] == 'import' else 'updated'} card {done['task_id']}"
+                  for done in result["applied"]]
+        lines += [f"#{skip['issue_number']} not applied: {skip['reason']}" for skip in result["skipped"]]
+        lines.append(f"collection revision {result['collection_revision']}")
+        if result["applied"]:
+            await orch._changed(project.id, "board", "orchestrator")
+    lines += [f"not applied: {line}" for line in refused]
+    return "\n".join(lines)
 
 
 async def _next_action(orch: Orchestrators, project: Project, session_id: str, task_id: str,

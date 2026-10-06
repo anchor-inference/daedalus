@@ -23,7 +23,7 @@ def mutates(operation: str, arguments: dict[str, Any]) -> bool:
     if operation == "team":
         return arguments.get("concurrency") is not None
     if operation == "tasks":
-        return arguments.get("op", "list") not in ("list", "get")
+        return arguments.get("op", "list") not in ("list", "get", "issues")
     if operation == "review_result":
         return arguments.get("op") != "inspect"
     return True

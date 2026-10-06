@@ -81,7 +81,11 @@ export type ProjectTask = {
   accepted_result_cost_unknown_reasons?: Array<"subscription" | "unpriced" | "unobserved">;
   /** What the card must satisfy, each with who was given it; absent from an older host. */
   requirements?: Requirement[];
+  /** The GitHub issue the card was imported from. */
+  issue?: TaskIssue | null;
 };
+
+export type TaskIssue = { repository: string; number: number; state: "linked" | "conflict" | "paused"; url: string };
 
 /** "handed_in": the member said it is done and nobody checked yet; "accepted": the orchestrator checked
  *  every item; "operator_approved": the operator accepted or merged it; "returned": checked and sent
