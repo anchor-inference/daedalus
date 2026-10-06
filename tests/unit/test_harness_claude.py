@@ -822,7 +822,14 @@ async def test_a_next_task_brief_claude_collapsed_is_acknowledged_by_its_hook(se
         delivery = await HarnessStore(db).delivery(brief.id)
         assert delivery is not None and delivery.via == "paste" and delivery.enters == 1 and delivery.acknowledged_at
         assert len([e for e in log(s, "submitted") if "Your previous task is closed." in e["text"]]) == 1
-        # The Feed shows the brief as the orchestrator's turn, in its own words.
+        # The Feed shows the brief as the orchestrator's turn, in its own words. Waited for: the hook
+        # that acknowledged the brief fires before Claude writes the prompt into its transcript, as
+        # the real one does so that a hook can still refuse it, and a loaded machine was seen reading
+        # the transcript in between and finding no turn at all.
+        async def handed_in_transcript() -> bool:
+            return any("Your previous task is closed." in t.text for t in await s.runtime._turns(await s.team.live(first.id)))  # type: ignore[arg-type]
+
+        await eventually(handed_in_transcript, "the brief reached the transcript")
         turns = await s.runtime._turns(await s.team.live(first.id))  # type: ignore[arg-type]
         handed = [t for t in turns if "Your previous task is closed." in t.text]
         assert [t.role for t in handed] == ["orchestrator"] and handed[0].text.startswith("[orchestrator] Your previous task is closed.")
