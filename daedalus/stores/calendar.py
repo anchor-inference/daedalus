@@ -690,7 +690,12 @@ class CalendarStore:
             raise RuntimeError("the event changed elsewhere; reload it before deleting")
         await self._writable_calendar(master["calendar_id"])
         async with self.db.transaction() as conn:
-            if not master["account_id"] or master["dirty"] == "create":
+            # Only a local calendar's event is removed at once. One of a provider's is marked, even
+            # when it was never sent: its create may be in flight right now, and a row removed under
+            # it left the provider's new copy with nothing to record its id on — an orphan nobody
+            # would delete. Marked, the acknowledgement keeps the id and the next sync deletes it
+            # there (or, never sent, simply drops the row).
+            if not master["account_id"]:
                 cursor = await conn.execute("DELETE FROM calendar_events WHERE id=? AND version=? AND dirty!='delete'", (master["id"], master["version"]))
             else:
                 cursor = await conn.execute("UPDATE calendar_events SET dirty='delete',version=version+1,updated_at=? WHERE id=? AND version=? AND dirty!='delete'", (now(), master["id"], master["version"]))

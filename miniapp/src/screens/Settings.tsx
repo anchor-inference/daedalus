@@ -480,7 +480,7 @@ function SearchBlock({ s, save }: { s: Settings; save: (patch: any) => Promise<v
   const saveSearch = (patch: any) => save({ tools: { web: { search: patch } } });
   const info = (id: string) => backends.find((b) => b.id === id);
   const usable = (b: SearchBackendInfo) => !b.needs_key || b.available !== false;
-  const optionLabel = (b: SearchBackendInfo) => `${b.label}${b.needs_key ? (b.available === false ? t("settings.search.nokey") : b.available == null ? t("settings.search.noproxy") : "") : ""}`;
+  const optionLabel = (b: SearchBackendInfo) => `${b.label}${b.needs_key ? (b.available === false ? t("settings.search.nokey") : b.available == null ? t(b.proxy === "refused" ? "settings.search.proxyrefused" : "settings.search.noproxy") : "") : ""}`;
   const runCheck = async (backend: string) => {
     setChecking(true);
     setCheckError("");

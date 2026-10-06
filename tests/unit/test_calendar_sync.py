@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import traceback
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -494,3 +495,66 @@ async def test_resolving_waits_for_a_running_sync_so_its_cursor_reset_survives(d
     await resolving
     # The resolve's own sync read from scratch, without the token the first sync stored.
     assert "syncToken" not in queries[-1]
+
+
+
+@pytest.mark.asyncio
+async def test_a_failed_feed_raises_without_its_address(db, monkeypatch):
+    """The stored error was already scrubbed; what sync raises must be too, its chain included."""
+    store = CalendarStore(db)
+    feed = await store.subscribe("Team", "https://feeds.example.invalid/private/SECRET-TOKEN/basic.ics?key=SECRET-KEY")
+    _fake_network(monkeypatch, lambda request: httpx.Response(403))
+    with pytest.raises(calendar_sync.CalendarSyncFailed) as caught:
+        await CalendarSync(store).sync(feed["id"])
+    printed = "".join(traceback.format_exception(caught.value))
+    assert "SECRET" not in printed and "HTTP 403 from feeds.example.invalid" in printed, printed
+
+
+@pytest.mark.asyncio
+async def test_an_event_deleted_while_its_create_is_in_flight_is_deleted_at_the_provider(db, monkeypatch):
+    store = CalendarStore(db)
+    account = await store.connect("google", "Work", OAUTH)
+    await db.execute("UPDATE calendar_accounts SET cursor='t0' WHERE id=?", (account["id"],))
+    made = await store.create({"calendar_id": account["calendar_id"], "title": "Lunch", "start_at": "2026-10-07T12:00:00Z", "end_at": "2026-10-07T13:00:00Z"})
+    calls = []
+
+    async def reply(request):
+        if request.url.host == "oauth2.googleapis.com":
+            return httpx.Response(200, json={"access_token": "access"})
+        calls.append((request.method, request.url.path))
+        if request.method == "POST":
+            # The operator deletes the event while its create is on its way to the provider.
+            await store.delete(made["event_id"], made["version"])
+            return httpx.Response(200, json={"id": "g1", "etag": '"1"'})
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(200, json={"items": [], "nextSyncToken": "t1"})
+
+    _fake_network(monkeypatch, reply)
+    sync = CalendarSync(store)
+    await sync.sync(account["id"])
+    await sync.sync(account["id"])
+    assert ("DELETE", "/calendar/v3/calendars/primary/events/g1") in calls, calls
+    assert await db.fetchall("SELECT id FROM calendar_events") == []
+
+
+@pytest.mark.asyncio
+async def test_an_event_never_sent_and_deleted_is_dropped_without_a_request(db, monkeypatch):
+    store = CalendarStore(db)
+    account = await store.connect("google", "Work", OAUTH)
+    await db.execute("UPDATE calendar_accounts SET cursor='t0' WHERE id=?", (account["id"],))
+    made = await store.create({"calendar_id": account["calendar_id"], "title": "Draft", "start_at": "2026-10-07T12:00:00Z", "end_at": "2026-10-07T13:00:00Z"})
+    await store.delete(made["event_id"], made["version"])
+    assert await store.occurrences("2026-10-07T00:00:00Z", "2026-10-08T00:00:00Z") == []
+    calls = []
+
+    async def reply(request):
+        if request.url.host == "oauth2.googleapis.com":
+            return httpx.Response(200, json={"access_token": "access"})
+        calls.append(request.method)
+        return httpx.Response(200, json={"items": [], "nextSyncToken": "t1"})
+
+    _fake_network(monkeypatch, reply)
+    await CalendarSync(store).sync(account["id"])
+    assert "POST" not in calls and "DELETE" not in calls, calls
+    assert await db.fetchall("SELECT id FROM calendar_events") == []

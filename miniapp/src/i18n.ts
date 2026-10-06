@@ -2448,6 +2448,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "settings.search.backend": { en: "Backend", ru: "Движок" },
   "settings.search.nokey": { en: " — no key in the key proxy", ru: " — в прокси ключей нет ключа" },
   "settings.search.noproxy": { en: " — key proxy not reachable", ru: " — прокси ключей недоступен" },
+  "settings.search.proxyrefused": { en: " — the key proxy does not recognise this installation", ru: " — прокси ключей не узнаёт эту установку" },
   "settings.search.fallbacks": { en: "Fallbacks", ru: "Запасные движки" },
   "settings.search.fallbacks.none": { en: "none", ru: "нет" },
   "settings.search.fallbacks.sub": { en: "Tried in the order you pick them when the backend fails or returns nothing.", ru: "Пробуются в том порядке, в каком выбраны, когда основной молчит или падает." },
