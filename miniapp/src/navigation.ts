@@ -33,10 +33,16 @@ export function moveIndex(index: number, key: string, count: number): number | n
 
 export type Shortcut = "menu" | "sidebar" | null;
 
+/** The Latin letter a key press stands for, whatever the layout. Comparing `key` alone left every
+ * letter shortcut dead on a Russian layout, where Ctrl+K arrives as "л"; `code` names the key. */
+export function latinKey(e: { key: string; code?: string }): string {
+  return e.code && /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : e.key.toLowerCase();
+}
+
 /** Ctrl/⌘ ⇧ M opens the menu, Ctrl/⌘ \ folds the sidebar. Anywhere, a text field included: both carry a modifier. */
-export function shortcutFor(e: { key: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): Shortcut {
+export function shortcutFor(e: { key: string; code?: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): Shortcut {
   if (!(e.metaKey || e.ctrlKey) || e.altKey) return null;
-  if (e.shiftKey && e.key.toLowerCase() === "m") return "menu";
+  if (e.shiftKey && latinKey(e) === "m") return "menu";
   if (!e.shiftKey && e.key === "\\") return "sidebar";
   return null;
 }

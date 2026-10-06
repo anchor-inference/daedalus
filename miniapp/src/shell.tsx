@@ -11,6 +11,7 @@ import { plural, t } from "./i18n";
 import { LangPicker } from "./ui/components";
 import { insideTerminal } from "./terminal/keys";
 import { modeHome } from "./mode";
+import { latinKey } from "./navigation";
 
 export type Counts = { inbox?: number; changes?: number; services?: number; agents?: number };
 
@@ -204,19 +205,20 @@ export function useShortcuts(onPalette: () => void, selfdev: SelfDevMode) {
       if (insideTerminal(e.target)) return;
       const t = e.target as HTMLElement | null;
       const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if ((e.metaKey || e.ctrlKey) && latinKey(e) === "k") {
         e.preventDefault();
         onPalette();
         return;
       }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "g") {
+      const letter = latinKey(e);
+      if (letter === "g") {
         pendingG = Date.now();
         return;
       }
-      if (pendingG && Date.now() - pendingG < 1200 && GO_KEYS[e.key] && visibleScreens([GO_KEYS[e.key]], selfdev).length) {
+      if (pendingG && Date.now() - pendingG < 1200 && GO_KEYS[letter] && visibleScreens([GO_KEYS[letter]], selfdev).length) {
         e.preventDefault();
-        navigate(pathFor(GO_KEYS[e.key]));
+        navigate(pathFor(GO_KEYS[letter]));
       }
       pendingG = 0;
     };

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Excalidraw, exportToBlob, exportToSvg } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
+import { latinKey } from "../navigation";
 import { api } from "../api";
 import { Icon } from "../icons";
 import { t } from "../i18n";
@@ -159,7 +160,7 @@ function Editor({ diagram, toast, returnPath, items, sessionId, onCreate, refres
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); if (timerRef.current) clearTimeout(timerRef.current); void flush(); }
+      if ((event.ctrlKey || event.metaKey) && latinKey(event) === "s") { event.preventDefault(); if (timerRef.current) clearTimeout(timerRef.current); void flush(); }
     };
     const onLeave = (event: BeforeUnloadEvent) => { if (pendingRef.current) event.preventDefault(); };
     window.addEventListener("keydown", onKey);

@@ -2,7 +2,7 @@
 // which key combinations are the shell's.
 
 import { describe, expect, it } from "vitest";
-import { GROUPS, menuSections, moveIndex, shortcutFor } from "./navigation";
+import { GROUPS, latinKey, menuSections, moveIndex, shortcutFor } from "./navigation";
 
 describe("the sections", () => {
   it("list every destination once, in the rail's old order, with the terminals after the board and the command-line agents after them", () => {
@@ -50,6 +50,13 @@ describe("the shortcuts", () => {
     expect(shortcutFor(key("m", { ctrl: true, shift: true }))).toBe("menu");
     expect(shortcutFor(key("m", { meta: true }))).toBeNull();
     expect(shortcutFor(key("m", { shift: true }))).toBeNull();
+  });
+
+  it("read the key, not the letter, so a Russian layout keeps them", () => {
+    expect(shortcutFor({ ...key("Ь", { ctrl: true, shift: true }), code: "KeyM" })).toBe("menu");
+    expect(latinKey({ key: "л", code: "KeyK" })).toBe("k");
+    expect(latinKey({ key: "ы", code: "KeyS" })).toBe("s");
+    expect(latinKey({ key: "\\", code: "Backslash" })).toBe("\\");
   });
 
   it("fold the sidebar on Ctrl or ⌘ with backslash", () => {
