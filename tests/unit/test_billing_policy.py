@@ -91,6 +91,37 @@ def errors(events: list[TurnEvent]) -> list[str]:
     return [str(event.payload.get("message")) for event in events if event.type is EventType.ERROR]
 
 
+async def test_capped_runs_answer_on_subscription_free_and_after_unpriced_usage(
+        settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager, sent = await started(settings, db, monkeypatch)
+    try:
+        state = await manager.create_session("subscription")
+        outcome, events = await run(manager, state.session.id, "first")
+        assert outcome == "completed", errors(events)
+        assert (await db.fetchone("SELECT count(*) FROM usage_events WHERE cost_usd IS NULL"))[0] == 1
+
+        # A day that already holds spend of unknown price used to refuse every later call.
+        outcome, events = await run(manager, state.session.id, "second")
+        assert outcome == "completed", errors(events)
+
+        free = await manager.create_session("free")
+        await manager.set_model(free.session.id, preset="opencode.space-bunny-free")
+        outcome, events = await run(manager, free.session.id, "third")
+        assert outcome == "completed", errors(events)
+
+        assert (await db.fetchone("SELECT count(*) FROM inference_reservations"))[0] == 0
+
+        # A priced model still reserves under the day's cap, beside the unpriced rows already in it.
+        priced = await manager.create_session("priced")
+        await manager.set_model(priced.session.id, preset="deepseek.flash")
+        outcome, events = await run(manager, priced.session.id, "fourth")
+        assert outcome == "completed", errors(events)
+        assert len(sent) == 4
+        assert (await db.fetchone("SELECT state FROM inference_reservations"))[0] == "settled"
+    finally:
+        await manager.close()
+
+
 async def test_a_priced_model_over_the_measured_daily_cap_is_refused_and_says_why(
         settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     manager, sent = await started(settings, db, monkeypatch)
