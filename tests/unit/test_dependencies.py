@@ -216,7 +216,7 @@ class Provider:
 
 def planner_for(tmp_path: Path, provider: Any) -> DependencyPlanner:
     preset = SimpleNamespace(provider="test", display=lambda key: key)
-    manager = SimpleNamespace(resolve_model=lambda overrides: ([(provider, "test")], preset), budget_exceeded=lambda: None, provider_costs_nothing=lambda key: True, dependency_installation_busy=lambda: False)
+    manager = SimpleNamespace(resolve_model=lambda overrides: ([(provider, "test")], preset), budget_exceeded=lambda: None, provider_costs_nothing=lambda *_: True, dependency_installation_busy=lambda: False)
     return DependencyPlanner(SimpleNamespace(db=MemoryDB(), settings=SimpleNamespace(state_dir=tmp_path), config=SimpleNamespace(presets={"test": preset}), manager=manager))
 
 

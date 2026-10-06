@@ -41,7 +41,7 @@ class Provider:
 def planner(provider: Any) -> PromptChangePlanner:
     preset = ModelPresetConfig(provider="test", model="model", max_output_tokens=16_000)
     config = RuntimeConfig(presets={"test": preset}, model={"preset": "test"})
-    manager = SimpleNamespace(resolve_model=lambda _: ([(provider, "model")], preset), budget_exceeded=lambda: False, provider_costs_nothing=lambda _: True)
+    manager = SimpleNamespace(resolve_model=lambda _: ([(provider, "model")], preset), budget_exceeded=lambda: False, provider_costs_nothing=lambda *_: True)
     app = SimpleNamespace(config=config, manager=manager, db=MemoryDB())
 
     async def save_config(value: RuntimeConfig) -> None:

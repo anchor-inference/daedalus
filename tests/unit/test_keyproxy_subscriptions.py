@@ -408,3 +408,14 @@ def test_key_status_lists_anthropic_and_a_keyless_local_endpoint(monkeypatch: py
     assert status["local"] == {"configured": True, "kind": proxy.ENDPOINT}
     monkeypatch.setenv("KEYPROXY_KEY_LOCAL", "k")
     assert proxy.key_status()["local"]["kind"] == proxy.API_KEY
+
+
+@pytest.mark.parametrize("body,free", [
+    (b'{"model": "vendor/model:free"}', True),
+    (b'{"model": "space-bunny-free"}', True),
+    (b'{"model": "deepseek-flash"}', False),
+    (b'not json', False),
+    (b'[]', False),
+])
+def test_a_free_model_passes_the_daily_flag(body: bytes, free: bool) -> None:
+    assert proxy.free_model_request(body) is free

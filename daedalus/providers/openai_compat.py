@@ -259,6 +259,21 @@ class ProviderEndpoint:
         best = max((key for key in self.pricing if model.startswith(key)), key=len, default=None)
         return self.pricing[best] if best is not None else None
 
+    def measures_spend(self, model: str) -> bool:
+        """Whether a dollar cap can count what a call to this model costs.
+
+        Not for the operator's own hardware, a model published at a zero price or under a free
+        name, or one with no price at all: a subscription login (Grok, Codex, Claude) or a
+        self-hosted server. OpenRouter is the exception to the last, since it reports each call's
+        cost itself.
+        """
+        if self.kind == "llamacpp" or model.endswith((":free", "-free")):
+            return False
+        price = self.pricing_for(model)
+        if price is not None and price.input is not None and price.output is not None:
+            return bool(price.input or price.output or price.cache_hit)
+        return self.kind == "openrouter"
+
 
 @dataclass(slots=True)
 class UsageRecord:

@@ -893,14 +893,21 @@ class SessionManager:
             return self.budget_flag.read_text(encoding="utf-8").strip()
         return None
 
-    def provider_costs_nothing(self, provider_id: str | None) -> bool:
-        """Whether dollar caps are irrelevant to this endpoint by definition."""
+    def provider_costs_nothing(self, provider_id: str | None, model: str | None = None) -> bool:
+        """Whether no dollar cap can count a call to this endpoint (and model, when given).
+
+        A cap limits spend it can measure. A local model, a free one, and a subscription or
+        self-hosted model with no price add nothing any cap counts, so a closed cap must not stop
+        them: refusing every non-local call once the day's priced spend passed its cap stopped
+        chats on the operator's subscription logins too.
+        """
         if not provider_id:
             return False
         try:
-            return self.providers.get(provider_id).endpoint.kind == "llamacpp"
+            endpoint = self.providers.get(provider_id).endpoint
         except KeyError:
             return False
+        return endpoint.kind == "llamacpp" or (model is not None and not endpoint.measures_spend(model))
 
     def add_sink(self, sink: EventSink) -> None:
         self._sinks.append(sink)
@@ -1781,8 +1788,8 @@ class SessionManager:
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)  # no straggler may write the old history later
         exceeded = self.budget_exceeded()
-        compact_provider, _compact_model = await self._compaction_rung(state)
-        if exceeded and not self.provider_costs_nothing(compact_provider.endpoint.id):
+        compact_provider, compact_model = await self._compaction_rung(state)
+        if exceeded and not self.provider_costs_nothing(compact_provider.endpoint.id, compact_model):
             raise RuntimeError(f"daily budget exceeded ({exceeded}); compaction is a paid call")
         full = list(state.engine.history) if state.engine is not None else list(
             await self.sessions.list_messages(session_id, TENANT, limit=10_000)
@@ -2101,10 +2108,11 @@ class SessionManager:
                     raise RuntimeError("the working directory is not writable")
                 rungs, _ = self.resolve_model(await self.live.load(session_id))
                 provider_id = rungs[0][0].endpoint.id if rungs else None
+                model = rungs[0][1] if rungs else None
                 exceeded = self.budget_exceeded()
-                if exceeded and not self.provider_costs_nothing(provider_id):
+                if exceeded and not self.provider_costs_nothing(provider_id, model):
                     raise RuntimeError(f"daily budget exceeded ({exceeded})")
-                breach = await self.cap_breach(state, provider_id)
+                breach = await self.cap_breach(state, provider_id, model)
                 if breach is not None:
                     raise RuntimeError(breach[1])
             history = list(state.engine.history) if state.engine is not None else list(await self.sessions.list_messages(session_id, TENANT, limit=10_000))
@@ -2794,20 +2802,22 @@ class SessionManager:
                 )
                 return state.run_id or ""
             provider_id: str | None = None
+            cap_model: str | None = None
             if not state.running:
                 if _provider_resume is not None:
-                    provider_id = _provider_resume[1]
+                    provider_id, cap_model = _provider_resume[1], _provider_resume[2]
                     self.providers.get(provider_id)
                 else:
                     try:
                         rungs, _ = self.resolve_model(await self.live.load(session_id))
                         provider_id = rungs[0][0].endpoint.id if rungs else None
+                        cap_model = rungs[0][1] if rungs else None
                     except Exception:  # noqa: BLE001 — a model problem surfaces when the run starts, not here
                         provider_id = None
                 exceeded = self.budget_exceeded()
-                if exceeded and not self.provider_costs_nothing(provider_id):
+                if exceeded and not self.provider_costs_nothing(provider_id, cap_model):
                     raise RuntimeError(f"daily budget exceeded ({exceeded}); runs resume tomorrow or after /budget reset")
-                breach = await self.cap_breach(state, provider_id)
+                breach = await self.cap_breach(state, provider_id, cap_model)
                 if breach is not None:
                     raise RuntimeError(breach[1])
             if state.running and state.engine is not None and state.engine.is_terminal and state.task is not None:
@@ -3289,18 +3299,20 @@ class SessionManager:
 
     async def _assemble_engine(self, state: SessionState, run_id: str, overrides: dict[str, Any], rungs: list[Any], preset: Any) -> QueryEngine:
         await self._load_capability_ancestors(state)
-        if rungs and self.provider_costs_nothing(rungs[0][0].endpoint.id):
-            # A local primary remains usable after a hosted-provider budget is exhausted. Paid
-            # fallbacks do not inherit that exemption: when any applicable dollar guard is already
-            # closed, keep only local rungs so a failed server cannot turn a free run into a charge.
+        if rungs and self.provider_costs_nothing(rungs[0][0].endpoint.id, rungs[0][1]):
+            # A local, free or subscription primary remains usable after a priced budget is
+            # exhausted. Paid fallbacks do not inherit that exemption: when any applicable dollar
+            # guard is already closed, keep only uncounted rungs so a failed server cannot turn a
+            # free run into a charge.
             paid_blocked = self.budget_exceeded() is not None
             if not paid_blocked:
-                for provider, _model in rungs[1:]:
-                    if not self.provider_costs_nothing(provider.endpoint.id) and await self.cap_breach(state, provider.endpoint.id) is not None:
+                for provider, fallback in rungs[1:]:
+                    if (not self.provider_costs_nothing(provider.endpoint.id, fallback)
+                            and await self.cap_breach(state, provider.endpoint.id, fallback) is not None):
                         paid_blocked = True
                         break
             if paid_blocked:
-                rungs = [(provider, model) for provider, model in rungs if self.provider_costs_nothing(provider.endpoint.id)]
+                rungs = [(provider, model) for provider, model in rungs if self.provider_costs_nothing(provider.endpoint.id, model)]
         deps = EngineDeps(
             tool_registry=self.registry_for(state),
             event_stream=self.events,
@@ -5341,16 +5353,18 @@ class SessionManager:
         await self.sessions.update_metadata(session_id, state.session.metadata)
         return cap
 
-    async def cap_breach(self, state: SessionState, provider_id: str | None) -> tuple[str, str] | None:
+    async def cap_breach(self, state: SessionState, provider_id: str | None,
+                         model: str | None = None) -> tuple[str, str] | None:
         """``(kind, note)`` when the session, its provider or everything together has spent its cap.
 
         Three caps stack above the per-run one: the session's own (session settings), the
         provider's total across every session (``limits.usd_total_per_provider``) and the grand
         total (``limits.usd_total``); the last two count from ``limits.total_since``.
         """
-        if self.provider_costs_nothing(provider_id):
-            # Dollar caps prevent another charge. A llama.cpp call is recorded at exactly zero, so
-            # refusing it would turn a hosted-provider balance into an unrelated local outage.
+        if self.provider_costs_nothing(provider_id, model):
+            # Dollar caps prevent another charge. A llama.cpp call is recorded at exactly zero and a
+            # subscription or free call adds nothing a cap counts, so refusing either would turn a
+            # priced provider's balance into an unrelated outage.
             return None
         limits = self.config.limits
         since = limits.total_since or None
@@ -5398,8 +5412,8 @@ class SessionManager:
             if unmetered:
                 note += f" {unmetered} call(s) had no known price and are not counted."
         else:
-            last = await self.db.fetchone("SELECT provider_id FROM usage_events WHERE run_id = ? ORDER BY seq DESC LIMIT 1", (run_id,))
-            breach = await self.cap_breach(state, last["provider_id"] if last else None)
+            last = await self.db.fetchone("SELECT provider_id,model FROM usage_events WHERE run_id = ? ORDER BY seq DESC LIMIT 1", (run_id,))
+            breach = await self.cap_breach(state, last["provider_id"] if last else None, last["model"] if last else None)
             if breach is not None:
                 kind, note = breach[0], f"💸 {breach[1]}; stopping this run."
         if note is None:
@@ -5549,7 +5563,7 @@ class SessionManager:
                     state = await self.get_state(session_id)
                     try:
                         rungs, _preset = self.resolve_model(await self.live.load(session_id))
-                        free = bool(rungs and self.provider_costs_nothing(rungs[0][0].endpoint.id))
+                        free = bool(rungs and self.provider_costs_nothing(rungs[0][0].endpoint.id, rungs[0][1]))
                     except Exception:  # noqa: BLE001 — the normal resume path records the unusable model
                         free = False
                     if state is not None and not free:
