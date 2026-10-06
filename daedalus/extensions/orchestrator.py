@@ -43,7 +43,7 @@ from daedalus.extensions.watches import describe as describe_watch
 from daedalus.harness.capabilities import MODE_MEANINGS
 from daedalus.host import prompts
 from daedalus.host.events import AppEvent, EventFilter
-from daedalus.host.inference_admission import HostInferenceAdmission, model_quote
+from daedalus.host.inference_admission import HostInferenceAdmission, model_quote, quotable
 from daedalus.host.peek import BridgedFolderAccess, FolderAccess, LocalFolderAccess, UnreachableFolder
 from daedalus.host.session_runner import HOME_KEY, WorkspaceUnreachable, home_of
 from daedalus.host.wake_queue import Batch, TargetState, Wake, WakeQueue
@@ -500,6 +500,11 @@ class Orchestrators:
         if not rungs:
             raise ProjectError(f"coordinator model {selected!r} is unavailable; choose another model")
         adapter, effective_model = rungs[0]
+        if not quotable(adapter.endpoint, effective_model):
+            # An unpriced model (a subscription login, a free or self-hosted one) runs under every
+            # cap without a reservation; refusing it here kept such a coordinator from being
+            # enabled at all while any spending limit was set.
+            return
         admission = HostInferenceAdmission(self.manager)
         limits = admission.prelaunch_constraints((adapter.endpoint.id,))
         async with self.manager.db.transaction() as conn:
@@ -514,8 +519,7 @@ class Orchestrators:
             # Enable used to publish a working office that its very first capped call refused.
             raise ProjectError(
                 f"coordinator model {selected!r} cannot run with spending limits: {exc}. "
-                "Choose a model with known prices and a documented provider input ceiling, "
-                "or configure those verified values in Settings → Models."
+                "Correct its price entry or output limit in Settings → Models & providers, or choose another model."
             ) from exc
 
     def needs_home(self, project: Project) -> bool:

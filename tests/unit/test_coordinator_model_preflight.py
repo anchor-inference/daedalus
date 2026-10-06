@@ -1,4 +1,4 @@
-"""A coordinator must reject an unquotable model before changing its office or chat."""
+"""A capped coordinator runs on an unpriced model and refuses only a rate card it cannot quote."""
 
 from pathlib import Path
 
@@ -15,29 +15,52 @@ from tests.support.models import DEFAULT_PRESET
 from tests.unit.test_orchestrator import rig
 from tests.unit.test_staff_runtime import close_team
 
+INVALID = ModelPricing(input=-1, output=2, input_limit=100, limit_source="provider docs")
+"""A priced rate card that cannot be quoted: the one thing a capped coordinator still refuses."""
+
 
 @pytest.mark.parametrize("price", [None, ModelPricing(input=1, output=2),
                                   ModelPricing(input=1, output=2, input_limit=100),
                                   ModelPricing(input=None, output=2, input_limit=100, limit_source="provider docs")])
-async def test_enable_refuses_missing_quote_before_creating_office(settings: Settings, db: Database,
-                                                                  tmp_path: Path, price: ModelPricing | None) -> None:
+async def test_capped_coordinator_enables_on_an_unpriced_subscription_model(settings: Settings, db: Database,
+                                                                           tmp_path: Path, price: ModelPricing | None) -> None:
+    # Subscription logins publish no per-token price. Refusing them under any cap kept every such
+    # coordinator from being enabled; it runs unreserved and its spend shows as unknown.
     r = await rig(settings, db, tmp_path)
     try:
+        r.manager.config.limits.usd_per_run = 5.0
+        r.manager.settings.usd_per_day = 3.0
         r.manager.config.presets["subscription"] = ModelPresetConfig(provider="proxy", model="claude")
         r.manager.config.orchestrator.preset = "subscription"
-        r.provider.endpoint = ProviderEndpoint(id="proxy", kind="openai", base_url="http://127.0.0.1:1",
+        r.provider.endpoint = ProviderEndpoint(id="proxy", kind="openai_compat", base_url="http://127.0.0.1:1",
                                               pricing={} if price is None else {"scripted-model": price})
+        project = await r.orch.enable(r.project.id)
+        assert project.settings.orchestrator.enabled and project.settings.orchestrator.session_id
+        assert r.provider.requests == []
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
+async def test_enable_refuses_an_invalid_rate_card_before_creating_office(settings: Settings, db: Database,
+                                                                          tmp_path: Path) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        r.manager.config.presets["broken"] = ModelPresetConfig(provider="proxy", model="claude")
+        r.manager.config.orchestrator.preset = "broken"
+        r.provider.endpoint = ProviderEndpoint(id="proxy", kind="openai", base_url="http://127.0.0.1:1",
+                                              pricing={"scripted-model": INVALID})
         r.team.app.bus = r.manager.bus
         api = build_app(r.team.app, "tok")
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
             preview = await client.post(f"/api/projects/{r.project.id}/orchestrator/preflight",
                                         json={"model": "", "concurrency_cap": 10}, headers={"X-Daedalus-Token": "tok"})
             assert preview.status_code == 400
-            assert "documented provider input ceiling" in preview.json()["detail"]
+            assert "invalid price" in preview.json()["detail"]
         assert not (await r.refreshed()).settings.orchestrator.enabled
-        with pytest.raises(ProjectError, match="coordinator model 'subscription'.*spending limits") as refused:
+        with pytest.raises(ProjectError, match="coordinator model 'broken'.*spending limits") as refused:
             await r.orch.enable(r.project.id)
-        assert "Choose a model with known prices" in str(refused.value)
+        assert "Correct its price entry" in str(refused.value)
         project = await r.refreshed()
         assert not project.settings.orchestrator.enabled
         assert project.settings.orchestrator.session_id == ""
@@ -75,11 +98,12 @@ async def test_deepseek_enable_and_refused_model_change_preserve_chat(settings: 
             assert rejected_controls.status_code == 400
             assert (await r.refreshed()).settings.orchestrator.model == enabled.settings.orchestrator.model
             assert await r.manager.live.load(sid) == before
-            r.provider.endpoint = ProviderEndpoint(id="proxy", kind="openai", base_url="http://127.0.0.1:1")
+            r.provider.endpoint = ProviderEndpoint(id="proxy", kind="openai", base_url="http://127.0.0.1:1",
+                                                  pricing={"deepseek-flash": INVALID})
             patched = await client.patch(f"/api/projects/{r.project.id}/orchestrator",
                                          json={"model": "subscription"}, headers=headers)
             assert patched.status_code == 400
-            assert "documented provider input ceiling" in patched.json()["detail"]
+            assert "invalid price" in patched.json()["detail"]
             chip = await client.post(f"/api/sessions/{sid}/model", json={"preset": "subscription"}, headers=headers)
             assert chip.status_code == 400
         await r.orch.update(r.project.id, concurrency_cap=8)

@@ -15,7 +15,7 @@ from check_project_focus import GARDEN, WORDS, serve  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
-REFUSAL = "coordinator model 'subscription' cannot run with spending limits: this model needs known prices and a documented provider input ceiling. Choose another model."
+REFUSAL = "coordinator model 'subscription' cannot run with spending limits: the rate card has an unknown or invalid price. Correct its price entry or output limit in Settings → Models & providers, or choose another model."
 
 
 def main() -> int:
