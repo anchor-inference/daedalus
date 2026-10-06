@@ -174,6 +174,24 @@ class BranchComparison:
         return sum(f.removed or 0 for f in self.files)
 
 
+@dataclass(frozen=True, slots=True)
+class WorktreeEntry:
+    """One staff worktree of a folder as git and the disk describe it, for the operator's list."""
+
+    path: Path
+    branch: str
+    """Empty when the worktree's HEAD is detached."""
+    changes: int
+    """Entries of ``git status --porcelain``: modified, staged and untracked files together."""
+    last_commit_at: str
+    merged: bool
+    """The branch is entirely in the folder's current branch, so deleting it loses nothing."""
+    size_bytes: int | None
+    """``None`` when it could not be measured: a folder of the other environment, or a slow disk."""
+    prunable: bool
+    """Git still lists it but its directory is gone; removing it only prunes the record."""
+
+
 _CYRILLIC = dict(zip(
     "абвгдеёжзийклмнопрстуфхцчшщъыьэюяіїєґ",
     ["a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r", "s", "t", "u", "f", "kh", "ts", "ch", "sh", "shch", "", "y", "", "e", "yu", "ya", "i", "yi", "ye", "g"],
@@ -382,6 +400,34 @@ async def _run_local(argv: list[str], *, cwd: Path, timeout: float) -> SetupResu
         return SetupResult(False, None, mask_credentials(kept.decode("utf-8", "replace")[-SETUP_TAIL_CHARS:]))
     tail = mask_credentials(kept.decode("utf-8", "replace")[-SETUP_TAIL_CHARS:])
     return SetupResult(proc.returncode == 0, proc.returncode, tail)
+
+
+SIZE_TIMEOUT = 20.0
+"""How long ``du`` may take over one worktree. A worktree with an installed ``node_modules`` can hold
+hundreds of thousands of files; past this the list shows no size rather than holding the page."""
+
+
+async def _disk_usage(path: Path) -> int | None:
+    """The bytes ``path`` takes on disk, by ``du -sk`` (portable, and counts a hard link once)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "du", "-sk", "--", str(path), stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, start_new_session=True,
+        )
+    except OSError:
+        return None
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=SIZE_TIMEOUT)
+    except TimeoutError:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        await proc.wait()
+        return None
+    # du exits 1 when one file in the tree was unreadable, and still prints the total it could count.
+    first = out.decode("utf-8", "replace").split("\t", 1)[0].strip()
+    return int(first) * 1024 if first.isdigit() else None
 
 
 def _text(value: Any) -> str:
@@ -788,3 +834,55 @@ class StaffWorktrees:
                 raise
             await git.run(["branch", "-d", worktree.branch], cwd=folder)
             return True
+
+    async def inventory(self, folder: ProjectFolder) -> list[WorktreeEntry]:
+        """The staff worktrees git has registered under ``<folder>/.agents/worktrees``, read only.
+
+        Asked of git rather than read from the directory, so a worktree whose directory was deleted
+        by hand still shows (as prunable) and a stray directory git never made does not. A folder
+        that is not a git repository has none and answers an empty list.
+        """
+        git = self._git(folder.env)
+        try:
+            registered = await self._registered(git, folder.path)
+        except GitError:
+            return []
+        root = git.same_path(str(folder.path / WORKTREES_DIR))
+        found: list[WorktreeEntry] = []
+        for where, fields in sorted(registered.items()):
+            if not where.startswith(root + "/"):
+                continue
+            path = Path(fields["worktree"])
+            branch = fields.get("branch", "").removeprefix("refs/heads/")
+            if "prunable" in fields:
+                found.append(WorktreeEntry(path, branch, 0, "", False, None, True))
+                continue
+            changes = len([line for line in (await git.run(["status", "--porcelain"], cwd=path)).splitlines() if line.strip()])
+            try:
+                last = (await git.run(["log", "-1", "--format=%cI", "HEAD"], cwd=path)).strip()
+            except GitError:
+                last = ""
+            merged = bool(branch) and await self.merged(folder, branch)
+            # A folder of the other environment is measured there or not at all: this process's
+            # disk at that path is a different directory, and the bridge runs git, not du.
+            size = await _disk_usage(path) if folder.env == self.local_env else None
+            found.append(WorktreeEntry(path, branch, changes, last, merged, size, False))
+        return found
+
+    async def remove_listed(self, folder: ProjectFolder, path: Path, *, delete_branch: bool) -> bool:
+        """Remove one worktree of :meth:`inventory` and, with ``delete_branch``, its branch once merged.
+
+        The path must be one git lists under the folder's worktree directory, so a request naming any
+        other directory, the folder itself among them, is refused before git is asked to remove
+        anything. Whether the branch was deleted is returned; an unmerged one is always kept.
+        """
+        if folder.readonly:
+            raise WorktreeRefused(f"{folder.path} is read-only, so nothing in it is removed from here")
+        git = self._git(folder.env)
+        entry = next((e for e in await self.inventory(folder) if git.same_path(str(e.path)) == git.same_path(str(path))), None)
+        if entry is None:
+            raise WorktreeRefused(f"{path} is not a staff worktree of {folder.path}")
+        if entry.changes:
+            raise WorktreeRefused(f"the worktree {path} has uncommitted changes; commit them before it is removed")
+        worktree = Worktree(path=entry.path, branch=entry.branch, base_ref="HEAD", folder=folder.path, env=folder.env)
+        return await self.remove(worktree, delete_branch_if_merged=delete_branch and bool(entry.branch))

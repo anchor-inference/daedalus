@@ -128,11 +128,13 @@ export function int(value: number | null | undefined): string {
   return num(value ?? 0);
 }
 
-/** Bytes as people read them: 950 B, 12 KB, 1.4 MB. */
+/** Bytes as people read them: 950 B, 12 KB, 1.4 MB, 2.3 GB. The gigabytes are for a worker's
+ *  worktree with its dependencies installed, which "2350.4 MB" made hard to compare at a glance. */
 export function bytes(n: number): string {
   if (n < 1024) return t("fmt.bytes.b", { n });
   if (n < 1024 * 1024) return t("fmt.bytes.kb", { n: Math.round(n / 1024) });
-  return t("fmt.bytes.mb", { n: (n / (1024 * 1024)).toFixed(1) });
+  if (n < 1024 * 1024 * 1024) return t("fmt.bytes.mb", { n: (n / (1024 * 1024)).toFixed(1) });
+  return t("fmt.bytes.gb", { n: (n / (1024 * 1024 * 1024)).toFixed(1) });
 }
 
 /**

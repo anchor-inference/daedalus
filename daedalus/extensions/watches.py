@@ -486,6 +486,13 @@ class Watches:
             if current is None or not current.enabled or self.cooling(current) > 0:
                 return False
             watch = current
+            # An archived project keeps its watches as they are, switched on, and they simply do not
+            # fire: restoring the project needs nothing switched back, and a watch the operator had
+            # switched off stays off. A git watch that saw a commit meanwhile still records the new
+            # heads, so the commit is not reported late on restore.
+            project = await self.manager.projects.get(watch.project_id)
+            if project is None or project.settings.archived:
+                return False
             now = self.clock()
             if watch.deadline_at and (_parse(watch.deadline_at) or now) <= now:
                 await self._stop(watch, "expired", "its deadline has passed")

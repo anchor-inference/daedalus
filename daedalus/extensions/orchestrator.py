@@ -1032,7 +1032,9 @@ class Orchestrators:
         display class "agent", binds a board event to this office's session.
         """
         project = await self.manager.projects.get(project_id)
-        if project is None or not project.settings.orchestrator.enabled:
+        # An archived project's events pass its coordinator by rather than wait for it: the queue
+        # moves its cursor on, so restoring the project does not deliver weeks of news in one turn.
+        if project is None or not project.settings.orchestrator.enabled or project.settings.archived:
             return None
         mine = project.settings.orchestrator.session_id
         p = event.payload

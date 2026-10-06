@@ -159,6 +159,10 @@ class ProjectSettings:
     """One shell command line run in a staff member's worktree when it is first made, before the
     worker starts (``uv sync --frozen && npm ci``): a fresh worktree has none of the dependencies the
     folder itself has installed. Empty runs nothing."""
+    archived: bool = False
+    """Put away by the operator rather than deleted: left out of the project lists, and nothing
+    wakes its coordinator (no event, schedule or watch) until it is restored. Every row it owns is
+    kept, so restoring is switching this off and nothing else."""
     orchestrator: OrchestratorSettings = field(default_factory=OrchestratorSettings)
 
     @classmethod
@@ -171,6 +175,7 @@ class ProjectSettings:
             ephemeral=bool(data.get("ephemeral", False)),
             default_env=env if env in ENVIRONMENTS else default_env,
             setup_command=str(data.get("setup_command") or "").strip(),
+            archived=bool(data.get("archived", False)),
             orchestrator=OrchestratorSettings.load(data.get("orchestrator")),
         )
 
@@ -181,6 +186,7 @@ class ProjectSettings:
             "ephemeral": self.ephemeral,
             "default_env": self.default_env,
             "setup_command": self.setup_command,
+            "archived": self.archived,
             "orchestrator": self.orchestrator.dump(),
         }
 

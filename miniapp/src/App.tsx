@@ -247,11 +247,14 @@ export function App() {
       }).catch(() => { /* Stay on the mode home when the project cannot be verified. */ });
   }, [projects.data, wide, showToast]);
   // The project lens of Agents mode offers the projects that mode lists: none with an orchestrator.
-  const agentProjects = projectList.filter((p) => !p.settings.orchestrator?.enabled && p.system !== "dispatcher");
+  const agentProjects = projectList.filter((p) => !p.settings.orchestrator?.enabled && p.system !== "dispatcher" && !p.settings.archived);
+  // Archived projects of either mode are kept out of every list and offered only under the
+  // switcher's fold, which is where they are restored from.
+  const archivedProjects = projectList.filter((p) => p.settings.archived && p.system !== "dispatcher");
   // A project removed elsewhere must not leave the shell filtering by something that is gone.
   // So must one that went over to orchestration mode: the Agents list would be empty through its lens.
   useEffect(() => {
-    if (project && projects.data && !projects.data.some((p) => p.id === project && !p.settings.orchestrator?.enabled)) pickProject("");
+    if (project && projects.data && !projects.data.some((p) => p.id === project && !p.settings.orchestrator?.enabled && !p.settings.archived)) pickProject("");
   }, [project, projects.data, pickProject]);
   const waiting = useOrchestrationWaiting();
   // What this installation can do decides what the app offers. Until the answer arrives the nav is the
@@ -485,9 +488,9 @@ export function App() {
       { id: "main", label: t("main.title"), icon: "compass", run: () => navigate(ORCHESTRATION) },
       { id: "projects", label: t("shell.projects"), hint: agentProjects.find((p) => p.id === project)?.name ?? t("shell.projects.all"), icon: "folder", run: () => { navigate(pathFor("agents")); setSwitching(true); } },
       ...agentProjects.map((p) => ({ id: `p-${p.id}`, label: t("shell.search.workin", { name: p.name }), hint: projectPath(p), icon: "folder" as const, run: () => { pickProject(p.id); navigate(pathFor("agents")); } })),
-      ...projectList.filter((p) => !p.system && !p.settings.ephemeral).map((p) => ({ id: `open-${p.id}`, label: t("focus.palette", { name: p.name }), icon: "conductor" as const, run: () => navigate(projectHome(p.id)) })),
-      ...projectList.filter((p) => !p.system && !p.settings.ephemeral).map((p) => ({ id: `team-${p.id}`, label: t("shell.search.team", { name: p.name }), icon: "bots" as const, run: () => navigate(projectPagePath(p.id, "team")) })),
-      ...projectList.filter((p) => !p.system && !p.settings.ephemeral).map((p) => ({ id: `board-${p.id}`, label: t("shell.search.board", { name: p.name }), icon: "board" as const, run: () => navigate(projectPagePath(p.id, "board")) })),
+      ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `open-${p.id}`, label: t("focus.palette", { name: p.name }), icon: "conductor" as const, run: () => navigate(projectHome(p.id)) })),
+      ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `team-${p.id}`, label: t("shell.search.team", { name: p.name }), icon: "bots" as const, run: () => navigate(projectPagePath(p.id, "team")) })),
+      ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `board-${p.id}`, label: t("shell.search.board", { name: p.name }), icon: "board" as const, run: () => navigate(projectPagePath(p.id, "board")) })),
       ...visibleScreens(SCREENS, selfdev).map((s) => ({ id: `go-${s}`, label: t("shell.search.goto", { name: screenTitle(s) }), icon: "back" as const, run: () => navigate(pathFor(s)) })),
       // An orchestrated session opens inside its project, not in the Agents list.
       ...sessions.filter((s) => !s.metadata?.dispatcher).map((s) => ({ id: `s-${s.id}`, label: s.title, hint: orchestratedIds.has(s.project_id) ? `${s.project} · ${s.model ?? ""}` : s.model ?? "", icon: orchestratedIds.has(s.project_id) ? "conductor" as const : "bots" as const, run: () => (orchestratedIds.has(s.project_id) ? navigate(orchestratedSessionPath(s.id, s.project_id)) : open(s.id)) })),
@@ -663,7 +666,7 @@ export function App() {
         <Suspense fallback={<div className="empty">{t("common.loading")}</div>}>{content}</Suspense>
       </div>
       {palette && <Palette items={paletteItems()} onClose={() => setPalette(false)} />}
-      {switching && <ProjectSwitcher projects={agentProjects} current={project} onPick={pickProject} onClose={() => setSwitching(false)} toast={showToast} />}
+      {switching && <ProjectSwitcher projects={agentProjects} archived={archivedProjects} current={project} onPick={pickProject} onClose={() => setSwitching(false)} toast={showToast} />}
       {tabBar && <TabBar screen={route.screen} counts={counts} waiting={waiting} selfdev={selfdev} onMore={() => setMore((m) => !m)} moreOpen={more} />}
       {projectBar?.bar && focusProject && (
         <ErrorBoundary key={`tabs-${focusProject}`}>

@@ -1577,7 +1577,7 @@ body.resizing iframe { pointer-events: none; }
 .disclosure .chev { color: var(--fg-2); display: inline-block; transition: transform .15s; font-size: var(--fs-18); line-height: 1; }
 .disclosure .chev.down { transform: rotate(90deg); }
 .disclosure-body { padding-bottom: 6px; }
-.sheet-foot { position: sticky; bottom: 0; display: flex; justify-content: flex-end; gap: 8px; padding: 12px 0 4px; margin-top: 10px; border-top: 1px solid var(--line); background: var(--surface-1); }
+.sheet-foot { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 0 4px; margin-top: 10px; border-top: 1px solid var(--line); background: var(--surface-1); }
 .field.search { margin: 2px 0 6px; }
 .pagehead .field { background: var(--surface-1); }
 @media (min-width: 1024px) {
@@ -2422,6 +2422,17 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 .dir-head .iconbtn { margin-left: auto; flex: none; }
 .dir-path { font-size: var(--fs-12); word-break: break-all; }
 .dir-row .toggle-row { margin: 4px 0 0; }
+/* A worker's worktree reads like a folder row: the same card, the action at the end of its head. */
+.worktree-list { display: flex; flex-direction: column; gap: 6px; }
+.worktree-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); min-width: 0; }
+.worktree-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.worktree-head .btn { flex: none; }
+.worktree-row .toggle-row { margin: 4px 0 0; }
+.project-archived-note { margin: 0 0 8px; }
+/* Archived rows are not picked, only restored or opened in settings, so they read quieter. */
+.project-row.archived .project-pick { cursor: default; color: var(--fg-2); }
+.project-row.archived .btn { flex: none; }
+.project-archived { margin-top: 6px; }
 .dir-reach { font-size: var(--fs-12); }
 .dir-form { margin-top: 8px; padding: 10px 12px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); }
 .dir-form-foot { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 8px; }

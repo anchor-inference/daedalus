@@ -18,6 +18,7 @@ import { ExecutionHosts } from "./project/ExecutionHosts";
 import { LifecycleCancel } from "./project/LifecycleCancel";
 import { CoordinatorAuthority } from "./project/CoordinatorAuthority";
 import { ProjectKnowledge } from "./project/ProjectKnowledge";
+import { ProjectWorktrees } from "./project/ProjectWorktrees";
 import { ProjectArchive } from "./project/ProjectArchive";
 import { ProjectBudget, budgetKey } from "./project/ProjectBudget";
 import { ProjectResources, resourceProfileKey } from "./project/ProjectResources";
@@ -165,9 +166,22 @@ export function ProjectChip({ projects, current, onOpen, collapsed }: { projects
 }
 
 /** Pick a project, add one, or open one's settings. */
-export function ProjectSwitcher({ projects, current, onPick, onClose, toast }: { projects: Project[]; current: string; onPick: (id: string) => void; onClose: () => void; toast: (t: string) => void }) {
-  const [adding, setAdding] = useState(projects.length === 0);
+export function ProjectSwitcher({ projects, archived = [], current, onPick, onClose, toast }: { projects: Project[]; archived?: Project[]; current: string; onPick: (id: string) => void; onClose: () => void; toast: (t: string) => void }) {
+  const [adding, setAdding] = useState(projects.length === 0 && archived.length === 0);
   const [editing, setEditing] = useState<Project | null>(null);
+  const [restoring, setRestoring] = useState("");
+  const offline = useOffline();
+  async function restore(project: Project) {
+    if (restoring || offline || !Number.isInteger(project.entity_revision)) return;
+    setRestoring(project.id);
+    try {
+      await api.patch(`/api/projects/${encodeURIComponent(project.id)}`, { archived: false,
+        expected_entity_revision: project.entity_revision, client_operation_id: crypto.randomUUID() });
+      afterChange();
+      toast(t("project.restored", { name: project.name }));
+    } catch (error) { toast(errorText(error)); }
+    finally { setRestoring(""); }
+  }
   const pick = (id: string) => {
     onPick(id);
     onClose();
@@ -225,6 +239,23 @@ export function ProjectSwitcher({ projects, current, onPick, onClose, toast }: {
           </button>
         </div>
       ))}
+      {archived.length > 0 && (
+        <details className="sheet-section project-archived">
+          <summary>{t("project.archivedFold", { n: archived.length })}</summary>
+          {archived.map((p) => (
+            <div key={p.id} className="project-row archived" data-project={p.id}>
+              <span className="grow project-pick">
+                <span className="project-name truncate">{p.name}</span>
+                <span className="sub mono truncate">{projectPath(p)}</span>
+              </span>
+              <button className="btn ghost small" disabled={!!restoring || offline} onClick={() => void restore(p)}>{t("project.restore")}</button>
+              <button className="iconbtn small" onClick={() => setEditing(p)} title={t("project.settings.for", { name: p.name })} aria-label={t("project.settings.for", { name: p.name })}>
+                <Icon name="settings" size={15} />
+              </button>
+            </div>
+          ))}
+        </details>
+      )}
       <div className="sheet-foot">
         <button className="btn ghost" onClick={onClose}>{t("common.close")}</button>
         <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" size={15} /> {t("shell.projects.add")}</button>
@@ -600,6 +631,16 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
     await writes.write("PATCH", path, { keep: true }, t("project.kept", { name: project.name }));
     setBusy(false);
   }
+  const archivable = !project.system && !project.settings.system && !project.settings.ephemeral;
+  async function archive(archived: boolean) {
+    if (!writes.ready || busy) return;
+    if (archived && !(await confirmAsync(t("project.archive.title", { name: project.name }), { body: t("project.archive.body"), action: t("project.archive"), danger: false }))) return;
+    setBusy(true);
+    // Archiving closes the sheet: the project leaves the list the sheet was opened from.
+    await writes.write("PATCH", path, { archived }, t(archived ? "project.archived" : "project.restored", { name: project.name }),
+      archived ? () => { if (project.id === storedProject()) rememberProject(""); onClose(); } : undefined);
+    setBusy(false);
+  }
   async function remove() {
     if (writes.offline || !writes.readCurrent || writes.pending || writes.busy) return;
     const agents = project.sessions.length;
@@ -621,6 +662,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
   }
   return (
     <Sheet title={project.name} ariaLabel={t("project.settings.for", { name: project.name })} onClose={onClose} size="narrow">
+      {project.settings.archived && <p className="sub attn project-archived-note" role="status">{t("project.archived.note")}</p>}
       {(writes.offline || !writes.readCurrent) && <div className="result-warning" role="status">{t("project.write.unverified")} <button type="button" className="linkbtn" disabled={writes.offline} onClick={projects.refresh}>{t("common.retry")}</button></div>}
       {writes.pending && <div className="result-warning" role="status">{t("project.write.pending", { action: writes.pending.label })} <button type="button" className="linkbtn" disabled={writes.offline || !!projects.error || writes.busy} onClick={() => void writes.retry()}>{t("project.write.retry")}</button></div>}
       {writes.conflict !== null && <div className="result-warning" role="status">{t("project.write.conflict")} <button type="button" className="linkbtn" disabled={writes.offline || writes.busy} onClick={() => void writes.reviewConflict()}>{t("project.write.review")}</button></div>}
@@ -668,6 +710,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
         ? <p className="sub">{t("authority.standing", { level: t(`focus.autonomy.${project.settings.orchestrator.autonomy}`) })}</p>
         : <CoordinatorAuthority projectId={project.id} toast={toast} onChanged={() => { afterChange(); projects.refresh(); }} />}
       <ProjectKnowledge projectId={project.id} toast={toast} />
+      <ProjectWorktrees projectId={project.id} toast={toast} />
       <ExecutionHosts toast={toast} />
       <LifecycleCancel kind="project_goal" id={project.id} projectId={project.id} onDone={afterChange} toast={toast} />
       {project.sessions.length > 0 && (
@@ -678,6 +721,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
       )}
       <div className="sheet-foot">
         <button className="btn danger" onClick={remove} disabled={writes.offline || !writes.readCurrent || !!writes.pending || writes.busy}><Icon name="trash" size={15} /> {t("common.remove")}</button>
+        {archivable && <button className="btn ghost" onClick={() => void archive(!project.settings.archived)} disabled={busy || !writes.ready}>{t(project.settings.archived ? "project.restore" : "project.archive")}</button>}
         <button className="btn primary" onClick={save} disabled={!dirty || !name.trim() || busy || !writes.ready}>{t("common.save")}</button>
       </div>
     </Sheet>

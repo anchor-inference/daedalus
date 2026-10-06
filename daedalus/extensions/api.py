@@ -94,6 +94,7 @@ from daedalus.extensions import (
     api_workflows,
     api_workspace,
     api_workspace_archive,
+    api_worktrees,
     launcher_updates,
 )
 from daedalus.extensions import commands as slash
@@ -1559,6 +1560,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_harnesses.register(api, app, auth)
     # One staff member's session as its runtime sees it: the staff view's reads.
     api_staff.register(api, app, auth)
+    # The worker worktrees in a project's folders: the list to clean up from, and the safe removal.
+    api_worktrees.register(api, app, auth)
     # The files orchestration keeps by handle: the cards a chat draws, their bytes, the audit.
     api_files.register(api, app, auth)
     if isinstance(getattr(app, "db", None), Database):

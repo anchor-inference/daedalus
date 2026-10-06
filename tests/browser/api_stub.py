@@ -521,6 +521,9 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str | bytes] | None
     if method.upper() == "GET" and len(parts) == 6 and parts[2] == "projects" and parts[4:] == ["workspace-archive", "budget-history"]:
         return 200, "application/json", json.dumps({"state": "not_in_source", "restored": False,
                                                       "current_available_microusd": None})
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "worktrees":
+        # A project nobody gave workers has no worker worktree; check_project_archive.py invents some.
+        return 200, "application/json", json.dumps({"worktrees": [], "problems": []})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "files":
         return 200, "application/json", json.dumps({"files": []})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "focus-state":

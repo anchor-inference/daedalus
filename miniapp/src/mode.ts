@@ -64,7 +64,8 @@ export function isMainProject(project: { system?: string } | undefined | null): 
  * What remains is the list exactly as it was before orchestration existed.
  */
 export function agentsListing<T extends { sessions: SessionSummary[]; projects: ProjectFolder[] }>(listing: T): T {
-  const away = new Set(listing.projects.filter((p) => orchestrated(p) || isMainProject(p)).map((p) => p.id));
+  // An archived project leaves the list with everything in it; restoring it brings them back.
+  const away = new Set(listing.projects.filter((p) => orchestrated(p) || isMainProject(p) || p.settings?.archived).map((p) => p.id));
   if (away.size === 0 && !listing.sessions.some((s) => s.metadata?.dispatcher)) return listing;
   return {
     ...listing,
@@ -76,7 +77,7 @@ export function agentsListing<T extends { sessions: SessionSummary[]; projects: 
 /** The projects Orchestration mode lists under Main: those with an orchestrator, most recent first. */
 export function orchestratedProjects(projects: ProjectFolder[]): ProjectFolder[] {
   return projects
-    .filter((p) => orchestrated(p) && !isMainProject(p))
+    .filter((p) => orchestrated(p) && !isMainProject(p) && !p.settings?.archived)
     .sort((a, b) => Date.parse(b.last_message_at || b.created_at) - Date.parse(a.last_message_at || a.created_at) || a.id.localeCompare(b.id));
 }
 
@@ -87,7 +88,7 @@ export function orchestratedProjects(projects: ProjectFolder[]): ProjectFolder[]
  * request, and is counted once, there.
  */
 export function waitingInOrchestration(projects: ProjectFolder[], main: MainView | null): number {
-  const counted = new Set(projects.filter((p) => orchestrated(p)).map((p) => p.id));
+  const counted = new Set(projects.filter((p) => orchestrated(p) && !p.settings?.archived).map((p) => p.id));
   let waiting = 0;
   for (const p of projects) if (counted.has(p.id)) waiting += Math.max(0, p.orchestrator?.needs_you ?? 0);
   for (const ask of main?.asks ?? []) {
