@@ -3606,6 +3606,9 @@ class SessionManager:
             if notes is not None:
                 break
         volatile = [notes if notes is not None else await self.workspace_notes(state)]
+        facts = await self._project_facts(state)
+        if facts:
+            volatile.append("\n" + facts)
         switched_off = await self._take_mcp_switched_off(state)
         if switched_off:
             volatile.append("\n" + switched_off)
@@ -3628,6 +3631,22 @@ class SessionManager:
             # The app draws the switch as a mark on the message instead of the note, which it never shows.
             update["metadata"] = {**update.get("metadata", message.metadata), "daedalus.yagni": "on" if yagni.startswith(prompts.YAGNI_ON) else "off"}
         return message.model_copy(update=update)
+
+    async def _project_facts(self, state: SessionState) -> str:
+        """The project's promoted facts for its coordinator and ordinary chats; ``""`` elsewhere.
+
+        A staff member's session is left out: its launch packet already carries the facts chosen
+        for its task, and a second, unselected copy would only crowd its context.
+        """
+        if state.project is None or state.metadata.get("staff_id"):
+            return ""
+        from daedalus.extensions.task_context import project_facts_note  # Lazy: the packet module imports the domain
+
+        try:
+            return self.redactor.redact(await project_facts_note(self.db, state.project.id))
+        except Exception:  # noqa: BLE001 — a turn starts without the facts rather than not at all
+            logger.exception("project facts for session %s could not be read", state.session.id)
+            return ""
 
     async def _take_mcp_switched_off(self, state: SessionState) -> str:
         """The note for the MCP servers the operator switched off since the last turn, once; ``""`` for none.
