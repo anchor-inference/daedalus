@@ -49,6 +49,11 @@ class Review:
             raise ReviewRefused(f"{project.name} has no folder to merge into")
         return task, project, folder
 
+    async def branch_head(self, task_id: str) -> str:
+        """The commit the task's branch points at now, without the comparison the review card makes."""
+        task, _, folder = await self._where(task_id)
+        return await self.team.worktrees.commit_identity(folder, str(task["branch"]))
+
     async def _comparison_where(self, task_id: str, attempt_id: str) -> tuple[dict[str, Any], Project,
                                                                                ProjectFolder, dict[str, Any]]:
         """Resolve a contender's observed worktree without projecting it onto the shared task."""

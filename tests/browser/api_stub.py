@@ -459,6 +459,11 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str | bytes] | None
     if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] in ("mode", "yagni"):
         # The composer's mode chip: a harness that reads the switch back answers these itself.
         return 200, "application/json", "{}"
+    if method.upper() == "GET" and len(parts) == 7 and parts[2] == "sessions" and parts[4:6] == ["policy", "similar"]:
+        # The approval dock asks what "Allow similar" would grant; nothing a harness did not refuse has a family.
+        return 200, "application/json", json.dumps({"similar": None})
+    if method.upper() == "POST" and len(parts) == 6 and parts[2] == "sessions" and parts[4:] == ["policy", "grant-similar"]:
+        return 400, "application/json", json.dumps({"detail": "this request has no narrower family of calls to allow; allow it once instead"})
     if method.upper() == "GET" and len(parts) == 6 and parts[2] == "sessions" and parts[4] == "tool-results":
         return 200, "application/json", json.dumps({"id": parts[5], "content": LONG_RESULT, "is_error": False, "length": len(LONG_RESULT), "complete": True})
     if len(parts) >= 5 and parts[2] == "sessions" and parts[4] == "tool-groups":

@@ -659,6 +659,84 @@ def _under(path: str, roots: Iterable[str]) -> bool:
     return any(p == r.rstrip("/") or p.startswith(r.rstrip("/") + "/") for r in roots)
 
 
+SIMILAR_WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_-]*")
+"""A word that may join the command in a "similar" prefix: a subcommand (``test``, ``run``, ``status``),
+never a flag, a path or an assignment, which would make the prefix name one file or one value."""
+
+
+def _simple_words(command: str) -> list[str] | None:
+    """The argv of a command line that is one plain command, or ``None`` for anything more.
+
+    A "similar" grant reads the command as written, not as :func:`shell_segments` unwraps it: that
+    one strips ``sudo`` and opens ``bash -c``, and a grant for ``npm test`` must not let through
+    ``sudo npm test`` or ``npm test; curl …``. A chain, a pipe, a redirection, a substitution or a
+    line break is not one plain command, and nothing generalised covers it.
+    """
+    if any(mark in command for mark in ("$(", "`", "\n", "\r")):
+        return None
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()<>")
+    lexer.whitespace_split = True
+    try:
+        words = list(lexer)
+    except ValueError:
+        return None
+    if not words or any(word and set(word) <= set(";&|()<>") for word in words):
+        return None
+    return words
+
+
+def similar_grant(tool: str, arguments: dict[str, Any], rule: str) -> dict[str, str] | None:
+    """The narrowest family of calls like this asked one, for "Allow similar for this session".
+
+    A shell command generalises to its command and subcommand (``npm test --watch`` → ``npm test``),
+    a file tool to the directory of its paths, a web address to its host. The family keeps the tool
+    and the rule that asked, so a grant made for one question never answers another: ``git push``
+    allowed past the egress question still asks again when it turns into a force push. ``None``
+    when no family is narrow enough to offer: a wrapper or a shell as the command, a chain, a path
+    straight under a system directory, or a tool that names no path at all.
+    """
+    if tool in SHELL_TOOLS:
+        words = _simple_words(str(arguments.get("command") or ""))
+        if not words or words[0] in WRAPPERS or words[0] in SHELLS or words[0] in KEYWORDS or "=" in words[0]:
+            return None
+        prefix = words[:2] if len(words) > 1 and SIMILAR_WORD.fullmatch(words[1]) else words[:1]
+        value = " ".join(prefix)
+        # The hosts stay part of the family: "curl*" past the egress question would otherwise be
+        # every address on the internet, when the operator looked at one.
+        hosts = hosts_in([words])
+        label = value + "*" + (f" ({', '.join(hosts)})" if hosts else "")
+        return {"tool": tool, "rule": rule, "kind": "prefix", "value": value, "hosts": hosts, "label": label}
+    if tool in ("WebFetch", *BROWSER_NAV_TOOLS):
+        parts = urlsplit(str(arguments.get("url") or ""))
+        host = (parts.hostname or "").lower()
+        if parts.scheme not in BROWSER_SCHEMES or not host:
+            return None
+        return {"tool": tool, "rule": rule, "kind": "host", "value": host, "label": f"{host}/*"}
+    paths = [_norm(path) for path in argument_paths(arguments)]
+    if not paths or any(not path.startswith(("/", "~")) for path in paths):
+        return None
+    try:
+        folder = posixpath.commonpath([posixpath.dirname(path.rstrip("/*")) or "/" for path in paths])
+    except ValueError:  # one path under ~ and one absolute: no folder holds both
+        return None
+    if folder in ("/", "~", "$HOME") or folder.rstrip("/") in _DANGEROUS_BASES:
+        return None
+    return {"tool": tool, "rule": rule, "kind": "dir", "value": folder, "label": folder.rstrip("/") + "/*"}
+
+
+def similar_covers(grant: dict[str, Any], tool: str, rule: str, family: dict[str, Any] | None) -> bool:
+    """Whether a standing "similar" grant answers a call whose own family is ``family``."""
+    if family is None or grant.get("tool") != tool or grant.get("rule") != rule or grant.get("kind") != family.get("kind"):
+        return False
+    value, theirs = str(grant.get("value") or ""), str(family.get("value") or "")
+    if grant["kind"] == "prefix":
+        return (theirs.split()[: len(value.split())] == value.split()
+                and set(family.get("hosts") or []) <= set(grant.get("hosts") or []))
+    if grant["kind"] == "dir":
+        return _under(theirs, [value])
+    return grant["kind"] == "host" and theirs == value
+
+
 class Policy:
     """The rule set: built-ins plus the operator's, evaluated per call."""
 
@@ -867,7 +945,8 @@ class Policy:
                 current = Decision(rule.action, rule.note or f"matched rule {rule.id}", rule.id, hosts=current.hosts)
         return current
 
-    def evaluate(self, tool: str, arguments: dict[str, Any], *, grants: Iterable[str] = ()) -> Decision:
+    def evaluate(self, tool: str, arguments: dict[str, Any], *, grants: Iterable[str] = (),
+                 similar: Iterable[dict[str, Any]] = ()) -> Decision:
         text = canonical(tool, arguments)
         if tool in SHELL_TOOLS:
             decision = self._shell(text, str(arguments.get("cwd") or "") or None, foreground=tool == "Exec" and not bool(arguments.get("background")))
@@ -882,6 +961,14 @@ class Policy:
             decision.key = approval_key(tool, arguments)
             if decision.key in set(grants):
                 return Decision(ALLOW, f"granted by the operator ({decision.key})", decision.rule, key=decision.key, hosts=decision.hosts)
+            standing = list(similar)
+            if standing:
+                family = similar_grant(tool, arguments, decision.rule)
+                grant = next((g for g in standing if similar_covers(g, tool, decision.rule, family)), None)
+                if grant is not None:
+                    # Not the key: a standing grant is not spent, and consuming a key it never held
+                    # would take a once-grant for a different call off the list.
+                    return Decision(ALLOW, f"allowed by the operator for this session: {grant.get('label')}", decision.rule, hosts=decision.hosts)
         return decision
 
     def describe(self) -> list[dict[str, str]]:

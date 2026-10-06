@@ -100,6 +100,7 @@ from daedalus.extensions import commands as slash
 from daedalus.extensions.artifact_headers import artifact_headers
 from daedalus.extensions.calendar_sync import sync_loop
 from daedalus.extensions.ci_observations import record_signed_delivery
+from daedalus.extensions.ci_wake import CiFailures, ci_link
 from daedalus.extensions.heartbeat import TEMPLATE as HEARTBEAT_TEMPLATE
 from daedalus.extensions.inbound import PAYLOAD_MAX_CHARS, flatten_payload, verify_signature
 from daedalus.extensions.notifications import ActionConflict, ActionRefused, Draft, NotificationService
@@ -4348,6 +4349,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
 
+    ci_failures = CiFailures(app)
+
     @api.post("/webhooks/{provider}")
     async def webhook(provider: str, request: Request) -> dict[str, Any]:
         # Every pre-verification refusal looks the same from outside: an anonymous caller learns nothing about what is configured.
@@ -4397,6 +4400,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(503, "the signed delivery could not be persisted; retry it") from exc
         if not receipt["fresh"]:
             return {"status": "duplicate", "delivery_id": delivery_id}
+        if receipt.get("observation"):
+            ci_failures.spawn(receipt["observation"], link=ci_link(event, payload))
         if conf.deliver == "events":
             return {"status": "accepted", "delivery_id": delivery_id, "delivered": "events"}
         try:
@@ -4470,6 +4475,26 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"grants": grants}
+
+    @api.get("/api/sessions/{session_id}/policy/similar/{key}")
+    async def policy_similar(session_id: str, key: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """What "Allow similar" would let through for an open request, or ``null`` when nothing narrower than the call does."""
+        if await manager.get_state(session_id) is None:
+            raise HTTPException(404, "no such session")
+        try:
+            return {"similar": manager.similar_of(session_id, key)}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @api.post("/api/sessions/{session_id}/policy/grant-similar")
+    async def policy_grant_similar(session_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Allow calls like a refused one until the session ends: ``{"key": "<approval key>"}``."""
+        try:
+            return await manager.grant_similar(session_id, str(body.get("key") or ""), via="app")
+        except KeyError as exc:
+            raise HTTPException(404, "no such session") from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @api.post("/api/sessions/{session_id}/policy/refuse")
     async def policy_refuse(session_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

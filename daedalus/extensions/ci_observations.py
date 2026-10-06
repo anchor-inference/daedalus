@@ -127,7 +127,7 @@ async def record_signed_delivery(db: Any, bus: Any, inbound: Any, *, provider: s
                 await observe(conn)
         bus.announce_committed(accepted)
     return {"fresh": True, "observation_id": recorded["observation_id"] if recorded else None,
-            "event_seq": accepted.seq}
+            "event_seq": accepted.seq, "observation": observation if recorded else None}
 
 
 async def set_required_checks(conn: aiosqlite.Connection, *, task_id: str, provider: str,
