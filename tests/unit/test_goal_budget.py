@@ -17,7 +17,7 @@ from daedalus.extensions.api_goal_budget import register
 from daedalus.extensions.task_launch import queue_launch
 from daedalus.providers.openai_compat import ProviderEndpoint
 from daedalus.providers.pricing import BUILTIN
-from daedalus.stores.control import ControlConflict, canonical
+from daedalus.stores.control import canonical
 from daedalus.stores.database import Database
 from daedalus.stores.goal_budget import (
     charge_for_session_in,
@@ -80,12 +80,14 @@ async def test_goal_cap_counts_concurrent_held_quotes_and_keeps_its_scope_after_
         view = await view_in(conn, "project")
         assert view is not None
         assert view["current_goal_revision"] == 2 and view["activated_goal_revision"] == 1
-        assert view["total"]["held_usd"] == "0.000070"
+        # The lost call shows as uncertain spend; it no longer holds the balance a later call needs.
+        assert view["total"]["held_usd"] == "0.000000"
         assert view["total"]["uncertain_usd"] == "0.000070"
         assert view["total"]["state"] == "uncertain"
-        assert view["total"]["available_usd"] == "0.000030"
+        assert view["total"]["available_usd"] == "0.000100"
+    await reserve(db, "after-revision")
     with pytest.raises(BudgetRefused, match="available balance"):
-        await reserve(db, "after-revision")
+        await reserve(db, "over-the-goal")
 
 
 async def test_settled_charge_remains_after_run_and_session_rows_are_removed(db: Database) -> None:
@@ -133,11 +135,12 @@ async def test_coordinator_and_subagent_share_a_smaller_current_office_cap(db: D
     await db.execute("UPDATE projects SET settings = ? WHERE id = 'project'",
                      (json.dumps({"orchestrator": {"enabled": True, "session_id": "replacement"}}),))
     async with db.transaction() as conn:
-        with pytest.raises(BudgetRefused, match="retired or foreign coordinator"):
-            await charge_for_session_in(conn, "child")
+        # It still spends the project's goal, as work rather than from the coordination allowance.
+        charge = await charge_for_session_in(conn, "child")
+        assert charge is not None and charge.project_id == "project" and charge.coordinator is False
 
 
-async def test_activation_refuses_preexisting_unscoped_inflight_project_work(db: Database) -> None:
+async def test_activation_does_not_wait_for_preexisting_project_work_to_settle(db: Database) -> None:
     await project(db)
     await db.execute("INSERT INTO sessions(id,tenant_id,project_id,created_at,last_message_at)"
                      " VALUES ('worker','tenant','project','now','now')")
@@ -148,11 +151,11 @@ async def test_activation_refuses_preexisting_unscoped_inflight_project_work(db:
             rate_version=hashlib.sha256(canonical(QUOTE).encode()).hexdigest(), quote=QUOTE, constraints=(),
         )
         await InferenceBudget(db).start_in(conn, "older")
+        await InferenceBudget(db).unknown_in(conn, "older", "response lost")
     async with db.transaction() as conn:
-        with pytest.raises(BudgetRefused, match="settle or stop"):
-            await set_budget_in(conn, project_id="project", budget_id="budget", expected_goal_revision=1,
-                                limit_usd="1.000000", coordination_limit_usd="0.500000")
-    assert await db.fetchone("SELECT 1 FROM project_goal_budgets") is None
+        view = await set_budget_in(conn, project_id="project", budget_id="budget", expected_goal_revision=1,
+                                   limit_usd="1.000000", coordination_limit_usd="0.500000")
+    assert view["total"]["available_usd"] == "1.000000"
 
 
 async def test_http_budget_command_replays_and_exposes_exact_balance(db: Database) -> None:
@@ -264,7 +267,9 @@ async def test_unpriced_project_model_runs_unreserved_under_a_goal_budget(db: Da
         await adapter.aclose()
 
 
-async def test_capped_project_refuses_unpriced_cli_before_task_assignment(db: Database) -> None:
+async def test_capped_project_assigns_a_command_line_worker(db: Database) -> None:
+    # A command-line worker runs on its own login and reports no price; refusing it in any project
+    # with a goal budget took the operator's subscription workers off every capped board.
     app, _, team, starts, revision = await queued_fixture(db)
     try:
         await db.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at)"
@@ -273,12 +278,28 @@ async def test_capped_project_refuses_unpriced_cli_before_task_assignment(db: Da
             await set_budget_in(conn, project_id="project", budget_id="budget", expected_goal_revision=1,
                                 limit_usd="1.000000", coordination_limit_usd="0.500000")
         await db.execute("UPDATE staff SET harness = 'claude' WHERE id = 'worker'")
-        with pytest.raises(ControlConflict, match="priced native worker"):
-            await queue_launch(app, "task", OPERATOR, staff_id="worker", client_operation_id="cli-launch",
-                               expected_entity_revision=revision)
-        assert (await db.fetchone("SELECT assignee_staff_id FROM board_tasks WHERE id = 'task'"))[0] is None
-        assert (await db.fetchone("SELECT count(*) FROM effect_outbox"))[0] == 0
-        assert starts == []
+        await queue_launch(app, "task", OPERATOR, staff_id="worker", client_operation_id="cli-launch",
+                           expected_entity_revision=revision)
+        assert (await db.fetchone("SELECT assignee_staff_id FROM board_tasks WHERE id = 'task'"))[0] == "worker"
     finally:
         team.queue.close()
         app.executions.release()
+
+
+async def test_gaps_in_session_lineage_charge_what_can_be_attributed(db: Database) -> None:
+    await project(db)
+    await project(db, "other")
+    async with db.transaction() as conn:
+        await set_budget_in(conn, project_id="project", budget_id="budget", expected_goal_revision=1,
+                            limit_usd="1.000000", coordination_limit_usd="0.500000")
+    rows = (("orphan", "project", {"subagent_of": "deleted-parent"}),
+            ("foreign-parent", "other", {}),
+            ("moved", "project", {"subagent_of": "foreign-parent"}))
+    for identity, project_id, metadata in rows:
+        await db.execute("INSERT INTO sessions(id,tenant_id,project_id,created_at,last_message_at,metadata)"
+                         " VALUES (?,'tenant',?,'now','now',?)", (identity, project_id, json.dumps(metadata)))
+    async with db.transaction() as conn:
+        orphan = await charge_for_session_in(conn, "orphan")
+        moved = await charge_for_session_in(conn, "moved")
+    assert orphan is not None and orphan.project_id == "project" and orphan.root_session_id == "orphan"
+    assert moved is not None and moved.project_id == "project" and moved.root_session_id == "moved"

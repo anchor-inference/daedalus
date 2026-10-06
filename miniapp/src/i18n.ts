@@ -4836,7 +4836,7 @@ Object.assign(DICT, {
   "focus.enable.first": { en: "Turn this on, then describe the result you want in the project conversation.", ru: "Включите управляющего, затем опишите нужный результат в разговоре проекта." },
   "focus.enable.advanced": { en: "Model and autonomy", ru: "Модель и самостоятельность" },
   "focus.enable.model": { en: "Model", ru: "Модель" },
-  "focus.enable.model.refused": { en: "This model cannot run with spending limits. Choose a model with verified prices and a provider input ceiling.", ru: "Эта модель не может работать с лимитами расходов. Выберите модель с подтверждёнными ценами и пределом входных токенов провайдера." },
+  "focus.enable.model.refused": { en: "This model cannot run with spending limits. Its price entry is invalid: correct it in Settings → Models & providers or choose another model.", ru: "Эта модель не может работать с лимитами расходов. Её запись о ценах неверна: исправьте её в «Настройки → Модели и клиенты» или выберите другую модель." },
   "focus.enable.model.checking": { en: "Checking the selected model…", ru: "Проверяем выбранную модель…" },
   "focus.enable.model.try": { en: "Use {name}", ru: "Выбрать {name}" },
   "focus.enable.preflight.blocked": { en: "These settings cannot start the orchestrator. Review the reason below.", ru: "С этими настройками оркестратор не запустится. Проверьте причину ниже." },

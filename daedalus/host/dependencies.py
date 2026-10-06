@@ -188,7 +188,7 @@ class DependencyPlanner:
         inspected = False
         for _ in range(5):
             await self._progress(value, "model")
-            if manager.budget_exceeded() and not manager.provider_costs_nothing(preset.provider):
+            if manager.budget_exceeded() and not manager.provider_costs_nothing(preset.provider, model):
                 raise ValueError("daily inference budget exceeded")
             request = LLMRequest(model=model, messages=messages, tools=TOOLS, max_tokens=2500, temperature=0.2, extra={"enable_thinking": False}, observability=LLMObservabilityContext(run_id=value["id"], call_category="dependency_planning", call_purpose="dependency_proposal"))
             names: dict[str, str] = {}

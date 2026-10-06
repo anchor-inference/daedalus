@@ -33,6 +33,19 @@ def maximum_rate(*values: float | None) -> Decimal:
     return max(rates)
 
 
+def quotable(endpoint: ProviderEndpoint, model: str) -> bool:
+    """Whether a call to this model gets a dollar reservation: local, or priced with a provider ceiling.
+
+    Anything else (a subscription login, an unpriced gateway or self-hosted model) runs unreserved
+    and its spend shows as unknown; only a prepaid comparison refuses it.
+    """
+    if endpoint.kind == "llamacpp":
+        return True
+    price = endpoint.pricing.get(model)
+    return not (price is None or price.input is None or price.output is None
+                or price.input_limit is None or not price.limit_source)
+
+
 def model_quote(endpoint: ProviderEndpoint, model: str, output: int) -> tuple[dict[str, Any], int]:
     """Share the provider ceiling and worst published rate between launch and each real send."""
     if type(output) is not int or not 1 <= output <= 2**63 - 1:
@@ -125,7 +138,9 @@ class HostInferenceAdmission:
             seen.add(identity)
             row = await one(conn, "SELECT metadata FROM sessions WHERE id = ?", (identity,))
             if row is None:
-                raise BudgetRefused("the charged session no longer exists")
+                # A removed ancestor has no cap left to keep; refusing here stopped every call of
+                # a subagent whose parent session had been deleted.
+                break
             metadata = json.loads(row["metadata"])
             cap = metadata.get("usd_cap")
             if cap is not None:
@@ -186,9 +201,7 @@ class HostInferenceAdmission:
                 if charge is not None:
                     constraints += await goal_constraints_in(conn, charge.project_id,
                                                               coordinator=charge.coordinator)
-                price = endpoint.pricing.get(request.model)
-                if not free and (price is None or price.input is None or price.output is None
-                                 or price.input_limit is None or not price.limit_source):
+                if not quotable(endpoint, request.model):
                     # A prepaid comparison promised a fixed spend and cannot send an unpriced call.
                     comparison = await one(conn, 'SELECT 1 FROM comparison_funding_slots WHERE attempt_id = ?',
                                            (attempt.id,)) if attempt is not None else None
@@ -230,7 +243,8 @@ class HostInferenceAdmission:
     async def cost(self, reservation_id: str, raw: dict[str, Any], normalized: dict[str, Any]) -> float | None:
         row = await self.db.fetchone("SELECT quote_json FROM inference_reservations WHERE id = ?", (reservation_id,))
         if row is None:
-            raise BudgetRefused("the inference has no admitted rate card")
+            # The reply already arrived; missing bookkeeping makes its cost unknown, not the answer lost.
+            return None
         quote = json.loads(row["quote_json"])
         if quote["provider_kind"] == "llamacpp":
             return 0.0

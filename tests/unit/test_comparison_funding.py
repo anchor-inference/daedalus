@@ -155,7 +155,7 @@ async def test_actual_native_requests_consume_pool_once_and_preserve_attempt_cos
         await adapter.aclose()
 
 
-async def test_missing_usage_retains_pool_and_blocks_next_send_or_refund(db: Database, pair) -> None:
+async def test_missing_usage_retains_pool_until_exit_and_then_stays_unknown(db: Database, pair) -> None:
     await fund(db, pair)
     manager, observed = await native_worker(db, pair)
     sends = []
@@ -172,12 +172,16 @@ async def test_missing_usage_retains_pool_and_blocks_next_send_or_refund(db: Dat
         await db.execute("UPDATE runs SET status = 'completed' WHERE id = 'run'")
         app = SimpleNamespace(db=db, executions=pair[0])
         assert await observe_exit(app, staff_session_id='staff-session', runtime_ref='run', observed_status='completed')
-        async with db.transaction() as conn:
-            with pytest.raises(BudgetRefused, match='unresolved provider charge'):
-                await ComparisonFunding(db).release_in(conn, 'slot1')
         view = await InferenceBudget(db).spend_view(since='9999', total_cap=0.0002, provider_caps={})
         assert view['total']['reserved_usd'] == 0.0002
         assert view['total']['uncertain_usd'] == 0.00007
+        # After the exit the unknown request has ended. Refusing the release on it kept the whole
+        # allowance held against every cap for good; the request itself stays recorded as unknown.
+        async with db.transaction() as conn:
+            await ComparisonFunding(db).release_in(conn, 'slot1')
+            assert await ComparisonFunding(db).observed_cost_in(conn, 'attempt1') is None
+        row = await db.fetchone("SELECT state FROM inference_reservations")
+        assert row['state'] == 'unknown'
     finally:
         await adapter.aclose()
 

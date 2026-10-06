@@ -78,7 +78,7 @@ async def test_spend_view_keeps_uncertain_and_inflight_quotes_after_counter_rese
     assert after["per_provider"]["test"]["reserved_count"] == 2
 
 
-async def test_started_unknown_call_keeps_its_reservation_after_reopen(db: Database) -> None:
+async def test_started_unknown_call_cannot_be_refunded_but_does_not_hold_the_cap(db: Database) -> None:
     await reserve(db, "uncertain")
     async with db.transaction() as conn:
         await InferenceBudget(db).start_in(conn, "uncertain")
@@ -89,8 +89,23 @@ async def test_started_unknown_call_keeps_its_reservation_after_reopen(db: Datab
     await db.close()
     await db.open()
     assert db.path == path
+    # Unknown spend is shown as unknown, never as zero, but it is not a balance a later call must fit beside.
+    assert (await reserve(db, "retry"))["state"] == "reserved"
+    assert (await db.fetchone("SELECT state FROM inference_reservations WHERE id = 'uncertain'"))[0] == "unknown"
+
+
+async def test_restart_turns_a_call_left_inflight_into_unknown_and_frees_the_cap(db: Database) -> None:
+    await reserve(db, "mid-call")
+    async with db.transaction() as conn:
+        await InferenceBudget(db).start_in(conn, "mid-call")
     with pytest.raises(BudgetRefused, match="available balance"):
-        await reserve(db, "retry")
+        await reserve(db, "while-live")
+    assert await InferenceBudget(db).recover_interrupted() == 1
+    row = await db.fetchone("SELECT state,last_error FROM inference_reservations WHERE id = 'mid-call'")
+    assert row["state"] == "unknown" and "stopped" in row["last_error"]
+    assert (await reserve(db, "after-restart"))["state"] == "reserved"
+    view = await InferenceBudget(db).spend_view(since=None, total_cap=0.0001, provider_caps={})
+    assert view["total"]["uncertain_count"] == 1
 
 
 async def test_unstarted_cancel_refunds_once_but_start_and_refund_cannot_race(db: Database) -> None:
@@ -117,15 +132,14 @@ async def test_actual_charge_and_settlement_share_a_transaction_and_replay_exact
 
 @pytest.mark.parametrize("raw,cost", [({}, 0), ({"other": "field"}, 0), ({"prompt_tokens": 1}, 0),
                                      ({"prompt_tokens": 1, "completion_tokens": 1}, None)])
-async def test_incomplete_usage_cannot_free_reserved_balance(db: Database, raw, cost) -> None:
+async def test_incomplete_usage_is_unknown_and_does_not_block_the_next_call(db: Database, raw, cost) -> None:
     await reserve(db, "missing")
     async with db.transaction() as conn:
         store = InferenceBudget(db)
         await store.start_in(conn, "missing")
         seq = await usage(conn, "missing", cost, raw=raw)
         assert await store.settle_in(conn, "missing", seq) == "unknown"
-    with pytest.raises(BudgetRefused):
-        await reserve(db, "next")
+    assert (await reserve(db, "next"))["state"] == "reserved"
 
 
 async def test_wrong_usage_identity_rolls_back_its_row_and_provider_overrun_remains_visible(db: Database) -> None:
@@ -178,7 +192,7 @@ async def test_a_new_cap_counts_uncapped_calls_that_are_already_in_flight(db: Da
         await reserve(db, "after-cap")
 
 
-async def test_unknown_usage_with_a_known_held_quote_can_use_only_the_other_balance(db: Database) -> None:
+async def test_unknown_usage_leaves_the_whole_balance_to_measured_and_live_calls(db: Database) -> None:
     await reserve(db, "missing")
     async with db.transaction() as conn:
         store = InferenceBudget(db)
@@ -186,5 +200,8 @@ async def test_unknown_usage_with_a_known_held_quote_can_use_only_the_other_bala
         seq = await usage(conn, "missing", None, raw={})
         assert await store.settle_in(conn, "missing", seq) == "unknown"
     await reserve(db, "other", 30)
+    async with db.transaction() as conn:
+        await InferenceBudget(db).start_in(conn, "other")
+    await reserve(db, "fits", 70)
     with pytest.raises(BudgetRefused, match="available balance"):
         await reserve(db, "over-budget", 1)

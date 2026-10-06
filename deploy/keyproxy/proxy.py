@@ -332,6 +332,19 @@ def budget_exempt(rest: str) -> bool:
     return any(segments[-len(tail):] == tail for tail in BUDGET_EXEMPT_TAILS if len(segments) >= len(tail))
 
 
+def free_model_request(body: bytes) -> bool:
+    """Whether the call names a free model (OpenRouter's ``:free``, OpenCode's ``-free``).
+
+    The daily flag counts priced spend; a free model adds none, so refusing it once the day's paid
+    spend passed the cap stopped the operator's free presets along with the paid ones.
+    """
+    try:
+        model = json.loads(body or b"{}").get("model")
+    except (ValueError, AttributeError):
+        return False
+    return isinstance(model, str) and model.endswith((":free", "-free"))
+
+
 def target_url(base: str, rest: str, query: str) -> str:
     return base.rstrip("/") + "/" + rest.lstrip("/") + (f"?{query}" if query else "")
 
@@ -601,7 +614,7 @@ async def handle(request: web.Request) -> web.StreamResponse:
         return web.json_response({"error": f"unknown upstream {name!r}"}, status=404)
     else:
         base, key = table[name]
-        if budget_exceeded() and not budget_exempt(rest):
+        if budget_exceeded() and not budget_exempt(rest) and not free_model_request(await request.read()):
             return web.json_response({"error": {"message": "daily budget exceeded; refused by the key proxy", "type": "budget_exceeded"}}, status=402)
         if key:
             inject_key(headers, name, key)

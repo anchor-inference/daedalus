@@ -152,7 +152,7 @@ class PromptChangePlanner:
         provider, model = rungs[0]
         user = f"Desired change:\n{value['instruction']}\n\nCurrent working rules:\n<working_rules>\n{before}\n</working_rules>"
         messages = [Message(role=MessageRole.system, content_blocks=[TextBlock(text=PROMPT)]), Message(role=MessageRole.user, content_blocks=[TextBlock(text=user)])]
-        if manager.budget_exceeded() and not manager.provider_costs_nothing(preset.provider):
+        if manager.budget_exceeded() and not manager.provider_costs_nothing(preset.provider, model):
             raise ValueError("daily inference budget exceeded")
         request = LLMRequest(
             model=model,

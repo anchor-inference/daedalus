@@ -217,7 +217,10 @@ class ComparisonFunding:
                                (slot['attempt_id'], slot_id))
             if slot['launch_started_at'] is not None or unsent is None:
                 raise BudgetRefused('the allocation needs its exact host-observed physical exit or unstarted boundary')
+        # A call still on the wire can charge the pool; an unknown one has ended. Refusing the
+        # release on an unknown request kept the whole allowance held against every daily and total
+        # cap for good, since nothing ever settles it. Its spend stays shown as unknown.
         if await one(conn, "SELECT 1 FROM inference_reservations WHERE comparison_slot_id = ?"
-                     " AND state IN ('reserved','inflight','unknown') LIMIT 1", (slot_id,)):
-            raise BudgetRefused('the allocation still owns an unresolved provider charge')
+                     " AND state IN ('reserved','inflight') LIMIT 1", (slot_id,)):
+            raise BudgetRefused('the allocation still owns a provider call in flight')
         await conn.execute("UPDATE comparison_funding_slots SET state = 'released',released_at = ? WHERE id = ?", (now(), slot_id))

@@ -34,6 +34,26 @@ def microusd(value: Any) -> int:
     return result
 
 
+def describe(key: str) -> str:
+    """The cap behind a balance key, named where the operator can change it."""
+    kind, _, rest = key.partition(":")
+    if kind == "daily":
+        return "the daily spending cap (usd_per_day in Settings → Limits); it reopens at midnight UTC"
+    if kind == "total":
+        return "the total spending cap (limits.usd_total in Settings → Limits)"
+    if kind == "provider":
+        return f"the total cap for provider {rest.rsplit(':', 1)[0]!r} (limits.usd_total_per_provider in Settings → Limits)"
+    if kind == "run":
+        return "this run's spending cap (limits.usd_per_run, or its mode's); a new message starts a new run"
+    if kind == "session":
+        return "this session's spending cap (in the session settings)"
+    if kind == "goal":
+        return "the project's goal budget (on the project's budget page)"
+    if kind == "goalcoord":
+        return "the project's coordination budget (on the project's budget page)"
+    return "a spending cap"
+
+
 @dataclass(frozen=True)
 class Constraint:
     """A host-selected cap and the exact historical usage slice it owns."""
@@ -94,7 +114,11 @@ async def held_in(conn: aiosqlite.Connection, limit: Constraint) -> tuple[int, s
              if (limit.key in row["scopes"] if limit.scope_only else pool_matches(row, limit))]
     covered = {row['id'] for row in pools}
     total = sum(row['held'] for row in pools)
-    clauses = ["r.state IN ('reserved','inflight','unknown')"]
+    # Only a call still on the wire holds its quote. An unknown one has ended without a usage
+    # report: holding its worst case for good let a few lost responses, or one restart during a
+    # call, close a daily or total cap for every later call. Its spend stays shown as unknown.
+    # A prepaid comparison pool above still keeps its unknown requests inside its allowance.
+    clauses = ["r.state IN ('reserved','inflight')"]
     args: list[Any] = []
     if limit.scope_only:
         clauses.append("s.scope_key = ?")
@@ -217,8 +241,12 @@ class InferenceBudget:
                 available = max(0, limit.cap_microusd - spent - held)
                 need = Decimal(quoted_microusd) / 1_000_000
                 free = Decimal(available) / 1_000_000
+                # Name the cap and where to change it: the bare key was all an operator saw when a
+                # run stopped, with no way to tell which of five caps had closed.
                 raise BudgetRefused(f"{limit.key}: this call needs a ${need:.6f} worst-case reservation;"
-                                    f" ${free:.6f} is the available balance")
+                                    f" ${free:.6f} is the available balance under {describe(limit.key)}."
+                                    " Raise that cap, or use a model it does not count"
+                                    " (a subscription, free or local one)")
         await conn.execute("INSERT INTO inference_reservations(id,provider_id,model,session_id,run_id,"
                            "request_digest,quoted_microusd,rate_version,quote_json,state,created_at,execution_attempt_id,comparison_slot_id)"
                            " VALUES (?,?,?,?,?,?,?,?,?,'reserved',?,?,?)",
@@ -269,6 +297,24 @@ class InferenceBudget:
                            (state, cost, usage_event_seq, now(), "provider usage exceeded its quote" if state == "overrun" else "",
                             reservation_id))
         return state
+
+    async def recover_interrupted(self) -> int:
+        """Close the sends a previous process left open; returns how many it found.
+
+        Only this process sends, so at start nothing is on the wire. A call that was mid-flight when
+        the process stopped is unknown, not inflight: left inflight it held its quote against every
+        cap and kept an update drain blocked, with nothing ever to settle it.
+        """
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute("UPDATE inference_reservations SET state = 'unknown',last_error = ?"
+                                        " WHERE state = 'inflight'", ("the process stopped during the call",))
+            started = cursor.rowcount
+            await cursor.close()
+            cursor = await conn.execute("UPDATE inference_reservations SET state = 'released',last_error = ?"
+                                        " WHERE state = 'reserved'", ("the process stopped before the call was sent",))
+            unsent = cursor.rowcount
+            await cursor.close()
+        return started + unsent
 
     async def unknown_in(self, conn: aiosqlite.Connection, reservation_id: str, reason: str) -> None:
         await conn.execute("UPDATE inference_reservations SET state = 'unknown',last_error = ?"

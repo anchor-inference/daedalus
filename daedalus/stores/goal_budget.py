@@ -49,7 +49,13 @@ async def goal_constraints_in(conn: aiosqlite.Connection, project_id: str,
 
 
 async def charge_for_session_in(conn: aiosqlite.Connection, session_id: str) -> GoalCharge | None:
-    """Follow host-persisted ancestry; retired offices cannot charge as a fresh coordinator."""
+    """Follow host-persisted ancestry to the nearest project with a goal budget.
+
+    Gaps in that bookkeeping charge what can still be attributed instead of refusing the call: a
+    removed ancestor ends the walk, a parent in another project is not this project's spend, a
+    removed project has no budget, and a retired coordinator still running is charged as ordinary
+    work. Each of those used to refuse every call of the session for good.
+    """
     current = session_id
     seen: set[str] = set()
     project_id: str | None = None
@@ -60,10 +66,10 @@ async def charge_for_session_in(conn: aiosqlite.Connection, session_id: str) -> 
         seen.add(current)
         row = await one(conn, "SELECT id,project_id,metadata FROM sessions WHERE id = ?", (current,))
         if row is None:
-            raise BudgetRefused("the charged session's project lineage is missing")
+            break
         if row["project_id"]:
             if project_id is not None and project_id != row["project_id"]:
-                raise BudgetRefused("the charged session crosses project budgets")
+                break
             project_id = row["project_id"]
         root = row
         current = str(json.loads(row["metadata"]).get("subagent_of") or "")
@@ -74,14 +80,13 @@ async def charge_for_session_in(conn: aiosqlite.Connection, session_id: str) -> 
         return None
     project = await one(conn, "SELECT settings,goal_revision FROM projects WHERE id = ?", (project_id,))
     if project is None:
-        raise BudgetRefused("the charged project budget was removed")
+        return None
     metadata = json.loads(root["metadata"])
     office = json.loads(project["settings"]).get("orchestrator", {})
-    claims_office = bool(metadata.get("orchestrator_of") or metadata.get("orchestrator_retired_of"))
     coordinator = (bool(office.get("enabled")) and office.get("session_id") == root["id"]
                    and metadata.get("orchestrator_of") == project_id)
-    if claims_office and not coordinator:
-        raise BudgetRefused("a retired or foreign coordinator cannot charge the current goal")
+    # A retired or foreign office cannot spend the current coordination allowance, but it is still
+    # the project's work and counts against the whole goal budget.
     return GoalCharge(project_id, root["id"], coordinator, project["goal_revision"], budget["budget_id"])
 
 
@@ -172,19 +177,9 @@ async def set_budget_in(conn: aiosqlite.Connection, *, project_id: str, budget_i
         raise BudgetRefused("the project goal revision changed")
     existing = await one(conn, "SELECT budget_id FROM project_goal_budgets WHERE project_id = ?", (project_id,))
     if existing is None:
-        # Earlier unscoped provider sends must settle or be reconciled before a cap can claim completeness.
-        open_call = await one(conn, "WITH RECURSIVE owned(id) AS (SELECT id FROM sessions WHERE project_id = ?"
-                              " UNION SELECT s.id FROM sessions s JOIN owned o"
-                              " ON json_extract(s.metadata,'$.subagent_of') = o.id)"
-                              " SELECT 1 FROM inference_reservations r WHERE r.session_id IN (SELECT id FROM owned)"
-                              " AND r.state IN ('reserved','inflight','unknown') LIMIT 1", (project_id,))
-        funded_pair = await one(conn, "SELECT 1 FROM comparison_funding_slots WHERE project_id = ?"
-                                " AND state = 'held' LIMIT 1", (project_id,))
-        cli = await one(conn, "SELECT 1 FROM staff_sessions s JOIN staff m ON m.id = s.staff_id"
-                        " WHERE m.project_id = ? AND m.harness != 'daedalus'"
-                        " AND s.started_at IS NOT NULL AND s.ended_at IS NULL LIMIT 1", (project_id,))
-        if open_call or funded_pair or cli:
-            raise BudgetRefused("settle or stop existing unpriced project work before activating its dollar cap")
+        # Work already running when the cap is set goes on, and its calls count from the next
+        # one. Refusing to set a budget until every worker had stopped and every lost reply had
+        # settled (which an unknown one never does) left the project with no cap at all.
         at = now()
         await conn.execute("INSERT INTO project_goal_budgets(project_id,budget_id,limit_microusd,"
                            "coordination_limit_microusd,activated_goal_revision,activated_at,updated_at)"
@@ -197,7 +192,3 @@ async def set_budget_in(conn: aiosqlite.Connection, *, project_id: str, budget_i
     view = await view_in(conn, project_id)
     assert view is not None
     return view
-
-
-async def requires_priced_native_in(conn: aiosqlite.Connection, project_id: str) -> bool:
-    return await one(conn, "SELECT 1 FROM project_goal_budgets WHERE project_id = ?", (project_id,)) is not None
