@@ -1125,6 +1125,7 @@ export type SessionList = {
 export type AsrStatus = { configured: boolean; reason: string; provider: string; model: string; max_seconds: number; autosend: boolean; transcriber?: string; fallback?: string };
 
 export type SlashCommand = { name: string; args: string; description: string; scope: string; confirm: boolean };
+export type SkillEntry = { id: string; name: string; description: string };
 
 export type Question = {
   question: string;

@@ -444,13 +444,22 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append(f"Reply did not send the chosen answer ({answered})")
     HOST.status = "idle"
 
+    # A skill is offered in the slash palette by name; picking it asks the agent to use it in words.
+    field(page).fill("/web")
+    page.wait_for_selector(".palette .palette-skill", timeout=5000)
+    page.locator(".palette .palette-skill").first.click()
+    if not field(page).input_value().startswith(("Use the web-design-reviewer skill", "Используй навык web-design-reviewer")):
+        problems.append(f"picking a skill did not name it in the draft ({field(page).input_value()!r})")
+    field(page).fill("")
+
     # The model list: opens from the pill, names the presets with their kind, a pick reaches the host.
     page.reload()
     page.wait_for_selector(".composer .model-select", timeout=15000)
     page.locator(".composer .model-select").click()
     page.wait_for_selector(".model-list .model-row", timeout=5000)
     providers = page.locator(".provider-row")
-    if providers.count() != 3 or page.locator(".model-list .model-row.on").count():
+    # Three providers and the free-model group, which opens like a provider.
+    if providers.count() != 4 or page.locator(".model-list .model-row.on").count():
         problems.append("the first step must list providers rather than every model")
     page.locator('.provider-row[data-provider="claude"]').click()
     if not page.locator(".model-list .model-row.on", has_text="Claude Opus 5").count():

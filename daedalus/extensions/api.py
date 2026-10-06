@@ -4219,6 +4219,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         """Only what this installation can run: a palette entry that answers with a refusal is a lie."""
         return [{"name": c.name, "args": c.args, "description": c.description, "scope": c.scope, "confirm": c.confirm} for c in slash.available(app)]
 
+    @api.get("/api/skills")
+    async def list_skills(_: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
+        """The enabled skills, for the composer to offer by name and description."""
+        entries = await manager.skills.list("default")
+        return [{"id": e.id, "name": e.name, "description": e.description} for e in entries if e.enabled]
+
     @api.post("/api/sessions/{session_id}/command")
     async def run_slash_command(session_id: str, body: CommandBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Run a slash command for this session and return the text the chat would have shown."""

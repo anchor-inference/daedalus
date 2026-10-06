@@ -2,7 +2,7 @@
 // actions are supplied by the parent so the card also works inside the voice page.
 
 import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, AsrStatus, ModelFallback, Question, SlashCommand } from "./api";
+import { api, ApiError, AsrStatus, ModelFallback, Question, SkillEntry, SlashCommand } from "./api";
 import { Popover } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { fileGlyph, previewKind, canPreview } from "./preview";
@@ -59,6 +59,8 @@ export type ComposerProps = {
   onSend: (text: string, files: File[], intent: "send" | "steer" | "queue", clientMessageId?: string, onProgress?: (fraction: number) => void) => Promise<"sent" | "steered" | "queued">;
   onStop: () => void;
   commands: SlashCommand[];
+  /** Installed skills, offered in the same palette: picking one asks the agent to use it. */
+  skills?: SkillEntry[];
   /** Run a slash command. Rejects on failure, and the draft comes back. */
   onCommand: (line: string) => Promise<void>;
   model: string;
@@ -225,6 +227,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // ── the slash palette ──
   const paletteQuery = draft.startsWith("/") && !draft.includes("\n") && !draft.includes(" ") ? draft.slice(1).toLowerCase() : null;
   const paletteItems = useMemo(() => (paletteQuery === null ? [] : commands.filter((c) => c.name.startsWith(paletteQuery))), [commands, paletteQuery]);
+  const skillItems = useMemo(() => paletteQuery === null ? [] : (props.skills ?? []).filter((s) => s.name.toLowerCase().includes(paletteQuery)).slice(0, Math.max(0, 8 - paletteItems.length)),
+    [props.skills, paletteQuery, paletteItems.length]);
+  // The run is told in words which skill to load; the Skill tool does the loading, so no new command exists.
+  const pickSkill = (s: SkillEntry) => {
+    setDraft(t("composer.skill.use", { name: s.name }));
+    textarea.current?.focus();
+  };
   const pickCommand = (c: SlashCommand) => {
     if (c.args) {
       setDraft(`/${c.name} `);
@@ -339,10 +348,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // ── keys ──
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
-    const intent = composerKey(e, { enterSends: enterSends(), paletteOpen: paletteItems.length > 0 });
+    const intent = composerKey(e, { enterSends: enterSends(), paletteOpen: paletteItems.length + skillItems.length > 0 });
     if (intent === "complete") {
       e.preventDefault();
-      pickCommand(paletteItems[0]);
+      if (paletteItems.length) pickCommand(paletteItems[0]);
+      else pickSkill(skillItems[0]);
     } else if (intent === "escape") {
       if (paletteQuery !== null) {
         e.preventDefault();
@@ -495,12 +505,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           </div>
         </div>
       )}
-      {paletteItems.length > 0 && (
+      {paletteItems.length + skillItems.length > 0 && (
         <div className="palette" role="listbox">
           {paletteItems.slice(0, 8).map((c) => (
             <button key={c.name} type="button" role="option" aria-selected={false} className="palette-item" onClick={() => pickCommand(c)}>
               <span className="mono">/{c.name} <span className="sub">{c.args}</span></span>
               <span className="sub">{c.description}</span>
+            </button>
+          ))}
+          {skillItems.map((s) => (
+            <button key={`skill:${s.id}`} type="button" role="option" aria-selected={false} className="palette-item palette-skill" onClick={() => pickSkill(s)}>
+              <span className="mono">{s.name} <span className="sub">{t("composer.skill.kind")}</span></span>
+              <span className="sub">{s.description}</span>
             </button>
           ))}
         </div>

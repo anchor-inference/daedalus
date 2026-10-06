@@ -88,6 +88,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "deps.job.completed": { en: "Dependencies installed", ru: "Зависимости установлены" },
   "deps.job.failed": { en: "Installation failed", ru: "Ошибка установки" },
   "deps.installingHint": { en: "You can leave this page. Installation continues in the supervisor; its result survives an application restart.", ru: "Можно уйти с этой страницы. Установку продолжает supervisor; результат сохранится после перезапуска приложения." },
+  "composer.skill.use": { en: "Use the {name} skill: ", ru: "Используй навык {name}: " },
+  "composer.skill.kind": { en: "skill", ru: "навык" },
   "composer.settings": { en: "Run settings", ru: "Настройки запуска" },
   "session.activity": { en: "Activity", ru: "Действия" },
   "turn.run.show": { en: "Show result", ru: "Показать результат" },

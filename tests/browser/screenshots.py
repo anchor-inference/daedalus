@@ -785,6 +785,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, GATES["/api/modes"])
     if rel == "/api/commands":
         return respond(route, [])
+    if rel == "/api/skills":
+        return respond(route, GATES["/api/skills"])
     if rel == "/api/voice":
         over = getattr(stub, "voice_over", None)
         spoken = getattr(stub, "voice_tts", None)

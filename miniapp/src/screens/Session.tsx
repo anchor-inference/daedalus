@@ -1,7 +1,7 @@
 import { useContextActions } from "../ui/context-menu";
 import { Component, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { api, ApiError, AsrStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, MessageView, RunOutcome, SessionDetail, Compacting } from "../api";
+import { api, ApiError, AsrStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, SessionDetail, Compacting } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
 import { MenuItem, OverflowMenu, Popover, confirmDialog, Overlay } from "../ui/dialogs";
 import { absDate, clock, commandPreview, duration, plainPreview, shortDateTime } from "../format";
@@ -186,6 +186,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
   const [modes, setModes] = useState<ModeInfo[]>([]);
   const [commands, setCommands] = useState<SlashCommand[]>([]);
+  const [skills, setSkills] = useState<SkillEntry[]>([]);
   const [commandResult, setCommandResult] = useState<{ line: string; text: string } | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -433,6 +434,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     load();
     api.get<Record<string, { description?: string }>>("/api/modes").then((m) => setModes(Object.entries(m).map(([name, v]) => ({ name, description: v?.description ?? "" })))).catch(() => setModes([]));
     api.get<SlashCommand[]>("/api/commands").then(setCommands).catch(() => setCommands([]));
+    api.get<SkillEntry[]>("/api/skills").then(setSkills).catch(() => setSkills([]));
     api.get<AsrStatus>("/api/asr").then(setAsr).catch(() => setAsr(null));
     readSnapshots();
   }, [load, readSnapshots]);
@@ -1453,6 +1455,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             onSend={send}
             onStop={stop}
             commands={commands}
+            skills={skills}
             onCommand={runCommand}
             model={detail?.model ?? ""}
             fallback={detail?.fallback ?? null}

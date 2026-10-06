@@ -170,3 +170,11 @@ async def test_sent_file_is_served_by_the_call_that_sent_it(client: httpx.AsyncC
     assert (await client.get(f"/api/sessions/{sid}/sent/nope/download", headers=H)).status_code == 404
     outside.unlink()
     assert (await client.get(f"/api/sessions/{sid}/sent/s2/download", headers=H)).status_code == 403
+
+
+async def test_skills_list_offers_enabled_skills_by_name(client: httpx.AsyncClient, manager: SessionManager) -> None:
+    skill = manager.skills.root / "menu-writer"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: menu-writer\ndescription: Write a short menu\n---\nWrite it.\n")
+    listed = (await client.get("/api/skills", headers=H)).json()
+    assert {"id": "menu-writer", "name": "menu-writer", "description": "Write a short menu"} in listed

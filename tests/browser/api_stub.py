@@ -267,6 +267,8 @@ GATES: dict[str, object] = {
         "careful": {"description": "ask before anything irreversible"},
     },
     "/api/commands": [],
+    # The composer's palette offers these next to the slash commands.
+    "/api/skills": [{"id": "web-design-reviewer", "name": "web-design-reviewer", "description": "Review a page's layout and accessibility"}],
     "/api/asr": {"configured": False, "reason": "", "provider": "", "model": "", "max_seconds": 120, "autosend": False},
     "/api/proposals": [],
     "/api/schedules": [],
