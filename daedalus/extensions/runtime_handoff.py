@@ -266,11 +266,9 @@ async def packet_for_launch(db: Any, handoff_id: str, *, task_id: str,
         if digest(packet) != row["packet_digest"]:
             raise ControlConflict("the immutable handoff packet changed")
         budget = await view_in(conn, packet["project_id"])
-        if budget is not None:
-            if packet["target_harness"] != "daedalus":
-                raise ControlConflict("the project now has a dollar cap that cannot price this CLI runtime")
-            if budget["total"]["state"] != "known" or not budget["total"]["available_usd"]:
-                raise ControlConflict("the current goal budget cannot admit another native attempt")
-            if float(budget["total"]["available_usd"]) <= 0:
-                raise ControlConflict("the current goal budget has no available balance")
+        # As at approval: unknown spend and a command-line target do not stop the handoff, only a
+        # goal budget that measured spend has used up.
+        if (budget is not None and budget["total"]["available_usd"] is not None
+                and float(budget["total"]["available_usd"]) <= 0):
+            raise ControlConflict("the project goal budget is spent; raise it on the project's budget to hand this task on")
         return packet

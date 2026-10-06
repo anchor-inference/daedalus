@@ -394,3 +394,30 @@ async def test_preview_exposes_resource_boundary_and_binds_its_observation(db: D
         app.extensions["terminals"].preflight_attempt_resources.assert_awaited_once()
     finally:
         app.executions.release()
+
+
+async def test_capped_project_hands_work_to_a_command_line_worker_until_measured_spend_uses_the_goal(db: Database) -> None:
+    from daedalus.stores.goal_budget import set_budget_in
+
+    app, identity = await handoff_fixture(db)
+    try:
+        await db.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at)"
+                         " VALUES ('project',1,'A checkable goal','operator','now')")
+        revision = (await db.fetchone("SELECT goal_revision FROM projects WHERE id = 'project'"))[0]
+        async with db.transaction() as conn:
+            await set_budget_in(conn, project_id="project", budget_id="budget", expected_goal_revision=revision,
+                                limit_usd="1.000000", coordination_limit_usd="0.500000")
+        assert await observe_no_entry(app, identity, staff_session_id="staff-session", reason="host refused entry")
+        view = await preview(app, "task", identity.id, "alternate")
+        assert view["ready"], view["blockers"]
+        response = await queue_launch(app, "task", OPERATOR, staff_id="alternate", client_operation_id="continue",
+                                      expected_entity_revision=view["entity_revision"],
+                                      fallback_from_attempt_id=identity.id,
+                                      fallback_preview_digest=view["preview_digest"])
+        assert (await packet_for_launch(db, response["handoff_id"], task_id="task",
+                                        target_staff_id="alternate"))["target_harness"] == "claude"
+        await db.execute("UPDATE project_goal_budgets SET limit_microusd = 0,coordination_limit_microusd = 0")
+        with pytest.raises(ControlConflict, match="goal budget is spent"):
+            await packet_for_launch(db, response["handoff_id"], task_id="task", target_staff_id="alternate")
+    finally:
+        app.executions.release()
