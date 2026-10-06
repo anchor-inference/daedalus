@@ -312,8 +312,7 @@ async def test_ci_failure_arriving_during_merge_lease_check_stops_git(settings: 
                           Principal.operator({"via": "token", "user_id": 1}), Scope("project", r.project.id),
                           task_id, None, ("git.merge",), "review.merge",
                           {"task_id": task_id, "result_id": result_id, "verdict_id": verdict_id,
-                           "head_sha": review["head_sha"], "base_sha": review["base_sha"], "source": source},
-                          False)
+                           "head_sha": review["head_sha"], "base_sha": review["base_sha"], "source": source})
 
             async def newer_failure(_claim: Claim) -> None:
                 await r.ci_result(task_id, "failure", run_id=2)
@@ -353,8 +352,7 @@ async def test_original_report_corruption_during_merge_lease_check_stops_git(
                           Principal.operator({"via": "token", "user_id": 1}), Scope("project", r.project.id),
                           task_id, None, ("git.merge",), "review.merge",
                           {"task_id": task_id, "result_id": result_id, "verdict_id": verdict_id,
-                           "head_sha": review["head_sha"], "base_sha": review["base_sha"], "source": source},
-                          False)
+                           "head_sha": review["head_sha"], "base_sha": review["base_sha"], "source": source})
 
             async def corrupt_report(_claim: Claim) -> None:
                 await r.manager.db.execute("UPDATE result_receipts SET original_text = ? WHERE id = ?",
@@ -391,7 +389,7 @@ async def test_rewritten_report_and_digest_cannot_replace_queued_merge_source(
             payload = json.loads(outbox["payload_json"])["data"]
             claim = Claim(action_id, outbox["receipt_id"], "review.merge", 1,
                           Principal.operator({"via": "token", "user_id": 1}), Scope("project", r.project.id),
-                          task_id, None, ("git.merge",), "review.merge", payload, False)
+                          task_id, None, ("git.merge",), "review.merge", payload)
 
             async def rewrite_report(_claim: Claim) -> None:
                 replacement = "different approved text"
@@ -431,7 +429,7 @@ async def test_merge_keeps_approved_report_copy_if_source_changes_during_git(
             payload = json.loads(outbox["payload_json"])["data"]
             claim = Claim(action_id, outbox["receipt_id"], "review.merge", 1,
                           Principal.operator({"via": "token", "user_id": 1}), Scope("project", r.project.id),
-                          task_id, None, ("git.merge",), "review.merge", payload, False)
+                          task_id, None, ("git.merge",), "review.merge", payload)
             git_driver = type(r.team.worktrees._git(r.project.primary.env))
             run_git = git_driver.run
 
@@ -475,7 +473,7 @@ async def test_source_changed_after_staging_cannot_reach_git_merge(
             payload = json.loads(outbox["payload_json"])["data"]
             claim = Claim(action_id, outbox["receipt_id"], "review.merge", 1,
                           Principal.operator({"via": "token", "user_id": 1}), Scope("project", r.project.id),
-                          task_id, None, ("git.merge",), "review.merge", payload, False)
+                          task_id, None, ("git.merge",), "review.merge", payload)
             merge = r.team.worktrees.merge
 
             async def change_before_git(*args: Any, **kwargs: Any) -> str:
@@ -523,7 +521,7 @@ async def test_queued_merge_rejects_changed_review_source(
             payload = json.loads(outbox["payload_json"])["data"]
             claim = Claim(action_id, outbox["receipt_id"], "review.merge", 1,
                           Principal.operator({"via": "token", "user_id": 1}), Scope("project", r.project.id),
-                          task_id, None, ("git.merge",), "review.merge", payload, False)
+                          task_id, None, ("git.merge",), "review.merge", payload)
             if change == "evidence":
                 await r.manager.db.execute("UPDATE review_evidence SET command = ? WHERE result_id = ?",
                                            ("changed after approval", result_id))

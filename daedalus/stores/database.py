@@ -23,7 +23,6 @@ from daedalus.stores.comparison_schema import MIGRATION as COMPARISON_MIGRATION
 from daedalus.stores.contract_change_schema import MIGRATION as CONTRACT_CHANGE_MIGRATION
 from daedalus.stores.control_schema import MIGRATION as CONTROL_MIGRATION
 from daedalus.stores.coordinator_handoff_schema import MIGRATION as COORDINATOR_HANDOFF_MIGRATION
-from daedalus.stores.effect_approval_schema import MIGRATION as EFFECT_APPROVAL_MIGRATION
 from daedalus.stores.execution_schema import MIGRATION as EXECUTION_MIGRATION
 from daedalus.stores.extension_schema import EXTENSION_SCHEMA
 from daedalus.stores.goal_budget_schema import MIGRATION as GOAL_BUDGET_MIGRATION
@@ -1770,7 +1769,6 @@ MIGRATIONS.append(PHASE_CLOCK_MIGRATION)
 MIGRATIONS.append(CAPACITY_MIGRATION)
 MIGRATIONS.append(ATTEMPT_FAULT_MIGRATION)
 MIGRATIONS.append(RETRY_MIGRATION)
-MIGRATIONS.append(EFFECT_APPROVAL_MIGRATION)
 MIGRATIONS.append(CALENDAR_DIAGRAM_MIGRATION)
 MIGRATIONS.append(WRITER_CONTAINMENT_MIGRATION)
 

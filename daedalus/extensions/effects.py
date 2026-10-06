@@ -115,18 +115,7 @@ class EffectDispatcher:
             await self.store.defer(claim, reason="launch admission changed before execution")
             return True
         try:
-            if claim.approval_required:
-                # Withdrawal waits for an admitted physical effect; the final check and write
-                # must share the same fence or revocation can commit between them.
-                async with self.store.db.authority_effect_lock(claim.scope.kind, claim.scope.id):
-                    try:
-                        await self.store.check(claim)
-                    except ControlDenied as exc:
-                        outcome = EffectOutcome("failed", str(exc))
-                    else:
-                        outcome = await self.handlers[claim.kind].run(claim, self.store.check)
-            else:
-                outcome = await self.handlers[claim.kind].run(claim, self.store.check)
+            outcome = await self.handlers[claim.kind].run(claim, self.store.check)
         except asyncio.CancelledError:
             # The process may already have sent an effect. Cancellation is not proof that it did not.
             await asyncio.shield(self.store.finish(claim, state="unknown", error="effect dispatcher stopped; reconcile outcome"))
