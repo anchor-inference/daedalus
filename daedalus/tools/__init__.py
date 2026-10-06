@@ -139,7 +139,9 @@ TOOL_GROUPS: dict[str, ToolGroupSpec] = {
         "lazy",
     ),
     "calendar": ToolGroupSpec(
-        "Read and change the operator's calendar events, including calendars connected to Google, Outlook and Yandex",
+        "The operator's calendar and personal planner: events and recurring series across local, Google, Outlook, "
+        "CalDAV and subscribed calendars (CalendarEvents, CalendarCreate), free time (CalendarFindTime), and their "
+        "own to-do tasks with due dates and time blocks (PlannerTasks, PlannerTaskCreate). Not the agent's Board",
         "lazy",
     ),
     "diagrams": ToolGroupSpec(

@@ -1739,6 +1739,131 @@ INSERT INTO diagram_revisions(diagram_id,version,title,scene_json,saved_at)
 SELECT id,version,title,scene_json,updated_at FROM diagrams;
 """)
 
+# The calendar becomes a planner: calendars with colours and visibility (one local "Personal", one per
+# connected account or subscription), series exceptions, reminders, personal tasks. The accounts table
+# is rebuilt because its provider constraint has to admit generic CalDAV and read-only ICS feeds; a
+# Yandex account becomes a CalDAV account with Yandex's address, since Yandex was only ever a CalDAV
+# server with a fixed host. Google's sync token is dropped: it was taken with singleEvents=true, which
+# returned every occurrence of a series as its own event, and a token is only valid with the query it
+# was issued for, so the next sync reads afresh and the stale per-occurrence rows fall away there.
+# Outlook's delta also delivered every occurrence as an event; nothing stored tells an occurrence from
+# a single event, so its acknowledged rows are dropped with its cursor and the next sync reads them
+# back as series and single events. Rows with a pending local edit stay and are sent as before.
+MIGRATIONS.append(("""
+CREATE TABLE calendar_accounts_rebuilt (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL CHECK (provider IN ('google', 'outlook', 'caldav', 'ics')),
+    name TEXT NOT NULL,
+    credentials_json TEXT NOT NULL,
+    remote_calendar_id TEXT NOT NULL DEFAULT 'primary',
+    cursor TEXT NOT NULL DEFAULT '',
+    last_sync_at TEXT,
+    sync_error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    failures INTEGER NOT NULL DEFAULT 0,
+    next_sync_at TEXT
+);
+INSERT INTO calendar_accounts_rebuilt(id,provider,name,credentials_json,remote_calendar_id,cursor,last_sync_at,sync_error,created_at)
+SELECT id,
+    CASE provider WHEN 'yandex' THEN 'caldav' ELSE provider END,
+    name,
+    CASE provider WHEN 'yandex' THEN json_object('server_url', 'https://caldav.yandex.ru', 'username', json_extract(credentials_json, '$.username'), 'password', json_extract(credentials_json, '$.app_password')) ELSE credentials_json END,
+    remote_calendar_id,
+    CASE provider WHEN 'google' THEN '' WHEN 'outlook' THEN '' ELSE cursor END,
+    last_sync_at, sync_error, created_at
+FROM calendar_accounts;
+DROP TABLE calendar_accounts;
+ALTER TABLE calendar_accounts_rebuilt RENAME TO calendar_accounts;
+DELETE FROM calendar_events WHERE dirty = '' AND account_id IN (SELECT id FROM calendar_accounts WHERE provider = 'outlook');
+
+CREATE TABLE calendars (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '#4f7cff',
+    kind TEXT NOT NULL CHECK (kind IN ('local', 'google', 'outlook', 'caldav', 'ics')),
+    account_id TEXT UNIQUE REFERENCES calendar_accounts(id) ON DELETE CASCADE,
+    visible INTEGER NOT NULL DEFAULT 1,
+    writable INTEGER NOT NULL DEFAULT 1,
+    position INTEGER NOT NULL DEFAULT 0,
+    default_reminders TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL
+);
+INSERT INTO calendars(id,name,color,kind,account_id,visible,writable,position,default_reminders,created_at)
+VALUES (lower(hex(randomblob(16))), 'Personal', '#4f7cff', 'local', NULL, 1, 1, 0, '[10]', strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'));
+INSERT INTO calendars(id,name,color,kind,account_id,visible,writable,position,default_reminders,created_at)
+SELECT lower(hex(randomblob(16))), name,
+    CASE provider WHEN 'google' THEN '#34a853' WHEN 'outlook' THEN '#0078d4' ELSE '#fc3f1d' END,
+    provider, id, 1, 1, 1 + (SELECT count(*) FROM calendar_accounts AS earlier WHERE earlier.created_at < calendar_accounts.created_at), '[]', created_at
+FROM calendar_accounts;
+
+ALTER TABLE calendar_events ADD COLUMN calendar_id TEXT REFERENCES calendars(id) ON DELETE CASCADE;
+ALTER TABLE calendar_events ADD COLUMN color TEXT NOT NULL DEFAULT '';
+ALTER TABLE calendar_events ADD COLUMN reminders TEXT;
+ALTER TABLE calendar_events ADD COLUMN exdates TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE calendar_events ADD COLUMN recurrence_end TEXT;
+ALTER TABLE calendar_events ADD COLUMN series_id TEXT REFERENCES calendar_events(id) ON DELETE CASCADE;
+ALTER TABLE calendar_events ADD COLUMN original_start TEXT;
+ALTER TABLE calendar_events ADD COLUMN cancelled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE calendar_events ADD COLUMN conflict TEXT NOT NULL DEFAULT '';
+UPDATE calendar_events SET calendar_id = COALESCE(
+    (SELECT calendars.id FROM calendars WHERE calendars.account_id = calendar_events.account_id),
+    (SELECT calendars.id FROM calendars WHERE calendars.kind = 'local')
+);
+CREATE INDEX calendar_events_by_calendar ON calendar_events(calendar_id, start_at);
+CREATE INDEX calendar_events_series ON calendar_events(start_at) WHERE recurrence != '';
+CREATE UNIQUE INDEX calendar_events_override ON calendar_events(series_id, original_start) WHERE series_id IS NOT NULL;
+
+CREATE TABLE calendar_remote_instances (
+    account_id TEXT NOT NULL REFERENCES calendar_accounts(id) ON DELETE CASCADE,
+    remote_id TEXT NOT NULL,
+    event_id TEXT NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE,
+    original_start TEXT NOT NULL,
+    PRIMARY KEY (account_id, remote_id)
+);
+CREATE INDEX calendar_remote_instances_event ON calendar_remote_instances(event_id);
+
+CREATE TABLE calendar_reminders_sent (
+    key TEXT PRIMARY KEY,
+    fire_at TEXT NOT NULL,
+    sent_at TEXT NOT NULL
+);
+CREATE INDEX calendar_reminders_sent_at ON calendar_reminders_sent(sent_at);
+
+CREATE TABLE planner_lists (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
+    inbox INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX planner_lists_one_inbox ON planner_lists(inbox) WHERE inbox = 1;
+INSERT INTO planner_lists(id,name,color,position,inbox,created_at)
+VALUES (lower(hex(randomblob(16))), 'Inbox', '', 0, 1, strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'));
+CREATE TABLE planner_tasks (
+    id TEXT PRIMARY KEY,
+    list_id TEXT NOT NULL REFERENCES planner_lists(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    notes TEXT NOT NULL DEFAULT '',
+    due_date TEXT,
+    due_time TEXT,
+    scheduled_start TEXT,
+    scheduled_end TEXT,
+    duration INTEGER,
+    priority INTEGER NOT NULL DEFAULT 0 CHECK (priority BETWEEN 0 AND 3),
+    done_at TEXT,
+    reminders TEXT NOT NULL DEFAULT '[]',
+    recurrence TEXT NOT NULL DEFAULT '',
+    position REAL NOT NULL DEFAULT 0,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX planner_tasks_by_list ON planner_tasks(list_id, position);
+CREATE INDEX planner_tasks_open ON planner_tasks(done_at, due_date);
+CREATE INDEX planner_tasks_scheduled ON planner_tasks(scheduled_start) WHERE scheduled_start IS NOT NULL;
+""", True))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
