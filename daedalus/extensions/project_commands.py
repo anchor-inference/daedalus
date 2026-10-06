@@ -80,9 +80,9 @@ class ProjectCommands:
                        client_operation_id: str, expected_entity_revision: int,
                        name: str | None = None, snapshots: bool | None = None,
                        default_env: str | None = None, keep: bool = False,
-                       setup_command: str | None = None) -> dict[str, Any]:
+                       setup_command: str | None = None, archived: bool | None = None) -> dict[str, Any]:
         payload = {"name": name, "snapshots": snapshots, "default_env": default_env, "keep": keep,
-                   "setup_command": setup_command}
+                   "setup_command": setup_command, "archived": archived}
 
         async def effect(conn: aiosqlite.Connection, _: Mutation) -> dict[str, Any]:
             self.check_env(default_env)
@@ -90,9 +90,25 @@ class ProjectCommands:
                 raise ProjectError("a project runs its agents in the container or on the host")
             if name is not None and not name.strip():
                 raise ProjectError("a project needs a name")
-            current = await one(conn, "SELECT name FROM projects WHERE id = ?", (project_id,))
+            current = await one(conn, "SELECT name,settings FROM projects WHERE id = ?", (project_id,))
             assert current is not None
             settings_patch: dict[str, Any] = {}
+            if archived is not None:
+                try:
+                    stored = json.loads(current["settings"] or "{}")
+                except ValueError:
+                    stored = {}
+                stored = stored if isinstance(stored, dict) else {}
+                # The installation's own projects and a chat's scratch project are not the
+                # operator's to put away: the one is always needed, the other goes with its chat.
+                if archived and (stored.get("system") or stored.get("ephemeral")):
+                    raise ProjectError("only a project of the operator's own can be archived")
+                if bool(stored.get("archived", False)) != archived:
+                    settings_patch["archived"] = archived
+                    await conn.execute(
+                        "INSERT INTO project_journal(project_id,at,author,kind,text,refs_json) VALUES (?,?,'operator','note',?,'{}')",
+                        (project_id, now(), "archived the project" if archived else "restored the project from the archive"),
+                    )
             if snapshots is not None:
                 settings_patch["snapshots"] = snapshots
             if default_env is not None:
@@ -112,8 +128,9 @@ class ProjectCommands:
             )
             return {}
 
+        change = "kept" if keep else "archived" if archived else "restored" if archived is False else "settings"
         return await self._mutate(principal, project_id, "project.settings", client_operation_id,
-                                  expected_entity_revision, payload, effect, "kept" if keep else "settings")
+                                  expected_entity_revision, payload, effect, change)
 
     async def add_folder(self, principal: Principal, project_id: str, *,
                          client_operation_id: str, expected_entity_revision: int,

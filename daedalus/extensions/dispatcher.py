@@ -302,7 +302,7 @@ class Dispatcher:
         if state is not None and state.metadata.get("predecessor") and not state.metadata.get("predecessor_announced"):
             lines.append(f"You replace the main orchestrator session {state.metadata['predecessor']}: {state.metadata.get('predecessor_reason') or 'replaced'}. Progress() shows what it handed over.")
         projects = {p.id: p for p in await self.manager.projects.list()}
-        workable = [p for p in projects.values() if not p.settings.system and not p.settings.ephemeral]
+        workable = [p for p in projects.values() if not p.settings.system and not p.settings.ephemeral and not p.settings.archived]
         lines.append("Projects: " + (" · ".join(f"{p.name}{' (orchestrator on)' if p.settings.orchestrator.enabled else ''}{' (setting up)' if p.setup_by == SETUP_BY else ''}" for p in workable) or "none yet"))
         open_dispatches = await self.manager.dispatches.open_for()
         blocked = [d for d in await self.manager.dispatches.recent(limit=40) if d.status == "blocked"]
@@ -751,6 +751,9 @@ async def op_delegate(d: Dispatcher, session_id: str, *, project: str, text: str
         dispatch = await d.dispatches.follow_up(dispatch, body, files=handed)
         return f"added to dispatch {dispatch.id} (#{dispatch.seq}, {dispatch.status}){carried}; its orchestrator has it now"
     target = await d.find_project(project)
+    if target.settings.archived:
+        # Its coordinator is not woken while it is archived, so the dispatch would sit unread.
+        raise ValueError(f"{target.name} is archived; the operator restores it from the project list before it takes work")
     if not target.settings.orchestrator.enabled:
         if not enable_orchestrator:
             raise ValueError(

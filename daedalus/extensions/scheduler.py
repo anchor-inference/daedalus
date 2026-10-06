@@ -176,12 +176,22 @@ class Scheduler:
             "SELECT * FROM schedules WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?",
             (now.isoformat(),),
         )
+        archived = await self._archived_projects() if rows else set()
         for row in rows:
             if row["id"] in self._active:
                 continue  # a recurring task never runs in parallel with itself
             schedule = dict(row)
             try:
                 if schedule["authority_state"] != "current":
+                    continue
+                if schedule.get("project_id") in archived:
+                    # The occurrence is skipped the way a missed one is, recorded and the clock
+                    # advanced, rather than held: restoring the project must not fire a backlog. A
+                    # skip that is refused is not this schedule's failure and is not counted as one.
+                    try:
+                        await self.app.extensions["recurring"].reserve(row["id"], skip=True)
+                    except Exception:  # noqa: BLE001 — the occurrence stays due and is tried next tick
+                        logger.info("could not skip schedule %s of an archived project", row["id"], exc_info=True)
                     continue
                 due = datetime.fromisoformat(row["next_run_at"])
                 stale = now - due > timedelta(hours=1)
@@ -210,6 +220,13 @@ class Scheduler:
         if self.app.notifications is not None:
             await self.app.notifications.prune(self.app.config.notifications.keep_days)
         await self._maintain_database(now)
+
+    async def _archived_projects(self) -> set[str]:
+        """The projects the operator archived: nothing of theirs fires until they are restored."""
+        rows = await self.app.db.fetchall(
+            "SELECT id FROM projects WHERE json_valid(settings) AND json_extract(settings, '$.archived') = 1"
+        )
+        return {str(r["id"]) for r in rows}
 
     async def _maintain_database(self, now: datetime) -> None:
         """The database's own housekeeping, on the tick that already runs: sweep old events, reclaim

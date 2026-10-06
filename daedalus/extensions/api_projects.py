@@ -137,6 +137,8 @@ class ProjectPatch(MutationBody):
     keep: Literal[True] | None = None
     """Keep a chat's scratch project as a project of its own. There is no way back: an ephemeral
     project is one made implicitly, and nothing the operator does makes one."""
+    archived: bool | None = None
+    """Archive (true) or restore (false): hidden from the lists and never woken, nothing deleted."""
 
 
 class FolderPatch(MutationBody):
@@ -356,7 +358,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                 Principal.operator(who), project_id, client_operation_id=body.client_operation_id,
                 expected_entity_revision=body.expected_entity_revision, name=body.name,
                 snapshots=body.snapshots, default_env=body.default_env, keep=bool(body.keep),
-                setup_command=body.setup_command,
+                setup_command=body.setup_command, archived=body.archived,
             )
         except ControlConflict as exc:
             raise conflict(exc) from exc
