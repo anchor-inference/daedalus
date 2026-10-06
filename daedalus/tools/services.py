@@ -42,6 +42,10 @@ async def service_start(context: ToolContext, name: str, command: str, cwd: str 
     hook = _hook(context)
     if hook is None:
         return error(context, "services are not available")
+    if services_for(context).exec_backend is not None:
+        # A service is a process of this machine, published on its port range; a session whose
+        # commands run on another machine would start it here, in a directory that is not there.
+        return error(context, "services run where Daedalus runs, and this session works on another machine; start the server there with Exec(background=true) and read it with JobOutput")
     try:
         s = await hook("start", session_id=context.session_id, name=name, command=command, cwd=cwd, port=port, restart=restart)
     except (ValueError, RuntimeError, KeyError) as exc:

@@ -96,7 +96,7 @@ async def test_a_project_is_made_with_its_folders_in_order(running: Any, tmp_pat
 
 
 async def test_a_host_folder_needs_the_host_bridge(running: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _, client = running
+    manager, client = running
     (site,) = _dirs(tmp_path, "site")
     environments = (await client.get("/api/project-environments", headers=HEADERS)).json()
     assert environments == {"local": "container", "available": ["container"], "host_bridge": False, "docker": True}
@@ -110,12 +110,16 @@ async def test_a_host_folder_needs_the_host_bridge(running: Any, tmp_path: Path,
     added = await _write(client, "POST", f"/api/projects/{project['id']}/folders", {"path": "/somewhere/on/the/host", "env": "host"})
     assert added.status_code == 200, added.text
     host = added.json()["folders"][1]
-    # Stored and shown, but only what runs in a host terminal can ever work in it.
+    # Stored and shown, and worked in through the host terminal daemon by whatever works there.
     assert host["env"] == "host" and host["reach"] == "terminals" and host["is_git"] is False
     assert (await _write(client, "PATCH", f"/api/projects/{project['id']}", {"default_env": "host"})).json()["settings"]["default_env"] == "host"
 
+    # A native chat works there through the daemon, so the daemon answering is what decides.
     refused = await client.post("/api/sessions", headers=HEADERS, json={"title": "x", "project_id": project["id"], "folder_id": host["id"]})
-    assert refused.status_code == 409 and "host folder" in refused.json()["detail"]
+    assert refused.status_code == 409 and "host terminal daemon is not answering" in refused.json()["detail"]
+    manager.host_bridge = SimpleNamespace(available=lambda: True)
+    started = await client.post("/api/sessions", headers=HEADERS, json={"title": "x", "project_id": project["id"], "folder_id": host["id"]})
+    assert started.status_code == 200, started.text
 
 
 async def test_folders_are_added_locked_and_removed_with_a_journal_of_it(running: Any, tmp_path: Path, db: Database) -> None:

@@ -296,7 +296,7 @@ async def exec_command(
     started = time.monotonic()
     if background:
         if services.exec_backend is not None:
-            return error(context, "background jobs are not available when commands run on another machine; start the process with nohup and redirect its output")
+            return await _start_remote_job(context, services, command, workdir, env)
         if not workdir.exists():
             return error(context, f"working directory does not exist: {workdir}")
         return await _start_job(context, services, command, workdir, env)
@@ -469,8 +469,93 @@ class Job:
         return self.process.returncode is None
 
 
-def _jobs(services: Any) -> dict[str, Job]:
+@dataclass(slots=True)
+class RemoteJob:
+    """A background job on the machine a session drives (the host), run detached by the shell there.
+
+    Nothing of it lives in this process: its status is asked of the other machine each time, from the
+    process id and the file its wrapper writes the exit code into when the command ends.
+    """
+
+    id: str
+    command: str
+    cwd: Path
+    log: Path
+    pid: int
+    started: float
+    backend: Any
+    exit_code: int | None = None
+
+    @property
+    def running(self) -> bool:
+        return self.exit_code is None
+
+    async def refresh(self) -> None:
+        """Ask the other machine whether the job still runs; a finished one keeps its exit code."""
+        if self.exit_code is not None:
+            return
+        done = shlex.quote(f"{self.log}.exit")
+        outcome = await self.backend.run(
+            f"if kill -0 {self.pid} 2>/dev/null; then echo running; elif [ -s {done} ]; then cat {done}; else echo gone; fi",
+            cwd=None, env=None, timeout=30.0,
+        )
+        answer = outcome.output.strip().splitlines()[-1:] if outcome.exit_code == 0 else []
+        if not answer or answer[0] == "running":
+            return
+        # "gone" is a job ended without its wrapper writing the code: killed with the whole group.
+        self.exit_code = int(answer[0]) if answer[0].lstrip("-").isdigit() else -1
+
+    async def kill(self) -> None:
+        """The hangup to the job's group (or to the job alone where it has none), the kill after a grace."""
+        await self.refresh()
+        if not self.running:
+            return
+        pid = self.pid
+        await self.backend.run(
+            f"kill -TERM -- -{pid} 2>/dev/null || kill -TERM {pid} 2>/dev/null; "
+            f"for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 {pid} 2>/dev/null || exit 0; sleep 0.5; done; "
+            f"kill -KILL -- -{pid} 2>/dev/null || kill -KILL {pid} 2>/dev/null; true",
+            cwd=None, env=None, timeout=30.0,
+        )
+        await self.refresh()
+
+    async def tail(self, lines: int) -> str:
+        outcome = await self.backend.run(f"tail -n {max(1, lines)} {shlex.quote(str(self.log))} 2>/dev/null", cwd=None, env=None, timeout=30.0)
+        return outcome.output.rstrip("\n")
+
+
+def _jobs(services: Any) -> dict[str, Any]:
     return services.extra.setdefault("jobs", {})
+
+
+REMOTE_JOB_START = (
+    "mkdir -p {logdir} && "
+    "if command -v setsid >/dev/null 2>&1; then detach=setsid; else detach=; fi; "
+    "$detach nohup bash -c 'bash -c \"$0\"; echo $? > \"$1.exit\"' {command} {log} > {log} 2>&1 < /dev/null & echo $!"
+)
+"""Starts a job on the other machine and prints its process id. ``nohup`` so the end of the one-shot
+call does not take it along, ``setsid`` where there is one (not on macOS) so it leads a process group
+of its own that ``JobKill`` can end whole, and a wrapper that writes the exit code next to the log,
+because nothing on this side is the job's parent and could wait for it."""
+
+
+async def _start_remote_job(context: ToolContext, services: Any, command: str, workdir: Path, env: dict[str, str] | None) -> ToolResult:
+    jobs = _jobs(services)
+    job_id = f"job-{len(jobs) + 1}-{int(time.time() * 1000) % 1000000}"
+    log = services.logs_dir(".jobs") / f"{job_id}.log"
+    backend = services.exec_backend
+    start = REMOTE_JOB_START.format(logdir=shlex.quote(str(log.parent)), command=shlex.quote(command), log=shlex.quote(str(log)))
+    outcome = await backend.run(start, cwd=str(workdir), env=env, timeout=60.0)
+    last = outcome.output.strip().splitlines()[-1:] if outcome.output.strip() else []
+    if outcome.exit_code != 0 or not last or not last[0].isdigit():
+        return error(context, f"the job did not start: {outcome.output.strip() or f'exit code {outcome.exit_code}'}")
+    job = RemoteJob(id=job_id, command=command, cwd=workdir, log=log, pid=int(last[0]), started=time.monotonic(), backend=backend)
+    jobs[job_id] = job
+    await asyncio.sleep(0.3)  # long enough for an immediate failure (a typo, a missing binary) to show up in the answer
+    await job.refresh()
+    head = (await job.tail(40))[:1500]
+    status = f"running (pid {job.pid})" if job.running else f"already exited with code {job.exit_code}"
+    return ok(context, f"{job_id}: {status} on the host; output in {log} (the job outlives a restart of the bot, but JobOutput forgets it; read the log)\n{head}".rstrip(), job_id=job_id, pid=job.pid)
 
 
 async def _start_job(context: ToolContext, services: Any, command: str, workdir: Path, env: dict[str, str] | None) -> ToolResult:
@@ -516,6 +601,11 @@ async def job_output(context: ToolContext, job_id: str, tail_lines: int = 100) -
     job = _jobs(services).get(job_id)
     if job is None:
         return error(context, f"no job {job_id!r}; JobList shows the jobs of this session")
+    if isinstance(job, RemoteJob):
+        await job.refresh()
+        status = "running" if job.running else f"exited with code {job.exit_code}"
+        text = f"{job.id}: {status} after {time.monotonic() - job.started:.0f}s — `{job.command[:200]}`\n{await job.tail(tail_lines)}"
+        return ok(context, clip(text, services.max_tool_output_chars), running=job.running, exit_code=job.exit_code)
     status = "running" if job.running else f"exited with code {job.process.returncode}"
     elapsed = time.monotonic() - job.started
     text = f"{job.id}: {status} after {elapsed:.0f}s — `{job.command[:200]}`\n{_tail(job.log, tail_lines)}"
@@ -532,6 +622,8 @@ async def job_kill(context: ToolContext, job_id: str) -> ToolResult:
     job = _jobs(services).get(job_id)
     if job is None:
         return error(context, f"no job {job_id!r}")
+    if isinstance(job, RemoteJob):
+        return await _kill_remote(context, job)
     if job.running:
         try:
             end_tree(job.process.pid, hard=False)
@@ -548,6 +640,11 @@ async def job_kill(context: ToolContext, job_id: str) -> ToolResult:
     return ok(context, f"{job.id}: exited with code {job.process.returncode}; log in {job.log}", exit_code=job.process.returncode)
 
 
+async def _kill_remote(context: ToolContext, job: RemoteJob) -> ToolResult:
+    await job.kill()
+    return ok(context, f"{job.id}: exited with code {job.exit_code}; log in {job.log}", exit_code=job.exit_code)
+
+
 @search_hint(
     "background jobs list what commands run in background "
     "фоновые джобы фоновые задачи список что крутится в фоне какие команды"
@@ -558,10 +655,17 @@ async def job_list(context: ToolContext) -> ToolResult:
     jobs = _jobs(services)
     if not jobs:
         return ok(context, "no background jobs in this session")
-    lines = [f"- {j.id}: {'running' if j.running else f'exited {j.process.returncode}'}, {time.monotonic() - j.started:.0f}s, `{j.command[:120]}` → {j.log}" for j in jobs.values()]
+    for job in jobs.values():
+        if isinstance(job, RemoteJob):
+            await job.refresh()
+    lines = [f"- {j.id}: {'running' if j.running else f'exited {_code(j)}'}, {time.monotonic() - j.started:.0f}s, `{j.command[:120]}` → {j.log}" for j in jobs.values()]
     return ok(context, "\n".join(lines), count=len(jobs))
+
+
+def _code(job: Job | RemoteJob) -> int | None:
+    return job.exit_code if isinstance(job, RemoteJob) else job.process.returncode
 
 
 TOOLS = [exec_command, job_output, job_kill, job_list]
 
-__all__ = ["TOOLS", "exec_command", "job_kill", "job_list", "job_output"]
+__all__ = ["TOOLS", "RemoteJob", "exec_command", "job_kill", "job_list", "job_output"]
