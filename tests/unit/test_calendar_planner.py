@@ -246,10 +246,15 @@ async def _record(posted, draft):
     posted.append(draft)
 
 
+# The planner's migration, found by what it creates rather than by being the last one: later
+# migrations follow it, and "everything but the last" then stopped short of the wrong one.
+PLANNER = next(index for index, migration in enumerate(MIGRATIONS) if isinstance(migration, tuple) and "CREATE TABLE planner_tasks" in migration[0])
+
+
 @pytest.mark.asyncio
 async def test_migration_backfills_calendars_from_the_previous_schema(tmp_path, monkeypatch):
     path = tmp_path / "old.sqlite"
-    previous = MIGRATIONS[:-1]
+    previous = MIGRATIONS[:PLANNER]
     monkeypatch.setattr(database_module, "MIGRATIONS", previous)
     old = Database(path)
     await old.open()
@@ -453,7 +458,7 @@ async def test_a_moved_occurrence_reminds_again_at_its_new_time(db):
 @pytest.mark.asyncio
 async def test_migration_drops_outlooks_per_occurrence_rows_and_its_cursor(tmp_path, monkeypatch):
     path = tmp_path / "old.sqlite"
-    monkeypatch.setattr(database_module, "MIGRATIONS", MIGRATIONS[:-1])
+    monkeypatch.setattr(database_module, "MIGRATIONS", MIGRATIONS[:PLANNER])
     old = Database(path)
     await old.open()
     try:
