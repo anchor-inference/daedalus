@@ -23,7 +23,7 @@ import type { MenuItem } from "../ui/dialogs";
 import { copyText } from "../ui/components";
 import { changeSummary, clockTime, groupByDay, type RevisionItem } from "../diagram-history";
 import { relTimeLong } from "../format";
-import { DiagramThumb, UI_OPTIONS, download, fileName, exposeView, fitOnOpen, sceneSignature, useExcalidrawLang, useScheme, type Diagram, type Head, type Scene } from "./diagramparts";
+import { DiagramThumb, UI_OPTIONS, download, fileName, exposeView, fitOnOpen, sceneSignature, useCanvasTheme, useExcalidrawLang, type Diagram, type Head, type Scene } from "./diagramparts";
 import "./diagrams.css";
 
 type Status = "saved" | "editing" | "saving" | "offline" | "conflict";
@@ -62,7 +62,7 @@ export function DiagramEditor({ id, sessionId, toast }: { id: string; sessionId:
 function Editor({ initial, listPath, toast }: { initial: Diagram; listPath: string; toast: (message: string) => void }) {
   const id = initial.id;
   const phone = useMedia("(max-width: 680px)");
-  const theme = useScheme();
+  const [theme, setTheme] = useCanvasTheme();
   const langCode = useExcalidrawLang();
   const [title, setTitle] = useState(initial.title);
   const [status, setStatus] = useState<Status>("saved");
@@ -326,6 +326,9 @@ function Editor({ initial, listPath, toast }: { initial: Diagram; listPath: stri
             UIOptions={UI_OPTIONS}
             name={title}
             onChange={(elements, appState, files) => {
+              // The theme is the canvas's own, switched in Excalidraw's menu; the prop is controlled,
+              // so the choice is taken from here and remembered.
+              if (appState.theme && appState.theme !== theme) setTheme(appState.theme);
               const scene = { elements: (elements as any[]).filter((element) => !element.isDeleted), appState: { viewBackgroundColor: appState.viewBackgroundColor, gridSize: appState.gridSize ?? null }, files: files as Record<string, unknown> };
               // Excalidraw calls this while loading the scene and whenever the viewport moves. Neither
               // changes the document, and saving either used to overwrite a newer agent edit.
@@ -347,6 +350,8 @@ function Editor({ initial, listPath, toast }: { initial: Diagram; listPath: stri
               <MainMenu.DefaultItems.Help />
               <MainMenu.DefaultItems.ClearCanvas />
               <MainMenu.Separator />
+              {/* The canvas's own light/dark switch: its theme is the drawing's, not the app's. */}
+              <MainMenu.DefaultItems.ToggleTheme />
               <MainMenu.DefaultItems.ChangeCanvasBackground />
             </MainMenu>
           </Excalidraw>

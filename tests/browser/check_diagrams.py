@@ -4,8 +4,9 @@ What it holds the app to: an open diagram is a focus mode (the app's own column 
 after Back; a phone loses its tab bar), the editor has one bar and no panel beside the canvas, the bar
 fits a phone without spilling, history is a drawer (a sheet on a phone) that restores by posting a
 new revision, sharing and export are a popover and a menu, the agent's edit reaches an open canvas
-without a save of its own, a stale save becomes a clear choice, and the canvas follows the app's theme
-and language. With SHOTS set, the pictures go there.
+without a save of its own, a stale save becomes a clear choice, the canvas has a theme of its own (light
+unless switched in its menu, whatever the app's) and the app's language. With SHOTS set, the pictures
+go there.
 """
 
 from __future__ import annotations
@@ -132,6 +133,7 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
     page.goto(f"{BASE}/diagrams?token=t&lang={lang}&scheme={SCHEME}")
     expect(page.locator(".diagram-card")).to_have_count(3)
     expect(page.locator(".diagram-card .diagram-thumb img").first).to_be_visible()
+    assert page.locator(".diagram-card .diagram-thumb.dark").count() == 0, "the thumbnails took the app's dark theme"
     expect(page.locator(".desktop-context")).to_be_visible()
     shot(page, f"desktop-list-{lang}-{SCHEME}")
     page.locator(".diagram-search input").fill("архит" if ru else "archi")
@@ -155,7 +157,8 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
     canvas_box = page.locator(".diagram-canvas").bounding_box()
     assert canvas_box is not None and canvas_box["x"] <= 60 and canvas_box["width"] >= 1440 - 60, canvas_box
     expect(page.locator(".diagram-status")).to_have_class("diagram-status saved")
-    assert ("theme--dark" in (page.locator(".diagram-canvas .excalidraw").first.get_attribute("class") or "")) == (SCHEME == "dark")
+    # The canvas is light by default whatever the app's scheme: a drawing is a document of its own.
+    assert "theme--dark" not in (page.locator(".diagram-canvas .excalidraw").first.get_attribute("class") or ""), "the canvas took the app's dark theme"
     if ru:
         expect(page.locator('.diagram-canvas [title*="Прямоугольник"]').first).to_be_attached()
     fits(page, ".diagram-bar")
@@ -246,12 +249,24 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
     expect(page.locator(".diagram-status.saved")).to_be_visible(timeout=15000)
     assert stub.diagrams[ids["flow"]]["title"] == "Mine after all"
 
-    # The theme follows the app while the diagram is open.
+    # The app's scheme does not reach the canvas; the canvas's own menu switches it, and the choice
+    # stays with this device (a reload keeps it, the thumbnails follow it).
     flipped = "light" if SCHEME == "dark" else "dark"
     page.evaluate(f"document.documentElement.dataset.scheme = '{flipped}'")
-    dark = "true" if flipped == "dark" else "false"
-    page.wait_for_function(f"() => document.querySelector('.diagram-canvas .excalidraw').classList.contains('theme--dark') === {dark}")
+    page.wait_for_timeout(300)
+    assert not page.evaluate("document.querySelector('.diagram-canvas .excalidraw').classList.contains('theme--dark')"), "the app's scheme changed the canvas"
     page.evaluate(f"document.documentElement.dataset.scheme = '{SCHEME}'")
+    page.locator(".diagram-canvas .main-menu-trigger").click()
+    page.locator(".diagram-canvas [data-testid='toggle-dark-mode']").click()
+    page.wait_for_function("() => document.querySelector('.diagram-canvas .excalidraw').classList.contains('theme--dark')")
+    assert page.evaluate("localStorage.getItem('daedalus.diagrams.theme')") == "dark"
+    page.reload()
+    wait_canvas(page)
+    page.wait_for_function("() => document.querySelector('.diagram-canvas .excalidraw').classList.contains('theme--dark')")
+    page.locator(".diagram-canvas .main-menu-trigger").click()
+    page.locator(".diagram-canvas [data-testid='toggle-dark-mode']").click()
+    page.wait_for_function("() => !document.querySelector('.diagram-canvas .excalidraw').classList.contains('theme--dark')")
+    assert page.evaluate("localStorage.getItem('daedalus.diagrams.theme')") == "light"
 
     # Back leaves focus mode: the column is there again.
     page.get_by_role("button", name="Назад" if ru else "Back").first.click()
@@ -281,6 +296,7 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
     expect(page.locator(".diagram-shared header")).to_contain_text("Архитектура" if ru else "Architecture")
     expect(page.locator(".diagram-shared-made")).to_be_visible()
     expect(page.locator(".diagram-shared .excalidraw")).to_be_visible(timeout=20000)
+    assert "theme--dark" not in (page.locator(".diagram-shared .excalidraw").get_attribute("class") or ""), "the shared canvas took the app's dark theme"
     on_screen(page, ".diagram-shared .diagram-canvas", stub.diagrams[shared]["scene"]["elements"])
     shot(page, f"desktop-shared-{lang}-{SCHEME}")
     context.close()

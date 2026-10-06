@@ -4,15 +4,15 @@ import "@excalidraw/excalidraw/index.css";
 import { api } from "../api";
 import { relTimeLong } from "../format";
 import { t } from "../i18n";
-import { UI_OPTIONS, exposeView, fitOnOpen, useExcalidrawLang, useScheme, type Scene } from "./diagramparts";
+import { UI_OPTIONS, exposeView, fitOnOpen, useCanvasTheme, useExcalidrawLang, type Scene } from "./diagramparts";
 import "./diagrams.css";
 
 type SharedScene = { title: string; version: number; updated_at?: string; scene: Scene };
 
-/** A diagram someone was sent a link to: read-only, in the reader's own theme and language, with no
- *  part of the app around it. */
+/** A diagram someone was sent a link to: read-only, on the canvas's own theme (light unless this
+ *  reader switched it) and in the reader's language, with no part of the app around it. */
 export function SharedDiagram({ token }: { token: string }) {
-  const theme = useScheme();
+  const [theme, setTheme] = useCanvasTheme();
   const langCode = useExcalidrawLang();
   const [diagram, setDiagram] = useState<SharedScene | null>(null);
   const [failed, setFailed] = useState(false);
@@ -44,7 +44,7 @@ export function SharedDiagram({ token }: { token: string }) {
         <span className="diagram-shared-made">{t("diagrams.shared.made")}</span>
       </header>
       <div ref={box} className="diagram-canvas">
-        <Excalidraw excalidrawAPI={(handle) => { fitOnOpen(handle); exposeView(handle, box.current); }} viewModeEnabled theme={theme} langCode={langCode} UIOptions={UI_OPTIONS} initialData={{ elements: diagram.scene.elements as any, appState: { ...diagram.scene.appState, collaborators: new Map() } as any, files: diagram.scene.files as any, scrollToContent: true }} />
+        <Excalidraw excalidrawAPI={(handle) => { fitOnOpen(handle); exposeView(handle, box.current); }} viewModeEnabled theme={theme} onChange={(_elements, appState) => { if (appState.theme && appState.theme !== theme) setTheme(appState.theme); }} langCode={langCode} UIOptions={UI_OPTIONS} initialData={{ elements: diagram.scene.elements as any, appState: { ...diagram.scene.appState, collaborators: new Map() } as any, files: diagram.scene.files as any, scrollToContent: true }} />
       </div>
     </div>
   );

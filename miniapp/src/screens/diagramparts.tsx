@@ -1,5 +1,6 @@
-// Pieces the diagram list, the editor and the shared page have in common: the scene's shape, the app's
-// theme and language as Excalidraw names them, and the thumbnail that loads only once it is in view.
+// Pieces the diagram list, the editor and the shared page have in common: the scene's shape, the
+// canvas's own theme, the app's language as Excalidraw names it, and the thumbnail that loads only once
+// it is in view.
 
 import { useEffect, useRef, useState } from "react";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
@@ -12,18 +13,44 @@ export type DiagramItem = { id: string; title: string; version: number; created_
 export type Diagram = DiagramItem & { scene: Scene; share_token?: string };
 export type Head = { id: string; title: string; version: number; updated_at: string; updated_by: "user" | "agent" };
 
-/** The app's colour scheme, followed live: the appearance settings and Telegram both rewrite it on the
- *  document while a diagram is open, and a light canvas inside a dark app glared like a lamp. */
-export function useScheme(): "light" | "dark" {
-  const read = () => (document.documentElement.dataset.scheme === "light" ? "light" : "dark");
-  const [scheme, setScheme] = useState<"light" | "dark">(read);
+export type CanvasTheme = "light" | "dark";
+const CANVAS_THEME_KEY = "daedalus.diagrams.theme";
+const CANVAS_THEME_EVENT = "daedalus:canvas-theme";
+
+function readCanvasTheme(): CanvasTheme {
+  try {
+    return localStorage.getItem(CANVAS_THEME_KEY) === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
+/** The canvas's own theme: light unless the operator switched it in Excalidraw's menu, and never the
+ *  app's. Following the app made every diagram dark for whoever used the app dark, and a drawing is a
+ *  document with its own colours — a white page, as Excalidraw itself opens. Kept on this device and
+ *  shared by the editor, the history preview, the shared page and the thumbnails. */
+export function useCanvasTheme(): [CanvasTheme, (theme: CanvasTheme) => void] {
+  const [theme, setTheme] = useState<CanvasTheme>(readCanvasTheme);
   useEffect(() => {
-    const observer = new MutationObserver(() => setScheme(read()));
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-scheme"] });
-    setScheme(read());
-    return () => observer.disconnect();
+    const sync = () => setTheme(readCanvasTheme());
+    window.addEventListener(CANVAS_THEME_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(CANVAS_THEME_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
   }, []);
-  return scheme;
+  const choose = (next: CanvasTheme) => {
+    if (next === readCanvasTheme()) return;
+    try {
+      localStorage.setItem(CANVAS_THEME_KEY, next);
+    } catch {
+      /* the choice lasts for this page */
+    }
+    setTheme(next);
+    window.dispatchEvent(new Event(CANVAS_THEME_EVENT));
+  };
+  return [theme, choose];
 }
 
 /** The app's language as Excalidraw's locale table names it. */
@@ -33,10 +60,10 @@ export function useExcalidrawLang(): string {
 }
 
 /** The Excalidraw options every canvas here shares. Loading, saving and exporting are the app's own
- *  (the bar above the canvas does them with the diagram's name and version), and the theme follows
- *  the app rather than a toggle of its own that the next page would not know about. */
+ *  (the bar above the canvas does them with the diagram's name and version). The theme is the
+ *  canvas's own, switched in Excalidraw's menu and remembered by useCanvasTheme. */
 export const UI_OPTIONS = {
-  canvasActions: { loadScene: false, saveToActiveFile: false, export: false as const, saveAsImage: false, toggleTheme: false, clearCanvas: true, changeViewBackgroundColor: true },
+  canvasActions: { loadScene: false, saveToActiveFile: false, export: false as const, saveAsImage: false, toggleTheme: true, clearCanvas: true, changeViewBackgroundColor: true },
 };
 
 /** What makes a scene a different document. Excalidraw rewrites bookkeeping on every redraw, and a
@@ -64,6 +91,7 @@ export function DiagramThumb({ path, version, className }: { path: string; versi
   const key = `${path}@${version}`;
   const [svg, setSvg] = useState<string | null>(previews.get(key) ?? null);
   const box = useRef<HTMLDivElement>(null);
+  const [theme] = useCanvasTheme();
   useEffect(() => {
     if (previews.has(key)) {
       setSvg(previews.get(key) ?? "");
@@ -92,7 +120,7 @@ export function DiagramThumb({ path, version, className }: { path: string; versi
     return () => { active = false; observer.disconnect(); };
   }, [key, path]);
   return (
-    <div ref={box} className={`diagram-thumb ${className ?? ""}`} aria-hidden="true">
+    <div ref={box} className={`diagram-thumb ${theme} ${className ?? ""}`} aria-hidden="true">
       {svg ? <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`} alt="" draggable={false} /> : svg === "" ? <Icon name="pen" size={20} /> : <span className="diagram-thumb-wait" />}
     </div>
   );
