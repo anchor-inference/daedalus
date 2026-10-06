@@ -787,3 +787,33 @@ async def test_a_range_diff_takes_only_commit_ids_that_exist(settings: Settings,
         assert same.commits == 0 and same.files == [] and same.patch == ""
     finally:
         await r.close()
+
+
+async def test_the_card_says_how_far_the_base_moved_without_fetching(settings: Settings, db: Database,
+                                                                      tmp_path: Path) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        member = await r.hire()
+        task_id, _request = await r.reviewed(member, "Menu", {"menu.md": "bread\n"}, ci=False)
+        fork = git(r.folder, "rev-parse", "main").strip()
+        fresh = (await r.review.review(task_id))["freshness"]
+        assert fresh == {"base_sha": fork, "base": "main", "behind": 0, "upstream": "", "upstream_behind": None}
+
+        for name in ("one", "two"):
+            (r.folder / f"{name}.md").write_text(name + "\n")
+            git(r.folder, "add", "-A")
+            git(r.folder, "commit", "-qm", name)
+        # An upstream as the operator's last fetch left it: one commit past the fork, no network.
+        git(r.folder, "update-ref", "refs/remotes/origin/main", git(r.folder, "rev-parse", "main~1").strip())
+        git(r.folder, "remote", "add", "origin", str(tmp_path / "nowhere"))
+        git(r.folder, "config", "branch.main.remote", "origin")
+        git(r.folder, "config", "branch.main.merge", "refs/heads/main")
+        fresh = (await r.review.review(task_id))["freshness"]
+        assert fresh == {"base_sha": fork, "base": "main", "behind": 2, "upstream": "origin/main", "upstream_behind": 1}
+
+        # A tracking branch configured and never fetched names its upstream and cannot count it.
+        git(r.folder, "update-ref", "-d", "refs/remotes/origin/main")
+        fresh = (await r.review.review(task_id))["freshness"]
+        assert fresh["upstream"] == "origin/main" and fresh["upstream_behind"] is None and fresh["behind"] == 2
+    finally:
+        await r.close()

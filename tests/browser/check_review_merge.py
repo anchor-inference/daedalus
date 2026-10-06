@@ -3,7 +3,8 @@
 What is checked is what the operator relies on: a branch review opens its changes and recorded
 checks; a merge requires the exact result, verdict and current branch, and queues only once. A dirty
 or conflicting folder blocks it; a result may be returned with a note. A task without a branch has
-no merge action. A reworked task's diff can show only what the rework changed.
+no merge action. A reworked task's diff can show only what the rework changed, and the card says
+how far the base branch moved on.
 Nothing scrolls sideways at 390 px, and the buttons are big enough to tap.
 """
 
@@ -118,6 +119,7 @@ def desktop(page: Page, lang: str) -> None:
     expect(diff.locator(".diff-line.diff-add").first).to_contain_text("if order.paid")
     # A first result has nothing earlier to compare with, so the diff offers no second view.
     expect(diff.locator(".review-diff-scope")).to_have_count(0)
+    expect(panel.locator(".review-base")).to_have_count(0)
     page.keyboard.press("Escape")
     expect(diff).to_have_count(0)
 
@@ -179,13 +181,15 @@ def merging(page: Page, lang: str, *, phone: bool) -> None:
 
 
 def reworked(page: Page, lang: str, *, phone: bool) -> None:
-    """A returned and redone task: the diff can show only what the rework changed."""
+    """A returned and redone task: the diff can show only what the rework changed, and the card says
+    the base moved on since the work was cut."""
     words = WORDS[lang]
     focus = FocusStub.bakery(lang)
     reviewed_result(focus)
     task = endpoint(focus)
     review = BoardStub.review(task)
     review["previous_result"] = {"id": "res-first", "head_sha": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b", "at": "2026-09-24T09:10:00Z"}
+    review["freshness"] = {"base_sha": "7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b", "base": "main", "behind": 3, "upstream": "origin/main", "upstream_behind": 5}
     focus.board.reviews[task["id"]] = review
     focus.board.since_previous[task["id"]] = {
         "task_id": task["id"], "previous_result": review["previous_result"],
@@ -197,6 +201,10 @@ def reworked(page: Page, lang: str, *, phone: bool) -> None:
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}&task=t-endpoint")
     panel = page.locator(".sheet.pboard-sheet .review-panel")
     expect(panel).to_be_visible()
+    base = panel.locator(".review-base")
+    expect(base).to_contain_text("7c6b5a4")
+    expect(base).to_contain_text("3 commits behind main" if lang == "en" else "main впереди на 3 коммита")
+    expect(base).to_contain_text("origin/main")
     panel.get_by_role("button", name=words["diff"]).click()
     diff = page.locator(".sheet.review-diff")
     scope = diff.locator(".review-diff-scope button")

@@ -136,6 +136,17 @@ class Review:
                 "commits": diff.commits, "files": [{"path": f.path, "added": f.added, "removed": f.removed} for f in diff.files],
                 "added": diff.added, "removed": diff.removed, "patch": diff.patch, "patch_complete": diff.patch_complete}
 
+    async def _freshness(self, folder: ProjectFolder, branch: str, base: str) -> dict[str, Any] | None:
+        """How far the base branch moved since the work was cut, or ``None`` when git cannot say."""
+        try:
+            fresh = await self.team.worktrees.freshness(folder, branch, base)
+        except (WorktreeError, OSError):
+            return None
+        if fresh is None:
+            return None
+        return {"base_sha": fresh.base_sha, "base": fresh.base, "behind": fresh.behind,
+                "upstream": fresh.upstream, "upstream_behind": fresh.upstream_behind}
+
     @staticmethod
     def blockers(task: dict[str, Any], comparison: BranchComparison, base: str,
                  *, comparison_member: bool = False) -> list[dict[str, str]]:
@@ -211,6 +222,8 @@ class Review:
                 if await unresolved_review_comments(conn, result["id"]):
                     blockers.append({"code": "comments", "text": "blocking review comments remain unresolved"})
         previous = await self._previous_result(task_id, head_sha) if member is None else None
+        freshness = await self._freshness(folder, branch, base or comparison.current) \
+            if comparison.exists and not comparison.merged else None
         return {
             "task_id": task["id"],
             "comparison_group_id": member["group_id"] if member is not None else None,
@@ -247,6 +260,7 @@ class Review:
             "conflicts": comparison.conflicts,
             "receipts": await self._receipts(task["id"]),
             "previous_result": previous,
+            "freshness": freshness,
             "can_merge": member is None and not blockers,
             "can_choose": member is not None and not blockers,
             "blockers": blockers,

@@ -28,6 +28,16 @@ export function blockerText(blocker: ReviewBlocker, review: Pick<Review, "curren
   return t(`pboard.review.block.${blocker.code}`, { current: review.current, base: review.base, files: (review.conflicts ?? []).slice(0, 3).join(", ") });
 }
 
+/** One plain line when the base branch moved on after the work was cut; nothing while it has not. */
+export function freshnessText(freshness: Review["freshness"]): string {
+  if (!freshness) return "";
+  const parts = [];
+  if (freshness.behind > 0) parts.push(plural("pboard.review.base.behind", freshness.behind, { base: freshness.base }));
+  if (freshness.upstream && freshness.upstream_behind) parts.push(plural("pboard.review.base.upstream", freshness.upstream_behind, { upstream: freshness.upstream }));
+  if (!parts.length) return "";
+  return [t("pboard.review.base.on", { sha: freshness.base_sha.slice(0, 7) }), ...parts].join(" · ");
+}
+
 /** The change the latest attempt made, fetched only when the operator picks it: most reviews never ask. */
 function SinceDiff({ taskId, head, onLine }: { taskId: string; head: string; onLine: (anchor: { path: string; line: number }) => void }) {
   const { data, error, loading, refresh } = useQuery<ReviewSince>(sinceKey(taskId, head), { staleMs: 2000 });
@@ -135,6 +145,7 @@ export function ReviewPanel({ taskId, onChanged, toast }: { taskId: string; onCh
         <code className="pcard-branch truncate" title={data.branch}>{data.branch}</code>
         <span className="sub nowrap">→ {data.current || data.base}</span>
       </div>
+      {freshnessText(data.freshness) && <div className="sub review-base" title={data.freshness?.base_sha}>{freshnessText(data.freshness)}</div>}
       <div className="review-stat">
         <span className="tk-add num">+{data.added}</span> <span className="tk-del num">−{data.removed}</span>
         <span className="sub"> · {plural("pboard.review.files", data.files.length)} · {plural("pboard.review.commits", data.commits.length)}{data.more_commits ? "+" : ""}</span>

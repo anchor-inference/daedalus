@@ -272,6 +272,8 @@ export type Review = {
   receipts: ReviewReceipt[];
   /** The newest result handed in at a head other than the branch's head now; null when there is none. */
   previous_result?: { id: string; head_sha: string; at: string } | null;
+  /** The fork point and how far the base branch, and its tracking ref as last fetched, have moved past it. */
+  freshness?: { base_sha: string; base: string; behind: number; upstream: string; upstream_behind: number | null } | null;
   ci_status: "passed" | "blocked" | "not_required";
   ci_checks: { provider: string; repository_id: string; check_name: string; head_sha: string | null; state: string; delivery_id: string | null }[];
   can_merge: boolean;

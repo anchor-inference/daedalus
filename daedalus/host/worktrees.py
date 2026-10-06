@@ -196,6 +196,21 @@ class RangeDiff:
 
 
 @dataclass(frozen=True, slots=True)
+class BaseFreshness:
+    """Where a branch's work starts and how far the branch it was cut from has gone on since."""
+
+    base_sha: str
+    """The fork point: the newest commit the branch shares with its base branch."""
+    base: str
+    behind: int
+    """Commits on the base branch after the fork point."""
+    upstream: str
+    """The base branch's tracking ref as the folder last fetched it; empty when it tracks nothing."""
+    upstream_behind: int | None
+    """Commits on that tracking ref after the fork point; ``None`` when there is no such ref locally."""
+
+
+@dataclass(frozen=True, slots=True)
 class WorktreeEntry:
     """One staff worktree of a folder as git and the disk describe it, for the operator's list."""
 
@@ -791,6 +806,34 @@ class StaffWorktrees:
         count = int((await git.run(["rev-list", "--count", f"{since}..{until}"], cwd=where)).strip() or 0)
         files, patch, complete = await self._bounded_patch(git, where, f"{since}..{until}", max_files=max_files, max_lines=max_lines, max_chars=max_chars)
         return RangeDiff(since, until, count, files, patch, complete)
+
+    async def freshness(self, folder: ProjectFolder, branch: str, base: str) -> BaseFreshness | None:
+        """How far ``base`` and its tracking ref have moved past the point ``branch`` was cut from.
+
+        Read from the refs the folder already has: nothing is fetched, so the upstream figure is as old
+        as the operator's last fetch, and that is said rather than paid for with a network call on every
+        card. ``None`` when the base cannot be resolved here (a deleted branch, a detached base that is
+        gone) — the card then simply says nothing."""
+        git = self._git(folder.env)
+        where = folder.path
+        base_ref = base if _COMMIT_ID.fullmatch(base) else f"refs/heads/{base}"
+        try:
+            fork = (await git.run(["merge-base", f"refs/heads/{branch}", base_ref], cwd=where)).strip()
+            behind = int((await git.run(["rev-list", "--count", f"{fork}..{base_ref}"], cwd=where)).strip() or 0)
+        except GitError:
+            return None
+        upstream, upstream_behind = "", None
+        if not _COMMIT_ID.fullmatch(base):
+            # for-each-ref answers an empty line, not an error, for a branch that tracks nothing.
+            tracking = (await git.run(["for-each-ref", "--format=%(upstream)", f"refs/heads/{base}"], cwd=where)).strip()
+            if tracking:
+                upstream = tracking.removeprefix("refs/remotes/")
+                try:
+                    upstream_behind = int((await git.run(["rev-list", "--count", f"{fork}..{tracking}"], cwd=where)).strip() or 0)
+                except GitError:
+                    # Configured but never fetched: the ref is named and absent.
+                    upstream_behind = None
+        return BaseFreshness(fork, base, behind, upstream, upstream_behind)
 
     async def merge(self, folder: ProjectFolder, branch: str, *, message: str = "",
                     expected_head: str | None = None, expected_branch_tip: str | None = None,
