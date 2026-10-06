@@ -33,7 +33,7 @@ def main() -> int:
                 serve(page, focus)
                 page.goto(f"{BASE}/orchestration/project/{PROJECT}?token=t&lang={lang}")
                 bar = page.locator("nav.project-tabs")
-                expect(bar.locator("a")).to_have_count(3)
+                expect(bar.locator(":scope > a, :scope > button")).to_have_count(5)
                 # Waiting questions take the goal line's place above the composer; with none, the goal line is there.
                 expect(page.locator(".goal-headline, .questions-line-text").first).to_be_visible()
                 send = page.locator(".composer [data-action='send']")
@@ -59,7 +59,8 @@ def main() -> int:
                 expect(page.locator(".composer textarea")).to_have_value("Keep this draft until I send it")
                 expect(page.locator(".composer .attachments")).to_contain_text("evidence.txt")
 
-                bar.locator("a[data-tab='attention']").click()
+                bar.locator("button[data-tab='more']").click()
+                page.locator(".sheet.more-sheet .more-item[data-more='attention']").click()
                 expect(page.locator(".focus-attention-item")).not_to_have_count(0)
                 expect(page.locator(".focus-attention-item .ask-answers-row .btn").first).to_be_visible()
                 expect(page.locator(".focus-attention-item")).to_have_count(3)
@@ -68,7 +69,8 @@ def main() -> int:
                 expect(blocked.get_by_role("button", name="Open task" if lang == "en" else "Открыть задачу")).to_be_visible()
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (lang, width, "attention overflow")
 
-                bar.locator("a[data-tab='journal']").click()
+                bar.locator("button[data-tab='more']").click()
+                page.locator(".sheet.more-sheet .more-item[data-more='journal']").click()
                 expect(page.locator(".journal-entry")).not_to_have_count(0)
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (lang, width, "history overflow")
                 context.close()

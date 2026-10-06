@@ -1,5 +1,5 @@
-// A project on a phone: four tabs at the bottom instead of the app's own (the orchestrator, the team,
-// the board, the terminals), a header with the project and how its work goes, and a banner with the
+// A project on a phone: four tabs at the bottom instead of the app's own (the orchestrator, the board,
+// the team, the terminals) and a More whose sheet holds the project's other pages, a header with the project and how its work goes, and a banner with the
 // request that has waited longest for the operator, answered with one tap and no need to open a
 // conversation or a terminal. `phoneTab` in focus.ts decides where the bar shows; App.tsx draws it.
 //
@@ -9,14 +9,14 @@
 import { FormEvent, ReactNode, useId, useMemo, useState } from "react";
 import { api, ApiError, type Ask, type StaffSessionView, type TerminalEnvName, type TerminalView as TerminalRow } from "../api";
 import { Skeleton } from "../ui/components";
-import { MenuItem, OverflowMenu, toast } from "../ui/dialogs";
+import { Sheet, toast } from "../ui/dialogs";
 import { useEvent, useStreamUp } from "../events";
 import { relTime } from "../format";
 import { plural, t } from "../i18n";
 import { EnvPill } from "../envpill";
 import { Icon, type IconName } from "../icons";
 import { go, PageHeader } from "../shell";
-import { ORCHESTRATION_LIST, navigate, pathFor, projectHome, projectPagePath, projectSessionPath, projectStaffPath } from "../router";
+import { ORCHESTRATION_LIST, navigate, pathFor, useRoute, projectHome, projectPagePath, projectSessionPath, projectStaffPath } from "../router";
 import { alwaysServer, answeredBy, askWords, canAlways, composerWhen, nowChoice } from "../staff/model";
 import { HealthLine } from "../staff/health";
 import { invalidate, useOffline, useQuery } from "../store";
@@ -24,12 +24,13 @@ import { PhoneTerminal, type PhoneTerminalProps } from "../terminal/mobile";
 import { TerminalRowMenu } from "../terminal/rowmenu";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { StaffSheet } from "../team/StaffSheet";
+import { ProjectSettingsSheet } from "../projects";
 import { Setups } from "../team/setups";
 import type { Staff, Team } from "../team/team";
 import type { ProjectBoardData } from "../board/board";
 import { errorText } from "../ui";
 import { boardKey, staffKey, terminalsKey, useProject, useUsage } from "./data";
-import { firstWait, oldestOpen, PHONE_TABS, type PhoneTab, splitTeam, staffTone, teamCounts, waitKey } from "./focus";
+import { firstWait, oldestOpen, PHONE_MORE, PHONE_TABS, type PhoneMorePage, type PhoneTab, splitTeam, staffTone, teamCounts, waitKey } from "./focus";
 import { useMember } from "./staff";
 import { spendLine, staffUsage } from "./usage";
 import { budgetCompact, useGoalBudget } from "./ProjectBudget";
@@ -50,7 +51,11 @@ function useTeamAndBoard(projectId: string): { team: Team | null; board: Project
   };
 }
 
-const TAB_ICONS: Record<PhoneTab, IconName> = { orchestrator: "conductor", attention: "alert", journal: "journal" };
+const TAB_ICONS: Record<PhoneTab, IconName> = { orchestrator: "conductor", board: "board", team: "bots", terminals: "terminal" };
+const MORE_ICONS: Record<PhoneMorePage, IconName> = { attention: "alert", journal: "journal", brief: "pen", wakeups: "clock", folders: "folder" };
+// The decisions and the history keep the names the desktop column gives them; the rest are named as
+// their pages are.
+const MORE_LABELS: Record<PhoneMorePage, string> = { attention: "focus.nav.attention", journal: "focus.nav.journal", brief: "focus.page.brief", wakeups: "focus.page.wakeups", folders: "focus.page.folders" };
 
 function tabPath(projectId: string, tab: PhoneTab): string {
   return tab === "orchestrator" ? projectHome(projectId) : projectPagePath(projectId, tab);
@@ -71,42 +76,88 @@ export function useOperatorAsks(projectId: string) {
 
 // ── the tab bar ──────────────────────────────────────────────────────────────────────────────
 
-/** The project's tabs, in the place of the app's. The team's tab carries how many requests wait. */
-export function ProjectTabs({ projectId, current }: { projectId: string; current: PhoneTab | null }) {
-  const { openAsks, unverified: asksUnverified } = useOperatorAsks(projectId);
+/** The project's tabs, in the place of the app's, and "More" for its other pages. The team's tab
+ *  carries how many requests wait; More carries how many decisions wait, because the page that lists
+ *  them sits in its sheet, and a count nobody can see from the bar is a decision nobody makes. */
+export function ProjectTabs({ projectId, current }: { projectId: string; current: PhoneTab | "more" | null }) {
+  const { waiting, openAsks, unverified: asksUnverified } = useOperatorAsks(projectId);
   const live = useStreamUp();
   const offline = useOffline();
+  const [moreOpen, setMoreOpen] = useState(false);
   const board = useQuery<ProjectBoardData>(boardKey(projectId), { pollMs: live ? 60000 : 15000, staleMs: 3000 });
   const next = useQuery<{ actions: NextAction[] }>(`/api/projects/${enc(projectId)}/next-actions`, { pollMs: live ? 60000 : 15000, staleMs: 3000 });
   const budget = useGoalBudget(projectId);
   const countKnown = !offline && !asksUnverified && !!board.data && !board.error
     && !!next.data && !next.error && !!budget.data && !budget.error;
   const decisions = operatorAttentionCount(openAsks, board.data?.tasks ?? [], next.data?.actions ?? [], budget.data);
+  // A count that cannot be confirmed shows as "?" rather than vanishing: no badge would read as
+  // "nothing waits", which is the one thing it cannot say.
+  const badge = countKnown ? (decisions > 0 ? (decisions > 99 ? "99+" : String(decisions)) : null) : "?";
+  const unknown = countKnown ? undefined : t("focus.attention.countUnknown");
   return (
-    <nav className="tabbar project-tabs" aria-label={t("phone.tabs")}>
-      {PHONE_TABS.map((tab) => {
-        const href = tabPath(projectId, tab);
-        return (
-          <a key={tab} href={href} data-tab={tab} className={current === tab ? "active" : ""} aria-current={current === tab ? "page" : undefined} onClick={(e) => go(e, href)}>
-            <span className="glyph">
-              <Icon name={TAB_ICONS[tab]} size={22} />
-          {tab === "attention" && (countKnown ? decisions > 0 : true) && <span className="tab-badge"
-            title={countKnown ? undefined : t("focus.attention.countUnknown")}
-            aria-label={countKnown ? undefined : t("focus.attention.countUnknown")}>{countKnown ? (decisions > 99 ? "99+" : decisions) : "?"}</span>}
-            </span>
-            {t(`focus.nav.${tab}`)}
-          </a>
-        );
-      })}
-    </nav>
+    <>
+      <nav className="tabbar five project-tabs" aria-label={t("phone.tabs")}>
+        {PHONE_TABS.map((tab) => {
+          const href = tabPath(projectId, tab);
+          return (
+            <a key={tab} href={href} data-tab={tab} className={current === tab && !moreOpen ? "active" : ""} aria-current={current === tab ? "page" : undefined} onClick={(e) => go(e, href)}>
+              <span className="glyph">
+                <Icon name={TAB_ICONS[tab]} size={22} />
+                {tab === "team" && waiting > 0 && <span className="tab-badge">{waiting > 99 ? "99+" : waiting}</span>}
+              </span>
+              <span className="tab-label">{t(`phone.tab.${tab}`)}</span>
+            </a>
+          );
+        })}
+        <button data-tab="more" className={current === "more" || moreOpen ? "active" : ""} onClick={() => setMoreOpen((open) => !open)} aria-haspopup="dialog" aria-expanded={moreOpen}>
+          <span className="glyph">
+            <Icon name="more" size={22} />
+            {badge && <span className="tab-badge" title={unknown} aria-label={unknown ?? plural("phone.more.decisions", decisions)}>{badge}</span>}
+          </span>
+          <span className="tab-label">{t("nav.more")}</span>
+        </button>
+      </nav>
+      {moreOpen && <ProjectMoreSheet projectId={projectId} current={current === "more"} badge={badge} unknown={unknown} onClose={() => setMoreOpen(false)} />}
+    </>
+  );
+}
+
+/** The project's other pages on a phone, in the sheet the app's own More opens and drawn the same
+ *  way, with the project's settings and the way back to every project after them. */
+function ProjectMoreSheet({ projectId, current, badge, unknown, onClose }: { projectId: string; current: boolean; badge: string | null; unknown?: string; onClose: () => void }) {
+  const { project } = useProject(projectId);
+  const route = useRoute();
+  const [settings, setSettings] = useState(false);
+  const here = current ? route.page : null;
+  if (settings && project) return <ProjectSettingsSheet project={project} onClose={onClose} onRemoved={() => { onClose(); navigate(ORCHESTRATION_LIST); }} toast={toast} />;
+  const item = (key: string, href: string, icon: IconName, label: string, active: boolean, count?: ReactNode) => (
+    <a key={key} href={href} data-more={key} className={`more-item ${active ? "active" : ""}`} onClick={(e) => { go(e, href); onClose(); }}>
+      <Icon name={icon} size={22} />
+      <span>{label}</span>
+      {count}
+    </a>
+  );
+  return (
+    <Sheet onClose={onClose} size="narrow" className="more-sheet" title={t("nav.more")}>
+      <div className="more-grid">
+        {PHONE_MORE.map((page) => item(page, projectPagePath(projectId, page), MORE_ICONS[page], t(MORE_LABELS[page]), here === page,
+          page === "attention" && badge ? <span className="tab-badge" title={unknown} aria-label={unknown}>{badge}</span> : undefined))}
+        <button type="button" data-more="settings" className="more-item" disabled={!project} onClick={() => setSettings(true)}>
+          <Icon name="settings" size={22} />
+          <span>{t("phone.more.settings")}</span>
+        </button>
+        {item("projects", ORCHESTRATION_LIST, "back", t("focus.all"), false)}
+      </div>
+    </Sheet>
   );
 }
 
 // ── the header ───────────────────────────────────────────────────────────────────────────────
 
-/** The project's header on a phone: back to orchestration's list of projects, its name and how the work goes, the
- *  environment it runs in, and its other pages behind a menu. */
-export function ProjectPhoneHead({ projectId, title, subtitle, actions, extra }: { projectId: string; title?: string; subtitle?: string; actions?: ReactNode; extra?: MenuItem[] }) {
+/** The project's header on a phone: back to orchestration's list of projects, its name and how the
+ *  work goes, and the environment it runs in. Its other pages are in the bar's "More" sheet, not in a
+ *  menu here: two menus listing the same pages left the operator guessing which one to open. */
+export function ProjectPhoneHead({ projectId, title, subtitle, actions }: { projectId: string; title?: string; subtitle?: string; actions?: ReactNode }) {
   const { project } = useProject(projectId);
   const { data: budget } = useGoalBudget(projectId);
   const remaining = budgetCompact(budget);
@@ -114,17 +165,6 @@ export function ProjectPhoneHead({ projectId, title, subtitle, actions, extra }:
   const counts = teamCounts(team?.staff ?? [], board?.tasks ?? []);
   const env: TerminalEnvName = project?.settings.default_env ?? project?.folders[0]?.env ?? "container";
   const line = [plural("phone.working", counts.working), counts.review ? plural("phone.review", counts.review) : ""].filter(Boolean).join(" · ");
-  const pages: MenuItem[] = [
-    ...(extra ?? []),
-    ...(extra?.length ? ["-" as const] : []),
-    { label: t("focus.page.brief"), icon: "pen", onSelect: () => navigate(projectPagePath(projectId, "brief")) },
-    { label: t("focus.page.journal"), icon: "journal", onSelect: () => navigate(projectPagePath(projectId, "journal")) },
-    { label: t("focus.page.wakeups"), icon: "clock", onSelect: () => navigate(projectPagePath(projectId, "wakeups")) },
-    { label: t("focus.page.folders"), icon: "folder", onSelect: () => navigate(projectPagePath(projectId, "folders")) },
-    { label: t("focus.page.team"), icon: "bots", onSelect: () => navigate(projectPagePath(projectId, "team")) },
-    { label: t("focus.page.board"), icon: "board", onSelect: () => navigate(projectPagePath(projectId, "board")) },
-    { label: t("focus.page.terminals"), icon: "terminal", onSelect: () => navigate(projectPagePath(projectId, "terminals")) },
-  ];
   return (
     <PageHeader
       title={title ?? project?.name ?? "…"}
@@ -135,7 +175,6 @@ export function ProjectPhoneHead({ projectId, title, subtitle, actions, extra }:
           {actions}
           {remaining && <span className="chip tiny project-budget-chip" title={`${remaining} · ${t("budget.summaryHint")}`}>{remaining}</span>}
           {project && <EnvPill env={env} tiny />}
-          <OverflowMenu items={pages} label={t("phone.pages")} />
         </>
       }
     />

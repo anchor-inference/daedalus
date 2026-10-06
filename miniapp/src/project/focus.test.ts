@@ -8,7 +8,7 @@ import { parse, projectHome, projectPagePath, projectSessionPath } from "../rout
 import { eventTone, parseEvents, systemNote } from "../turns";
 import type { Ask } from "../api";
 import type { Staff } from "../team/team";
-import { canFocus, firstWait, focusView, isChat, oldestOpen, operatorReviewReady, PHONE_TABS, phoneTab, splitTeam, staffTone, stepDetail, stepKey, STEP_KEYS, teamCounts, waitKey } from "./focus";
+import { canFocus, firstWait, FOCUS_PAGES, focusView, isChat, oldestOpen, operatorReviewReady, PHONE_MORE, PHONE_TABS, phoneTab, splitTeam, staffTone, stepDetail, stepKey, STEP_KEYS, teamCounts, waitKey } from "./focus";
 
 function member(over: Partial<Staff> = {}): Pick<Staff, "status" | "queued" | "one_off" | "archived_at"> {
   return { status: "off", queued: [], one_off: false, archived_at: null, ...over };
@@ -191,16 +191,21 @@ describe("a project on a phone", () => {
     expect(operatorReviewReady({ status: "doing", acceptance_state: "accepted" })).toBe(false);
     expect(operatorReviewReady({ status: "review" })).toBe(false);
   });
-  it("lights the tab of the route, keeps the bar on the other pages, and gives a session the whole height", () => {
+  it("lights the tab of the route, lights More for a page inside it, and gives a session the whole height", () => {
     expect(phoneTab(focusView(null, null))).toEqual({ tab: "orchestrator", bar: true });
-    expect(phoneTab(focusView("team", null))).toEqual({ tab: null, bar: true });
-    expect(phoneTab(focusView("board", null))).toEqual({ tab: null, bar: true });
-    expect(phoneTab(focusView("terminals", null))).toEqual({ tab: null, bar: true });
-    expect(phoneTab(focusView("attention", null))).toEqual({ tab: "attention", bar: true });
-    expect(phoneTab(focusView("journal", null))).toEqual({ tab: "journal", bar: true });
-    expect(phoneTab(focusView("brief", null))).toEqual({ tab: null, bar: true });
+    expect(phoneTab(focusView("team", null))).toEqual({ tab: "team", bar: true });
+    expect(phoneTab(focusView("board", null))).toEqual({ tab: "board", bar: true });
+    expect(phoneTab(focusView("terminals", null))).toEqual({ tab: "terminals", bar: true });
+    for (const page of ["attention", "journal", "brief", "wakeups", "folders"]) expect(phoneTab(focusView(page, null))).toEqual({ tab: "more", bar: true });
     expect(phoneTab(focusView("s", "sess-lev"))).toEqual({ tab: null, bar: false });
-    expect(PHONE_TABS).toEqual(["orchestrator", "attention", "journal"]);
+    expect(phoneTab(focusView("staff", "st-ira"))).toEqual({ tab: null, bar: false });
+    expect(PHONE_TABS).toEqual(["orchestrator", "board", "team", "terminals"]);
+  });
+
+  it("reaches every page of a project from the bar or its More sheet, each from one place", () => {
+    const reached = [...PHONE_TABS.filter((tab) => tab !== "orchestrator"), ...PHONE_MORE];
+    expect([...reached].sort()).toEqual([...FOCUS_PAGES].sort());
+    expect(new Set(reached).size).toBe(reached.length);
   });
 
   it("puts the operator's longest-waiting open request in the banner, and counts the rest", () => {
