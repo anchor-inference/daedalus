@@ -21,7 +21,7 @@ func quietLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, n
 
 func TestExecRefusesWhatIsNotAllowed(t *testing.T) {
 	e := NewExec(nil, os.Environ(), t.TempDir(), quietLog())
-	for _, argv := range [][]string{{"sh", "-c", "true"}, {"/bin/sh", "-c", "true"}, {"bash"}} {
+	for _, argv := range [][]string{{"sh", "-c", "true"}, {"/bin/sh", "-c", "true"}} {
 		if _, err := e.Run(context.Background(), ExecRequest{Argv: argv}); !errors.Is(err, ErrForbidden) {
 			t.Errorf("%v: %v, want forbidden", argv, err)
 		}
@@ -34,6 +34,22 @@ func TestExecRefusesWhatIsNotAllowed(t *testing.T) {
 	}
 	if _, err := e.Run(context.Background(), ExecRequest{Argv: []string{"git"}, Cwd: "relative"}); !errors.Is(err, ErrInvalid) {
 		t.Errorf("a relative cwd: %v", err)
+	}
+}
+
+// bash is on the list because a Daedalus agent working in a host folder runs every command and every
+// file read through it; the daemon refusing it is an agent on the host that cannot do anything.
+func TestExecRunsBash(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("no bash on this machine")
+	}
+	e := NewExec(nil, os.Environ(), t.TempDir(), quietLog())
+	res, err := e.Run(context.Background(), ExecRequest{Argv: []string{"bash", "-c", "exec 2>&1; echo out; echo err >&2"}, Timeout: 20 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ExitCode != 0 || res.Stdout != "out\nerr\n" {
+		t.Fatalf("%+v", res)
 	}
 }
 

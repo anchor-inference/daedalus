@@ -63,7 +63,7 @@ READ_RAW_MAX = 512 << 10
 READ_TEXT_MAX = 768 << 10
 HOOK_BODY_MAX = 1 << 20
 HOOK_HOLD_MAX_MS = 600_000
-EXEC_ALLOW = frozenset({"claude", "codex", "opencode", "pi", "grok", "cursor-agent", "npm", "npx", "node", "git", "uname"})
+EXEC_ALLOW = frozenset({"claude", "codex", "opencode", "pi", "grok", "cursor-agent", "npm", "npx", "node", "git", "uname", "bash"})
 FS_DENY = (
     "**/.claude/.credentials.json", "**/.codex/auth.json", "**/.grok/auth.json", "**/.local/share/opencode/auth.json",
     "**/.pi/agent/auth.json", "**/.ssh/**", "**/.gnupg/**", "**/.config/gh/hosts.yml", "**/.netrc", "**/.git-credentials",

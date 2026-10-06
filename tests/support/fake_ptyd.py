@@ -104,7 +104,7 @@ class FakePtyd:
         every writable folder that does not exist here, as the real daemon does."""
         # Side channels: scripted programs, real files under the roots the host sets, echoing byte
         # streams, and launches whose hook posts a test makes with ``post_hook``.
-        self.exec_allow = {"claude", "codex", "opencode", "pi", "grok", "cursor-agent", "npm", "npx", "node", "git", "uname"}
+        self.exec_allow = {"claude", "codex", "opencode", "pi", "grok", "cursor-agent", "npm", "npx", "node", "git", "uname", "bash"}
         self.exec_results: dict[str, dict[str, Any]] = {}
         """Program basename → the exec.run result it gives; unknown ones exit 0 with no output."""
         self.roots: list[str] = []
