@@ -995,7 +995,8 @@ async def test_a_session_works_in_the_folder_it_is_given(settings: Settings, con
         in_docs = await manager.create_session("docs", project_id=project.id, folder_id=docs.id, own_directory=True)
         assert in_docs.workspace == tmp_path / "docs" / ".agents" / in_docs.session.id
         assert in_docs.services is not None and in_docs.services.walls is not None and in_docs.services.walls.readable == (in_docs.workspace,)
-        with pytest.raises(ValueError, match="host folder"):
+        # A host folder works through the host terminal daemon; without one answering it is refused.
+        with pytest.raises(ValueError, match="host terminal daemon is not answering"):
             await manager.create_session("host", project_id=project.id, folder_id=host.id)
         with pytest.raises(ValueError, match="not a folder of"):
             await manager.create_session("nowhere", project_id=project.id, folder_id="f-nothing")

@@ -32,8 +32,8 @@ PROJECT = {
     "sessions": [{"id": "s1", "title": "Writer", "running": False}],
 }
 WORDS = {
-    "en": {"projects": "Projects", "settings": "Settings for Bakery", "remove": "Remove", "readonly": "Agents read it and never write it.", "unmounted": "Not mounted in the container yet", "terminals": "only CLI agents and host terminals reach it", "mount": "the bot sees a folder only once it is mounted", "host": "A host folder is worked in through the host terminal"},
-    "ru": {"projects": "Проекты", "settings": "Настройки: Bakery", "remove": "Убрать", "readonly": "Агенты читают её и никогда не пишут.", "unmounted": "Ещё не смонтирована в контейнер", "terminals": "её видят только CLI-агенты и терминалы хоста", "mount": "бот видит папку, только когда она смонтирована", "host": "С папкой на хосте работают через терминал хоста"},
+    "en": {"projects": "Projects", "settings": "Settings for Bakery", "remove": "Remove", "readonly": "Agents read it and never write it.", "unmounted": "Not mounted in the container yet", "terminals": "every agent reaches it through the host terminal daemon", "mount": "the bot sees a folder only once it is mounted", "host": "A host folder is worked in through the host terminal daemon"},
+    "ru": {"projects": "Проекты", "settings": "Настройки: Bakery", "remove": "Убрать", "readonly": "Агенты читают её и никогда не пишут.", "unmounted": "Ещё не смонтирована в контейнер", "terminals": "все агенты работают с ней через демон терминала хоста", "mount": "бот видит папку, только когда она смонтирована", "host": "С папкой на хосте работают через демон терминала хоста"},
 }
 
 
@@ -211,9 +211,11 @@ def scenario(page: Page, lang: str, unhandled: Unhandled, name: str) -> None:
     page.locator(".sheet select.field").nth(1).select_option("p1")
     choice = page.locator("#newagent-folder")
     expect(choice).to_be_visible()
-    # The site, the docs and the unmounted assets folder; the host folder is not an agent's to work in.
-    expect(choice.locator("option")).to_have_count(3)
-    expect(choice.locator("option[disabled]")).to_have_count(1)
+    # The site, the docs, the unmounted assets folder and the host folder, which a Daedalus agent now
+    # works in through the host terminal daemon.
+    expect(choice.locator("option")).to_have_count(4)
+    # Unmounted, and the host folder while this installation has no host terminal daemon.
+    expect(choice.locator("option[disabled]")).to_have_count(2)
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/newagent-{name}.png")
 
