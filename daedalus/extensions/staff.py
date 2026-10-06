@@ -1352,6 +1352,7 @@ class Team:
                 await self.runtime(live.staff).stop(live)
             except Exception:  # noqa: BLE001 — the row ends whatever the process did; reconcile finds a survivor
                 logger.exception("stopping %s's session failed", live.staff.name)
+        await self._stop_services(live, reason)
         ended = await self.manager.staff.end_session(live.id, reason)
         if ended is not None:
             payload: dict[str, Any] = {"status": "exited", "previous": live.session.status, "detail": reason[:500]}
@@ -1363,6 +1364,21 @@ class Team:
         for ask in await self._open_asks(live.id):
             if await self.manager.asks.resolve(ask.id, "system", {"closed": f"the session ended: {reason}"}):
                 await self._withdrawn(ask)
+
+    async def _stop_services(self, live: LiveSession, reason: str) -> None:
+        """Stop the servers the worker's session started with ServiceStart. They belong to the session,
+        and nothing else ever stopped them: a released worker's dev server kept its port and its memory
+        until the operator found it in the services list. Only a Daedalus session has the tool."""
+        services: Any = self.app.extensions.get("services")
+        if services is None or not live.session.session_id:
+            return
+        try:
+            stopped = await services.stop_session(live.session.session_id, f"its worker ended: {reason}")
+        except Exception:  # noqa: BLE001 — the session ends whatever its servers did
+            logger.exception("stopping the services of %s's session failed", live.staff.name)
+            return
+        if stopped:
+            logger.info("stopped %d service(s) of %s's session: %s", stopped, live.staff.name, reason)
 
     async def _open_asks(self, staff_session_id: str) -> list[Ask]:
         rows = await self.manager.db.fetchall("SELECT id FROM asks WHERE staff_session_id = ? AND resolved_at IS NULL ORDER BY created_at", (staff_session_id,))

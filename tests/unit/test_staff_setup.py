@@ -1,4 +1,4 @@
-"""A project's setup command in a new staff worktree."""
+"""A project's setup command in a new staff worktree, and the services a worker's session leaves behind."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from daedalus.config import Settings
+from daedalus.extensions.services import Services, pid_alive
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
 from daedalus.stores.projects import Project
@@ -99,6 +100,37 @@ async def test_an_empty_setup_command_runs_nothing(settings: Settings, db: Datab
         [started] = runtime.started
         assert started.worktree is not None and started.worktree.created
         assert not await manager.db.fetchall("SELECT key FROM kv WHERE key LIKE 'worktree_setup:%'")
+    finally:
+        await close_team(manager)
+        await manager.close()
+
+
+async def test_releasing_a_worker_stops_the_services_its_session_started(settings: Settings, db: Database, tmp_path: Path) -> None:
+    settings.services_port_range = "18140-18143"
+    manager, team, runtime, project = await fake_team(settings, db, tmp_path)
+    try:
+        app: Any = team.app
+        app.config = manager.config
+        services = Services(app)
+        app.extensions["services"] = services
+        ada = await manager.staff.hire(project.id, name="Ada", isolation="worktree")
+        await operator_assignment(team, ada, await board_task(manager, project, "Menu"))
+        live = await team.live_of(ada)
+        assert live is not None and live.session.session_id
+        sid = live.session.session_id
+        server = await services.start(sid, name="preview", command="sleep 60", port="none")
+        other = await manager.create_session("Someone else's chat")
+        theirs = await services.start(other.session.id, name="theirs", command="sleep 60", port="none")
+        assert pid_alive(server["pid"]) and pid_alive(theirs["pid"])
+
+        assert await team.release(ada, reason="released by the operator")
+
+        assert not pid_alive(server["pid"])
+        row = await services.get(sid, "preview")
+        assert row is not None and row["status"] == "stopped" and row["restart"] == 0
+        assert row["note"] == "its worker ended: released by the operator"
+        assert pid_alive(theirs["pid"]), "only the worker's own session's services stop"
+        await services.stop_all(other.session.id)
     finally:
         await close_team(manager)
         await manager.close()

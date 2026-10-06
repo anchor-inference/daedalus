@@ -295,6 +295,20 @@ class Services:
         self._procs.pop((session_id, name), None)
         return True
 
+    async def stop_session(self, session_id: str, note: str) -> int:
+        """Stop every running service of a session and keep the rows, saying why; how many stopped.
+
+        Unlike :meth:`stop_all`, which is for a deleted session, the rows stay: the session's history
+        is still read, and the operator can see the server was stopped with its worker rather than
+        wonder where it went. ``restart`` is cleared by :meth:`stop`, so a rebuild does not revive it.
+        """
+        n = 0
+        for row in await self.rows(session_id):
+            if row["status"] == "running":
+                await self.stop(session_id, row["name"], note=note[:700])
+                n += 1
+        return n
+
     async def stop_all(self, session_id: str) -> int:
         n = 0
         for row in await self.rows(session_id):
