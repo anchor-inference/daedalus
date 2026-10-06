@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from daedalus.extensions.staff import Team
+from daedalus.extensions.staff_kept import how_kept
 from daedalus.harness.capabilities import CAPABILITIES
 from daedalus.stores.harness import HarnessStore
 from daedalus.stores.staff import Staff, StaffBusy, StaffError
@@ -76,16 +78,29 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(409, f"{member.name} has no live session")
         return live
 
+    async def kept_of(member: Staff) -> list[dict[str, Any]]:
+        """How the member's settings are kept, for its next launch: live session or not, since the
+        operator reads it while deciding how to hire or change the member."""
+        project = await manager.projects.get(member.project_id)
+        if project is None:
+            return []
+        try:
+            folder = Team.folder_for(project, member, None)
+        except StaffError:
+            return []
+        return how_kept(member, folder, local_env=manager.projects.local_env, permission_level=Team.permission_level(project))
+
     @api.get("/api/staff/{staff_id}/session")
     async def staff_session(staff_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """The member's live session with what its runtime knows: the status and what it waits for,
         the terminal, the launch (CLI, version, model, mode, worktree, branch, task), what the CLI
         can do, what each channel last said (``channel``) and the verdict on them (``health``), the
-        requests open, the spend. ``rules`` are the operator's standing grants to the member, live
-        session or not."""
+        requests open, the spend. ``rules`` are the operator's standing grants to the member and
+        ``kept`` how each of its settings is kept, live session or not."""
         member = await member_of(staff_id)
         session = await manager.staff.live(staff_id)
         out: dict[str, Any] = {"staff": member.view(), "session": session.view() if session is not None else None, "rules": await manager.staff.allow_rules(staff_id)}
+        out["kept"] = await kept_of(member)
         if session is None:
             return out
         caps = CAPABILITIES.get(member.harness)

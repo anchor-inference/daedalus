@@ -106,6 +106,15 @@ TEAM_TOOLS = ("mcp__daedalus_team__Report", "mcp__daedalus_team__AskOrchestrator
 PERMISSION_MODES = {"default": "manual", "manual": "manual", "acceptEdits": "acceptEdits", "auto": "auto", "plan": "plan", "dontAsk": "dontAsk", "bypassPermissions": "bypassPermissions"}
 """The staff store keeps ``default``, the name hooks report; the flag calls the same mode ``manual``."""
 LEVEL_MODES = {"ask": "manual", "edits": "acceptEdits", "all": "bypassPermissions"}
+
+
+def start_mode(permission_mode: str, permission_level: str) -> str:
+    """The mode Claude Code starts in: the member's own when it has one, else the project's autonomy.
+    A function of its own because the member's Details say from it how a setting is kept, and a copy
+    of the rule there would drift from the launch."""
+    if permission_mode:
+        return PERMISSION_MODES[permission_mode]
+    return LEVEL_MODES[permission_level]
 DIALOG_WAIT_S = 10.0
 """How long an answer typed into a dialog waits for the dialog to be drawn."""
 DIALOG_CONFIRM_S = 5.0
@@ -272,9 +281,7 @@ class ClaudeCodeAdapter:
 
     def _mode(self, spec: LaunchSpec) -> str:
         spec.validate_permissions(PERMISSION_MODES)
-        if spec.permission_mode:
-            return PERMISSION_MODES[spec.permission_mode]
-        return LEVEL_MODES[spec.permission_level]
+        return start_mode(spec.permission_mode, spec.permission_level)
 
     def _plan(self, spec: LaunchSpec, session: str, *, resume: bool) -> LaunchPlan:
         mode = self._mode(spec)

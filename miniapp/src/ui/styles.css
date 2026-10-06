@@ -4529,3 +4529,10 @@ button.staff-row:hover { background: var(--surface-2); }
   .pet-host.in-settings .pet-figure { height:calc(130px * var(--pet-scale)); }
   .pet-bubble { width:min(calc(185px * var(--pet-scale)),calc(100vw - 16px)); }
 }
+/* How a member's settings are kept: the setting, the sentence that wraps, and the kind of keeping at
+   the end, where the eye lands; a setting nothing keeps is the one to notice. */
+.kept-list .dt-key, .staff-details .kept-list .dt-key { flex: 0 0 auto; min-width: 72px; }
+.kept-list .kept-kind { flex: none; color: var(--fg-3); white-space: nowrap; }
+.kept-list [data-kept="none"] .kept-kind { color: var(--warn); }
+.kept-fold { margin-top: var(--space-3); }
+.kept-fold > summary { cursor: pointer; color: var(--fg-2); }

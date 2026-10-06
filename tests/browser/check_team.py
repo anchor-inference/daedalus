@@ -4,6 +4,7 @@ What is checked is what the operator relies on: a Daedalus member can be hired a
 badge; a command-line agent that cannot run here is offered but disabled, with the reason beside it;
 the branch a worktree will get is previewed from the name; an edit is sent; a dismissal asks first
 and takes the member off the list; a member who works cannot be dismissed, and the page says why.
+An edit sheet says, under a fold, how each of the member's settings is kept.
 And the page fits: nothing scrolls sideways at 390 px.
 """
 
@@ -25,8 +26,8 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "9f3c2a1b7d40"
 
 WORDS = {
-    "en": {"title": "Team · Bakery", "hire": "Hire", "save": "Save", "dismiss": "Dismiss", "signedout": "not signed in", "missing": "not installed", "working": "working", "edit": "Edit {name}", "empty": "No staff yet", "shared": "Shared folder", "worktree": "Own worktree", "blocked": "This environment cannot safely write in a shared folder"},
-    "ru": {"title": "Команда · Bakery", "hire": "Нанять", "save": "Сохранить", "dismiss": "Уволить", "signedout": "нет входа", "missing": "не установлен", "working": "работает", "edit": "Изменить: {name}", "empty": "Сотрудников пока нет", "shared": "Общая папка", "worktree": "Свой worktree", "blocked": "Эта среда не может безопасно писать в общую папку"},
+    "en": {"title": "Team · Bakery", "hire": "Hire", "save": "Save", "dismiss": "Dismiss", "signedout": "not signed in", "missing": "not installed", "working": "working", "edit": "Edit {name}", "empty": "No staff yet", "kept": "How these settings are kept", "walls": "the host's walls refuse", "shared": "Shared folder", "worktree": "Own worktree", "blocked": "This environment cannot safely write in a shared folder"},
+    "ru": {"title": "Команда · Bakery", "hire": "Нанять", "save": "Сохранить", "dismiss": "Уволить", "signedout": "нет входа", "missing": "не установлен", "working": "работает", "edit": "Изменить: {name}", "empty": "Сотрудников пока нет", "kept": "Как соблюдаются эти настройки", "walls": "хост отклоняет", "shared": "Общая папка", "worktree": "Свой worktree", "blocked": "Эта среда не может безопасно писать в общую папку"},
 }
 
 
@@ -134,10 +135,17 @@ def run_one(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
     assert (rex["harness"], rex["agent"], rex["model"], rex["permission_mode"], rex["env"]) == ("claude", "code-reviewer", "opus", "acceptEdits", ""), rex
     expect(page.locator(row, has_text="Rex").locator(".harness-badge")).to_have_text("CC")
 
-    # Edit it.
+    # Edit it. Under a fold, the sheet says how each setting is kept: a Daedalus member's folder by the host.
     page.get_by_role("button", name=words["edit"].format(name="Ada Lovelace")).click()
     expect(sheet).to_be_visible()
     expect(sheet.locator("#staff-name")).to_have_count(0)
+    fold = sheet.locator("[data-kept-fold]")
+    expect(fold.locator("[data-kept-list]")).to_be_hidden()
+    fold.get_by_text(words["kept"], exact=True).click()
+    expect(fold.locator('[data-setting="folder"]')).to_have_attribute("data-kept", "host")
+    expect(fold.locator('[data-setting="folder"]')).to_contain_text(words["walls"])
+    expect(fold.locator('[data-setting="scope"]')).to_have_attribute("data-kept", "prompt")
+    fits(page, f"{lang} {width} kept fold")
     sheet.locator("#staff-role").fill("Tests the menu page")
     sheet.get_by_role("button", name=words["save"], exact=True).click()
     expect(sheet).to_have_count(0)

@@ -60,6 +60,12 @@ async def test_hire_list_edit_and_dismiss(settings: Settings, config: RuntimeCon
             assert (await client.post("/api/projects/nope/staff", headers=HEADERS, json={"name": "Bo"})).status_code == 404
             cc = (await client.post(f"/api/projects/{pid}/staff", headers=HEADERS, json={"name": "Cleo", "harness": "claude", "model": "opus", "permission_mode": "acceptEdits", "isolation": "shared"})).json()
             assert (cc["harness"], cc["permission_mode"], cc["isolation"]) == ("claude", "acceptEdits", "shared")
+            # How each setting is kept is on the member's details before any session exists.
+            view = (await client.get(f"/api/staff/{cc['id']}/session", headers=HEADERS)).json()
+            assert view["session"] is None
+            assert {line["setting"]: line["kept"] for line in view["kept"]} == {"folder": "prompt", "asking": "cli", "network": "none", "scope": "prompt"}
+            native = (await client.get(f"/api/staff/{ada['id']}/session", headers=HEADERS)).json()
+            assert next(line for line in native["kept"] if line["setting"] == "folder")["kept"] == "host"
 
             listing = (await client.get(f"/api/projects/{pid}/staff", headers=HEADERS)).json()
             assert [m["name"] for m in listing["staff"]] == ["Ada", "Cleo"] and listing["counts"]["staff"] == 2

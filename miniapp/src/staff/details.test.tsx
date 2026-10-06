@@ -7,9 +7,9 @@ import { createRoot, Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionDetail, StaffSessionView, StaffTurn } from "../api";
 import { SessionDetails, type DetailsActions } from "../details";
-import { setLang } from "../i18n";
+import { DICT, setLang } from "../i18n";
 import type { Staff } from "../team/team";
-import { contextFill, conversationCounts, hasSpend, sessionAge, windowName } from "./details";
+import { contextFill, conversationCounts, hasSpend, keptWords, sessionAge, windowName } from "./details";
 import { StaffDetails } from "./StaffDetails";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -116,6 +116,38 @@ describe("the panels", () => {
     act(() => root.render(<StaffDetails member={{ ...MEMBER, status: "off" }} view={null} turns={[]} now={NOW} />));
     expect(host.textContent).toContain("No live session");
     expect(host.textContent).toContain("opus");
+  });
+
+  it("says how each setting is kept, one plain line each, in both languages", () => {
+    const kept: StaffSessionView["kept"] = [
+      { setting: "folder", kept: "cli", reason: "readonly", mode: "plan" },
+      { setting: "asking", kept: "cli", reason: "mode", mode: "plan" },
+      { setting: "network", kept: "none", reason: "open", mode: "" },
+      { setting: "scope", kept: "prompt", reason: "brief", mode: "" },
+    ];
+    act(() => root.render(<StaffDetails member={MEMBER} view={{ ...view(null), kept }} turns={[]} now={NOW} />));
+    const rows = [...host.querySelectorAll("[data-kept-list] [data-setting]")];
+    expect(rows.map((r) => r.getAttribute("data-kept"))).toEqual(["cli", "cli", "none", "prompt"]);
+    expect(rows[0].textContent).toBe("WritingWrites nothing: Claude Code starts in its own plan mode.CLI mode");
+    expect(rows[3].textContent).toContain("only asked in its prompt");
+    act(() => setLang("ru"));
+    act(() => root.render(<StaffDetails member={MEMBER} view={{ ...view(null), kept }} turns={[]} now={NOW} />));
+    expect(host.querySelector('[data-setting="network"]')!.textContent).toContain("недоступно");
+  });
+
+  it("has words for every line the host can send, and falls back to the kind for a new one", () => {
+    const known = (key: string) => key in DICT;
+    const sent: [string, string, string][] = [
+      ["folder", "host", "readonly"], ["folder", "host", "worktree"], ["folder", "host", "shared"], ["folder", "prompt", "remote"],
+      ["folder", "cli", "readonly"], ["folder", "none", "readonly_refused"], ["folder", "cli", "sandbox"], ["folder", "none", "anywhere"],
+      ["folder", "prompt", "brief_worktree"], ["folder", "prompt", "brief_shared"], ["asking", "host", "policy"], ["asking", "cli", "mode"],
+      ["asking", "cli", "rules"], ["asking", "none", "never"], ["asking", "none", "bypass"], ["network", "cli", "off"], ["network", "none", "open"],
+      ["scope", "prompt", "brief"],
+    ];
+    for (const [setting, kept, reason] of sent) {
+      expect(keptWords({ setting, kept, reason, mode: "" } as never, known).text).not.toBeNull();
+    }
+    expect(keptWords({ setting: "folder", kept: "host", reason: "someday", mode: "" }, known)).toEqual({ label: "staff.kept.setting.folder", text: null, kind: "staff.kept.kind.host" });
   });
 
   it("gives an orchestrator the session's Details less what would break it", async () => {

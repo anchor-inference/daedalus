@@ -4,13 +4,13 @@
 // heard, and the spend its transcript reports. What the CLI does not report is said to be so: a
 // meter drawn from a guessed window, or a cost where there is none, would read as a fact.
 
-import type { StaffSessionView, StaffTurn } from "../api";
+import type { KeptLine, StaffSessionView, StaffTurn } from "../api";
 import { Section } from "../details";
 import { duration, relTimeLong, shortDateTime, tokens, usd } from "../format";
-import { plural, t } from "../i18n";
+import { DICT, plural, t } from "../i18n";
 import { HarnessBadge } from "../team/parts";
 import { HARNESS_NAMES, type Staff } from "../team/team";
-import { contextFill, conversationCounts, hasSpend, sessionAge, windowName } from "./details";
+import { contextFill, conversationCounts, hasSpend, keptWords, sessionAge, windowName } from "./details";
 import { turnFacts } from "./model";
 
 function Row({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
@@ -18,6 +18,26 @@ function Row({ label, children, mono }: { label: string; children: React.ReactNo
     <div className="dt-row sub">
       <span className="dt-key">{label}</span>
       <span className={`grow ${mono ? "mono" : ""}`}>{children}</span>
+    </div>
+  );
+}
+
+/** One line per setting and what keeps it. Plain rows: the kind is the one word that matters, so it
+ *  stands at the end of the line rather than in a colour the operator has to decode. */
+export function KeptList({ lines, harness }: { lines: KeptLine[]; harness: Staff["harness"] }) {
+  const cli = HARNESS_NAMES[harness];
+  return (
+    <div className="kept-list" data-kept-list>
+      {lines.map((line) => {
+        const words = keptWords(line, (key) => key in DICT);
+        return (
+          <div key={line.setting} className="dt-row sub prose" data-kept={line.kept} data-setting={line.setting}>
+            <span className="dt-key">{t(words.label)}</span>
+            <span className="grow">{words.text ? t(words.text, { cli, mode: line.mode }) : "—"}</span>
+            <span className="kept-kind">{t(words.kind)}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -44,6 +64,12 @@ export function StaffDetails({ member, view, turns, now = Date.now() }: { member
         <Row label={t("staff.details.permissions")}>{launch?.permission_mode || member.permission_mode || "—"}</Row>
         {(launch?.branch || session?.branch) && <Row label={t("staff.details.branch")} mono>{launch?.branch || session?.branch}</Row>}
       </Section>
+
+      {(view?.kept ?? []).length > 0 && (
+        <Section ids={ids} id="staff-kept" label={t("staff.kept.title")}>
+          <KeptList lines={view?.kept ?? []} harness={member.harness} />
+        </Section>
+      )}
 
       {/* The heading names the state only when no session has a Status row to say it: both at once
           read "working" twice, one line under the other. */}
