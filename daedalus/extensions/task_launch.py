@@ -32,7 +32,6 @@ from daedalus.stores.control import (
     one,
 )
 from daedalus.stores.executions import ACTIVE
-from daedalus.stores.goal_budget import requires_priced_native_in
 from daedalus.stores.goal_budget import view_in as goal_budget_view_in
 from daedalus.stores.outbox import Claim, OutboxStore
 from daedalus.stores.resource_profiles import (
@@ -235,8 +234,6 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
             raise StaffError(f"{member['name']} cannot work on task {task_id}: "
                              + daedalus_cannot_reach(folder["path"], folder["env"],
                                                      app.manager.projects.local_env))
-        if member["harness"] != "daedalus" and await requires_priced_native_in(conn, task["project_id"]):
-            raise ControlConflict("a dollar-capped project needs priced native worker admission")
         current_profile = await latest_in(conn, task["project_id"])
         if resources is None:
             if current_profile is not None and current_profile["state"] == "enabled":

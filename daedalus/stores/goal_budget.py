@@ -193,6 +193,3 @@ async def set_budget_in(conn: aiosqlite.Connection, *, project_id: str, budget_i
     assert view is not None
     return view
 
-
-async def requires_priced_native_in(conn: aiosqlite.Connection, project_id: str) -> bool:
-    return await one(conn, "SELECT 1 FROM project_goal_budgets WHERE project_id = ?", (project_id,)) is not None

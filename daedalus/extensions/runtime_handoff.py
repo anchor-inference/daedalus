@@ -87,13 +87,12 @@ async def snapshot_in(conn: aiosqlite.Connection, *, task_id: str, source_attemp
     if source["folder_id"] != folder["id"]:
         raise ControlConflict("the target must use the source attempt's project folder")
     budget = await view_in(conn, task["project_id"])
-    if budget is not None:
-        if target["harness"] != "daedalus":
-            raise ControlConflict("a dollar-capped project cannot price a CLI worker")
-        if budget["total"]["state"] != "known" or budget["total"]["available_usd"] is None:
-            raise ControlConflict("the current goal budget is uncertain")
-        if float(budget["total"]["available_usd"]) <= 0:
-            raise ControlConflict("the current goal budget has no available balance")
+    # A command-line worker's spend and a lost reply's cost are unknown to the goal budget; they
+    # are shown as such and no longer refuse the handoff. Only a balance that measured spend has
+    # used up does.
+    if (budget is not None and budget["total"]["available_usd"] is not None
+            and float(budget["total"]["available_usd"]) <= 0):
+        raise ControlConflict("the project goal budget is spent; raise it on the project's budget to hand this task on")
     snapshot = json.loads(contract["snapshot_json"])
     if not isinstance(snapshot, dict):
         raise ControlConflict("the current task contract is malformed")

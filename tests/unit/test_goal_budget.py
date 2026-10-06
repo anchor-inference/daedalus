@@ -17,7 +17,7 @@ from daedalus.extensions.api_goal_budget import register
 from daedalus.extensions.task_launch import queue_launch
 from daedalus.providers.openai_compat import ProviderEndpoint
 from daedalus.providers.pricing import BUILTIN
-from daedalus.stores.control import ControlConflict, canonical
+from daedalus.stores.control import canonical
 from daedalus.stores.database import Database
 from daedalus.stores.goal_budget import (
     charge_for_session_in,
@@ -267,7 +267,9 @@ async def test_unpriced_project_model_runs_unreserved_under_a_goal_budget(db: Da
         await adapter.aclose()
 
 
-async def test_capped_project_refuses_unpriced_cli_before_task_assignment(db: Database) -> None:
+async def test_capped_project_assigns_a_command_line_worker(db: Database) -> None:
+    # A command-line worker runs on its own login and reports no price; refusing it in any project
+    # with a goal budget took the operator's subscription workers off every capped board.
     app, _, team, starts, revision = await queued_fixture(db)
     try:
         await db.execute("INSERT INTO project_goal_revisions(project_id,goal_revision,body,origin_kind,created_at)"
@@ -276,12 +278,9 @@ async def test_capped_project_refuses_unpriced_cli_before_task_assignment(db: Da
             await set_budget_in(conn, project_id="project", budget_id="budget", expected_goal_revision=1,
                                 limit_usd="1.000000", coordination_limit_usd="0.500000")
         await db.execute("UPDATE staff SET harness = 'claude' WHERE id = 'worker'")
-        with pytest.raises(ControlConflict, match="priced native worker"):
-            await queue_launch(app, "task", OPERATOR, staff_id="worker", client_operation_id="cli-launch",
-                               expected_entity_revision=revision)
-        assert (await db.fetchone("SELECT assignee_staff_id FROM board_tasks WHERE id = 'task'"))[0] is None
-        assert (await db.fetchone("SELECT count(*) FROM effect_outbox"))[0] == 0
-        assert starts == []
+        await queue_launch(app, "task", OPERATOR, staff_id="worker", client_operation_id="cli-launch",
+                           expected_entity_revision=revision)
+        assert (await db.fetchone("SELECT assignee_staff_id FROM board_tasks WHERE id = 'task'"))[0] == "worker"
     finally:
         team.queue.close()
         app.executions.release()
