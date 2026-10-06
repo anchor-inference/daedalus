@@ -4543,3 +4543,18 @@ button.staff-row:hover { background: var(--surface-2); }
   .pet-host.in-settings .pet-figure { height:calc(130px * var(--pet-scale)); }
   .pet-bubble { width:min(calc(185px * var(--pet-scale)),calc(100vw - 16px)); }
 }
+/* How a member's settings are kept: the setting, the sentence that wraps, and the kind of keeping at
+   the end, where the eye lands; a setting nothing keeps is the one to notice. */
+.kept-list .dt-key, .staff-details .kept-list .dt-key { flex: 0 0 auto; min-width: 72px; }
+.kept-list .kept-kind { flex: none; color: var(--fg-3); white-space: nowrap; }
+.kept-list [data-kept="none"] .kept-kind { color: var(--warn); }
+.kept-fold { margin-top: var(--space-3); }
+.kept-fold > summary { cursor: pointer; color: var(--fg-2); }
+/* Ready-made teams under an empty team's Hire: plain rows that read as choices, not three more primary
+   buttons competing with Hire. */
+.team-setups { display: grid; gap: var(--space-2); width: min(100%, 420px); margin-top: var(--space-3); text-align: start; }
+.team-setup { display: grid; gap: 2px; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); color: var(--fg); text-align: start; cursor: pointer; }
+.team-setup:hover:not(:disabled) { border-color: var(--accent); }
+.empty .team-setup b { font-size: var(--fs-14); }
+.team-setup:disabled { opacity: 0.6; cursor: default; }
+.setup-steps { margin: 0; padding-inline-start: 1.2em; display: grid; gap: 4px; }

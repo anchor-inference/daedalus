@@ -97,6 +97,19 @@ SANDBOXES = ("read-only", "workspace-write", "danger-full-access")
 LEVELS = {"ask": ("workspace-write", "untrusted"), "edits": ("workspace-write", "on-request"), "all": ("danger-full-access", "never")}
 """The project's autonomy as Codex's sandbox and approval policy. ``untrusted`` asks before anything
 that is not known to be safe, which is what "ask" means for Claude as well."""
+
+
+def start_modes(permission_mode: str, permission_level: str) -> tuple[str, str]:
+    """The sandbox and the approval policy Codex starts with. A function of its own because the
+    member's Details say from it how a setting is kept, and a copy of the rule would drift."""
+    sandbox, approval = LEVELS[permission_level]
+    if permission_mode in SANDBOXES:
+        sandbox = permission_mode
+        if sandbox == "danger-full-access":
+            approval = "never"
+    return sandbox, approval
+
+
 CONNECT_S = 60.0
 """How long the host keeps dialling the app server's socket while the companion starts."""
 CALL_TIMEOUT_S = 30.0
@@ -237,12 +250,7 @@ class CodexAdapter:
     @staticmethod
     def _modes(spec: LaunchSpec) -> tuple[str, str]:
         spec.validate_permissions(SANDBOXES)
-        sandbox, approval = LEVELS[spec.permission_level]
-        if spec.permission_mode in SANDBOXES:
-            sandbox = spec.permission_mode
-            if sandbox == "danger-full-access":
-                approval = "never"
-        return sandbox, approval
+        return start_modes(spec.permission_mode, spec.permission_level)
 
     def _plan(self, spec: LaunchSpec, resume: str) -> LaunchPlan:
         sandbox, approval = self._modes(spec)

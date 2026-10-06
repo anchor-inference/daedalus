@@ -660,6 +660,8 @@ class TeamStub:
         self.personas = personas if personas is not None else ["reviewer", "tester"]
         self.hired: list[dict] = []
         self.patched: list[dict] = []
+        self.enabled: list[dict] = []
+        """Each request that switched the coordinator on, in order: a ready-made setup's first step."""
         self.spend: dict[str, dict] = {}
         """What each member spent, ``staff_id -> {"today": {...}, "subscription": ...}``; the rest spent nothing."""
         self.orchestrator_spend: dict | None = None
@@ -693,6 +695,20 @@ class TeamStub:
         }
         row.update(fields)
         return row
+
+    @staticmethod
+    def kept(row: dict) -> list[dict]:
+        """How a member's settings are kept (``staff_kept.py``), for the two kinds the checks hire: a
+        Daedalus member, walled by the host, and a command-line member, kept by its CLI's mode."""
+        def line(setting: str, kept: str, reason: str, mode: str = "") -> dict:
+            return {"setting": setting, "kept": kept, "reason": reason, "mode": mode}
+
+        if row["harness"] == "daedalus":
+            where = line("folder", "host", "readonly" if row["isolation"] == "readonly" else row["isolation"])
+            return [where, line("asking", "host", "policy"), line("network", "none", "open"), line("scope", "prompt", "brief")]
+        mode = row["permission_mode"] or "acceptEdits"
+        where = line("folder", "cli", "readonly", "plan") if row["isolation"] == "readonly" else line("folder", "prompt", f"brief_{row['isolation']}")
+        return [where, line("asking", "cli", "mode", mode), line("network", "none", "open"), line("scope", "prompt", "brief")]
 
     def listing(self, archived: bool) -> dict:
         rows = [m for m in self.staff if archived or not m["archived_at"]]
@@ -729,11 +745,17 @@ class TeamStub:
                 row["project_id"] = self.project["id"]
                 self.staff.append(row)
                 return 201, row
+        if path == f"/api/projects/{self.project['id']}/orchestrator" and method == "POST":
+            self.enabled.append(dict(body or {}))
+            self.project["orchestrator"] = True
+            return 200, {"enabled": True, "model": "", "autonomy": "normal", "effective_model": "strong", "project_id": self.project["id"]}
         if path.startswith("/api/staff/"):
             sid = path.split("/")[3]
             row = next((m for m in self.staff if m["id"] == sid), None)
             if row is None:
                 return 404, {"detail": "no such staff member"}
+            if path.endswith("/session") and method == "GET":
+                return 200, {"staff": row, "session": None, "rules": [], "kept": self.kept(row)}
             if method == "PATCH":
                 payload = dict(body or {})
                 self.patched.append(payload)

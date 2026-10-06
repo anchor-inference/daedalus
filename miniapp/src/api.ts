@@ -1079,7 +1079,13 @@ export type StaffSessionView = {
   /** The operator's standing grants to the member ("Always"), as its CLI's allow rules. */
   rules?: StandingRule[];
   usage?: StaffUsage | null;
+  /** How each of the member's settings is kept, for its next launch; there with or without a session. */
+  kept?: KeptLine[];
 };
+
+/** One setting and what keeps it: the host, the CLI's own mode, only a request in the prompt, or
+ *  nothing. Codes, worded by the app; ``mode`` is the CLI mode or level the line names. */
+export type KeptLine = { setting: "folder" | "asking" | "network" | "scope"; kept: "host" | "cli" | "prompt" | "none"; reason: string; mode: string };
 
 /** What a command-line member's turns cost, read from its CLI's transcript after each turn. A field
  *  the CLI does not report is null or empty, never a guess. */

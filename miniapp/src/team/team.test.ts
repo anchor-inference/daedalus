@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HARNESSES, HARNESS_BADGES, availability, branchPreview, placeExecutor, branchSlug, colourVar, defaultIsolation, foldersFor, initials, modelGroups, statusTone } from "./team";
+import { HARNESSES, HARNESS_BADGES, SETUPS, availability, branchPreview, placeExecutor, branchSlug, colourVar, defaultIsolation, foldersFor, initials, modelGroups, setupPlan, statusTone, type TeamFolder } from "./team";
 
 describe("the executor badge", () => {
   it("gives every executor its own two letters", () => {
@@ -127,5 +127,34 @@ describe("the hiring form's models", () => {
     // A catalog from before the choice existed, or none at all.
     expect(modelGroups({ models: ["opus"] })).toEqual({ offered: ["opus"], others: [] });
     expect(modelGroups(null)).toEqual({ offered: [], others: [] });
+  });
+});
+
+describe("the ready-made setups", () => {
+  const NAMES = { worker: "Worker", reviewer: "Reviewer", workerRole: "Makes the changes", reviewerRole: "Reviews without editing" };
+  const git: TeamFolder = { id: "f1", path: "/w/bakery", label: "", env: "container", is_git: true, readonly: false };
+  const plain: TeamFolder = { ...git, is_git: false };
+
+  it("gives one agent its own worktree in a Git folder and the shared folder otherwise", () => {
+    expect(setupPlan("solo", { orchestrator: false, folders: [git] }, NAMES)).toEqual({ kind: "solo", enable: false, hires: [{ name: "Worker", role: "", harness: "daedalus", isolation: "worktree" }] });
+    expect(setupPlan("solo", { orchestrator: false, folders: [plain] }, NAMES).hires[0].isolation).toBe("shared");
+    expect(setupPlan("solo", { orchestrator: false, folders: [] }, NAMES).hires[0].isolation).toBe("shared");
+  });
+
+  it("pairs a writer with a read-only reviewer", () => {
+    const plan = setupPlan("pair", { orchestrator: false, folders: [git] }, NAMES);
+    expect(plan.enable).toBe(false);
+    expect(plan.hires.map((h) => [h.name, h.isolation, h.role])).toEqual([["Worker", "worktree", "Makes the changes"], ["Reviewer", "readonly", "Reviews without editing"]]);
+  });
+
+  it("switches the coordinator on only when it is off, and hires one worker either way", () => {
+    expect(setupPlan("coordinator", { orchestrator: false, folders: [git] }, NAMES).enable).toBe(true);
+    const on = setupPlan("coordinator", { orchestrator: true, folders: [git] }, NAMES);
+    expect(on.enable).toBe(false);
+    expect(on.hires).toHaveLength(1);
+  });
+
+  it("hires only Daedalus members, which need no CLI installed", () => {
+    for (const kind of SETUPS) expect(setupPlan(kind, { orchestrator: false, folders: [git] }, NAMES).hires.every((h) => h.harness === "daedalus")).toBe(true);
   });
 });

@@ -101,6 +101,14 @@ ALLOW_ROW, DENY_ROW = ("2", "Yes, proceed"), ("3", "No, reject")
 _ROW = re.compile(r"^\s*┃?\s*(\d)\s+\((?:●|○)\)\s+(.*?)\s*$")
 
 
+def start_mode(permission_mode: str, permission_level: str) -> str:
+    """The mode Grok starts in: the member's own when it has one, else the project's autonomy; the
+    member's Details say from it how a setting is kept."""
+    if permission_mode in PERMISSION_MODES:
+        return permission_mode
+    return LEVEL_MODES[permission_level]
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -258,9 +266,7 @@ class GrokAdapter:
 
     def _mode(self, spec: LaunchSpec) -> str:
         spec.validate_permissions(PERMISSION_MODES)
-        if spec.permission_mode in PERMISSION_MODES:
-            return spec.permission_mode
-        return LEVEL_MODES[spec.permission_level]
+        return start_mode(spec.permission_mode, spec.permission_level)
 
     def _plan(self, spec: LaunchSpec, session: str, *, resume: bool) -> LaunchPlan:
         holds = {"DAEDALUS_ASK_HOLD_MS": str(spec.ask_hold_ms), "DAEDALUS_REPORT_HOLD_MS": str(spec.report_hold_ms)}

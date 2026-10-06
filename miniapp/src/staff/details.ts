@@ -3,7 +3,7 @@
 // session has run. Everything here is read from what the host recorded; a number the CLI did not
 // report stays null, and the tab says "not reported" rather than drawing a guess.
 
-import type { StaffSessionView, StaffTurn, StaffUsage } from "../api";
+import type { KeptLine, StaffSessionView, StaffTurn, StaffUsage } from "../api";
 
 /** The context's fill at the end of the last turn. The share needs the window, which only some CLIs
  *  report (Codex does, Claude Code's transcript does not): without it the tokens stand alone. */
@@ -46,4 +46,12 @@ export function sessionAge(view: StaffSessionView | null | undefined, now = Date
 /** Whether the recorded spend says anything at all: a snapshot of zeros is a turn not yet read. */
 export function hasSpend(usage: StaffUsage | null | undefined): boolean {
   return !!usage && ((usage.input_tokens ?? 0) > 0 || (usage.output_tokens ?? 0) > 0 || (usage.cost_usd ?? 0) > 0);
+}
+
+/** A "how it is kept" line as dictionary keys: the setting's label, the sentence and the kind of
+ *  keeping. A reason the app has no words for falls back to the kind alone, so a code added on the
+ *  host reads as "kept by the host" rather than as a raw key. */
+export function keptWords(line: KeptLine, known: (key: string) => boolean): { label: string; text: string | null; kind: string } {
+  const text = `staff.kept.${line.setting}.${line.kept}.${line.reason}`;
+  return { label: `staff.kept.setting.${line.setting}`, text: known(text) ? text : null, kind: `staff.kept.kind.${line.kept}` };
 }

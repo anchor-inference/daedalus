@@ -51,6 +51,12 @@ TRANSCRIPT = "cursor-turns.jsonl"
 CONNECT_S = 60.0
 
 
+def start_mode(permission_mode: str) -> str:
+    """The mode Cursor starts in. Without one it is ``ask``, never ``agent``: see the launch plan for
+    why only an explicit full-access mode may edit."""
+    return permission_mode or "ask"
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -109,7 +115,7 @@ class CursorAdapter:
 
     def _plan(self, spec: LaunchSpec, resume: str) -> LaunchPlan:
         spec.validate_permissions(("ask", "plan", "agent"))
-        mode = spec.permission_mode or "ask"
+        mode = start_mode(spec.permission_mode)
         # ACP asks for permission on some calls, but file edits can proceed without an approval
         # request. Only the explicit full-access mode may therefore enter Cursor's agent mode.
         deny = ["Write(**)", "Shell(*)"] if mode != "agent" else []

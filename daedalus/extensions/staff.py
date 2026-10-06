@@ -419,7 +419,8 @@ class Team:
         row = await self.manager.db.fetchone("SELECT * FROM board_tasks WHERE id = ?", (task_id,))
         return _task(row) if row is not None else None
 
-    def folder_for(self, project: Project, member: Staff, task: BoardTask | None) -> ProjectFolder:
+    @staticmethod
+    def folder_for(project: Project, member: Staff, task: BoardTask | None) -> ProjectFolder:
         for folder_id in ((task.folder_id if task else None), member.default_folder_id):
             if folder_id:
                 folder = project.folder(folder_id)
@@ -1114,7 +1115,8 @@ class Team:
                              "a shared folder or a worktree instead of read-only")
         return member.permission_mode if member.permission_mode in modes else min(modes)
 
-    def permission_level(self, project: Project) -> str:
+    @staticmethod
+    def permission_level(project: Project) -> str:
         """The permission level a command-line member starts with. ``full`` autonomy starts it exactly
         like ``normal``: the operator decided that full means the orchestrator answers the requests
         itself, not that the agent stops asking — a bypassed permission is one nobody sees."""

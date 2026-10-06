@@ -24,6 +24,7 @@ import { PhoneTerminal, type PhoneTerminalProps } from "../terminal/mobile";
 import { TerminalRowMenu } from "../terminal/rowmenu";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { StaffSheet } from "../team/StaffSheet";
+import { Setups } from "../team/setups";
 import type { Staff, Team } from "../team/team";
 import type { ProjectBoardData } from "../board/board";
 import { errorText } from "../ui";
@@ -308,6 +309,7 @@ export function PhoneTeam({ projectId, toast }: { projectId: string; toast: (tex
           <div className="empty">
             <b>{t("team.empty")}</b>
             <div>{t("team.empty.sub")}</div>
+            {!team.project.ephemeral && !team.project.system && <Setups team={team} toast={toast} onDone={reload} />}
           </div>
         )}
         {members.length > 0 && <div className="phone-staff" role="list">{members.map(row)}</div>}

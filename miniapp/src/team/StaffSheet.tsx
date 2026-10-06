@@ -3,7 +3,9 @@
 // different executor keeps a different transcript — so the edit form shows them and does not offer them.
 
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../api";
+import { api, type StaffSessionView } from "../api";
+import { KeptList } from "../staff/StaffDetails";
+import { useQuery } from "../store";
 import { Sheet } from "../ui/dialogs";
 import { Icon } from "../icons";
 import { confirmAsync, errorText } from "../ui";
@@ -49,6 +51,22 @@ function useCatalogs(): Record<Env, Catalog | null | undefined> {
     };
   }, []);
   return catalogs;
+}
+
+/** How the member's saved settings are kept, under a fold: the form says what was chosen, this says
+ *  which of those choices a wall holds and which are only a request. Every member has the edit
+ *  sheet, a Daedalus member included, which has no staff view with a Details tab. */
+function KeptFold({ member }: { member: Staff }) {
+  const { data } = useQuery<StaffSessionView>(`/api/staff/${encodeURIComponent(member.id)}/session`, { staleMs: 2000 });
+  const lines = data?.kept ?? [];
+  if (!lines.length) return null;
+  return (
+    <details className="kept-fold" data-kept-fold>
+      <summary>{t("staff.kept.title")}</summary>
+      <p className="sub">{t("staff.kept.saved")}</p>
+      <KeptList lines={lines} harness={member.harness} />
+    </details>
+  );
 }
 
 export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Team; member?: Staff; onClose: () => void; onDone: () => void; toast: (text: string) => void }) {
@@ -322,6 +340,8 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
           <span className="sub">{t("team.oneoff.hint")}</span>
         </label>
       )}
+
+      {member && <KeptFold member={member} />}
 
       <div className="sheet-foot">
         {member ? <button className="btn danger" onClick={dismiss}><Icon name="trash" size={15} /> {t("team.dismiss")}</button> : <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>}
