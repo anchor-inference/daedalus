@@ -26,6 +26,8 @@ import urllib.request
 from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote, unquote_plus
 
+from calendar_stub import CalendarStub
+
 # Outside services_port_range (8100-8119), the range this product hands to an agent's own preview
 # servers: a harness that serves its build into that range competes with the installation running
 # beside it, and loses silently — the browser is pointed at the address either way.
@@ -264,8 +266,6 @@ GATES: dict[str, object] = {
     "/api/asr": {"configured": False, "reason": "", "provider": "", "model": "", "max_seconds": 120, "autosend": False},
     "/api/proposals": [],
     "/api/schedules": [],
-    "/api/calendar/events": [],
-    "/api/calendar/accounts": [],
     "/api/diagrams": [],
     # A project's requests: none waits, so a phone's project draws no banner.
     "/api/asks": {"asks": []},
@@ -306,6 +306,10 @@ GATES: dict[str, object] = {
         "capacity": {"running": 0, "cap": 20, "queued": 0},
     },
 }
+
+
+CALENDAR = CalendarStub()
+"""The calendar and planner every harness shares: calendars, a week of events, tasks and connections."""
 
 
 SHARED_WRITES: dict[tuple[str, str], tuple[int, str, str]] = {
@@ -420,6 +424,7 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
     harness asks this where it used to look ``GATES`` up, after its own routes, so what it invented
     still wins.
     """
+    query = path.split("?", 1)[1] if "?" in path else ""
     path = path.split("?", 1)[0]
     path = path[path.index("/api/"):] if "/api/" in path else path
     if method.upper() == "GET" and path == EVENTS:
@@ -435,6 +440,11 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
         return 200, "application/json", json.dumps(launcher_state())
     if method.upper() == "POST" and path == "/api/system/launcher/install":
         return 200, "application/json", json.dumps({"started": True})
+    if path.startswith(("/api/calendar", "/api/planner")):
+        # The planner's week, the same for every harness that opens the calendar without inventing
+        # one; check_calendar_planner.py keeps a CalendarStub of its own to read its writes back.
+        status, payload = CALENDAR.answer(method.upper(), path, query, None)  # type: ignore[misc]
+        return status, "application/json", json.dumps(payload)
     if path in GATES:
         return 200, "application/json", json.dumps(GATES[path])
     parts = path.split("/")
@@ -556,7 +566,7 @@ def expect_app(base: str) -> None:
 
 
 
-__all__ = ["VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tool_groups", "terminal_load"]
+__all__ = ["CALENDAR", "CalendarStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tool_groups", "terminal_load"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent
