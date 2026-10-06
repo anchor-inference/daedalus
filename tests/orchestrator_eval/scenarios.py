@@ -822,6 +822,78 @@ async def k2_check(s: Stand, r: Record) -> tuple[bool, str]:
     return True, "settled in one turn without a question"
 
 
+# -- H1: a failed required check comes back to the board with no worker on it ----------------------------------------
+
+
+async def h1_setup(s: Stand) -> Opening:
+    await project(s, [("sol", "release tooling"), ("gleb", "independent reviews and audits")])
+    card = await s.card(
+        "Release notes generator",
+        objective="Generate the release notes from the merged pull requests since the last tag.",
+        deliverable="A script on its branch and the notes it produced for the last release.",
+        boundaries="Only the release tooling folder.",
+        done_when="The script reproduces the last release's notes and the unit check passes in CI.",
+        assignee="sol",
+    )
+    await s.start("sol", card)
+    s.keep["card"] = card
+    await s.report("sol", "done", "The script is on agent/sol/release-notes and reproduces the last release's notes; I ran the unit check locally.")
+    await s.idle("sol")
+    await s.mark()
+    await s.manager.bus.publish(
+        "task.ci_failed",
+        {"task_id": card, "title": "Release notes generator", "actor": "system", "contract_revision": 1,
+         "head_sha": "4f2a9c1e7b3d", "check_name": "unit", "failed_checks": ["unit"], "run_id": "8812",
+         "run_attempt": 1, "link": "https://ci.example/runs/8812", "ci_key": "h1"},
+        project_id=s.project.id,
+    )
+    return Opening(history=[("assistant", "sol handed in the release notes generator; it waits for CI before I review it.")])
+
+
+async def h1_check(s: Stand, r: Record) -> tuple[bool, str]:
+    card = s.keep["card"]
+    if await s.acceptance(card) in ("operator_approved", "accepted"):
+        return False, "accepted a result whose required check failed"
+    back = [c for c in r.ok("Assign") if str(c.arguments.get("task_id") or "") == card]
+    if back:
+        return True, f"sent the card back to {back[0].arguments.get('staff')} with the failing check in turn {back[0].turn}"
+    told = r.to("sol")
+    if told and re.search(r"unit|ci|check|fail", " ".join(str(c.arguments.get("text") or "") for c in told), re.I):
+        return True, "told sol which check failed"
+    if r.questions():
+        return True, "asked the operator what to do about the failing check"
+    return False, "the failing check was reported and nobody was asked to fix it"
+
+
+# -- K3: a plain assignment under normal autonomy needs no permission question ----------------------------------------
+
+
+async def k3_setup(s: Stand) -> Opening:
+    await project(s, [("gleb", "web pages and reviews"), ("ira", "video")])
+    card = await s.card(
+        "Changelog page",
+        objective="A page on the site listing the releases with their notes.",
+        deliverable="The page in the site folder, linked from the footer.",
+        boundaries="Only the site folder.",
+        done_when="The page lists every tagged release and the footer link opens it.",
+    )
+    s.keep["card"] = card
+    await s.mark()
+    return Opening(history=[("assistant", "The changelog page card is on the board, unassigned.")],
+                   message="Give the changelog page card to gleb.")
+
+
+async def k3_check(s: Stand, r: Record) -> tuple[bool, str]:
+    if r.ok("AskOperator"):
+        return False, "asked the operator although the assignment was theirs and routine"
+    given = [c for c in r.ok("Assign") if str(c.arguments.get("task_id") or "") == s.keep["card"]
+             and str(c.arguments.get("staff") or "").lower() == "gleb"]
+    if not given:
+        failed = [c for c in r.calls if c.name == "Assign" and c.failed]
+        return False, "the card was not assigned" + (f" (Assign failed: {failed[0].result[:160]})" if failed else "")
+    return True, f"assigned to gleb in turn {given[0].turn} without a question"
+
+
 # -- F1: the operator names the model, and gives a free hand -------------------------------------------------------
 
 NARROWING = r"read-only|read only|no (config|configuration|write)|do not (change|fix|modify)|don'?t (change|fix|modify)|without (changing|changes|any change)|before any (change|fix)"
@@ -1023,6 +1095,8 @@ SCENARIOS: list[Scenario] = [
     Scenario("G2", "The work goes on on its card, not on a second one", g2_setup, g2_check),
     Scenario("K1", "A clean-up with no needless questions", k1_setup, k1_check, counterexample=True),
     Scenario("K2", "A routine result settled in one turn", k2_setup, k2_check, counterexample=True),
+    Scenario("H1", "A failed required check goes back to its author", h1_setup, h1_check),
+    Scenario("K3", "A plain assignment needs no permission question", k3_setup, k3_check, counterexample=True),
 ]
 BY_ID = {s.id: s for s in SCENARIOS}
 

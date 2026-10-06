@@ -15,6 +15,8 @@ model through the loop, not through a delivery into the stand's session.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import os
 import subprocess
@@ -27,18 +29,26 @@ from typing import Any
 
 from daedalus.config import Settings
 from daedalus.extensions.board import Board
+from daedalus.extensions.effects import EffectDispatcher
 from daedalus.extensions.orchestrator import WAKE_TYPES, Orchestrators
+from daedalus.extensions.orchestrator_domain import apply_goal_revision
 from daedalus.extensions.staff import Team
+from daedalus.extensions.task_launch import TaskLaunchEffect
 from daedalus.host import prompts
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.services import SessionServices, locator
 from daedalus.host.wake_queue import Batch, Pending
 from daedalus.staff_runtime import FakeStaffRuntime, LiveSession, ReadPage
+from daedalus.stores.control import ControlStore, Principal
 from daedalus.stores.database import Database
+from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.files import StoredFile
+from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.projects import FolderSpec, Project
 from daedalus.stores.staff import Staff
+from tests.support.authorized_launch import operator_assignment
 from tests.unit.test_session_runner import ScriptedProvider, _manager
+from tests.unit.test_staff_runtime import ObservedFakeStaffRuntime
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -135,6 +145,8 @@ class Stand:
     runtime: FakeStaffRuntime
     notes: Notes
     mark_seq: int = 0
+    background: list[Any] = field(default_factory=list)
+    """The execution store and the effect dispatcher's task, released and stopped on close."""
     members: dict[str, Staff] = field(default_factory=dict)
     keep: dict[str, Any] = field(default_factory=dict)
     """What a scenario's setup keeps for its check: the card it is about, the files it attached."""
@@ -148,12 +160,25 @@ class Stand:
         await db.open()
         manager = await _manager(settings, db, ScriptedProvider([]))
         notes = Notes()
-        app = SimpleNamespace(manager=manager, extensions={}, settings=settings, notifications=notes, db=manager.db, config=manager.config)
+        # Launches go through the durable launch command, as in the product: the execution store
+        # owns attempts and the effect dispatcher carries the queued launch out.
+        executions = ExecutionStore(manager.db)
+        executions.acquire()
+        await executions.boot()
+        app = SimpleNamespace(manager=manager, extensions={}, settings=settings, notifications=notes, db=manager.db,
+                              config=manager.config, executions=executions)
         team = Team(app)  # type: ignore[arg-type]
         app.extensions["staff"] = team
         team.attach()
+        dispatcher = EffectDispatcher(OutboxStore(manager.db))
+        dispatcher.register("task.launch", TaskLaunchEffect(app))
+        app.extensions["effects"] = dispatcher
+        running = asyncio.create_task(dispatcher.run())
+        dispatcher.enable()
         manager.config.staff.launch_stagger_seconds = 0
-        runtime = FakeStaffRuntime(kind="daedalus")
+        # The observed fake reports the execution reference a launch now requires of a runtime.
+        runtime = ObservedFakeStaffRuntime(kind="daedalus")
+        runtime.manager = manager
         runtime.page = ReadPage("(the member's last reply is in its report)", None, False)
         team.runtimes["daedalus"] = runtime
         board = Board(app)  # type: ignore[arg-type]
@@ -178,9 +203,16 @@ class Stand:
             state.services = services
         project = await manager.projects.get(project.id)
         assert project is not None
-        return cls(root, repo, db, manager, team, board, orch, project, session_id, runtime, notes)
+        return cls(root, repo, db, manager, team, board, orch, project, session_id, runtime, notes,
+                   background=[executions, running])
 
     async def close(self) -> None:
+        executions, running = self.background
+        running.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await running
+        self.team.queue.close()
+        executions.release()
         locator.unregister(self.session_id)
         await self.manager.close()
         await self.db.close()
@@ -196,7 +228,15 @@ class Stand:
         self.team.app.extensions["harness"] = Harnesses()
 
     async def brief(self, section: str, text: str) -> None:
-        await self.manager.projects.set_brief(self.project.id, section, text, "operator")
+        if section != "goals":
+            await self.manager.projects.set_brief(self.project.id, section, text, "operator")
+            return
+        # The goal is a versioned record the brief only mirrors; it changes through a revision.
+        async with self.db.transaction() as conn:
+            row = await (await conn.execute("SELECT goal_revision FROM projects WHERE id = ?", (self.project.id,))).fetchone()
+            await apply_goal_revision(conn, project_id=self.project.id, expected_goal_revision=int(row["goal_revision"]),
+                                      body=text, root_task_ids=[], origin_kind="operator", origin_ref="stand",
+                                      control=ControlStore(self.db), principal=Principal.operator({"via": "token", "user_id": 1}))
 
     async def journal(self, kind: str, text: str, *, author: str = "orchestrator") -> None:
         await self.manager.projects.record(self.project.id, author, kind, text)
@@ -234,12 +274,21 @@ class Stand:
                 json.dumps({"objective": objective, "deliverable": deliverable, "boundaries": boundaries, "done_when": done_when}),
             ),
         )
+        # A card on today's board has its first contract version and work step, as Board.add writes
+        # them; a launch refuses a card without one.
+        brief = {"objective": objective, "deliverable": deliverable, "boundaries": boundaries, "done_when": done_when}
+        await self.db.execute("INSERT INTO task_contract_versions(task_id,contract_revision,origin_kind,origin_ref,snapshot_json,created_at)"
+                              " VALUES (?,1,'orchestrator',?,?,?)",
+                              (task_id, self.session_id, json.dumps({"requirements": [], "checklist": [], "acceptance": "",
+                                                                    "depends_on": depends_on or [], "brief": brief}), at))
+        await self.db.execute("INSERT INTO workflow_steps(id,task_id,step_kind,state,contract_revision) VALUES (?,?,'work','pending',1)",
+                              (f"task:{task_id}:work", task_id))
         return task_id
 
     async def start(self, name: str, task_id: str) -> LiveSession:
         """The member at work on the card: its session started the way an assignment starts one."""
         member = self.members[name]
-        await self.team.assign(member, task_id, by="orchestrator")
+        await operator_assignment(self.team, member, task_id)
         live = await self.team.live_of(member)
         assert live is not None, f"{name} did not start"
         # A fake session says nothing after its start; a real one is at work by the time anything
@@ -260,7 +309,8 @@ class Stand:
 
         live = await self.team.live_of(self.members[name])
         assert live is not None, f"{name} has no session to report from"
-        extra: dict[str, Any] = {}
+        # Each report is one tool call of the member's, named as the team tool names it.
+        extra: dict[str, Any] = {"call_id": f"stand-report:{uuid.uuid4().hex}"}
         if operator_steps is not None and "operator_steps" in inspect.signature(self.team.ingress.report).parameters:
             extra["operator_steps"] = operator_steps
         return await self.team.ingress.report(live, kind, text, artifacts, **extra)

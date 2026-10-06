@@ -85,7 +85,7 @@ class ScriptedProvider(ILLMProvider):
 async def _manager(settings: Settings, db: Database, provider: ScriptedProvider) -> SessionManager:
     manager = SessionManager(settings, model_config(), db=db)
     await manager.start()
-    manager.providers.rungs_for = lambda config: [(provider, "scripted-model")]  # type: ignore[method-assign]
+    manager.providers.rungs_for = lambda config, preset_id=None: [(provider, "scripted-model")]  # type: ignore[method-assign]
     return manager
 
 
