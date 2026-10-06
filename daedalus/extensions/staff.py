@@ -40,7 +40,7 @@ from daedalus.extensions.runtime_observations import admit_native_run, enter_run
 from daedalus.extensions.staff_results import StaffReportService
 from daedalus.extensions.task_context import ContextUnavailable, assemble_task_context, render_task_context
 from daedalus.extensions.task_contract import RETURNED, Contracts
-from daedalus.harness.capabilities import CAPABILITIES
+from daedalus.harness.capabilities import CAPABILITIES, RESTRICTIVE_MODES
 from daedalus.harness.contract import mcp_server, standing_rule
 from daedalus.harness.health import ChannelHealth, channel_health
 from daedalus.host import prompts
@@ -831,6 +831,7 @@ class Team:
         if profile is not None and profile["state"] == "enabled" and resources is None:
             raise StaffError("a strict resource profile requires an exact queued CLI containment binding")
         await check_authority()
+        permission_mode = self.launch_permission_mode(member)
         runtime = self.runtime(member)
         project = await self.project(member.project_id)
         folder = self.folder_for(project, member, task)
@@ -948,7 +949,7 @@ class Team:
             effort=(await self.manager.db.kv_get(self._effort_key(member.id, task.id))) or member.effort,
             agent=member.agent,
             permission_level=self.permission_level(project),
-            permission_mode=member.permission_mode,
+            permission_mode=permission_mode,
             team_url=f"http://127.0.0.1:{self.app.settings.api_port}/api/team/{session.id}",
             team_token=token,
             predecessor=LiveSession(member, predecessor) if predecessor else None,
@@ -1030,6 +1031,21 @@ class Team:
         if first_id:
             await self.ingress.message_state(first_id, "submitted")
         return LiveSession(member, refreshed or session)
+
+    @staticmethod
+    def launch_permission_mode(member: Staff) -> str:
+        """The CLI mode a member starts in. A read-only member starts in its CLI's own no-write mode.
+
+        Read-only used to live only in the brief, while Claude ran with acceptEdits and Codex with
+        workspace-write, so a "read-only" reviewer could still edit the folder it was checking. A
+        CLI with no such mode is refused rather than trusted to keep a promise in its prompt."""
+        if member.isolation != "readonly" or member.harness == "daedalus":
+            return member.permission_mode
+        modes = RESTRICTIVE_MODES.get(member.harness)
+        if not modes:
+            raise StaffError(f"{member.harness} has no mode that keeps it from writing; give {member.name} "
+                             "a shared folder or a worktree instead of read-only")
+        return member.permission_mode if member.permission_mode in modes else min(modes)
 
     def permission_level(self, project: Project) -> str:
         """The permission level a command-line member starts with. ``full`` autonomy starts it exactly
