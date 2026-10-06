@@ -70,9 +70,11 @@ export function ResultTransfer({ projectId, artifacts, toast }: { projectId: str
     {hosts.data && offered.length === 0 && <p className="sub">{t("transfer.noHost")}</p>}
     {readiness.data && !readiness.data.available && <p className="sub">{t("transfer.noFile")}</p>}
     {selected && <p className={selected.state === "failed" || selected.state === "unknown" ? "result-warning" : "sub"} role="status">
-      {t(`transfer.state.${selected.state}`)}{selected.state === "published" && selected.published_digest ? ` · ${selected.verified_bytes}/${selected.total_bytes} · ${selected.published_digest}` : ""}
+      {t(`transfer.state.${selected.state}`)}
       {selected.error_code ? ` · ${selected.error_code}` : ""}
     </p>}
+    {selected?.state === "published" && selected.published_digest && <details><summary>{t("common.details")}</summary>
+      <div className="mono">{selected.verified_bytes}/{selected.total_bytes} · {selected.published_digest}</div></details>}
     {selected?.state === "unknown" && <p className="sub">{t("transfer.unknownHint")}</p>}
     {canStart && !selected && <button type="button" className="btn small" disabled={busy} onClick={() => void send(false)}>{t("transfer.start")}</button>}
     {canStart && (selected?.state === "failed" || selected?.state === "unknown") && <button type="button" className="btn small" disabled={busy} onClick={() => void send(true)}>{t("transfer.retry")}</button>}

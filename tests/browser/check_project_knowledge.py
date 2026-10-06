@@ -137,10 +137,10 @@ def check(lang: str, width: int) -> None:
         section.get_by_text("Propose a fact" if lang == "en" else "Предложить факт", exact=True).click()
         expect(section.get_by_label("Fact to check" if lang == "en" else "Факт для проверки")).to_have_value(claim)
         section.get_by_role("button", name="Save for checking" if lang == "en" else "Сохранить для проверки", exact=True).click()
-        expect(section).to_contain_text("unconfirmed" if lang == "en" else "не подтверждён")
+        expect(section).to_contain_text("Couldn't confirm" if lang == "en" else "Не удалось подтвердить")
         page.reload()
         section = open_memory()
-        section.get_by_role("button", name="Retry saved command" if lang == "en" else "Повторить сохранённую команду", exact=True).click()
+        section.get_by_role("button", name="Try again" if lang == "en" else "Повторить", exact=True).click()
         expect(section.get_by_role("button", name=claim, exact=True)).to_be_visible()
         assert sent[0] == sent[1] and len(facts) == 1
         section.get_by_role("button", name=claim, exact=True).click()
@@ -156,12 +156,12 @@ def check(lang: str, width: int) -> None:
         section.get_by_text("Sources needing review" if lang == "en" else "Источники для проверки", exact=True).click()
         expect(section).to_contain_text("approved source has a new version" if lang == "en" else "У разрешённого источника новая версия")
         section.get_by_role("button", name="Check source again" if lang == "en" else "Проверить источник снова").click()
-        expect(section).to_contain_text("unconfirmed" if lang == "en" else "не подтверждён")
+        expect(section).to_contain_text("Couldn't confirm" if lang == "en" else "Не удалось подтвердить")
         page.reload()
         section = open_memory()
-        section.get_by_role("button", name="Retry saved command" if lang == "en" else "Повторить сохранённую команду").click()
+        section.get_by_role("button", name="Try again" if lang == "en" else "Повторить").click()
         expect(section).to_contain_text("Invalidated" if lang == "en" else "Признано неактуальным")
-        expect(section.get_by_role("button", name="Retry saved command" if lang == "en" else "Повторить сохранённую команду")).to_have_count(0)
+        expect(section.get_by_role("button", name="Try again" if lang == "en" else "Повторить")).to_have_count(0)
         assert len(stale_commands) == 2 and stale_commands[0] == stale_commands[1]
         expect(section.get_by_role("button", name="Allow in context" if lang == "en" else "Разрешить в контексте", exact=True)).to_have_count(0)
         facts[0] = {**facts[0], "version": 5, "status": "promoted", "source_status": "stale"}
@@ -192,7 +192,7 @@ def check(lang: str, width: int) -> None:
         expect(section).to_contain_text("command ID belongs to a different request" if lang == "en" else "ID команды относится к другому запросу")
         section.get_by_role("button", name="Set aside this command" if lang == "en" else "Отложить эту команду").click()
         assert page.evaluate("sessionStorage.getItem('daedalus.knowledge.pending.p1')") is None
-        expect(section.get_by_role("button", name="Retry saved command" if lang == "en" else "Повторить сохранённую команду")).to_have_count(0)
+        expect(section.get_by_role("button", name="Try again" if lang == "en" else "Повторить")).to_have_count(0)
         assert len(sent) == 4
         assert page.evaluate("document.documentElement.scrollWidth - window.innerWidth") <= 0
         assert unhandled.report() == 0

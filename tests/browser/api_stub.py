@@ -875,7 +875,7 @@ class BoardStub:
             if row is None:
                 return 404, {"detail": "no such timed-out attempt"}
             self.unknown_stops.remove(row)
-            return 200, {"cancel_state": "completed"}
+            return 200, {"cancel_state": "drained"}
         if method == "GET" and path.startswith("/api/board/") and path.endswith("/context-history"):
             task_id = path.split("/")[3]
             if not any(task["id"] == task_id for task in self.tasks):

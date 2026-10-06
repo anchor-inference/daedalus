@@ -91,7 +91,7 @@ def scenario(language: str, width: int) -> None:
         expect(sheet.locator("#project-start-checks")).to_have_value("\n".join(f"Check {index}" for index in range(13)))
         sheet.locator("#project-start-checks").fill("All items listed\nWording checked")
         sheet.get_by_role("button", name="Create project and first task" if language == "en" else "Создать проект и первую задачу").click()
-        expect(sheet).to_contain_text("The command's outcome is unconfirmed" if language == "en" else "Исход команды не подтверждён")
+        expect(sheet).to_contain_text("Couldn't confirm the project was created" if language == "en" else "Не удалось подтвердить создание проекта")
         page.set_viewport_size({"width": 1440, "height": 900})
         page.reload()
         page.locator(".project-chip").click()

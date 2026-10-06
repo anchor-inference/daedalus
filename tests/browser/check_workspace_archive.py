@@ -150,7 +150,7 @@ def scenario(page: Page, lang: str, unhandled: Unhandled) -> None:
     section.locator("#archive-relative-path").fill("notes/draft.txt")
     section.get_by_role("button", name="Include file" if lang == "en" else "Добавить файл").click()
     section.get_by_role("button", name=words["export"]).click()
-    expect(section.get_by_text("The last command's result is unknown." if lang == "en" else "Результат последней команды неизвестен.", exact=False)).to_be_visible()
+    expect(section.get_by_text("Couldn't confirm the last action." if lang == "en" else "Не удалось подтвердить последнее действие.", exact=False)).to_be_visible()
     page.reload()
     page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{words['projects']}']:visible").first.click()
     page.locator(f".project-row .iconbtn[aria-label='{words['settings']}']").click()

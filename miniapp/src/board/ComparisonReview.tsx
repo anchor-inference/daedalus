@@ -282,7 +282,7 @@ export function ComparisonReview({ task, groupId, slot, candidate, contract, gro
         </details>
         <details><summary>{t("result.reviewEvidence")}</summary>
           <p className="sub">{t("result.manualEvidence")}</p>
-          {(evidence.data ?? []).map((item) => <div className="sub" key={item.evidence_id}>{item.criterion_id} · {item.observation}</div>)}
+          {(evidence.data ?? []).map((item) => <div className="sub" key={item.evidence_id}>{checklist.find((check) => check.id === item.criterion_id)?.text ?? item.criterion_id} · {item.observation}</div>)}
           {checklist.map((item) => <div className="sub" key={item.id}>{item.text} · {evidence.data?.some((row) => row.criterion_id === item.id && row.verification === "verified") ? t("result.covered") : t("result.uncovered")}</div>)}
           {evidence.error && <div className="result-warning">{t("pair.reviewUnavailable")}</div>}
           {checklist.length > 0 && <select className="field" aria-label={t("result.criterion")} value={criterionId} onChange={(event) => setCriterion(event.target.value)}>{checklist.map((item) => <option key={item.id} value={item.id}>{item.text}</option>)}</select>}

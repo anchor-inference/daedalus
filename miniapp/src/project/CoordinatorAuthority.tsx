@@ -56,9 +56,6 @@ function grantName(grant: Grant): string {
     if (grant.scope.kind === rule.scope_kind && same(grant.operations, rule.operations) && same(grant.effects, rule.effects))
       return bundleName(id);
   }
-  if (same(grant.operations, ["task.launch"]) && same(grant.effects, ["execution.start"])) return t("authority.bundle.legacyExecution");
-  if (same(grant.operations, ["board.task.create", "board.task.update"]) && same(grant.effects, [])) return t("authority.bundle.legacyPlanning");
-  if (same(grant.operations, ["task.launch", "staff.release"]) && same(grant.effects, ["execution.start", "execution.stop"])) return t("authority.bundle.legacyStaff");
   return bundleName("");
 }
 

@@ -58,13 +58,13 @@ def check(width: int, language: str) -> None:
         launches.locator(".pboard-unknown-row summary").click()
         expect(launches).to_contain_text("attempt-one")
         expect(launches).to_contain_text("response lost")
-        launches.get_by_role("button", name="Check observed outcome" if language == "en" else "Проверить подтверждённый исход").click()
-        expect(launches).to_contain_text("launch remains fenced" if language == "en" else "запуск остаётся заблокированным")
+        launches.get_by_role("button", name="Check it" if language == "en" else "Проверить", exact=True).click()
+        expect(launches).to_contain_text("Still can't tell whether the worker is running" if language == "en" else "Пока не понятно, работает ли исполнитель")
         expect(launches.locator(".pboard-unknown-row")).to_have_count(1)
         assert stub.launch_reconciliations == ["launch-one"]
         stub.uncertain_launches[0]["provider_session_recorded"] = True
-        launches.get_by_role("button", name="Check observed outcome" if language == "en" else "Проверить подтверждённый исход").click()
-        expect(launches).to_contain_text("completed")
+        launches.get_by_role("button", name="Check it" if language == "en" else "Проверить", exact=True).click()
+        expect(launches).to_contain_text("Checked" if language == "en" else "Проверено")
         expect(launches.locator(".pboard-unknown-row")).to_have_count(0)
         assert stub.launch_reconciliations == ["launch-one", "launch-one"]
         fits(page, f"{width}px {language} uncertain launch")
@@ -75,9 +75,9 @@ def check(width: int, language: str) -> None:
         disclosure = page.locator(".pboard-unknown-stops")
         expect(disclosure).to_be_visible()
         disclosure.locator(":scope > summary").click()
-        expect(disclosure).to_contain_text("unavailable")
+        expect(disclosure).to_contain_text("Couldn't check" if language == "en" else "Не удалось проверить")
         stub.unknown_stops_failed = False
-        disclosure.get_by_role("button", name="Reload stops" if language == "en" else "Обновить остановки").click()
+        disclosure.get_by_role("button", name="Refresh" if language == "en" else "Обновить", exact=True).click()
         expect(disclosure).to_have_count(0)
 
         blocked = stop("attempt-one")
@@ -95,7 +95,7 @@ def check(width: int, language: str) -> None:
         expect(disclosure).to_contain_text("observing_exit")
         expect(disclosure).to_contain_text("7")
         expect(disclosure).to_contain_text("Yes" if language == "en" else "Да")
-        expect(disclosure).to_contain_text("no recorded process containment" if language == "en" else "не записана изоляция процессов")
+        expect(disclosure).to_contain_text("wasn't isolated" if language == "en" else "не был изолирован")
         expect(disclosure).to_contain_text("No binding recorded" if language == "en" else "Привязка не записана")
         expect(disclosure).to_contain_text("terminal-one")
         reconcile = disclosure.locator(".pboard-unknown-row button")
@@ -112,29 +112,29 @@ def check(width: int, language: str) -> None:
             "id": "stale-observation", "host_generation": "6", "observation_kind": "exit",
             "enforced": 1, "populated": 0, "observed_at": "2026-10-01T09:03:00Z"}
         stub.unknown_stops = [stale]
-        disclosure.get_by_role("button", name="Reload stops" if language == "en" else "Обновить остановки").click()
+        disclosure.get_by_role("button", name="Refresh" if language == "en" else "Обновить", exact=True).click()
         expect(disclosure).to_contain_text("stale-observation")
-        expect(disclosure).to_contain_text("not release proof" if language == "en" else "не подтверждает освобождение")
+        expect(disclosure).to_contain_text("does not confirm the stop" if language == "en" else "не подтверждает остановку")
         expect(reconcile).to_be_disabled()
         assert stub.stop_reconciliations == []
 
         changed_scope = stop("attempt-one")
         changed_scope["recovery_blocker"] = "source_revision_changed"
         stub.unknown_stops = [changed_scope]
-        disclosure.get_by_role("button", name="Reload stops" if language == "en" else "Обновить остановки").click()
-        expect(disclosure).to_contain_text("source revision differs" if language == "en" else "Ревизия источника владельца отличается")
+        disclosure.get_by_role("button", name="Refresh" if language == "en" else "Обновить", exact=True).click()
+        expect(disclosure).to_contain_text("changed after this run started" if language == "en" else "изменили после начала этого запуска")
         expect(reconcile).to_be_disabled()
         assert stub.stop_reconciliations == []
 
         stub.unknown_stops = [stop("attempt-one")]
-        disclosure.get_by_role("button", name="Reload stops" if language == "en" else "Обновить остановки").click()
-        expect(disclosure).to_contain_text("Exact release evidence" if language == "en" else "Точное подтверждение")
+        disclosure.get_by_role("button", name="Refresh" if language == "en" else "Обновить", exact=True).click()
+        expect(disclosure).to_contain_text("The worker has stopped" if language == "en" else "Исполнитель остановился")
         expect(disclosure).to_contain_text("observation-one")
         expect(disclosure).to_contain_text("Writer claim" if language == "en" else "Заявка на запись")
         expect(disclosure).to_contain_text("populated No" if language == "en" else "есть процессы Нет")
         expect(reconcile).to_be_enabled()
         reconcile.click()
-        expect(disclosure).to_contain_text("completed")
+        expect(disclosure).to_contain_text("Released" if language == "en" else "Задача освобождена")
         expect(disclosure.locator(".pboard-unknown-row")).to_have_count(0)
         assert stub.stop_reconciliations == ["attempt-one"], stub.stop_reconciliations
         fits(page, f"{width}px {language} reconciled stop")

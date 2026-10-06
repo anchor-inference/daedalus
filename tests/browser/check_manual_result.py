@@ -163,7 +163,7 @@ def scenario(language: str, width: int, file_bound: bool) -> None:
         sheet = page.locator(".sheet.pboard-sheet")
         sheet.get_by_role("button", name="Submit my result" if language == "en" else "Сдать мой результат").click()
         if file_bound:
-            sheet.get_by_role("button", name="Prepare proof for prices.csv" if language == "en" else "Подготовить подтверждение для prices.csv").click()
+            sheet.get_by_role("button", name="Use attached prices.csv" if language == "en" else "Использовать прикреплённый prices.csv").click()
             expect(sheet.get_by_label("prices.csv")).to_be_visible()
             sheet.get_by_label("prices.csv").check()
         report = sheet.get_by_label("What was completed?" if language == "en" else "Что выполнено?")
@@ -174,7 +174,7 @@ def scenario(language: str, width: int, file_bound: bool) -> None:
         sheet.get_by_role("button", name="Submit my result" if language == "en" else "Сдать мой результат").click()
         expect(sheet.get_by_label("What was completed?" if language == "en" else "Что выполнено?")).to_have_value("Updated all catalog prices")
         sheet.get_by_role("button", name="Submit for review" if language == "en" else "Сдать на проверку").click()
-        expect(sheet).to_contain_text("unconfirmed" if language == "en" else "не подтверждён")
+        expect(sheet).to_contain_text("Couldn't confirm" if language == "en" else "Не удалось подтвердить")
         page.reload()
         sheet = page.locator(".sheet.pboard-sheet")
         expect(sheet).to_be_visible()
@@ -202,7 +202,7 @@ def scenario(language: str, width: int, file_bound: bool) -> None:
         page.reload()
         sheet = page.locator(".sheet.pboard-sheet")
         expect(sheet).to_be_visible()
-        sheet.get_by_role("button", name="Confirm saved reopen command" if language == "en" else "Подтвердить сохранённую команду возврата").click()
+        sheet.get_by_role("button", name="Try again" if language == "en" else "Повторить").click()
         expect(sheet).to_contain_text("Returned for another round" if language == "en" else "Возвращено на доработку")
         assert len(reopen_calls) == 2 and reopen_calls[0] == reopen_calls[1]
         assert page.evaluate("document.documentElement.scrollWidth - window.innerWidth") <= 0

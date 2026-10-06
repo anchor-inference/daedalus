@@ -67,7 +67,7 @@ export function UnknownStops({ projectId }: { projectId: string }) {
     setOutcome("");
     try {
       const result = await api.post<{ cancel_state: string }>(`${base}/${encodeURIComponent(id)}/reconcile`, {});
-      setOutcome(t("pboard.unknown.result", { id, state: result.cancel_state }));
+      setOutcome(t(result.cancel_state === "unknown" ? "pboard.unknown.stillLocked" : "pboard.unknown.released"));
     } catch (error) { setWarning(errorText(error)); }
     finally {
       await reload();
@@ -84,12 +84,11 @@ export function UnknownStops({ projectId }: { projectId: string }) {
     {warning && <p className="result-warning" role="alert">{warning}</p>}
     {outcome && <p className="sub" role="status">{outcome}</p>}
     {items.map((item) => <div className="pboard-unknown-row" key={item.id}>
-      <div><b>{item.task_id}</b> · <code>{item.id}</code></div>
-      <div className="sub">{t("pboard.unknown.phase", { phase: item.phase ?? "—", deadline: item.deadline_at ?? "—" })}</div>
+      <div><b>{item.task_id}</b></div>
       <p className="sub" role="status">{t(`pboard.unknown.blocker.${item.recovery_blocker}`)}</p>
-      <details><summary>{t("pboard.unknown.observation")}</summary>
+      <details><summary>{t("common.details")}</summary>
         <dl>
-          {(["state", "cancel_state", "parent_kind", "parent_id", "generation", "host_generation",
+          {(["id", "phase", "deadline_at", "state", "cancel_state", "parent_kind", "parent_id", "generation", "host_generation",
             "generation_matches_host_record", "staff_session_id", "runtime_kind", "provider_session_ref",
             "native_run_id", "runtime_instance", "exit_observed", "no_entry_observed", "updated_at"] as const).map((key) =>
             <div key={key}><dt>{t(`pboard.unknown.${key}`)}</dt><dd><code>{typeof item[key] === "boolean" ? t(item[key] ? "pboard.unknown.yes" : "pboard.unknown.no") : String(item[key] ?? "—")}</code></dd></div>)}

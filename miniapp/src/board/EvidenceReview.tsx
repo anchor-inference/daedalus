@@ -79,7 +79,7 @@ export function EvidenceReview({ task, result, contract, review, blockingComment
     <summary>{t("result.reviewEvidence")}</summary>
     <p className="sub">{t("result.manualEvidence")}</p>
     {evidence.error && <div className="result-warning" role="status">{t("result.block.unconfirmed")} <button type="button" className="linkbtn" onClick={() => evidence.refresh()}>{t("common.retry")}</button></div>}
-    <ul>{(evidence.data ?? []).map((row) => <li key={row.evidence_id}>{row.criterion_id} · {row.observation} · {t(`result.verification.${row.verification}`)}</li>)}</ul>
+    <ul>{(evidence.data ?? []).map((row) => <li key={row.evidence_id}>{checks.find((check) => check.id === row.criterion_id)?.text ?? row.criterion_id} · {row.observation} · {t(`result.verification.${row.verification}`)}</li>)}</ul>
     {checks.length > 0 && <ul>{checks.map((check) => <li key={check.id}>{check.text} · {(evidence.data ?? []).some((row) => row.criterion_id === check.id && row.verification === "verified") ? t("result.covered") : t("result.uncovered")}</li>)}</ul>}
     <div className="result-comment-form">
       {checks.length > 0 && <select className="field" aria-label={t("result.criterion")} value={selectedCriterion} onChange={(event) => setCriterion(event.target.value)}>{checks.map((check) => <option key={check.id} value={check.id}>{check.text}</option>)}</select>}

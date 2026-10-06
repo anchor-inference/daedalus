@@ -73,22 +73,22 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
 
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/project/p1/board?task=task&token=t&lang={language}")
-    title = "Continue with another runtime" if language == "en" else "Продолжить в другом рантайме"
+    title = "Continue with another worker" if language == "en" else "Продолжить с другим исполнителем"
     section = page.locator(".sheet.pboard-sheet details.result-details", has=page.get_by_text(title)).first
     section.locator("summary").click()
     section.get_by_label("New worker" if language == "en" else "Новый исполнитель").select_option("alternate")
-    expect(section).to_contain_text("provider session" if language == "en" else "сессия провайдера")
-    action = "Approve continuation" if language == "en" else "Подтвердить продолжение"
-    section.get_by_role("button", name=action).click()
+    expect(section).to_contain_text("conversation aren't copied" if language == "en" else "разговор не копируются")
+    action = "Continue" if language == "en" else "Продолжить"
+    section.get_by_role("button", name=action, exact=True).click()
     dialog = page.locator(".dialog[role='alertdialog']")
     expect(dialog).to_contain_text("Alternate")
-    dialog.get_by_role("button", name=action).click()
-    expect(section.get_by_role("status")).to_contain_text("uncertain" if language == "en" else "не подтверждён")
+    dialog.get_by_role("button", name=action, exact=True).click()
+    expect(section.get_by_role("status")).to_contain_text("Couldn't confirm" if language == "en" else "Не удалось подтвердить")
     page.reload()
     section = page.locator(".sheet.pboard-sheet details.result-details", has=page.get_by_text(title)).first
     section.locator("summary").click()
     section.get_by_role("status").get_by_role("button").click()
-    expect(page.get_by_text("Continuation queued" if language == "en" else "Продолжение поставлено в очередь")).to_be_visible()
+    expect(page.get_by_text("Starting the new worker" if language == "en" else "Запускаем нового исполнителя")).to_be_visible()
     assert len(state["commands"]) == 2 and state["commands"][0] == state["commands"][1]
 
 

@@ -83,6 +83,14 @@ function detail(value: unknown): string {
   return String(value);
 }
 
+/** The content hashes prove which bytes were reviewed; a person rarely reads them, so they wait behind a fold. */
+function Fingerprints({ artifacts, original }: { artifacts: ResultReceipt["artifacts"]; original: string }) {
+  return <details><summary>{t("common.details")}</summary>
+    <ul>{artifacts.map((artifact) => <li key={artifact.id} className="mono">{artifact.artifact_key} · {artifact.digest}</li>)}</ul>
+    <div className="mono">{original}</div>
+  </details>;
+}
+
 export type AcceptedResultReference = { resultId: string; revision: number; attemptId: string; digest: string };
 
 /** A summary link names a receipt, contract and attempt. A changed board must not redirect it to a newer result. */
@@ -133,7 +141,8 @@ export function AcceptedResultDetail({ task, reference }: { task: ProjectTask; r
         <p className="result-state">{t("result.acceptance.operator_approved")} · {t("result.version", { revision: receipt.contract_revision })} · {absTime(receipt.created_at)}</p>
         {(receipt.checks ?? []).length > 0 && <div className="result-checks"><b>{t("result.checks")}</b><ul>{receipt.checks.map((item, index) => <li key={index}>{detail(item)}</li>)}</ul></div>}
         {(receipt.limitations ?? []).length > 0 && <div className="result-warning"><b>{t("result.limitations")}</b><ul>{receipt.limitations.map((item, index) => <li key={index}>{detail(item)}</li>)}</ul></div>}
-        <div className="result-details"><b>{t("result.evidence")}</b><ul>{(receipt.artifacts ?? []).map((artifact) => <li key={artifact.id}>{artifact.artifact_kind}: {artifact.artifact_key} · {artifact.digest}</li>)}</ul><div className="mono">{receipt.original_digest}</div></div>
+        <div className="result-details"><b>{t("result.evidence")}</b><ul>{(receipt.artifacts ?? []).map((artifact) => <li key={artifact.id}>{artifact.artifact_kind}: {artifact.artifact_key}</li>)}</ul>
+          <Fingerprints artifacts={receipt.artifacts ?? []} original={receipt.original_digest} /></div>
         <h4>{t("result.original")}</h4>
         {originalError ? <p className="result-warning" role="alert">{t("goal.resultUnavailable")} <button type="button" className="linkbtn" onClick={() => setReadAttempt((attempt) => attempt + 1)}>{t("common.retry")}</button></p>
           : original === null ? <p className="sub">{t("result.loading")}</p> : <pre className="result-original">{original}</pre>}
@@ -356,9 +365,9 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
       <details className="result-details" open={reviewing} onToggle={(event) => { setEvidenceOpen(event.currentTarget.open); setReviewing(event.currentTarget.open); }}>
         <summary>{t("result.evidence")}</summary>
         <div>{t("result.version", { revision: result.contract_revision })} · {absTime(result.created_at)}</div>
-        <ul>{(result.artifacts ?? []).map((artifact) => <li key={artifact.id}>{artifact.artifact_kind}: {artifact.artifact_key} · {artifact.digest}</li>)}</ul>
+        <ul>{(result.artifacts ?? []).map((artifact) => <li key={artifact.id}>{artifact.artifact_kind}: {artifact.artifact_key}</li>)}</ul>
         {evidenceOpen && task.project_id && (result.artifacts ?? []).length > 0 && <ResultTransfer projectId={task.project_id} artifacts={result.artifacts} toast={toast} />}
-        <div className="mono">{result.original_digest}</div>
+        <Fingerprints artifacts={result.artifacts ?? []} original={result.original_digest} />
         <button type="button" className="btn small" disabled={loadingOriginal} onClick={() => void showOriginal()}>{t("result.original")}</button>
         {originalError && <p className="bad" role="alert">{originalError}</p>}
         {original?.resultId === result.result_id && <pre className="result-original">{original.text}</pre>}
