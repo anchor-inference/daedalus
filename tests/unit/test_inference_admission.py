@@ -229,15 +229,16 @@ async def test_rate_card_is_pinned_even_if_registry_prices_change_during_transpo
         await adapter.aclose()
 
 
-async def test_capped_unknown_price_or_input_bound_is_refused_before_transport(manager) -> None:
+async def test_capped_unknown_input_bound_goes_ahead_unreserved(manager) -> None:
+    # A subscription model publishes no per-token price or input ceiling. Refusing it under any cap
+    # stopped every coordinator on one; it runs, and its spend shows as unknown.
     sends = []
     configured = endpoint()
     configured.pricing["model"].input_limit = None
     adapter = provider(manager, lambda req: sends.append(req) or answer(), configured=configured)
     try:
-        with pytest.raises(LLMProviderError, match="input ceiling"):
-            await adapter.complete_text(request())
-        assert sends == [] and await manager.db.fetchall("SELECT id FROM inference_reservations") == []
+        await adapter.complete_text(request())
+        assert len(sends) == 1 and await manager.db.fetchall("SELECT id FROM inference_reservations") == []
     finally:
         await adapter.aclose()
 
@@ -328,9 +329,10 @@ async def test_a_missing_output_rate_cannot_turn_a_priced_input_into_a_free_repl
     configured.pricing["model"] = ModelPricing.from_entry({"input": 1, "input_limit": 50, "limit_source": "test"})
     adapter = provider(manager, lambda req: sends.append(req) or answer(), configured=configured)
     try:
-        with pytest.raises(LLMProviderError, match="priced"):
-            await adapter.complete_text(request())
-        assert sends == []
+        # The call runs unreserved, and its cost stays unknown rather than becoming zero.
+        await adapter.complete_text(request())
+        assert len(sends) == 1
+        assert await manager.db.fetchall("SELECT id FROM inference_reservations") == []
         assert configured.pricing["model"].cost({"input_tokens": 2, "output_tokens": 3}) is None
     finally:
         await adapter.aclose()

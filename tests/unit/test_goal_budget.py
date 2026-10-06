@@ -240,7 +240,7 @@ async def test_native_provider_reserves_project_goal_before_transport(db: Databa
         await adapter.aclose()
 
 
-async def test_unpriced_project_model_is_refused_before_provider_transport(db: Database) -> None:
+async def test_unpriced_project_model_runs_unreserved_under_a_goal_budget(db: Database) -> None:
     await project(db)
     await db.execute("INSERT INTO sessions(id,tenant_id,project_id,created_at,last_message_at)"
                      " VALUES ('worker','tenant','project','now','now')")
@@ -257,9 +257,8 @@ async def test_unpriced_project_model_is_refused_before_provider_transport(db: D
     adapter = provider(manager, lambda sent: sends.append(sent) or answer(), configured=unpriced)
     try:
         observed = request(observability=LLMObservabilityContext(tenant_id="tenant", session_id="worker"))
-        with pytest.raises(LLMProviderError, match="priced, provider-enforced"):
-            await adapter.complete_text(observed)
-        assert sends == []
+        await adapter.complete_text(observed)
+        assert len(sends) == 1
         assert (await db.fetchone("SELECT count(*) FROM inference_reservations"))[0] == 0
     finally:
         await adapter.aclose()

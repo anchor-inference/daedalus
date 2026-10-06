@@ -189,13 +189,16 @@ class HostInferenceAdmission:
                 price = endpoint.pricing.get(request.model)
                 if not free and (price is None or price.input is None or price.output is None
                                  or price.input_limit is None or not price.limit_source):
-                    # A prepaid comparison cannot silently send an unpriced fallback even when
-                    # the operator has disabled broader daily or installation spending limits.
+                    # A prepaid comparison promised a fixed spend and cannot send an unpriced call.
                     comparison = await one(conn, 'SELECT 1 FROM comparison_funding_slots WHERE attempt_id = ?',
                                            (attempt.id,)) if attempt is not None else None
-                    if not constraints and comparison is None:
-                        return None
-                    raise BudgetRefused("this model needs a priced, provider-enforced input ceiling before a capped call")
+                    if comparison is not None:
+                        raise BudgetRefused("this model needs a priced, provider-enforced input ceiling before a capped call")
+                    # Anything else goes ahead unreserved; its spend shows as unknown. Refusing every
+                    # unpriced call under any cap stopped every coordinator on a subscription model
+                    # (Grok, Codex, Claude through their logins publish no per-token price), which a
+                    # dollar ceiling cannot bound anyway.
+                    return None
                 quote, quoted = model_quote(endpoint, request.model, body.get('max_tokens'))
                 quote['quoted_at'] = datetime.now(UTC).isoformat()
                 observer = request.observability
