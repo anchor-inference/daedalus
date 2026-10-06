@@ -1,7 +1,7 @@
 """A result moves through evidence, coordinator verdict, merge receipt and exact operator acceptance.
 
-On the way the operator counts the worker's passing check on the reviewed commit as evidence with
-one click.
+On the way the operator pins a note to a diff line by tapping it, and counts the worker's passing
+check on the reviewed commit as evidence with one click.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ class ResultStub(BoardStub):
         self.verdict: dict | None = None
         self.merge_receipt: dict | None = None
         self.operations: list[tuple[str, dict]] = []
+        self.comments: list[dict] = []
 
     def answer(self, method: str, path: str, query: str, body: dict | None):  # type: ignore[no-untyped-def]
         base = "/api/board/review-one"
@@ -39,7 +40,13 @@ class ResultStub(BoardStub):
         if path == f"{result}/turns" and method == "GET":
             return 200, [{"session_id": "session-source", "turn_seq": 7, "source_ref": "turn:7", "source_digest": "d" * 64, "source_current": True}]
         if path == f"{result}/comments" and method == "GET":
-            return 200, []
+            return 200, self.comments
+        if path == f"{result}/comments" and method == "POST":
+            payload = dict(body or {})
+            self.operations.append(("comment", payload))
+            self.comments.append({"comment_id": "comment-one", "result_id": "result-one", "priority": payload["priority"], "body": payload["body"], "manifest_id": payload.get("manifest_id"), "path": payload.get("path"), "head": payload.get("head"), "line_start": payload.get("line_start"), "line_end": None, "state": "open", "created_at": "2026-10-03T00:01:00Z"})
+            task["entity_revision"] += 1
+            return 200, {"comment_id": "comment-one", "state": "open", "entity_revision": task["entity_revision"], "receipt_id": "comment-receipt"}
         if path == f"{result}/evidence/check" and method == "POST":
             payload = dict(body or {})
             self.operations.append(("check", payload))
@@ -122,6 +129,15 @@ def run() -> int:
         flow.get_by_role("textbox", name="What did you observe?").fill("Opened the export and checked its schema")
         flow.get_by_role("button", name="Record observation").click()
         expect(flow).to_contain_text("Evidence recorded")
+        # A tap on an added line opens the note form pinned to that file and head line.
+        page.locator(".review-panel").get_by_role("button", name="Diff").click()
+        page.locator(".review-diff .diff-line", has_text="if order.paid:").tap()
+        expect(page.locator(".review-diff")).to_have_count(0)
+        expect(flow.get_by_role("textbox", name="File path")).to_have_value("api/notify.py")
+        expect(flow.get_by_role("spinbutton", name="Line number")).to_have_value("2")
+        flow.locator("#comment-review-one").fill("Guard the unpaid case in a test too")
+        flow.get_by_role("button", name="Add note").click()
+        expect(flow).to_contain_text("api/notify.py:2")
         flow.get_by_role("textbox", name="Review conclusion").fill("Export matches the requested schema")
         flow.get_by_role("button", name="Approve reviewed result").click()
         expect(flow.get_by_role("button", name="Merge reviewed branch")).to_be_enabled()
@@ -129,9 +145,11 @@ def run() -> int:
         expect(flow.get_by_role("button", name="Accept this result")).to_be_enabled()
         flow.get_by_role("button", name="Accept this result").click()
         expect(page.locator(".toast")).to_contain_text("Result accepted")
-        assert [kind for kind, _ in stub.operations] == ["check", "evidence", "verdict", "merge", "accept"], stub.operations
+        assert [kind for kind, _ in stub.operations] == ["check", "evidence", "comment", "verdict", "merge", "accept"], stub.operations
         check = dict(stub.operations)["check"]
         assert check["verification_id"] == 7 and check["criterion_id"] == "C1", check
+        note = dict(stub.operations)["comment"]
+        assert (note["path"], note["line_start"], note["head"]) == ("api/notify.py", 2, "head"), note
         for _, payload in stub.operations:
             assert payload.get("client_operation_id") and isinstance(payload.get("expected_entity_revision"), int), payload
         assert stub.tasks[0]["acceptance_state"] == "operator_approved"

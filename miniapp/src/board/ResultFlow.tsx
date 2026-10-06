@@ -10,6 +10,7 @@ import { useOffline, useQuery, invalidate } from "../store";
 import { errorText } from "../ui";
 import { mergeBlock, type ProjectTask, type Review } from "./board";
 import { reviewKey } from "./ReviewPanel";
+import { useCommentAnchor } from "./commentAnchor";
 import { EvidenceReview, type ResultContract } from "./EvidenceReview";
 import { ResultTransfer } from "./ResultTransfer";
 import { ManualEvidenceReview } from "./ManualEvidenceReview";
@@ -164,6 +165,9 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
   const [commentArtifact, setCommentArtifact] = useState("");
   const [commentPath, setCommentPath] = useState("");
   const [commentLine, setCommentLine] = useState("");
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [locationOpen, setLocationOpen] = useState(false);
+  const commentBox = useRef<HTMLTextAreaElement | null>(null);
   const [resolving, setResolving] = useState<string | null>(null);
   const [resolution, setResolution] = useState<"resolved" | "waived">("resolved");
   const [resolutionReason, setResolutionReason] = useState("");
@@ -186,6 +190,17 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
   const blockingComments = (comments.data ?? []).filter((comment) => comment.priority === "blocking" && (comment.state === "open" || comment.state === "reopened"));
   const block = acceptanceBlock(task, result, contract.data ?? null, review.data ?? null, uncertain || annotationUncertain) ?? (blockingComments.length ? "comments" : null);
   const mergeReason = mergeGuard(task, result, contract.data ?? null, review.data ?? null, uncertain || annotationUncertain) ?? (blockingComments.length ? "comments" : null);
+  // A click on a diff line arrives here with its file and line; the typed fields stay as the fallback.
+  useCommentAnchor(task.id, !!result && !!task.branch, (anchor) => {
+    setCommentPath(anchor.path);
+    setCommentLine(String(anchor.line));
+    setNotesOpen(true);
+    setLocationOpen(true);
+    requestAnimationFrame(() => {
+      commentBox.current?.scrollIntoView({ block: "center" });
+      commentBox.current?.focus({ preventScroll: true });
+    });
+  });
   const returnBlocked = uncertain || !result || !contract.data || result.current_result_id !== result.result_id || result.contract_revision !== contract.data.contract_revision || !result.verdict_id;
 
   // Opening review fetches the complete report so the reviewer sees the source before recording a verdict.
@@ -392,7 +407,7 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
           originalAvailable={originalAvailable}
           toast={toast} onChanged={() => { results.refresh(); contract.refresh(); review.refresh(); onAccepted(); }} />)}
       {contract.data && task.status === "done" && result.origin_kind === "operator_manual" && <ManualReopen task={task} result={result} contract={contract.data} onChanged={() => { results.refresh(); contract.refresh(); onAccepted(); }} toast={toast} />}
-      <details className="result-details">
+      <details className="result-details" open={notesOpen} onToggle={(event) => setNotesOpen(event.currentTarget.open)}>
         <summary>{t("result.annotations", { count: (comments.data ?? []).length })}</summary>
         {comments.error && <div className="result-warning" role="status">{t("result.block.unconfirmed")} <button type="button" className="linkbtn" onClick={() => comments.refresh()}>{t("common.retry")}</button></div>}
         <ul>{(comments.data ?? []).map((comment) => <li key={comment.comment_id} className={comment.priority === "blocking" && (comment.state === "open" || comment.state === "reopened") ? "result-warning" : ""}>
@@ -409,7 +424,7 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
         </li>)}</ul>
         <div className="result-comment-form">
           <label htmlFor={`comment-${task.id}`}>{t("result.comment")}</label>
-          <textarea id={`comment-${task.id}`} className="field" rows={3} value={commentText} onChange={(event) => setCommentText(event.target.value)} />
+          <textarea id={`comment-${task.id}`} ref={commentBox} className="field" rows={3} value={commentText} onChange={(event) => setCommentText(event.target.value)} />
           <select className="field" aria-label={t("result.commentPriority")} value={commentPriority} onChange={(event) => setCommentPriority(event.target.value as Comment["priority"])}>
             {(["suggestion", "important", "blocking"] as const).map((priority) => <option key={priority} value={priority}>{t(`result.priority.${priority}`)}</option>)}
           </select>
@@ -417,7 +432,7 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
             <option value="">{t("result.wholeResult")}</option>
             {result.artifacts.map((artifact) => <option key={artifact.id} value={artifact.id}>{artifact.artifact_key}</option>)}
           </select>}
-          {task.branch && <details className="result-comment-location"><summary>{t("result.commentLocation")}</summary>
+          {task.branch && <details className="result-comment-location" open={locationOpen} onToggle={(event) => setLocationOpen(event.currentTarget.open)}><summary>{t("result.commentLocation")}</summary>
             <input className="field" aria-label={t("result.commentPath")} value={commentPath} onChange={(event) => setCommentPath(event.target.value)} placeholder={t("result.commentPath")} />
             <input className="field" type="number" min="1" aria-label={t("result.commentLine")} value={commentLine} onChange={(event) => setCommentLine(event.target.value)} placeholder={t("result.commentLine")} />
             <p className="sub">{t("result.commentLocationHint")}</p>

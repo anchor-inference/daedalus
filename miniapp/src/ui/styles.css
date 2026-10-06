@@ -2598,6 +2598,10 @@ input.field[type="range"] {
 .diff-hunk { color:var(--fg-3); background:var(--surface-1); padding:4px 8px; white-space:pre; }
 .diff-line { display:flex; min-width:max-content; white-space:pre; }
 .diff-line .linenum { min-width:38px; text-align:right; padding:0 6px; color:var(--fg-3); user-select:none; }
+/* A line that takes a review note says so on hover and on keyboard focus; a phone just taps it. */
+.diff-view.commentable .diff-line[role="button"] { cursor:pointer; }
+.diff-view.commentable .diff-line[role="button"]:hover { box-shadow:inset 3px 0 0 var(--accent); }
+.diff-view.commentable .diff-line[role="button"]:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
 .diff-sign { width:20px; }
 /* A phone wraps a long line inside its row instead of scrolling it: a touch screen draws no
    scrollbar, so a line wider than the sheet simply ended at the edge ("…are_not_sent" with its "():"

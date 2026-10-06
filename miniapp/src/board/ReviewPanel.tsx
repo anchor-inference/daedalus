@@ -14,6 +14,7 @@ import { plural, t } from "../i18n";
 import { DiffView } from "../previewparts";
 import { invalidate, useOffline, useQuery } from "../store";
 import { BLOCKER_CODES, Review, ReviewBlocker, mergeBlock } from "./board";
+import { requestCommentAt } from "./commentAnchor";
 
 export const reviewKey = (taskId: string) => `/api/board/${encodeURIComponent(taskId)}/review`;
 
@@ -174,7 +175,12 @@ export function ReviewPanel({ taskId, onChanged, toast }: { taskId: string; onCh
       {diff && (
         <Sheet title={data.branch} onClose={() => setDiff(false)} size="full" className="review-diff">
           {!data.patch_complete && <div className="sub attn">{t("pboard.review.diff.cut")}</div>}
-          <DiffView text={data.patch} />
+          <p className="sub">{t("diff.commentHint")}</p>
+          <DiffView text={data.patch} onLine={(anchor) => {
+            // The sheet closes so the prefilled form under it is what the operator sees next.
+            if (requestCommentAt(taskId, anchor)) setDiff(false);
+            else toast(t("diff.commentNoResult"));
+          }} />
         </Sheet>
       )}
     </section>
