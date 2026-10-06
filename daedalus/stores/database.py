@@ -1792,6 +1792,10 @@ CREATE INDEX effect_approvals_by_effect ON effect_approvals(effect_id, revoked_a
 MIGRATIONS.append(CALENDAR_DIAGRAM_MIGRATION)
 MIGRATIONS.append(WRITER_CONTAINMENT_MIGRATION)
 MIGRATIONS.append("DROP TABLE effect_approvals;")
+# The branch head a worker's result was handed in at. The review card diffs one attempt's head
+# against the next so a reworked task shows what the rework changed, not only the whole branch
+# again; a result from before this column, or one without a branch, keeps NULL.
+MIGRATIONS.append("ALTER TABLE result_receipts ADD COLUMN head TEXT;")
 
 BRANCH_BASE_SCHEMA = MIGRATIONS.index(CONTROL_MIGRATION)
 

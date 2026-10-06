@@ -13,10 +13,11 @@ import { Icon } from "../icons";
 import { plural, t } from "../i18n";
 import { DiffView } from "../previewparts";
 import { invalidate, useOffline, useQuery } from "../store";
-import { BLOCKER_CODES, Review, ReviewBlocker, mergeBlock } from "./board";
+import { BLOCKER_CODES, Review, ReviewBlocker, ReviewSince, mergeBlock } from "./board";
 import { requestCommentAt } from "./commentAnchor";
 
 export const reviewKey = (taskId: string) => `/api/board/${encodeURIComponent(taskId)}/review`;
+const sinceKey = (taskId: string, head: string) => `${reviewKey(taskId)}/since-previous?head=${encodeURIComponent(head)}`;
 
 const COMMITS_SHOWN = 5;
 
@@ -25,6 +26,23 @@ export function blockerText(blocker: ReviewBlocker, review: Pick<Review, "curren
   if (blocker.code === "ci") return t("pboard.review.block.ciPending");
   if (!(BLOCKER_CODES as readonly string[]).includes(blocker.code)) return blocker.text;
   return t(`pboard.review.block.${blocker.code}`, { current: review.current, base: review.base, files: (review.conflicts ?? []).slice(0, 3).join(", ") });
+}
+
+/** The change the latest attempt made, fetched only when the operator picks it: most reviews never ask. */
+function SinceDiff({ taskId, head, onLine }: { taskId: string; head: string; onLine: (anchor: { path: string; line: number }) => void }) {
+  const { data, error, loading, refresh } = useQuery<ReviewSince>(sinceKey(taskId, head), { staleMs: 2000 });
+  if (loading && !data) return <Skeleton rows={3} />;
+  if (error && !data) return <div className="sub bad">{t("pboard.review.diff.sinceError", { detail: error })} <button className="linkbtn" onClick={refresh}>{t("common.retry")}</button></div>;
+  if (!data) return null;
+  return <>
+    <p className="sub review-since-range">
+      {t("pboard.review.diff.range", { since: data.since.slice(0, 7), until: data.until.slice(0, 7) })}
+      {" · "}<span className="tk-add num">+{data.added}</span> <span className="tk-del num">−{data.removed}</span>
+      {" · "}{plural("pboard.review.files", data.files.length)}
+    </p>
+    {!data.patch_complete && <div className="sub attn">{t("pboard.review.diff.cut")}</div>}
+    {data.patch ? <DiffView text={data.patch} onLine={onLine} /> : <p className="sub">{t("pboard.review.diff.sinceEmpty")}</p>}
+  </>;
 }
 
 type RequirementIntent = { client_operation_id: string; expected_entity_revision: number; provider: "github"; repository_id: string; check_names: string[] };
@@ -85,6 +103,7 @@ function CiRequirements({ taskId, checks, onChanged, toast }: { taskId: string; 
 export function ReviewPanel({ taskId, onChanged, toast }: { taskId: string; onChanged: () => void; toast: (text: string) => void }) {
   const { data, error, loading, refresh } = useQuery<Review>(reviewKey(taskId), { staleMs: 2000 });
   const [diff, setDiff] = useState(false);
+  const [since, setSince] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
 
@@ -98,6 +117,11 @@ export function ReviewPanel({ taskId, onChanged, toast }: { taskId: string; onCh
     );
   }
   if (!data) return null;
+  const commentAt = (anchor: { path: string; line: number }) => {
+    // The sheet closes so the prefilled form under it is what the operator sees next.
+    if (requestCommentAt(taskId, anchor)) setDiff(false);
+    else toast(t("diff.commentNoResult"));
+  };
   const block = mergeBlock(data);
   // The reason Merge waits is said once, under the button it disables; the list above keeps only the
   // others. Both used to print it, word for word, two lines apart.
@@ -174,13 +198,21 @@ export function ReviewPanel({ taskId, onChanged, toast }: { taskId: string; onCh
       <div className={`sub review-why ${block?.code === "conflicts" ? "bad" : "attn"}`}>{block ? t("pboard.review.why", { reason: blockerText(block, data) }) : t("result.block.unverified")}</div>
       {diff && (
         <Sheet title={data.branch} onClose={() => setDiff(false)} size="full" className="review-diff">
-          {!data.patch_complete && <div className="sub attn">{t("pboard.review.diff.cut")}</div>}
+          {/* The whole branch is what Merge brings and stays the first view; the second answers what a
+              rework changed, which the whole branch hides once a task has been returned and redone. */}
+          {data.previous_result && data.head_sha && (
+            <div className="segmented review-diff-scope">
+              <button className={!since ? "on" : ""} aria-pressed={!since} onClick={() => setSince(false)}>{t("pboard.review.diff.whole")}</button>
+              <button className={since ? "on" : ""} aria-pressed={since} onClick={() => setSince(true)}>{t("pboard.review.diff.since")}</button>
+            </div>
+          )}
           <p className="sub">{t("diff.commentHint")}</p>
-          <DiffView text={data.patch} onLine={(anchor) => {
-            // The sheet closes so the prefilled form under it is what the operator sees next.
-            if (requestCommentAt(taskId, anchor)) setDiff(false);
-            else toast(t("diff.commentNoResult"));
-          }} />
+          {since && data.previous_result && data.head_sha
+            ? <SinceDiff taskId={taskId} head={data.head_sha} onLine={commentAt} />
+            : <>
+              {!data.patch_complete && <div className="sub attn">{t("pboard.review.diff.cut")}</div>}
+              <DiffView text={data.patch} onLine={commentAt} />
+            </>}
         </Sheet>
       )}
     </section>

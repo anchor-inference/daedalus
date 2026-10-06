@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,8 +22,10 @@ from daedalus.extensions.ci_observations import observation_from_webhook, record
 from daedalus.extensions.merge_effect import MergeEffect
 from daedalus.extensions.orchestrator_domain import OrchestratorDomain
 from daedalus.extensions.review import Review, ReviewRefused
+from daedalus.extensions.runtime_observations import admit_native_run, observe_exit
 from daedalus.extensions.staff import Team
 from daedalus.host.session_runner import SessionManager
+from daedalus.host.worktrees import WorktreeRefused
 from daedalus.staff_runtime import StartRequest
 from daedalus.stores.control import Principal, Scope
 from daedalus.stores.database import Database
@@ -695,5 +698,92 @@ async def test_review_patch_is_bounded_without_changing_the_git_evidence(setting
         full = await r.team.worktrees.compare(r.project.primary, branch)
         assert full.patch.count("diff --git") == 6 and full.patch_complete
         assert (await r.review.review(task_id))["result_id"]
+    finally:
+        await r.close()
+
+
+async def test_a_reworked_result_shows_only_what_the_rework_changed(settings: Settings, db: Database,
+                                                                     tmp_path: Path) -> None:
+    """The whole branch stays the merge's question; the second view answers what the last attempt did."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        member = await r.hire()
+        task_id = await board_task(r.manager, r.project, "Menu")
+
+        async def attempt(name: str, content: str) -> str:
+            """One launch that commits a file and hands in, its run observed to end so the next may start."""
+            await operator_assignment(r.team, member, task_id)
+            request = next(item for item in reversed(r.runtime.started) if item.task.id == task_id)
+            assert request.worktree is not None
+            (request.worktree.cwd / name).write_text(content)
+            git(request.worktree.path, "add", "-A")
+            git(request.worktree.path, "commit", "-qm", name)
+            live = await r.team.live_of(member)
+            assert live is not None and live.session.session_id
+            source = await r.manager.db.fetchone("SELECT tenant_id FROM sessions WHERE id = ?", (live.session.session_id,))
+            run_id = uuid.uuid4().hex
+            stamp = datetime.now(UTC).isoformat()
+            await r.manager.db.execute("INSERT INTO runs(id,tenant_id,session_id,status,created_at,updated_at)"
+                                       " VALUES (?,?,?,'running',?,?)", (run_id, source["tenant_id"], live.session.session_id, stamp, stamp))
+            await admit_native_run(r.team.app, live.id, live.session.session_id, run_id)
+            await r.team.ingress.report(live, "done", f"{name} written", artifacts=[name], call_id=f"review:{uuid.uuid4().hex}")
+            await r.manager.db.execute("UPDATE runs SET status = 'completed' WHERE id = ?", (run_id,))
+            assert await observe_exit(r.team.app, staff_session_id=live.id, runtime_ref=run_id, observed_status="completed")
+            await r.team.ingress.status((await r.team.live_of(member)) or live, "idle")
+            return git(r.folder, "rev-parse", f"refs/heads/{(await task_row(r.manager, task_id))['branch']}").strip()
+
+        first_head = await attempt("menu.md", "bread\n")
+        recorded = await r.manager.db.fetchone("SELECT id,head FROM result_receipts WHERE task_id = ?", (task_id,))
+        assert recorded["head"] == first_head
+        # One result, at the head now: there is nothing earlier to compare with.
+        assert (await r.review.review(task_id))["previous_result"] is None
+        with pytest.raises(ReviewRefused, match="no earlier result"):
+            await r.review.since_previous(task_id)
+        async with r.client() as client:
+            result_id, verdict_id = await r.approve(client, task_id)
+            assert result_id == recorded["id"]
+            returned = await client.post(f"/api/board/{task_id}/results/{result_id}/return", json={
+                "client_operation_id": "return:prices", "verdict_id": verdict_id, "contract_revision": 1,
+                "expected_entity_revision": (await task_row(r.manager, task_id))["entity_revision"],
+                "reason": "Add prices"})
+            assert returned.status_code == 200, returned.text
+        second_head = await attempt("prices.md", "bread 3\n")
+
+        review = await r.review.review(task_id)
+        assert review["head_sha"] == second_head
+        assert review["previous_result"]["id"] == result_id
+        assert review["previous_result"]["head_sha"] == first_head
+        assert {f["path"] for f in review["files"]} == {"menu.md", "prices.md"}
+        since = await r.review.since_previous(task_id)
+        assert (since["since"], since["until"], since["commits"]) == (first_head, second_head, 1)
+        assert [f["path"] for f in since["files"]] == ["prices.md"]
+        assert since["added"] == 1 and since["patch_complete"]
+        assert "+bread 3" in since["patch"] and "menu.md" not in since["patch"]
+        r.team.app.front = None
+        r.team.app.guard = None
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(r.team.app, "tok")),
+                                     base_url="http://test") as client:
+            served = await client.get(f"/api/board/{task_id}/review/since-previous", headers={"X-Daedalus-Token": "tok"})
+            assert served.status_code == 200 and served.json()["patch"] == since["patch"]
+
+        # A result from before heads were kept is found by the head its verdict named.
+        await r.manager.db.execute("UPDATE result_receipts SET head = NULL WHERE id = ?", (result_id,))
+        assert (await r.review.review(task_id))["previous_result"]["head_sha"] == first_head
+    finally:
+        await r.close()
+
+
+async def test_a_range_diff_takes_only_commit_ids_that_exist(settings: Settings, db: Database,
+                                                              tmp_path: Path) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        assert r.project.primary is not None
+        head = git(r.folder, "rev-parse", "HEAD").strip()
+        with pytest.raises(WorktreeRefused, match="full commit ids"):
+            await r.team.worktrees.diff_commits(r.project.primary, "--output=/tmp/x", head)
+        with pytest.raises(WorktreeRefused, match="no longer"):
+            await r.team.worktrees.diff_commits(r.project.primary, "0" * 40, head)
+        same = await r.team.worktrees.diff_commits(r.project.primary, head, head)
+        assert same.commits == 0 and same.files == [] and same.patch == ""
     finally:
         await r.close()
