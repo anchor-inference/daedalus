@@ -65,11 +65,11 @@ from daedalus.doctor import DoctorContext, render_text, run_checks, summarize
 from daedalus.extensions import (
     api_browsers,
     api_calendar,
+    api_diagrams,
     api_files,
     api_harnesses,
     api_projects,
     api_staff,
-    api_workspace,
     launcher_updates,
 )
 from daedalus.extensions import commands as slash
@@ -1571,9 +1571,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     # The files orchestration keeps by handle: the cards a chat draws, their bytes, the audit.
     api_files.register(api, app, auth)
     if isinstance(getattr(app, "db", None), Database):
-        api_workspace.register(api, app, auth)
         # The calendar, its connected accounts and the planner's tasks.
         api_calendar.register(api, app, auth)
+        # The diagram editor: scenes, their history, previews and public links.
+        api_diagrams.register(api, app, auth)
     # The agent's browser: its groups, the live view's ticket and socket, control, the audit.
     api_browsers.register(api, app, auth)
 

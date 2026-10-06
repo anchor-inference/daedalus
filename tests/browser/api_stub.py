@@ -477,6 +477,11 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str] | None:
     if method.upper() == "GET" and len(parts) == 5 and parts[3] == "provider" and parts[2] == "usage":
         # The provider card in Details: a day with nothing spent, no subscription read.
         return 200, "application/json", json.dumps({"provider": parts[4], "today": {}, "subscription": None, "balance": None})
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "diagrams" and parts[4] == "preview":
+        # The diagram list draws a thumbnail per card; a diagram a harness listed but drew nothing
+        # for has an empty canvas, which the card shows as its placeholder. `diagram_stub.py`
+        # answers every diagram route for a harness that opens one.
+        return 200, "application/json", json.dumps({"version": 1, "svg": ""})
     if method.upper() == "GET" and path == "/api/files":
         # Handles a harness did not invent name no file: the chat draws no card for them.
         return 200, "application/json", json.dumps({"files": []})
