@@ -3960,6 +3960,9 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "session.outside": { en: "{path} is outside this working directory", ru: "{path} лежит вне рабочей папки" },
   "session.allow.once": { en: "Allow once ({key})", ru: "Разрешить один раз ({key})" },
   "session.allowed.once": { en: "Allowed once ({key})", ru: "Разрешено один раз ({key})" },
+  "session.allow.similar": { en: "Allow similar…", ru: "Разрешить похожие…" },
+  "session.allow.similar.none": { en: "nothing narrower than this call can be allowed; allow it once", ru: "ничего уже этого вызова разрешить нельзя; разрешите его один раз" },
+  "session.allowed.similar": { en: "Allowed {label} in this session", ru: "Разрешено {label} в этой сессии" },
   "session.allow.title": { en: "Let this exact call through once; the agent retries it on its next step", ru: "Пропустить именно этот вызов один раз; агент повторит его на следующем шаге" },
   "session.showall": { en: "Show all ({n} characters)", ru: "Показать целиком ({n} символов)" },
   "session.showall.masked": { en: "Show the whole result", ru: "Показать результат целиком" },
@@ -4143,6 +4146,9 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "composer.approve": { en: "Allow once", ru: "Разрешить один раз" },
   "composer.deny": { en: "Refuse", ru: "Отказать" },
   "composer.approved": { en: "allowed once; the agent retries it on its next step", ru: "разрешено один раз; агент повторит на следующем шаге" },
+  "composer.approve.similar": { en: "Allow {label} in this session", ru: "Разрешить {label} в этой сессии" },
+  "composer.approve.similar.title": { en: "The same tool, for the same question, until the session ends; the open requests it covers are answered too", ru: "Тот же инструмент по тому же вопросу до конца сессии; открытые запросы, которые под это подходят, тоже будут разрешены" },
+  "composer.approved.similar": { en: "{label} allowed in this session; the agent retries on its next step", ru: "{label} разрешено в этой сессии; агент повторит на следующем шаге" },
   "composer.question": { en: "The agent asks", ru: "Агент спрашивает" },
 
   // ── what a step in the timeline is called: the verb while it runs, and after ────────────

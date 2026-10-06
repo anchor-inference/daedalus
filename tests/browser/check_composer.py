@@ -68,6 +68,9 @@ class Host:
         self.yagni = False
         # How many times the app has read the session: a re-read is what once wiped a picked answer.
         self.reads = 0
+        # The request "Allow similar" has a family for, and the other open ones that family answers.
+        self.similar_key = ""
+        self.covered: list[str] = []
 
     def detail(self) -> dict:
         return {
@@ -114,6 +117,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             if len(HOST.queue) == before:
                 return route.fulfill(status=409, content_type="application/json", body=json.dumps({"detail": "that message has already reached the agent"}))
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"deleted": True}))
+        if rel == f"/api/sessions/{SESSION}/policy/grant-similar":
+            key = str((data or {}).get("key") or "")
+            resolved = [key, *HOST.covered] if key == HOST.similar_key else []
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"key": key, "similar": {"label": "rm*"}, "resolved": resolved, "approves": [], "standing": []}))
         if rel == f"/api/sessions/{SESSION}/stop":
             HOST.status = "idle"
             return route.fulfill(status=200, content_type="application/json", body="{}")
@@ -153,6 +160,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     elif rel == f"/api/sessions/{SESSION}":
         HOST.reads += 1
         body = HOST.detail()
+    elif rel.startswith(f"/api/sessions/{SESSION}/policy/similar/"):
+        key = rel.rsplit("/", 1)[1]
+        body = {"similar": {"tool": "Exec", "rule": "shell.rm_workspace", "kind": "prefix", "value": "rm", "hosts": [], "label": "rm*"} if key == HOST.similar_key else None}
     elif rel.startswith(f"/api/sessions/{SESSION}/"):
         body = []
     elif rel == "/api/settings":
@@ -394,6 +404,43 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append(f"the approval did not spend the key ({granted})")
     if page.locator(".composer .dock.approval").count():
         problems.append("the dock stayed after the key was spent")
+
+    # A request the host has no family for offers Allow once only.
+    HOST.messages = HOST.messages[:2]
+    HOST.refuse("fedcba987654")
+    page.reload()
+    page.wait_for_selector(".composer .dock.approval", timeout=15000)
+    page.wait_for_timeout(400)
+    if page.locator(".composer .dock.approval [data-action='allow-similar']").count():
+        problems.append("the dock offers Allow similar for a request with no family")
+
+    # A request with a family: the button says what "similar" means, and pressing it grants the
+    # family and answers the open requests it covers, so the dock does not come back for them.
+    HOST.messages = HOST.messages[:2]
+    HOST.similar_key = "0a1b2c3d4e5f"
+    HOST.covered = ["5f4e3d2c1b0a"]
+    HOST.refuse("5f4e3d2c1b0a")
+    HOST.messages = HOST.messages + [
+        message(105, "assistant", "", tool_calls=[{"id": "c_rm2", "name": "Exec", "arguments": {"command": "rm -rf dist"}}]),
+        message(106, "tool", "", tool_results=[{"id": "c_rm2", "content": "refused by policy: destructive command.\nApproval key: 0a1b2c3d4e5f", "is_error": True}]),
+    ]
+    page.reload()
+    page.wait_for_selector(".composer .dock.approval [data-action='allow-similar']", timeout=15000)
+    similar = page.locator(".composer .dock.approval [data-action='allow-similar']")
+    print("allow similar:", similar.inner_text())
+    if similar.inner_text().strip() != "Allow rm* in this session":
+        problems.append(f"the similar button does not say what it allows ({similar.inner_text()!r})")
+    before = len(posts("/policy/grant-similar"))
+    similar.click()
+    reached(page, "/policy/grant-similar", before, "Allow similar", problems)
+    page.wait_for_timeout(200)
+    asked = posts("/policy/grant-similar")
+    if not asked or asked[-1][2] != {"key": "0a1b2c3d4e5f"}:
+        problems.append(f"Allow similar did not reach the host with the key ({asked})")
+    if page.locator(".composer .dock.approval").count():
+        problems.append("the dock came back for a request the similar grant answered")
+    HOST.similar_key = ""
+    HOST.covered = []
 
     # Refusing tells the host as well, so the request is closed wherever else it is shown.
     HOST.messages = HOST.messages[:2]

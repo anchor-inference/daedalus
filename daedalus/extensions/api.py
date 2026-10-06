@@ -4476,6 +4476,26 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(400, str(exc)) from exc
         return {"grants": grants}
 
+    @api.get("/api/sessions/{session_id}/policy/similar/{key}")
+    async def policy_similar(session_id: str, key: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """What "Allow similar" would let through for an open request, or ``null`` when nothing narrower than the call does."""
+        if await manager.get_state(session_id) is None:
+            raise HTTPException(404, "no such session")
+        try:
+            return {"similar": manager.similar_of(session_id, key)}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @api.post("/api/sessions/{session_id}/policy/grant-similar")
+    async def policy_grant_similar(session_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Allow calls like a refused one until the session ends: ``{"key": "<approval key>"}``."""
+        try:
+            return await manager.grant_similar(session_id, str(body.get("key") or ""), via="app")
+        except KeyError as exc:
+            raise HTTPException(404, "no such session") from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     @api.post("/api/sessions/{session_id}/policy/refuse")
     async def policy_refuse(session_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Leave one refused call refused: ``{"key": "<approval key>"}``. The request stops being open."""

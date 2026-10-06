@@ -50,7 +50,10 @@ counts for a minute; a window that also holds `/api/events?client=<its id>` stop
 seconds after that stream drops. `kind=launcher` on the stream marks a desktop launcher listening
 for notifications, which is never a presence. A refused tool call can be answered either way from
 any client: `POST /api/sessions/{id}/policy/grant` or `…/policy/refuse` with `{"key"}`, and the
-stream carries `permission.pending` and `permission.resolved` for it.
+stream carries `permission.pending` and `permission.resolved` for it. `GET …/policy/similar/{key}`
+says what "Allow similar" would grant for an open request (the same tool and rule, with its command
+prefix, folder or host, as `label`), or `null`; `POST …/policy/grant-similar` with `{"key"}` grants
+that family until the session ends and answers every open request it covers.
 
 **Notifications.** Everything that wants your attention — a failed run, a scheduled task's result, a
 loop that needs an answer, a service that did not come back — is one row of the notification centre

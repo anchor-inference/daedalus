@@ -92,6 +92,9 @@ export type ComposerProps = {
   onAnswer?: (answers: Answer[]) => Promise<void>;
   approval?: Approval | null;
   onApprove?: (a: Approval) => void;
+  /** What "Allow similar" grants for this request (``npm test*``), when the host offers a family. */
+  similar?: string | null;
+  onApproveSimilar?: (a: Approval) => void;
   onDeny?: (a: Approval) => void;
   /** A file waiting in the pill, opened before it goes. */
   onPreviewFile?: (file: File) => void;
@@ -471,6 +474,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           {approval.detail && <div className="dock-detail mono truncate" title={approval.detail}>{approval.detail}</div>}
           <div className="dock-actions">
             <button type="button" className="btn small primary" onClick={() => props.onApprove?.(approval)}>{t("composer.approve")}</button>
+            {props.similar && props.onApproveSimilar && (
+              <button type="button" className="btn small" data-action="allow-similar" title={t("composer.approve.similar.title")} onClick={() => props.onApproveSimilar?.(approval)}>
+                {t("composer.approve.similar", { label: props.similar })}
+              </button>
+            )}
             <button type="button" className="btn small" onClick={() => props.onDeny?.(approval)}>{t("composer.deny")}</button>
           </div>
         </div>

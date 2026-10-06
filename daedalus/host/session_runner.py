@@ -75,7 +75,7 @@ from daedalus.host.events import AppEvent, EventBus, EventFilter
 from daedalus.host.hooks import DaedalusHookManager
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.inference_admission import HostInferenceAdmission
-from daedalus.host.policy import Decision, Policy, Rule, canonical
+from daedalus.host.policy import Decision, Policy, Rule, canonical, similar_covers, similar_grant
 from daedalus.host.presence import Presence
 from daedalus.host.request_manifests import RequestManifestStore
 from daedalus.host.run_outcome import outcome_message, run_outcome
@@ -5099,7 +5099,8 @@ class SessionManager:
             policy = self.policy(base_dir=state.workspace if state is not None else self.workspace_for(session_id))
             now = time.time()
             grants = {k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > now} if state is not None else set()
-            decision = policy.evaluate(tool, arguments, grants=grants)
+            similar = list(state.metadata.get("policy_similar") or []) if state is not None else []
+            decision = policy.evaluate(tool, arguments, grants=grants, similar=similar)
             if decision.key and decision.action == "allow" and state is not None:
                 self._consume_grant(state, decision.key)
             elif decision.key and state is not None:
@@ -5107,6 +5108,11 @@ class SessionManager:
                 pending = dict(state.metadata.get("policy_pending") or {})
                 fresh = decision.key not in pending
                 pending[decision.key] = {"tool": tool, "text": self.redactor.redact(canonical(tool, arguments))[:300], "at": datetime.now(UTC).isoformat()}
+                # The family "Allow similar" would grant, worked out now: the arguments are gone by the
+                # time the operator answers, and the pending entry keeps only a redacted preview.
+                family = similar_grant(tool, arguments, decision.rule)
+                if family is not None:
+                    pending[decision.key]["similar"] = {**family, "label": self.redactor.redact(family["label"])[:200]}
                 for meta in (state.metadata, state.session.metadata):
                     meta["policy_pending"] = dict(list(pending.items())[-20:])
                 if fresh:
@@ -5256,6 +5262,44 @@ class SessionManager:
         await self.sessions.update_metadata(session_id, state.session.metadata)
         await self._publish(state, "permission.resolved", {"request_id": key, "request_ref": f"policy:{session_id}:{key}", "decision": "allow", "via": via})
         return {"key": key, "approves": approves, "grants": list(state.metadata["policy_grants"]), "expires_in_minutes": GRANT_TTL_SECONDS // 60}
+
+    def similar_of(self, session_id: str, key: str) -> dict[str, Any] | None:
+        """What "Allow similar" would grant for an open request, for the app to say before it asks."""
+        state = self._states.get(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        refused = (state.metadata.get("policy_pending") or {}).get(self._approval_key(key)) or {}
+        family = refused.get("similar")
+        return dict(family) if isinstance(family, dict) else None
+
+    async def grant_similar(self, session_id: str, key: str, *, via: str) -> dict[str, Any]:
+        """The operator allows calls like a refused one for the rest of the session.
+
+        The family was fixed when the call was refused (:func:`similar_grant`): the same tool, the same
+        rule that asked, and the command prefix, folder or host. It stands with the session, unspent, the
+        way a command-line member keeps an "Always"; and every request still open that it covers is
+        answered with it, so twenty asks of the same kind take one answer, not twenty.
+        """
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        key = self._approval_key(key)
+        family = self.similar_of(session_id, key)
+        if family is None:
+            raise ValueError("this request has no narrower family of calls to allow; allow it once instead")
+        standing = [g for g in (state.metadata.get("policy_similar") or []) if g != family]
+        standing.append(family)
+        resolved = [k for k, refused in (state.metadata.get("policy_pending") or {}).items()
+                    if isinstance(refused.get("similar"), dict)
+                    and similar_covers(family, str(refused.get("tool") or ""), str(refused["similar"].get("rule") or ""), refused["similar"])]
+        approves = [self._drop_pending(state, k) for k in resolved]
+        for meta in (state.metadata, state.session.metadata):
+            meta["policy_similar"] = standing[-20:]
+        await self.sessions.update_metadata(session_id, state.session.metadata)
+        for k in resolved:
+            await self._publish(state, "permission.resolved", {"request_id": k, "request_ref": f"policy:{session_id}:{k}", "decision": "allow", "via": via})
+        return {"key": key, "similar": family, "resolved": resolved, "approves": approves,
+                "standing": list(state.metadata["policy_similar"])}
 
     async def refuse(self, session_id: str, key: str, *, via: str) -> dict[str, Any]:
         """The operator leaves a refused call refused. Nothing changes for the agent, which was already

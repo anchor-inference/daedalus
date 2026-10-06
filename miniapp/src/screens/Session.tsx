@@ -550,6 +550,37 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     },
     [id, toast],
   );
+  // What "Allow similar" would grant for the request in the dock, asked of the host because only it
+  // still holds the refused call's arguments; the button says it before it is pressed.
+  const [similar, setSimilar] = useState<{ key: string; label: string } | null>(null);
+  const approvalKey = approval?.key ?? "";
+  useEffect(() => {
+    setSimilar(null);
+    if (!approvalKey) return;
+    let gone = false;
+    api.get<{ similar?: { label?: unknown } | null }>(`/api/sessions/${id}/policy/similar/${approvalKey}`)
+      .then((r) => {
+        const label = r?.similar?.label;
+        if (!gone && typeof label === "string" && label) setSimilar({ key: approvalKey, label });
+      })
+      .catch(() => undefined);
+    return () => {
+      gone = true;
+    };
+  }, [id, approvalKey]);
+  const approveSimilar = useCallback(
+    async (a: Approval) => {
+      try {
+        const r = await api.post<{ resolved?: unknown; similar?: { label?: unknown } }>(`/api/sessions/${id}/policy/grant-similar`, { key: a.key });
+        const answered = Array.isArray(r?.resolved) ? r.resolved.filter((k): k is string => typeof k === "string") : [];
+        setSeenKeys((k) => new Set([...k, a.key, ...answered]));
+        toast(t("composer.approved.similar", { label: typeof r?.similar?.label === "string" ? r.similar.label : similar?.label ?? "" }));
+      } catch (e) {
+        toast(errorText(e));
+      }
+    },
+    [id, toast, similar],
+  );
   // Refusing tells the host too, so the request stops being open on every other front that shows it.
   const deny = useCallback(
     async (a: Approval) => {
@@ -1481,6 +1512,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             onAnswer={answer}
             approval={approval}
             onApprove={approve}
+            similar={similar && similar.key === approval?.key ? similar.label : null}
+            onApproveSimilar={approveSimilar}
             onDeny={deny}
             onPreviewFile={(file) => setPreview({ file })}
             phone={phone}

@@ -66,6 +66,26 @@ export function ToolResultView({ sessionId, item, toast, initial, keep }: { sess
   }
   const approval = item.error ? /Approval key: ([0-9a-f]{12})/.exec(text) : null;
   const [granted, setGranted] = useState(false);
+  // "Allow similar" in two presses: the first asks the host what the family is and puts it on the
+  // button, the second grants it. A history of old refusals then costs no request until one is pressed.
+  const [similar, setSimilar] = useState<string | null>(null);
+  const [grantedSimilar, setGrantedSimilar] = useState(false);
+  async function allowSimilar() {
+    if (!approval) return;
+    try {
+      if (similar === null) {
+        const r = await api.get<{ similar?: { label?: unknown } | null }>(`/api/sessions/${sessionId}/policy/similar/${approval[1]}`);
+        const label = r?.similar?.label;
+        if (typeof label === "string" && label) setSimilar(label);
+        else toast(t("session.allow.similar.none"));
+        return;
+      }
+      await api.post(`/api/sessions/${sessionId}/policy/grant-similar`, { key: approval[1] });
+      setGrantedSimilar(true);
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
   async function allowOnce() {
     if (!approval) return;
     try {
@@ -91,6 +111,11 @@ export function ToolResultView({ sessionId, item, toast, initial, keep }: { sess
       {approval && (
         <button type="button" className="btn small" onClick={allowOnce} disabled={granted} title={t("session.allow.title")}>
           {t(granted ? "session.allowed.once" : "session.allow.once", { key: approval[1] })}
+        </button>
+      )}
+      {approval && !granted && (
+        <button type="button" className="btn small" data-action="allow-similar" onClick={allowSimilar} disabled={grantedSimilar} title={t("composer.approve.similar.title")}>
+          {grantedSimilar && similar ? t("session.allowed.similar", { label: similar }) : similar ? t("composer.approve.similar", { label: similar }) : t("session.allow.similar")}
         </button>
       )}
       {clipped && (
