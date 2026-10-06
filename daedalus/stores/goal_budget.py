@@ -192,4 +192,3 @@ async def set_budget_in(conn: aiosqlite.Connection, *, project_id: str, budget_i
     view = await view_in(conn, project_id)
     assert view is not None
     return view
-
