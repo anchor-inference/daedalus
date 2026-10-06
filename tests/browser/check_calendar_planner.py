@@ -134,8 +134,10 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
     expect(title).to_have_text(first_title)
     now = datetime.now(zone)
     minutes = now.hour * 60 + now.minute
-    top = page.locator(".cal-tg-scroll").evaluate("el => el.scrollTop")
-    assert abs(top - max(0, minutes - 90) / 60 * HOUR) < 4 or minutes < 90, f"Today scrolled to {top}px, not to now ({minutes} min)"
+    top, limit = page.locator(".cal-tg-scroll").evaluate("el => [el.scrollTop, el.scrollHeight - el.clientHeight]")
+    # Late in the day the grid cannot scroll as far as an hour and a half before now; it stops at its end.
+    want = min(limit, max(0, minutes - 90) / 60 * HOUR)
+    assert abs(top - want) < 6, f"Today scrolled to {top}px, not to now ({minutes} min, {want}px)"
     line = page.locator(".cal-now").bounding_box()
     scroller = page.locator(".cal-tg-scroll").bounding_box()
     assert line and scroller and scroller["y"] < line["y"] < scroller["y"] + scroller["height"], "the current-time line is not on screen after Today"
@@ -286,15 +288,18 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
     expect(editor.get_by_role("alert")).to_contain_text("Changed in two places")
     expect(editor.get_by_role("button", name="Use theirs")).to_be_visible()
     page.keyboard.press("Escape")
+    expect(page.get_by_role("dialog")).to_have_count(0)
 
     # Deep links: an occurrence of a series, and a task.
     page.goto(f"{BASE}/calendar?token=t&lang=en&event=ev-sync:{occurrence}")
     expect(page.get_by_role("dialog", name="Edit event").get_by_label("Title")).to_have_value("Weekly team sync")
     page.keyboard.press("Escape")
+    expect(page.get_by_role("dialog")).to_have_count(0)
     page.goto(f"{BASE}/calendar?token=t&lang=en&task=task-grandma")
     expect(page.get_by_role("dialog", name="Task").get_by_label("Title")).to_have_value("Call grandma")
     assert "task=" not in page.url, "the deep link stays in the address after it was opened"
     page.keyboard.press("Escape")
+    expect(page.get_by_role("dialog")).to_have_count(0)
 
     # Connections: the failed account's conflict is resolved by its buttons, and a provider shows its steps.
     page.get_by_role("button", name="Calendar menu").click()

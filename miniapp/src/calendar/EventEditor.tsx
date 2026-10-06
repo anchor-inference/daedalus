@@ -32,9 +32,13 @@ export type EventDraft = {
   color: string | null;
 };
 
-export function draftFromOccurrence(o: Occurrence, viewZone: string): EventDraft {
+/** The editor's draft of an occurrence. The host sends an occurrence's colour already resolved, so a
+ *  colour unlike its calendar's is the event's own; the same one is "the calendar's", and saving the
+ *  draft keeps following the calendar when the calendar is recoloured. */
+export function draftFromOccurrence(o: Occurrence, viewZone: string, calendarColor?: string): EventDraft {
   const zone = o.timezone && validZone(o.timezone) ? o.timezone : viewZone;
-  const base = { occurrence: o, calendar_id: o.calendar_id, title: o.title, description: o.description ?? "", location: o.location ?? "", timezone: zone, recurrence: o.recurrence ?? "", reminders: o.reminders ?? [], color: o.color_override ?? null };
+  const own = calendarColor && o.color && o.color.toLowerCase() !== calendarColor.toLowerCase() ? o.color : null;
+  const base = { occurrence: o, calendar_id: o.calendar_id, title: o.title, description: o.description ?? "", location: o.location ?? "", timezone: zone, recurrence: o.recurrence ?? "", reminders: o.reminders ?? [], color: own };
   if (o.all_day) {
     const first = o.start_date || o.start_at.slice(0, 10);
     const end = o.end_date || o.end_at.slice(0, 10);
@@ -127,7 +131,7 @@ export function EventEditor({ draft: initial, calendars, busy, onClose, onSave, 
             <Icon name="alert" size={16} />
             <div>
               <b>{t("cal.conflict.title")}</b>
-              <p>{t("cal.conflict.body")}{conflict.remote_title && conflict.remote_title !== initial.occurrence.title ? ` ${t("cal.conflict.remote", { title: conflict.remote_title })}` : ""}</p>
+              <p>{t("cal.conflict.body")}</p>
               <div className="cal-conflict-actions">
                 <button type="button" className="btn small" disabled={busy} onClick={() => onResolve(initial.occurrence!, "local")}>{t("cal.conflict.local")}</button>
                 <button type="button" className="btn small" disabled={busy} onClick={() => onResolve(initial.occurrence!, "remote")}>{t("cal.conflict.remote.use")}</button>

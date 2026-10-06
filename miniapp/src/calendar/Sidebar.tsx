@@ -13,6 +13,7 @@ import { invalidate, prime } from "../store";
 import { CALENDARS, PALETTE, refreshPlanner } from "./data";
 import { ColorPicker } from "./fields";
 import type { CalendarRow } from "./types";
+import { calendarName } from "./words";
 
 export function CalendarsSection({ calendars, onConnections, toast }: { calendars: CalendarRow[]; onConnections: () => void; toast: (text: string) => void }) {
   const [editing, setEditing] = useState<CalendarRow | "new" | null>(null);
@@ -29,7 +30,7 @@ export function CalendarsSection({ calendars, onConnections, toast }: { calendar
   }
 
   async function remove(calendar: CalendarRow) {
-    if (!(await confirmAsync(t("cal.calendar.delete.title", { name: calendar.name }), { body: t("cal.calendar.delete.body"), action: t("common.delete") }))) return;
+    if (!(await confirmAsync(t("cal.calendar.delete.title", { name: calendarName(calendar) }), { body: t("cal.calendar.delete.body"), action: t("common.delete") }))) return;
     try { await api.delete(`${CALENDARS}/${encodeURIComponent(calendar.id)}`); toast(t("cal.calendar.deleted")); }
     catch (exc) { toast(errorText(exc)); }
     invalidate(CALENDARS);
@@ -39,12 +40,12 @@ export function CalendarsSection({ calendars, onConnections, toast }: { calendar
   const row = (calendar: CalendarRow, extra?: ReactNode) => (
     <li key={calendar.id} className={`cal-cal ${calendar.visible ? "" : "hidden"}`} style={{ "--c": calendar.color } as CSSProperties}>
       <label className="cal-cal-toggle">
-        <input type="checkbox" checked={calendar.visible} onChange={() => void toggle(calendar)} aria-label={t("cal.calendar.show", { name: calendar.name })} />
+        <input type="checkbox" checked={calendar.visible} onChange={() => void toggle(calendar)} aria-label={t("cal.calendar.show", { name: calendarName(calendar) })} />
         <span className="cal-cal-box" aria-hidden="true">{calendar.visible && <Icon name="check" size={11} />}</span>
-        <span className="cal-cal-name">{calendar.name}</span>
+        <span className="cal-cal-name">{calendarName(calendar)}</span>
       </label>
       {extra}
-      <OverflowMenu small label={t("cal.calendar.menu", { name: calendar.name })} items={[
+      <OverflowMenu small label={t("cal.calendar.menu", { name: calendarName(calendar) })} items={[
         { label: t("cal.calendar.edit"), icon: "pen", onSelect: () => setEditing(calendar) },
         ...(calendar.kind === "local" && mine.length > 1 ? [{ label: t("common.delete"), icon: "trash" as const, danger: true, onSelect: () => void remove(calendar) }] : []),
         ...(calendar.kind !== "local" ? [{ label: t("cal.connections.manage"), icon: "plug" as const, onSelect: onConnections }] : []),
@@ -89,7 +90,7 @@ function SyncMark({ calendar }: { calendar: CalendarRow }) {
 }
 
 function CalendarSheet({ calendar, onClose, toast }: { calendar: CalendarRow | null; onClose: () => void; toast: (text: string) => void }) {
-  const [name, setName] = useState(calendar?.name ?? "");
+  const [name, setName] = useState(calendar ? calendarName(calendar) : "");
   const [color, setColor] = useState(calendar?.color ?? PALETTE[0].hex);
   const [busy, setBusy] = useState(false);
   async function save(e: React.FormEvent) {

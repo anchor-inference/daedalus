@@ -17,11 +17,11 @@ import { AgendaView, DayList } from "./Agenda";
 import { ConnectionsSheet } from "./Connections";
 import { addDays, dayLabel, rangeTitle, startOfWeek, step, visibleRange, weekdayNames, type Day, type View } from "./dates";
 import {
-  CALENDARS, LISTS, SETTINGS, completeTask, createEvent, createTask, deleteEvent, deleteTask, eventsKey, fieldsOf, refreshPlanner, tasksRangeKey, updateEvent, updateTask,
+  CALENDARS, LISTS, SETTINGS, completeTask, createEvent, createTask, deleteEvent, deleteTask, eventsKey, refreshPlanner, timesOf, tasksRangeKey, updateEvent, updateTask,
   type EventFields,
 } from "./data";
 import { EventEditor, draftFromOccurrence, fieldsFromDraft, type EventDraft } from "./EventEditor";
-import { eventItem, taskItem } from "./items";
+import { eventItem, isDone, taskItem } from "./items";
 import { MiniMonth } from "./MiniMonth";
 import { MonthView } from "./MonthView";
 import { QuickCreate, type QuickDraft } from "./QuickCreate";
@@ -187,7 +187,7 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
         setScrollToken((n) => n + 1);
       };
       if (occurrenceStart && !Number.isNaN(Date.parse(occurrenceStart))) land(occurrenceStart);
-      else api.get<Occurrence>(`/api/calendar/events/${encodeURIComponent(eventId)}`).then((found) => land(found.start_at, found.all_day ? found.start_date : null), (exc) => toast(errorText(exc)));
+      else api.get<Occurrence>(`/api/calendar/events/${encodeURIComponent(eventId)}`).then((found) => land(found.start_at, found.all_day ? (found.start_date || found.start_at.slice(0, 10)) : null), (exc) => toast(errorText(exc)));
       clear();
       return;
     }
@@ -206,7 +206,7 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
   useEffect(() => {
     if (!pendingEvent || !events.data) return;
     const found = events.data.find((o) => o.id === pendingEvent) ?? events.data.find((o) => o.event_id === pendingEvent);
-    if (found) setEditor({ kind: "event", draft: draftFromOccurrence(found, zone) });
+    if (found) setEditor({ kind: "event", draft: draftFromOccurrence(found, zone, colorOf(found.calendar_id)) });
     else toast(t("cal.event.missing"));
     setPendingEvent(null);
   }, [pendingEvent, events.data]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -348,12 +348,12 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
     }
     hold(eventsPath);
     try {
-      const fields = { ...fieldsOf(occurrence), start_at: startAt, end_at: endAt };
-      const answer = await updateEvent(occurrence, fields, scope);
-      const moved: Occurrence = { ...occurrence, start_at: startAt, end_at: endAt, version: answer?.version ?? occurrence.version + 1 };
+      const answer = await updateEvent(occurrence, { ...timesOf(occurrence), start_at: startAt, end_at: endAt }, scope);
+      // Moved as a series, the occurrence is now known by its new start; moved alone, it keeps its original one.
+      const moved: Occurrence = { ...occurrence, start_at: startAt, end_at: endAt, occurrence_start: scope === "all" && occurrence.occurrence_start ? startAt : occurrence.occurrence_start, version: answer?.version ?? occurrence.version + 1 };
       showToast(t("cal.event.moved"), {
         undo: () => {
-          void updateEvent(moved, fieldsOf(occurrence), scope).then(refreshPlanner, (exc) => { toast(errorText(exc)); refreshPlanner(); });
+          void updateEvent(moved, timesOf(occurrence), scope).then(refreshPlanner, (exc) => { toast(errorText(exc)); refreshPlanner(); });
         },
       });
     } catch (exc) {
@@ -398,8 +398,8 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
   }
 
   async function toggleTask(task: Task) {
-    const done = !task.done_at;
-    const undoLocal = patchTaskEverywhere(task.id, { done_at: done ? new Date().toISOString() : null });
+    const done = !isDone(task);
+    const undoLocal = patchTaskEverywhere(task.id, { done, done_at: done ? new Date().toISOString() : null });
     try {
       await completeTask(task, done);
       if (done) showToast(t("cal.task.done"), { undo: () => { void completeTask(task, false).then(refreshPlanner, (exc) => toast(errorText(exc))); } });
@@ -452,7 +452,7 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
   }
 
   function openItem(item: Item) {
-    if (item.event) setEditor({ kind: "event", draft: draftFromOccurrence(item.event, zone) });
+    if (item.event) setEditor({ kind: "event", draft: draftFromOccurrence(item.event, zone, colorOf(item.event.calendar_id)) });
     else if (item.task) setEditor({ kind: "task", draft: taskDraft(item.task) });
   }
 
@@ -460,7 +460,11 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
     const day = found.all_day ? (found.start_date || found.start_at.slice(0, 10)) : toWall(found.start_at, zone).day;
     setAnchor(day);
     setScrollToken((n) => n + 1);
-    setEditor({ kind: "event", draft: draftFromOccurrence(found, zone) });
+    setEditor({ kind: "event", draft: draftFromOccurrence(found, zone, colorOf(found.calendar_id)) });
+  }
+
+  function colorOf(calendarId: string): string | undefined {
+    return calendars.find((c) => c.id === calendarId)?.color;
   }
 
   // ── keyboard ───────────────────────────────────────────────────────────────────────────────

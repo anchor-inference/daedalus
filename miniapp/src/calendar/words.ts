@@ -4,7 +4,7 @@
 import { locale, plural, t } from "../i18n";
 import { addDays, clockLabel, dayLabel, durationLabel, type Day } from "./dates";
 import { describeRule, type ByDay, type Freq } from "./rrule";
-import type { Item } from "./types";
+import type { CalendarRow, Item } from "./types";
 import { toWall } from "./zone";
 
 export const REMINDER_PRESETS = [0, 5, 10, 15, 30, 60, 120, 1440, 2880, 10080];
@@ -58,4 +58,10 @@ export function ruleText(rule: string): string {
 export function dueLabel(due: Day, today: Day): string {
   if (due < today) return t("cal.task.overdue.since", { day: dayLabel(due, locale(), { day: "numeric", month: "short" }) });
   return relativeDay(due, today, false);
+}
+
+/** A calendar's name as shown. The host names the first local calendar "Personal" in every language;
+ *  that one name is the host's default and is shown in the reader's language. */
+export function calendarName(calendar: Pick<CalendarRow, "name" | "kind">): string {
+  return calendar.kind === "local" && calendar.name === "Personal" ? t("cal.calendar.personal") : calendar.name;
 }

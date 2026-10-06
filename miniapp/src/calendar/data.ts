@@ -31,11 +31,9 @@ export function refreshPlanner(): void {
   invalidate("/api/planner/tasks");
 }
 
-/** The stored event, the series master for a recurring one. */
-export type StoredEvent = Omit<Occurrence, "id" | "occurrence_start" | "recurring"> & { id: string };
-
 /** The fields an event is written with. An all-day event carries its dates as well as midnight
- *  instants, the end exclusive, as the contract has it. */
+ *  instants, the end exclusive, as the contract has it. The host changes only the fields sent, so a
+ *  move sends its times alone and leaves the reminders and the colour as they were. */
 export type EventFields = {
   calendar_id: string;
   title: string;
@@ -49,15 +47,14 @@ export type EventFields = {
   timezone: string;
   recurrence: string;
   reminders: number[];
+  /** The event's own colour, or null for its calendar's. */
   color: string | null;
 };
 
-export function fieldsOf(event: Occurrence | StoredEvent): EventFields {
-  return {
-    calendar_id: event.calendar_id, title: event.title, description: event.description ?? "", location: event.location ?? "",
-    start_at: event.start_at, end_at: event.end_at, all_day: !!event.all_day, start_date: event.start_date ?? null, end_date: event.end_date ?? null,
-    timezone: event.timezone, recurrence: event.recurrence ?? "", reminders: event.reminders ?? [], color: event.color_override ?? null,
-  };
+export type EventTimes = Pick<EventFields, "start_at" | "end_at" | "all_day" | "start_date" | "end_date">;
+
+export function timesOf(event: Occurrence): EventTimes {
+  return { start_at: event.start_at, end_at: event.end_at, all_day: !!event.all_day, start_date: event.start_date ?? null, end_date: event.end_date ?? null };
 }
 
 /** All-day dates as the instants the contract wants beside them. `lastDay` is inclusive. */
@@ -70,39 +67,35 @@ export function createEvent(fields: EventFields): Promise<Occurrence> {
   return api.post<Occurrence>("/api/calendar/events", fields);
 }
 
-/** Writes an occurrence's new fields.
+/** Writes an occurrence's new fields, always addressed through the occurrence.
 
-    For `scope: "this"` the host writes an override of that one occurrence. For `scope: "all"` on a
-    recurring event the change is made to the series: the times the reader moved this occurrence by
-    are applied to the master's own times, because the occurrence being edited is usually not the
-    first one, and sending its date as the series start would move the whole series to it. */
-export async function updateEvent(occurrence: Occurrence, fields: EventFields, scope: Scope): Promise<{ version?: number }> {
-  if (scope === "all" && occurrence.recurring) {
-    const master = await api.get<StoredEvent>(`/api/calendar/events/${encodeURIComponent(occurrence.event_id)}`);
-    const shiftStart = Date.parse(fields.start_at) - Date.parse(occurrence.start_at);
-    const shiftEnd = Date.parse(fields.end_at) - Date.parse(occurrence.end_at);
-    const start = new Date(Date.parse(master.start_at) + shiftStart).toISOString();
-    const end = new Date(Date.parse(master.end_at) + shiftEnd).toISOString();
-    const dates = fields.all_day ? allDayTimes(start.slice(0, 10), addDays(end.slice(0, 10), -1)) : { start_at: start, end_at: end, start_date: null, end_date: null };
-    return api.put(`/api/calendar/events/${encodeURIComponent(occurrence.event_id)}`, { ...fields, ...dates, version: master.version, scope: "all" });
-  }
-  return api.put(`/api/calendar/events/${encodeURIComponent(occurrence.event_id)}`, { ...fields, version: occurrence.version, scope, occurrence_start: occurrence.occurrence_start });
+    With `scope: "this"` the host writes an override of that one occurrence. With `scope: "all"` and
+    the occurrence's start, the host reads the times sent as this occurrence's new times and moves
+    the whole series by the same amount: the occurrence being edited is usually not the first one,
+    and its date sent as the series' start would have moved the series to it. A series is checked
+    against the master's version, which an occurrence changed on its own does not carry, so that one
+    asks for it first. */
+export async function updateEvent(occurrence: Occurrence, fields: Partial<EventFields>, scope: Scope): Promise<{ version?: number }> {
+  let version = occurrence.version;
+  if (scope === "all" && occurrence.exception) version = (await api.get<{ version: number }>(`/api/calendar/events/${encodeURIComponent(occurrence.event_id)}`)).version;
+  const at = occurrence.occurrence_start ? { occurrence_start: occurrence.occurrence_start } : {};
+  return api.put(`/api/calendar/events/${encodeURIComponent(occurrence.event_id)}`, { ...fields, version, scope, ...at });
 }
 
 export function deleteEvent(occurrence: Occurrence, scope: Scope): Promise<unknown> {
   const query = new URLSearchParams({ version: String(occurrence.version), scope });
-  if (scope === "this") query.set("occurrence_start", occurrence.occurrence_start);
+  if (scope === "this" && occurrence.occurrence_start) query.set("occurrence_start", occurrence.occurrence_start);
   return api.delete(`/api/calendar/events/${encodeURIComponent(occurrence.event_id)}?${query}`);
 }
 
-export type TaskFields = Partial<Omit<Task, "id" | "version" | "done_at">>;
+export type TaskFields = Partial<Omit<Task, "id" | "version" | "done_at" | "done">>;
 
 export function createTask(fields: TaskFields): Promise<Task> {
   return api.post<Task>("/api/planner/tasks", fields);
 }
 
 export function updateTask(task: Task, fields: TaskFields): Promise<Task> {
-  const { id: _id, done_at: _done, version, ...rest } = task;
+  const { id: _id, done_at: _doneAt, done: _done, version, ...rest } = task;
   return api.put<Task>(`/api/planner/tasks/${encodeURIComponent(task.id)}`, { ...rest, ...fields, version });
 }
 

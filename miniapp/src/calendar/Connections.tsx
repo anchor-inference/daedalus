@@ -5,13 +5,13 @@
 import { useState, type CSSProperties } from "react";
 import { api } from "../api";
 import { relTime } from "../format";
-import { t } from "../i18n";
+import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { Sheet } from "../ui/dialogs";
 import { confirmAsync, errorText } from "../ui";
 import { useQuery, invalidate } from "../store";
 import { ACCOUNTS, CALENDARS, PALETTE, refreshPlanner } from "./data";
-import type { Account, Provider } from "./types";
+import type { Account, Occurrence, Provider } from "./types";
 
 const PROVIDERS: Provider[] = ["google", "outlook", "yandex", "icloud", "caldav", "ics"];
 /** Where a CalDAV preset's server is; the reader types only the account and its app password. */
@@ -23,9 +23,21 @@ const CONSOLES: Partial<Record<Provider, string>> = {
   icloud: "https://account.apple.com/account/manage",
 };
 
+/** The service an account was set up as. The host stores Yandex and iCloud as CalDAV with their
+ *  server filled in, so the server says which it is. */
 function providerOf(account: Account): Provider {
-  if (account.provider === "caldav" && (account.preset === "yandex" || account.preset === "icloud")) return account.preset;
-  return account.provider;
+  if (account.provider !== "caldav") return account.provider;
+  const server = account.server_url ?? "";
+  if (server.startsWith(SERVERS.yandex!)) return "yandex";
+  if (server.startsWith(SERVERS.icloud!)) return "icloud";
+  return "caldav";
+}
+
+/** Where an account lives, under its name: the CalDAV server and login, or the feed's host. */
+function whereOf(account: Account): string {
+  if (account.provider === "ics") return account.host ?? "";
+  if (account.provider === "caldav") return [account.username, providerOf(account) === "caldav" ? account.server_url?.replace(/^https:\/\//, "") : ""].filter(Boolean).join(" · ");
+  return "";
 }
 
 export function ProviderGlyph({ provider }: { provider: Provider }) {
@@ -47,6 +59,30 @@ export function statusOf(account: Account): "ok" | "error" | "syncing" | "never"
   if (account.status) return account.status;
   if (account.sync_error) return "error";
   return account.last_sync_at ? "ok" : "never";
+}
+
+/** The events of a connected calendar that wait for a choice: the account says how many, and the
+ *  occurrences carry the flag, so a year around today is read for them and each gets its buttons. */
+function AccountConflicts({ calendarId, count, busy, onResolve }: { calendarId: string; count: number; busy: string; onResolve: (eventId: string, choice: "local" | "remote") => void }) {
+  const [from] = useState(() => new Date(Date.now() - 30 * 86400000).toISOString());
+  const [to] = useState(() => new Date(Date.now() + 365 * 86400000).toISOString());
+  const { data } = useQuery<Occurrence[]>(`/api/calendar/events?start=${encodeURIComponent(from)}&end=${encodeURIComponent(to)}&calendars=${encodeURIComponent(calendarId)}`, { staleMs: 3000 });
+  const seen = new Set<string>();
+  const found = (data ?? []).filter((o) => o.conflict && !seen.has(o.event_id) && seen.add(o.event_id));
+  return (
+    <div className="cal-account-conflict">
+      <span><Icon name="alert" size={13} /> {plural("cal.conflict.count", count)}</span>
+      {found.map((o) => (
+        <div key={o.event_id} className="cal-account-conflict-row">
+          <span className="cal-account-conflict-title">{t("cal.conflict.event", { title: o.title || t("cal.untitled") })}</span>
+          <div className="cal-conflict-actions">
+            <button type="button" className="btn small" disabled={busy === o.event_id} onClick={() => onResolve(o.event_id, "local")}>{t("cal.conflict.local")}</button>
+            <button type="button" className="btn small" disabled={busy === o.event_id} onClick={() => onResolve(o.event_id, "remote")}>{t("cal.conflict.remote.use")}</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function ConnectionsSheet({ onClose, toast }: { onClose: () => void; toast: (text: string) => void }) {
@@ -98,15 +134,8 @@ export function ConnectionsSheet({ onClose, toast }: { onClose: () => void; toas
                           {t(`cal.provider.${providerOf(account)}`)} · <span className={`cal-status ${status}`}>{status === "ok" ? t("cal.sync.ok", { when: relTime(account.last_sync_at) }) : t(`cal.sync.${status}`)}</span>
                         </span>
                         {account.sync_error && <span className="cal-account-error">{account.sync_error}</span>}
-                        {(account.conflicts ?? []).map((conflict) => (
-                          <div key={conflict.event_id} className="cal-account-conflict">
-                            <span><Icon name="alert" size={13} /> {t("cal.conflict.event", { title: conflict.title })}</span>
-                            <div className="cal-conflict-actions">
-                              <button type="button" className="btn small" disabled={busy === conflict.event_id} onClick={() => void resolve(conflict.event_id, "local")}>{t("cal.conflict.local")}</button>
-                              <button type="button" className="btn small" disabled={busy === conflict.event_id} onClick={() => void resolve(conflict.event_id, "remote")}>{t("cal.conflict.remote.use")}</button>
-                            </div>
-                          </div>
-                        ))}
+                        {whereOf(account) && <span className="cal-account-where">{whereOf(account)}</span>}
+                        {!!account.conflicts && account.calendar_id && <AccountConflicts calendarId={account.calendar_id} count={account.conflicts} busy={busy} onResolve={(id, choice) => void resolve(id, choice)} />}
                       </div>
                       <button type="button" className="iconbtn" disabled={busy === account.id} onClick={() => void sync(account)} aria-label={t("cal.sync.now.named", { name: account.name })} title={t("cal.sync.now")}><Icon name="reload" size={16} /></button>
                       <button type="button" className="iconbtn" onClick={() => void disconnect(account)} aria-label={t("cal.disconnect.named", { name: account.name })} title={t("cal.disconnect")}><Icon name="unlink" size={16} /></button>
@@ -158,7 +187,8 @@ function ConnectForm({ provider, toast, onDone }: { provider: Provider; toast: (
         return;
       }
       if (provider === "ics") await api.post("/api/calendar/subscriptions", { name, url, color });
-      else await api.post("/api/calendar/accounts", { provider: "caldav", preset: provider === "caldav" ? "" : provider, name, server_url: server, remote_calendar_id: remoteId === "primary" ? "" : remoteId, credentials: { username, password } });
+      // Yandex and iCloud are CalDAV with a known server, which the host fills in from the provider's name.
+      else await api.post("/api/calendar/accounts", { provider, name, remote_calendar_id: remoteId || "primary", credentials: provider === "caldav" ? { server_url: server, username, password } : { username, password } });
       toast(t("cal.connected"));
       onDone();
     } catch (exc) { toast(errorText(exc)); }

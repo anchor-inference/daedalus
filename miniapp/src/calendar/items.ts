@@ -23,8 +23,13 @@ export function eventItem(event: Occurrence, zone: string): Item {
   return { key: `e:${event.id}`, kind: "event", title: event.title, color: event.color, start, end, allDay: end - start >= DAY_MS, firstDay, lastDay, event, location: event.location };
 }
 
+/** Whether a task is done: the host says so in a flag, and with the time it was done. */
+export function isDone(task: Task): boolean {
+  return task.done ?? !!task.done_at;
+}
+
 export function taskItem(task: Task, zone: string, color: string): Item | null {
-  const done = !!task.done_at;
+  const done = isDone(task);
   if (task.scheduled_start && task.scheduled_end) {
     const start = Date.parse(task.scheduled_start);
     const end = Math.max(Date.parse(task.scheduled_end), start + 15 * 60000);

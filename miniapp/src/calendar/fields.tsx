@@ -7,7 +7,7 @@ import { Icon } from "../icons";
 import { clock, clockLabel, parseClock } from "./dates";
 import { PALETTE } from "./data";
 import type { CalendarRow } from "./types";
-import { duration, REMINDER_PRESETS, reminderLabel } from "./words";
+import { calendarName, duration, REMINDER_PRESETS, reminderLabel } from "./words";
 import { allZones, offsetLabel } from "./zone";
 
 /** A time of day in 15-minute steps, as a native select: a phone shows it as its own wheel, which is
@@ -43,7 +43,7 @@ export function CalendarPicker({ calendars, value, onChange }: { calendars: Cale
       {writable.map((c) => (
         <button key={c.id} type="button" role="radio" aria-checked={c.id === value} className={`cal-pick-item ${c.id === value ? "on" : ""}`} style={{ "--c": c.color } as CSSProperties} onClick={() => onChange(c.id)}>
           <span className="cal-dot" aria-hidden="true" />
-          <span>{c.name}</span>
+          <span>{calendarName(c)}</span>
         </button>
       ))}
     </div>

@@ -8,6 +8,7 @@ import { Sheet } from "../ui/dialogs";
 import { useQuery } from "../store";
 import { addDays, clockLabel, dayLabel, type Day } from "./dates";
 import { tasksViewKey } from "./data";
+import { isDone } from "./items";
 import { Reminders } from "./fields";
 import type { Task, TaskList, TaskView } from "./types";
 import { dueLabel } from "./words";
@@ -35,8 +36,8 @@ export function TasksPanel(props: PanelProps) {
   const { data: overdue } = useQuery<Task[]>(tasksViewKey("overdue"), { pollMs: 60000, staleMs: 5000 });
   const [title, setTitle] = useState("");
   const [adding, setAdding] = useState(false);
-  const tasks = (data ?? []).filter((task) => !task.done_at || view === "today");
-  const late = (overdue ?? []).filter((task) => !task.done_at).length;
+  const tasks = (data ?? []).filter((task) => !isDone(task) || view === "today");
+  const late = (overdue ?? []).filter((task) => !isDone(task)).length;
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
@@ -79,13 +80,13 @@ export function TasksPanel(props: PanelProps) {
 function TaskRow({ task, today, zone, lists, onToggle, onOpen, onDragTask, draggable }: PanelProps & { task: Task }) {
   const list = lists.find((l) => l.id === task.list_id);
   const blocked = task.scheduled_start ? toWall(task.scheduled_start, zone) : null;
-  const overdue = !!task.due_date && task.due_date < today && !task.done_at;
+  const overdue = !!task.due_date && task.due_date < today && !isDone(task);
   return (
-    <li className={`cal-task ${task.done_at ? "done" : ""}`} draggable={draggable && !task.done_at}
+    <li className={`cal-task ${isDone(task) ? "done" : ""}`} draggable={draggable && !isDone(task)}
       onDragStart={(e) => { e.dataTransfer.setData("application/x-daedalus-task", task.id); e.dataTransfer.setData("text/plain", task.title); e.dataTransfer.effectAllowed = "move"; onDragTask(task); }}
       onDragEnd={() => onDragTask(null)}>
-      <button type="button" className={`cal-check round ${task.done_at ? "on" : ""}`} role="checkbox" aria-checked={!!task.done_at} aria-label={t("cal.task.complete.named", { title: task.title })} onClick={() => onToggle(task)} style={{ "--c": task.priority ? PRIORITY_COLOR[task.priority] : "var(--fg-3)" } as CSSProperties}>
-        {task.done_at && <Icon name="check" size={12} />}
+      <button type="button" className={`cal-check round ${isDone(task) ? "on" : ""}`} role="checkbox" aria-checked={!!isDone(task)} aria-label={t("cal.task.complete.named", { title: task.title })} onClick={() => onToggle(task)} style={{ "--c": task.priority ? PRIORITY_COLOR[task.priority] : "var(--fg-3)" } as CSSProperties}>
+        {isDone(task) && <Icon name="check" size={12} />}
       </button>
       <button type="button" className="cal-task-open" onClick={() => onOpen(task)}>
         <span className="cal-task-title">{task.title}</span>
@@ -114,8 +115,8 @@ export function TaskEditor({ draft: initial, lists, zone, today, busy, onClose, 
       <form className="cal-form" onSubmit={(e) => { e.preventDefault(); if (d.title.trim()) onSave(d); }}>
         <div className="cal-task-title-row">
           {initial.task && (
-            <button type="button" className={`cal-check round big ${initial.task.done_at ? "on" : ""}`} role="checkbox" aria-checked={!!initial.task.done_at} aria-label={t("cal.task.complete.named", { title: initial.task.title })} onClick={() => onToggle(initial.task!)}>
-              {initial.task.done_at && <Icon name="check" size={14} />}
+            <button type="button" className={`cal-check round big ${isDone(initial.task) ? "on" : ""}`} role="checkbox" aria-checked={!!isDone(initial.task)} aria-label={t("cal.task.complete.named", { title: initial.task.title })} onClick={() => onToggle(initial.task!)}>
+              {isDone(initial.task) && <Icon name="check" size={14} />}
             </button>
           )}
           <input className="field cal-title-input" autoFocus={!initial.task} required maxLength={240} value={d.title} onChange={(e) => set({ title: e.target.value })} placeholder={t("cal.task.placeholder")} aria-label={t("cal.field.title")} />

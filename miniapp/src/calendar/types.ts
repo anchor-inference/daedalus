@@ -16,13 +16,8 @@ export type CalendarRow = {
   writable: boolean;
   position: number;
   default_reminders: number[];
-  sync: { last_sync_at: string | null; error: string; status: SyncStatus } | null;
+  sync: { last_sync_at: string | null; error: string; status: SyncStatus; conflicts?: number; next_sync_at?: string | null; failures?: number } | null;
 };
-
-/** A local edit and a provider's edit to the same event that the sync could not reconcile. The
- *  account and the event both carry it as fields, so the screen offers the two versions without
- *  reading anything out of an error sentence. */
-export type Conflict = { event_id: string; title: string; remote_title?: string; remote_start_at?: string; remote_end_at?: string; detected_at?: string };
 
 /** One occurrence: a single event, or one instance of a recurring series (`id` is then
  *  `event_id:occurrence_start`). Times are UTC instants; an all-day event also has its dates, the end
@@ -31,6 +26,8 @@ export type Occurrence = {
   id: string;
   event_id: string;
   calendar_id: string;
+  calendar_name?: string;
+  account_id?: string | null;
   title: string;
   description: string;
   location: string;
@@ -41,16 +38,19 @@ export type Occurrence = {
   end_date?: Day | null;
   timezone: string;
   color: string;
-  /** The event's own colour, when it overrides its calendar's. */
-  color_override?: string | null;
   recurrence: string;
   recurring: boolean;
-  occurrence_start: string;
+  /** The occurrence's original start, for one of a series; null for a single event. */
+  occurrence_start: string | null;
+  /** An occurrence of a series that was changed on its own. */
+  exception?: boolean;
   reminders: number[];
   version: number;
   writable: boolean;
   pending_sync: boolean;
-  conflict?: Conflict | null;
+  /** Edited here and at the provider before the two synced: the host keeps both until one is chosen,
+   *  a structured flag rather than words in an error, so the screen can offer the two versions. */
+  conflict?: boolean;
 };
 
 export type Scope = "all" | "this";
@@ -69,6 +69,7 @@ export type Task = {
   duration: number | null;
   priority: 0 | 1 | 2 | 3;
   done_at: string | null;
+  done?: boolean;
   reminders: number[];
   recurrence: string;
   position: number;
@@ -94,17 +95,22 @@ export type Provider = "google" | "outlook" | "yandex" | "icloud" | "caldav" | "
 
 export type Account = {
   id: string;
-  provider: "google" | "outlook" | "yandex" | "caldav" | "ics";
-  /** For a CalDAV account, which service it was set up as. */
-  preset?: string | null;
+  provider: "google" | "outlook" | "caldav" | "ics";
   name: string;
   remote_calendar_id?: string;
+  /** A CalDAV account's server and login; for a subscription only the feed's host, since its
+   *  address often carries a private token. */
   server_url?: string;
+  username?: string;
+  host?: string;
   calendar_id?: string | null;
   last_sync_at: string | null;
   sync_error: string;
   status?: SyncStatus;
-  conflicts?: Conflict[];
+  /** How many of its events wait for a conflict to be resolved. */
+  conflicts?: number;
+  failures?: number;
+  next_sync_at?: string | null;
 };
 
 /** What the grid draws, an event or a task, reduced to what placing it needs. */

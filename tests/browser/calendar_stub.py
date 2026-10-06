@@ -43,23 +43,25 @@ class CalendarStub:
         ru = lang == "ru"
         self.settings: dict = {"week_start": 1, "work_start": "09:00", "work_end": "18:00", "default_view": "week", "default_duration": 60, "default_reminders": [10], "timezone": zone, "show_weekends": True}
 
-        def sync(status: str, error: str = "", minutes: int = 6) -> dict:
+        def sync(status: str, error: str = "", minutes: int = 6, conflicts: int = 0) -> dict:
             at = None if status == "never" else iso(datetime.now(self.zone) - timedelta(minutes=minutes))
-            return {"last_sync_at": at, "error": error, "status": status}
+            return {"last_sync_at": at, "error": error, "status": status, "conflicts": conflicts, "next_sync_at": iso(datetime.now(self.zone) + timedelta(minutes=5)), "failures": 1 if error else 0}
 
         self.calendars: list[dict] = [
-            {"id": "cal-personal", "name": "Личный" if ru else "Personal", "color": "#4f8ff7", "kind": "local", "account_id": None, "visible": True, "writable": True, "position": 0, "default_reminders": [10], "sync": None},
+            {"id": "cal-personal", "name": "Personal", "color": "#4f8ff7", "kind": "local", "account_id": None, "visible": True, "writable": True, "position": 0, "default_reminders": [10], "sync": None},
             {"id": "cal-work", "name": "Работа" if ru else "Work", "color": "#14b8a6", "kind": "local", "account_id": None, "visible": True, "writable": True, "position": 1, "default_reminders": [10], "sync": None},
             {"id": "cal-family", "name": "Семья" if ru else "Family", "color": "#e3608f", "kind": "local", "account_id": None, "visible": True, "writable": True, "position": 2, "default_reminders": [60], "sync": None},
             {"id": "cal-team", "name": "Команда (Google)" if ru else "Team (Google)", "color": "#f2782f", "kind": "google", "account_id": "acc-google", "visible": True, "writable": True, "position": 3, "default_reminders": [10], "sync": sync("ok")},
-            {"id": "cal-yandex", "name": "Яндекс" if ru else "Yandex", "color": "#9b6ef3", "kind": "caldav", "account_id": "acc-yandex", "visible": True, "writable": True, "position": 4, "default_reminders": [], "sync": sync("error", "the server refused the change: 412 Precondition Failed", 95)},
+            {"id": "cal-yandex", "name": "Яндекс" if ru else "Yandex", "color": "#9b6ef3", "kind": "caldav", "account_id": "acc-yandex", "visible": True, "writable": True, "position": 4, "default_reminders": [], "sync": sync("error", "the server refused the change: 412 Precondition Failed", 95, conflicts=1)},
             {"id": "cal-holidays", "name": "Праздники" if ru else "Public holidays", "color": "#34a853", "kind": "ics", "account_id": "acc-ics", "visible": True, "writable": False, "position": 5, "default_reminders": [], "sync": sync("ok", minutes=240)},
         ]
         self.accounts: list[dict] = [
-            {"id": "acc-google", "provider": "google", "preset": None, "name": "Команда (Google)" if ru else "Team (Google)", "remote_calendar_id": "primary", "calendar_id": "cal-team", "last_sync_at": self.calendars[3]["sync"]["last_sync_at"], "sync_error": "", "status": "ok", "conflicts": []},
-            {"id": "acc-yandex", "provider": "caldav", "preset": "yandex", "name": "Яндекс" if ru else "Yandex", "remote_calendar_id": "", "server_url": "https://caldav.yandex.ru", "calendar_id": "cal-yandex", "last_sync_at": self.calendars[4]["sync"]["last_sync_at"], "sync_error": "the server refused the change: 412 Precondition Failed", "status": "error",
-             "conflicts": [{"event_id": "ev-planning", "title": "Квартальное планирование" if ru else "Quarterly planning", "remote_title": "Квартальное планирование (перенесено)" if ru else "Quarterly planning (moved)", "detected_at": iso(datetime.now(self.zone) - timedelta(minutes=95))}]},
-            {"id": "acc-ics", "provider": "ics", "preset": None, "name": "Праздники" if ru else "Public holidays", "calendar_id": "cal-holidays", "last_sync_at": self.calendars[5]["sync"]["last_sync_at"], "sync_error": "", "status": "ok", "conflicts": []},
+            {"id": "acc-google", "provider": "google", "name": "Команда (Google)" if ru else "Team (Google)", "remote_calendar_id": "primary", "calendar_id": "cal-team", "last_sync_at": self.calendars[3]["sync"]["last_sync_at"], "sync_error": "", "status": "ok", "conflicts": 0, "failures": 0, "next_sync_at": None},
+            # Yandex is stored as CalDAV with its server filled in, as the host stores its presets.
+            {"id": "acc-yandex", "provider": "caldav", "name": "Яндекс" if ru else "Yandex", "remote_calendar_id": "primary", "server_url": "https://caldav.yandex.ru", "username": "someone", "calendar_id": "cal-yandex", "last_sync_at": self.calendars[4]["sync"]["last_sync_at"],
+             "sync_error": "the server refused the change: 412 Precondition Failed", "status": "error", "conflicts": 1, "failures": 1, "next_sync_at": None},
+            # A subscription shows only the feed's host: its address often carries a private token.
+            {"id": "acc-ics", "provider": "ics", "name": "Праздники" if ru else "Public holidays", "remote_calendar_id": "primary", "host": "calendar.example.org", "calendar_id": "cal-holidays", "last_sync_at": self.calendars[5]["sync"]["last_sync_at"], "sync_error": "", "status": "ok", "conflicts": 0, "failures": 0, "next_sync_at": None},
         ]
         d = self.today
 
@@ -68,7 +70,7 @@ class CalendarStub:
 
         def event(id_: str, calendar: str, title: str, start: str, end: str, **over: object) -> dict:
             row = {"id": id_, "calendar_id": calendar, "title": title, "description": "", "location": "", "start_at": start, "end_at": end, "all_day": False, "start_date": None, "end_date": None,
-                   "timezone": zone, "color_override": None, "recurrence": "", "reminders": [10], "version": 1, "pending_sync": False, "conflict": None}
+                   "timezone": zone, "color_override": None, "recurrence": "", "reminders": [10], "version": 1, "pending_sync": False, "conflict": False}
             row.update(over)
             return row
 
@@ -96,8 +98,7 @@ class CalendarStub:
             event("ev-dentist", "cal-personal", w["dentist"], at(d + timedelta(days=1), 16), at(d + timedelta(days=1), 17, 30), location=w["clinic"], reminders=[60, 1440]),
             event("ev-cinema", "cal-family", w["cinema"], at(d - timedelta(days=1), 19), at(d - timedelta(days=1), 21, 30)),
             all_day("ev-holiday", "cal-holidays", w["holiday"], d + timedelta(days=6), 1),
-            event("ev-planning", "cal-yandex", w["planning"], at(d + timedelta(days=1), 11), at(d + timedelta(days=1), 12, 30), pending_sync=True,
-                  conflict={"event_id": "ev-planning", "title": w["planning"], "remote_title": self.accounts[1]["conflicts"][0]["remote_title"], "detected_at": self.accounts[1]["conflicts"][0]["detected_at"]}),
+            event("ev-planning", "cal-yandex", w["planning"], at(d + timedelta(days=1), 11), at(d + timedelta(days=1), 12, 30), pending_sync=True, conflict=True),
             event("ev-yoga", "cal-personal", w["yoga"], at(d - timedelta(days=2), 18, 30), at(d - timedelta(days=2), 19, 30)),
             event("ev-dinner", "cal-family", w["dinner"], at(d + timedelta(days=3), 19), at(d + timedelta(days=3), 21)),
             event("ev-flight", "cal-work", w["flight"], at(d + timedelta(days=1), 20, 15), at(d + timedelta(days=1), 23, 40)),
@@ -144,17 +145,20 @@ class CalendarStub:
         return next((c for c in self.calendars if c["id"] == calendar_id), None)
 
     def _view(self, row: dict, occurrence_start: str | None = None, start: str | None = None, end: str | None = None) -> dict:
-        calendar = self._calendar(row["calendar_id"]) or {"color": "#4f8ff7", "writable": True}
+        calendar = self._calendar(row["calendar_id"]) or {"color": "#4f8ff7", "writable": True, "name": "", "account_id": None}
         recurring = bool(row["recurrence"])
-        view = {k: v for k, v in row.items() if k != "id"}
+        view = {k: v for k, v in row.items() if k not in ("id", "color_override")}
         view.update(
             id=f"{row['id']}:{occurrence_start}" if recurring else row["id"], event_id=row["id"], color=row["color_override"] or calendar["color"], recurring=recurring,
-            occurrence_start=occurrence_start or row["start_at"], writable=bool(calendar["writable"]),
+            occurrence_start=occurrence_start if recurring else None, writable=bool(calendar["writable"]), calendar_name=calendar["name"], account_id=calendar["account_id"], exception=False,
         )
         if start:
             view["start_at"], view["end_at"] = start, end
-        if recurring and occurrence_start:
-            view.update(self.overrides.get((row["id"], occurrence_start), {}))
+        if recurring and occurrence_start and (row["id"], occurrence_start) in self.overrides:
+            changed = dict(self.overrides[(row["id"], occurrence_start)])
+            if "color_override" in changed:
+                changed["color"] = changed.pop("color_override") or view["color"]
+            view.update(changed, exception=True)
         if view.get("all_day"):
             view["start_date"], view["end_date"] = view["start_at"][:10], view["end_at"][:10]
         return view
@@ -221,8 +225,9 @@ class CalendarStub:
             first, last = start.astimezone(self.zone).date().isoformat(), (end.astimezone(self.zone) - timedelta(seconds=1)).date().isoformat()
             return [t for t in self.tasks if (t["scheduled_start"] and parse(t["scheduled_start"]) < end and parse(t["scheduled_end"]) > start) or (t["due_date"] and first <= t["due_date"] <= last)]
         if view == "inbox":
-            return [t for t in self.tasks if not t["due_date"] and not t["done_at"]]
+            return [t for t in self.tasks if t["list_id"] == "list-inbox" and not t["done_at"]]
         if view == "today":
+            # Overdue is a view of its own; today is what is due or blocked out today.
             return [t for t in self.tasks if t["due_date"] == today or (t["scheduled_start"] and parse(t["scheduled_start"]).astimezone(self.zone).date().isoformat() == today)]
         if view == "upcoming":
             return sorted([t for t in self.tasks if t["due_date"] and t["due_date"] >= tomorrow and not t["done_at"]], key=lambda t: t["due_date"])
@@ -231,6 +236,9 @@ class CalendarStub:
         if view == "done":
             return [t for t in self.tasks if t["done_at"]]
         return list(self.tasks)
+
+    def _task(self, row: dict) -> dict:
+        return {**row, "done": bool(row["done_at"])}
 
     # ── the routes ──
 
@@ -292,19 +300,23 @@ class CalendarStub:
             return 200, found[: int(q.get("limit", ["20"])[0])]
         if path.startswith("/api/calendar/events/"):
             event_id = parts[4]
+            if ":" in event_id:
+                # An occurrence's own id stands for its series and its start.
+                event_id, started = event_id.split(":", 1)
+                body.setdefault("occurrence_start", started)
+                q.setdefault("occurrence_start", [started])
             row = next((e for e in self.events if e["id"] == event_id), None)
             if row is None:
                 return 404, {"detail": "no such event"}
             if len(parts) == 6 and parts[5] == "resolve":
-                row["conflict"] = None
+                row["conflict"] = False
                 row["pending_sync"] = False
+                calendar = self._calendar(row["calendar_id"]) or {}
                 for account in self.accounts:
-                    account["conflicts"] = [c for c in account.get("conflicts", []) if c["event_id"] != event_id]
-                    if not account["conflicts"] and account["status"] == "error":
-                        account.update(status="ok", sync_error="", last_sync_at=iso(datetime.now(self.zone)))
-                for c in self.calendars:
-                    if c["account_id"] == "acc-yandex" and c["sync"]:
-                        c["sync"] = {"last_sync_at": iso(datetime.now(self.zone)), "error": "", "status": "ok"}
+                    if account["id"] == calendar.get("account_id"):
+                        account.update(conflicts=0, status="ok", sync_error="", failures=0, last_sync_at=iso(datetime.now(self.zone)))
+                if calendar.get("sync"):
+                    calendar["sync"] = {**calendar["sync"], "last_sync_at": iso(datetime.now(self.zone)), "error": "", "status": "ok", "conflicts": 0, "failures": 0}
                 return 200, self._view(row)
             if method == "GET":
                 return 200, {**self._view(row), "id": row["id"]}
@@ -314,29 +326,46 @@ class CalendarStub:
                 fields = {k: v for k, v in body.items() if k in ("calendar_id", "title", "description", "location", "start_at", "end_at", "all_day", "start_date", "end_date", "timezone", "recurrence", "reminders")}
                 if "color" in body:
                     fields["color_override"] = body["color"]
-                if body.get("scope") == "this" and row["recurrence"]:
-                    self.overrides[(row["id"], body["occurrence_start"])] = {k: v for k, v in fields.items() if k != "recurrence"}
+                occurrence = body.get("occurrence_start")
+                if body.get("scope") == "this" and row["recurrence"] and occurrence:
+                    key = (row["id"], iso(parse(occurrence)))
+                    self.overrides[key] = {**self.overrides.get(key, {}), **{k: v for k, v in fields.items() if k != "recurrence"}}
                 else:
+                    if row["recurrence"] and occurrence and "start_at" in fields and "end_at" in fields and not row["all_day"]:
+                        # Sent as one occurrence's new times: the series moves by as much, with the new length.
+                        shift = parse(fields["start_at"]) - parse(occurrence)
+                        length = parse(fields["end_at"]) - parse(fields["start_at"])
+                        begins = parse(row["start_at"]) + shift
+                        fields["start_at"], fields["end_at"] = iso(begins), iso(begins + length)
                     row.update(fields)
                 row["version"] += 1
                 return 200, self._view(row)
             if method == "DELETE":
                 if q.get("scope", ["all"])[0] == "this" and row["recurrence"]:
-                    self.exdates.add((row["id"], q["occurrence_start"][0]))
+                    self.exdates.add((row["id"], iso(parse(q["occurrence_start"][0]))))
                 else:
                     self.events.remove(row)
                 return 200, {"ok": True}
         if path == "/api/calendar/accounts":
             if method == "POST":
+                provider = body.get("provider", "caldav")
+                credentials = dict(body.get("credentials") or {})
+                presets = {"yandex": "https://caldav.yandex.ru", "icloud": "https://caldav.icloud.com"}
+                if provider in presets:
+                    provider, credentials["server_url"] = "caldav", presets[provider]
+                if provider not in ("google", "outlook", "caldav") or (provider == "caldav" and not all(credentials.get(k) for k in ("server_url", "username", "password"))):
+                    return 400, {"detail": "missing calendar credentials"}
                 calendar_id = self._id("cal")
-                row = {"id": self._id("acc"), "provider": body.get("provider", "caldav"), "preset": body.get("preset"), "name": body.get("name", ""), "calendar_id": calendar_id, "last_sync_at": None, "sync_error": "", "status": "never", "conflicts": []}
+                row = {"id": self._id("acc"), "provider": provider, "name": body.get("name", ""), "remote_calendar_id": body.get("remote_calendar_id", "primary"), "server_url": credentials.get("server_url", ""), "username": credentials.get("username", ""),
+                       "calendar_id": calendar_id, "last_sync_at": None, "sync_error": "", "status": "never", "conflicts": 0, "failures": 0, "next_sync_at": None}
                 self.accounts.append(row)
                 self.calendars.append({"id": calendar_id, "name": row["name"], "color": "#7d8798", "kind": "caldav", "account_id": row["id"], "visible": True, "writable": True, "position": len(self.calendars), "default_reminders": [], "sync": {"last_sync_at": None, "error": "", "status": "never"}})
                 return 201, row
             return 200, self.accounts
         if path == "/api/calendar/subscriptions" and method == "POST":
             calendar_id = self._id("cal")
-            row = {"id": self._id("acc"), "provider": "ics", "preset": None, "name": body.get("name", ""), "calendar_id": calendar_id, "last_sync_at": None, "sync_error": "", "status": "never", "conflicts": []}
+            host = body.get("url", "").split("://", 1)[-1].split("/", 1)[0]
+            row = {"id": self._id("acc"), "provider": "ics", "name": body.get("name", ""), "remote_calendar_id": "primary", "host": host, "calendar_id": calendar_id, "last_sync_at": None, "sync_error": "", "status": "never", "conflicts": 0, "failures": 0, "next_sync_at": None}
             self.accounts.append(row)
             self.calendars.append({"id": calendar_id, "name": row["name"], "color": body.get("color", "#34a853"), "kind": "ics", "account_id": row["id"], "visible": True, "writable": False, "position": len(self.calendars), "default_reminders": [], "sync": {"last_sync_at": None, "error": "", "status": "never"}})
             return 201, row
@@ -348,7 +377,7 @@ class CalendarStub:
             if account is None:
                 return 404, {"detail": "no such account"}
             if len(parts) == 6 and parts[5] == "sync":
-                if account["conflicts"]:
+                if account.get("conflicts"):
                     return 502, {"detail": "calendar synchronization failed: an event changed in both places"}
                 account.update(status="ok", sync_error="", last_sync_at=iso(datetime.now(self.zone)))
                 return 200, account
@@ -371,8 +400,8 @@ class CalendarStub:
                 row.update({k: v for k, v in body.items() if k in row and k not in ("id", "version", "done_at")})
                 row["list_id"] = row["list_id"] or "list-inbox"
                 self.tasks.append(row)
-                return 201, row
-            return 200, self._tasks(q)
+                return 201, self._task(row)
+            return 200, [self._task(t) for t in self._tasks(q)]
         if path.startswith("/api/planner/tasks/"):
             row = next((t for t in self.tasks if t["id"] == parts[4]), None)
             if row is None:
@@ -380,13 +409,13 @@ class CalendarStub:
             if len(parts) == 6 and parts[5] == "complete":
                 row["done_at"] = iso(datetime.now(self.zone)) if body.get("done", True) else None
                 row["version"] += 1
-                return 200, row
+                return 200, self._task(row)
             if method == "PUT":
                 if body.get("version") != row["version"]:
                     return 409, {"detail": "the task changed since it was opened"}
                 row.update({k: v for k, v in body.items() if k in row and k not in ("id", "version", "done_at")})
                 row["version"] += 1
-                return 200, row
+                return 200, self._task(row)
             if method == "DELETE":
                 self.tasks.remove(row)
                 return 200, {"ok": True}

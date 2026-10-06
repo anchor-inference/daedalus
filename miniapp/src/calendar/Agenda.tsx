@@ -7,7 +7,7 @@ import { Icon } from "../icons";
 import { dayLabel, diffDays, type Day } from "./dates";
 import { byStart, onDay } from "./items";
 import type { CalendarRow, Item, Task } from "./types";
-import { itemTime, relativeDay } from "./words";
+import { calendarName, itemTime, relativeDay } from "./words";
 
 type Common = {
   items: Item[];
@@ -65,7 +65,7 @@ function DayRows({ day, items, zone, now, calendars, onOpen, onToggleTask }: Com
         const calendar = item.event ? calendars.find((c) => c.id === item.event!.calendar_id) : null;
         const time = itemTime(item, zone, day);
         const task = item.task;
-        const meta = [item.location, calendar?.name].filter(Boolean).join(" · ");
+        const meta = [item.location, calendar && calendarName(calendar)].filter(Boolean).join(" · ");
         return (
           <li key={item.key} className={`cal-row ${item.kind} ${item.done ? "done" : ""} ${!item.allDay && item.end < now ? "past" : ""}`} style={{ "--c": item.color } as CSSProperties}>
             <span className="cal-row-time">{time.includes(" – ") ? <>{time.split(" – ")[0]}<small>{time.split(" – ")[1]}</small></> : time}</span>

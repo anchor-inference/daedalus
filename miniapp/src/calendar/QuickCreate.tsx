@@ -10,6 +10,7 @@ import { Sheet, useLayer } from "../ui/dialogs";
 import { dayLabel, type Day } from "./dates";
 import { TimeSelect } from "./fields";
 import type { CalendarRow } from "./types";
+import { calendarName } from "./words";
 
 export type QuickDraft = { kind: "event" | "task"; title: string; day: Day; start: number; end: number; allDay: boolean; calendar_id: string };
 
@@ -100,7 +101,7 @@ function QuickForm({ draft, calendars, busy, onChange, onSave, onMore }: Props) 
         <label className="cal-quick-cal" style={{ "--c": calendar?.color ?? "var(--accent)" } as CSSProperties}>
           <span className="cal-dot" aria-hidden="true" />
           <select className="field" value={draft.calendar_id} onChange={(e) => set({ calendar_id: e.target.value })} aria-label={t("cal.field.calendar")}>
-            {writable.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {writable.map((c) => <option key={c.id} value={c.id}>{calendarName(c)}</option>)}
           </select>
         </label>
       )}

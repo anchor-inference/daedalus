@@ -9,7 +9,9 @@
 .cal-head { display: flex; align-items: center; gap: var(--space-2); min-height: calc(var(--head-h) + 8px); padding: max(6px, env(safe-area-inset-top)) var(--space-4) 6px var(--space-3); border-bottom: 1px solid var(--line); flex: none; }
 .cal-head .iconbtn { background: transparent; }
 .cal-head .iconbtn:hover { background: var(--surface-2); }
-.cal-title { flex: 0 1 auto; min-width: 0; margin: 0 auto 0 var(--space-1); font-size: var(--fs-18); font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The title keeps its length and the search field gives way: a range cut to "5–11 октября 202…" said
+   less than a narrower search box costs. */
+.cal-title { flex: 0 0 auto; max-width: 45%; min-width: 0; margin: 0 auto 0 var(--space-1); font-size: var(--fs-18); font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-nav { display: flex; gap: 2px; }
 .cal-today { font-weight: 600; }
 .cal-views { margin: 0; flex: none; }
@@ -287,7 +289,7 @@
 .cal-fab:active { transform: scale(.96); }
 @media (min-width: 1024px) { .cal-fab { bottom: 24px; } }
 .cal-screen.phone .cal-head { gap: 2px; padding: max(4px, env(safe-area-inset-top)) 6px 4px 4px; min-height: var(--head-h); }
-.cal-screen.phone .cal-title { font-size: var(--fs-16); margin-left: 2px; }
+.cal-screen.phone .cal-title { flex: 1 1 auto; max-width: none; font-size: var(--fs-16); margin-left: 2px; }
 .cal-screen.phone .cal-agenda { padding: var(--space-1) var(--space-3) 96px; }
 .cal-screen.phone .cal-agenda-day { grid-template-columns: 46px minmax(0, 1fr); gap: var(--space-2); }
 .cal-screen.phone .cal-agenda-date { flex-direction: column; align-items: center; gap: 0; }
@@ -452,3 +454,6 @@ select.field.cal-reminder-add { width: auto; min-width: 0; color: var(--fg-2); }
 .cal-screen.phone .cal-head .iconbtn { width: var(--row-h-touch); height: var(--row-h-touch); }
 .cal-screen.phone .cal-view-current { height: var(--row-h-touch); padding: 0 6px 0 10px; }
 .cal-label { display: block; margin: 10px 0 4px; color: var(--muted); font-size: var(--fs-12); }
+.cal-account-where { font-size: var(--fs-12); color: var(--fg-3); overflow-wrap: anywhere; }
+.cal-account-conflict-row { display: grid; gap: 4px; }
+.cal-account-conflict-title { color: var(--fg); }
