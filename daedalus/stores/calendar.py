@@ -16,8 +16,9 @@ import json
 import re
 import uuid
 from collections.abc import Callable, Iterable
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
+from urllib.parse import urlparse
 
 from daedalus.stores import recurrence
 from daedalus.stores.database import Database
@@ -121,7 +122,7 @@ def account_view(row: Any, calendar_id: str | None = None, conflicts: int = 0) -
         view["server_url"] = credentials.get("server_url", "")
         view["username"] = credentials.get("username", "")
     elif row["provider"] == "ics":
-        view["host"] = re.sub(r"^https://([^/]+).*$", r"\1", credentials.get("url", ""))
+        view["host"] = urlparse(credentials.get("url", "")).hostname or ""
     view["calendar_id"] = calendar_id
     view["status"] = sync_status(row)
     view["conflicts"] = conflicts
@@ -559,18 +560,8 @@ class CalendarStore:
         # Addressed through one occurrence (its override's id, or the series with its start), the new
         # times the client sent are that occurrence's.
         occurrence = body.get("occurrence_start") or original
-        if master["recurrence"] and occurrence and body.get("start_at") and body.get("end_at") and not master["all_day"]:
-            # The client edited the series from one of its occurrences and sent that occurrence's new
-            # times: the series moves by the same amount, and keeps the new length.
-            shift = moment(body["start_at"]) - moment(occurrence)
-            length = moment(body["end_at"]) - moment(body["start_at"])
-            begins = datetime.fromisoformat(master["start_at"]) + shift
-            changes["start_at"], changes["end_at"] = begins.isoformat(), (begins + length).isoformat()
-        elif master["recurrence"] and occurrence and master["all_day"] and body.get("start_date") and body.get("end_date"):
-            shift = datetime.fromisoformat(str(body["start_date"])[:10]) - datetime.fromisoformat(instant(occurrence)[:10])
-            length = datetime.fromisoformat(str(body["end_date"])[:10]) - datetime.fromisoformat(str(body["start_date"])[:10])
-            begins = datetime.fromisoformat(master["start_at"][:10]) + shift
-            changes["start_date"], changes["end_date"] = begins.date().isoformat(), (begins + length).date().isoformat()
+        if master["recurrence"] and occurrence and any(body.get(key) for key in ("start_at", "end_at", "start_date", "end_date")):
+            changes.update(self._series_times(master, occurrence, body))
         fields = self._fields(changes, master, target_calendar)
         account = master["account_id"]
         dirty = ("create" if master["dirty"] == "create" else "update") if account else ""
@@ -587,15 +578,63 @@ class CalendarStore:
             if not fields["recurrence"]:
                 await conn.execute("DELETE FROM calendar_events WHERE series_id=?", (master["id"],))
                 await conn.execute("UPDATE calendar_events SET exdates='[]' WHERE id=?", (master["id"],))
-            elif reshaped and not account:
+            elif reshaped and (not account or calendar["provider"] == "caldav"):
                 # A series that moved or changed its rule has different occurrences: the old
                 # exceptions would point at starts that no longer exist, and a moved one would show
-                # twice. A provider makes the same call for its own copy, which the next read brings.
+                # twice. Google and Outlook keep their own exceptions and decide for their copy, which
+                # the next read brings; a CalDAV series is sent whole from here, so its exceptions
+                # are dropped here too, or the resource would carry RECURRENCE-IDs of no occurrence.
                 await conn.execute("DELETE FROM calendar_events WHERE series_id=?", (master["id"],))
                 await conn.execute("UPDATE calendar_events SET exdates='[]' WHERE id=?", (master["id"],))
             if target_calendar["id"] != master["calendar_id"]:
                 await conn.execute("UPDATE calendar_events SET calendar_id=? WHERE series_id=?", (target_calendar["id"], master["id"]))
         return await self._view_of(master["id"])
+
+    @staticmethod
+    def _series_times(master: Any, occurrence: str, body: dict[str, Any]) -> dict[str, Any]:
+        """The series' new bounds when the client moved one occurrence with ``scope=all``.
+
+        The client sends that occurrence's new times, possibly only one bound of them; the series
+        moves by the same amount and takes the new length. The move is measured on the wall clock of
+        the series' zone, so dragging a 10:00 meeting to 11:00 keeps it at 11:00 on both sides of a
+        daylight-saving change. An all-day series moves by whole days, whether the client named the
+        dates or sent the dates' midnights (the agent's tool can only send the latter).
+        """
+        zone = recurrence.zone(str(body.get("timezone") or master["timezone"]))
+        was_all_day = bool(master["all_day"])
+        all_day = bool(body["all_day"]) if body.get("all_day") is not None else was_all_day
+        occurrence_at = moment(occurrence)
+        master_start = datetime.fromisoformat(master["start_at"])
+        length = datetime.fromisoformat(master["end_at"]) - master_start
+        if was_all_day:
+            occurrence_local = datetime.combine(occurrence_at.date(), time())
+            master_local = datetime.combine(master_start.date(), time())
+        else:
+            occurrence_local = occurrence_at.astimezone(zone).replace(tzinfo=None)
+            master_local = master_start.astimezone(zone).replace(tzinfo=None)
+
+        def day_of(date_key: str, time_key: str) -> date | None:
+            if body.get(date_key):
+                return date.fromisoformat(str(body[date_key])[:10])
+            if body.get(time_key):
+                # As in _fields: an all-day bound keeps the date the caller wrote, whatever its offset.
+                return datetime.fromisoformat(str(body[time_key]).replace("Z", "+00:00")).date()
+            return None
+
+        if all_day:
+            first_day = day_of("start_date", "start_at")
+            last_day = day_of("end_date", "end_at")
+            if first_day is None:
+                first_day = occurrence_local.date() if last_day is None else last_day - max(timedelta(days=1), timedelta(days=length.days))
+            if last_day is None:
+                last_day = first_day + max(timedelta(days=1), timedelta(days=length.days))
+            begins = master_local.date() + (first_day - occurrence_local.date())
+            return {"all_day": True, "start_date": begins.isoformat(), "end_date": (begins + (last_day - first_day)).isoformat()}
+        new_start = moment(body["start_at"]) if body.get("start_at") else occurrence_at
+        new_end = moment(body["end_at"]) if body.get("end_at") else new_start + length
+        begins_local = master_local + (new_start.astimezone(zone).replace(tzinfo=None) - occurrence_local)
+        begins = begins_local.replace(tzinfo=zone).astimezone(UTC)
+        return {"start_at": begins.isoformat(), "end_at": (begins + (new_end - new_start)).isoformat(), "start_date": None, "end_date": None}
 
     async def _update_occurrence(self, master: Any, override: Any, original: str, body: dict[str, Any]) -> dict[str, Any]:
         expected = override["version"] if override is not None else master["version"]

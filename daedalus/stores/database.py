@@ -1746,6 +1746,9 @@ SELECT id,version,title,scene_json,updated_at FROM diagrams;
 # server with a fixed host. Google's sync token is dropped: it was taken with singleEvents=true, which
 # returned every occurrence of a series as its own event, and a token is only valid with the query it
 # was issued for, so the next sync reads afresh and the stale per-occurrence rows fall away there.
+# Outlook's delta also delivered every occurrence as an event; nothing stored tells an occurrence from
+# a single event, so its acknowledged rows are dropped with its cursor and the next sync reads them
+# back as series and single events. Rows with a pending local edit stay and are sent as before.
 MIGRATIONS.append(("""
 CREATE TABLE calendar_accounts_rebuilt (
     id TEXT PRIMARY KEY,
@@ -1766,11 +1769,12 @@ SELECT id,
     name,
     CASE provider WHEN 'yandex' THEN json_object('server_url', 'https://caldav.yandex.ru', 'username', json_extract(credentials_json, '$.username'), 'password', json_extract(credentials_json, '$.app_password')) ELSE credentials_json END,
     remote_calendar_id,
-    CASE provider WHEN 'google' THEN '' ELSE cursor END,
+    CASE provider WHEN 'google' THEN '' WHEN 'outlook' THEN '' ELSE cursor END,
     last_sync_at, sync_error, created_at
 FROM calendar_accounts;
 DROP TABLE calendar_accounts;
 ALTER TABLE calendar_accounts_rebuilt RENAME TO calendar_accounts;
+DELETE FROM calendar_events WHERE dirty = '' AND account_id IN (SELECT id FROM calendar_accounts WHERE provider = 'outlook');
 
 CREATE TABLE calendars (
     id TEXT PRIMARY KEY,

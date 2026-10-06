@@ -71,7 +71,9 @@ async def due(store: CalendarStore, planner: PlannerStore, moment: datetime, lan
             fire = anchor - timedelta(minutes=minutes)
             if not moment - GRACE <= fire <= moment:
                 continue
-            key = f"event:{item['event_id']}:{item['occurrence_start'] or item['start_at']}:{minutes}"
+            # The occurrence and where it is now: a moved occurrence reminds again at its new time,
+            # as a moved single event does, while a restart finds the same key and stays quiet.
+            key = f"event:{item['id']}:{item['start_at']}:{minutes}"
             if item["all_day"]:
                 body = render("calendar.reminder.all_day", language, day=item["start_date"])
             else:

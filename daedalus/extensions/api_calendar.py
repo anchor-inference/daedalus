@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from daedalus.extensions.calendar_sync import CalendarSync
+from daedalus.extensions.calendar_sync import CalendarSync, describe
 from daedalus.stores.calendar import CalendarStore
 from daedalus.stores.planner import PlannerStore
 
@@ -227,7 +227,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         except (ValueError, KeyError) as exc:
             raise refused(exc) from exc
         except Exception as exc:
-            raise HTTPException(502, f"calendar synchronization failed: {exc}") from exc
+            raise HTTPException(502, f"calendar synchronization failed: {describe(exc)}") from exc
 
     # -- accounts and subscriptions --------------------------------------------------------------
 
@@ -313,7 +313,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         except KeyError as exc:
             raise refused(exc) from exc
         except Exception as exc:
-            raise HTTPException(502, f"calendar synchronization failed: {exc}") from exc
+            raise HTTPException(502, f"calendar synchronization failed: {describe(exc)}") from exc
 
     # -- planner ---------------------------------------------------------------------------------
 
@@ -375,7 +375,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.post("/api/planner/tasks/{task_id}/complete")
     async def task_complete(task_id: str, body: CompleteBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await planner.complete(task_id, body.done)
+            return await planner.complete(task_id, body.done, (await calendar.settings())["timezone"])
         except (ValueError, KeyError) as exc:
             raise refused(exc) from exc
 

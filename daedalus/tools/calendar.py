@@ -210,7 +210,7 @@ async def planner_task_update(context: ToolContext, task_id: str, version: int, 
 @tool(name="PlannerTaskComplete", description="Mark a planner task done (or open again with done=false). A repeating task is recorded as done and moves to its next due date.")
 async def planner_task_complete(context: ToolContext, task_id: str, done: bool = True) -> ToolResult:
     try:
-        task = await _planner(context).complete(task_id, done)
+        task = await _planner(context).complete(task_id, done, (await _store(context).settings())["timezone"])
     except KeyError:
         return error(context, f"no task {task_id}")
     return ok(context, json.dumps(task, ensure_ascii=False))

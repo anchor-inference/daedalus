@@ -96,7 +96,12 @@ class PlannerStore:
 
     # -- tasks ---------------------------------------------------------------------------------
 
-    async def tasks(self, view: str = "all", list_id: str | None = None, start: str | None = None, end: str | None = None, timezone: str = "UTC") -> list[dict[str, Any]]:
+    async def timezone(self) -> str:
+        """The calendar's zone, for a caller that did not name one (the store has no browser to ask)."""
+        stored = await self.db.kv_get("calendar_settings", {}) or {}
+        return str(stored.get("timezone") or "UTC")
+
+    async def tasks(self, view: str = "all", list_id: str | None = None, start: str | None = None, end: str | None = None, timezone: str | None = None) -> list[dict[str, Any]]:
         """Tasks for one view of the planner, or every task due or scheduled in ``[start, end)``.
 
         ``inbox`` is the open tasks of the Inbox list; ``today`` those due today or with a time block
@@ -104,7 +109,7 @@ class PlannerStore:
         before today; ``done`` the finished ones, newest first; ``all`` every task, open first.
         "Today" is the operator's today, in the calendar's zone.
         """
-        zone = recurrence.zone(timezone)
+        zone = recurrence.zone(timezone or await self.timezone())
         local_now = datetime.now(UTC).astimezone(zone)
         today = local_now.date().isoformat()
         day_start = datetime.combine(local_now.date(), time(), zone).astimezone(UTC).isoformat()
@@ -247,7 +252,7 @@ class PlannerStore:
             raise RuntimeError("the task changed elsewhere; reload it before deleting")
         await self.db.execute("DELETE FROM planner_tasks WHERE id=?", (task_id,))
 
-    async def complete(self, task_id: str, done: bool = True) -> dict[str, Any]:
+    async def complete(self, task_id: str, done: bool = True, timezone: str | None = None) -> dict[str, Any]:
         """Mark a task done or open again.
 
         Finishing a repeating task records the finished occurrence as its own done task and moves the
@@ -276,8 +281,17 @@ class PlannerStore:
                 if "COUNT" in found:
                     found["COUNT"] = str(max(1, int(found["COUNT"]) - 1))
                     rule = "RRULE:" + ";".join(f"{key}={value}" for key, value in found.items())
-                scheduled_start = (datetime.fromisoformat(row["scheduled_start"]) + shift).isoformat() if row["scheduled_start"] else None
-                scheduled_end = (datetime.fromisoformat(row["scheduled_end"]) + shift).isoformat() if row["scheduled_end"] else None
+                # The block moves by whole days on the operator's wall clock: a 09:00 walk stays at
+                # 09:00 when the clocks change, which adding the same number of UTC hours would not.
+                zone = recurrence.zone(timezone or await self.timezone())
+
+                def moved(value: str | None) -> str | None:
+                    if not value:
+                        return None
+                    local = datetime.fromisoformat(value).astimezone(zone).replace(tzinfo=None) + timedelta(days=shift.days)
+                    return local.replace(tzinfo=zone).astimezone(UTC).isoformat()
+
+                scheduled_start, scheduled_end = moved(row["scheduled_start"]), moved(row["scheduled_end"])
                 async with self.db.transaction() as conn:
                     await conn.execute(
                         "INSERT INTO planner_tasks(id,list_id,title,notes,due_date,due_time,scheduled_start,scheduled_end,duration,priority,done_at,reminders,recurrence,position,created_at,updated_at)"

@@ -1,5 +1,6 @@
 """Calendar synchronization against fake providers: no request leaves the process."""
 
+import asyncio
 import json
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -353,3 +354,143 @@ async def test_a_subscription_is_polled_conditionally_over_https_only(db, monkey
     async with _client(lambda request: httpx.Response(200, content=body)) as client:
         with pytest.raises(ValueError, match="larger"):
             await sync._ics(client, await store.account(feed["id"]))
+
+
+@pytest.mark.asyncio
+async def test_reshaping_a_caldav_series_drops_its_exceptions(db):
+    store = CalendarStore(db)
+    account = await store.connect("caldav", "Work", {"server_url": "https://dav.example.invalid", "username": "someone", "password": "secret"})
+    series = await store.create({"calendar_id": account["calendar_id"], "title": "Sync", "start_at": "2026-10-05T08:00:00Z", "end_at": "2026-10-05T08:30:00Z", "recurrence": "FREQ=DAILY;COUNT=5"})
+    await db.execute("UPDATE calendar_events SET dirty='', remote_id='/cal/x.ics', etag='e1'")
+    await store.update(series["event_id"], {"scope": "this", "occurrence_start": "2026-10-07T08:00:00Z", "version": series["version"], "title": "Sync (renamed)"})
+    await store.delete(series["event_id"], None, "this", "2026-10-08T08:00:00Z")
+    master = await store.get(series["event_id"])
+    await store.update(series["event_id"], {"scope": "all", "version": master["version"], "start_at": "2026-10-05T09:00:00Z", "end_at": "2026-10-05T09:30:00Z"})
+    found = await store.occurrences("2026-10-05T00:00:00Z", "2026-10-10T00:00:00Z")
+    assert [(item["title"], item["start_at"][11:16]) for item in found] == [("Sync", "09:00")] * 5
+    row = await db.fetchone("SELECT * FROM calendar_events WHERE id=?", (series["event_id"],))
+    sent = calendar_sync._ical(row, []).decode()
+    assert "RECURRENCE-ID" not in sent and "EXDATE" not in sent and row["dirty"] == "update"
+
+
+@pytest.mark.asyncio
+async def test_a_feeds_secret_address_never_reaches_the_sync_error(db, monkeypatch, caplog):
+    store = CalendarStore(db)
+    feed = await store.subscribe("Team", "https://feeds.example.invalid/private/SECRET-TOKEN/basic.ics?key=SECRET-KEY")
+    assert feed["host"] == "feeds.example.invalid"
+    _fake_network(monkeypatch, lambda request: httpx.Response(403))
+    await sync_due(CalendarSync(store))
+    exposed = json.dumps([await store.calendars(), await store.accounts()]) + caplog.text
+    assert "SECRET" not in exposed and "HTTP 403 from feeds.example.invalid" in exposed
+    assert calendar_sync.describe(ValueError("could not read https://feeds.example.invalid/SECRET")) == "could not read feeds.example.invalid"
+
+
+@pytest.mark.asyncio
+async def test_an_edit_during_the_create_keeps_the_remote_id(db, monkeypatch):
+    store = CalendarStore(db)
+    account = await store.connect("google", "Work", OAUTH)
+    await db.execute("UPDATE calendar_accounts SET cursor='t0' WHERE id=?", (account["id"],))
+    made = await store.create({"calendar_id": account["calendar_id"], "title": "Lunch", "start_at": "2026-10-07T12:00:00Z", "end_at": "2026-10-07T13:00:00Z"})
+    calls = []
+
+    async def reply(request):
+        if request.url.host == "oauth2.googleapis.com":
+            return httpx.Response(200, json={"access_token": "access"})
+        calls.append((request.method, request.url.path))
+        if request.method == "POST":
+            # The operator edits the event while its create is in flight.
+            await store.update(made["event_id"], {"version": made["version"], "title": "Lunch with A"})
+            return httpx.Response(200, json={"id": "g1", "etag": '"1"'})
+        if request.method == "PATCH":
+            assert json.loads(request.content)["summary"] == "Lunch with A"
+            return httpx.Response(200, json={"id": "g1", "etag": '"2"'})
+        return httpx.Response(200, json={"items": [], "nextSyncToken": "t1"})
+
+    _fake_network(monkeypatch, reply)
+    sync = CalendarSync(store)
+    await sync.sync(account["id"])
+    row = await db.fetchone("SELECT remote_id, dirty FROM calendar_events WHERE id=?", (made["event_id"],))
+    assert (row["remote_id"], row["dirty"]) == ("g1", "update")
+    await sync.sync(account["id"])
+    assert [method for method, _ in calls if method in ("POST", "PATCH")] == ["POST", "PATCH"]
+    assert (await store.get(made["event_id"]))["dirty"] == ""
+
+
+@pytest.mark.asyncio
+async def test_an_edit_during_a_caldav_put_is_sent_to_the_same_resource(db):
+    store = CalendarStore(db)
+    account = await store.connect("caldav", "Home", {"server_url": "https://dav.example.invalid", "username": "someone", "password": "secret"}, "/calendars/someone/work/")
+    made = await store.create({"calendar_id": account["calendar_id"], "title": "Piano", "start_at": "2026-10-05T16:00:00Z", "end_at": "2026-10-05T17:00:00Z"})
+    puts = []
+
+    async def reply(request):
+        if request.method == "PUT":
+            puts.append(request.headers.get("If-None-Match") or request.headers.get("If-Match"))
+            if len(puts) == 1:
+                await store.update(made["event_id"], {"version": made["version"], "title": "Piano lesson"})
+            return httpx.Response(201, headers={"etag": f'"v{len(puts)}"'})
+        listed = f'<d:response><d:href>/calendars/someone/work/{made["event_id"]}.ics</d:href><d:propstat><d:prop><d:getetag>"v{len(puts)}"</d:getetag></d:prop></d:propstat></d:response>'
+        return httpx.Response(207, text='<d:multistatus xmlns:d="DAV:">' + listed + "</d:multistatus>")
+
+    sync = CalendarSync(store)
+    async with _client(reply) as client:
+        await sync._caldav(client, await store.account(account["id"]))
+        await sync._caldav(client, await store.account(account["id"]))
+    assert puts == ["*", '"v1"']
+    stored = await store.get(made["event_id"])
+    assert stored["conflict"] is False and stored["dirty"] == "" and stored["title"] == "Piano lesson"
+
+
+@pytest.mark.asyncio
+async def test_a_local_edit_that_lands_during_a_read_is_not_deleted(db, monkeypatch):
+    store = CalendarStore(db)
+    account = await store.connect("caldav", "Home", {"server_url": "https://dav.example.invalid", "username": "someone", "password": "secret"}, "/calendars/someone/work/")
+    made = await store.create({"calendar_id": account["calendar_id"], "title": "Kept", "start_at": "2026-10-05T16:00:00Z", "end_at": "2026-10-05T17:00:00Z"})
+    await db.execute("UPDATE calendar_events SET dirty='', remote_id='/calendars/someone/work/kept.ics', etag='e' WHERE id=?", (made["event_id"],))
+    execute = db.execute
+
+    async def racing(sql, params=()):
+        # The resource is gone at the server; the operator's edit lands after the sync chose the row
+        # as an unseen clean one and before it deletes it.
+        if sql.startswith("DELETE FROM calendar_events WHERE id=?") and params and params[0] == made["event_id"]:
+            await execute("UPDATE calendar_events SET title='Kept and edited', dirty='update', version=version+1 WHERE id=?", (made["event_id"],))
+        await execute(sql, params)
+
+    monkeypatch.setattr(db, "execute", racing)
+    async with _client(lambda request: httpx.Response(207, text='<d:multistatus xmlns:d="DAV:"/>')) as client:
+        await CalendarSync(store)._caldav(client, await store.account(account["id"]))
+    assert (await store.get(made["event_id"]))["title"] == "Kept and edited"
+
+
+@pytest.mark.asyncio
+async def test_resolving_waits_for_a_running_sync_so_its_cursor_reset_survives(db, monkeypatch):
+    store = CalendarStore(db)
+    account = await store.connect("google", "Work", OAUTH)
+    made = await store.create({"calendar_id": account["calendar_id"], "title": "Review", "start_at": "2026-10-05T08:00:00Z", "end_at": "2026-10-05T09:00:00Z"})
+    await db.execute("UPDATE calendar_events SET remote_id='r1', etag='\"old\"', dirty='update', conflict='changed' WHERE id=?", (made["event_id"],))
+    await db.execute("UPDATE calendar_accounts SET cursor='t0' WHERE id=?", (account["id"],))
+    reading = asyncio.Event()
+    release = asyncio.Event()
+    queries = []
+
+    async def reply(request):
+        if request.url.host == "oauth2.googleapis.com":
+            return httpx.Response(200, json={"access_token": "access"})
+        queries.append(dict(request.url.params))
+        if len(queries) == 1:
+            reading.set()
+            await release.wait()
+        return httpx.Response(200, json={"items": [], "nextSyncToken": f"t{len(queries)}"})
+
+    _fake_network(monkeypatch, reply)
+    sync = CalendarSync(store)
+    running = asyncio.create_task(sync.sync(account["id"]))
+    await reading.wait()
+    resolving = asyncio.create_task(sync.resolve(made["event_id"], "remote"))
+    await asyncio.sleep(0.05)
+    assert (await store.get(made["event_id"]))["conflict"] is True  # still waiting for the lock
+    release.set()
+    await running
+    await resolving
+    # The resolve's own sync read from scratch, without the token the first sync stored.
+    assert "syncToken" not in queries[-1]

@@ -399,3 +399,75 @@ async def test_find_time_respects_working_hours_events_and_time_blocks(db, monke
     body = json.loads(listed.content)
     assert body["timezone"] == "Europe/Berlin" and {item["calendar_name"] for item in body["events"]} == {"Personal"}
     assert "description" not in body["events"][0]
+
+
+@pytest.mark.asyncio
+async def test_an_all_day_series_moved_from_an_occurrence_by_its_midnights_moves_by_days(db):
+    store = CalendarStore(db)
+    series = await store.create({"title": "Bins", "all_day": True, "start_date": "2026-10-05", "end_date": "2026-10-06", "recurrence": "FREQ=WEEKLY;COUNT=10"})
+    # What the agent's tool sends: the occurrence's new midnights, no dates.
+    await store.update(series["event_id"], {"scope": "all", "occurrence_start": "2026-10-26T00:00:00+00:00", "version": series["version"], "all_day": True, "start_at": "2026-10-27T00:00:00Z", "end_at": "2026-10-28T00:00:00Z"})
+    found = await store.occurrences("2026-10-01T00:00:00Z", "2027-02-28T00:00:00Z")
+    assert len(found) == 10 and [item["start_date"] for item in found[:3]] == ["2026-10-06", "2026-10-13", "2026-10-20"]
+    assert all(item["end_date"] > item["start_date"] for item in found)
+
+
+@pytest.mark.asyncio
+async def test_a_series_edited_from_an_occurrence_with_one_bound_keeps_the_other(db):
+    store = CalendarStore(db)
+    series = await store.create({"title": "Standup", "start_at": "2026-10-05T08:00:00Z", "end_at": "2026-10-05T08:30:00Z", "timezone": "Europe/Berlin", "recurrence": "FREQ=WEEKLY"})
+    # Only the end of the 2 November occurrence (10:00 Berlin, after the clocks went back) is moved.
+    longer = await store.update(series["event_id"], {"scope": "all", "occurrence_start": "2026-11-02T09:00:00+00:00", "version": series["version"], "end_at": "2026-11-02T10:00:00Z"})
+    master = await store.get(series["event_id"])
+    assert (master["start_at"], master["end_at"]) == ("2026-10-05T08:00:00+00:00", "2026-10-05T09:00:00+00:00")
+    # Only the start: the series moves an hour later on the Berlin clock and keeps its length,
+    # although this occurrence and the series' first one sit on different sides of the change.
+    await store.update(series["event_id"], {"scope": "all", "occurrence_start": "2026-11-02T09:00:00+00:00", "version": longer["version"], "start_at": "2026-11-02T10:00:00Z"})
+    found = await store.occurrences("2026-10-05T00:00:00Z", "2026-11-03T00:00:00Z")
+    assert [(item["start_at"], item["end_at"]) for item in found][::4] == [("2026-10-05T09:00:00+00:00", "2026-10-05T10:00:00+00:00"), ("2026-11-02T10:00:00+00:00", "2026-11-02T11:00:00+00:00")]
+
+
+@pytest.mark.asyncio
+async def test_a_repeating_tasks_time_block_keeps_its_wall_clock_across_daylight_saving(db):
+    await _berlin(CalendarStore(db))
+    planner = PlannerStore(db)
+    task = await planner.create({"title": "Walk", "due_date": "2026-10-24", "scheduled_start": "2026-10-24T09:00:00+02:00", "scheduled_end": "2026-10-24T09:30:00+02:00", "recurrence": "FREQ=DAILY"})
+    for _ in range(2):
+        task = await planner.complete(task["id"])
+    # 09:00 Berlin on the 26th is 08:00 UTC, an hour later in UTC than on the 24th.
+    assert task["due_date"] == "2026-10-26" and (task["scheduled_start"], task["scheduled_end"]) == ("2026-10-26T08:00:00+00:00", "2026-10-26T08:30:00+00:00")
+
+
+@pytest.mark.asyncio
+async def test_a_moved_occurrence_reminds_again_at_its_new_time(db):
+    store, planner = CalendarStore(db), PlannerStore(db)
+    series = await store.create({"title": "Sync", "start_at": "2026-10-05T07:00:00Z", "end_at": "2026-10-05T07:30:00Z", "recurrence": "FREQ=DAILY", "reminders": [10]})
+    posted = []
+    app = SimpleNamespace(notifications=SimpleNamespace(language=lambda: "en", post=lambda draft: _record(posted, draft)))
+    assert await calendar_reminders.deliver(app, store, planner, datetime(2026, 10, 6, 6, 51, tzinfo=UTC)) == 1
+    await store.update(series["event_id"], {"scope": "this", "occurrence_start": "2026-10-06T07:00:00Z", "version": series["version"], "start_at": "2026-10-06T07:40:00Z", "end_at": "2026-10-06T08:10:00Z"})
+    assert await calendar_reminders.deliver(app, store, planner, datetime(2026, 10, 6, 7, 31, tzinfo=UTC)) == 1
+    assert await calendar_reminders.deliver(app, store, planner, datetime(2026, 10, 6, 7, 35, tzinfo=UTC)) == 0
+
+
+@pytest.mark.asyncio
+async def test_migration_drops_outlooks_per_occurrence_rows_and_its_cursor(tmp_path, monkeypatch):
+    path = tmp_path / "old.sqlite"
+    monkeypatch.setattr(database_module, "MIGRATIONS", MIGRATIONS[:-1])
+    old = Database(path)
+    await old.open()
+    try:
+        await old.execute("INSERT INTO calendar_accounts(id,provider,name,credentials_json,cursor,created_at) VALUES('o','outlook','Work','{}','{\"end\":\"2028-01-01T00:00:00+00:00\",\"url\":\"x\"}','2026-01-01')")
+        for event_id, dirty in (("o1", ""), ("o2", ""), ("o3", "update")):
+            await old.execute("INSERT INTO calendar_events(id,account_id,remote_id,title,start_at,end_at,dirty,updated_at) VALUES(?,'o',?,'Weekly','2026-10-05T09:00:00+00:00','2026-10-05T10:00:00+00:00',?,'x')", (event_id, "r" + event_id, dirty))
+    finally:
+        await old.close()
+    monkeypatch.setattr(database_module, "MIGRATIONS", MIGRATIONS)
+    db = Database(path)
+    await db.open()
+    try:
+        assert (await db.fetchone("SELECT cursor FROM calendar_accounts WHERE id='o'"))["cursor"] == ""
+        assert [row["id"] for row in await db.fetchall("SELECT id FROM calendar_events")] == ["o3"]
+        assert await db.fetchall("PRAGMA foreign_key_check") == []
+    finally:
+        await db.close()

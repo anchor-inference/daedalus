@@ -18,6 +18,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -50,6 +51,28 @@ BACKOFF_MAX_SECONDS = 6 * 60 * 60
 a revoked token is tried about a dozen times on its first day instead of 288 times."""
 ICS_MAX_BYTES = 5 * 1024 * 1024
 ICS_MAX_EVENTS = 5000
+
+
+_URL = re.compile(r"(?:https?|webcal)://[^\s'\"<>]+")
+
+
+def describe(exc: BaseException) -> str:
+    """A failure as it may be shown and stored: the status and the host, never the address.
+
+    An ICS feed's address is often its only secret (a private token in the path or query), and
+    httpx puts the whole URL into its messages; stored as the sync error, that reached the app, the
+    agent's context through CalendarList, the 502 text and the log.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code} from {exc.request.url.host}"
+    if isinstance(exc, httpx.RequestError):
+        try:
+            host = exc.request.url.host
+        except RuntimeError:
+            host = "the provider"
+        return f"{type(exc).__name__} reaching {host}"
+    text = _URL.sub(lambda found: urlparse(found.group(0)).hostname or "a URL", str(exc))
+    return text[:500] or type(exc).__name__
 
 
 def backoff(failures: int) -> int:
@@ -319,7 +342,7 @@ class CalendarSync:
                 retry = datetime.now(UTC) + timedelta(seconds=backoff(failures))
                 await self.db.execute(
                     "UPDATE calendar_accounts SET sync_error=?,failures=?,next_sync_at=? WHERE id=?",
-                    (str(exc)[:500] or type(exc).__name__, failures, retry.isoformat(), account_id),
+                    (describe(exc), failures, retry.isoformat(), account_id),
                 )
                 raise
             finally:
@@ -331,23 +354,29 @@ class CalendarSync:
         row = await self.db.fetchone("SELECT * FROM calendar_events WHERE id=? AND account_id IS NOT NULL AND (conflict!='' OR dirty!='')", (event_id,))
         if row is None:
             raise KeyError(event_id)
-        if choice == "remote":
-            if row["conflict"] == "deleted" or row["series_id"]:
-                # Nothing of ours is worth keeping: the provider's copy (or its absence) comes back
-                # with the full read below.
-                await self.db.execute("DELETE FROM calendar_events WHERE id=?", (event_id,))
+        # The choice is written under the account's lock: a sync running meanwhile would otherwise
+        # store its new cursor over the reset below, and the full read the choice needs never comes.
+        async with _ACCOUNT_LOCKS.setdefault(row["account_id"], asyncio.Lock()):
+            row = await self.db.fetchone("SELECT * FROM calendar_events WHERE id=? AND (conflict!='' OR dirty!='')", (event_id,))
+            if row is None:
+                raise KeyError(event_id)
+            if choice == "remote":
+                if row["conflict"] == "deleted" or row["series_id"]:
+                    # Nothing of ours is worth keeping: the provider's copy (or its absence) comes back
+                    # with the full read below.
+                    await self.db.execute("DELETE FROM calendar_events WHERE id=?", (event_id,))
+                else:
+                    await self.db.execute("UPDATE calendar_events SET dirty='',conflict='',etag='' WHERE id=?", (event_id,))
+                # A full refresh is needed because the provider's cursor may already have passed the
+                # change that conflicted with this local write.
+                await self.db.execute("UPDATE calendar_accounts SET cursor='' WHERE id=?", (row["account_id"],))
+            elif row["conflict"] == "deleted":
+                # The provider no longer has it and the operator wants it: it is created again.
+                await self.db.execute("UPDATE calendar_events SET remote_id=NULL,etag='',dirty='create',conflict='' WHERE id=?", (event_id,))
             else:
-                await self.db.execute("UPDATE calendar_events SET dirty='',conflict='',etag='' WHERE id=?", (event_id,))
-            # A full refresh is needed because the provider's cursor may already have passed the
-            # change that conflicted with this local write.
-            await self.db.execute("UPDATE calendar_accounts SET cursor='' WHERE id=?", (row["account_id"],))
-        elif row["conflict"] == "deleted":
-            # The provider no longer has it and the operator wants it: it is created again.
-            await self.db.execute("UPDATE calendar_events SET remote_id=NULL,etag='',dirty='create',conflict='' WHERE id=?", (event_id,))
-        else:
-            # The operator explicitly chose to replace the provider's newer version. The next
-            # outbound write omits If-Match for this one event; other writes keep their checks.
-            await self.db.execute("UPDATE calendar_events SET etag='',conflict='' WHERE id=?", (event_id,))
+                # The operator explicitly chose to replace the provider's newer version. The next
+                # outbound write omits If-Match for this one event; other writes keep their checks.
+                await self.db.execute("UPDATE calendar_events SET etag='',conflict='' WHERE id=?", (event_id,))
         return await self.sync(row["account_id"])
 
     async def _conflict(self, row: Any, kind: str) -> None:
@@ -358,6 +387,17 @@ class CalendarSync:
         if row is None:
             raise KeyError(account_id)
         return str(row["id"])
+
+    async def _acknowledge(self, row: Any, remote_id: str | None, etag: str) -> None:
+        """Record that the provider stored ``row``. The remote id and etag are kept whatever happened
+        meanwhile; only the pending flag depends on the version. Saving the id only when the version
+        still matched lost it after an edit made during the request: the next sync then created the
+        event a second time (or, for CalDAV, sent If-None-Match: * and met a false conflict)."""
+        await self.db.execute(
+            "UPDATE calendar_events SET remote_id=COALESCE(?, remote_id), etag=?,"
+            " dirty=CASE WHEN version=? THEN '' WHEN dirty='delete' THEN 'delete' ELSE 'update' END WHERE id=?",
+            (remote_id, etag, row["version"], row["id"]),
+        )
 
     async def _token(self, client: httpx.AsyncClient, account: Any) -> str:
         credentials = json.loads(account["credentials_json"])
@@ -459,7 +499,7 @@ class CalendarSync:
         # An exception the resource no longer carries is gone at the provider.
         for row in await self.db.fetchall("SELECT id, original_start FROM calendar_events WHERE series_id=? AND dirty=''", (master["id"],)):
             if row["original_start"] not in exceptions:
-                await self.db.execute("DELETE FROM calendar_events WHERE id=?", (row["id"],))
+                await self.db.execute("DELETE FROM calendar_events WHERE id=? AND dirty=''", (row["id"],))
         return True
 
     async def _forget_unseen(self, account_id: str, seen: set[str]) -> int:
@@ -518,10 +558,7 @@ class CalendarSync:
             return
         response.raise_for_status()
         saved = response.json()
-        await self.db.execute(
-            "UPDATE calendar_events SET remote_id=?,etag=?,dirty='' WHERE id=? AND version=?",
-            (saved["id"], saved.get("etag") or saved.get("@odata.etag") or "", row["id"], row["version"]),
-        )
+        await self._acknowledge(row, saved.get("id") or remote_id, saved.get("etag") or saved.get("@odata.etag") or "")
 
     async def _push_instance(self, client: httpx.AsyncClient, provider: str, base: str, headers: dict[str, str], row: Any) -> None:
         master = await self.db.fetchone("SELECT * FROM calendar_events WHERE id=?", (row["series_id"],))
@@ -545,7 +582,7 @@ class CalendarSync:
                 return
             if response.status_code not in (404, 410):
                 response.raise_for_status()
-            await self.db.execute("UPDATE calendar_events SET remote_id=?,etag='',dirty='' WHERE id=? AND version=?", (instance, row["id"], row["version"]))
+            await self._acknowledge(row, instance, "")
             return
         response = await client.patch(url, headers=conditional, json=_payload(provider, row))
         if response.status_code in (409, 412):
@@ -556,10 +593,7 @@ class CalendarSync:
             return
         response.raise_for_status()
         saved = response.json()
-        await self.db.execute(
-            "UPDATE calendar_events SET remote_id=?,etag=?,dirty='' WHERE id=? AND version=?",
-            (saved.get("id") or instance, saved.get("etag") or saved.get("@odata.etag") or "", row["id"], row["version"]),
-        )
+        await self._acknowledge(row, saved.get("id") or instance, saved.get("etag") or saved.get("@odata.etag") or "")
 
     async def _google_read(self, client: httpx.AsyncClient, account: Any, base: str, headers: dict[str, str]) -> int:
         account_id = account["id"]
@@ -710,9 +744,9 @@ class CalendarSync:
             if row["dirty"]:
                 return set()
             if row["series_id"]:
-                await self.db.execute("UPDATE calendar_events SET cancelled=1, version=version+1 WHERE id=?", (row["id"],))
+                await self.db.execute("UPDATE calendar_events SET cancelled=1, version=version+1 WHERE id=? AND dirty=''", (row["id"],))
                 return {row["series_id"]}
-            await self.db.execute("DELETE FROM calendar_events WHERE id=?", (row["id"],))
+            await self.db.execute("DELETE FROM calendar_events WHERE id=? AND dirty=''", (row["id"],))
             return set()
         mapped = await self.db.fetchone("SELECT * FROM calendar_remote_instances WHERE account_id=? AND remote_id=?", (account_id, remote_id))
         if mapped is None:
@@ -807,7 +841,7 @@ class CalendarSync:
                 changed += 1
         for row in await self.db.fetchall("SELECT id,remote_id FROM calendar_events WHERE account_id=? AND remote_id IS NOT NULL AND series_id IS NULL AND dirty=''", (account["id"],)):
             if row["remote_id"] not in seen:
-                await self.db.execute("DELETE FROM calendar_events WHERE id=?", (row["id"],))
+                await self.db.execute("DELETE FROM calendar_events WHERE id=? AND dirty=''", (row["id"],))
                 changed += 1
         return changed
 
@@ -839,10 +873,7 @@ class CalendarSync:
                 await self._conflict(row, "deleted")
                 continue
             response.raise_for_status()
-            await self.db.execute(
-                "UPDATE calendar_events SET remote_id=?,etag=?,dirty='' WHERE id=? AND version=?",
-                (urlparse(event_url).path, response.headers.get("etag", ""), row["id"], row["version"]),
-            )
+            await self._acknowledge(row, urlparse(event_url).path, response.headers.get("etag", ""))
             for override in overrides:
                 await self.db.execute("UPDATE calendar_events SET dirty='' WHERE id=? AND version=?", (override["id"], override["version"]))
 
@@ -904,8 +935,9 @@ async def sync_due(sync: CalendarSync) -> None:
     for row in await sync.db.fetchall("SELECT id FROM calendar_accounts WHERE next_sync_at IS NULL OR next_sync_at <= ?", (now(),)):
         try:
             await sync.sync(row["id"])
-        except Exception:
-            logger.warning("calendar sync failed for %s", row["id"], exc_info=True)
+        except Exception as exc:
+            # No traceback: its frames and messages carry the provider's full address.
+            logger.warning("calendar sync failed for %s: %s", row["id"], describe(exc))
 
 
 async def sync_loop(store: CalendarStore, stopping: asyncio.Event) -> None:
@@ -919,4 +951,4 @@ async def sync_loop(store: CalendarStore, stopping: asyncio.Event) -> None:
             pass
 
 
-__all__ = ["CalendarSync", "backoff", "sync_due", "sync_loop"]
+__all__ = ["CalendarSync", "backoff", "describe", "sync_due", "sync_loop"]
