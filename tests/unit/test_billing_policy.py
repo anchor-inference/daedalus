@@ -209,3 +209,27 @@ def test_which_calls_a_cap_can_measure(kind: str, model: str, price: dict[str, f
     endpoint = ProviderEndpoint(id="p", kind=kind, base_url=BASE,
                                 pricing={} if price is None else {model: ModelPricing.from_entry(price)})
     assert endpoint.measures_spend(model) is measured
+
+
+async def test_a_free_preset_runs_on_its_last_listing_while_the_catalog_is_unreachable(
+        settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager, sent = await started(settings, db, monkeypatch)
+    listing = {"providers": [{**FREE_CATALOG["providers"][0], "fresh": False}]}
+
+    async def stale() -> dict[str, Any]:
+        return listing
+
+    monkeypatch.setattr(session_runner.free_catalog, "get", stale)
+    try:
+        free = await manager.create_session("free")
+        await manager.set_model(free.session.id, preset="opencode.space-bunny-free")
+        outcome, events = await run(manager, free.session.id, "while the list is down")
+        assert outcome == "completed", errors(events)
+
+        # A model the provider no longer lists as free is the promise the preset makes; it still stops.
+        listing["providers"][0]["models"] = [{"id": "space-bunny-free", "mechanism": "paid"}]
+        with pytest.raises(RuntimeError, match="no longer listed as free"):
+            await run(manager, free.session.id, "after it became paid")
+        assert len(sent) == 1
+    finally:
+        await manager.close()

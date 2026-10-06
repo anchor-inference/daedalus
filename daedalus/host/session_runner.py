@@ -3279,8 +3279,11 @@ class SessionManager:
             snapshot = await free_catalog.get()
             source = next((row for row in snapshot["providers"] if row["id"] == preset.provider), None)
             listed = next((row for row in source["models"] if row["id"] == preset.model), None) if source else None
-            if source is None or not source["fresh"] or listed is None or listed["mechanism"] != "zero_price":
-                raise RuntimeError("free model could not be verified now; choose another model before running")
+            # The last listing the catalog read stands while a refresh fails: refusing every run of a
+            # free preset whenever the public model list was briefly unreachable stopped free work
+            # for no charge it could prevent. A model the provider no longer lists as free still stops.
+            if source is None or listed is None or listed["mechanism"] != "zero_price":
+                raise RuntimeError("the free model is no longer listed as free by its provider; choose another model before running")
             configured = self.config.providers.get(preset.provider)
             if configured is None or not approved_endpoint(preset.provider, configured.base_url, source["base_url"]):
                 raise RuntimeError("free model provider no longer points to its verified endpoint")
