@@ -285,13 +285,13 @@ def run() -> int:
             page.set_viewport_size({"width": width, "height": 900})
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), f"resource settings overflow {width}px"
         resources.get_by_role("button", name="Save resource limits").click()
-        expect(page.locator(".result-warning")).to_contain_text("Retry original request")
+        expect(page.locator(".result-warning")).to_contain_text("Try again")
         assert resource_attempts[0]["expected_entity_revision"] == 1
         assert resource_attempts[0]["memory_bytes"] == 512 * 1048576
         assert resource_attempts[0]["min_free_disk_bytes"] == 1024 * 1048576
         assert resource_attempts[0]["expected_profile_revision"] is None
         assert resource_attempts[0]["cpu_millis"] == 1000 and resource_attempts[0]["process_count"] == 64
-        page.get_by_role("button", name="Retry original request").click()
+        page.get_by_role("button", name="Try again").click()
         expect(resources.locator("summary")).to_contain_text("512 MiB", timeout=5000)
         assert resource_attempts[1] == resource_attempts[0], "uncertain resource write did not replay the exact request"
         resources.locator("#resource-cpu-p1").fill("1500")
@@ -317,7 +317,7 @@ def run() -> int:
         lifecycle.locator("summary").first.click()
         expect(lifecycle).to_contain_text("Owned task")
         expect(lifecycle).to_contain_text("Owned run")
-        lifecycle.get_by_text("Technical identity").first.click()
+        lifecycle.get_by_text("Details").first.click()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "ownership identity overflows the phone"
         lifecycle.locator("textarea").fill("Stop the owned work")
         lifecycle.get_by_role("button", name="Request stop").click()
@@ -330,7 +330,7 @@ def run() -> int:
         assert lifecycle_attempts[0]["preview_fingerprint"] == "b" * 64
         assert lifecycle_commands and lifecycle_commands[-1]["preview_fingerprint"] == "c" * 64
         assert lifecycle_commands[-1]["expected_entity_revision"] == 1 and lifecycle_commands[-1]["expected_source_revision"] == 1
-        expect(lifecycle).to_contain_text("Stop requested")
+        expect(lifecycle).to_contain_text("Stopping…")
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "lifecycle settings overflow the phone"
         page.set_viewport_size({"width": 1440, "height": 900})
         expect(extensions.locator("article.project-extension")).to_have_count(0)
@@ -349,9 +349,9 @@ def run() -> int:
         authority.get_by_text("Approve an action", exact=True).click()
         authority.get_by_role("button", name="Approve", exact=True).click()
         page.locator(".sheet-backdrop.confirm .dialog button").last.click()
-        expect(authority).to_contain_text("unconfirmed", timeout=5000)
+        expect(authority).to_contain_text("Couldn't confirm", timeout=5000)
         assert authority_requests[0]["bundle_id"] == "planning" and authority_requests[0]["task_id"] is None
-        authority.get_by_role("button", name="Retry original request").click()
+        authority.get_by_role("button", name="Try again").click()
         expect(authority).to_contain_text("Active approvals: 1", timeout=5000)
         assert authority_requests[1] == authority_requests[0], "uncertain approval did not replay the exact request"
         authority.locator("select").first.select_option("execution")
@@ -390,8 +390,8 @@ def run() -> int:
         handoff = authority.locator("details.sheet-section", has_text="Replace coordinator")
         handoff.locator("summary").first.click()
         expect(handoff.locator("textarea")).to_have_value("Refresh the coordinator context")
-        handoff.get_by_role("button", name="Retry request").click()
-        expect(handoff).to_contain_text("Office transferred; old-session retirement requested", timeout=5000)
+        handoff.get_by_role("button", name="Try again").click()
+        expect(handoff).to_contain_text("Coordinator replaced; the old session was asked to stop", timeout=5000)
         assert handoff_requests[1] == handoff_requests[0], "uncertain replacement did not replay the exact command"
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "handoff controls overflow the phone"
         host_list_item[0] = True

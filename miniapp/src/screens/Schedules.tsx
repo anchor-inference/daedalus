@@ -253,12 +253,17 @@ function PendingProposals({ toast, onAccepted }: { toast: (text: string) => void
     {entries.map((item) => <div key={item.id} className="erow schedule">
       <div className="grow">
         <b>{item.name}</b> <span className="sub">{t(`sched.kind.${item.kind}`)}</span>
-        <div className="sub">{item.cron ? item.cron : absTime(item.next_run_at)} · {t("sched.proposal.source", { id: item.source_session_id ?? "—" })}</div>
+        <div className="sub">{item.cron ? item.cron : absTime(item.next_run_at)}</div>
         <div className="sub">{t("sched.approval.expires", { at: absTime(expiresFor(item)) })}</div>
         <div className="proposal-text">{item.prompt}</div>
         {item.file_count > 0 && <div className="sub">{t("sched.proposal.files", { n: item.file_count })}</div>}
         {item.legacy_file_review_required && <div className="result-warning">{t("sched.proposal.legacyfiles")}</div>}
-        {item.files.map((file) => <div className="sub mono" key={`${file.name}:${file.digest}`}>{file.name} · {file.size} B · SHA-256 {file.digest} · {t("sched.proposal.revision", { n: item.proposal_revision })}</div>)}
+        {item.files.map((file) => <div className="sub" key={`${file.name}:${file.digest}`}>{file.name} · {file.size} B</div>)}
+        {/* Which session asked and the content hashes pinned for approval are for checking, not reading. */}
+        <details><summary>{t("common.details")}</summary>
+          <div className="sub mono">{t("sched.proposal.source", { id: item.source_session_id ?? "—" })} · {t("sched.proposal.revision", { n: item.proposal_revision })}</div>
+          {item.files.map((file) => <div className="sub mono" key={`${file.name}:${file.digest}`}>{file.name} · SHA-256 {file.digest}</div>)}
+        </details>
       </div>
       <div className="row-actions">
         <button className="btn small" disabled={!!busy || !!error || offline || !data?.collection_revisions[item.source_project_id ? `project:${item.source_project_id}` : "global:global"]} onClick={() => void decide(item, "withdraw")}>{t("sched.proposal.withdraw")}</button>

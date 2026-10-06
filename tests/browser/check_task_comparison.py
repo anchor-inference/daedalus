@@ -19,7 +19,7 @@ PROJECT = {"id": "p1", "name": "Bakery", "entity_revision": 1, "folders": folder
            "created_at": "2026-09-20T00:00:00Z", "settings": {"snapshots": False, "default_env": "container"}, "system": "", "sessions": []}
 WORDS = {
     "en": {"title": "Compare two approaches", "prepare": "Prepare a comparison", "start": "Start comparison", "retry": "Retry", "queued": "Comparison queued", "unknown": "Observed cost is unknown", "capacity": "Project capacity: 1 of 10 simultaneous workers.", "raise": "Set capacity to 2"},
-    "ru": {"title": "Сравнить два подхода", "prepare": "Подготовить сравнение", "start": "Начать сравнение", "retry": "Ещё раз", "queued": "Сравнение поставлено в очередь", "unknown": "Фактические затраты одного из вариантов неизвестны", "capacity": "Одновременно в проекте: 1 из 10 исполнителей.", "raise": "Установить лимит 2"},
+    "ru": {"title": "Сравнить два подхода", "prepare": "Подготовить сравнение", "start": "Начать сравнение", "retry": "Ещё раз", "queued": "Сравнение в очереди", "unknown": "Фактические затраты одного из вариантов неизвестны", "capacity": "Одновременно в проекте: 1 из 10 исполнителей.", "raise": "Установить лимит 2"},
 }
 
 
@@ -162,11 +162,11 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
     expect(dialog).to_contain_text("Ira")
     expect(dialog).to_contain_text("Max")
     dialog.get_by_role("button", name=words["start"]).click()
-    expect(section.get_by_text("The launch outcome is unknown" if language == "en" else "Исход запуска неизвестен", exact=False)).to_be_visible()
+    expect(section.get_by_text("Couldn't confirm the comparison started" if language == "en" else "Не удалось подтвердить запуск сравнения", exact=False)).to_be_visible()
     page.reload()
     section = page.locator(".sheet.pboard-sheet details.result-details", has=page.get_by_text(words["title"])).first
     section.locator("summary").first.click()
-    pending_status = section.get_by_role("status").filter(has_text="The launch outcome is unknown" if language == "en" else "Исход запуска неизвестен")
+    pending_status = section.get_by_role("status").filter(has_text="Couldn't confirm the comparison started" if language == "en" else "Не удалось подтвердить запуск сравнения")
     pending_status.get_by_role("button").first.click()
     expect(page.get_by_text(words["queued"], exact=False)).to_be_visible()
     assert len(state["commands"]) == 2 and state["commands"][0] == state["commands"][1]

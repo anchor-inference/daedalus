@@ -52,8 +52,7 @@ export function UncertainLaunches({ projectId }: { projectId: string }) {
     setOutcome("");
     try {
       const result = await api.post<{ state: string; reconciled: boolean }>(`${base}/${encodeURIComponent(id)}/reconcile`, {});
-      setOutcome(t(result.reconciled ? "pboard.launchClaims.resolved" : "pboard.launchClaims.blocked",
-        { id, state: result.state }));
+      setOutcome(t(result.reconciled ? "pboard.launchClaims.resolved" : "pboard.launchClaims.blocked"));
     } catch (error) { setWarning(errorText(error)); }
     finally {
       await reload();
@@ -69,10 +68,10 @@ export function UncertainLaunches({ projectId }: { projectId: string }) {
     {warning && <p className="result-warning" role="alert">{warning}</p>}
     {outcome && <p className="sub" role="status">{outcome}</p>}
     {items.map((item) => <div className="pboard-unknown-row" key={item.id}>
-      <div><b>{item.task_id}</b> · <code>{item.id}</code> · {t(`pboard.launchClaims.${item.state}`)}</div>
-      <details><summary>{t("pboard.unknown.observation")}</summary>
+      <div><b>{item.task_id}</b> · {t(`pboard.launchClaims.${item.state}`)}</div>
+      <details><summary>{t("common.details")}</summary>
         <dl>
-          {(["claim_generation", "created_at", "claimed_at", "completed_at", "error", "attempt_id",
+          {(["id", "claim_generation", "created_at", "claimed_at", "completed_at", "error", "attempt_id",
             "attempt_state", "provider_session_recorded", "no_entry_observed", "exit_observed"] as const).map((key) =>
             <div key={key}><dt>{t(`pboard.launchClaims.${key}`)}</dt><dd><code>{typeof item[key] === "boolean" ? t(item[key] ? "pboard.unknown.yes" : "pboard.unknown.no") : String(item[key] ?? "—")}</code></dd></div>)}
         </dl>

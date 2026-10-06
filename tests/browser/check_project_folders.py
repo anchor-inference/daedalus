@@ -148,8 +148,8 @@ def scenario(page: Page, lang: str, unhandled: Unhandled, name: str) -> None:
     page.reload()
     page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{words['projects']}']:visible").first.click()
     page.locator(f".project-row .iconbtn[aria-label='{words['settings']}']").click()
-    expect(page.get_by_text("Retry original request" if lang == "en" else "Повторить исходный запрос")).to_be_visible()
-    page.get_by_text("Retry original request" if lang == "en" else "Повторить исходный запрос").click()
+    expect(page.get_by_text("Try again" if lang == "en" else "Повторить")).to_be_visible()
+    page.get_by_text("Try again" if lang == "en" else "Повторить").click()
     expect(docs.locator(".dir-reach")).to_have_text(words["readonly"])
     locks = [body for method, path, body in sent if method == "PATCH" and path == "/api/projects/p1/folders/f-docs"]
     assert len(locks) == 2 and locks[0] == locks[1] and locks[0]["readonly"] is True

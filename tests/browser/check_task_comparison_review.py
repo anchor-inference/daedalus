@@ -21,11 +21,11 @@ WORDS = {
     "en": {"pair": "Compare two approaches", "original": "Show original report", "review": "Review checks and evidence",
            "observe": "Record observation", "verdict": "Approve reviewed result", "choose": "Choose this result",
            "observation": "What did you observe?", "reason": "Review conclusion",
-           "unknown": "The choice outcome is unknown"},
+           "unknown": "Couldn't confirm your choice was saved"},
     "ru": {"pair": "Сравнить два подхода", "original": "Показать исходный отчёт", "review": "Проверка критериев и доказательств",
            "observe": "Записать наблюдение", "verdict": "Одобрить проверенный результат", "choose": "Выбрать этот результат",
            "observation": "Что вы наблюдали?", "reason": "Вывод проверки",
-           "unknown": "Исход выбора неизвестен"},
+           "unknown": "Не удалось подтвердить, что выбор сохранён"},
 }
 
 

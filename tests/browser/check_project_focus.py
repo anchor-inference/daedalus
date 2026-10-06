@@ -212,8 +212,8 @@ def desktop(page: Page, lang: str, width: int) -> None:
     page.locator(".panel .wakeup-section").last.get_by_role("button", name=words["watch_add"], exact=True).click()
     page.locator("#watch-deadline").select_option("24")
     page.get_by_role("button", name=words["watch_set"], exact=True).click()
-    expect(page.locator(".watch-sheet").get_by_text("Retry original request" if lang == "en" else "Повторить исходный запрос")).to_be_visible()
-    page.locator(".watch-sheet").get_by_text("Retry original request" if lang == "en" else "Повторить исходный запрос").click()
+    expect(page.locator(".watch-sheet").get_by_text("Try again" if lang == "en" else "Повторить")).to_be_visible()
+    page.locator(".watch-sheet").get_by_text("Try again" if lang == "en" else "Повторить").click()
     creates = [body for kind, body in focus.watched if kind == "create"]
     assert len(creates) == 2 and creates[0] == creates[1] and creates[0]["deadline_at"], focus.watched
     hours = (datetime.fromisoformat(creates[0]["deadline_at"]) - datetime.now(UTC)).total_seconds() / 3600

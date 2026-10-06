@@ -51,9 +51,9 @@ function CiRequirements({ taskId, checks, onChanged, toast }: { taskId: string; 
     setBusy(true);
     setProblem("");
     try {
-      const receipt = await api.post<{ receipt_id: string; entity_revision: number }>(`/api/board/${encodeURIComponent(taskId)}/ci/requirements`, pending.current);
+      await api.post<{ receipt_id: string; entity_revision: number }>(`/api/board/${encodeURIComponent(taskId)}/ci/requirements`, pending.current);
       pending.current = null;
-      toast(t("pboard.review.ci.saved", { receipt: receipt.receipt_id }));
+      toast(t("pboard.review.ci.saved"));
       invalidate(contractKey);
       invalidate(reviewKey(taskId));
       onChanged();

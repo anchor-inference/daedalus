@@ -28,12 +28,12 @@ WORDS = {
     "en": {
         "title": "Board · Bakery", "needs": "Needs you", "doing": "In progress", "review": "Review", "queue": "Queue", "done": "Done",
         "answer": "Answer", "accept": "Accept", "merge": "Merge", "new": "New task", "create": "Create", "save": "Save", "working": "working",
-        "after": "after “Checkout”", "accepted": "is done", "queued": "Launch requested", "missing": "Missing", "started": "Launch requested",
+        "after": "after “Checkout”", "accepted": "is done", "queued": "Starting the task", "missing": "Missing", "started": "Starting the task",
     },
     "ru": {
         "title": "Доска · Bakery", "needs": "Нужны вы", "doing": "В работе", "review": "Проверка", "queue": "Очередь", "done": "Готово",
         "answer": "Ответить", "accept": "Принять", "merge": "Слить", "new": "Новая задача", "create": "Создать", "save": "Сохранить", "working": "работает",
-        "after": "после «Checkout»", "accepted": "готово", "queued": "Запуск запрошен", "missing": "Не заполнено", "started": "Запуск запрошен",
+        "after": "после «Checkout»", "accepted": "готово", "queued": "Запускаем задачу", "missing": "Не заполнено", "started": "Запускаем задачу",
     },
 }
 
@@ -154,7 +154,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     owned.locator("textarea").fill("Operator requested a clean stop")
     owned.get_by_role("button", name="Request stop" if lang == "en" else "Запросить остановку").click()
     page.locator(".sheet-backdrop.confirm .dialog button").last.click()
-    expect(owned).to_contain_text("Stop requested" if lang == "en" else "Остановка запрошена")
+    expect(owned).to_contain_text("Stopping…" if lang == "en" else "Останавливается…")
     assert stub.cancellations[-1][0] == "task:t-checkout"
     assert stub.cancellations[-1][1]["preview_fingerprint"] == "a" * 64
     page.keyboard.press("Escape")
@@ -195,11 +195,11 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     launched_id = stub.launched[-1][0]
     effect_id = f"launch-{launched_id}"
     states = (
-        ({"state": "failed", "error": "Provider authentication is required"}, "Launch request failed" if lang == "en" else "Запрос на запуск завершился ошибкой"),
-        ({"state": "unknown", "error": "Delivery connection lost"}, "Launch outcome is unconfirmed" if lang == "en" else "Результат запроса на запуск не подтверждён"),
-        ({"state": "pending", "wait_reason": "machine", "wait_detail": "Host unavailable"}, "Launch request is pending" if lang == "en" else "Запрос на запуск ожидает обработки"),
-        ({"state": "claimed"}, "Launch request is being delivered" if lang == "en" else "Запрос на запуск доставляется"),
-        ({"state": "completed"}, "Launch request completed; check the task's current state" if lang == "en" else "Запрос на запуск обработан; проверьте текущее состояние задачи"),
+        ({"state": "failed", "error": "Provider authentication is required"}, "Couldn't start" if lang == "en" else "Не удалось запустить"),
+        ({"state": "unknown", "error": "Delivery connection lost"}, "Couldn't confirm it started" if lang == "en" else "Запуск не подтверждён"),
+        ({"state": "pending", "wait_reason": "machine", "wait_detail": "Host unavailable"}, "Waiting to start" if lang == "en" else "Ждёт запуска"),
+        ({"state": "claimed"}, "Starting…" if lang == "en" else "Запускается…"),
+        ({"state": "completed"}, "Started" if lang == "en" else "Запущено"),
     )
     for observed, label in states:
         stub.launch_effects[effect_id] = observed
@@ -209,7 +209,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
         if observed.get("error") or observed.get("wait_detail"):
             expect(warning).to_contain_text(observed.get("error") or observed["wait_detail"])
         if observed["state"] == "failed":
-            expect(warning).not_to_contain_text("unconfirmed" if lang == "en" else "не подтверждён")
+            expect(warning).not_to_contain_text("Couldn't confirm" if lang == "en" else "не подтверждён")
         fits(page, f"{lang} delivery {observed['state']}")
         page.keyboard.press("Escape")
         expect(sheet).to_have_count(0)
@@ -236,7 +236,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     sheet.locator(".sheet-foot").get_by_role("button", name=words["create"]).click()
     expect(sheet).to_have_count(0)
     assert sum(task["title"] == "Retry launch" for task in stub.tasks) == 1
-    expect(page.locator(".toast")).to_contain_text("Task saved; launch outcome unconfirmed" if lang == "en" else "Задача сохранена; результат запроса на запуск не подтверждён")
+    expect(page.locator(".toast")).to_contain_text("Task saved, but couldn't confirm it started" if lang == "en" else "Задача сохранена, но запуск не подтверждён")
     cols.locator(".pcard", has_text="Retry launch").click()
     sheet.get_by_role("button", name="Start task" if lang == "en" else "Запустить задачу", exact=True).click()
     expect(page.locator(".toast")).to_contain_text(words["queued"])
@@ -251,11 +251,11 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     expect(sheet).to_have_count(0)
     unknown_id, unknown_body = stub.unknown_launches[-1]
     cols.locator(".pcard", has_text="Unknown launch").click()
-    sheet.get_by_role("button", name="Retry launch request" if lang == "en" else "Повторить запрос на запуск").click()
+    sheet.get_by_role("button", name="Try starting again" if lang == "en" else "Запустить ещё раз").click()
     assert stub.launched[-1][0] == unknown_id
     assert stub.launched[-1][1]["client_operation_id"] == unknown_body["client_operation_id"]
     assert stub.launched[-1][1]["expected_entity_revision"] == unknown_body["expected_entity_revision"]
-    expect(sheet.locator(".result-warning", has_text="pending" if lang == "en" else "ожидает")).to_be_visible()
+    expect(sheet.locator(".result-warning", has_text="Waiting to start" if lang == "en" else "Ждёт запуска")).to_be_visible()
     expect(sheet.get_by_role("button", name="Start task" if lang == "en" else "Запустить задачу", exact=True)).to_be_disabled()
     page.keyboard.press("Escape")
     fits(page, f"{lang} desktop")

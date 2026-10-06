@@ -28,11 +28,11 @@ PID = "b4k3ry20f0c5"
 
 WORDS = {
     "en": {
-        "merge": "Merge reviewed branch", "diff": "Diff", "reject": "Return with a note", "send": "Send back", "stat": "2 files · 2 commits", "merged": "Merge requested; waiting for the recorded outcome",
+        "merge": "Merge reviewed branch", "diff": "Diff", "reject": "Return with a note", "send": "Send back", "stat": "2 files · 2 commits", "merged": "Merge requested; waiting for the result",
         "rejected": "Result returned for changes", "dirty": "The reviewed branch must be merged first.", "conflict": "conflict", "checked": "tests pass", "open": "Open review", "ci": "CI passed for branch head",
     },
     "ru": {
-        "merge": "Влить проверенную ветку", "diff": "Изменения", "reject": "Вернуть с замечанием", "send": "Вернуть", "stat": "2 файла · 2 коммита", "merged": "Слияние запрошено; ожидаем подтверждённый итог",
+        "merge": "Влить проверенную ветку", "diff": "Изменения", "reject": "Вернуть с замечанием", "send": "Вернуть", "stat": "2 файла · 2 коммита", "merged": "Слияние запрошено; ждём итога",
         "rejected": "Результат возвращён на доработку", "dirty": "Сначала нужно влить проверенную ветку.", "conflict": "конфликт", "checked": "tests pass", "open": "Открыть проверку", "ci": "CI пройден для ветки head",
     },
 }
@@ -225,7 +225,7 @@ def configure_ci(page: Page, lang: str) -> None:
     focus.board.ci_requirement_failures = 1
     save.click()
     assert len(focus.board.ci_requirement_requests) == 2
-    unknown = "The outcome is unknown" if lang == "en" else "Результат неизвестен"
+    unknown = "Couldn't confirm the checks" if lang == "en" else "Не удалось подтвердить сохранение проверок"
     expect(setup.get_by_role("alert")).to_contain_text(unknown)
     save.click()
     assert len(focus.board.ci_requirement_requests) == 3
@@ -235,9 +235,10 @@ def configure_ci(page: Page, lang: str) -> None:
     assert second["expected_entity_revision"] == task["entity_revision"] - 1
     assert second["provider"] == "github" and second["repository_id"] == "7"
     assert second["check_names"] == ["unit", "build"]
-    receipt = "Required checks saved; result returned to queue" if lang == "en" else "Проверки сохранены; результат возвращён в очередь"
-    expect(page.locator(".toast")).to_contain_text(receipt)
-    expect(page.locator(".toast")).to_contain_text("ci-receipt")
+    saved = "Required checks saved; the result went back to the queue" if lang == "en" else "Проверки сохранены; результат возвращён в очередь"
+    expect(page.locator(".toast")).to_contain_text(saved)
+    # The receipt id is bookkeeping for the server; the operator's toast says what happened, not its id.
+    expect(page.locator(".toast")).not_to_contain_text("ci-receipt")
     expect(page.locator(".sheet.pboard-sheet .review-panel")).to_have_count(0)
     fits(page, f"{lang} CI requirements")
 

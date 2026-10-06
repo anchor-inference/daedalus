@@ -3,7 +3,7 @@ import { api, ApiError } from "../api";
 import { t } from "../i18n";
 import { useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
-import type { ProjectTask } from "./board";
+import { launchFeedback, type ProjectTask } from "./board";
 
 type Target = { id: string; name: string; harness: string; permission_mode: string };
 type Options = { source_attempt_id: string | null; source_harness?: string; source_released?: boolean;
@@ -117,34 +117,38 @@ export function RuntimeHandoff({ task, onChanged, toast }: { task: ProjectTask;
       </label>}
       {preview.error && <p className="result-warning" role="alert">{errorText(preview.error)}</p>}
       {preview.data && target && <div className="sub">
-        <p>{t("handoff.capability", { runtime: target.harness, version: preview.data.capability.version || t("handoff.unknown"),
-          login: preview.data.capability.login || t("handoff.unknown") })}</p>
-        <p>{t("handoff.permission", { previous: preview.data.packet.source_permission_mode,
-          next: preview.data.packet.target_permission_mode })}</p>
         <p>{t("handoff.evidence", { reports: preview.data.packet.source_result ? "1" : "0",
           artifacts: String(preview.data.packet.artifacts.length), criteria: String(preview.data.packet.criteria.length),
           requirements: String(preview.data.packet.requirements.length),
           obligations: String(preview.data.packet.open_obligations.length) })}</p>
-        <p>{t("handoff.workspace", { branch: preview.data.packet.workspace.branch || t("handoff.unknown"),
-          base: preview.data.packet.workspace.base_ref || t("handoff.unknown") })}</p>
         <p>{t("handoff.limitations")}</p>
         <p>{t(preview.data.packet.cost_state === "priced_at_native_inference" ? "handoff.priced" : "handoff.unpriced")}</p>
         {preview.data.budget && <p>{t("handoff.budget", {
           available: preview.data.budget.total.state === "known" && preview.data.budget.total.available_usd !== null ?
             `$${preview.data.budget.total.available_usd}` : t("handoff.unknown") })}</p>}
-        {preview.data.resource.state === "ready" && <p>{t("handoff.resourceReady", {
-          revision: String(preview.data.resource.profile_revision) })}</p>}
         {preview.data.resource.state === "blocked" && <p className="result-warning">{t("handoff.resourceBlocked", {
           reason: preview.data.resource.reason || t("handoff.unknown") })}</p>}
         {!preview.data.ready && preview.data.resource.state !== "blocked" &&
           <p className="result-warning">{preview.data.capability.reason || preview.data.blockers.join(", ")}</p>}
+        {/* The runtime's version, the access modes and the old branch matter when something goes wrong, not on
+            every read; what blocks the continuation stays above. */}
+        <details><summary>{t("common.details")}</summary>
+          <p>{t("handoff.capability", { runtime: target.harness, version: preview.data.capability.version || t("handoff.unknown"),
+            login: preview.data.capability.login || t("handoff.unknown") })}</p>
+          <p>{t("handoff.permission", { previous: preview.data.packet.source_permission_mode,
+            next: preview.data.packet.target_permission_mode })}</p>
+          <p>{t("handoff.workspace", { branch: preview.data.packet.workspace.branch || t("handoff.unknown"),
+            base: preview.data.packet.workspace.base_ref || t("handoff.unknown") })}</p>
+          {preview.data.resource.state === "ready" && <p>{t("handoff.resourceReady", {
+            revision: String(preview.data.resource.profile_revision) })}</p>}
+        </details>
       </div>}
       <button type="button" className="btn small" disabled={!current || busy || offline || !!pending}
         onClick={() => void approve()}>{t("handoff.continue")}</button>
     </>}
     {pending && <p className="result-warning" role="status">{t("handoff.pending")}
       <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => void send(pending)}>{t("common.retry")}</button></p>}
-    {effectId && <p className="sub" role="status">{t("handoff.effect", { state: effect.data?.state || t("handoff.unknown") })}
+    {effectId && <p className="sub" role="status">{t("handoff.effect", { state: t(effect.data || effect.error ? launchFeedback(effect.data, !!effect.error).key : "pboard.launch.pending") })}
       {effect.data?.error && ` · ${effect.data.error}`}</p>}
     {warning && <p className="result-warning" role="alert">{warning}</p>}
   </details>;

@@ -135,7 +135,7 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
     page.reload()
     page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{projects}']:visible").first.click()
     page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
-    retry = "Retry original request" if language == "en" else "Повторить исходный запрос"
+    retry = "Try again" if language == "en" else "Повторить"
     page.get_by_text(retry).click()
     expect(block.locator("summary")).to_contain_text("$0.700000")
     expect(block).to_contain_text("$0.100000")

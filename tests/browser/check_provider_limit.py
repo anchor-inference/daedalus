@@ -70,7 +70,7 @@ def main() -> int:
             expect(limits).to_contain_text("provider-declared" if lang == "en" else "заявленный сброс")
             limits.get_by_role("button", name="Hold this session" if lang == "en" else "Удержать эту сессию").click()
             expect(limits).to_contain_text("Decision unconfirmed" if lang == "en" else "Решение не подтверждено")
-            limits.get_by_role("button", name="Retry original decision" if lang == "en" else "Повторить исходное решение").click()
+            limits.get_by_role("button", name="Try again" if lang == "en" else "Повторить").click()
             expect(limits).to_contain_text("held" if lang == "en" else "удержана")
             assert len(seen) >= 2 and seen[-1] == seen[-2], seen
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), lang

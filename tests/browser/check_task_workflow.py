@@ -46,15 +46,15 @@ def check(lang: str, width: int) -> None:
         workflow = page.locator(".sheet.pboard-sheet .task-workflow-section")
         workflow.locator("button").first.click()
         if lang == "en" and width == 390:
-            expect(workflow).to_contain_text("command result is unconfirmed")
+            expect(workflow).to_contain_text("Couldn't confirm the change was saved")
             workflow.get_by_role("button", name="Try again").last.click()
-            expect(workflow).not_to_contain_text("command result is unconfirmed")
+            expect(workflow).not_to_contain_text("Couldn't confirm the change was saved")
             assert len(stub.workflow_runs) == 1
         expect(workflow.get_by_role("button", name="Approve this step" if lang == "en" else "Подтвердить этот шаг")).to_be_visible()
         workflow.get_by_role("button", name="Approve this step" if lang == "en" else "Подтвердить этот шаг").click()
         expect(workflow).to_contain_text("Completed" if lang == "en" else "Завершён")
-        workflow.get_by_role("button", name="Check reuse" if lang == "en" else "Проверить повторное использование").click()
-        expect(workflow).to_contain_text("Current receipt can be reused" if lang == "en" else "Текущую квитанцию можно использовать")
+        workflow.get_by_role("button", name="Check if still valid" if lang == "en" else "Проверить, актуален ли").click()
+        expect(workflow).to_contain_text("The earlier result still holds" if lang == "en" else "Прежний результат по-прежнему подходит")
         run = next(iter(stub.workflow_runs.values()))
         run["projection_current"] = False
         run["steps"][0]["source_current"] = False
