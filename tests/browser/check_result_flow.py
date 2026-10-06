@@ -1,4 +1,8 @@
-"""A result moves through evidence, coordinator verdict, merge receipt and exact operator acceptance."""
+"""A result moves through evidence, coordinator verdict, merge receipt and exact operator acceptance.
+
+On the way the operator counts the worker's passing check on the reviewed commit as evidence with
+one click.
+"""
 
 from __future__ import annotations
 
@@ -36,6 +40,14 @@ class ResultStub(BoardStub):
             return 200, [{"session_id": "session-source", "turn_seq": 7, "source_ref": "turn:7", "source_digest": "d" * 64, "source_current": True}]
         if path == f"{result}/comments" and method == "GET":
             return 200, []
+        if path == f"{result}/evidence/check" and method == "POST":
+            payload = dict(body or {})
+            self.operations.append(("check", payload))
+            if payload.get("verification_id") != 7:
+                return 409, {"detail": "the check ran against another commit than the reviewed branch head"}
+            self.evidence.append({"evidence_id": "evidence-check", "criterion_id": payload["criterion_id"], "observation": "verify: export tests pass", "verification": "verified", "exit_code": 0, "manifest_digest_before": "tree:head", "manifest_digest_after": "tree:head", "observed_at": "2026-10-03T00:02:00Z"})
+            task["entity_revision"] += 1
+            return 200, {"evidence_id": "evidence-check", "verification": "verified", "entity_revision": task["entity_revision"], "receipt_id": "check-receipt"}
         if path == f"{result}/evidence" and method == "GET":
             return 200, self.evidence
         if path == f"{result}/evidence" and method == "POST":
@@ -47,14 +59,17 @@ class ResultStub(BoardStub):
         if path == f"{result}/verdicts" and method == "POST":
             payload = dict(body or {})
             self.operations.append(("verdict", payload))
-            if payload["evidence_ids"] != ["evidence-one"]:
+            if sorted(payload["evidence_ids"]) != ["evidence-check", "evidence-one"]:
                 return 409, {"detail": "missing evidence"}
             self.verdict = payload
             task["acceptance_state"] = "accepted"
             task["entity_revision"] += 1
             return 200, {"verdict_id": "verdict-one", "accepted": True, "entity_revision": task["entity_revision"], "receipt_id": "verdict-receipt"}
         if path == f"{base}/review" and method == "GET":
-            review = self.review(task)
+            # Receipt 7 ran on the reviewed head; receipt 8 on uncommitted edits, so it is never offered.
+            review = self.review(task, receipts=[
+                {"id": 7, "criterion": "export tests pass", "command": "pytest tests/test_export.py", "exit_code": 0, "passed": True, "at": "2026-10-03T00:00:00Z", "tree": "head"},
+                {"id": 8, "criterion": "lint is clean", "command": "ruff check", "exit_code": 0, "passed": True, "at": "2026-10-03T00:00:00Z", "tree": "head+worktree"}])
             return 200, {**review, "head_sha": "head", "base_sha": "base", "current_sha": "merged-head" if self.merge_receipt else "base", "merge_receipt": self.merge_receipt, "merged": bool(self.merge_receipt), "can_merge": not self.merge_receipt, "blockers": []}
         if path == f"{result}/merge" and method == "POST":
             payload = dict(body or {})
@@ -98,6 +113,12 @@ def run() -> int:
         expect(flow.get_by_role("button", name="Open source message")).to_be_visible()
         review = flow.locator("details.result-details", has_text="Review checks and evidence")
         expect(review).to_have_attribute("open", "")
+        checks = flow.locator(".result-checks", has_text="Checks the worker ran on this commit")
+        expect(checks).to_contain_text("export tests pass")
+        expect(checks).not_to_contain_text("lint is clean")
+        expect(checks).to_contain_text("another commit")
+        checks.get_by_role("button", name="Use this check").click()
+        expect(page.locator(".toast")).to_contain_text("Check recorded as evidence")
         flow.get_by_role("textbox", name="What did you observe?").fill("Opened the export and checked its schema")
         flow.get_by_role("button", name="Record observation").click()
         expect(flow).to_contain_text("Evidence recorded")
@@ -108,7 +129,9 @@ def run() -> int:
         expect(flow.get_by_role("button", name="Accept this result")).to_be_enabled()
         flow.get_by_role("button", name="Accept this result").click()
         expect(page.locator(".toast")).to_contain_text("Result accepted")
-        assert [kind for kind, _ in stub.operations] == ["evidence", "verdict", "merge", "accept"], stub.operations
+        assert [kind for kind, _ in stub.operations] == ["check", "evidence", "verdict", "merge", "accept"], stub.operations
+        check = dict(stub.operations)["check"]
+        assert check["verification_id"] == 7 and check["criterion_id"] == "C1", check
         for _, payload in stub.operations:
             assert payload.get("client_operation_id") and isinstance(payload.get("expected_entity_revision"), int), payload
         assert stub.tasks[0]["acceptance_state"] == "operator_approved"

@@ -130,3 +130,72 @@ async def test_exact_result_flow_over_http(domain_api) -> None:  # type: ignore[
     assert decision['contract_revision'] == 1 and decision['attempt_id'] is None
     assert decision['actor'] == 'operator' and decision['actor_id']
     assert decision['receipt_id']
+
+
+async def test_worker_check_counts_as_evidence_only_for_the_current_branch_head(tmp_path: Path) -> None:
+    db = Database(tmp_path / "state.sqlite")
+    await db.open()
+    head = {"sha": "a" * 40}
+
+    class FakeReview:
+        async def review(self, task_id: str, *, comparison_attempt_id: str | None = None) -> dict[str, str]:
+            return {"head_sha": head["sha"]}
+
+    await db.execute("INSERT INTO board_tasks(id,title,status,priority,acceptance,checklist,depends_on,branch,"
+                     " created_at,updated_at,brief_json) VALUES ('task1','Review','review',3,'',"
+                     " '[{\"text\":\"Tests pass\",\"done\":false}]','[]','agent/task1','2026-01-01','2026-01-01','{}')")
+    await db.execute("INSERT INTO task_contract_versions(task_id,contract_revision,origin_kind,origin_ref,"
+                     " snapshot_json,created_at) VALUES ('task1',1,'operator','',"
+                     " '{\"requirements\":[],\"checklist\":[{\"id\":\"C1\",\"text\":\"Tests pass\"}],"
+                     "\"acceptance\":\"\",\"depends_on\":[],\"brief\":{}}','2026-01-01')")
+    await db.execute("INSERT INTO projects(id,name,created_at,settings) VALUES ('project1','P','2026-01-01','{}')")
+    await db.execute("INSERT INTO staff(id,project_id,name,harness,created_by,created_at)"
+                     " VALUES ('member1','project1','Member','daedalus','operator','2026-01-01')")
+    await db.execute("INSERT INTO sessions(id,tenant_id,project_id,created_at,last_message_at)"
+                     " VALUES ('worker-session','t','project1','now','now')")
+    await db.execute("INSERT INTO staff_sessions(id,staff_id,kind,session_id,task_id,status_at,started_at)"
+                     " VALUES ('ss1','member1','daedalus','worker-session','task1','now','now')")
+    await db.execute("INSERT INTO verifications(id,session_id,criterion,command,exit_code,passed,output_digest,at,tree)"
+                     " VALUES (7,'worker-session','tests pass','pytest -q',0,1,'digest','now',?)", ("a" * 40,))
+    report = "Done"
+    digest = hashlib.sha256(report.encode()).hexdigest()
+    await db.execute("INSERT INTO artifact_manifests(id,task_id,artifact_kind,artifact_key,artifact_revision,digest,"
+                     " size_bytes,created_at) VALUES ('m1','task1','document','answer',1,?,4,'2026-01-01')", (digest,))
+    await db.execute("INSERT INTO result_receipts(id,task_id,contract_revision,attempt_id,outcome,original_text,"
+                     " original_digest,original_size_bytes,checks_json,limitations_json,actor_id,created_at)"
+                     " VALUES ('result1','task1',1,NULL,'complete',?,?,4,'[]','[]','worker','2026-01-01')", (report, digest))
+    await db.execute("INSERT INTO result_artifacts(result_id,manifest_id) VALUES ('result1','m1')")
+    api = FastAPI()
+
+    async def authenticated() -> dict[str, int | str]:
+        return {"via": "token", "user_id": 1}
+
+    bus = EventBus(db)
+    await bus.start()
+    install_routes(api, SimpleNamespace(db=db, extensions={"staff": SimpleNamespace(review=FakeReview())},
+                                        manager=SimpleNamespace(bus=bus)), authenticated)
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
+            base = "/api/board/task1/results/result1"
+            revision = (await client.get("/api/board/task1/contract")).json()["entity_revision"]
+            head["sha"] = "b" * 40
+            stale = await client.post(base + "/evidence/check", json={
+                "client_operation_id": "check-stale", "expected_entity_revision": revision,
+                "verification_id": 7, "criterion_id": "C1"})
+            assert stale.status_code == 409 and "another commit" in stale.text
+            head["sha"] = "a" * 40
+            bound = await client.post(base + "/evidence/check", json={
+                "client_operation_id": "check-current", "expected_entity_revision": revision,
+                "verification_id": 7, "criterion_id": "C1", "head": "b" * 40})
+            assert bound.status_code == 200, bound.text
+            assert bound.json()["verification"] == "verified"
+            listed = (await client.get(base + "/evidence")).json()
+            assert [(row["criterion_id"], row["verification"]) for row in listed] == [("C1", "verified")]
+            verdict = await client.post(base + "/verdicts", json={
+                "client_operation_id": "verdict1", "expected_entity_revision": bound.json()["entity_revision"],
+                "verification": "verified", "accepted": True, "head": "a" * 40, "base": "c" * 40,
+                "evidence_ids": [bound.json()["evidence_id"]], "reason": "The worker's tests pass on this commit"})
+            assert verdict.status_code == 200, verdict.text
+    finally:
+        await bus.close()
+        await db.close()

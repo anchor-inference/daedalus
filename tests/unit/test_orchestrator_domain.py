@@ -16,6 +16,7 @@ from daedalus.extensions.orchestrator_domain import (
     OriginalReports,
     accept_result,
     add_artifact_manifest,
+    add_check_evidence,
     add_review_comment,
     add_review_evidence,
     advance_workflow_step,
@@ -124,6 +125,75 @@ async def test_result_review_and_acceptance_pin_exact_contract_and_evidence(doma
     assert results[0]["accepted"] is True
     assert results[0]["acceptance_state"] == "operator_approved"
     assert (await domain_db.fetchone("SELECT status FROM board_tasks WHERE id = 'task1'"))["status"] == "done"
+
+
+HEAD = "a" * 40
+MOVED = "b" * 40
+
+
+async def worker_checks(db: Database) -> None:
+    """A complete result on task1 and three Verify receipts from the worker's session on it."""
+    await db.execute("INSERT INTO projects(id,name,created_at,settings) VALUES ('project1','P','2026-01-01','{}')")
+    await db.execute("INSERT INTO staff(id,project_id,name,harness,created_by,created_at)"
+                     " VALUES ('member1','project1','Member','daedalus','operator','2026-01-01')")
+    await db.execute("INSERT INTO sessions(id,tenant_id,project_id,created_at,last_message_at) VALUES ('worker-session','t','project1','now','now')")
+    await db.execute("INSERT INTO staff_sessions(id,staff_id,kind,session_id,task_id,status_at,started_at)"
+                     " VALUES ('ss1','member1','daedalus','worker-session','task1','now','now')")
+    for receipt_id, exit_code, tree in ((1, 0, HEAD), (2, 1, HEAD), (3, 0, HEAD + "+worktree")):
+        await db.execute("INSERT INTO verifications(id,session_id,criterion,command,exit_code,passed,output_digest,at,tree)"
+                         " VALUES (?,'worker-session','tests pass','pytest -q',?,?,'digest','now',?)",
+                         (receipt_id, exit_code, int(exit_code == 0), tree))
+    original = b"Complete report"
+    digest = hashlib.sha256(original).hexdigest()
+    async with db.transaction() as conn:
+        await add_artifact_manifest(conn, manifest_id="manifest1", project_id=None, task_id="task1",
+                                    artifact_kind="document", artifact_key="report", artifact_revision=1,
+                                    digest=digest, size_bytes=len(original))
+        await submit_result(conn, result_id="result1", task_id="task1", attempt_id=None,
+                            contract_revision=1, outcome="complete", original_text=original.decode(),
+                            original_blob_ref=None, original_digest=digest, original_size_bytes=len(original),
+                            actor_id="worker", manifest_ids=["manifest1"], checks=[], limitations=[])
+
+
+async def test_passing_check_on_the_reviewed_head_supports_approval(domain_db: Database) -> None:
+    await worker_checks(domain_db)
+    async with domain_db.transaction() as conn:
+        evidence = await add_check_evidence(conn, evidence_id="check1", result_id="result1", criterion_id="C1",
+                                            verification_id=1, head=HEAD)
+        assert evidence["verification"] == "verified"
+        verdict = await record_verdict(conn, verdict_id="verdict1", result_id="result1", reviewer_actor_id="reviewer",
+                                       verification="verified", accepted=True, head=HEAD, base="c" * 40,
+                                       environment_digest=None, evidence_ids=["check1"], reason="the worker's tests pass")
+    assert verdict["accepted"] is True
+    row = await domain_db.fetchone("SELECT original_verification_id, manifest_digest_before FROM review_evidence WHERE id = 'check1'")
+    assert (row["original_verification_id"], row["manifest_digest_before"]) == (1, f"tree:{HEAD}")
+
+
+async def test_check_on_a_stale_head_or_failing_or_dirty_is_refused(domain_db: Database) -> None:
+    await worker_checks(domain_db)
+    refusals = (({"verification_id": 1, "head": MOVED}, "another commit"),
+                ({"verification_id": 2, "head": HEAD}, "passing"),
+                ({"verification_id": 3, "head": HEAD}, "another commit"),
+                ({"verification_id": 1, "head": None}, "another commit"),
+                ({"verification_id": 99, "head": HEAD}, "not run for this task"))
+    for arguments, reason in refusals:
+        with pytest.raises(DomainConflict, match=reason):
+            async with domain_db.transaction() as conn:
+                await add_check_evidence(conn, evidence_id="check", result_id="result1", criterion_id="C1", **arguments)
+    with pytest.raises(DomainConflict, match="outside the current contract"):
+        async with domain_db.transaction() as conn:
+            await add_check_evidence(conn, evidence_id="check", result_id="result1", criterion_id="C9",
+                                     verification_id=1, head=HEAD)
+    # Bound while the head matched, then the branch moved: the verdict on the new head refuses it.
+    async with domain_db.transaction() as conn:
+        await add_check_evidence(conn, evidence_id="check1", result_id="result1", criterion_id="C1",
+                                 verification_id=1, head=HEAD)
+    with pytest.raises(DomainConflict, match="another commit"):
+        async with domain_db.transaction() as conn:
+            await record_verdict(conn, verdict_id="verdict1", result_id="result1", reviewer_actor_id="reviewer",
+                                 verification="verified", accepted=True, head=MOVED, base="c" * 40,
+                                 environment_digest=None, evidence_ids=["check1"], reason="moved")
+    assert await domain_db.fetchall("SELECT id FROM review_verdicts") == []
 
 
 async def test_approval_needs_evidence_for_each_requirement_as_well_as_each_check(domain_db: Database) -> None:

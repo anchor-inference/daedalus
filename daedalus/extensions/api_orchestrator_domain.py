@@ -16,6 +16,7 @@ from daedalus.extensions.orchestrator_domain import (
     OriginalReports,
     accept_result,
     add_artifact_manifest,
+    add_check_evidence,
     add_operator_attestation,
     add_review_comment,
     add_review_evidence,
@@ -480,6 +481,38 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
                                              environment_digest=None, manifest_digest_before=manifest["digest"],
                                              manifest_digest_after=manifest["digest"])
         return await mutate(task_id, who, body, "review.evidence.attest", effect)
+
+    @api.post("/api/board/{task_id}/results/{result_id}/evidence/check")
+    async def check_evidence(task_id: str, result_id: str, body: dict[str, Any],
+                             who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        # The head comes from the branch itself, never from the request: a card left open while the
+        # worker committed again would otherwise bind a receipt to a commit nobody is reviewing.
+        task = await app.db.fetchone("SELECT branch FROM board_tasks WHERE id = ?", (task_id,))
+        if task is None:
+            raise HTTPException(404, "no such task")
+        if not task["branch"]:
+            raise HTTPException(409, "a check can count as evidence only for a task with a branch")
+        review = getattr(app.extensions.get("staff"), "review", None)
+        if review is None:
+            raise HTTPException(503, "review service is unavailable")
+        try:
+            current = await review.review(task_id, comparison_attempt_id=body.get("comparison_attempt_id"))
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+        async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
+            cursor = await conn.execute("SELECT task_id FROM result_receipts WHERE id = ?", (result_id,))
+            row = await cursor.fetchone()
+            await cursor.close()
+            if row is None or row["task_id"] != task_id:
+                raise KeyError(result_id)
+            verification_id = body["verification_id"]
+            if isinstance(verification_id, bool) or not isinstance(verification_id, int):
+                raise ValueError("verification_id must be an integer")
+            return await add_check_evidence(conn, evidence_id=mutation.object_id, result_id=result_id,
+                                            criterion_id=str(body["criterion_id"]), verification_id=verification_id,
+                                            head=current["head_sha"])
+        return await mutate(task_id, who, body, "review.evidence.check", effect)
 
     @api.get("/api/board/{task_id}/results/{result_id}/evidence")
     async def evidence(task_id: str, result_id: str,
