@@ -66,3 +66,29 @@ async def test_orchestration_history_adds_calendar_schema(tmp_path: Path, monkey
     assert [tuple(row) for row in await db.fetchall("PRAGMA integrity_check")] == [("ok",)]
     assert await db.fetchall("PRAGMA foreign_key_check") == []
     await db.close()
+
+
+async def test_planner_history_is_not_migrated_twice(tmp_path: Path, monkeypatch) -> None:
+    # The main line ran its two calendar migrations and then the planner's two, as schemas 54-57;
+    # here the planner's sit last. Opening such a database must run the orchestration migrations it
+    # has not seen and skip the planner ones, whose ALTER TABLEs would fail a second time.
+    path = tmp_path / "planner-history.sqlite"
+    migrations = schema.MIGRATIONS
+    planner = [migrations[index - 1] for index in schema.MAIN_LINE_LATER]
+    main_line = migrations[:schema.BRANCH_BASE_SCHEMA] + [calendar_schema, "SELECT 1;"] + planner
+    monkeypatch.setattr(schema, "MIGRATIONS", main_line)
+    db = schema.Database(path)
+    await db.open()
+    await db.execute("INSERT INTO diagrams(id,title,scene_json,created_at,updated_at,updated_by)"
+                     " VALUES ('diagram','Plan','{}','2026-01-01','2026-01-01','agent')")
+    assert (await db.fetchone("SELECT version FROM schema_version"))["version"] == schema.BRANCH_BASE_SCHEMA + 4
+    await db.close()
+
+    monkeypatch.setattr(schema, "MIGRATIONS", migrations)
+    db = schema.Database(path)
+    await db.open()
+    assert (await db.fetchone("SELECT version FROM schema_version"))["version"] == len(migrations)
+    assert (await db.fetchone("SELECT updated_by FROM diagrams WHERE id = 'diagram'"))["updated_by"] == "agent"
+    assert await db.fetchone("SELECT name FROM sqlite_master WHERE name = 'domain_collection_revisions'")
+    assert [tuple(row) for row in await db.fetchall("PRAGMA integrity_check")] == [("ok",)]
+    await db.close()

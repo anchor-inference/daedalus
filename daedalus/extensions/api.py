@@ -67,11 +67,13 @@ from daedalus.extensions import (
     api_attempt_diagnostics,
     api_board,
     api_browsers,
+    api_calendar,
     api_capacity,
     api_ci,
     api_comparisons,
     api_control,
     api_coordinator_authority,
+    api_diagrams,
     api_files,
     api_goal_budget,
     api_harnesses,
@@ -92,7 +94,6 @@ from daedalus.extensions import (
     api_staff_reports,
     api_update_drains,
     api_workflows,
-    api_workspace,
     api_workspace_archive,
     api_worktrees,
     launcher_updates,
@@ -1565,7 +1566,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     # The files orchestration keeps by handle: the cards a chat draws, their bytes, the audit.
     api_files.register(api, app, auth)
     if isinstance(getattr(app, "db", None), Database):
-        api_workspace.register(api, app, auth)
+        # The calendar, its connected accounts and the planner's tasks.
+        api_calendar.register(api, app, auth)
+        # The diagram editor: scenes, their history, previews and public links.
+        api_diagrams.register(api, app, auth)
     # The agent's browser: its groups, the live view's ticket and socket, control, the audit.
     api_browsers.register(api, app, auth)
 

@@ -51,7 +51,7 @@ const BoardScreen = lazy(retried(() => import("./screens/Board"), (m) => ({ defa
 const VoiceScreen = lazy(retried(() => import("./screens/Voice"), (m) => ({ default: m.VoiceScreen })));
 const ProposalsScreen = lazy(retried(() => import("./screens/Proposals"), (m) => ({ default: m.ProposalsScreen })));
 const SchedulesScreen = lazy(retried(() => import("./screens/Schedules"), (m) => ({ default: m.SchedulesScreen })));
-const CalendarScreen = lazy(retried(() => import("./screens/Calendar"), (m) => ({ default: m.CalendarScreen })));
+const CalendarScreen = lazy(retried(() => import("./calendar/Calendar"), (m) => ({ default: m.CalendarScreen })));
 const DiagramsScreen = lazy(retried(() => import("./screens/Diagrams"), (m) => ({ default: m.DiagramsScreen })));
 const UsageScreen = lazy(retried(() => import("./screens/Usage"), (m) => ({ default: m.UsageScreen })));
 const SettingsScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ default: m.SettingsScreen })));
@@ -187,6 +187,16 @@ export function App() {
     }
     flipSidebar();
   }, [folded, flipSidebar]);
+  // An open diagram is a focus mode. The editor needs the width, and the column beside the rail was a
+  // second left menu next to the canvas's own tools. The rail stays; its fold button shows the column
+  // for this visit only, so the folding the operator chose for every other page is left alone.
+  const diagramOpen = route.screen === "diagrams" && !!route.detail;
+  const [columnShown, setColumnShown] = useState(false);
+  useEffect(() => {
+    if (!diagramOpen) setColumnShown(false);
+  }, [diagramOpen]);
+  const columnFolded = diagramOpen ? !columnShown : folded;
+  const sidebarToggle = useCallback(() => (diagramOpen ? setColumnShown((open) => !open) : toggleSidebar()), [diagramOpen, toggleSidebar]);
   const [menu, setMenu] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   const openPalette = useCallback(() => setPalette(true), []);
@@ -278,11 +288,11 @@ export function App() {
       if (!which) return;
       e.preventDefault();
       if (which === "menu") setMenu((m) => !m);
-      else toggleSidebar();
+      else sidebarToggle();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [wide, toggleSidebar]);
+  }, [wide, sidebarToggle]);
 
   useEffect(() => {
     if (authed !== null) return;
@@ -578,7 +588,7 @@ export function App() {
             <ProposalsScreen toast={showToast} selected={route.detail} />
           ))}
         {route.screen === "schedules" && <SchedulesScreen toast={showToast} onOpen={open} selected={route.detail} />}
-        {route.screen === "calendar" && <CalendarScreen toast={showToast} />}
+        {route.screen === "calendar" && <CalendarScreen toast={showToast} query={route.query} />}
         {route.screen === "diagrams" && <DiagramsScreen toast={showToast} selected={route.detail} />}
         {route.screen === "terminals" && !route.detail && <TerminalsScreen toast={showToast} project={project} projects={projectList} />}
         {route.screen === "terminals" && route.detail && <TerminalFullScreen id={route.detail} beside={route.query.get("with")} toast={showToast} />}
@@ -610,16 +620,17 @@ export function App() {
   // session inside it is a detail with a back of its own and no bar under it.
   const projectBar = !wide && focusProject ? phoneTab(focusView(route.page, route.inner)) : null;
   // The main chat on a phone is a detail of orchestration's list, with a back of its own and no bar under it.
-  const tabBar = !wide && !sessionId && !focusProject && !terminalOpen && !mainChat;
+  // An open diagram is a detail with its own back and no bar under it, like a terminal.
+  const tabBar = !wide && !sessionId && !focusProject && !terminalOpen && !mainChat && !diagramOpen;
   return (
-    <div ref={shell} className={`app ${projectBar ? "project-phone" : ""} ${route.screen === "settings" ? "settings-open" : ""}`} style={wide ? { ["--sidebar-w" as string]: `${folded ? 0 : sidebarWidth}px` } : undefined}>
+    <div ref={shell} className={`app ${projectBar ? "project-phone" : ""} ${route.screen === "settings" ? "settings-open" : ""} ${diagramOpen ? "focus-mode" : ""}`} style={wide ? { ["--sidebar-w" as string]: `${columnFolded ? 0 : sidebarWidth}px` } : undefined}>
       {wide && (
-        <div className={`desktop-column ${folded ? "folded" : ""}`}><Rail
+        <div className={`desktop-column ${columnFolded ? "folded" : ""}`}><Rail
           screen={route.screen}
           detail={route.detail}
           mode={mode}
-          collapsed={folded}
-          onToggle={toggleSidebar}
+          collapsed={columnFolded}
+          onToggle={sidebarToggle}
           counts={counts}
           waiting={waiting}
           selfdev={selfdev}
@@ -629,7 +640,7 @@ export function App() {
           onSearch={() => setPalette(true)}
         />
         <div className="desktop-context">
-      {wide && !folded && focusProject && (
+      {wide && !columnFolded && focusProject && (
         <ErrorBoundary key={focusProject}>
         <Suspense fallback={<nav className="sidebar project-sidebar" />}>
           <ProjectSidebar
@@ -643,11 +654,11 @@ export function App() {
         </Suspense>
         </ErrorBoundary>
       )}
-      {wide && !folded && !focusProject && mode === "orchestration" && <OrchestrationSidebar onMain={mainChat} onToggle={toggleSidebar} />}
-      {wide && !folded && !focusProject && mode === "agents" && (
+      {wide && !columnFolded && !focusProject && mode === "orchestration" && <OrchestrationSidebar onMain={mainChat} onToggle={sidebarToggle} />}
+      {wide && !columnFolded && !focusProject && mode === "agents" && (
         <Sidebar
           session={sessionId}
-          onToggle={toggleSidebar}
+          onToggle={sidebarToggle}
           projects={agentProjects}
           project={project}
           onProjects={() => setSwitching(true)}
@@ -655,10 +666,10 @@ export function App() {
           toast={showToast}
         />
       )}
-        </div>{!folded && <PaneHandle side="right" drag={sidebarDrag} />}</div>
+        </div>{!columnFolded && <PaneHandle side="right" drag={sidebarDrag} />}</div>
       )}
       {wide && menu && <NavMenu screen={route.screen} counts={counts} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} />}
-      <div ref={main} className={`main ${sessionId || focusChat || terminalOpen ? "chat-open" : ""}`}>
+      <div ref={main} className={`main ${sessionId || focusChat || terminalOpen || diagramOpen ? "chat-open" : ""}`}>
         <MaintenanceNotice />
         {offline && <div className="offline-strip" role="status">{t("app.offline")}</div>}
         <ChangeStrip caps={caps} />

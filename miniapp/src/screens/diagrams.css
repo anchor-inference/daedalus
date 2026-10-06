@@ -1,38 +1,149 @@
+/* The diagrams list: a grid of cards, each a thumbnail over its title. */
 .diagrams-screen { min-width: 0; }
-.diagram-list { display: grid; gap: 6px; margin-top: 16px; }
-.diagram-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); }
-.diagram-row > button:first-child { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; text-align: left; border: 0; background: none; color: var(--fg); cursor: pointer; }
-.diagram-row > button:first-child > span:last-child { display: grid; gap: 3px; min-width: 0; }
-.diagram-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-14); }
-.diagram-row small { color: var(--fg-3); font-size: var(--fs-11); }
-.diagram-thumb { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: var(--radius-sm); color: var(--accent); background: var(--surface-2); }
-.diagram-editor { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; background: var(--surface-1); }
-.diagram-bar { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 14px; border-bottom: 1px solid var(--line); }
-.diagram-bar input { min-width: 0; flex: 1; padding: 5px 8px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 600; }
-.diagram-bar input:focus { border-color: var(--line-strong); outline: none; }
-.diagram-status { color: var(--fg-3); font-size: var(--fs-12); }
-.diagram-status.conflict { color: var(--bad); }
-.diagram-version { color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
-.diagram-export { appearance: auto; max-width: 116px; }
-.diagram-workspace { display: flex; flex: 1; min-height: 0; min-width: 0; }
-.diagram-side { display: flex; flex-direction: column; gap: 8px; width: 248px; flex: none; min-height: 0; padding: 12px 8px; overflow: auto; border-right: 1px solid var(--line); background: var(--surface-1); }
-.diagram-side-heading { display: flex; align-items: center; justify-content: space-between; padding: 3px 9px; color: var(--fg-3); font-size: var(--fs-12); }
-.diagram-side-list { display: grid; gap: 3px; }
-.diagram-side-item { display: flex; align-items: center; gap: 7px; width: 100%; padding: 8px 9px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg); text-align: left; cursor: pointer; font: inherit; font-size: var(--fs-12); }
-.diagram-side-item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.diagram-side-item small { margin-left: auto; color: var(--fg-3); white-space: nowrap; }
-.diagram-side-item.active { background: var(--surface-2); color: var(--accent); }
-.diagram-side-item:disabled { opacity: .5; cursor: not-allowed; }
-.diagram-diff, .diagram-share-state { display: grid; gap: 6px; padding: 11px 9px; border-top: 1px solid var(--line); font-size: var(--fs-12); }
-.diagram-diff p { margin: 0; color: var(--fg-3); }
-.diagram-diff small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.diagram-share-state span { color: var(--fg-3); }
-.diagram-share-state input { width: 100%; min-width: 0; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg); font: inherit; }
-.diagram-canvas { flex: 1; min-width: 0; min-height: 400px; position: relative; }
+.diagram-scope { display: flex; align-items: center; gap: 10px; margin: 4px 0 10px; font-size: var(--fs-13); }
+.diagram-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 16px; }
+.diagram-search { flex: 1 1 240px; max-width: 420px; display: flex; align-items: center; gap: 8px; min-height: var(--ctl-h); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-3); }
+.diagram-search:focus-within { border-color: var(--line-strong); color: var(--fg-2); }
+.diagram-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); padding: 6px 0; }
+.diagram-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; padding-bottom: 8px; }
+.diagram-card { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); overflow: hidden; transition: border-color var(--t-fast), box-shadow var(--t-fast); }
+.diagram-card:hover { border-color: var(--line-strong); box-shadow: 0 6px 20px rgb(0 0 0 / .18); }
+.diagram-card.skeleton { aspect-ratio: 4 / 3; background: linear-gradient(90deg, var(--surface-1), var(--surface-2), var(--surface-1)); background-size: 200% 100%; animation: diagram-shimmer 1.4s linear infinite; }
+@keyframes diagram-shimmer { to { background-position: -200% 0; } }
+[data-motion="reduce"] .diagram-card.skeleton { animation: none; }
+.diagram-card-open { display: block; width: 100%; padding: 0; border: 0; border-bottom: 1px solid var(--line); background: transparent; cursor: pointer; }
+.diagram-card-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.diagram-card .diagram-thumb { width: 100%; aspect-ratio: 16 / 10; border-radius: 0; }
+.diagram-card-foot { display: flex; align-items: center; gap: 6px; padding: 8px 6px 8px 12px; min-height: 52px; }
+.diagram-card-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.diagram-card-title { display: block; padding: 0; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 600; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.diagram-card-meta { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; overflow: hidden; }
+.diagram-card-meta time { overflow: hidden; text-overflow: ellipsis; }
+.diagram-card-shared { display: inline-flex; color: var(--accent); }
+.diagram-rename { min-height: 28px; padding: 3px 6px; font-size: var(--fs-14); }
+
+/* A thumbnail is the server's sketch of the scene on the canvas colour. Excalidraw darkens its own
+   canvas the same way in a dark theme, so the picture looks like the editor it opens. */
+.diagram-thumb { position: relative; display: grid; place-items: center; overflow: hidden; background: #fff; color: var(--fg-3); border-radius: var(--radius-sm); }
+/* Placed absolutely: as a grid item its percentage height resolved against an automatic row, and a
+   tall drawing grew past the card instead of being fitted into it. */
+.diagram-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; padding: 8%; box-sizing: border-box; }
+:root[data-scheme="dark"] .diagram-thumb { background: #121212; }
+:root[data-scheme="dark"] .diagram-thumb img { filter: invert(93%) hue-rotate(180deg); }
+:root[data-scheme="dark"] .diagram-thumb > .ic { color: var(--fg-3); }
+.diagram-thumb-wait { width: 30%; height: 18%; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--fg-3) 18%, transparent); }
+
+.diagram-empty { display: flex; flex-direction: column; align-items: center; text-align: center; max-width: 760px; margin: 6vh auto 0; }
+.diagram-empty-mark { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; background: var(--surface-2); color: var(--accent); }
+.diagram-empty h2 { margin: 14px 0 6px; font-size: var(--fs-18); }
+.diagram-empty p { margin: 0 0 20px; color: var(--fg-2); font-size: var(--fs-14); max-width: 460px; }
+.diagram-templates { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; width: 100%; }
+.diagram-template { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); color: var(--fg); text-align: left; cursor: pointer; font: inherit; }
+.diagram-template:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.diagram-template:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.diagram-template:disabled { opacity: .55; cursor: progress; }
+.diagram-template strong { font-size: var(--fs-14); }
+.diagram-template small { color: var(--fg-3); font-size: var(--fs-12); line-height: 1.35; }
+.diagram-template-art { display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; margin-bottom: 6px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--accent); }
+.diagram-template-art svg { width: 70%; height: 70%; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* The editor: one bar and the canvas under it. In focus mode the shell gives it the whole column. */
+.diagram-editor { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; background: var(--bg); }
+.diagram-bar { display: flex; align-items: center; gap: 6px; flex: none; min-height: var(--head-h); padding: 6px 10px; padding-top: max(6px, env(safe-area-inset-top)); border-bottom: 1px solid var(--line); background: var(--bg); }
+.diagram-bar .iconbtn { background: transparent; }
+.diagram-bar .iconbtn:hover { background: var(--surface-2); }
+.diagram-title { flex: 0 1 auto; field-sizing: content; min-width: 120px; max-width: min(520px, 40vw); padding: 5px 8px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 600; text-overflow: ellipsis; }
+.diagram-title:hover { border-color: var(--line); }
+.diagram-title:focus { border-color: var(--line-strong); background: var(--surface-1); outline: none; }
+.diagram-status { display: inline-flex; align-items: center; gap: 5px; flex: none; margin-right: auto; padding: 3px 9px; border-radius: var(--radius-pill); color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
+.diagram-status.saved .ic { color: var(--ok); }
+.diagram-status.editing .ic, .diagram-status.saving .ic { color: var(--fg-3); }
+.diagram-status.saving .ic { animation: diagram-pulse 1s ease-in-out infinite; }
+@keyframes diagram-pulse { 50% { opacity: .3; } }
+[data-motion="reduce"] .diagram-status.saving .ic { animation: none; }
+.diagram-status.offline { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.diagram-status.conflict { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.diagram-tool { flex: none; gap: 6px; background: transparent; border-color: transparent; color: var(--fg-2); font-size: var(--fs-13); }
+.diagram-tool:hover { background: var(--surface-2); color: var(--fg); }
+.diagram-tool.on, .diagram-tool[aria-expanded="true"] { background: var(--surface-2); border-color: var(--line); color: var(--fg); }
+.diagram-tool .ic { margin: 0; vertical-align: 0; }
+
+.diagram-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: none; padding: 8px 12px; font-size: var(--fs-13); border-bottom: 1px solid var(--line); }
+.diagram-banner > span { flex: 1 1 200px; min-width: 0; }
+.diagram-banner.conflict { background: color-mix(in srgb, var(--bad) 10%, var(--bg)); color: var(--fg); }
+.diagram-banner.conflict > .ic { color: var(--bad); }
+.diagram-banner.preview { background: var(--surface-1); }
+.diagram-banner.preview > .ic { color: var(--accent); }
+.diagram-banner .btn .ic { margin-right: 0; vertical-align: 0; }
+
+/* A stacking context of its own: Excalidraw gives its layers z-indexes, and outside one they rose
+   above the app's sheets and menus, so the history sheet and the phone's menu opened under the canvas. */
+.diagram-stage { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; isolation: isolate; z-index: 0; }
+.diagram-canvas { position: relative; flex: 1; min-width: 0; min-height: 0; }
 .diagram-canvas .excalidraw { height: 100%; }
-.diagram-preview-note { position: absolute; z-index: 5; left: 16px; bottom: 16px; display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: var(--radius-sm); background: var(--surface-1); box-shadow: 0 2px 12px #0002; font-size: var(--fs-12); }
-.diagram-shared { display: flex; flex-direction: column; width: 100vw; height: 100vh; background: var(--surface-1); }
-.diagram-shared header { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 0 20px; border-bottom: 1px solid var(--line); }
-.diagram-shared header span { color: var(--fg-3); font-size: var(--fs-12); }
-.diagram-shared-state { display: grid; place-items: center; min-height: 100vh; background: var(--surface-1); color: var(--fg-3); }
-@media (max-width: 680px) { .diagram-bar { gap: 4px; padding: 5px 8px; } .diagram-status, .diagram-version { display: none; } .diagram-side { position: absolute; z-index: 10; top: 48px; bottom: 0; box-shadow: 8px 0 20px #0003; } .diagram-workspace { position: relative; } .diagram-canvas { min-height: 60vh; } }
+.diagram-loading { display: grid; place-items: center; flex: 1; color: var(--fg-3); }
+.diagram-preview { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; background: var(--bg); }
+.diagram-preview-canvas { position: relative; flex: 1; min-height: 0; }
+
+/* History: a drawer at the canvas's right edge on a desktop, closed until asked for. It takes its
+   width from the canvas rather than lying over it: drawn on top, it hid the right of the drawing
+   and the preview's own Restore button with it. */
+.diagram-history { position: relative; z-index: 6; flex: none; display: flex; flex-direction: column; width: 340px; max-width: 45%; border-left: 1px solid var(--line); background: var(--bg); animation: diagram-drawer var(--t-base) var(--ease-out); }
+@keyframes diagram-drawer { from { transform: translateX(24px); opacity: 0; } }
+[data-motion="reduce"] .diagram-history { animation: none; }
+.diagram-history-head { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 6px 8px 6px 16px; border-bottom: 1px solid var(--line); font-size: var(--fs-14); }
+.diagram-history-head .iconbtn { background: transparent; }
+.diagram-history-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 8px 16px; }
+.diagram-history-day h4 { position: sticky; top: 0; z-index: 1; margin: 0; padding: 10px 8px 6px; background: inherit; color: var(--fg-3); font-size: var(--fs-12); font-weight: 600; }
+.diagram-history-body .diagram-history-day h4 { background: var(--bg); }
+.diagram-history-sheet .diagram-history-day h4 { background: var(--surface-1); }
+.diagram-revision { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--fg); text-align: left; cursor: pointer; font: inherit; }
+.diagram-revision:hover { background: var(--surface-1); }
+.diagram-revision.active { background: var(--surface-2); border-color: var(--line); }
+.diagram-revision:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.diagram-revision .diagram-thumb { flex: none; width: 72px; height: 48px; border: 1px solid var(--line); border-radius: var(--radius-xs); }
+.diagram-revision-text { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.diagram-revision-top { display: flex; align-items: center; gap: 6px; font-size: var(--fs-13); }
+.diagram-revision-top time { font-weight: 600; font-variant-numeric: tabular-nums; }
+.diagram-revision-summary { color: var(--fg-2); font-size: var(--fs-12); line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.diagram-who { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-11); }
+.diagram-who.agent { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.diagram-current { margin-left: auto; color: var(--ok); font-size: var(--fs-11); }
+
+.menu.pop.diagram-share-pop { width: min(360px, calc(100vw - 16px)); max-width: min(360px, calc(100vw - 16px)); padding: 14px; }
+/* The popover is a menu box, whose rules make every button a full-width row; the sharing panel's are
+   ordinary buttons and keep their own look. */
+.menu.pop.diagram-share-pop .btn { display: inline-flex; justify-content: center; gap: 6px; min-height: var(--ctl-h); padding: 5px 12px; font-size: var(--fs-13); border: 1px solid var(--line); background: var(--surface-3); }
+.menu.pop.diagram-share-pop .btn.primary { background: var(--primary); color: var(--primary-ink); border-color: transparent; }
+.menu.pop.diagram-share-pop .btn.danger { background: transparent; color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+.menu.pop.diagram-share-pop .btn .ic { color: inherit; }
+.diagram-share { display: grid; gap: 10px; }
+.diagram-share-head { display: flex; align-items: center; gap: 8px; font-size: var(--fs-14); }
+.diagram-share-head .ic { color: var(--accent); }
+.diagram-share p { margin: 0; color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; }
+.diagram-share .field { width: 100%; font-size: var(--fs-13); }
+.diagram-share-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.diagram-share-actions .btn .ic { margin-right: 0; vertical-align: 0; }
+
+/* The page someone was sent a link to. */
+.diagram-shared { display: flex; flex-direction: column; width: 100vw; height: 100vh; height: 100dvh; background: var(--bg); }
+.diagram-shared header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: none; min-height: 52px; padding: max(6px, env(safe-area-inset-top)) 16px 6px; border-bottom: 1px solid var(--line); }
+.diagram-shared-title { display: grid; min-width: 0; }
+.diagram-shared-title strong { font-size: var(--fs-14); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.diagram-shared-title span, .diagram-shared-made { color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
+.diagram-shared .diagram-canvas { flex: 1; isolation: isolate; }
+.diagram-shared-state { display: grid; place-content: center; gap: 6px; min-height: 100vh; padding: 24px; background: var(--bg); color: var(--fg-3); text-align: center; }
+.diagram-shared-state strong { color: var(--fg); font-size: var(--fs-16); }
+
+@media (max-width: 680px) {
+  .diagram-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .diagram-card-foot { padding: 6px 2px 6px 10px; }
+  .diagram-search { max-width: none; flex-basis: 100%; }
+  .diagram-search input { font-size: var(--fs-16); }
+  .diagram-bar { gap: 2px; padding-left: 4px; padding-right: 4px; }
+  .diagram-bar .iconbtn, .diagram-tool { min-width: var(--row-h-touch); height: var(--row-h-touch); padding: 0; }
+  .diagram-title { flex: 1 1 auto; field-sizing: fixed; min-width: 0; max-width: none; font-size: var(--fs-16); padding: 5px 6px; }
+  .diagram-tool-word, .diagram-status-word { display: none; }
+  .diagram-status { margin-right: 0; padding: 3px 6px; }
+  .diagram-shared-made { display: none; }
+}

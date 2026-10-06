@@ -52,6 +52,7 @@ EXTENSIONS = (
     "daedalus.extensions.phase_expiry",
     "daedalus.extensions.issue_sync",
     "daedalus.extensions.launcher_updates",
+    "daedalus.extensions.calendar_reminders",
     "daedalus.extensions.api",
 )
 

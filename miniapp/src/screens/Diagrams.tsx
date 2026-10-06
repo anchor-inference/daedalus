@@ -1,237 +1,224 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Excalidraw, exportToBlob, exportToSvg } from "@excalidraw/excalidraw";
-import "@excalidraw/excalidraw/index.css";
-import { latinKey } from "../navigation";
+// The diagrams page: a grid of cards with real thumbnails, search and sort, rename, duplicate and
+// delete with undo, and the diagrams of one chat when it is opened from that chat. The editor is a
+// chunk of its own, so the list never loads Excalidraw just to show what there is.
+
+import { lazy, Suspense, useMemo, useRef, useState, type ReactElement } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
 import { t } from "../i18n";
 import { navigate, pathFor, useRoute } from "../router";
-import { invalidate, prime, useQuery } from "../store";
-import { confirmAsync, errorText } from "../ui";
-import { PageHeader } from "../ui/index";
-import { diagramDiff } from "../diagram-diff";
+import { invalidate, useQuery } from "../store";
+import { errorText } from "../ui";
+import { OverflowMenu, PageHeader, Segmented, Sheet } from "../ui/index";
+import { deleteWithUndo } from "../ui/dialogs";
+import { relTimeLong } from "../format";
+import { TEMPLATES, templateSkeleton, type TemplateId } from "../diagram-templates";
+import { DiagramThumb, type Diagram, type DiagramItem } from "./diagramparts";
 import "./diagrams.css";
 
-type Scene = { elements: any[]; appState: Record<string, unknown>; files: Record<string, unknown> };
-type Diagram = { id: string; title: string; version: number; created_at: string; updated_at: string; scene: Scene; share_token?: string };
-type DiagramItem = Omit<Diagram, "scene">;
-type Revision = { version: number; title: string; saved_at: string; scene: Scene };
-type RevisionItem = Omit<Revision, "scene">;
+const DiagramEditor = lazy(() => import("./DiagramEditor").then((module) => ({ default: module.DiagramEditor })));
 
-function download(data: Blob, filename: string) {
-  const url = URL.createObjectURL(data);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+type Sort = "recent" | "name";
 
-function Editor({ diagram, toast, returnPath, items, sessionId, onCreate, refreshDiagram }: { diagram: Diagram; toast: (message: string) => void; returnPath: string; items: DiagramItem[]; sessionId: string | null; onCreate: () => void; refreshDiagram: () => Promise<void> }) {
-  const [title, setTitle] = useState(diagram.title);
-  const [status, setStatus] = useState<"saved" | "editing" | "saving" | "conflict">("saved");
-  const sceneRef = useRef<Scene>(diagram.scene);
-  const signatureRef = useRef(JSON.stringify({ elements: diagram.scene.elements, files: diagram.scene.files }));
-  const initializedRef = useRef(false);
-  const titleRef = useRef(diagram.title);
-  const versionRef = useRef(diagram.version);
-  const pendingRef = useRef(false);
-  const savingRef = useRef(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [sideOpen, setSideOpen] = useState(true);
-  const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
-  const [canvasVersion, setCanvasVersion] = useState(diagram.version);
-  const remoteConflictRef = useRef(false);
-  const [shareUrl, setShareUrl] = useState(diagram.share_token ? `/app/d/${diagram.share_token}` : "");
-  const { data: versions, refresh: refreshVersions } = useQuery<RevisionItem[]>(`/api/diagrams/${diagram.id}/versions`, { pollMs: 5000, staleMs: 0 });
-  const { data: preview } = useQuery<Revision>(selectedVersion === null ? null : `/api/diagrams/${diagram.id}/versions/${selectedVersion}`, { staleMs: 0 });
-  const diff = preview ? diagramDiff(preview.scene.elements, diagram.scene.elements) : null;
-
-  useEffect(() => {
-    if (diagram.version <= versionRef.current) return;
-    // A remote agent edit must not unmount a canvas with local unsaved strokes. Keep it
-    // available for export and ask before replacing it with the newer stored version.
-    if (pendingRef.current || savingRef.current) {
-      remoteConflictRef.current = true;
-      setStatus("conflict");
-      return;
-    }
-    sceneRef.current = diagram.scene;
-    signatureRef.current = JSON.stringify({ elements: diagram.scene.elements, files: diagram.scene.files });
-    initializedRef.current = false;
-    titleRef.current = diagram.title;
-    setTitle(diagram.title);
-    versionRef.current = diagram.version;
-    setCanvasVersion(diagram.version);
-  }, [diagram]);
-
-  const flush = useCallback(async () => {
-    if (savingRef.current || !pendingRef.current || remoteConflictRef.current) return;
-    savingRef.current = true;
-    try {
-      while (pendingRef.current) {
-        pendingRef.current = false;
-        setStatus("saving");
-        const saved = await api.put<Diagram>(`/api/diagrams/${diagram.id}`, { title: titleRef.current, scene: sceneRef.current, version: versionRef.current });
-        versionRef.current = saved.version;
-      }
-      setStatus("saved");
-      invalidate("/api/diagrams");
-      void refreshVersions();
-    } catch (exc) {
-      pendingRef.current = true;
-      remoteConflictRef.current = true;
-      setStatus("conflict");
-      toast(errorText(exc));
-      void refreshDiagram();
-    } finally { savingRef.current = false; }
-  }, [diagram.id, toast, refreshVersions, refreshDiagram]);
-
-  function showCurrent() {
-    initializedRef.current = false;
-    setSelectedVersion(null);
-  }
-
-  async function reloadRemote() {
-    if (!(await confirmAsync(t("diagrams.reload"), { body: t("diagrams.reload.body"), action: t("diagrams.reload") }))) return;
-    try {
-      const latest = await api.get<Diagram>(`/api/diagrams/${diagram.id}`);
-      if (timerRef.current) clearTimeout(timerRef.current);
-      pendingRef.current = false;
-      remoteConflictRef.current = false;
-      sceneRef.current = latest.scene;
-      signatureRef.current = JSON.stringify({ elements: latest.scene.elements, files: latest.scene.files });
-      initializedRef.current = false;
-      titleRef.current = latest.title;
-      setTitle(latest.title);
-      versionRef.current = latest.version;
-      setCanvasVersion(latest.version);
-      setStatus("saved");
-      prime(`/api/diagrams/${diagram.id}`, latest);
-    } catch (error) { toast(errorText(error)); }
-  }
-
-  async function share() {
-    try {
-      const result = await api.post<{ url: string }>(`/api/diagrams/${diagram.id}/share`, {});
-      setShareUrl(result.url);
-      invalidate(`/api/diagrams/${diagram.id}`);
-      const url = `${window.location.origin}${result.url}`;
-      if (navigator.share) await navigator.share({ title: titleRef.current, url });
-      else { await navigator.clipboard.writeText(url); toast(t("diagrams.link.copied")); }
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      toast(errorText(error));
-    }
-  }
-
-  async function revoke() {
-    if (!(await confirmAsync(t("diagrams.share.revoke"), { action: t("diagrams.share.revoke") }))) return;
-    try {
-      await api.delete(`/api/diagrams/${diagram.id}/share`);
-      setShareUrl("");
-      invalidate(`/api/diagrams/${diagram.id}`);
-    } catch (error) { toast(errorText(error)); }
-  }
-
-  async function exportScene(format: "png" | "svg" | "excalidraw") {
-    const scene = sceneRef.current;
-    const name = titleRef.current.trim().replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(0, 80) || "diagram";
-    try {
-      if (format === "excalidraw") {
-        download(new Blob([JSON.stringify({ type: "excalidraw", version: 2, source: "Daedalus", ...scene })], { type: "application/json" }), `${name}.excalidraw`);
-      } else if (format === "svg") {
-        const svg = await exportToSvg({ elements: scene.elements as any, appState: scene.appState as any, files: scene.files as any });
-        download(new Blob([new XMLSerializer().serializeToString(svg)], { type: "image/svg+xml" }), `${name}.svg`);
-      } else {
-        const blob = await exportToBlob({ elements: scene.elements as any, appState: scene.appState as any, files: scene.files as any, mimeType: "image/png" });
-        download(blob, `${name}.png`);
-      }
-    } catch (error) { toast(errorText(error)); }
-  }
-
-  function changed() {
-    pendingRef.current = true;
-    if (remoteConflictRef.current) { setStatus("conflict"); return; }
-    setStatus("editing");
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => void flush(), 1100);
-  }
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && latinKey(event) === "s") { event.preventDefault(); if (timerRef.current) clearTimeout(timerRef.current); void flush(); }
-    };
-    const onLeave = (event: BeforeUnloadEvent) => { if (pendingRef.current) event.preventDefault(); };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("beforeunload", onLeave);
-    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("beforeunload", onLeave); if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [flush]);
-
-  return <div className="diagram-editor">
-    <div className="diagram-bar"><button className="iconbtn" onClick={() => { if (pendingRef.current) void flush(); navigate(returnPath); }} aria-label={t("diagrams.back")}><Icon name="back" size={18} /></button>
-      <input aria-label={t("diagrams.title")} value={title} maxLength={160} onChange={(event) => { setTitle(event.target.value); titleRef.current = event.target.value; changed(); }} />
-      <span className="diagram-version">{t("diagrams.version", { n: versionRef.current })}</span>
-      <span className={`diagram-status ${status}`}>{t(`diagrams.${status}`)}</span>
-      {status === "conflict" && <button className="btn" onClick={() => void reloadRemote()}>{t("diagrams.reload")}</button>}
-      <button className="btn" onClick={() => void share()}><Icon name="share" size={15} /> {t("diagrams.share")}</button>
-      <select className="btn diagram-export" aria-label={t("diagrams.export")} value="" onChange={(event) => { const value = event.target.value as "png" | "svg" | "excalidraw"; event.target.value = ""; void exportScene(value); }}><option value="" disabled>{t("diagrams.export")}</option><option value="png">PNG</option><option value="svg">SVG</option><option value="excalidraw">{t("diagrams.export.editable")}</option></select>
-      <button className="btn" onClick={() => { if (timerRef.current) clearTimeout(timerRef.current); void flush(); }} disabled={status === "saved" || status === "saving" || status === "conflict"}>{t("common.save")}</button>
-      <button className="iconbtn diagram-side-toggle" onClick={() => setSideOpen((open) => !open)} aria-label={t("diagrams.sidebar")} aria-expanded={sideOpen}><Icon name="sidebar" size={18} /></button>
-    </div>
-    <div className="diagram-workspace">
-      {sideOpen && <aside className="diagram-side" aria-label={t("diagrams.sidebar")}>
-        <div className="diagram-side-heading"><strong>{t("nav.diagrams")}</strong><button className="iconbtn" onClick={onCreate} aria-label={t("diagrams.new")}><Icon name="plus" size={16} /></button></div>
-        <div className="diagram-side-list">{items.map((item) => <button key={item.id} className={`diagram-side-item ${item.id === diagram.id ? "active" : ""}`} onClick={() => navigate(pathFor("diagrams", item.id, { session: sessionId }))}><Icon name="pen" size={15} /><span>{item.title}</span></button>)}</div>
-        <div className="diagram-side-heading"><strong>{t("diagrams.history")}</strong></div>
-        <div className="diagram-side-list"><button className={`diagram-side-item ${selectedVersion === null ? "active" : ""}`} onClick={showCurrent}>{t("diagrams.current", { n: versionRef.current })}</button>{versions?.map((item) => <button key={item.version} className={`diagram-side-item ${selectedVersion === item.version ? "active" : ""}`} disabled={status !== "saved"} onClick={() => setSelectedVersion(item.version)}>{t("diagrams.version", { n: item.version })}<small>{new Date(item.saved_at).toLocaleString()}</small></button>)}</div>
-        {diff && <div className="diagram-diff"><strong>{t("diagrams.diff")}</strong><p>{t("diagrams.diff.counts", { added: diff.added.length, removed: diff.removed.length, changed: diff.changed.length })}</p>{preview?.title !== diagram.title && <p>{t("diagrams.diff.title", { from: preview?.title ?? "", to: diagram.title })}</p>}{diff.added.map((item) => <small key={`a-${item.id}`}>+ {item.type} · {item.id}</small>)}{diff.removed.map((item) => <small key={`r-${item.id}`}>− {item.type} · {item.id}</small>)}{diff.changed.map((item) => <small key={`c-${item.id}`}>~ {item.type} · {item.id}</small>)}</div>}
-        {shareUrl && <div className="diagram-share-state"><span>{t("diagrams.share.active")}</span><input aria-label={t("diagrams.share.link")} readOnly value={`${window.location.origin}${shareUrl}`} onFocus={(event) => event.target.select()} /><button className="btn small" onClick={() => void revoke()}>{t("diagrams.share.revoke")}</button></div>}
-      </aside>}
-      <div className="diagram-canvas">{selectedVersion !== null && preview ? <><div className="diagram-preview-note">{t("diagrams.preview", { n: selectedVersion })}<button className="btn small" onClick={showCurrent}>{t("diagrams.return")}</button></div><Excalidraw key={`preview-${selectedVersion}`} viewModeEnabled initialData={{ elements: preview.scene.elements as any, appState: { ...preview.scene.appState, collaborators: new Map() } as any, files: preview.scene.files as any }} /></> : <Excalidraw key={canvasVersion} initialData={{ elements: sceneRef.current.elements as any, appState: { ...sceneRef.current.appState, collaborators: new Map() } as any, files: sceneRef.current.files as any }} onChange={(elements, appState, files) => {
-      const scene = { elements: elements as any[], appState: { viewBackgroundColor: appState.viewBackgroundColor, gridSize: appState.gridSize }, files: files as Record<string, unknown> };
-      // Excalidraw calls onChange while loading initialData and when the viewport moves.
-      // Neither changes the document; saving either used to overwrite a newer agent edit.
-      const signature = JSON.stringify({ elements: scene.elements, files: scene.files });
-      if (!initializedRef.current) {
-        initializedRef.current = true;
-        signatureRef.current = signature;
-        sceneRef.current = scene;
-        return;
-      }
-      if (signatureRef.current === signature) return;
-      signatureRef.current = signature;
-      sceneRef.current = scene;
-      changed();
-    }} />}</div>
-    </div>
-  </div>;
+/** Build a template's scene with Excalidraw's own converter, loaded only when a template is chosen. */
+async function templateScene(id: TemplateId) {
+  const skeleton = templateSkeleton(id);
+  if (!skeleton.length) return { elements: [], appState: {}, files: {} };
+  const { convertToExcalidrawElements } = await import("@excalidraw/excalidraw");
+  return { elements: convertToExcalidrawElements(skeleton as any, { regenerateIds: false }), appState: {}, files: {} };
 }
 
 export function DiagramsScreen({ toast, selected }: { toast: (message: string) => void; selected: string | null }) {
   const route = useRoute();
   const sessionId = route.query.get("session");
-  const { data: items, loading, error, refresh } = useQuery<DiagramItem[]>(sessionId ? `/api/diagrams?session_id=${encodeURIComponent(sessionId)}` : "/api/diagrams", { pollMs: 5000, staleMs: 0 });
-  const { data: diagram, error: detailError, refresh: refreshDiagram } = useQuery<Diagram>(selected ? `/api/diagrams/${selected}` : "/api/diagrams", { pollMs: selected ? 5000 : 0, staleMs: 0 });
+  if (selected) {
+    return (
+      <Suspense fallback={<div className="diagram-editor"><div className="diagram-loading">{t("common.loading")}</div></div>}>
+        <DiagramEditor id={selected} sessionId={sessionId} toast={toast} />
+      </Suspense>
+    );
+  }
+  return <DiagramList toast={toast} sessionId={sessionId} />;
+}
 
-  async function create() {
+function DiagramList({ toast, sessionId }: { toast: (message: string) => void; sessionId: string | null }) {
+  const listKey = sessionId ? `/api/diagrams?session_id=${encodeURIComponent(sessionId)}` : "/api/diagrams";
+  const { data: items, loading, error, refresh } = useQuery<DiagramItem[]>(listKey, { pollMs: 10000, staleMs: 0 });
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<Sort>("recent");
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [choosing, setChoosing] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const shown = useMemo(() => {
+    const words = query.trim().toLocaleLowerCase();
+    const list = (items ?? []).filter((item) => !hidden.has(item.id) && (!words || item.title.toLocaleLowerCase().includes(words)));
+    return sort === "name" ? [...list].sort((a, b) => a.title.localeCompare(b.title)) : list;
+  }, [items, query, sort, hidden]);
+
+  async function create(template: TemplateId) {
+    if (busy) return;
+    setBusy(true);
     try {
-      const made = await api.post<Diagram>("/api/diagrams", { title: t("diagrams.untitled") });
-      refresh(); navigate(pathFor("diagrams", made.id));
+      const title = template === "blank" ? t("diagrams.untitled") : t(`diagrams.tpl.${template}`);
+      const made = await api.post<Diagram>("/api/diagrams", { title, scene: await templateScene(template) });
+      setChoosing(false);
+      invalidate("/api/diagrams");
+      navigate(pathFor("diagrams", made.id, { session: sessionId }));
+    } catch (exc) { toast(errorText(exc)); } finally { setBusy(false); }
+  }
+
+  async function duplicate(item: DiagramItem) {
+    try {
+      await api.post<Diagram>(`/api/diagrams/${item.id}/duplicate`, { title: t("diagrams.copy.title", { title: item.title }).slice(0, 160) });
+      toast(t("diagrams.duplicated"));
+      invalidate("/api/diagrams");
+      refresh();
     } catch (exc) { toast(errorText(exc)); }
   }
 
-  async function remove(item: DiagramItem) {
-    if (!(await confirmAsync(t("diagrams.delete"), { body: item.title, action: t("common.delete") }))) return;
-    try { await api.delete(`/api/diagrams/${item.id}`); refresh(); }
-    catch (exc) { toast(errorText(exc)); }
+  function remove(item: DiagramItem) {
+    setHidden((set) => new Set(set).add(item.id));
+    deleteWithUndo(
+      t("diagrams.deleted", { title: item.title }),
+      async () => { await api.delete(`/api/diagrams/${item.id}`); invalidate("/api/diagrams"); refresh(); },
+      () => setHidden((set) => { const next = new Set(set); next.delete(item.id); return next; }),
+      (exc) => toast(errorText(exc)),
+    );
   }
 
-  if (selected) return diagram && "scene" in diagram ? <Editor key={selected} diagram={diagram} toast={toast} returnPath={pathFor("diagrams", null, { session: sessionId })} items={items ?? []} sessionId={sessionId} onCreate={() => void create()} refreshDiagram={refreshDiagram} /> : <div className="screen"><PageHeader title={t("nav.diagrams")} />{detailError || t("common.loading")}</div>;
-  return <div className="screen diagrams-screen"><PageHeader title={sessionId ? t("diagrams.session") : t("nav.diagrams")} actions={<button className="btn primary" onClick={() => void create()}><Icon name="plus" size={16} /> {t("diagrams.new")}</button>} />
-    {error && <div className="empty">{error}</div>}
-    {loading && !items && <div className="empty">{t("common.loading")}</div>}
-    {items?.length === 0 && <div className="empty">{t("diagrams.empty")}</div>}
-    <div className="diagram-list">{(items ?? []).map((item) => <div className="diagram-row" key={item.id}><button onClick={() => navigate(pathFor("diagrams", item.id, { session: sessionId }))}><span className="diagram-thumb"><Icon name="pen" size={19} /></span><span><strong>{item.title}</strong><small>{new Date(item.updated_at).toLocaleString()}</small></span></button><button className="iconbtn" onClick={() => void remove(item)} aria-label={t("common.delete")}><Icon name="trash" size={16} /></button></div>)}</div>
-  </div>;
+  async function rename(item: DiagramItem, title: string) {
+    setRenaming(null);
+    const next = title.trim();
+    if (!next || next === item.title) return;
+    try {
+      await api.patch(`/api/diagrams/${item.id}`, { title: next, version: item.version });
+      invalidate("/api/diagrams");
+      refresh();
+    } catch (exc) { toast(errorText(exc)); }
+  }
+
+  const empty = items !== undefined && items.length === 0;
+  return (
+    <div className="screen wide diagrams-screen">
+      <PageHeader
+        title={t("nav.diagrams")}
+        actions={<button className="btn primary" onClick={() => setChoosing(true)} disabled={busy}><Icon name="plus" size={16} /> {t("diagrams.new")}</button>}
+      />
+      {sessionId && (
+        <div className="diagram-scope">
+          <span className="chip on"><Icon name="bots" size={14} />{t("diagrams.scope.chat")}</span>
+          <button className="linkbtn" onClick={() => navigate(pathFor("diagrams"), { replace: true })}>{t("diagrams.scope.all")}</button>
+        </div>
+      )}
+      {!empty && (
+        <div className="diagram-toolbar">
+          <label className="diagram-search">
+            <Icon name="search" size={15} />
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("diagrams.search")} aria-label={t("diagrams.search")} />
+          </label>
+          <Segmented<Sort> value={sort} onChange={setSort} label={t("diagrams.sort")} options={[{ id: "recent", label: t("diagrams.sort.recent") }, { id: "name", label: t("diagrams.sort.name") }]} />
+        </div>
+      )}
+      {error && !items && <div className="empty">{error}</div>}
+      {loading && !items && <div className="diagram-grid">{[0, 1, 2].map((key) => <div key={key} className="diagram-card skeleton" aria-hidden="true" />)}</div>}
+      {empty && (
+        <div className="diagram-empty">
+          <div className="diagram-empty-mark"><Icon name="pen" size={26} /></div>
+          <h2>{sessionId ? t("diagrams.empty.chat") : t("diagrams.empty.title")}</h2>
+          <p>{t("diagrams.empty.body")}</p>
+          <TemplatePicker onPick={(template) => void create(template)} busy={busy} />
+        </div>
+      )}
+      {!empty && items && shown.length === 0 && <div className="empty">{t("diagrams.search.none")}</div>}
+      {!empty && shown.length > 0 && (
+        <div className="diagram-grid">
+          {shown.map((item) => (
+            <DiagramCard
+              key={item.id}
+              item={item}
+              renaming={renaming === item.id}
+              onOpen={() => navigate(pathFor("diagrams", item.id, { session: sessionId }))}
+              onRename={(title) => void rename(item, title)}
+              onCancelRename={() => setRenaming(null)}
+              menu={[
+                { label: t("diagrams.open"), icon: "external", onSelect: () => navigate(pathFor("diagrams", item.id, { session: sessionId })) },
+                { label: t("diagrams.rename"), icon: "pen", onSelect: () => setRenaming(item.id) },
+                { label: t("diagrams.duplicate"), icon: "copy", onSelect: () => void duplicate(item) },
+                "-",
+                { label: t("common.delete"), icon: "trash", danger: true, onSelect: () => remove(item) },
+              ]}
+            />
+          ))}
+        </div>
+      )}
+      {choosing && (
+        <Sheet title={t("diagrams.new")} onClose={() => setChoosing(false)}>
+          <TemplatePicker onPick={(template) => void create(template)} busy={busy} />
+        </Sheet>
+      )}
+    </div>
+  );
 }
+
+function DiagramCard({ item, renaming, menu, onOpen, onRename, onCancelRename }: { item: DiagramItem; renaming: boolean; menu: Parameters<typeof OverflowMenu>[0]["items"]; onOpen: () => void; onRename: (title: string) => void; onCancelRename: () => void }) {
+  const field = useRef<HTMLInputElement>(null);
+  return (
+    <article className="diagram-card">
+      <button className="diagram-card-open" onClick={onOpen} aria-label={item.title} tabIndex={renaming ? -1 : 0}>
+        <DiagramThumb path={`/api/diagrams/${item.id}/preview`} version={item.version} />
+      </button>
+      <div className="diagram-card-foot">
+        <div className="diagram-card-text">
+          {renaming ? (
+            <input
+              ref={field}
+              className="field diagram-rename"
+              autoFocus
+              defaultValue={item.title}
+              maxLength={160}
+              aria-label={t("diagrams.title")}
+              onFocus={(event) => event.target.select()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") onRename(event.currentTarget.value);
+                if (event.key === "Escape") { event.stopPropagation(); onCancelRename(); }
+              }}
+              onBlur={(event) => onRename(event.currentTarget.value)}
+            />
+          ) : (
+            <button className="diagram-card-title" onClick={onOpen}>{item.title}</button>
+          )}
+          <span className="diagram-card-meta">
+            {item.updated_by === "agent" && <Icon name="bots" size={12} />}
+            <time dateTime={item.updated_at}>{t(item.updated_by === "agent" ? "diagrams.meta.agent" : "diagrams.meta.you", { time: relTimeLong(item.updated_at) })}</time>
+            {item.shared && <span className="diagram-card-shared" title={t("diagrams.share.on")} aria-label={t("diagrams.share.on")}><Icon name="link" size={12} /></span>}
+          </span>
+        </div>
+        <OverflowMenu small items={menu} label={t("diagrams.actions", { title: item.title })} />
+      </div>
+    </article>
+  );
+}
+
+function TemplatePicker({ onPick, busy }: { onPick: (template: TemplateId) => void; busy: boolean }) {
+  return (
+    <div className="diagram-templates" role="list">
+      {TEMPLATES.map((template) => (
+        <button key={template} role="listitem" className="diagram-template" disabled={busy} onClick={() => onPick(template)}>
+          <span className={`diagram-template-art ${template}`} aria-hidden="true">{TEMPLATE_ART[template]}</span>
+          <strong>{t(`diagrams.tpl.${template}`)}</strong>
+          <small>{t(`diagrams.tpl.${template}.hint`)}</small>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Small line drawings of what each template starts with, in the app's own colours. */
+const TEMPLATE_ART: Record<TemplateId, ReactElement> = {
+  blank: <svg viewBox="0 0 96 60"><rect x="30" y="18" width="36" height="24" rx="4" strokeDasharray="4 4" /><path d="M48 25v10M43 30h10" /></svg>,
+  flowchart: <svg viewBox="0 0 96 60"><ellipse cx="48" cy="9" rx="14" ry="6" /><rect x="34" y="22" width="28" height="12" rx="3" /><path d="M48 15v7M48 34v6" /><path d="M48 40l9 7-9 7-9-7z" /></svg>,
+  mindmap: <svg viewBox="0 0 96 60"><ellipse cx="48" cy="30" rx="15" ry="9" /><rect x="4" y="6" width="22" height="10" rx="3" /><rect x="70" y="6" width="22" height="10" rx="3" /><rect x="4" y="44" width="22" height="10" rx="3" /><rect x="70" y="44" width="22" height="10" rx="3" /><path d="M35 25L26 15M61 25l9-10M35 35l-9 10M61 35l9 10" /></svg>,
+  swimlane: <svg viewBox="0 0 96 60"><rect x="2" y="4" width="92" height="24" rx="2" strokeDasharray="3 3" /><rect x="2" y="32" width="92" height="24" rx="2" strokeDasharray="3 3" /><rect x="12" y="10" width="18" height="12" rx="2" /><rect x="40" y="38" width="18" height="12" rx="2" /><rect x="68" y="10" width="18" height="12" rx="2" /><path d="M30 16l10 22M58 44l10-22" /></svg>,
+};
