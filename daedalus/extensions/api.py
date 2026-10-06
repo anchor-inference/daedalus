@@ -64,6 +64,7 @@ from daedalus.config import (
 from daedalus.doctor import DoctorContext, render_text, run_checks, summarize
 from daedalus.extensions import (
     api_browsers,
+    api_calendar,
     api_files,
     api_harnesses,
     api_projects,
@@ -1571,6 +1572,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_files.register(api, app, auth)
     if isinstance(getattr(app, "db", None), Database):
         api_workspace.register(api, app, auth)
+        # The calendar, its connected accounts and the planner's tasks.
+        api_calendar.register(api, app, auth)
     # The agent's browser: its groups, the live view's ticket and socket, control, the audit.
     api_browsers.register(api, app, auth)
 

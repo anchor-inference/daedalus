@@ -39,6 +39,13 @@ TEXT: dict[str, dict[str, str]] = {
         "launcher.upgrade.package": "This copy was installed from a package: download the new version's installer from the release page and install it the same way; the data stays where it is.",
         "launcher.upgrade.promise": "It asks first, keeps the data from before the upgrade — on Linux with ext4 as a whole copy of the data folder, elsewhere as a verified backup — and puts the data and the launcher back if the new version does not come up.",
         "launcher.upgrade.notes": "Release notes: {url}",
+        "calendar.reminder.timed": "{when}",
+        "calendar.reminder.timed.place": "{when} · {place}",
+        "calendar.reminder.all_day": "{day}, all day",
+        "calendar.reminder.lead": "in {minutes} min",
+        "calendar.reminder.lead.now": "now",
+        "task.reminder.due": "Due {when}",
+        "task.reminder.block": "Planned for {when}",
     },
     "ru": {
         "run.finished": "Готово: {title}",
@@ -65,6 +72,13 @@ TEXT: dict[str, dict[str, str]] = {
         "launcher.upgrade.package": "Эта копия установлена из пакета: скачайте установщик новой версии со страницы релиза и установите так же; данные останутся на месте.",
         "launcher.upgrade.promise": "Сначала будет вопрос; данные до обновления сохраняются — на Linux с ext4 целой копией папки данных, в остальных случаях проверенной резервной копией, — а если новая версия не поднимется, данные и лаунчер вернутся как были.",
         "launcher.upgrade.notes": "Что нового: {url}",
+        "calendar.reminder.timed": "{when}",
+        "calendar.reminder.timed.place": "{when} · {place}",
+        "calendar.reminder.all_day": "{day}, весь день",
+        "calendar.reminder.lead": "через {minutes} мин",
+        "calendar.reminder.lead.now": "сейчас",
+        "task.reminder.due": "Срок: {when}",
+        "task.reminder.block": "Запланировано на {when}",
     },
 }
 

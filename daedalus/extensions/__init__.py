@@ -45,6 +45,7 @@ EXTENSIONS = (
     "daedalus.extensions.browser",
     "daedalus.extensions.watches",
     "daedalus.extensions.launcher_updates",
+    "daedalus.extensions.calendar_reminders",
     "daedalus.extensions.api",
 )
 
