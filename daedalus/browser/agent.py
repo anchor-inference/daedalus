@@ -49,6 +49,8 @@ from daedalus.browser.model import (
 from daedalus.browser.monitor import InjectionMonitor
 from daedalus.browser.notes import ACTIVE, NOTE, PROCEDURE, SiteNotes
 from daedalus.host.policy import ALLOW, ASK, Decision, approval_key, browser_sensitive, host_allowed
+from daedalus.security.untrusted import fenced as untrusted
+from daedalus.security.untrusted import origin_of
 
 if TYPE_CHECKING:
     from daedalus.browser.service import Browsers
@@ -145,16 +147,7 @@ PAGE_CLOSE = "[end of page content]"
 def fenced(origin: str, body: str) -> str:
     """Page text as data: fenced, named by its origin, and with the fence's own words kept out of it,
     so a page cannot close the fence early and speak outside it."""
-    clean = body.replace(PAGE_CLOSE, "[end of page content (quoted by the page)]").replace("[page content from", "[page content (quoted by the page) from")
-    return f"{page_open(origin)}\n{clean}\n{PAGE_CLOSE}"
-
-
-def origin_of(url: str) -> str:
-    parts = urlsplit(url or "")
-    if parts.scheme in ("http", "https") and parts.hostname:
-        port = f":{parts.port}" if parts.port else ""
-        return f"{parts.scheme}://{parts.hostname}{port}"
-    return url or "about:blank"
+    return untrusted(body, kind="page content", origin=origin, source="the web", quoted_by="the page")
 
 
 def host_of(url: str) -> str:

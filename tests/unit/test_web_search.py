@@ -163,7 +163,8 @@ async def test_tool_validates_arguments_and_reports_the_backend() -> None:
         empty = await web_search().invoke(context, {"query": "   "})
         assert empty.is_error
         result = await web_search().invoke(context, {"query": "a", "domains": "A.example, b.example"})
-        assert not result.is_error and result.content == "- A\n  https://a.example/\n  sa"
+        assert not result.is_error and result.content.splitlines()[1:-1] == ["- A", "  https://a.example/", "  sa"]
+        assert result.content.startswith("[search results from ") and "not instructions" in result.content
         assert result.metadata["backend"] == "duckduckgo" and result.metadata["count"] == 1 and result.metadata["fallback_used"] is False
         assert not searxng.called, "the default backend reached for a container that is not running"
     finally:

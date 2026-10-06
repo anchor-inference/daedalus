@@ -10,6 +10,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.security.untrusted import fenced, origin_of
 from daedalus.tools import search_hint, websearch
 from daedalus.tools._common import clip, error, ok, services_for, tool_config
 
@@ -55,7 +56,8 @@ async def web_fetch(context: ToolContext, url: str, max_chars: int | None = None
     else:
         return ok(context, f"HTTP {response.status_code}, {content_type}, {len(response.content)} bytes (binary; use exec with curl -o to save it)")
     limit = min(max_chars or web.fetch_max_chars, services.max_tool_output_chars)
-    return ok(context, f"HTTP {response.status_code} {url}\n\n{clip(body, limit)}", status=response.status_code)
+    page = fenced(clip(body, limit), kind="page content", origin=origin_of(str(response.url)), source="the web", quoted_by="the page")
+    return ok(context, f"HTTP {response.status_code} {url}\n\n{page}", status=response.status_code)
 
 
 @search_hint(
@@ -93,7 +95,9 @@ async def web_search(
         if all(a.error for a in outcome.attempts):
             return error(context, f"search failed ({reasons})", backend="", attempts=tried)
         return ok(context, "(no results)", count=0, backend=outcome.backend, attempts=tried)
-    return ok(context, websearch.render(outcome.hits), count=len(outcome.hits), backend=outcome.backend, fallback_used=outcome.fallback_used, attempts=tried)
+    results = fenced(websearch.render(outcome.hits), kind="search results", origin=outcome.backend,
+                     source="the web", quoted_by="the results")
+    return ok(context, results, count=len(outcome.hits), backend=outcome.backend, fallback_used=outcome.fallback_used, attempts=tried)
 
 
 TOOLS = [web_fetch, web_search]

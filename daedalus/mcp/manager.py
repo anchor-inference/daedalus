@@ -29,6 +29,7 @@ from protocore.contracts.types import ToolDefinition, ToolParameterSchema, ToolR
 from daedalus.config import McpServerConfig
 from daedalus.mcp.oauth import MCPOAuthClient, NeedsAuthorization
 from daedalus.security import redact
+from daedalus.security.untrusted import fenced
 from daedalus.tools._common import clip
 
 logger = logging.getLogger(__name__)
@@ -153,6 +154,8 @@ class McpToolProxy(Tool):
         content = "\n".join(parts) or "(empty result)"
         content, concealed = self._connection.vault.conceal(content)
         content = clip(content, _output_limit(context.session_id), note="the MCP tool returned more")
+        content = fenced(content, kind="tool output", origin=f"MCP server {self.server}", source="an outside server",
+                         quoted_by="the tool")
         if concealed:
             content += "\n" + VAULT_NOTE
         return ToolResult(tool_call_id=call_id, content=content, is_error=bool(getattr(result, "is_error", None) or getattr(result, "isError", False)))
