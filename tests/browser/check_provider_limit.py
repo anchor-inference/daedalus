@@ -63,13 +63,15 @@ def main() -> int:
             page = context.new_page()
             page.route("**/api/**", host)
             page.goto(f"{BASE}/settings/models?token=t&lang={lang}")
+            # Providers sit on their own tab of the models section since the free-model catalog arrived.
+            page.get_by_role("tab", name="Providers" if lang == "en" else "Провайдеры").click()
             provider = page.locator(".mrow", has_text="vendor").first
             provider.locator(".mmain").click()
             limits = provider.locator(".provider-limit")
             expect(limits).to_contain_text("rate limit" if lang == "en" else "ограничении частоты")
             expect(limits).to_contain_text("provider-declared" if lang == "en" else "заявленный сброс")
             limits.get_by_role("button", name="Hold this session" if lang == "en" else "Удержать эту сессию").click()
-            expect(limits).to_contain_text("Decision unconfirmed" if lang == "en" else "Решение не подтверждено")
+            expect(limits).to_contain_text("Couldn't confirm your decision was saved" if lang == "en" else "Не удалось подтвердить, что решение сохранено")
             limits.get_by_role("button", name="Try again" if lang == "en" else "Повторить").click()
             expect(limits).to_contain_text("held" if lang == "en" else "удержана")
             assert len(seen) >= 2 and seen[-1] == seen[-2], seen

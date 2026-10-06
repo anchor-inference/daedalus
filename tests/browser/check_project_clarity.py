@@ -34,7 +34,8 @@ def main() -> int:
                 page.goto(f"{BASE}/orchestration/project/{PROJECT}?token=t&lang={lang}")
                 bar = page.locator("nav.project-tabs")
                 expect(bar.locator("a")).to_have_count(3)
-                expect(page.locator(".goal-headline")).to_be_visible()
+                # Waiting questions take the goal line's place above the composer; with none, the goal line is there.
+                expect(page.locator(".goal-headline, .questions-line-text").first).to_be_visible()
                 send = page.locator(".composer [data-action='send']")
                 expect(send).to_be_visible()
                 assert send.bounding_box()["y"] + send.bounding_box()["height"] <= 560

@@ -347,6 +347,8 @@ def run() -> int:
         authority.locator("summary").first.click()
         expect(authority).to_contain_text("Active approvals: 0")
         authority.get_by_text("Approve an action", exact=True).click()
+        # The form opens on task assignment, which this project's coordinator is not offered.
+        authority.locator("select").first.select_option("planning")
         authority.get_by_role("button", name="Approve", exact=True).click()
         page.locator(".sheet-backdrop.confirm .dialog button").last.click()
         expect(authority).to_contain_text("Couldn't confirm", timeout=5000)
@@ -381,9 +383,9 @@ def run() -> int:
         handoff.locator("summary").first.click()
         handoff.locator("textarea").fill("Refresh the coordinator context")
         handoff.get_by_role("button", name="Check and replace").click()
-        expect(page.locator(".sheet-backdrop.confirm .dialog")).to_contain_text("model catalogue")
+        expect(page.locator(".sheet-backdrop.confirm .dialog")).to_contain_text("model is available")
         page.locator(".sheet-backdrop.confirm .dialog button").last.click()
-        expect(handoff).to_contain_text("unknown", timeout=5000)
+        expect(handoff).to_contain_text("Couldn't confirm the replacement was requested", timeout=5000)
         assert handoff_requests[0]["expected_coordinator_session_id"] == "coordinator-current"
         authority.locator("summary").first.click()
         authority.locator("summary").first.click()
