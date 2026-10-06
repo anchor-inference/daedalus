@@ -235,7 +235,7 @@ export function ProjectSwitcher({ projects, current, onPick, onClose, toast }: {
 
 type Env = "container" | "host";
 
-type SettingsDraft = { name: string; snapshots: boolean; defaultEnv: Env };
+type SettingsDraft = { name: string; snapshots: boolean; defaultEnv: Env; setupCommand?: string };
 
 function savedSettingsDraft(projectId: string): SettingsDraft | null {
   try {
@@ -559,6 +559,8 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
   const [snapshots, setSnapshots] = useState(startingDraft.current?.snapshots ?? project.settings.snapshots);
   const savedEnv: Env = project.settings.default_env ?? environments?.local ?? "container";
   const [defaultEnv, setDefaultEnv] = useState<Env>(startingDraft.current?.defaultEnv ?? savedEnv);
+  const savedSetup = project.settings.setup_command ?? "";
+  const [setupCommand, setSetupCommand] = useState(startingDraft.current?.setupCommand ?? savedSetup);
   const previousSavedEnv = useRef(savedEnv);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -569,22 +571,24 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
     setName(draft?.name ?? opened.name);
     setSnapshots(draft?.snapshots ?? opened.settings.snapshots);
     setDefaultEnv(draft?.defaultEnv ?? savedEnv);
+    setSetupCommand(draft?.setupCommand ?? opened.settings.setup_command ?? "");
   }, [opened.id]);
   useEffect(() => {
     setDefaultEnv((value) => value === previousSavedEnv.current ? savedEnv : value);
     previousSavedEnv.current = savedEnv;
   }, [savedEnv]);
-  const dirty = name.trim() !== project.name || snapshots !== project.settings.snapshots || defaultEnv !== savedEnv;
+  const setupChanged = setupCommand.trim() !== savedSetup;
+  const dirty = name.trim() !== project.name || snapshots !== project.settings.snapshots || defaultEnv !== savedEnv || setupChanged;
   useEffect(() => {
     try {
-      if (dirty) sessionStorage.setItem(draftKey, JSON.stringify({ name, snapshots, defaultEnv }));
+      if (dirty) sessionStorage.setItem(draftKey, JSON.stringify({ name, snapshots, defaultEnv, setupCommand }));
       else sessionStorage.removeItem(draftKey);
     } catch { /* the mounted form still retains its draft */ }
-  }, [draftKey, name, snapshots, defaultEnv, dirty]);
+  }, [draftKey, name, snapshots, defaultEnv, setupCommand, dirty]);
   async function save() {
     if (!dirty || !name.trim() || busy || !writes.ready) return;
     setBusy(true);
-    await writes.write("PATCH", path, { name: name.trim(), snapshots, ...(defaultEnv !== savedEnv ? { default_env: defaultEnv } : {}) }, t("common.saved"), () => {
+    await writes.write("PATCH", path, { name: name.trim(), snapshots, ...(defaultEnv !== savedEnv ? { default_env: defaultEnv } : {}), ...(setupChanged ? { setup_command: setupCommand.trim() } : {}) }, t("common.saved"), () => {
       try { sessionStorage.removeItem(draftKey); } catch { /* local state has the confirmed value */ }
       onClose();
     });
@@ -649,6 +653,10 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
         <span>{t("project.snapshots")}</span>
         <span className="sub">{t("project.snapshots.hint.edit")}</span>
       </label>
+      <label className="field" htmlFor="project-setup-command">{t("project.setup")}</label>
+      <input id="project-setup-command" className="field mono" value={setupCommand} maxLength={2000}
+        spellCheck={false} autoCapitalize="off" autoCorrect="off" onChange={(e) => setSetupCommand(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
+      <div className="sub">{t("project.setup.hint")}</div>
       <ProjectBudget projectId={project.id} write={writes.write} canWrite={writes.ready} confirmed={writes.confirmed} />
       <ProjectResources projectId={project.id} write={writes.write} canWrite={writes.ready} />
       <ProjectExtensions projectId={project.id} toast={toast} />

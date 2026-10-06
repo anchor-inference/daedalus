@@ -495,6 +495,45 @@ async def test_a_failing_host_command_is_reported_with_its_exit_code(tmp_path: P
         await trees.prepare(_folder(tmp_path, env="host"), "Anna", "1", "one")
 
 
+async def test_a_setup_command_that_hangs_is_killed_with_its_children_at_the_timeout(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    trees = StaffWorktrees("container")
+    tree = await trees.prepare(_folder(repo), "Anna", "1", "one")
+    assert tree.created
+    pid_file = tmp_path / "child.pid"
+
+    result = await trees.run_setup(tree, f"echo installing; sleep 30 & echo $! > {pid_file}; wait", timeout=1.0)
+
+    assert not result.ok and result.exit_code is None and "installing" in result.tail
+    assert "timed out" in result.reason("npm ci")
+    child = int(pid_file.read_text())
+    # The shell's child is in the killed group too: an orphaned install would keep writing into the
+    # worktree after the launch was refused.
+    for _ in range(50):
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        raise AssertionError("the setup command's child outlived the timeout")
+
+
+async def test_a_host_setup_command_runs_through_the_bridge_in_the_worktree(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    (repo / ".git" / "info" / "exclude").write_text("/.agents/\n")
+    bridge = _FakeBridge()
+    trees = StaffWorktrees("container", host=bridge)
+    tree = await trees.prepare(_folder(repo, env="host"), "Anna", "1", "one")
+
+    result = await trees.run_setup(tree, "echo ready; echo 'warn' >&2; exit 4")
+
+    assert bridge.calls[-1] == ("host", ["bash", "-lc", "echo ready; echo 'warn' >&2; exit 4"], str(tree.cwd))
+    assert not result.ok and result.exit_code == 4 and "ready" in result.tail and "warn" in result.tail
+    again = await trees.prepare(_folder(repo, env="host"), "Anna", "1", "one")
+    assert not again.created
+
+
 async def test_a_sandboxed_commit_in_a_worktree_needs_only_the_paths_the_walls_open(request: pytest.FixtureRequest) -> None:
     """The opt-in sandbox proof: a commit inside bubblewrap, with only the writable walls of a staff
     session in its worktree bound, lands on the staff branch, and a write into the folder the worktree

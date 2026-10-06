@@ -78,6 +78,7 @@ from daedalus.stores.staff import (
     DAEDALUS_EFFORTS,
     HARNESS_NAMES,
     Ask,
+    SetupFailed,
     Staff,
     StaffBusy,
     StaffError,
@@ -693,6 +694,39 @@ class Team:
             await self.note_on_card(task.id, f"{entry.staff_name} could not start: {exc}")
             await self._set_assignee(task, None, actor="system", error=f"{entry.staff_name} could not start: {exc}")
 
+    async def _set_up(self, member: Staff, task: BoardTask, project: Project, worktree: Worktree) -> None:
+        """Run the project's setup command in a worktree that was just made, before the worker starts.
+
+        Only a new worktree: a reused one keeps what was installed in it. A worktree whose last setup
+        failed is set up again though, or one bad ``npm ci`` would leave it bare for good. The outcome
+        and the tail of the output are kept under the worktree's key. A failure stops the launch: the
+        card says why with the last lines of the output, and the task stays unstarted.
+        """
+        command = project.settings.setup_command
+        if not command:
+            return
+        key = f"worktree_setup:{worktree.env}:{worktree.path}"
+        previous = await self.manager.db.kv_get(key)
+        if not worktree.created and (previous is None or previous.get("ok")):
+            return
+        try:
+            result = await self.worktrees.run_setup(worktree, command)
+        except WorktreeError as exc:
+            raise SetupFailed(f"no setup for {member.name} in {worktree.cwd}: {exc}") from exc
+        await self.manager.db.kv_set(key, {"ok": result.ok, "exit_code": result.exit_code,
+                                           "command": command, "tail": result.tail, "at": _now()})
+        if result.ok:
+            return
+        reason = result.reason(command)
+        logger.warning("setup of %s's worktree %s failed: %s", member.name, worktree.path, reason)
+        # The same words a launch the queue could not make leaves on the card, so the operator finds
+        # this one where they look for the others; the event wakes the orchestrator.
+        await self.note_on_card(task.id, f"{member.name} could not start: {reason}")
+        current = await self.task(task.id)
+        if current is not None and current.assignee_staff_id == member.id:
+            await self._set_assignee(current, None, actor="system", error=f"{member.name} could not start: {reason}")
+        raise SetupFailed(reason)
+
     # -- assigning and starting ---------------------------------------------------------------------
 
     @staticmethod
@@ -920,6 +954,7 @@ class Team:
                 raise StaffError("the selected CLI session was launched in another worktree or branch")
             if source and source.session.launch_cwd and str(worktree.cwd) != source.session.launch_cwd:
                 raise StaffError("the selected CLI session was launched from another worktree folder")
+            await self._set_up(member, task, project, worktree)
         # Before the session exists: the brief names these copies, so a start whose files cannot be
         # put in place does not start at all.
         delivered = await self.hand_files(member, await self.manager.files.of_task(task.id), folder=folder, cwd=str(worktree.cwd if worktree else folder.path), task_id=task.id, by=by)
@@ -1317,6 +1352,7 @@ class Team:
                 await self.runtime(live.staff).stop(live)
             except Exception:  # noqa: BLE001 — the row ends whatever the process did; reconcile finds a survivor
                 logger.exception("stopping %s's session failed", live.staff.name)
+        await self._stop_services(live, reason)
         ended = await self.manager.staff.end_session(live.id, reason)
         if ended is not None:
             payload: dict[str, Any] = {"status": "exited", "previous": live.session.status, "detail": reason[:500]}
@@ -1328,6 +1364,21 @@ class Team:
         for ask in await self._open_asks(live.id):
             if await self.manager.asks.resolve(ask.id, "system", {"closed": f"the session ended: {reason}"}):
                 await self._withdrawn(ask)
+
+    async def _stop_services(self, live: LiveSession, reason: str) -> None:
+        """Stop the servers the worker's session started with ServiceStart. They belong to the session,
+        and nothing else ever stopped them: a released worker's dev server kept its port and its memory
+        until the operator found it in the services list. Only a Daedalus session has the tool."""
+        services: Any = self.app.extensions.get("services")
+        if services is None or not live.session.session_id:
+            return
+        try:
+            stopped = await services.stop_session(live.session.session_id, f"its worker ended: {reason}")
+        except Exception:  # noqa: BLE001 — the session ends whatever its servers did
+            logger.exception("stopping the services of %s's session failed", live.staff.name)
+            return
+        if stopped:
+            logger.info("stopped %d service(s) of %s's session: %s", stopped, live.staff.name, reason)
 
     async def _open_asks(self, staff_session_id: str) -> list[Ask]:
         rows = await self.manager.db.fetchall("SELECT id FROM asks WHERE staff_session_id = ? AND resolved_at IS NULL ORDER BY created_at", (staff_session_id,))

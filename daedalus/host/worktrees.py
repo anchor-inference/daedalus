@@ -30,6 +30,7 @@ import asyncio
 import logging
 import os
 import re
+import signal
 import unicodedata
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -47,6 +48,12 @@ TITLE_SLUG_CHARS = 32
 STAFF_SLUG_CHARS = 32
 IDENTITY = ("daedalus", "daedalus@localhost")
 GIT_TIMEOUT = 300.0
+SETUP_TIMEOUT = 900.0
+"""How long a project's setup command may run in a new worktree: long enough for a cold
+``uv sync`` and ``npm ci`` of a large project, short enough that a hung install does not hold the
+member's launch for the rest of the day."""
+SETUP_TAIL_CHARS = 4000
+SETUP_TAIL_LINES = 20
 
 # The directories a session writes into the folder it works in: the inbox files arrive in, and the
 # per-tool scratch of Exec, its background jobs, the services it hosts, the snapshots, and the staff
@@ -85,11 +92,31 @@ class Worktree:
     """Where the folder sits inside its repository (``git rev-parse --show-prefix``), empty when the
     folder is the repository's top. A worktree checks out the whole repository, so a staff member
     assigned to a sub-folder works in the same sub-folder of its worktree."""
+    created: bool = False
+    """Whether :meth:`StaffWorktrees.prepare` made it just now rather than switching an existing one:
+    only a new worktree lacks the dependencies, so only it gets the project's setup command."""
 
     @property
     def cwd(self) -> Path:
         """Where a staff session in this worktree works."""
         return self.path / self.subdir if self.subdir else self.path
+
+
+@dataclass(frozen=True, slots=True)
+class SetupResult:
+    """How a project's setup command ended in a worktree; ``tail`` is the last of its output."""
+
+    ok: bool
+    exit_code: int | None
+    """``None`` when it was killed at the timeout."""
+    tail: str
+
+    def reason(self, command: str) -> str:
+        how = "timed out" if self.exit_code is None else f"exited with {self.exit_code}"
+        # Bounded twice: a card's notes keep a few thousand characters, and one progress bar can be
+        # a single line of tens of thousands.
+        lines = "\n".join(self.tail.splitlines()[-SETUP_TAIL_LINES:])[-1500:]
+        return f"the setup command `{command}` {how}" + (f"; its last lines:\n{lines}" if lines else "")
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,6 +352,38 @@ def _conflicted_names(message: str) -> list[str]:
     return list(dict.fromkeys(names))
 
 
+async def _run_local(argv: list[str], *, cwd: Path, timeout: float) -> SetupResult:
+    """Run ``argv`` with its output merged, keeping only the tail in memory: an install may print
+    megabytes, and only its last lines say why it failed. Its own session, so a timeout kills the
+    whole group: ``npm ci`` under ``bash -c`` would otherwise outlive the shell that was killed."""
+    proc = await asyncio.create_subprocess_exec(
+        *argv, cwd=str(cwd), env={**os.environ, **_QUIET},
+        stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        start_new_session=True,
+    )
+    assert proc.stdout is not None
+    kept = bytearray()
+
+    async def drain() -> None:
+        assert proc.stdout is not None
+        while chunk := await proc.stdout.read(65536):
+            kept.extend(chunk)
+            del kept[:-SETUP_TAIL_CHARS * 4]
+        await proc.wait()
+
+    try:
+        await asyncio.wait_for(drain(), timeout=timeout)
+    except TimeoutError:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        await proc.wait()
+        return SetupResult(False, None, mask_credentials(kept.decode("utf-8", "replace")[-SETUP_TAIL_CHARS:]))
+    tail = mask_credentials(kept.decode("utf-8", "replace")[-SETUP_TAIL_CHARS:])
+    return SetupResult(proc.returncode == 0, proc.returncode, tail)
+
+
 def _text(value: Any) -> str:
     if isinstance(value, bytes | bytearray):
         return bytes(value).decode("utf-8", "replace")
@@ -474,34 +533,60 @@ class StaffWorktrees:
             except GitError:
                 base = (await git.run(["rev-parse", "HEAD"], cwd=where)).strip()
             try:
-                await self._place(git, where, path, branch, head)
+                created = await self._place(git, where, path, branch, head)
             except GitError as first:
                 logger.info("worktree for %s in %s failed once, pruning and retrying: %s", slug_, where, first)
                 try:
                     await git.run(["worktree", "prune"], cwd=where)
                     await self._source_head(git, where, expected=head)
-                    await self._place(git, where, path, branch, head)
+                    created = await self._place(git, where, path, branch, head)
                 except GitError as exc:
                     raise WorktreeError(f"could not prepare the worktree of {slug_} in {where}: {exc}") from exc
             await self._identity(git, path)
-        return Worktree(path=path, branch=branch, base_ref=base, folder=where, env=folder.env, subdir=prefix.rstrip("/"))
+        return Worktree(path=path, branch=branch, base_ref=base, folder=where, env=folder.env, subdir=prefix.rstrip("/"), created=created)
 
-    async def _place(self, git: _Git, folder: Path, path: Path, branch: str, base: str) -> None:
+    async def _place(self, git: _Git, folder: Path, path: Path, branch: str, base: str) -> bool:
+        """Put the worktree at ``path`` on ``branch``; whether it had to be made."""
         entry = (await self._registered(git, folder)).get(git.same_path(str(path)))
         if entry is not None and "prunable" not in entry:
             if await self._is_dirty(git, path):
                 raise WorktreeRefused(f"the worktree {path} has uncommitted changes; commit or pause the previous task first")
             if entry.get("branch") == f"refs/heads/{branch}":
-                return
+                return False
             if await self._branch_exists(git, folder, branch):
                 await git.run(["switch", branch], cwd=path)
             else:
                 await git.run(["switch", "-c", branch, base], cwd=path)
-            return
+            return False
         if await self._branch_exists(git, folder, branch):
             await git.run(["worktree", "add", str(path), branch], cwd=folder)
         else:
             await git.run(["worktree", "add", "-b", branch, str(path), base], cwd=folder)
+        return True
+
+    async def run_setup(self, worktree: Worktree, command: str, *, timeout: float = SETUP_TIMEOUT) -> SetupResult:
+        """Run a project's setup command in the worktree's working folder, in the worktree's own
+        environment: locally as a process group of this host, otherwise through the host bridge.
+
+        A login shell, so the tools the operator installed under their home (``uv``, ``npm`` from a
+        version manager) are on the path as they are in their own terminal. A failure is a result,
+        not an exception; only a bridge that cannot be reached raises.
+        """
+        argv = ["bash", "-lc", command]
+        if worktree.env == self.local_env:
+            return await _run_local(argv, cwd=worktree.cwd, timeout=timeout)
+        if self.host is None:
+            raise WorktreeUnavailable("host folders need the host terminal bridge")
+        try:
+            result = await self.host.exec_run(worktree.env, argv, cwd=str(worktree.cwd), env_vars=dict(_QUIET), timeout=timeout)
+        except OSError as exc:
+            raise WorktreeUnavailable(f"the host terminal bridge did not answer: {exc}") from exc
+        output = _text(getattr(result, "stdout", "")) + _text(getattr(result, "stderr", ""))
+        tail = mask_credentials(output[-SETUP_TAIL_CHARS:])
+        if getattr(result, "timed_out", False):
+            return SetupResult(False, None, tail)
+        code = int(getattr(result, "exit_code", 1))
+        return SetupResult(code == 0, code, tail)
 
     async def commit_wip(self, worktree: Worktree, message: str) -> str | None:
         """Commit everything in the worktree on its branch; the new commit's id, or None when clean.

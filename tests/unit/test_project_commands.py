@@ -73,6 +73,27 @@ async def test_project_settings_receipt_replay_and_stale_write(
     assert len(settings_events) == 2 and settings_events[0]["receipt_id"] == receipt["receipt_id"]
 
 
+async def test_the_setup_command_is_kept_trimmed_and_refused_across_lines(running: Any, tmp_path: Path) -> None:
+    _, client = running
+    folder = tmp_path / "site"
+    folder.mkdir()
+    created = (await client.post("/api/projects", headers=HEADERS,
+                                 json={"name": "Bakery", "folders": [{"path": str(folder)}]})).json()
+    project_id, path = created["id"], f"/api/projects/{created['id']}"
+    assert created["settings"]["setup_command"] == ""
+    saved = await client.patch(path, headers=HEADERS, json={
+        "client_operation_id": "setup-one", "expected_entity_revision": await _revision(client, project_id),
+        "setup_command": "  uv sync --frozen && npm ci  "})
+    assert saved.status_code == 200, saved.text
+    two_lines = await client.patch(path, headers=HEADERS, json={
+        "client_operation_id": "setup-two", "expected_entity_revision": await _revision(client, project_id),
+        "setup_command": "uv sync\nnpm ci"})
+    assert two_lines.status_code == 400 and "one line" in two_lines.text
+    current = next(item for item in (await client.get("/api/projects", headers=HEADERS)).json()
+                   if item["id"] == project_id)
+    assert current["settings"]["setup_command"] == "uv sync --frozen && npm ci"
+
+
 async def test_folder_create_replay_and_remove_replay_are_stable(
     running: Any, tmp_path: Path, db: Database,
 ) -> None:

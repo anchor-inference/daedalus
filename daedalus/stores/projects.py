@@ -154,6 +154,10 @@ class ProjectSettings:
     default_env: str = ""
     """Where a new agent of this project runs when nothing names a folder; empty until the store
     fills it with the environment this process runs in."""
+    setup_command: str = ""
+    """One shell command line run in a staff member's worktree when it is first made, before the
+    worker starts (``uv sync --frozen && npm ci``): a fresh worktree has none of the dependencies the
+    folder itself has installed. Empty runs nothing."""
     orchestrator: OrchestratorSettings = field(default_factory=OrchestratorSettings)
 
     @classmethod
@@ -165,6 +169,7 @@ class ProjectSettings:
             system=str(data.get("system") or ""),
             ephemeral=bool(data.get("ephemeral", False)),
             default_env=env if env in ENVIRONMENTS else default_env,
+            setup_command=str(data.get("setup_command") or "").strip(),
             orchestrator=OrchestratorSettings.load(data.get("orchestrator")),
         )
 
@@ -174,6 +179,7 @@ class ProjectSettings:
             "system": self.system,
             "ephemeral": self.ephemeral,
             "default_env": self.default_env,
+            "setup_command": self.setup_command,
             "orchestrator": self.orchestrator.dump(),
         }
 

@@ -133,6 +133,7 @@ class ProjectPatch(MutationBody):
     name: str | None = None
     snapshots: bool | None = None
     default_env: Env | None = None
+    setup_command: str | None = Field(default=None, max_length=2000)
     keep: Literal[True] | None = None
     """Keep a chat's scratch project as a project of its own. There is no way back: an ephemeral
     project is one made implicitly, and nothing the operator does makes one."""
@@ -355,6 +356,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                 Principal.operator(who), project_id, client_operation_id=body.client_operation_id,
                 expected_entity_revision=body.expected_entity_revision, name=body.name,
                 snapshots=body.snapshots, default_env=body.default_env, keep=bool(body.keep),
+                setup_command=body.setup_command,
             )
         except ControlConflict as exc:
             raise conflict(exc) from exc

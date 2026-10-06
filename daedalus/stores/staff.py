@@ -93,6 +93,11 @@ class StaffBusy(StaffError):
     """The staff member already has a live session, or is asked to leave while it works."""
 
 
+class SetupFailed(StaffError):
+    """The project's setup command failed in a new worktree. It runs before the worker's session and
+    attempt exist and has exited when this is raised, so the launch is known not to have started."""
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
