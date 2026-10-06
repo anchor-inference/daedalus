@@ -85,7 +85,7 @@ export function NavMenu({ screen, counts, selfdev, onClose, opener }: { screen: 
           </div>
         ))}
         <div className="navmenu-section">
-          <button role="menuitem" className="navmenu-item" onClick={() => { setPet(!pet); onClose(); }} aria-pressed={pet}>
+          <button role="menuitem" className="navmenu-item navmenu-action" onClick={() => { setPet(!pet); onClose(); }}>
             <Icon name="bots" size={18} />
             <span className="truncate">{pet ? t("pet.off") : t("pet.on")}</span>
           </button>

@@ -86,6 +86,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/lang", s.handleLang)
 	mux.HandleFunc("/api/setup/detect", s.handleSetupDetect)
 	mux.HandleFunc("/api/setup/endpoint", s.handleSetupEndpoint)
+	mux.HandleFunc("/api/setup/free-catalog", s.handleSetupFreeCatalog)
+	mux.HandleFunc("/api/setup/free-probe", s.handleSetupFreeProbe)
 	mux.HandleFunc("/api/autostart", s.handleAutostart)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/action/", s.handleAction)

@@ -54,6 +54,7 @@ import { pipGroup } from "../browser/model";
 import { orchestrationPathOf } from "../mode";
 import { FullResult, ToolResultView } from "../toolresult";
 import { useQuery } from "../store";
+import { sentMessageReachedTranscript } from "../pending-message";
 
 /**
  * Markdown parsed once per text. `cacheKey` names a message that will never change again, so its
@@ -118,7 +119,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   usePresenceScope({ session: id || undefined });
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const { data: sessionDiagrams } = useQuery<{ id: string; title: string }[]>(`/api/diagrams?session_id=${encodeURIComponent(id)}`, { pollMs: 5000, staleMs: 0 });
-  const [sendingMessages, setSendingMessages] = useState<{ id: string; text: string; at: number }[]>([]);
+  const [sendingMessages, setSendingMessages] = useState<{ id: string; text: string }[]>([]);
   // The streaming turn's state is not React state: a token must repaint the turn it belongs to,
   // not the screen. The components that show it subscribe; everything else never hears about it.
   const liveRef = useRef<LiveStore | null>(null);
@@ -703,7 +704,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     return built.current;
   }, [detail?.messages]);
   useEffect(() => {
-    setSendingMessages((current) => current.filter((pending) => !detail?.messages.some((message) => message.role === "user" && Date.parse(message.created_at) >= pending.at - 5000 && (message.text === pending.text || message.text.includes(pending.text)))));
+    setSendingMessages((current) => current.filter((pending) => !sentMessageReachedTranscript(detail?.messages, pending.id)));
   }, [detail?.messages]);
   // What the receipts under the operator's messages measure "read" against.
   useAnsweredMark(id, detail?.messages, orchestrating);
@@ -1057,7 +1058,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     const pendingText = text || files.map((file) => file.name).join(", ");
     // Submission can wait behind a busy run for several seconds. Show the operator's words
     // immediately, then let the durable transcript replace this temporary bubble.
-    setSendingMessages((current) => [...current, { id: pendingId, text: pendingText, at: Date.now() }]);
+    setSendingMessages((current) => [...current, { id: pendingId, text: pendingText }]);
     stick.current = true;
     try {
       if (files.length > 0) {
@@ -1420,7 +1421,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                   )}
                 />
                 {busy && <LiveTurn base={tail} live={live} onTurnAction={turnAction} onRender={pinBottom} />}
-                {sendingMessages.filter((pending) => !detail?.messages.some((message) => message.role === "user" && Date.parse(message.created_at) >= pending.at - 5000 && (message.text === pending.text || message.text.includes(pending.text)))).map((pending) => <div className="turn" key={pending.id}><div className="turn-content"><div className="msg-wrap"><div className="msg user"><Md text={pending.text} /></div></div></div></div>)}
+                {sendingMessages.filter((pending) => !sentMessageReachedTranscript(detail?.messages, pending.id)).map((pending) => <div className="turn" key={pending.id}><div className="turn-content"><div className="msg-wrap"><div className="msg user"><Md text={pending.text} /></div></div></div></div>)}
               </SessionContext.Provider>
               {flow}
               {/* Not while the Questions tab is the one open: the cards are already beside the chat,

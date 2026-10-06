@@ -16,6 +16,7 @@ import { plural, t, useLang } from "../i18n";
 import { LangPicker, Switch } from "../ui/index";
 import { errorText, numInput } from "../ui";
 import { BLANK, ModelEntry, Picked, PricingDraft, REASONING_EFFORTS, prefilled, presetIdFor, priceFor, pricingFromDraft, retyped } from "../models";
+import { FreeModels } from "./FreeModels";
 
 export type { ModelEntry, Picked } from "../models";
 export { presetIdFor } from "../models";
@@ -272,6 +273,7 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
   const [priceError, setPriceError] = useState("");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<"regular" | "free">("regular");
 
   useEffect(() => {
     api.get<OnboardingState>("/api/onboarding").then(setState).catch((e) => toast(errorText(e)));
@@ -393,6 +395,11 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
 
   return (
     <div className="addmodel">
+      <div className="segmented" role="tablist" aria-label={t("add.step1")} style={{ marginBottom: 18 }}>
+        <button role="tab" aria-selected={mode === "regular"} className={mode === "regular" ? "on" : ""} onClick={() => setMode("regular")}>{t("add.step1")}</button>
+        <button role="tab" aria-selected={mode === "free"} className={mode === "free" ? "on" : ""} onClick={() => setMode("free")}>{t("free.tab")}</button>
+      </div>
+      {mode === "free" ? <FreeModels onSaved={onSaved} toast={toast} /> : <>
       <Step n={1} title={t("add.step1")} sub={t("add.step1.sub")} active={!provider} done={!!provider}>
         <ProviderStep state={state} chosen={provider} onPick={pickProvider} />
         {provider === CUSTOM && <CustomProvider key={CUSTOM} kind="openai_compat" busy={busy} onCreate={createProvider} />}
@@ -480,6 +487,7 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
           {busy ? t("add.saving") : state?.has_model ? t("add.save") : t("add.save.first")}
         </button>
       </div>
+      </>}
     </div>
   );
 }

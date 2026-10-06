@@ -16,6 +16,7 @@ import { ComponentsTab } from "./Components";
 import { DependenciesTab } from "./Dependencies";
 import { PromptChange } from "./PromptChange";
 import { AddModel } from "./AddModel";
+import { FreeModels } from "./FreeModels";
 import { ON_DEMAND_CHOICES, REASONING_EFFORTS, onDemandGroups, orchestratorPreset } from "../models";
 import { mainPreset } from "../main/model";
 import { Sheet } from "../ui/dialogs";
@@ -37,6 +38,13 @@ import { ProviderLimit } from "./ProviderLimit";
 const DEFAULT_KINDS = ["deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"];
 /** The generic protocol also serves remote vendors, so temperature is available there too. */
 const TEMPERATURE_KINDS = new Set(["vllm", "llamacpp", "openai_compat"]);
+const KEY_LINKS: Record<string, string> = {
+  openrouter: "https://openrouter.ai/settings/keys",
+  opencode_zen: "https://opencode.ai/auth",
+  groq: "https://console.groq.com/keys",
+  cerebras: "https://cloud.cerebras.ai/platform",
+  gemini: "https://aistudio.google.com/apikey",
+};
 
 function RulesEditor({ rules, fallback, onSave }: { rules: string; fallback: string; onSave: (rules: string) => void }) {
   const [text, setText] = useState(rules || fallback);
@@ -352,6 +360,7 @@ function ProviderBlock({ id, p, kinds, available, onPatch, onRemove }: {
                   </button>
                 )}
               </div>
+              {KEY_LINKS[id] && <span className="sub">{t("free.key.get")} <a href={KEY_LINKS[id]} target="_blank" rel="noopener noreferrer">{p.name} ↗</a></span>}
             </label>
           </div>
           <ProviderLimit providerId={id} />
@@ -987,6 +996,9 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
   const caps = useQuery<Capabilities>("/api/capabilities", { staleMs: 20000 });
   const [s, setS] = useState<Settings | null>(null);
   const [adding, setAdding] = useState(false);
+  const [modelsTab, setModelsTab] = useState<"my" | "free" | "providers">(
+    () => new URLSearchParams(window.location.search).get("tab") === "free" ? "free" : "my",
+  );
   const [status, setStatus] = useState<any>(null);
   const wide = useMedia("(min-width: 1024px)");
   const [query, setQuery] = useState("");
@@ -1146,6 +1158,13 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
       case "models":
         return (
           <>
+            <div className="segmented" role="tablist" aria-label={t("settings.models.title")} style={{ marginBottom: 18 }}>
+              <button role="tab" aria-selected={modelsTab === "my"} className={modelsTab === "my" ? "on" : ""} onClick={() => setModelsTab("my")}>{t("settings.models.title")}</button>
+              <button role="tab" aria-selected={modelsTab === "free"} className={modelsTab === "free" ? "on" : ""} onClick={() => setModelsTab("free")}>{t("free.tab")}</button>
+              <button role="tab" aria-selected={modelsTab === "providers"} className={modelsTab === "providers" ? "on" : ""} onClick={() => setModelsTab("providers")}>{t("settings.providers.title")}</button>
+            </div>
+            {modelsTab === "free" && <div className="card"><FreeModels onSaved={(_, next) => setS(next)} toast={toast} /></div>}
+            {modelsTab === "my" && <>
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.models.title")}</div>
               <div className="sub">{t("settings.models.sub")}</div>
@@ -1230,7 +1249,8 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
               </Row>
               <NumRow id="vision-output" title={t("settings.vision.output")} value={s.vision.max_output_tokens} min={100} step={100} onSave={(v) => save({ vision: { ...s.vision, max_output_tokens: v } })} />
             </div>
-            <div className="card">
+            </>}
+            {modelsTab === "providers" && <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.providers.title")}</div>
               <div className="sub">{t("settings.providers.sub")}</div>
               <div className="mlist">
@@ -1239,7 +1259,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
                 ))}
               </div>
               <AddProviderRow kinds={kinds} toast={toast} onAdd={(pid, base, kind) => void patchProvider(pid, { kind, base_url: base })} />
-            </div>
+            </div>}
           </>
         );
       case "rules":

@@ -459,7 +459,7 @@ async def test_a_steer_the_core_placed_is_not_shown_twice_while_the_run_lasts(se
     manager = await _manager(settings, db, provider)
     state = await manager.create_session("busy")
     state.task = asyncio.create_task(asyncio.sleep(SETTLE))
-    await manager.submit(state.session.id, "change of plan")
+    await manager.submit(state.session.id, "change of plan", client_message_id="send-1")
     # queue_update tags the received copy, while the submitted copy remains an archive record.
     state.engine = SimpleNamespace(history=[Message(role=MessageRole.user, content_blocks=[TextBlock(text="change of plan")])])  # type: ignore[assignment]
     queued = await manager.queued_steers(state.session.id)
@@ -470,6 +470,8 @@ async def test_a_steer_the_core_placed_is_not_shown_twice_while_the_run_lasts(se
     # Only the received copy is drawn, in the core history's position after the tool batch.
     views = [message_view(m) for m in shown if m.role is MessageRole.user]
     assert [(v["origin"], v["internal"]) for v in views] == [("operator", True), ("operator", False)]
+    assert views[0]["client_message_id"] == "send-1"
+    assert views[1]["client_message_ids"] == ["send-1"]
     state.engine = None
     state.task.cancel()
     await manager.close()

@@ -109,6 +109,8 @@ def message_view(message: Message) -> dict[str, Any]:
         "summary": is_summary,
         "internal": internal,
         "origin": origin or ("operator" if message.role is MessageRole.user and not internal else ""),
+        "client_message_id": message.metadata.get("daedalus.client_message_id") if message.role is MessageRole.user else None,
+        "client_message_ids": message.metadata.get("daedalus.client_message_ids") if message.role is MessageRole.user else None,
         "seq": message.metadata.get("daedalus.seq") if isinstance(message.metadata, dict) else None,
         "compaction": compaction,
         "archived": archived,

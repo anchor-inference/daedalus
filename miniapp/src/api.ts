@@ -727,6 +727,8 @@ export type OperatorSteps = {
 export type MessageView = {
   run_id?: string | null;
   role: "system" | "user" | "assistant" | "tool";
+  client_message_id?: string | null;
+  client_message_ids?: string[] | null;
   summary?: boolean;
   internal?: boolean;
   origin?: string;
@@ -1312,6 +1314,7 @@ export type Preset = {
   thinking: boolean;
   reasoning_effort: string;
   images: boolean;
+  free_only?: boolean;
   context_window: number;
   max_output_tokens: number;
   /** Tool groups on demand held back for this model; absent or null follows what the model is known for. */

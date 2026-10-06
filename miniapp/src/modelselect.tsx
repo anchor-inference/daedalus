@@ -13,6 +13,7 @@ import { readCustomModel, rememberCustomModel } from "./composer";
 import { DICT, num, t } from "./i18n";
 import { ProviderMark, providerName } from "./ui/provider-mark";
 import { EffortMenu } from "./effortselect";
+import { pathFor } from "./router";
 
 export type ModelChoice = { clear: true } | { preset: string } | { provider: string; model: string } | { model: string };
 
@@ -104,6 +105,7 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
 function ModelList({ cat, failed, model, fallback, onPick, effort, thinking, onChooseEffort, sheet }: { cat: Catalogue | null; failed: string | null; model: string; fallback: ModelFallback | null; onPick: (c: ModelChoice) => void; effort?: string; thinking?: boolean; onChooseEffort?: (value: string) => void; sheet: boolean }) {
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState<string | null>(null);
+  const [freeGroup, setFreeGroup] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -114,8 +116,8 @@ function ModelList({ cat, failed, model, fallback, onPick, effort, thinking, onC
   if (!cat) return <div className="sub model-row-note">{t("common.loading")}</div>;
   const entries = Object.entries(cat.presets);
   const search = query.trim().toLocaleLowerCase();
-  const matched = entries.filter(([id, p]) => (provider === null || p.provider === provider) && `${id} ${p.label} ${p.provider} ${providerName(p.provider, cat.providers[p.provider])} ${p.model}`.toLocaleLowerCase().includes(search));
-  const providers = [...new Set(entries.map(([, p]) => p.provider))];
+  const matched = entries.filter(([id, p]) => (provider === null || p.provider === provider) && (!freeGroup || p.free_only) && `${id} ${p.label} ${p.provider} ${providerName(p.provider, cat.providers[p.provider])} ${p.model}`.toLocaleLowerCase().includes(search));
+  const providers = [...new Set(entries.filter(([, p]) => !!p.free_only === freeGroup).map(([, p]) => p.provider))];
   const browsing = provider === null && !search;
   const back = () => {
     const previous = provider;
@@ -138,10 +140,11 @@ function ModelList({ cat, failed, model, fallback, onPick, effort, thinking, onC
       {/* The heading carries the key to the two marks, so what they mean is on the screen and not
           only in a tooltip a touch screen never shows. */}
       <div className="menu-heading sub model-heading">
-        <span className="grow">{t(browsing ? "composer.model.providers" : "session.model")}</span>
+        <span className="grow">{t(browsing ? freeGroup ? "composer.model.free" : "composer.model.providers" : "session.model")}</span>
         {!browsing && <span className="model-legend"><span className="model-kind thinking" aria-hidden>✦</span> {t("composer.model.thinking")}</span>}
         {!browsing && <span className="model-legend"><span className="model-kind fast" aria-hidden>⚡</span> {t("composer.model.fast")}</span>}
       </div>
+      {freeGroup && provider === null && <button type="button" role="menuitem" className="model-row provider-back" onClick={() => { setFreeGroup(false); setQuery(""); }}><Icon name="back" size={16} /><span className="grow">{t("composer.model.back")}</span></button>}
       {provider !== null && <button type="button" role="menuitem" className="model-row provider-back" onClick={back} aria-label={t("composer.model.back")}>
         <Icon name="back" size={16} /><ProviderMark id={provider} kind={cat.providers[provider]?.kind} />
         <span className="grow">{providerName(provider, cat.providers[provider])}</span>
@@ -164,8 +167,11 @@ function ModelList({ cat, failed, model, fallback, onPick, effort, thinking, onC
           <span className="sub">{cat.global}</span>
         </span>
       </button>}
+      {browsing && !freeGroup && <button type="button" role="menuitem" className="model-row provider-row" onClick={() => { setFreeGroup(true); setQuery(""); }}>
+        <Icon name="model" size={16} /><span className="grow model-text"><span>{t("composer.model.free")}</span><span className="sub">{t("composer.model.free.sub")}</span></span><Icon name="chevron" size={14} />
+      </button>}
       {browsing && providers.map((id) => {
-        const choices = entries.filter(([, p]) => p.provider === id);
+        const choices = entries.filter(([, p]) => p.provider === id && !!p.free_only === freeGroup);
         const current = choices.find(([key, p]) => isCurrent(key, p, model));
         return <button key={id} type="button" role="menuitem" className="model-row provider-row" data-provider={id} onClick={() => { setProvider(id); setQuery(""); }}>
           <ProviderMark id={id} kind={cat.providers[id]?.kind} />
@@ -175,6 +181,7 @@ function ModelList({ cat, failed, model, fallback, onPick, effort, thinking, onC
           <Icon name="chevron" size={14} />
         </button>;
       })}
+      {browsing && freeGroup && providers.length === 0 && <div className="model-row-note sub"><a href={pathFor("settings", "models", { tab: "free" })}>{t("free.chat.add")}</a></div>}
       {!browsing && matched.length === 0 && <div className="model-row-note sub" role="status">{t("shell.search.nomatch")}</div>}
       {!browsing && matched.map(([id, p]) => {
         const current = isCurrent(id, p, model);

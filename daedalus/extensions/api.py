@@ -126,6 +126,8 @@ from daedalus.host.services import SCRATCH_DIR_NAME
 from daedalus.host.session_runner import TENANT, Attachment, clip_title
 from daedalus.host.transcript_view import full_tool_result, message_view
 from daedalus.processes import end_tree
+from daedalus.providers.free_catalog import approved_endpoint, probe_agent_cycle
+from daedalus.providers.free_catalog import catalog as free_catalog
 from daedalus.providers.llamacpp import discover_llamacpp
 from daedalus.providers.openai_compat import UsageRecord
 from daedalus.search.service import ConversationSearch, SearchBusy
@@ -752,6 +754,11 @@ class ModelsLookupBody(BaseModel):
     """A configured client id: probe its stored base_url with its stored key (keys stay server-side)."""
 
 
+class FreeProbeBody(BaseModel):
+    provider: str
+    model: str
+
+
 class PresetPatch(BaseModel):
     label: str | None = None
     provider: str | None = None
@@ -759,6 +766,7 @@ class PresetPatch(BaseModel):
     thinking: bool | None = None
     reasoning_effort: str | None = None
     images: bool | None = None
+    free_only: bool | None = None
     context_window: int | None = None
     max_output_tokens: int | None = None
     on_demand_tool_groups: bool | None = None
@@ -5744,6 +5752,34 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         del raw["providers"][provider_id]
         new_config = type(app.config).model_validate(raw)
         return await _save_provider_config(new_config)
+
+    @api.get("/api/providers/free-catalog")
+    async def get_free_catalog(refresh: bool = False, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Offer public free listings with their real provider IDs and verification state."""
+        return await free_catalog.get(force=refresh)
+
+    @api.post("/api/providers/free-catalog/probe")
+    async def probe_free_model(body: FreeProbeBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        catalog = await free_catalog.get()
+        source = next((p for p in catalog["providers"] if p["id"] == body.provider), None)
+        if source is None or not source["fresh"]:
+            raise HTTPException(503, "free model listing is unavailable or stale")
+        model = next((m for m in source["models"] if m["id"] == body.model), None) if source else None
+        if model is None or model["mechanism"] != "zero_price":
+            raise HTTPException(400, "model has no verified zero-price listing")
+        configured = app.config.providers.get(body.provider)
+        if body.provider != "kilo" and (configured is None or not configured.base_url):
+            raise HTTPException(400, "connect the provider before testing its model")
+        base_url = configured.base_url if configured else source["base_url"]
+        if not approved_endpoint(body.provider, base_url, source["base_url"]):
+            raise HTTPException(400, "provider endpoint differs from the verified free catalog")
+        api_key = configured.api_key if configured else ""
+        if body.provider == "openrouter" and configured and not api_key:
+            api_key = settings.openrouter_api_key
+        passed = await probe_agent_cycle(base_url, body.model, api_key)
+        if passed:
+            free_catalog.mark_probed(body.provider, body.model)
+        return {"agent_ready": passed}
 
     @api.post("/api/providers/lookup-models")
     async def lookup_provider_models(body: ModelsLookupBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

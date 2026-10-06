@@ -103,6 +103,10 @@ type setupBoot struct {
 		URL   string `json:"url"`
 		Model string `json:"model"`
 	} `json:"local"`
+	Free struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	} `json:"free"`
 	Limit string `json:"limit"`
 	TG    struct {
 		Owner string `json:"owner"`
@@ -201,6 +205,13 @@ func (s *Server) setupBoot(ctx context.Context, lang Lang, status Status, sugges
 	if current.LocalKey != "" {
 		b.Kept["local.key"] = mask(current.LocalKey)
 	}
+	b.Free.Provider, b.Free.Model = current.FreeProvider, current.FreeModel
+	if b.Free.Provider == "" {
+		b.Free.Provider = "kilo"
+	}
+	if current.FreeModel != "" {
+		b.Kind = "free"
+	}
 	b.Limit = firstSet(current.USDPerDay, "20")
 	if current.BotToken != "" {
 		b.Kept["tg.token"] = mask(current.BotToken)
@@ -258,6 +269,7 @@ func parseSetupForm(form url.Values) (Setup, map[string]string, *setupError) {
 		APIID:         get("api_id"),
 		APIHash:       get("api_hash"),
 		USDPerDay:     strings.ReplaceAll(get("usd_per_day"), ",", "."),
+		ModelKind:     get("kind"),
 		Clear:         clearedFields(form["clear"]),
 	}
 	for _, provider := range providerKeyVars {
@@ -284,6 +296,26 @@ func parseSetupForm(form url.Values) (Setup, map[string]string, *setupError) {
 		s.LocalURL, s.LocalKey, s.LocalModel = base, get("local_key"), get("local_model")
 		if s.LocalModel == "" {
 			return s, nil, &setupError{"local.model", "pick a model"}
+		}
+	}
+	if form.Get("kind") == "free" {
+		s.FreeProvider, s.FreeModel = get("free_provider"), get("free_model")
+		if s.FreeProvider != "kilo" && s.FreeProvider != "openrouter" && s.FreeProvider != "opencode_zen" {
+			return s, nil, &setupError{"free.provider", "choose a free provider"}
+		}
+		if s.FreeModel == "" || len(s.FreeModel) > 200 || strings.ContainsAny(s.FreeModel, " \t\r\n") {
+			return s, nil, &setupError{"free.model", "choose a listed free model"}
+		}
+		if s.FreeProvider == "openrouter" {
+			key := get("free_key")
+			if key != "" {
+				s.OpenrouterKey = key
+			}
+		}
+		if s.FreeProvider == "opencode_zen" {
+			if key := get("free_key"); key != "" {
+				s.ProviderKeys["opencode_zen"] = key
+			}
 		}
 	}
 	switch voice := get("voice"); voice {

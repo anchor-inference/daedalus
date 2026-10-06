@@ -30,6 +30,18 @@ async def test_the_view_is_written_with_the_row_and_read_back_without_the_messag
     assert views[0] == message_view((await store.list_transcript("v1"))[0])
 
 
+async def test_operator_message_keeps_its_client_id_in_the_stored_view(db: Database) -> None:
+    store = await _store(db, "message-receipt")
+    await store.append_transcript("message-receipt", [Message(
+        role=MessageRole.user,
+        content_blocks=[TextBlock(text="Attached files:\n- sample.txt")],
+        metadata={"daedalus.origin": "operator", "daedalus.client_message_id": "send-1"},
+    )])
+    view = (await store.list_transcript_views("message-receipt", limit=10))[0]
+    assert view["client_message_id"] == "send-1"
+    assert view["text"] == "Attached files:\n- sample.txt"
+
+
 async def test_a_secret_configured_later_reaches_rows_written_before_it(db: Database) -> None:
     secret = "abcd1234efgh5678ijkl"
     store = await _store(db, "v2")

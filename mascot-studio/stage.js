@@ -26,13 +26,17 @@ function bodyRadius(y) { // the lathe profile of chibi2.js's body (its mesh sits
 export class MascotStage {
   constructor(canvas, options = {}) {
     this.canvas = canvas;
-    this.stage = createStage({ canvas, fitCanvas: true, transparent: true, fov: 30, maxDpr: options.compact ? 1 : 1.5, maxFps: options.compact ? 24 : undefined, exposure: 1.06, envIntensity: 0.6 });
+    // The compact scene gets more detail on 1x screens while its pixel budget limits GPU work.
+    this.stage = createStage({ canvas, fitCanvas: true, transparent: true, fov: 30, minDpr: options.compact ? 1.5 : 1, maxDpr: options.compact ? 3 : 2, maxPixels: options.compact ? 200000 : undefined, maxFps: options.compact ? 40 : options.embedded ? 30 : undefined, shadows: !options.embedded, exposure: 1.06, envIntensity: 0.6 });
     this.scene = this.stage.scene;
     this.lights = studioLights(this.scene, { target: new THREE.Vector3(0, 2.0, 0), key: 2.4, rim: 8, fill: 0.9, hemi: 0.42, shadowRadius: 3 });
     if (options.compact) this.lights.key.shadow.mapSize.set(512, 512);
+    // Embedded scenes have no plinth to receive a shadow; the contact mesh supplies grounding.
+    if (options.embedded) this.lights.key.castShadow = false;
     // a low warm light from the front, so the bronze and the face read warm and close
     const warm = new THREE.PointLight(0xffc89a, 1.1, 9, 2); warm.position.set(-1.2, 1.3, 3.2); this.scene.add(warm);
-    this.buildPlinth();
+    this.floor = options.embedded ? 0 : PLINTH;
+    if (!options.embedded) this.buildPlinth();
 
     const make = {
       daedalus: () => ({ model: makeDaedalus(0.8), size: 0.8, kind: "body" }),
@@ -41,11 +45,11 @@ export class MascotStage {
     };
     this.variants = {};
     for (const [id, f] of Object.entries(make)) {
-      if (options.compact && id !== "daedalus") continue;
+      if ((options.compact || options.embedded) && id !== (options.variant || "daedalus")) continue;
       const V = f();
       V.id = id;
       const m = V.model;
-      m.root.position.y = PLINTH;
+      m.root.position.y = this.floor;
       if (m.head) m.head.rotation.order = "YXZ";
       this.scene.add(m.root);
       V.face = new FaceRig(m);
@@ -62,7 +66,7 @@ export class MascotStage {
       V.pose = null;
       this.variants[id] = V;
     }
-    this.mascot = "daedalus";
+    this.mascot = options.variant || "daedalus";
     this.emotion = "calm";
     this.action = "idle";
     this.prop = "";
@@ -78,14 +82,14 @@ export class MascotStage {
     this.framing = "full";
     this.trail = new Trail(this.scene);
     this.tmp = new THREE.Vector3(); this.tmp2 = new THREE.Vector3(); this.tmpQ = new THREE.Quaternion(); this.tmpE = new THREE.Euler();
-    this.bindDrag();
+    if (!options.embedded) this.bindDrag();
     this.stage.onFrame((dt, t) => this.update(dt, t));
     this.onResize = () => this.frame(true);
     window.addEventListener("resize", this.onResize);
     // the canvas also changes size when the layout does (a phone's toolbar, the library opening)
     this.observer = new ResizeObserver(() => { this.stage.measure(); this.frame(true); });
     this.observer.observe(canvas);
-    this.setMascot("daedalus");
+    this.setMascot(this.mascot);
     this.stage.start();
     this.frame(true);
   }
@@ -202,12 +206,12 @@ export class MascotStage {
     const { W, H } = this.stage.size;
     const aspect = Math.max(0.3, W / Math.max(1, H));
     const s = V.size, head = V.kind === "head";
-    const headY = head ? PLINTH + V.hoverY : PLINTH + 2.72 * s;
+    const headY = head ? this.floor + V.hoverY : this.floor + 2.72 * s;
     const box = {
-      full: { cy: 2.2, h: 4.95, w: 4.5 },
-      medium: { cy: head ? headY - 0.15 : PLINTH + 2.15 * s, h: head ? 3.1 : 3.5 * s + 0.35, w: 3.6 },
-      portrait: { cy: headY + 0.12 * s, h: head ? 2.5 : 2.55 * s + 0.25, w: 2.7 * s + 0.3 },
-    }[this.framing] || { cy: 2.2, h: 4.95, w: 4.5 };
+      full: { cy: this.floor + 1.65, h: 4.95, w: 4.5 },
+      medium: { cy: head ? headY - 0.15 : this.floor + 2.15 * s, h: head ? 3.1 : 3.5 * s + 0.35, w: 3.6 },
+      portrait: { cy: headY + 0.12 * s, h: head ? 2.5 : 2.55 * s + 0.25, w: head ? 4.0 * s + 0.3 : 2.7 * s + 0.3 },
+    }[this.framing] || { cy: this.floor + 1.65, h: 4.95, w: 4.5 };
     const t = Math.tan(THREE.MathUtils.degToRad(this.stage.camera.fov / 2));
     const dist = Math.max(box.h / (2 * t), box.w / (2 * t * aspect));
     const az = 0.3, el = this.framing === "portrait" ? 0.07 : 0.14;
@@ -464,6 +468,7 @@ export class MascotStage {
 
   updateMotes(now, still) {
     const M = this.motes;
+    if (!M) return;
     for (let i = 0; i < M.n; i++) {
       const [a, r, ph] = M.seed[i];
       const k = still ? ph : (now * 0.035 + ph) % 1;

@@ -84,6 +84,8 @@ from daedalus.host.worktrees import append_exclude, exclude_lines
 from daedalus.mcp.manager import McpManager, blocked_for, mcp_tool_prefix
 from daedalus.processes import end_tree
 from daedalus.providers.chain import build_chain
+from daedalus.providers.free_catalog import approved_endpoint
+from daedalus.providers.free_catalog import catalog as free_catalog
 from daedalus.providers.registry import ProviderRegistry
 from daedalus.security import redact
 from daedalus.stores.blobs import FileBlobStore
@@ -940,7 +942,10 @@ class SessionManager:
             return self.providers.rungs_for(self.config, pid), self.config.presets[pid]
         _, default = self.config.preset()  # NoModelConfigured when the table is empty
         if overrides.get("provider") and overrides.get("model_name"):
-            return self.providers.rungs_for_pair(self.config, overrides["provider"], overrides["model_name"]), default
+            # A manual pair is an explicit choice outside the default preset. Carry its window
+            # settings, but do not claim the default free model's price evidence for that pair.
+            selected = default.model_copy(update={"free_only": False}) if default.free_only else default
+            return self.providers.rungs_for_pair(self.config, overrides["provider"], overrides["model_name"]), selected
         return self.providers.rungs_for(self.config), default
 
     # -- MCP per session --------------------------------------------------------------
@@ -3131,6 +3136,17 @@ class SessionManager:
                            if item.provider == provider_id and item.model == model), preset)
         else:
             rungs, preset = self.resolve_model(overrides)
+        if preset.free_only:
+            if len(rungs) != 1 or rungs[0][0].endpoint.id != preset.provider or rungs[0][1] != preset.model:
+                raise RuntimeError("free preset has a different model route")
+            snapshot = await free_catalog.get()
+            source = next((row for row in snapshot["providers"] if row["id"] == preset.provider), None)
+            listed = next((row for row in source["models"] if row["id"] == preset.model), None) if source else None
+            if source is None or not source["fresh"] or listed is None or listed["mechanism"] != "zero_price":
+                raise RuntimeError("free model could not be verified now; choose another model before running")
+            configured = self.config.providers.get(preset.provider)
+            if configured is None or not approved_endpoint(preset.provider, configured.base_url, source["base_url"]):
+                raise RuntimeError("free model provider no longer points to its verified endpoint")
         hold = ExitStack()
         hold.enter_context(self.providers.hold([provider for provider, _ in rungs]))
         try:
@@ -4133,8 +4149,12 @@ class SessionManager:
                     # A placed prompt the queue no longer lists: its words are the operator's only
                     # when the operator sent it, and the text as placed is the best copy there is.
                     message.metadata.update(operator_words_metadata(origin, prompts.without_turn_context(message.text)))
-                for client_message_id in placed:
+                # The core may combine queued prompts into one visible row; carry each receipt id
+                # so the app keeps its temporary bubble until that row is actually shown.
+                client_message_ids = []
+                for client_message_id in sorted(placed):
                     if await self.live.receipt(state.session.id, str(client_message_id)) is not None:
+                        client_message_ids.append(str(client_message_id))
                         await self.live.consume(
                             state.session.id,
                             str(client_message_id),
@@ -4142,6 +4162,8 @@ class SessionManager:
                             step_id=str(event.payload.get("step_id") or "queue"),
                             message_seq=None,
                         )
+                if client_message_ids:
+                    message.metadata["daedalus.client_message_ids"] = client_message_ids
         change = self._model_change(state, event)
         if change is not None:
             # Before the message it explains, not after it: the header says which model is speaking

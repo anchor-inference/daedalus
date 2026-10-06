@@ -200,9 +200,11 @@ class ProviderRegistry:
     def rungs_for(self, config: RuntimeConfig, preset_id: str | None = None) -> list[tuple[OpenAICompatibleProvider, str]]:
         """``(adapter, model)`` pairs: the chosen (or default) preset first, then the fallback chain."""
         first_id, first = config.preset(preset_id)
-        order = [first_id, *[c for c in config.model.chain if c != first_id]]
-        if config.model.preset not in order:
-            order.append(config.model.preset)
+        order = [first_id]
+        if not first.free_only:
+            order.extend(c for c in config.model.chain if c != first_id)
+            if config.model.preset not in order:
+                order.append(config.model.preset)
         rungs: list[tuple[OpenAICompatibleProvider, str]] = []
         for pid in order:
             preset = config.presets.get(pid)

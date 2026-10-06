@@ -230,6 +230,7 @@ GATES: dict[str, object] = {
     "/api/conversation-search/settings": {"mode": "off", "paused": False, "reason": "off", "busy": False, "indexed": 0, "pending": 0, "label": "Multilingual E5 Small", "size_bytes": 135429554, "licence": "MIT", "installed": False},
     # Drawn before any screen: no model means the whole app is the "Add a model" flow.
     "/api/onboarding": {"has_model": True, "presets": 1, "default_preset": "p", "providers": [], "needs": [], "message": ""},
+    "/api/providers/free-catalog": {"providers": [], "updated_at": None, "stale": False},
     # Decides which screens the navigation has at all.
     "/api/capabilities": {
         "selfdev": {"mode": "off", "configured": "off", "reasons": [], "missing": [], "tools": []},
@@ -1519,7 +1520,7 @@ class FocusStub:
                 if reply is not None and not any(m.get("seq") == reply.get("seq") for m in messages):
                     return 404, {"detail": "that message is not in this conversation"}
                 now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-                messages.append({"role": "user", "seq": seq, "origin": "operator", "text": payload.get("text", ""), "thinking": "", "tool_calls": [], "tool_results": [], "created_at": now,
+                messages.append({"role": "user", "seq": seq, "origin": "operator", "client_message_id": payload.get("client_message_id"), "text": payload.get("text", ""), "thinking": "", "tool_calls": [], "tool_results": [], "created_at": now,
                                  "delivery": "steer" if payload.get("steer") else None, "reply_to": reply})
                 # A missing receipt is an unconfirmed send: the composer must retain its draft and
                 # reply quote. Mirror the host's consumed receipt once the idle session starts a run.

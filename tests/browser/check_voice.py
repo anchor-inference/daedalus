@@ -282,6 +282,8 @@ def main() -> int:
         check_prompt(browser, check)
         context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark", permissions=["microphone"])
         context.add_init_script(PHASES)
+        # The orb remains an option; the barge-in check exercises that view explicitly.
+        context.add_init_script("localStorage.setItem('daedalus.voice.mascot', 'off')")
         page = context.new_page()
         page.route("**/api/**", stub)
         shots.stub.voice_frames = SPEAKING  # type: ignore[attr-defined]

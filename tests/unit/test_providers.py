@@ -316,6 +316,35 @@ def test_preset_rungs_put_the_chosen_model_first_then_the_chain() -> None:
     assert rungs[0][0].accepts_images("Qwen3.6") is False  # no image loader wired in this registry
 
 
+def test_free_preset_never_enters_the_paid_fallback_chain() -> None:
+    from daedalus.config import ModelPresetConfig, Settings
+    from daedalus.providers.registry import ProviderRegistry
+    from tests.support.models import model_config
+
+    config = model_config()
+    config.presets["free.example"] = ModelPresetConfig(provider="openrouter", model="example:free", free_only=True)
+    registry = ProviderRegistry(Settings(openrouter_api_key="key", deepseek_api_key="key"), config)
+    assert [(p.endpoint.id, model) for p, model in registry.rungs_for(config, "free.example")] == [("openrouter", "example:free")]
+
+
+
+def test_manual_model_pair_does_not_inherit_free_price_evidence() -> None:
+    from types import SimpleNamespace
+
+    from daedalus.config import ModelPresetConfig, Settings
+    from daedalus.host.session_runner import SessionManager
+    from daedalus.providers.registry import ProviderRegistry
+    from tests.support.models import model_config
+
+    config = model_config()
+    config.presets["free.example"] = ModelPresetConfig(provider="openrouter", model="example:free", free_only=True)
+    config.model.preset = "free.example"
+    registry = ProviderRegistry(Settings(openrouter_api_key="key", deepseek_api_key="key"), config)
+    manager = SimpleNamespace(config=config, providers=registry)
+    rungs, effective = SessionManager.resolve_model(manager, {"provider": "deepseek", "model_name": "paid-model"})
+    assert rungs[0][0].endpoint.id == "deepseek" and rungs[0][1] == "paid-model"
+    assert effective.free_only is False
+
 
 async def test_core_tier2_keeps_operator_turns_verbatim() -> None:
     from protocore.contracts.types import ToolResultBlock, ToolUseBlock

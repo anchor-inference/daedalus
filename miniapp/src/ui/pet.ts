@@ -43,3 +43,19 @@ export function usePetModel(): [string, (model: string) => void] {
   };
   return [model, choose];
 }
+
+export type VoiceMascot = "full" | "head" | "off";
+const VOICE_KEY = "daedalus.voice.mascot";
+export function useVoiceMascot(): [VoiceMascot, (value: VoiceMascot) => void] {
+  const [value, setValue] = useState<VoiceMascot>(() => {
+    try {
+      const saved = localStorage.getItem(VOICE_KEY);
+      return saved === "head" || saved === "off" ? saved : "full";
+    } catch { return "full"; }
+  });
+  const choose = (next: VoiceMascot) => {
+    setValue(next);
+    try { localStorage.setItem(VOICE_KEY, next); } catch { /* private mode */ }
+  };
+  return [value, choose];
+}
