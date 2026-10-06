@@ -1,7 +1,7 @@
 // The goal line names the next step at the point where the operator can reply. Its expanded list
 // keeps the task, result and promise evidence nearby without filling a phone's header.
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { acceptanceTone } from "../board/board";
 import { relTime } from "../format";
 import { t } from "../i18n";
@@ -44,6 +44,24 @@ export function GoalStrip({ projectId }: { projectId: string }) {
   );
 }
 
+/** What makes a row open its card on the board: a link in the accessibility tree, reached with Tab
+ * and followed with Enter, as the row reads as one destination. The row's own text is its name, so
+ * a screen reader hears the card's title rather than a generic "Open task". */
+function opensTask(projectId: string, taskId: string) {
+  const open = () => navigate(projectPagePath(projectId, "board", { task: taskId }));
+  return {
+    role: "link",
+    tabIndex: 0,
+    title: t("goal.openTask"),
+    onClick: open,
+    onKeyDown: (e: ReactKeyboardEvent) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      open();
+    },
+  };
+}
+
 /** The list the line opens: work, results awaiting review, accepted receipts, then promises. */
 function GoalList({ id, projectId, state }: { id: string; projectId: string; state: FocusState }) {
   const goals = goalRows(state.goals);
@@ -58,7 +76,7 @@ function GoalList({ id, projectId, state }: { id: string; projectId: string; sta
             {goals.map((goal) => {
               const tone = goal.acceptance ? acceptanceTone(goal.acceptance as Parameters<typeof acceptanceTone>[0]) : "";
               return (
-                <li key={goal.id} className={`goal-item ${goal.blocked ? "blocked" : ""}`} data-task={goal.id}>
+                <li key={goal.id} className={`goal-item linked ${goal.blocked ? "blocked" : ""}`} data-task={goal.id} {...opensTask(projectId, goal.id)}>
                   <div className="goal-item-head">
                     <span className="goal-title">{goal.title || t("goal.card.untitled")}</span>
                     <span className="goal-status">{t(`board.col.${goal.status}`)}</span>
@@ -81,7 +99,7 @@ function GoalList({ id, projectId, state }: { id: string; projectId: string; sta
           <h4 className="goal-sec-head">{t("goal.results")} <span className="num">{results.length}</span></h4>
           <ul>
             {results.map((result) => (
-              <li key={String(result.id)} className={`goal-item result ${result.cause}`} data-result={String(result.id)}>
+              <li key={String(result.id)} className={`goal-item result ${result.cause} ${result.task_id ? "linked" : ""}`} data-result={String(result.id)} {...(result.task_id ? opensTask(projectId, result.task_id) : {})}>
                 <div className="goal-item-head">
                   <span className="goal-title">
                     {t(resultKey(result.cause), { who: result.staff_name || t("goal.result.member"), card: result.title || t(result.task_id ? "goal.card.untitled" : "goal.result.nocard") })}

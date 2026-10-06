@@ -3374,6 +3374,9 @@ button.staff-row:hover { background: var(--surface-2); }
 .goal-item.blocked, .goal-item.result.report_needs_input, .goal-item.result.task_unowned { box-shadow: inset 2px 0 0 var(--warn); }
 .goal-item.result.report_done { box-shadow: inset 2px 0 0 var(--ok); }
 .goal-item.result.report_stuck { box-shadow: inset 2px 0 0 var(--bad); }
+/* A row that opens its card says so on hover (the focus ring is the global one); a result with no card stays plain. */
+.goal-item.linked { cursor: pointer; border-radius: var(--radius-sm); }
+.goal-item.linked:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
 .goal-item-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .goal-title { flex: 1; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
 .goal-status, .goal-age { flex: none; font-size: var(--fs-11); color: var(--fg-3); }
