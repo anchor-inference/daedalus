@@ -19,6 +19,7 @@ from daedalus.host.worktrees import WorktreeError
 from daedalus.stores.blobs import FileBlobStore
 from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope, now
 from daedalus.stores.files import FILE_MAX_BYTES, FILES_TENANT
+from daedalus.stores.result_anchors import ResultAnchorRefused, add_result_turn_anchor
 from daedalus.stores.staff import cap_notes
 
 if TYPE_CHECKING:
@@ -280,6 +281,7 @@ class StaffReportService:
                                     original_artifact_file_id=original_file_id,
                                     actor_id=principal.actor_id, manifest_ids=manifest_ids,
                                     checks=checks, limitations=[])
+                await self._anchor(conn, mutation.object_id, live.session_id)
                 if row["comparison_group_id"] is None:
                     await conn.execute("UPDATE board_tasks SET status = 'review',"
                                        " merge_state = CASE WHEN branch IS NOT NULL AND branch != '' THEN 'proposed'"
@@ -334,6 +336,23 @@ class StaffReportService:
             if event is not None:
                 self.app.manager.bus.announce_committed(event)
         return response, event
+
+    async def _anchor(self, conn: aiosqlite.Connection, result_id: str, session_id: str | None) -> None:
+        """Link a result to the worker's turn that handed it in: the latest message of its chat.
+
+        Nothing ever wrote these links, so a result's source messages were always empty. A
+        command-line worker has no host chat to point at, and a chat outside the result's project is
+        refused by the anchor itself; neither may fail the report, which is the record that matters.
+        """
+        if not session_id:
+            return
+        latest = await _one(conn, "SELECT MAX(seq) AS seq FROM session_messages WHERE session_id = ?", (session_id,))
+        if latest is None or latest["seq"] is None:
+            return
+        try:
+            await add_result_turn_anchor(conn, result_id, session_id, int(latest["seq"]))
+        except ResultAnchorRefused:
+            return
 
     async def _acknowledge(self, conn: aiosqlite.Connection, task_id: str, staff_session_id: str,
                            contract_revision: int, refs: list[str]) -> tuple[list[str], list[str]]:

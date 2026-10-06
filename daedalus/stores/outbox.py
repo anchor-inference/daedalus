@@ -15,7 +15,6 @@ import aiosqlite
 
 from daedalus.stores.control import ControlDenied, ControlStore, Mutation, Principal, Scope, canonical, now, one
 from daedalus.stores.database import Database
-from daedalus.stores.effect_approvals import ApprovalPending, EffectApprovals
 from daedalus.stores.retry_policy import READ_ONLY_BUDGETS, TRANSIENT_ERRORS, budget, next_retry_at
 from daedalus.stores.update_drains import UpdateDrainActive, assert_admission_open_in
 
@@ -33,7 +32,6 @@ class Claim:
     effects: tuple[str, ...]
     operation: str
     payload: dict[str, Any]
-    approval_required: bool
 
 
 class OutboxStore:
@@ -42,12 +40,11 @@ class OutboxStore:
         self.control = ControlStore(db)
 
     @staticmethod
-    async def enqueue(conn: aiosqlite.Connection, mutation: Mutation, principal: Principal, *, kind: str, operation: str, payload: dict[str, Any], effects: tuple[str, ...] = (), task_id: str | None = None, attempt_id: str | None = None, approval_required: bool = False) -> str:
+    async def enqueue(conn: aiosqlite.Connection, mutation: Mutation, principal: Principal, *, kind: str, operation: str, payload: dict[str, Any], effects: tuple[str, ...] = (), task_id: str | None = None, attempt_id: str | None = None) -> str:
         if not kind or not operation or not isinstance(payload, dict):
             raise ValueError("an effect kind, operation and payload are required")
         action_id = uuid.uuid5(uuid.NAMESPACE_URL, f"effect:{mutation.receipt_id}:{kind}").hex
-        envelope = {"data": payload, "control": {"task_id": task_id, "effects": list(effects), "operation": operation,
-                                                 "approval_required": approval_required}}
+        envelope = {"data": payload, "control": {"task_id": task_id, "effects": list(effects), "operation": operation}}
         await conn.execute(
             "INSERT INTO effect_outbox(id,receipt_id,grant_id,grant_generation,attempt_id,kind,payload_json,created_at) VALUES (?,?,?,?,?,?,?,?)",
             (action_id, mutation.receipt_id, principal.grant_id, principal.grant_generation, attempt_id, kind, canonical(envelope), now()),
@@ -68,13 +65,11 @@ class OutboxStore:
             principal = Principal(receipt["actor_id"], grant["origin_class"] if grant is not None else "system", row["grant_id"], row["grant_generation"])
         else:
             principal = Principal(receipt["actor_id"], "operator" if receipt["actor_id"].startswith("operator:") else "system")
-        return Claim(row["id"], row["receipt_id"], row["kind"], int(row["claim_generation"]), principal, scope, metadata["task_id"], row["attempt_id"], tuple(metadata["effects"]), metadata["operation"], envelope["data"], bool(metadata.get("approval_required")))
+        return Claim(row["id"], row["receipt_id"], row["kind"], int(row["claim_generation"]), principal, scope, metadata["task_id"], row["attempt_id"], tuple(metadata["effects"]), metadata["operation"], envelope["data"])
 
     async def _authorize(self, conn: aiosqlite.Connection, row: aiosqlite.Row) -> Claim:
         claim = await self._decode(conn, row)
         await self.control.authorize(conn, claim.principal, claim.scope, claim.operation, task_id=claim.task_id, effects=claim.effects)
-        if json.loads(row["payload_json"])["control"].get("approval_required"):
-            await EffectApprovals.check(conn, row)
         if row["attempt_id"]:
             attempt = await one(conn, "SELECT a.task_id,a.state,a.host_generation,t.current_attempt_id FROM execution_attempts a JOIN board_tasks t ON t.id=a.task_id WHERE a.id = ?", (row["attempt_id"],))
             host = await one(conn, "SELECT value FROM kv WHERE key = 'execution_host_generation'")
@@ -195,8 +190,6 @@ class OutboxStore:
                     continue
                 try:
                     await self._authorize(conn, row)
-                except ApprovalPending:
-                    continue
                 except (ControlDenied, KeyError) as exc:
                     await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ?,completed_at = ? WHERE id = ? AND state = 'pending'", (str(exc), now(), row["id"]))
                     continue

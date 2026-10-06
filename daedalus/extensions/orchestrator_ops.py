@@ -20,6 +20,7 @@ from daedalus.extensions import wakeups
 from daedalus.extensions.board_commands import BoardCommands
 from daedalus.extensions.likeness import same_question
 from daedalus.extensions.notifications import Draft
+from daedalus.extensions.orchestrator_domain import clear_next_action, set_next_action
 from daedalus.extensions.plugins import PluginRefused, PluginRegistry
 from daedalus.extensions.task_contract import split_checks
 from daedalus.extensions.watch_commands import WatchCommands
@@ -49,7 +50,8 @@ JOURNAL_TEXT_MAX = 4000
 REPORT_TEXT_MAX = 4000
 REPORT_KINDS = ("progress", "done", "blocked", "decision")
 PEEK_OPS = ("read", "ls", "find", "search", "git_log", "git_diff", "git_status", "files", "dispatch")
-TASK_OPS = ("list", "get", "create", "update", "move")
+TASK_OPS = ("list", "get", "create", "update", "move", "next")
+NEXT_KINDS = ("answer_question", "provide_input", "review", "retry", "assign", "wait")
 FOLDER_OPS = ("list", "add", "update", "remove")
 TEAM_MESSAGES = 5
 
@@ -375,6 +377,8 @@ async def tasks(
     waiting_on: str = "",
     new: bool = False,
     reason: str = "",
+    next_kind: str | None = None,
+    owner: str = "",
     client_operation_id: str = "",
     expected_entity_revision: int | None = None,
     expected_collection_revision: int | None = None,
@@ -429,6 +433,9 @@ async def tasks(
             if task.get("notes"):
                 parts.append("notes:\n" + task["notes"][-1500:])
             return "\n".join(parts)
+        elif op == "next":
+            return await _next_action(orch, project, session_id, task_id, next_kind, owner,
+                                      client_operation_id, expected_entity_revision)
         else:
             if not client_operation_id or expected_entity_revision is None:
                 raise Refused("update needs its trusted call id and expected_entity_revision from Tasks(get)")
@@ -478,6 +485,49 @@ async def tasks(
         where = f" (queue position {launched.get('position')}: {launched.get('detail')})" if state == "queued" else ""
         return f"{line}\n{member.name if member else 'the assignee'}: {state}{where}"
     return line
+
+
+async def _next_action(orch: Orchestrators, project: Project, session_id: str, task_id: str,
+                       kind: str | None, owner: str, client_operation_id: str,
+                       expected_entity_revision: int | None) -> str:
+    """Set or clear a card's typed next step: the attention list, the sidebar count and the automatic
+    handoff read only this record, and before this operation only a raw HTTP call could write it, so
+    they stayed empty for every coordinator-run project.
+
+    It is written under the card-update approval the planning grant already carries, rather than a
+    new operation name that every approval issued before it would lack.
+    """
+    if not client_operation_id or expected_entity_revision is None:
+        raise Refused("next needs its trusted call id and expected_entity_revision from Tasks(get)")
+    if kind not in (*NEXT_KINDS, "none"):
+        raise Refused(f"next_kind is one of {', '.join(NEXT_KINDS)}, or none to clear it")
+    owner_kind, owner_id = "orchestrator", None
+    if kind != "none":
+        who = " ".join((owner or "").split())
+        if who.lower() in ("operator", "orchestrator", "system"):
+            owner_kind = who.lower()
+        elif who.lower() in ("", "you", "me"):
+            owner_kind = "orchestrator"
+        else:
+            member = await orch.manager.staff.find(project.id, who)
+            if member is None or not member.active:
+                raise Refused(f"{project.name} has nobody active called {who!r}")
+            owner_kind, owner_id = "staff", member.id
+    principal = await board_principal(orch, session_id, project.id, "board.task.update", task_id)
+
+    async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
+        if kind == "none":
+            return await clear_next_action(conn, task_id=task_id)
+        return await set_next_action(conn, action_id=mutation.object_id, task_id=task_id, kind=kind,
+                                     owner_kind=owner_kind, owner_id=owner_id, prerequisites=[])
+
+    payload = {"next_kind": kind, "owner_kind": owner_kind, "owner_id": owner_id}
+    await ControlStore(orch.manager.db).mutate(principal, Scope("project", project.id), "board.task.update",
+                                               client_operation_id, expected_entity_revision,
+                                               Entity("task", task_id), payload, effect)
+    if kind == "none":
+        return f"{task_id}: next step cleared"
+    return f"{task_id}: next step {kind}, owned by {owner_id and owner or owner_kind}"
 
 
 async def _contract_lines(orch: Orchestrators, task: dict[str, Any]) -> list[str]:

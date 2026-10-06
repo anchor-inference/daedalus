@@ -20,6 +20,7 @@ from daedalus.extensions.effects import EffectDispatcher
 from daedalus.extensions.launch_controls import launch_attempt, observe_bind, prepare_attempt
 from daedalus.extensions.lifecycle import Lifecycle
 from daedalus.extensions.runtime_observations import observe_no_entry
+from daedalus.extensions.staff import claim_host_slot, finish_host_slot
 from daedalus.extensions.task_controls import TaskStopEffect, queue_stop
 from daedalus.extensions.task_launch import TaskLaunchEffect, queue_launch
 from daedalus.host.launch_queue import LaunchQueue
@@ -27,6 +28,7 @@ from daedalus.staff_runtime import BoardTask, Started
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.database import Database
 from daedalus.stores.outbox import OutboxStore
+from daedalus.stores.result_anchors import result_turn_refs
 from daedalus.stores.staff import StaffStore
 from tests.support.waiting import until_await
 from tests.unit.test_launch_controls import OPERATOR, launch_fixture
@@ -397,6 +399,10 @@ async def test_actual_native_worker_launch_and_report_preserve_the_full_original
 
         result = await db.fetchone("SELECT id FROM result_receipts WHERE task_id = ?", (task["id"],))
         assert await OrchestratorDomain(db).original(task["id"], result["id"]) == original.encode()
+        # The result names the worker's chat turn it was handed in from, so its source is one click away.
+        chat = (await db.fetchone("SELECT session_id FROM staff_sessions WHERE task_id = ?", (task["id"],)))[0]
+        refs = await result_turn_refs(db, task["id"], result["id"])
+        assert [(ref["session_id"], ref["source_current"]) for ref in refs] == [(chat, True)]
         assert (await db.fetchone("SELECT state FROM execution_attempts WHERE task_id = ?", (task["id"],)))[0] == "completed"
         assert (await db.fetchone("SELECT status FROM board_tasks WHERE id = ?", (task["id"],)))[0] == "review"
 
@@ -515,6 +521,35 @@ async def test_parent_cancellation_between_attempt_claim_and_provider_call_fence
         assert not await dispatcher.step()
         owner = await db.fetchone("SELECT cancel_state FROM lifecycle_owners WHERE child_kind = 'execution_attempt'")
         assert owner["cancel_state"] == "unknown"
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
+async def test_a_launch_takes_and_keeps_one_machine_wide_place(db: Database) -> None:
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    app.manager.config = SimpleNamespace(terminals=SimpleNamespace(running_cap=3))
+    team.queue._claim_host = lambda entry: claim_host_slot(app, entry)
+    team.queue._finish_host = lambda entry, started: finish_host_slot(app, entry, started)
+    # The fixture's unbound staff session and an operator's shell take two of the three places;
+    # the last one is kept for coordination or review, so the worker waits in the durable order.
+    await db.execute("INSERT INTO terminals(id,env,owner_kind,cwd,created_at)"
+                     " VALUES ('shell','host','session','/tmp','now')")
+    try:
+        result = await queue_launch(app, "task", OPERATOR, staff_id="worker", client_operation_id="launch",
+                                    expected_entity_revision=revision)
+        assert await dispatcher.step()
+        view = await dispatcher.store.view(result["effect_id"])
+        assert view["state"] == "pending" and starts == []
+        waiting = await db.fetchone("SELECT state,reason FROM scheduler_claims")
+        assert waiting["state"] == "waiting" and "reserved for coordination" in waiting["reason"]
+        await db.execute("UPDATE terminals SET status = 'exited' WHERE id = 'shell'")
+        dispatcher.wake.set()
+        assert await dispatcher.step()
+        assert len(starts) == 1
+        reservation = await db.fetchone("SELECT attempt_id,state,role_class FROM capacity_reservations")
+        assert (reservation["attempt_id"], reservation["state"], reservation["role_class"]) == (starts[0].id, "active", "worker")
+        assert (await db.fetchone("SELECT state FROM scheduler_claims"))[0] == "admitted"
     finally:
         team.queue.close()
         app.executions.release()
