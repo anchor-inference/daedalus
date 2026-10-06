@@ -10,6 +10,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.extensions.skill_quality import assess
 from daedalus.host.services import locator
 from daedalus.host.toolchain import status as toolchain_status
 from daedalus.tools import search_hint, tool_group
@@ -119,8 +120,14 @@ async def skill_draft(context: ToolContext, name: str, description: str, body: s
     directory.mkdir(parents=True, exist_ok=True)
     front = f"---\nname: {slug}\ndescription: {description}\n" + (f"params: {params.strip()}\n" if params and params.strip() else "") + "---\n"
     body = manager.redactor.redact(body.strip())  # a draft may become public through a pull request: no secrets in it
-    (directory / "SKILL.md").write_text(front + body + "\n", encoding="utf-8")
-    return ok(context, f"draft saved at {directory}/SKILL.md (session {context.session_id}). {_how_to_ship(manager, slug)}", path=str(directory))
+    markdown = front + body + "\n"
+    (directory / "SKILL.md").write_text(markdown, encoding="utf-8")
+    # The same check a skill must pass to be activated, said now while the session still knows the
+    # procedure; the draft is kept either way, since a draft is allowed to be unfinished.
+    verdict = assess(slug, markdown, [])
+    gaps = "" if verdict["valid"] else " Before it can become a skill: " + "; ".join(verdict["errors"]) + "."
+    return ok(context, f"draft saved at {directory}/SKILL.md (session {context.session_id}).{gaps} {_how_to_ship(manager, slug)}",
+              path=str(directory), valid=verdict["valid"])
 
 
 def _how_to_ship(manager: Any, slug: str) -> str:

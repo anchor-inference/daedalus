@@ -88,6 +88,8 @@ async def test_skill_draft_is_saved_under_the_state_directory(settings, db) -> N
         assert not result.is_error
         draft = settings.state_dir / "skill-drafts" / "release-notes" / "SKILL.md"
         assert draft.is_file() and draft.read_text().startswith("---\nname: release-notes\n") and "params: range" in draft.read_text()
+        # A numbered list without the sections a skill needs is saved, and the gap is said at once.
+        assert "Before it can become a skill" in result.content and "usage, procedure and checks" in result.content
         assert (await skill_draft().invoke(ctx, {"name": "x", "description": "short", "body": "tiny"})).is_error
     finally:
         await manager.close()
