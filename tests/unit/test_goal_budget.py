@@ -135,11 +135,12 @@ async def test_coordinator_and_subagent_share_a_smaller_current_office_cap(db: D
     await db.execute("UPDATE projects SET settings = ? WHERE id = 'project'",
                      (json.dumps({"orchestrator": {"enabled": True, "session_id": "replacement"}}),))
     async with db.transaction() as conn:
-        with pytest.raises(BudgetRefused, match="retired or foreign coordinator"):
-            await charge_for_session_in(conn, "child")
+        # It still spends the project's goal, as work rather than from the coordination allowance.
+        charge = await charge_for_session_in(conn, "child")
+        assert charge is not None and charge.project_id == "project" and charge.coordinator is False
 
 
-async def test_activation_refuses_preexisting_unscoped_inflight_project_work(db: Database) -> None:
+async def test_activation_does_not_wait_for_preexisting_project_work_to_settle(db: Database) -> None:
     await project(db)
     await db.execute("INSERT INTO sessions(id,tenant_id,project_id,created_at,last_message_at)"
                      " VALUES ('worker','tenant','project','now','now')")
@@ -150,11 +151,11 @@ async def test_activation_refuses_preexisting_unscoped_inflight_project_work(db:
             rate_version=hashlib.sha256(canonical(QUOTE).encode()).hexdigest(), quote=QUOTE, constraints=(),
         )
         await InferenceBudget(db).start_in(conn, "older")
+        await InferenceBudget(db).unknown_in(conn, "older", "response lost")
     async with db.transaction() as conn:
-        with pytest.raises(BudgetRefused, match="settle or stop"):
-            await set_budget_in(conn, project_id="project", budget_id="budget", expected_goal_revision=1,
-                                limit_usd="1.000000", coordination_limit_usd="0.500000")
-    assert await db.fetchone("SELECT 1 FROM project_goal_budgets") is None
+        view = await set_budget_in(conn, project_id="project", budget_id="budget", expected_goal_revision=1,
+                                   limit_usd="1.000000", coordination_limit_usd="0.500000")
+    assert view["total"]["available_usd"] == "1.000000"
 
 
 async def test_http_budget_command_replays_and_exposes_exact_balance(db: Database) -> None:
@@ -284,3 +285,22 @@ async def test_capped_project_refuses_unpriced_cli_before_task_assignment(db: Da
     finally:
         team.queue.close()
         app.executions.release()
+
+
+async def test_gaps_in_session_lineage_charge_what_can_be_attributed(db: Database) -> None:
+    await project(db)
+    await project(db, "other")
+    async with db.transaction() as conn:
+        await set_budget_in(conn, project_id="project", budget_id="budget", expected_goal_revision=1,
+                            limit_usd="1.000000", coordination_limit_usd="0.500000")
+    rows = (("orphan", "project", {"subagent_of": "deleted-parent"}),
+            ("foreign-parent", "other", {}),
+            ("moved", "project", {"subagent_of": "foreign-parent"}))
+    for identity, project_id, metadata in rows:
+        await db.execute("INSERT INTO sessions(id,tenant_id,project_id,created_at,last_message_at,metadata)"
+                         " VALUES (?,'tenant',?,'now','now',?)", (identity, project_id, json.dumps(metadata)))
+    async with db.transaction() as conn:
+        orphan = await charge_for_session_in(conn, "orphan")
+        moved = await charge_for_session_in(conn, "moved")
+    assert orphan is not None and orphan.project_id == "project" and orphan.root_session_id == "orphan"
+    assert moved is not None and moved.project_id == "project" and moved.root_session_id == "moved"

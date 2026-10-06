@@ -125,7 +125,9 @@ class HostInferenceAdmission:
             seen.add(identity)
             row = await one(conn, "SELECT metadata FROM sessions WHERE id = ?", (identity,))
             if row is None:
-                raise BudgetRefused("the charged session no longer exists")
+                # A removed ancestor has no cap left to keep; refusing here stopped every call of
+                # a subagent whose parent session had been deleted.
+                break
             metadata = json.loads(row["metadata"])
             cap = metadata.get("usd_cap")
             if cap is not None:
@@ -230,7 +232,8 @@ class HostInferenceAdmission:
     async def cost(self, reservation_id: str, raw: dict[str, Any], normalized: dict[str, Any]) -> float | None:
         row = await self.db.fetchone("SELECT quote_json FROM inference_reservations WHERE id = ?", (reservation_id,))
         if row is None:
-            raise BudgetRefused("the inference has no admitted rate card")
+            # The reply already arrived; missing bookkeeping makes its cost unknown, not the answer lost.
+            return None
         quote = json.loads(row["quote_json"])
         if quote["provider_kind"] == "llamacpp":
             return 0.0

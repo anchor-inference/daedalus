@@ -356,3 +356,17 @@ async def test_a_missing_output_rate_cannot_turn_a_priced_input_into_a_free_repl
         assert configured.pricing["model"].cost({"input_tokens": 2, "output_tokens": 3}) is None
     finally:
         await adapter.aclose()
+
+
+async def test_a_subagent_whose_parent_session_was_removed_still_runs(manager) -> None:
+    await manager.db.execute("INSERT INTO projects(id,name,created_at,settings) VALUES ('project','Project','2026-01-01','{}')")
+    await manager.db.execute("INSERT INTO sessions(id,tenant_id,created_at,last_message_at,project_id,metadata)"
+                             " VALUES ('orphan','tenant','2026-01-01','2026-01-01','project',?)",
+                             (json.dumps({"subagent_of": "removed-parent"}),))
+    sends = []
+    adapter = provider(manager, lambda req: sends.append(req) or answer())
+    try:
+        await adapter.complete_text(request(observability=LLMObservabilityContext(tenant_id="tenant", session_id="orphan")))
+        assert len(sends) == 1
+    finally:
+        await adapter.aclose()
