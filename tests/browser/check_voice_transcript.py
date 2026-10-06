@@ -100,24 +100,36 @@ def playing(page) -> dict:  # type: ignore[no-untyped-def]
     )
 
 
-def open_page(browser, wire: Wire, viewport: dict):  # type: ignore[no-untyped-def]
+# The microphone in the middle of the page is whichever visual the operator chose for it: the mascot
+# by default, the orb when the mascot is switched off. Both are the one control the animation frame
+# writes to and the transcript gives way to, so the switch is driven through each of them. Holding
+# only the orb would leave the view most people see unchecked; holding only the mascot would lose
+# the orb, which is still an option on the page.
+VISUALS = {"mascot": ".voice-mascot", "orb": ".voice-orb"}
+
+
+def open_page(browser, wire: Wire, viewport: dict, visual: str = "mascot"):  # type: ignore[no-untyped-def]
     context = browser.new_context(viewport=viewport, color_scheme="dark", permissions=["microphone"])
     context.add_init_script(PLAYED)
+    if visual == "orb":
+        context.add_init_script("localStorage.setItem('daedalus.voice.mascot', 'off')")
     page = context.new_page()
     page.route("**/api/**", wire.route)
     page.goto(f"{BASE}/voice?token=t&scheme=dark&lang=en")
     return context, page
 
 
-def check_through_the_switch(browser, check) -> None:  # type: ignore[no-untyped-def]
+def check_through_the_switch(browser, check, visual: str) -> None:  # type: ignore[no-untyped-def]
     """The transcript opens in the middle of an answer, and the answer goes on being read out."""
     wire = Wire()
-    context, page = open_page(browser, wire, {"width": 1440, "height": 900})
+    context, page = open_page(browser, wire, {"width": 1440, "height": 900}, visual)
+    control = VISUALS[visual]
+    print(f"-- through the switch, with the {visual}")
     page.wait_for_selector(".voice-stage.phase-speaking", timeout=15000)
     page.wait_for_function("window.__played.length > 0", timeout=15000)
     # The microphone is opened first: what is being asserted is that it survives the change, and a
     # microphone that was never opened survives nothing.
-    page.locator(".voice-orb").click()
+    page.locator(control).click()
     page.wait_for_timeout(400)
     said_before = page.locator(".voice-stage .voice-said .voice-sentence").count()
     # Wait for the page to have reconnected once, after which the count stands still on its own.
@@ -162,7 +174,8 @@ def check_through_the_switch(browser, check) -> None:  # type: ignore[no-untyped
     after = playing(page)
     check(not after["paused"] and after["src"] == before["src"], "coming back does not interrupt it either")
     check(page.locator(".voice-stage.phase-speaking").count() == 1, "the orb comes back in the state the page is actually in")
-    check(page.locator(".voice-orb").get_attribute("aria-pressed") == "true", "and with the microphone still open")
+    check(page.locator(control).count() == 1, f"the {visual} is the control in the middle again")
+    check(page.locator(control).get_attribute("aria-pressed") == "true", "and with the microphone still open")
     check(wire.streams == streams_before, f"and still on the one stream it started with (opened {wire.streams})")
     context.close()
 
@@ -252,7 +265,8 @@ def main() -> int:
 
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=shots.CHROMIUM, args=shots.FAKE_MEDIA)
-        check_through_the_switch(browser, check)
+        for visual in VISUALS:
+            check_through_the_switch(browser, check, visual)
         check_the_agent(browser, check)
         check_the_phone(browser, check)
         browser.close()

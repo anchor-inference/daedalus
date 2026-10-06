@@ -1088,10 +1088,14 @@ VOICE_STATES: dict[str, dict] = {
 
 VOICE_ASKED = "How did the invoice run go?"
 
+# The microphone in the middle of the voice page is the mascot unless the operator switched it to the
+# orb, and the pictures are of the page as it opens, so the tap goes to whichever of the two is there.
+VOICE_MIC = ".voice-mascot, .voice-orb"
+
 
 def listening(page: Page) -> None:
     """Open the microphone and say nothing: the state the page spends most of its time in."""
-    page.locator(".voice-orb").click()
+    page.locator(VOICE_MIC).click()
     page.wait_for_timeout(900)
 
 
@@ -1103,7 +1107,7 @@ def talking(page: Page) -> None:
     on the screen. Asking after the first delivery and shooting before the third is what leaves
     exactly one answer under exactly one question.
     """
-    page.locator(".voice-orb").click()
+    page.locator(VOICE_MIC).click()
     page.wait_for_timeout(1200)
     page.fill(".voice-compose .field", VOICE_ASKED)
     page.locator(".voice-compose button[type=submit]").click()
