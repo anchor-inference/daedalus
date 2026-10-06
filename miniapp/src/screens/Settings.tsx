@@ -21,6 +21,7 @@ import { ON_DEMAND_CHOICES, REASONING_EFFORTS, onDemandGroups, orchestratorPrese
 import { mainPreset } from "../main/model";
 import { Sheet } from "../ui/dialogs";
 import { plural, t } from "../i18n";
+import { describeIntegration, type IntegrationRow } from "../integrationHealth";
 import { Dropdown, LangPicker, MultiDropdown, Segmented, Switch } from "../ui/index";
 import { NumInput, NumRow, Row, TextBlock } from "../settingsrow";
 import { AppearancePanel } from "./Appearance";
@@ -673,8 +674,20 @@ type Check = { name: string; ok: boolean; message: string; severity: string; fix
 function HealthTab({ toast }: { toast: (t: string) => void }) {
   const [data, setData] = useState<{ checks: Check[]; summary: Record<string, number> } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [integrations, setIntegrations] = useState<IntegrationRow[] | null>(null);
+  const loadIntegrations = async () => {
+    // The quick answer draws the card at once; the probed one follows with GitHub's verdict. Either
+    // failing leaves the card as it was: the doctor's list below is the screen's real job.
+    try {
+      setIntegrations((await api.get<{ rows: IntegrationRow[] }>("/api/integrations/health")).rows ?? []);
+      setIntegrations((await api.get<{ rows: IntegrationRow[] }>("/api/integrations/health?probe=true")).rows ?? []);
+    } catch {
+      /* the card stays as it was */
+    }
+  };
   const load = async (fix = false) => {
     setBusy(true);
+    void loadIntegrations();
     try {
       setData(fix ? await api.post("/api/doctor/fix") : await api.get("/api/doctor"));
       if (fix) toast(t("settings.health.fixed"));
@@ -715,6 +728,7 @@ function HealthTab({ toast }: { toast: (t: string) => void }) {
           )}
         </div>
       </div>
+      {integrations && integrations.length > 0 && <IntegrationsCard rows={integrations} />}
       <div className="card">
         {checks.map((c, i) => (
           <div key={i} className="row" style={{ alignItems: "flex-start", padding: "6px 0", borderTop: i ? "1px solid var(--line)" : undefined }}>
@@ -729,6 +743,39 @@ function HealthTab({ toast }: { toast: (t: string) => void }) {
         ))}
       </div>
     </>
+  );
+}
+
+/** GitHub, each MCP server and each model provider: one line each, the remedy under a failing one,
+ * and the host's technical text folded away. */
+function IntegrationsCard({ rows }: { rows: IntegrationRow[] }) {
+  const mark: Record<IntegrationRow["severity"], [IconName, string]> = { ok: ["check", "ok"], info: ["dot", "info"], warn: ["alert", "warn"], fail: ["close", "bad"] };
+  return (
+    <div className="card integrations">
+      <div className="section-title" style={{ marginTop: 0 }}>{t("health.int.title")}</div>
+      {rows.map((row, i) => {
+        const words = describeIntegration(row);
+        const [icon, tone] = mark[row.severity] ?? mark.info;
+        return (
+          <div key={`${row.kind}:${row.name}`} className="row integration" data-kind={row.kind} data-state={row.state} data-severity={row.severity} style={{ alignItems: "flex-start", padding: "6px 0", borderTop: i ? "1px solid var(--line)" : undefined }}>
+            <span className={`health-mark ${tone}`}><Icon name={icon} size={16} /></span>
+            <div className="grow" style={{ minWidth: 0 }}>
+              <div>
+                <b>{row.name}</b> <span className="sub">{words.kind} · {words.state}</span>
+              </div>
+              {words.fix && <div className="sub integration-fix">→ {words.fix}</div>}
+              {/* A healthy row's detail (a tool count, where its key comes from) is not worth a fold of its own. */}
+              {row.detail && row.severity !== "ok" && (
+                <details className="integration-detail">
+                  <summary className="sub">{t("health.int.details")}</summary>
+                  <code>{row.detail}</code>
+                </details>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

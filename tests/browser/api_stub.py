@@ -315,6 +315,14 @@ GATES: dict[str, object] = {
         "terminals": [],
         "capacity": {"running": 0, "cap": 20, "queued": 0},
     },
+    # The Health screen: the doctor's list, and the integration card with one row of each kind.
+    # check_health.py answers both itself, with failing rows; these are a quiet installation's.
+    "/api/doctor": {"checks": [{"name": "default model", "ok": True, "message": "main = DeepSeek V4", "severity": "ok", "fix_hint": "", "fixable": False, "fixed": False}],
+                    "summary": {"ok": 1, "warn": 0, "fail": 0, "fixed": 0}},
+    "/api/integrations/health": {"rows": [
+        {"kind": "github", "name": "GitHub", "state": "not_configured", "severity": "info", "detail": ""},
+        {"kind": "provider", "name": "deepseek", "state": "ready", "severity": "ok", "detail": "deepseek, key: proxy"},
+    ]},
 }
 
 
