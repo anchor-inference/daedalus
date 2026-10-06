@@ -272,7 +272,9 @@ class Team:
         folder = folder or self.folder_for(project, live.staff, None)
         state = self.manager.live_state(live.session.session_id) if live.session.session_id else None
         if state is not None and live.staff.harness == "daedalus":
-            return folder, str(state.workspace)
+            # Where its tools work: in a host folder that is the folder on the host, not the
+            # directory of this process the session runs from.
+            return folder, str(self.manager.work_dir(state))
         return folder, live.session.worktree_path or str(folder.path)
 
     async def hand_files(self, member: Staff, files: list[StoredFile], *, folder: ProjectFolder, cwd: str, task_id: str | None, by: str) -> list[Delivered]:
