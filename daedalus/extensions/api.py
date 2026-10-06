@@ -122,7 +122,7 @@ from daedalus.host.presence import MAX_ID_LENGTH, MAX_PROJECTS, MAX_SESSIONS, MA
 from daedalus.host.prompt_changes import PromptChangePlanner
 from daedalus.host.prompts import DEFAULT_RULES, without_turn_context
 from daedalus.host.services import SCRATCH_DIR_NAME
-from daedalus.host.session_runner import TENANT, Attachment, clip_title
+from daedalus.host.session_runner import TENANT, Attachment, HostUnreachable, clip_title
 from daedalus.host.transcript_view import full_tool_result, message_view
 from daedalus.processes import end_tree
 from daedalus.providers.free_catalog import approved_endpoint, probe_agent_cycle
@@ -2025,10 +2025,16 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             if folder is None:
                 raise HTTPException(404, f"{project.name} has no such folder")
             if not folder.local(manager.projects.local_env):
-                # An agent of this process works with this process's tools; a folder of the other
-                # environment is reached only by what runs in a terminal there.
-                raise HTTPException(409, f"{folder.path} is a {folder.env} folder; an agent started here cannot work in it, only one started in a {folder.env} terminal can")
-            if not await manager.projects.ensure_reachable(folder):
+                if folder.env != "host":
+                    # Natively nothing of this process reaches into the container; only what runs
+                    # in a terminal there does.
+                    raise HTTPException(409, f"{folder.path} is a {folder.env} folder; an agent started here cannot work in it, only one started in a {folder.env} terminal can")
+                # A host folder seen from the container is worked in through the host terminal
+                # daemon, so the daemon answering is what decides, not a mount here.
+                problem = manager.host_unreachable()
+                if problem:
+                    raise HTTPException(409, f"{folder.path} is on the host, and {problem}")
+            elif not await manager.projects.ensure_reachable(folder):
                 raise HTTPException(409, f"the folder of {project.name} ({folder.path}) is not reachable from here yet; mount it and restart before starting an agent in it")
         elif body.folder_id:
             raise HTTPException(400, "a folder is named within a project")
@@ -2037,7 +2043,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             create_args["folder_id"] = body.folder_id
         if body.own_directory:
             create_args["own_directory"] = True
-        state = await manager.create_session(title, **create_args)
+        try:
+            state = await manager.create_session(title, **create_args)
+        except HostUnreachable as exc:
+            # The daemon went away between the check above and the session.
+            raise HTTPException(409, str(exc)) from exc
         if body.preset:
             # Before the first run, so the session's opening task already goes to the chosen model.
             try:

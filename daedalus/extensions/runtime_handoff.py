@@ -14,6 +14,7 @@ from daedalus.stores.control import ControlConflict, canonical, digest, now, one
 from daedalus.stores.goal_budget import view_in
 from daedalus.stores.resource_profiles import latest_in, strict_target
 from daedalus.stores.runtime_release import attempt_released_in
+from daedalus.stores.staff import daedalus_reaches
 
 
 async def snapshot_in(conn: aiosqlite.Connection, *, task_id: str, source_attempt_id: str,
@@ -180,7 +181,9 @@ async def target_capability(app: Any, harness: str, env: str, staff_id: str) -> 
         config = getattr(manager, "config", None)
         presets = getattr(config, "presets", {}) if config is not None else {}
         ready = (manager is not None and staff is not None and member is not None
-                 and env == manager.projects.local_env and bool(getattr(config, "has_model", False))
+                 and daedalus_reaches(env, manager.projects.local_env)
+                 and (env == manager.projects.local_env or not manager.host_unreachable())
+                 and bool(getattr(config, "has_model", False))
                  and (not member.model or member.model in presets))
         return {"available": ready, "harness": harness, "env": env,
                 "reason": "" if ready else "native worker model or local runtime is unavailable",

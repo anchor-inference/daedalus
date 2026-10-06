@@ -43,7 +43,7 @@ from daedalus.stores.resource_profiles import (
     writer_target,
 )
 from daedalus.stores.runtime_release import attempt_released_in, no_entry_in
-from daedalus.stores.staff import DAEDALUS_EFFORTS, StaffError, daedalus_cannot_reach
+from daedalus.stores.staff import DAEDALUS_EFFORTS, StaffError, daedalus_cannot_reach, daedalus_reaches
 from daedalus.stores.update_drains import UpdateDrainActive, assert_admission_open_in
 
 if TYPE_CHECKING:
@@ -221,7 +221,7 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
         if source_head is not None and (folder["id"] != source_folder_id
                 or digest(folder["path"]) != source_path_digest or folder["env"] != source_env):
             raise ControlConflict("the selected workspace changed before the launch was recorded")
-        if member["harness"] == "daedalus" and folder["env"] != app.manager.projects.local_env:
+        if member["harness"] == "daedalus" and not daedalus_reaches(folder["env"], app.manager.projects.local_env):
             # A queued command must refuse an unreachable folder before it records an assignment.
             raise StaffError(f"{member['name']} cannot work on task {task_id}: "
                              + daedalus_cannot_reach(folder["path"], folder["env"],

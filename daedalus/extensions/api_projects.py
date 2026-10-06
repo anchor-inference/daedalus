@@ -257,7 +257,8 @@ def environments(settings: Any, local_env: str, terminals: Any = None) -> dict[s
 
 def reach(folder: ProjectFolder, local_env: str, bridge: bool) -> str:
     """Who can work in a folder: ``agents`` (every agent, this process's own tools included),
-    ``terminals`` (only what runs in a host terminal: CLI staff and the operator's shells), or
+    ``terminals`` (everything, but through the host terminal daemon: CLI staff and the operator's
+    shells in host terminals, and a Daedalus agent whose commands and file tools the daemon runs), or
     ``none``. Whether the folder is mounted yet is ``reachable``; this is whether it ever can be."""
     if folder.local(local_env):
         return "agents"

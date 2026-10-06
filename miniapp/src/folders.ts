@@ -14,7 +14,8 @@ export function projectPath(project: Pick<ProjectRef, "folders">): string {
 
 /** Whether an agent can be started in the project from where the bot runs: its primary folder is there. */
 export function projectReachable(project: Pick<ProjectRef, "folders">): boolean {
-  return primaryFolder(project)?.reachable ?? false;
+  const primary = primaryFolder(project);
+  return !!primary && (primary.reachable || primary.reach === "terminals");
 }
 
 /** What a folder is called on screen: the label the operator gave it, else the last part of its path. */
@@ -26,7 +27,7 @@ export function folderName(folder: { label: string; path: string }): string {
 
 /** The folders an agent of the bot can be started in: those of the bot's own environment. */
 export function agentFolders(project: Pick<ProjectRef, "folders">): ProjectDir[] {
-  return project.folders.filter((folder) => folder.reach === "agents");
+  return project.folders.filter((folder) => folder.reach === "agents" || folder.reach === "terminals");
 }
 
 /** Whether a new agent is offered a choice of folder: only when there is more than one it could work in. */

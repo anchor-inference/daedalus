@@ -74,7 +74,7 @@ async def test_a_hire_round_trips_with_a_colour_and_a_journal_entry(db: Database
         ({"agent": "poet"}, "no persona"),
         ({"effort": "extreme"}, "effort is one of"),
         ({"permission_mode": "acceptEdits"}, "command-line agent"),
-        ({"env": "host"}, "works where Daedalus runs"),
+        ({"env": "host"}, "works where its folder is"),
         ({"env": "moon"}, "container or on the host"),
         ({"color": "#ff0000"}, "colour is one of"),
         ({"model": "has space"}, "not a name this store keeps"),
@@ -110,8 +110,11 @@ async def test_folders_decide_what_isolation_and_environment_are_possible(db: Da
     with pytest.raises(StaffError, match="read-only, so no worktree"):
         await store.hire(project.id, name="A", folder_id=plain_id, isolation="worktree")
     assert (await store.hire(project.id, name="B", folder_id=plain_id, isolation="readonly")).isolation == "readonly"
-    with pytest.raises(StaffError, match="is on the host"):
-        await store.hire(project.id, name="C", folder_id=host_id, isolation="shared")
+    # A Daedalus member works in a host folder through the host terminal daemon; natively nothing
+    # of this process reaches into the container, so a container folder is refused there.
+    assert (await store.hire(project.id, name="C", folder_id=host_id, isolation="shared")).default_folder_id == host_id
+    with pytest.raises(StaffError, match="is in the container"):
+        await _store(db, local_env="host").hire(project.id, name="G", folder_id=repo_id, isolation="shared")
     # A command-line member can run on the host, where that folder is; its git state is not known here.
     on_host = await store.hire(project.id, name="D", harness="codex", env="host", folder_id=host_id, isolation="worktree")
     assert on_host.env == "host"

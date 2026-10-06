@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +21,7 @@ from protocore.contracts.types import MessageRole, TextBlock, ToolUseBlock
 
 from daedalus.host.gitrun import GitError, run_git
 from daedalus.host.prompts import split_headline
+from daedalus.host.services import SessionServices
 from daedalus.staff_runtime import (
     AskRef,
     Availability,
@@ -33,6 +35,7 @@ from daedalus.staff_runtime import (
     StartRequest,
     UsageSnapshot,
 )
+from daedalus.stores.staff import daedalus_reaches
 
 if TYPE_CHECKING:
     from daedalus.host.session_runner import SessionManager
@@ -58,8 +61,15 @@ class DaedalusStaffRuntime:
         self.manager = manager
 
     async def available(self, env: str) -> Availability:
-        if env != self.manager.projects.local_env:
-            return Availability(False, f"a Daedalus staff member works where Daedalus runs ({self.manager.projects.local_env}) and cannot reach a {env} folder; give this to a command-line member, which works in a {env} terminal")
+        local = self.manager.projects.local_env
+        if not daedalus_reaches(env, local):
+            return Availability(False, f"a Daedalus staff member works where Daedalus runs ({local}) and cannot reach a {env} folder; give this to a command-line member, which works in a {env} terminal")
+        if env != local:
+            # A host folder seen from the container: every command of the member runs through the
+            # host terminal daemon, so a member started while it is down could do nothing at all.
+            problem = self.manager.host_unreachable()
+            if problem:
+                return Availability(False, problem)
         if not self.manager.config.has_model:
             return Availability(False, "no model is configured")
         return Availability(True)
@@ -183,6 +193,10 @@ class DaedalusStaffRuntime:
             if state is None:
                 return ReadPage("the session is gone", None, False)
             path, base = str(state.workspace), "HEAD"
+        loaded = await self.manager.get_state(self._session(live))
+        services = loaded.services if loaded is not None else None
+        if services is not None and services.exec_backend is not None:
+            return await self._remote_diff(services, path if live.session.worktree_path else str(services.workspace_dir), base or "HEAD", req)
         cwd = Path(path)
         try:
             stat = await run_git(["diff", "--stat", base or "HEAD"], cwd=cwd, timeout=DIFF_TIMEOUT)
@@ -190,6 +204,22 @@ class DaedalusStaffRuntime:
             untracked = await run_git(["ls-files", "--others", "--exclude-standard"], cwd=cwd, timeout=DIFF_TIMEOUT)
         except GitError as exc:
             return ReadPage(f"no diff: {exc}", None, False)
+        text = (stat.strip() or "(no changes against the base)") + (f"\n\nnew files not yet added:\n{untracked.strip()}" if untracked.strip() else "") + (f"\n\n{patch}" if patch.strip() else "")
+        return _clip(text, req.max_chars, None, keep="head")
+
+    async def _remote_diff(self, services: SessionServices, path: str, base: str, req: ReadRequest) -> ReadPage:
+        """The diff of a member working in a host folder, taken there by the commands it runs with:
+        the session here only runs from a directory of its own, which holds none of its changes."""
+        assert services.exec_backend is not None
+        quoted = shlex.quote(base)
+        outcomes = [
+            await services.exec_backend.run(f"git -c core.quotepath=off {args}", cwd=path, env={"GIT_TERMINAL_PROMPT": "0"}, timeout=DIFF_TIMEOUT)
+            for args in (f"diff --stat {quoted}", f"diff {quoted}", "ls-files --others --exclude-standard")
+        ]
+        failed = next((o for o in outcomes if o.exit_code != 0), None)
+        if failed is not None:
+            return ReadPage(f"no diff: {failed.output.strip()[:500]}", None, False)
+        stat, patch, untracked = (o.output for o in outcomes)
         text = (stat.strip() or "(no changes against the base)") + (f"\n\nnew files not yet added:\n{untracked.strip()}" if untracked.strip() else "") + (f"\n\n{patch}" if patch.strip() else "")
         return _clip(text, req.max_chars, None, keep="head")
 

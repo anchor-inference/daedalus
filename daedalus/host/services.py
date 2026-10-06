@@ -85,6 +85,9 @@ class SessionServices:
     """Where the host writes this session's command logs when that is not its workspace: the
     :func:`session_scratch_dir` of a session whose folder is read-only, readable through ``walls`` and
     exempt from the seal on the state directory, never writable by the agent. ``None`` is the workspace."""
+    remote_readonly: bool = False
+    """A session driving the host whose folder (or staff isolation) is read-only. It has no walls of
+    this process to say so, so ``resolve`` refuses its writes by this flag instead."""
     extra: dict[str, Any] = field(default_factory=dict)
 
     def logs_dir(self, kind: str) -> Path:
@@ -143,6 +146,8 @@ class SessionServices:
                 # the workspace path, which a read-only folder refuses: the scratch is the host's.
                 candidate = (None if write else self.log_file(path)) or self.workspace_dir / candidate
         if self.walls is None:
+            if write and self.remote_readonly:
+                raise PathOutsideProject(f"{candidate} is in {self.workspace_dir}, a folder this session may read but not write: it is read-only here.")
             return candidate
         if not self.contains(candidate, write=write):
             raise PathOutsideProject(self.refusal(candidate, write=write))
@@ -171,6 +176,8 @@ class SessionServices:
     @property
     def workspace_writable(self) -> bool:
         """Whether the walls let this session write the folder it works in; a read-only folder does not."""
+        if self.walls is None and self.remote_readonly:
+            return False
         return self.contains(self.workspace_dir, write=True)
 
     def sandbox_writable(self) -> list[Path]:

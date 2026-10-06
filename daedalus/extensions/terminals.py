@@ -46,6 +46,8 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     app.extensions["terminals"] = terminals
     # The host as a Docker installation reaches it: a folder checked or made there, git run there.
     app.extensions["host_bridge"] = HostBridge(lambda: terminals)
+    # And a Daedalus session working in a host folder: its commands and file tools run there.
+    manager.host_bridge = app.extensions["host_bridge"]
 
     async def session_deleted(session_id: str) -> None:
         await terminals.close_owned("session", session_id)

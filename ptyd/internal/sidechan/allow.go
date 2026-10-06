@@ -9,11 +9,14 @@
 package sidechan
 
 // DefaultExecAllow are the programs exec.run may run, by the basename of what PATH resolves: the
-// CLIs the harness drives and what their installers and version checks need. Harness adapters add
-// to this list here; a deployment adds to it in the configuration file.
+// CLIs the harness drives and what their installers and version checks need, and bash, through which
+// a Daedalus agent working in a host folder runs its commands and reads and writes its files. bash
+// opens everything the shell can do, which the token already does by starting a terminal with any
+// argv; the list guards against mistakes, and a native agent on the host is not one. Harness adapters
+// add to this list here; a deployment adds to it in the configuration file.
 var DefaultExecAllow = []string{
 	"claude", "codex", "opencode", "pi", "grok", "cursor-agent",
-	"npm", "npx", "node", "git", "uname",
+	"npm", "npx", "node", "git", "uname", "bash",
 }
 
 // DefaultDeny are the files no fs.* call reads, whatever root holds them: every CLI's login, and the

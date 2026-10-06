@@ -268,7 +268,7 @@ function EnvSelect({ id, value, onChange, environments }: { id: string; value: E
 
 /** What adding a folder in this environment means, said before the operator adds it. */
 function EnvNote({ env, environments }: { env: Env; environments?: ProjectEnvironments }) {
-  if (environments && env !== environments.local) return <div className="sub">{t("folder.host.hint")}</div>;
+  if (environments && env !== environments.local) return <div className="sub">{t(environments.host_bridge ? "folder.host.hint" : "folder.host.hint.nobridge")}</div>;
   if (needsMount(env, environments)) return <div className="sub attn dir-mount">{t("folder.mount.warning")}</div>;
   return null;
 }

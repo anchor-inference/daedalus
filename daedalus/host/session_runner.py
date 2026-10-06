@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import time
 import uuid
@@ -72,6 +73,7 @@ from daedalus.host.containment import Walls, walls_for, worktree_writable_paths
 from daedalus.host.engine_factory import TENANT, EngineDeps, PolicyAdapter, build_engine
 from daedalus.host.events import AppEvent, EventBus, EventFilter
 from daedalus.host.hooks import DaedalusHookManager
+from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.inference_admission import HostInferenceAdmission
 from daedalus.host.policy import Decision, Policy, Rule, canonical
 from daedalus.host.presence import Presence
@@ -116,8 +118,10 @@ from daedalus.stores.sqlite import (
 from daedalus.stores.staff import AsksStore, StaffStore
 from daedalus.stores.update_drains import UpdateDrainActive, UpdateDrainPaused, assert_admission_open_in
 from daedalus.terminals import endpoint as terminal_endpoint
+from daedalus.terminals.bridge import HostBridge
 from daedalus.tools import TOOL_GROUPS, discover_tools
 from daedalus.tools.dispatcher import build as build_dispatcher_tools
+from daedalus.tools.shell import RemoteJob
 
 logger = logging.getLogger(__name__)
 
@@ -394,6 +398,24 @@ def home_of(metadata: dict[str, Any]) -> str:
     return value if _HOME_RE.fullmatch(value) and value not in (".", "..") else ""
 
 
+def host_home_name(session_id: str) -> str:
+    """The directory under the workspaces root that a session working in a host folder runs from.
+
+    Its commands and file tools work on the host, but a run still needs a directory of this process
+    to start in, keep its snapshots and receive attachments before they are passed on. Derived from
+    the session rather than stored, so a session moved into a host project, or loaded after a restart,
+    has it without a migration of its metadata.
+    """
+    return "host-" + re.sub(r"[^A-Za-z0-9_-]", "_", session_id)
+
+
+class HostUnreachable(ValueError):
+    """A session cannot be made in a host folder now: the host terminal daemon does not answer.
+
+    A ``ValueError``, so every caller that already turns a refused ``create_session`` into a message
+    for the operator says this one too; the text names the fix."""
+
+
 class WorkspaceUnreachable(RuntimeError):
     """The session's working directory is not there (or not writable) and nothing here can make it.
 
@@ -569,6 +591,9 @@ class SessionManager:
         """Called after an automatic compaction with what changed, so the chat can say so in one line."""
         self._pending_restored: list[Callable[[str, PendingQuestion], Awaitable[None]]] = []
         self.service_hooks: dict[str, Any] = {}
+        self.host_bridge: HostBridge | None = None
+        """The host through its terminal daemon, set when the terminals are installed: what a session
+        working in a host folder runs its commands and file tools through."""
         self.delete_hooks: list[Callable[[str], Awaitable[None]]] = []
         """Called with the session id before a session is removed (extensions release what they hold for it)."""
         self.project_delete_hooks: list[Callable[[str], Awaitable[None]]] = []
@@ -1085,12 +1110,34 @@ class SessionManager:
             raise RuntimeError(f"session {session_id} works in a folder {project.name} no longer has")
         return folder
 
+    def host_folder_of(self, session_id: str, metadata: dict[str, Any], project: Project | None) -> ProjectFolder | None:
+        """The host folder the session works in when this process runs in the container; ``None`` otherwise.
+
+        Such a session runs from a directory of its own here (:func:`host_home_name`) and does its
+        work on the host through the terminal daemon (:class:`HostExecBackend`). Natively a host folder
+        is this process's own and none of this applies.
+        """
+        if project is None or not project.folders or self.projects.local_env == "host":
+            return None
+        try:
+            folder = self.folder_of(session_id, metadata, project)
+        except RuntimeError:
+            return None
+        return folder if folder.env == "host" else None
+
     def workspace_of(self, session_id: str, metadata: dict[str, Any], project: Project | None) -> Path:
         """Return the session's project folder, its private directory inside that folder, or its own
         directory under the workspaces root (``home``) when its folders are out of this process's reach."""
         home = home_of(metadata)
         if home:
             return self.settings.workspaces_dir / home
+        if self.host_folder_of(session_id, metadata, project) is not None:
+            return self.settings.workspaces_dir / host_home_name(session_id)
+        return self.folder_workspace(session_id, metadata, project)
+
+    def folder_workspace(self, session_id: str, metadata: dict[str, Any], project: Project | None) -> Path:
+        """Where in its project folder the session works — the folder, its worktree or its own directory —
+        whether or not this process can reach it: for a host folder, the path on the host."""
         base = self.folder_of(session_id, metadata, project).path
         worktree = str(metadata.get("worktree_cwd") or "").strip()
         if worktree:
@@ -1114,7 +1161,25 @@ class SessionManager:
     def inbox_folder(self, session_id: str, metadata: dict[str, Any], project: Project | None) -> ProjectFolder | None:
         """The project folder whose rules decide whether the session's inbox may be made: none for a
         session with a home of its own, which is ours to create."""
-        return None if home_of(metadata) else self.folder_of(session_id, metadata, project)
+        if home_of(metadata) or self.host_folder_of(session_id, metadata, project) is not None:
+            return None
+        return self.folder_of(session_id, metadata, project)
+
+    def work_dir(self, state: SessionState) -> Path:
+        """Where the session's tools work: its workspace, or the path on the host for a session whose
+        commands run there. What the prompt names as the working directory and what a reviewer's
+        diff is taken in."""
+        services = state.services
+        if services is not None and isinstance(services.exec_backend, HostExecBackend):
+            return services.workspace_dir
+        return state.workspace
+
+    def host_unreachable(self) -> str:
+        """Why a session cannot be started in a host folder now, or ``""`` when it can."""
+        bridge = self.host_bridge
+        if bridge is None or not bridge.available():
+            return BRIDGE_DOWN
+        return ""
 
     def locator_services(self, session_id: str) -> SessionServices | None:
         state = self._states.get(session_id)
@@ -1140,9 +1205,10 @@ class SessionManager:
             folder = project.folder(folder_id) if project is not None else None
             if folder is None:
                 raise ValueError(f"{folder_id} is not a folder of {project.name if project is not None else 'a named project'}")
-            if not folder.local(self.projects.local_env):
-                # A Daedalus session works with this process's own tools, which cannot reach a folder
-                # of the other environment; only a terminal bridged there can.
+            if not folder.local(self.projects.local_env) and folder.env != "host":
+                # A Daedalus session works with this process's own tools, and natively nothing can
+                # reach into the container; only a terminal there can. A host folder seen from the
+                # container is worked in through the host terminal daemon (``host_folder_of``).
                 raise ValueError(f"{folder.path} is a {folder.env} folder, which an agent of this process cannot work in")
             meta["folder_id"] = folder_id
         else:
@@ -1158,6 +1224,16 @@ class SessionManager:
             meta["directory"] = f".agents/{sid}"
         else:
             meta.pop("directory", None)
+        host_folder = self.host_folder_of(sid, meta, project)
+        if host_folder is not None and not home_of(meta):
+            # Refused before anything is stored: a session whose every command would fail is a chat
+            # the operator then has to find and delete. A session with a home of its own (the
+            # project's coordinator) reads the host through Peek and starts without the daemon.
+            problem = self.host_unreachable()
+            if problem:
+                raise HostUnreachable(f"{host_folder.path} is on the host, and {problem}")
+            if own_directory:
+                await self._make_host_directory(self.folder_workspace(sid, meta, project), host_folder)
         workspace = self.workspace_of(sid, meta, project)
         _ensure_inbox(workspace, self.inbox_folder(sid, meta, project))
         session = Session(id=sid, tenant_id=TENANT, title=title, metadata=dict(meta))
@@ -1166,6 +1242,14 @@ class SessionManager:
         self._states[sid] = state
         self.register_services(state)
         return state
+
+    async def _make_host_directory(self, path: Path, folder: ProjectFolder) -> None:
+        """Make a session's own directory inside a host folder, through the daemon, as ``_ensure_inbox``
+        makes it locally; the daemon refuses a command whose working directory is not there."""
+        backend = HostExecBackend(lambda: self.host_bridge, str(folder.path))
+        outcome = await backend.run(f"mkdir -p -- {shlex.quote(str(path / 'inbox'))}", cwd=str(folder.path), env=None, timeout=30.0)
+        if outcome.exit_code != 0:
+            raise HostUnreachable(f"could not make {path} on the host: {outcome.output.strip()}")
 
     def live_state(self, session_id: str) -> SessionState | None:
         """The state of a session this process already holds; ``None`` for one it would have to load."""
@@ -1341,7 +1425,8 @@ class SessionManager:
         now = datetime.now(UTC)
         out: list[dict[str, Any]] = []
         for job in self._jobs.get(session_id, {}).values():
-            code = job.process.returncode
+            # A job on the host has no process here; its code is what it was last seen to end with.
+            code = job.exit_code if isinstance(job, RemoteJob) else job.process.returncode
             state = "running" if code is None else "cancelled" if code < 0 else "done" if code == 0 else "failed"
             started = now.timestamp() - max(0.0, time.monotonic() - job.started)
             try:
@@ -1399,6 +1484,9 @@ class SessionManager:
         job = self._jobs.get(session_id, {}).get(task_id)
         if job is None:
             return False
+        if isinstance(job, RemoteJob):
+            await job.kill()
+            return True
         if job.process.returncode is None:
             try:
                 end_tree(job.process.pid, hard=False)
@@ -1442,6 +1530,11 @@ class SessionManager:
         self._states.pop(session_id, None)
         locator.unregister(session_id)
         for job in self._jobs.pop(session_id, {}).values():
+            if isinstance(job, RemoteJob):
+                # Its host goes on running it otherwise, with nobody left who knows it is there.
+                with suppress(Exception):
+                    await job.kill()
+                continue
             process = getattr(job, "process", None)
             if process is not None and process.returncode is None:
                 try:
@@ -1481,6 +1574,8 @@ class SessionManager:
         # The logs a read-only folder's session kept in the state volume are the session's alone.
         # Removed whether or not the folder is read-only today: it may have been when they were written.
         shutil.rmtree(session_scratch_dir(self.settings.state_dir, session_id), ignore_errors=True)
+        # So is the directory a session in a host folder ran from: nothing of the operator's is in it.
+        shutil.rmtree(self.settings.workspaces_dir / host_home_name(session_id), ignore_errors=True)
         # A private child belongs to this session. A project folder never goes with a session.
         if (
             delete_workspace
@@ -2217,6 +2312,7 @@ class SessionManager:
             home = home_of(metadata) if isinstance(metadata, dict) else ""
             if home:
                 known_paths.add((self.settings.workspaces_dir / home).resolve())
+            known_paths.add((self.settings.workspaces_dir / host_home_name(r["id"])).resolve())
         sched = await self.db.fetchall("SELECT workspace FROM schedules")
         known_paths.update(Path(r["workspace"]).resolve() for r in sched)
         known_paths.add((self.settings.workspaces_dir / "heartbeat").resolve())
@@ -2400,7 +2496,10 @@ class SessionManager:
             walls=self.walls_of(state),
             extra={"skill_store": self.skills, "manager": self, "vision": _LiveVision(self), "jobs": self._jobs.setdefault(state.session.id, {})},
         )
-        if services.walls is not None and not services.workspace_writable:
+        host_folder = self.host_folder_of(state.session.id, state.session.metadata, state.project)
+        if host_folder is not None:
+            self._drive_host(services, state, host_folder)
+        elif services.walls is not None and not services.workspace_writable:
             # The host writes a read-only folder's command logs to the state volume instead, and the
             # session reads them there: a readable wall, never a writable one, so the agent sees
             # its jobs' output without being able to write into the installation.
@@ -2408,6 +2507,24 @@ class SessionManager:
             services.walls = Walls(readable=(*services.walls.readable, services.log_root), writable=services.walls.writable)
         state.services = services
         locator.register(services)
+
+    def _drive_host(self, services: SessionServices, state: SessionState, folder: ProjectFolder) -> None:
+        """Point a session's tools at the host folder it works in, as the benchmark harness points them
+        at a task container: commands and file tools through the terminal daemon, relative paths under
+        the folder (its worktree or its own directory), and no walls of this process, whose realpath
+        checks would judge a host path by whatever the container has under the same name.
+
+        It is the operator's own machine and nothing new fences it in; what is kept is the read-only
+        promise, because a reviewer told it may not write would otherwise write through every tool.
+        """
+        metadata = state.session.metadata
+        target = self.folder_workspace(state.session.id, metadata, state.project)
+        services.exec_backend = HostExecBackend(lambda: self.host_bridge, str(target))
+        services.workspace_dir = target
+        services.walls = None
+        services.writable = []
+        services.log_root = None
+        services.remote_readonly = folder.readonly or str(metadata.get("staff_isolation") or "") == "readonly"
 
     def walls_of(self, state: SessionState) -> Walls | None:
         """The walls of a loaded session, from its project, its folder and its own directory."""
@@ -2579,7 +2696,7 @@ class SessionManager:
                 # to create, and a run refused because our own bookkeeping lost a directory is an
                 # outage with nothing for the operator to do about it. A folder they pointed at is
                 # theirs, so that one still refuses, with the path in the message.
-                if home_of(state.metadata):
+                if home_of(state.metadata) or self.host_folder_of(state.session.id, state.metadata, state.project) is not None:
                     with suppress(OSError):
                         _ensure_inbox(state.workspace, None)
                 elif state.project is not None:
@@ -2901,7 +3018,14 @@ class SessionManager:
                     finally:
                         temporary.unlink(missing_ok=True)
             attachment.stored_name = target.name
-            lines.append(f"- {target} ({attachment.mime_type}, {target.stat().st_size} bytes)")
+            shown = target
+            backend = state.services.exec_backend if state.services is not None else None
+            if isinstance(backend, HostExecBackend) and state.services is not None:
+                # The session's tools work on the host, where the copy here cannot be opened; the
+                # file is passed on into the folder's inbox there and named by that path.
+                shown = state.services.workspace_dir / "inbox" / target.name
+                await backend.put_bytes(str(shown), await asyncio.to_thread(target.read_bytes))
+            lines.append(f"- {shown} ({attachment.mime_type}, {target.stat().st_size} bytes)")
             if attachment.mime_type.startswith("image/"):
                 meta = await self.blobs.put(TENANT, target.read_bytes(), content_type=attachment.mime_type)
                 image_refs.append((meta.ref, attachment.mime_type))
@@ -3223,7 +3347,7 @@ class SessionManager:
             run_id=run_id,
             session_id=state.session.id,
             session_title=state.session.title,
-            workspace=state.workspace,
+            workspace=self.work_dir(state),
             project=state.project.name if state.project is not None else "",
             rungs=rungs,
             provider_chain=chain,
@@ -4822,6 +4946,14 @@ class SessionManager:
     def notes_for(self, state: SessionState) -> str:
         """What the system prompt says about this session beyond the environment: the brief it was created with."""
         parts = [state.extra_notes.strip()] if state.extra_notes.strip() else []
+        if state.services is not None and isinstance(state.services.exec_backend, HostExecBackend):
+            # The sandbox line of the environment section describes this process's commands, not these.
+            parts.append(
+                f"- You work on the operator's own machine (the host), in {state.services.workspace_dir}: Exec, Verify, "
+                "background jobs and the file tools run there through the host terminal, with no sandbox around them, "
+                "so take the care you would take on someone's own computer. ServiceStart is not available there; "
+                "start a server with Exec(background=true)."
+            )
         available = set(self.providers.available())
         models = [pid for pid, preset in self.config.presets.items() if preset.provider in available and preset.model]
         if models:
@@ -4846,17 +4978,14 @@ class SessionManager:
         """
         parts: list[str] = []
         for name in ("AGENTS.md", "CLAUDE.md"):
-            path = state.workspace / name
-            try:
-                if path.is_file():
-                    text = (await asyncio.to_thread(path.read_text, "utf-8", "replace")).strip()
-                    if text:
-                        if len(text) > WORKSPACE_NOTES_CHARS:
-                            text = text[:WORKSPACE_NOTES_CHARS] + f"\n[… {name} continues; Read it for the rest]"
-                        parts.append(f"- {name} in the workspace (your project memory; keep it current):\n{self.redactor.redact(text)}")
-                    break
-            except OSError:
+            text = await self._workspace_note(state, name)
+            if text is None:
                 continue
+            if text:
+                if len(text) > WORKSPACE_NOTES_CHARS:
+                    text = text[:WORKSPACE_NOTES_CHARS] + f"\n[… {name} continues; Read it for the rest]"
+                parts.append(f"- {name} in the workspace (your project memory; keep it current):\n{self.redactor.redact(text)}")
+            break
         try:
             rows = await self.db.fetchall("SELECT id, title, status, priority FROM board_tasks WHERE session_id = ? AND status NOT IN ('done', 'cancelled') ORDER BY priority, updated_at DESC LIMIT 8", (state.session.id,))
         except Exception:  # noqa: BLE001 — the board is optional
@@ -4864,6 +4993,22 @@ class SessionManager:
         if rows:
             parts.append("- Your open board tasks (BoardGet for details; update them as you go):\n" + "\n".join(f"  - [{r['status']}] {r['id']}: {r['title']}" for r in rows))
         return ("\n" + "\n".join(parts)) if parts else ""
+
+    async def _workspace_note(self, state: SessionState, name: str) -> str | None:
+        """The text of a notes file in the workspace root, or ``None`` when it is not there to read.
+
+        A session working in a host folder keeps its notes there, not in the directory it runs from,
+        so its file is read through its tools' own filesystem."""
+        services = state.services
+        try:
+            if services is not None and isinstance(services.exec_backend, HostExecBackend):
+                return (await services.fs.read_text(services.workspace_dir / name)).strip()
+            path = state.workspace / name
+            if not path.is_file():
+                return None
+            return (await asyncio.to_thread(path.read_text, "utf-8", "replace")).strip()
+        except (OSError, UnicodeDecodeError):
+            return None
 
     async def set_brief(self, session_id: str, brief: str) -> str:
         state = await self.get_state(session_id)
@@ -5849,4 +5994,4 @@ def _bind(fn: Callable[..., Awaitable[Any]] | None, session_id: str) -> Callable
     return bound
 
 
-__all__ = ["HOME_KEY", "Attachment", "PendingQuestion", "SessionManager", "SessionState", "WorkspaceUnreachable", "annotate_summary", "home_of", "transcript_for_summary", "validate_summary_sections", "verbatim_tail"]
+__all__ = ["HOME_KEY", "Attachment", "HostUnreachable", "PendingQuestion", "SessionManager", "SessionState", "WorkspaceUnreachable", "annotate_summary", "home_of", "host_home_name", "transcript_for_summary", "validate_summary_sections", "verbatim_tail"]

@@ -17,11 +17,10 @@ from protocore.contracts.types import MessageRole, TextBlock
 from daedalus.config import Settings
 from daedalus.extensions.dispatches import Dispatches
 from daedalus.extensions.orchestrator_ops import Refused
-from daedalus.stores.control import ControlStore, Entity, Principal, Scope
+from daedalus.host.host_exec import HostExecBackend
+from daedalus.host.session_runner import host_home_name
 from daedalus.stores.database import Database
 from daedalus.stores.projects import FolderSpec, Project
-from daedalus.stores.staff import StaffError
-from tests.support.authorized_launch import operator_task
 from tests.support.waiting import until_await
 from tests.unit.test_orchestrator import Rig, _idle, events, events_messages, git, rig
 
@@ -138,8 +137,8 @@ async def test_an_orchestrator_of_a_project_whose_only_folder_is_on_the_host_run
         home = settings.workspaces_dir / HOME_NAME.format(project_id=project.id)
         assert state.workspace == home and home.is_dir(), "it runs in a directory of its own, not in the host path"
         assert state.project is not None and [str(f.path) for f in state.project.folders] == [HOST_ROOT], "the folder stays the project's"
-        assert state.services is not None and state.services.walls is not None
-        assert Path(HOST_ROOT) not in state.services.walls.readable, "a host path seen from the container names nothing to touch"
+        assert state.services is not None and isinstance(state.services.exec_backend, HostExecBackend)
+        assert state.services.workspace_dir == Path(HOST_ROOT), "its tools work in the host folder, through the host terminal daemon"
 
         dispatch = await dispatches.create(await r.manager.projects.get(project.id), text="Survey the folders and write the brief", title="Setup", kind="setup")  # type: ignore[arg-type]
 
@@ -162,10 +161,13 @@ async def test_an_orchestrator_stored_in_a_host_folder_is_moved_at_start_and_get
             pytest.skip("a host folder is out of reach only in a container installation")
         dispatches = install_dispatches(r)
         project = await host_project(r)
-        # As the stuck project was stored: an orchestrator session whose working directory is the host path.
+        # As the stuck project was stored: an orchestrator session without a home of its own. It is
+        # made while the host answers, as an ordinary session in a host folder is; it then runs from
+        # the directory every such session runs from until the start gives it the office's own.
+        r.manager.host_bridge = FakeHost(host_disk(tmp_path))  # type: ignore[assignment]
         state = await r.manager.create_session(f"Orchestrator · {project.name}", metadata={"orchestrator_of": project.id, "telegram_detached": True}, project_id=project.id)
         sid = state.session.id
-        assert state.workspace == Path(HOST_ROOT)
+        assert state.workspace == settings.workspaces_dir / host_home_name(sid)
         await r.manager.projects.update_orchestrator(project.id, enabled=True)
         assert await r.manager.projects.set_orchestrator(project.id, expect="", value=sid)
         await r.manager.db.kv_set(f"orchestrator_cursor:{project.id}", r.manager.bus.head)
@@ -344,36 +346,20 @@ async def test_a_refusal_that_passes_by_itself_is_retried_quietly(settings: Sett
 # -- who may work in a host folder -------------------------------------------------------------------------
 
 
-async def test_a_daedalus_member_is_refused_a_host_folder_with_a_sentence_that_says_who_can(settings: Settings, db: Database, tmp_path: Path) -> None:
+async def test_a_daedalus_member_is_hired_into_a_host_folder_only_while_the_host_answers(settings: Settings, db: Database, tmp_path: Path) -> None:
     r = await rig(settings, db, tmp_path)
     try:
         if r.manager.projects.local_env != "container":
-            pytest.skip("a host folder is out of reach only in a container installation")
+            pytest.skip("a host folder is driven through the daemon only from a container installation")
         project = await host_project(r)
         sid = (await r.orch.enable(project.id)).settings.orchestrator.session_id
-        with pytest.raises(Refused, match="a Daedalus staff member runs inside the agent's container.*hire a command-line member"):
+        with pytest.raises(Refused, match="Daedalus staff cannot run in the host now: the host terminal daemon is not answering"):
             await r.call(sid, "hire", name="Ada", role="Menu")
-        with pytest.raises(StaffError, match="Claude Code, Codex"):
-            await r.manager.staff.hire(project.id, name="Ada", role="Menu", isolation="shared")
+        assert await r.manager.staff.list(project.id) == []
 
-        # A project with a folder of both kinds: hired for the container folder, then handed a host task.
-        mixed = await r.manager.projects.create("Mixed", [FolderSpec(str(r.repo.parent / "mixed")), FolderSpec("/home/someone/mixed", env="host")])
-        (r.repo.parent / "mixed").mkdir()
-        member = await r.manager.staff.hire(mixed.id, name="Bo", role="Docs", isolation="shared")
-        host_folder = mixed.folders[1]
-        task_id = await operator_task(r.manager.db, mixed.id, "Host docs", folder_id=host_folder.id,
-                                      brief={"objective": "Document the host folder", "deliverable": "docs.md",
-                                             "boundaries": "Read only this folder", "done_when": "Docs are reviewed"})
-        scope = Scope("project", mixed.id)
-        revision = await ControlStore(r.manager.db).revision(scope, Entity("task", task_id))
-        with pytest.raises(StaffError, match=r"Bo cannot work on task .*/home/someone/mixed is on the host.*command-line member"):
-            await r.team.assign(member, task_id, principal=Principal.operator({"via": "token", "user_id": 1}),
-                                client_operation_id="host-folder-denied", expected_entity_revision=revision)
-        assert r.team.queue.queue(mixed.id) == [], "nothing waits for a start that cannot happen"
-        assert await r.manager.db.fetchone(
-            "SELECT 1 FROM effect_outbox WHERE json_extract(payload_json,'$.control.task_id') = ?",
-            (task_id,)) is None
-        assert (await r.manager.db.fetchone("SELECT assignee_staff_id FROM board_tasks WHERE id = ?",
-                                            (task_id,)))["assignee_staff_id"] is None
+        r.manager.host_bridge = FakeHost(host_disk(tmp_path))  # type: ignore[assignment]
+        await r.call(sid, "hire", name="Ada", role="Menu")
+        [member] = await r.manager.staff.list(project.id)
+        assert member.harness == "daedalus" and member.isolation == "shared", "a host folder's git is not known here, so no worktree is assumed"
     finally:
         await r.manager.close()

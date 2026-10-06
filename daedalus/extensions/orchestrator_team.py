@@ -199,7 +199,8 @@ async def hire(
     target = _folder(project, folder) if folder else None
     local = orch.manager.projects.local_env
     if harness == "daedalus":
-        where = env or local
+        # A Daedalus member works where its folder is: the host's own through the host terminal daemon.
+        where = env or (target.env if target is not None else (project.primary.env if project.primary else local))
     else:
         where = env or (target.env if target is not None else "") or project.settings.default_env or (project.primary.env if project.primary else local)
     available = await runtime.available(where)
@@ -1204,7 +1205,9 @@ async def harnesses(orch: Orchestrators, project: Project, session_id: str, *, h
     environments = [env] if env else sorted({f.env for f in project.folders} or {orch.manager.projects.local_env})
     lines: list[str] = []
     if harness is None:
-        lines.append("Daedalus: " + ("ready" if "daedalus" in runtimes else "no runtime") + f", in the {orch.manager.projects.local_env}; efforts off, low, medium, high, xhigh")
+        local = orch.manager.projects.local_env
+        reach = f"in the {local}" + (" and, through the host terminal, in host folders" if local == "container" else "")
+        lines.append("Daedalus: " + ("ready" if "daedalus" in runtimes else "no runtime") + f", {reach}; efforts off, low, medium, high, xhigh")
         if manager is None:
             lines.append("the command-line agents are not set up on this installation")
             return "\n".join(lines)

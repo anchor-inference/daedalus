@@ -119,6 +119,13 @@ def _json(text: str | None) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def daedalus_reaches(env: str, local_env: str) -> bool:
+    """Whether a Daedalus session can work in a folder of ``env``: its own environment, or the host
+    seen from the container, whose commands and files the host terminal daemon runs for it. Natively
+    nothing reaches into the container but a terminal there."""
+    return env == local_env or (env == "host" and local_env == "container")
+
+
 def daedalus_cannot_reach(path: Any, env: str, local_env: str) -> str:
     """Why a Daedalus staff member cannot work in a folder of the other environment, and who can."""
     where = "on the host" if env == "host" else "in the container"
@@ -625,16 +632,20 @@ class StaffStore:
                 raise StaffError(f"a Daedalus staff member's effort is one of {', '.join(e or 'default' for e in DAEDALUS_EFFORTS)}")
             if out["permission_mode"]:
                 raise StaffError("a permission mode is a command-line agent's setting; a Daedalus member follows the project's autonomy")
-            if out["env"] and out["env"] != self.local_env:
+            if out["env"] and not daedalus_reaches(out["env"], self.local_env):
                 raise StaffError(f"a Daedalus staff member works where Daedalus runs ({self.local_env}), not on the {out['env']}")
         env = out["env"] or str(settings.get("default_env") or self.local_env)
-        if harness == "daedalus":
-            env = self.local_env
         folder_id = out["default_folder_id"] or None
         out["default_folder_id"] = folder_id
         if folder_id is not None and folder_id not in folders:
             raise StaffError("that folder is not one of this project's")
         folder = folders[folder_id] if folder_id is not None else next(iter(folders.values()), None)
+        if harness == "daedalus":
+            # A Daedalus member works where its folder is, when it can reach it at all: in the
+            # container's own folders, and on the host through the host terminal daemon.
+            if out["env"] and folder is not None and out["env"] != folder["env"]:
+                raise StaffError(f"a Daedalus staff member works where its folder is ({folder['env']}), not on the {out['env']}")
+            env = folder["env"] if folder is not None and daedalus_reaches(folder["env"], self.local_env) else self.local_env
         if folder is not None:
             where = "on the host" if folder["env"] == "host" else "in the container"
             if folder["env"] != env and harness == "daedalus":
@@ -1287,5 +1298,6 @@ __all__ = [
     "cap_notes",
     "colour_for",
     "daedalus_cannot_reach",
+    "daedalus_reaches",
     "normalise_short_id",
 ]
