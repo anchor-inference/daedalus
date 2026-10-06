@@ -13,6 +13,7 @@ import { spendLine, staffUsage } from "../project/usage";
 import { plural, t } from "../i18n";
 import { HarnessBadge, StaffAvatar } from "./parts";
 import { StaffSheet } from "./StaffSheet";
+import { Setups } from "./setups";
 import { HARNESS_NAMES, Staff, Team, statusTone } from "./team";
 import { firstWait, waitKey } from "../project/focus";
 import { HealthLine } from "../staff/health";
@@ -78,6 +79,7 @@ export function TeamPage({ projectId, toast, back }: { projectId: string; toast:
             <b>{t("team.empty")}</b>
             <div>{t("team.empty.sub")}</div>
             <button className="btn primary" onClick={() => setHiring(true)}><Icon name="plus" size={15} /> {t("team.hire")}</button>
+            <Setups team={team} toast={toast} onDone={reload} />
           </div>
         )}
         {team && !closed && active.length > 0 && (

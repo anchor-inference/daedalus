@@ -220,3 +220,24 @@ export function foldersFor(folders: TeamFolder[], env: Env): TeamFolder[] {
 export function defaultIsolation(folder: TeamFolder | undefined): Isolation {
   return folder && folder.is_git && !folder.readonly ? "worktree" : "shared";
 }
+
+export const SETUPS = ["solo", "pair", "coordinator"] as const;
+export type SetupKind = (typeof SETUPS)[number];
+
+/** One member a ready-made setup hires: the body of the ordinary hire request, nothing more. */
+export type SetupHire = { name: string; role: string; harness: "daedalus"; isolation: Isolation };
+
+/** What a ready-made setup will do, in the order it does it: switch the coordinator on (only when it
+ *  is off), then hire. Shown in full before anything is sent, so the confirmation is the plan. */
+export type SetupPlan = { kind: SetupKind; enable: boolean; hires: SetupHire[] };
+
+/** A ready-made setup for an empty team. Every member is a Daedalus member, which needs no CLI to be
+ *  installed or signed in, so a setup offered on any installation can be carried out on it. The writer
+ *  gets its own worktree where the primary folder is a repository and the shared folder otherwise,
+ *  the same default the hiring form starts from; the reviewer is read-only, which the host walls. */
+export function setupPlan(kind: SetupKind, project: Pick<Team["project"], "orchestrator" | "folders">, names: { worker: string; reviewer: string; workerRole: string; reviewerRole: string }): SetupPlan {
+  const writer: SetupHire = { name: names.worker, role: kind === "solo" ? "" : names.workerRole, harness: "daedalus", isolation: defaultIsolation(project.folders[0]) };
+  if (kind === "pair") return { kind, enable: false, hires: [writer, { name: names.reviewer, role: names.reviewerRole, harness: "daedalus", isolation: "readonly" }] };
+  if (kind === "coordinator") return { kind, enable: !project.orchestrator, hires: [writer] };
+  return { kind, enable: false, hires: [writer] };
+}

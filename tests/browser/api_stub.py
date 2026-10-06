@@ -660,6 +660,8 @@ class TeamStub:
         self.personas = personas if personas is not None else ["reviewer", "tester"]
         self.hired: list[dict] = []
         self.patched: list[dict] = []
+        self.enabled: list[dict] = []
+        """Each request that switched the coordinator on, in order: a ready-made setup's first step."""
         self.spend: dict[str, dict] = {}
         """What each member spent, ``staff_id -> {"today": {...}, "subscription": ...}``; the rest spent nothing."""
         self.orchestrator_spend: dict | None = None
@@ -743,6 +745,10 @@ class TeamStub:
                 row["project_id"] = self.project["id"]
                 self.staff.append(row)
                 return 201, row
+        if path == f"/api/projects/{self.project['id']}/orchestrator" and method == "POST":
+            self.enabled.append(dict(body or {}))
+            self.project["orchestrator"] = True
+            return 200, {"enabled": True, "model": "", "autonomy": "normal", "effective_model": "strong", "project_id": self.project["id"]}
         if path.startswith("/api/staff/"):
             sid = path.split("/")[3]
             row = next((m for m in self.staff if m["id"] == sid), None)

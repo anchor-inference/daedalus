@@ -4,7 +4,8 @@ What is checked is what the operator relies on: a Daedalus member can be hired a
 badge; a command-line agent that cannot run here is offered but disabled, with the reason beside it;
 the branch a worktree will get is previewed from the name; an edit is sent; a dismissal asks first
 and takes the member off the list; a member who works cannot be dismissed, and the page says why.
-An edit sheet says, under a fold, how each of the member's settings is kept.
+An edit sheet says, under a fold, how each of the member's settings is kept. An empty team offers
+three ready-made setups, each showing its plan and creating nothing until it is confirmed.
 And the page fits: nothing scrolls sideways at 390 px.
 """
 
@@ -26,8 +27,8 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "9f3c2a1b7d40"
 
 WORDS = {
-    "en": {"title": "Team · Bakery", "hire": "Hire", "save": "Save", "dismiss": "Dismiss", "signedout": "not signed in", "missing": "not installed", "working": "working", "edit": "Edit {name}", "empty": "No staff yet", "kept": "How these settings are kept", "walls": "the host's walls refuse", "shared": "Shared folder", "worktree": "Own worktree", "blocked": "This environment cannot safely write in a shared folder"},
-    "ru": {"title": "Команда · Bakery", "hire": "Нанять", "save": "Сохранить", "dismiss": "Уволить", "signedout": "нет входа", "missing": "не установлен", "working": "работает", "edit": "Изменить: {name}", "empty": "Сотрудников пока нет", "kept": "Как соблюдаются эти настройки", "walls": "хост отклоняет", "shared": "Общая папка", "worktree": "Свой worktree", "blocked": "Эта среда не может безопасно писать в общую папку"},
+    "en": {"title": "Team · Bakery", "hire": "Hire", "save": "Save", "dismiss": "Dismiss", "signedout": "not signed in", "missing": "not installed", "working": "working", "edit": "Edit {name}", "empty": "No staff yet", "kept": "How these settings are kept", "walls": "the host's walls refuse", "worker": "Worker", "reviewer": "Reviewer", "enable": "coordinator on", "shared": "Shared folder", "worktree": "Own worktree", "blocked": "This environment cannot safely write in a shared folder"},
+    "ru": {"title": "Команда · Bakery", "hire": "Нанять", "save": "Сохранить", "dismiss": "Уволить", "signedout": "нет входа", "missing": "не установлен", "working": "работает", "edit": "Изменить: {name}", "empty": "Сотрудников пока нет", "kept": "Как соблюдаются эти настройки", "walls": "хост отклоняет", "worker": "Исполнитель", "reviewer": "Ревьюер", "enable": "Включить координатора", "shared": "Общая папка", "worktree": "Свой worktree", "blocked": "Эта среда не может безопасно писать в общую папку"},
 }
 
 
@@ -167,6 +168,60 @@ def run_one(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
     fits(page, f"{lang} {width} after")
 
 
+def run_setups(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
+    """An empty team: three ready-made setups, a plan shown before anything is created, nothing sent on
+    cancel, and the coordinator's setup switching it on before hiring its worker."""
+    words = WORDS[lang]
+    team = TeamStub(project(), staff=[])
+
+    def stub(route) -> None:  # type: ignore[no-untyped-def]
+        request = route.request
+        url = urlsplit(request.url)
+        path = url.path[url.path.index("/api/"):] if "/api/" in url.path else ""
+        answered = team.answer(request.method, path, url.query, request.post_data_json if request.method in ("POST", "PATCH") else None) or BoardStub(project()).answer(request.method, path, url.query, None)
+        if answered is not None:
+            status, body = answered
+            return route.fulfill(status=status, content_type="application/json", body=json.dumps(body))
+        if path == "/api/projects":
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps([project()]))
+        if path == "/api/sessions":
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"sessions": [], "projects": []}))
+        if path == "/api/settings":
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"presets": {}, "model": {}}))
+        if fulfil_shared(route):
+            return None
+        unhandled.record(path)
+        route.fulfill(status=200, content_type="application/json", body="[]")
+
+    page.route("**/api/**", stub)
+    page.goto(f"{BASE}/project/{PID}/team?token=t&lang={lang}")
+    expect(page.get_by_text(words["empty"], exact=True)).to_be_visible()
+    setups = page.locator("[data-team-setups]")
+    expect(setups.locator("[data-setup]")).to_have_count(3)
+    fits(page, f"{lang} {width} setups")
+
+    # The pair: its plan names both members, and a cancel creates nothing.
+    setups.locator('[data-setup="pair"]').click()
+    dialog = page.locator(".dialog")
+    steps = dialog.locator("[data-setup-steps] li")
+    expect(steps).to_have_count(2)
+    expect(steps.nth(0)).to_contain_text(words["worker"])
+    expect(steps.nth(1)).to_contain_text(words["reviewer"])
+    fits(page, f"{lang} {width} setup plan")
+    dialog.locator(".dialog-actions .btn").first.click()
+    expect(dialog).to_have_count(0)
+    assert team.hired == [] and team.enabled == [], (team.hired, team.enabled)
+
+    # The coordinator's: switch it on first, then one worker in its own worktree.
+    setups.locator('[data-setup="coordinator"]').click()
+    expect(steps).to_have_count(2)
+    expect(steps.nth(0)).to_contain_text(words["enable"])
+    dialog.locator(".dialog-actions .btn.primary").click()
+    expect(page.locator(".phone-staff-item" if width < 1024 else ".staff-row", has_text=words["worker"])).to_be_visible()
+    assert len(team.enabled) == 1, team.enabled
+    assert [(h["name"], h["harness"], h["isolation"]) for h in team.hired] == [(words["worker"], "daedalus", "worktree")], team.hired
+
+
 def run() -> int:
     unhandled = Unhandled()
     expect_app(BASE)
@@ -177,6 +232,9 @@ def run() -> int:
                 context = browser.new_context(viewport={"width": width, "height": height}, is_mobile=mobile, has_touch=mobile)
                 page = context.new_page()
                 run_one(page, lang, width, unhandled)
+                context.close()
+                context = browser.new_context(viewport={"width": width, "height": height}, is_mobile=mobile, has_touch=mobile)
+                run_setups(context.new_page(), lang, width, unhandled)
                 context.close()
         browser.close()
     return unhandled.report()
