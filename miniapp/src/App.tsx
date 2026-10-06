@@ -50,7 +50,7 @@ const BoardScreen = lazy(retried(() => import("./screens/Board"), (m) => ({ defa
 const VoiceScreen = lazy(retried(() => import("./screens/Voice"), (m) => ({ default: m.VoiceScreen })));
 const ProposalsScreen = lazy(retried(() => import("./screens/Proposals"), (m) => ({ default: m.ProposalsScreen })));
 const SchedulesScreen = lazy(retried(() => import("./screens/Schedules"), (m) => ({ default: m.SchedulesScreen })));
-const CalendarScreen = lazy(retried(() => import("./screens/Calendar"), (m) => ({ default: m.CalendarScreen })));
+const CalendarScreen = lazy(retried(() => import("./calendar/Calendar"), (m) => ({ default: m.CalendarScreen })));
 const DiagramsScreen = lazy(retried(() => import("./screens/Diagrams"), (m) => ({ default: m.DiagramsScreen })));
 const UsageScreen = lazy(retried(() => import("./screens/Usage"), (m) => ({ default: m.UsageScreen })));
 const SettingsScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ default: m.SettingsScreen })));
@@ -554,7 +554,7 @@ export function App() {
             <ProposalsScreen toast={showToast} selected={route.detail} />
           ))}
         {route.screen === "schedules" && <SchedulesScreen toast={showToast} onOpen={open} selected={route.detail} />}
-        {route.screen === "calendar" && <CalendarScreen toast={showToast} />}
+        {route.screen === "calendar" && <CalendarScreen toast={showToast} query={route.query} />}
         {route.screen === "diagrams" && <DiagramsScreen toast={showToast} selected={route.detail} />}
         {route.screen === "terminals" && !route.detail && <TerminalsScreen toast={showToast} project={project} projects={projectList} />}
         {route.screen === "terminals" && route.detail && <TerminalFullScreen id={route.detail} beside={route.query.get("with")} toast={showToast} />}

@@ -30,6 +30,9 @@ function listed(file: string, name: string): string[] {
 const SAME_IN_BOTH = [
   // The agent's name on its browser cursor is the product's name in both languages.
   "browser.agent",
+  // Two calendar services whose names are the same brand in Russian.
+  "cal.provider.icloud",
+  "cal.provider.outlook",
   // Three of the components are proper names of programs and are spelled the same in Russian.
   "comp.name.git",
   "comp.name.node",
