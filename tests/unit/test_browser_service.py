@@ -232,6 +232,27 @@ async def test_reconcile_after_a_daemon_restart_and_an_adoption_by_labels(db: Da
     assert "s-gone" not in daemon.groups
 
 
+async def test_a_group_opened_while_the_daemon_was_being_listed_is_not_closed(db: Database, service: Browsers, owners: FakeOwners) -> None:
+    """The listing came back before the open reached the daemon, and the row was written after it."""
+    owners.add(SESSION)
+    await service.open(SESSION, actor="agent:sess1")
+    link = service.links["container"]
+    real = link.client.call
+
+    async def listed_too_early(method: str, params: dict) -> dict:  # type: ignore[type-arg]
+        if method == "group.list":
+            return {"groups": []}
+        return await real(method, params)
+
+    link.client.call = listed_too_early  # type: ignore[method-assign]
+    await service._reconcile(link)
+    assert await _status(db, "s-sess1") == "open", "a browser just given to the agent was closed as idle"
+    # Long after its open, a group the same daemon does not list really is gone.
+    await db.execute("UPDATE browser_groups SET last_activity_at = '2026-01-01T00:00:00+00:00' WHERE id = 's-sess1'")
+    await service._reconcile(link)
+    assert await _status(db, "s-sess1") == "closed"
+
+
 async def _status(db: Database, group: str) -> str | None:
     row = await db.fetchone("SELECT status FROM browser_groups WHERE id = ?", (group,))
     return str(row["status"]) if row is not None else None
