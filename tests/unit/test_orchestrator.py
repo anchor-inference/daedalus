@@ -536,6 +536,11 @@ async def test_what_wakes_the_orchestrator_and_what_never_does(settings: Setting
         assert await wake("task.created", {**task, "actor": "agent", "actor_id": f"orchestrator:{sid}"}) is None, "its own doing is not news"
         assert await wake("task.moved", {**task, "from": "todo", "to": "doing", "actor": "operator"}) is not None
         assert (await wake("task.merge_failed", {**task, "actor": "system"})).urgent
+        red = {**task, "actor": "system", "head_sha": "a" * 40, "check_name": "unit", "failed_checks": ["unit"],
+               "run_id": "41", "link": "https://github.com/someone/example/runs/41"}
+        assert (await wake("task.ci_failed", red)).urgent
+        line = await r.orch.line(r.project, await bus.publish("task.ci_failed", red, project_id=pid))
+        assert "required CI failed" in line and "unit" in line and "runs/41" in line and "a" * 12 in line
         assert await wake("staff.status", {"status": "idle", "previous": "working"}, staff_id=ada.id) is None
         assert not (await wake("staff.status", {"status": "turn_done_unseen", "previous": "working"}, staff_id=ada.id)).urgent
         assert (await wake("staff.status", {"status": "error", "previous": "working"}, staff_id=ada.id)).urgent

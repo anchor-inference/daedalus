@@ -101,7 +101,8 @@ The two ``dispatch`` types are the main orchestrator's hand-overs to a project; 
 
 STAFF_WAKE_STATUSES = frozenset({"turn_done_unseen", "error", "exited", "no_signal"})
 URGENT_REPORTS = frozenset({"needs_input", "stuck"})
-TASK_WAKES = frozenset({"task.created", "task.moved", "task.assigned", "task.accepted", "task.merge_failed"})
+TASK_WAKES = frozenset({"task.created", "task.moved", "task.assigned", "task.accepted", "task.merge_failed",
+                        "task.ci_failed"})
 SELF_EVENTS_ALLOWED = frozenset({"ask.answered", "permission.resolved"})
 """Events that carry the orchestrator's own session id but are someone else's news: the operator
 answering what it asked."""
@@ -1079,7 +1080,7 @@ class Orchestrators:
                 return None
             return Wake(f"answers:{p.get('batch_id') or event.seq}", urgent=any(a.kind != "permission" for a in asks))
         if kind in TASK_WAKES:
-            return Wake(f"task:{p.get('task_id') or event.seq}", urgent=kind == "task.merge_failed")
+            return Wake(f"task:{p.get('task_id') or event.seq}", urgent=kind in ("task.merge_failed", "task.ci_failed"))
         if kind == "run.started":
             if not event.staff_id or p.get("origin") != "operator":
                 return None
@@ -1241,6 +1242,12 @@ class Orchestrators:
                 return f"{title} assigned to {assignee.name}{error}" if assignee else f"{title} is unassigned{error}"
             if kind == "task.accepted":
                 return f"{actor} accepted {title}"
+            if kind == "task.ci_failed":
+                # Only reaches the coordinator when no worker is live on the task to take it itself.
+                failed = ", ".join(str(name) for name in p.get("failed_checks") or [p.get("check_name")])
+                link = f"; {p['link']}" if p.get("link") else ""
+                return (f"required CI failed on {title} at {str(p.get('head_sha') or '')[:12]}: {failed}"
+                        f" (run {p.get('run_id')}{link}); no worker is live on it")
             return f"merging {title} failed: {_one_line(str(p.get('error') or 'conflicts'), 300)}"
         if kind == "run.started":
             return f"the operator wrote to {who(member)} directly"

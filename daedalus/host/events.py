@@ -347,6 +347,13 @@ TaskChange = TypedDict(
         "attempt_id": NotRequired[str | None],
         "receipt_id": NotRequired[str],
         "error": NotRequired[str],
+        "head_sha": NotRequired[str],
+        "check_name": NotRequired[str],
+        "failed_checks": NotRequired[list[str]],
+        "run_id": NotRequired[str],
+        "run_attempt": NotRequired[int],
+        "link": NotRequired[str],
+        "ci_key": NotRequired[str],
     },
 )
 
@@ -574,6 +581,7 @@ REGISTRY: dict[str, EventSpec] = {
     "task.assigned": EventSpec(TaskChange),
     "task.accepted": EventSpec(TaskChange),
     "task.merge_failed": EventSpec(TaskChange),
+    "task.ci_failed": EventSpec(TaskChange),
     "orchestrator.open_results": EventSpec(OpenResults),
     "schedule.fired": EventSpec(ScheduleFired),
     "watch.fired": EventSpec(WatchFired),

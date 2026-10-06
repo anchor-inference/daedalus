@@ -100,6 +100,7 @@ from daedalus.extensions import commands as slash
 from daedalus.extensions.artifact_headers import artifact_headers
 from daedalus.extensions.calendar_sync import sync_loop
 from daedalus.extensions.ci_observations import record_signed_delivery
+from daedalus.extensions.ci_wake import CiFailures, ci_link
 from daedalus.extensions.heartbeat import TEMPLATE as HEARTBEAT_TEMPLATE
 from daedalus.extensions.inbound import PAYLOAD_MAX_CHARS, flatten_payload, verify_signature
 from daedalus.extensions.notifications import ActionConflict, ActionRefused, Draft, NotificationService
@@ -4348,6 +4349,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
 
+    ci_failures = CiFailures(app)
+
     @api.post("/webhooks/{provider}")
     async def webhook(provider: str, request: Request) -> dict[str, Any]:
         # Every pre-verification refusal looks the same from outside: an anonymous caller learns nothing about what is configured.
@@ -4397,6 +4400,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(503, "the signed delivery could not be persisted; retry it") from exc
         if not receipt["fresh"]:
             return {"status": "duplicate", "delivery_id": delivery_id}
+        if receipt.get("observation"):
+            ci_failures.spawn(receipt["observation"], link=ci_link(event, payload))
         if conf.deliver == "events":
             return {"status": "accepted", "delivery_id": delivery_id, "delivered": "events"}
         try:
