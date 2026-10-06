@@ -72,10 +72,11 @@ async def _historical(conn: aiosqlite.Connection, limit: Constraint) -> int:
                                    (row["inference_reservation_id"],))
                 if (escrow is not None and escrow["state"] in ("inflight", "unknown")
                         and all(escrow[field] == row[field] for field in ("provider_id", "model", "session_id", "run_id"))):
-                    # This charge is counted at its still-held quote below. An older unpriced
-                    # usage row without an admitted ceiling cannot be treated the same way.
+                    # This charge is counted at its still-held quote below.
                     continue
-                raise BudgetRefused(f"{limit.key}: prior usage has an unknown price")
+                # Unknown spend adds nothing the cap can count. Refusing on it stopped every chat
+                # for the rest of the day once one subscription call (no published price) had run.
+                continue
             total += microusd(row["cost_usd"])
     finally:
         await cursor.close()
