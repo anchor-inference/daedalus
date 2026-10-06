@@ -236,7 +236,7 @@ def seed_before_history(path: Path) -> str:
     the old tool dropped, then the operator moved the box twice."""
     raw = sqlite3.connect(path)
     raw.executescript(f"CREATE TABLE schema_version (version INTEGER NOT NULL); INSERT INTO schema_version VALUES ({HISTORY});")
-    opening = SimpleNamespace(workspaces_dir=path.parent / "workspaces", local_env="container")
+    opening = SimpleNamespace(workspaces_dir=path.parent / "workspaces", local_env="container", path=path)
     for script in MIGRATIONS[:HISTORY]:
         script = script(opening) if callable(script) else script
         raw.executescript(script[0] if isinstance(script, tuple) else script)
