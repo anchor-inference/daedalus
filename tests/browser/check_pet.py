@@ -6,11 +6,49 @@ import os
 import sys
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from screenshots import UNHANDLED, stub  # noqa: E402
+
+# A line stays twelve seconds and a touch held for 650 ms opens the menu: the companion's real timings.
+# On a loaded machine the check's own round trips outlasted both. The greeting it measured after a
+# reload was gone by the time the drag was over, and a touch drag whose move came a second after its
+# start had become a held press. So each measurement of a bubble raises a fresh line and reads the
+# boxes in the same task, a frame after it is drawn, and the touch drag is dispatched in one task.
+SAY = """async ([id, selectors]) => {
+    window.dispatchEvent(new CustomEvent('daedalus:pet-notice', {detail: {id, title: 'A task finished', body: 'Open the inbox', tone: 'success', category: 'run_finished', needs_you: false}}));
+    const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+    for (let n = 0; n < 600 && !document.querySelector('.pet-bubble')?.textContent?.includes('A task finished'); n++) await frame();
+    await frame();
+    const boxes = {};
+    for (const selector of selectors) {
+        const node = document.querySelector(selector);
+        const box = node?.getBoundingClientRect();
+        boxes[selector] = box ? {x: box.x, y: box.y, width: box.width, height: box.height} : null;
+    }
+    const bubble = document.querySelector('.pet-bubble');
+    boxes.font = bubble ? parseFloat(getComputedStyle(bubble).fontSize) : null;
+    boxes.background = bubble ? getComputedStyle(bubble).backgroundColor : null;
+    return boxes;
+}"""
+
+TOUCH_DRAG = """([from, to]) => {
+    const figure = document.querySelector('.pet-figure');
+    const event = (type, [x, y]) => figure.dispatchEvent(new PointerEvent(type, {bubbles: true, pointerId: 7, pointerType: 'touch', button: 0, clientX: x, clientY: y}));
+    event('pointerdown', from);
+    for (let step = 1; step <= 8; step++) event('pointermove', [from[0] + (to[0] - from[0]) * step / 8, from[1] + (to[1] - from[1]) * step / 8]);
+    event('pointerup', to);
+}"""
+
+
+def say(page: Page, notice_id: int, *selectors: str) -> dict:
+    """A fresh line on the companion, and the boxes of ``selectors`` the frame after it is drawn."""
+    boxes = page.evaluate(SAY, [notice_id, [".pet-bubble", *selectors]])
+    assert boxes[".pet-bubble"], "the companion never showed the line"
+    return boxes
 
 
 def main() -> None:
@@ -40,25 +78,20 @@ def main() -> None:
         page.get_by_label("Reaction model").select_option("deepseek-flash")
         page.locator(".pet-figure").click(button="right")
         page.get_by_role("button", name="Generate a line").click()
-        page.locator(".pet-bubble").get_by_text("I'm here.").wait_for(timeout=5000)
+        page.locator(".pet-bubble").get_by_text("I'm here.").wait_for()
         page.locator(".pet-figure").click(button="right")
         page.get_by_label("Emotion").select_option("surprised")
         page.get_by_label("Animation").select_option("wave")
         page.get_by_label("Object").select_option("mug")
-        page.evaluate("""() => window.dispatchEvent(new CustomEvent('daedalus:pet-notice', {detail: {id: 7, title: 'A task finished', body: 'Open the inbox', tone: 'success', category: 'run_finished', needs_you: false}}))""")
-        page.locator(".pet-bubble").get_by_text("A task finished").wait_for(timeout=5000)
-        background = page.locator(".pet-bubble").evaluate("node => getComputedStyle(node).backgroundColor")
-        assert background.startswith("rgb("), background
-        original_figure = page.locator(".pet-figure").bounding_box()
-        original_bubble = page.locator(".pet-bubble").bounding_box()
-        original_font = page.locator(".pet-bubble").evaluate("node => parseFloat(getComputedStyle(node).fontSize)")
-        assert original_figure and original_bubble
+        original = say(page, 7, ".pet-figure")
+        assert original["background"].startswith("rgb("), original["background"]
+        original_figure, original_bubble, original_font = original[".pet-figure"], original[".pet-bubble"], original["font"]
+        assert original_figure
         page.get_by_role("slider", name="Size").press("Home")
         assert page.get_by_role("slider", name="Size").input_value() == "60"
-        small_figure = page.locator(".pet-figure").bounding_box()
-        small_bubble = page.locator(".pet-bubble").bounding_box()
-        small_font = page.locator(".pet-bubble").evaluate("node => parseFloat(getComputedStyle(node).fontSize)")
-        assert small_figure and small_bubble
+        small = say(page, 7, ".pet-figure")
+        small_figure, small_bubble, small_font = small[".pet-figure"], small[".pet-bubble"], small["font"]
+        assert small_figure
         assert abs(small_figure["height"] / original_figure["height"] - 0.6) < 0.02
         assert abs(small_bubble["width"] / original_bubble["width"] - 0.6) < 0.02
         assert abs(small_font / original_font - 0.6) < 0.02
@@ -70,17 +103,16 @@ def main() -> None:
         page.get_by_role("slider", name="Size").press("End")
         assert page.get_by_role("slider", name="Size").input_value() == "100"
         page.keyboard.press("Escape")
-        figure = page.locator(".pet-figure")
-        before = figure.bounding_box()
+        before = page.locator(".pet-figure").bounding_box()
         assert before
         page.mouse.move(before["x"] + before["width"] / 2, before["y"] + before["height"] / 2)
         page.mouse.down()
         page.mouse.move(8, 8, steps=8)
         page.mouse.up()
-        moved = page.locator(".pet-host").bounding_box()
+        after_drag = say(page, 9, ".pet-host")
+        moved, bubble = after_drag[".pet-host"], after_drag[".pet-bubble"]
         assert moved and moved["x"] <= 10 and moved["y"] <= 10, moved
-        bubble = page.locator(".pet-bubble").bounding_box()
-        assert bubble and bubble["x"] >= 8 and bubble["y"] >= 8, bubble
+        assert bubble["x"] >= 8 and bubble["y"] >= 8, bubble
         assert bubble["x"] + bubble["width"] <= 1352 and bubble["y"] + bubble["height"] <= 892, bubble
         assert bubble["y"] >= moved["y"] + moved["height"] - 50 or bubble["x"] >= moved["x"] + moved["width"] - 1, bubble
         assert "custom" in page.evaluate("localStorage.getItem('daedalus.pet.position.desktop')")
@@ -89,11 +121,11 @@ def main() -> None:
         restored = page.locator(".pet-host").bounding_box()
         assert restored and restored["x"] <= 10 and restored["y"] <= 10, restored
         page.locator(".pet-figure").click(button="right")
-        menu = page.locator(".pet-menu").bounding_box()
+        page.locator(".pet-menu").wait_for()
+        with_menu = say(page, 10, ".pet-menu")
+        menu, bubble = with_menu[".pet-menu"], with_menu[".pet-bubble"]
         assert menu and menu["x"] >= 8 and menu["y"] >= 8, menu
         assert menu["x"] + menu["width"] <= 1352 and menu["y"] + menu["height"] <= 892, menu
-        bubble = page.locator(".pet-bubble").bounding_box()
-        assert bubble
         overlap = max(0, min(menu["x"] + menu["width"], bubble["x"] + bubble["width"]) - max(menu["x"], bubble["x"])) * max(0, min(menu["y"] + menu["height"], bubble["y"] + bubble["height"]) - max(menu["y"], bubble["y"]))
         assert overlap == 0, (menu, bubble)
         page.get_by_role("button", name="Hide companion").click()
@@ -104,33 +136,36 @@ def main() -> None:
         phone.route("**/api/**", stub)
         phone.goto(base + "/?token=t&scheme=dark&lang=en")
         phone.wait_for_selector(".pet-figure", timeout=15000)
-        phone.wait_for_function("document.querySelector('.pet-figure canvas')?.width > 0")
-        ratio = phone.locator(".pet-figure canvas").evaluate("canvas => canvas.width / canvas.getBoundingClientRect().width")
-        assert ratio >= 2.9, ratio
-        phone.evaluate("""() => window.dispatchEvent(new CustomEvent('daedalus:pet-notice', {detail: {id: 8, title: 'A task finished', body: 'Open the inbox', tone: 'success', category: 'run_finished', needs_you: false}}))""")
-        phone.locator(".pet-bubble").wait_for(timeout=3000)
-        phone_bubble = phone.locator(".pet-bubble").bounding_box()
-        assert phone_bubble and phone_bubble["x"] >= 8 and phone_bubble["y"] >= 8, phone_bubble
+        # Waited for, not read at once. A canvas is 300 wide before anything sizes it, so "wider than
+        # nothing" held from the first moment; when the lazily loaded renderer came late, the ratio read
+        # was that blank canvas's 300 over the figure's 130, which is the 2.31 a loaded run reported.
+        # The renderer does not adapt its resolution to the frame rate: its density is fixed by the
+        # screen and a pixel budget, so a settled canvas is the one to judge.
+        sharp = "canvas => !!canvas && canvas.width / canvas.getBoundingClientRect().width >= 2.9"
+        try:
+            phone.wait_for_function(f"({sharp})(document.querySelector('.pet-figure canvas'))")
+        except PlaywrightTimeout:
+            ratio = phone.locator(".pet-figure canvas").evaluate("canvas => canvas.width / canvas.getBoundingClientRect().width")
+            raise AssertionError(f"the companion's canvas never reached the screen's density: {ratio}") from None
+        phone_bubble = say(phone, 8)[".pet-bubble"]
+        assert phone_bubble["x"] >= 8 and phone_bubble["y"] >= 8, phone_bubble
         assert phone_bubble["x"] + phone_bubble["width"] <= 382 and phone_bubble["y"] + phone_bubble["height"] <= 836, phone_bubble
         start = phone.locator(".pet-figure").bounding_box()
         assert start
-        touch = phone.context.new_cdp_session(phone)
-        touch.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": start["x"] + 50, "y": start["y"] + 50}]})
-        touch.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": 50, "y": 740}]})
-        touch.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
-        moved_phone = phone.locator(".pet-host").bounding_box()
+        phone.evaluate(TOUCH_DRAG, [[start["x"] + 50, start["y"] + 50], [50, 740]])
+        after_touch = say(phone, 11, ".pet-host")
+        moved_phone, phone_bubble = after_touch[".pet-host"], after_touch[".pet-bubble"]
         assert moved_phone and moved_phone["x"] <= 10 and moved_phone["y"] <= 619, moved_phone
-        phone_bubble = phone.locator(".pet-bubble").bounding_box()
-        assert phone_bubble and phone_bubble["x"] >= 8 and phone_bubble["y"] >= 8, phone_bubble
+        assert phone_bubble["x"] >= 8 and phone_bubble["y"] >= 8, phone_bubble
         assert phone_bubble["x"] + phone_bubble["width"] <= 382 and phone_bubble["y"] + phone_bubble["height"] <= 836, phone_bubble
         phone.locator(".pet-figure").evaluate("node => node.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, pointerType: 'touch', clientX: 330, clientY: 120}))")
-        phone.locator(".pet-menu").wait_for(timeout=10000)
+        phone.locator(".pet-menu").wait_for()
         phone.locator(".pet-figure").evaluate("node => node.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, pointerType: 'touch'}))")
         phone.get_by_role("slider", name="Size").press("Home")
-        small_phone = phone.locator(".pet-figure").bounding_box()
+        small_phone_boxes = say(phone, 12, ".pet-figure")
+        small_phone, phone_bubble = small_phone_boxes[".pet-figure"], small_phone_boxes[".pet-bubble"]
         assert small_phone and abs(small_phone["width"] - 78) < 2, small_phone
-        phone_bubble = phone.locator(".pet-bubble").bounding_box()
-        assert phone_bubble and phone_bubble["x"] >= 8 and phone_bubble["y"] >= 8, phone_bubble
+        assert phone_bubble["x"] >= 8 and phone_bubble["y"] >= 8, phone_bubble
         assert phone_bubble["x"] + phone_bubble["width"] <= 382 and phone_bubble["y"] + phone_bubble["height"] <= 836, phone_bubble
         browser.close()
     assert UNHANDLED.report() == 0

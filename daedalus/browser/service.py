@@ -78,6 +78,9 @@ COSTS_SAVE_SECONDS = 300.0
 ADMISSION_RECHECK = 2.0
 """How often an agent waiting for a free browser tries again without being woken: a browser closed
 on another environment, or by the daemon's own idle close before its event arrived, wakes nobody."""
+JUST_OPENED = timedelta(seconds=30)
+"""How long a reconcile leaves alone an open row its daemon does not list yet: an open asks the
+daemon before it writes the row, and the two can straddle the reconcile's listing."""
 CALL_SLACK = 10.0
 """What a call's own timeout exceeds the daemon's wait by, so the daemon's answer always arrives first."""
 DOWNLOAD_CHUNK = 512 << 10
@@ -1083,6 +1086,12 @@ class Browsers:
             if info is None:
                 if row["daemon_instance"] and row["daemon_instance"] != instance:
                     await self._mark_closed(row, "lost", status="lost")
+                elif self._just_opened(row, instance):
+                    # The daemon was listed before this group's open reached it, and the row was
+                    # written after: open asks the daemon outside the state lock, so a reconcile can
+                    # fall between the two. Closed as idle, a browser the agent had just been given
+                    # vanished under it. The next reconcile settles it once the moment has passed.
+                    continue
                 else:
                     await self._mark_closed(row, "idle", status="closed")
                 continue
@@ -1102,6 +1111,20 @@ class Browsers:
                 await self.db.execute("UPDATE browsers SET status = 'exited', reason = CASE WHEN reason = '' THEN 'gone' ELSE reason END, exited_at = ? WHERE env = ? AND id = ?", (now_iso(), link.env, row["id"]))
         for bid, info in running.items():
             await self._browser_started(link, {"browser_id": bid, "profile": info.get("profile"), "pid": info.get("pid"), "started_at": info.get("started_at")})
+
+    @staticmethod
+    def _just_opened(row: dict[str, Any], instance: str) -> bool:
+        """A row this daemon's open wrote a moment ago (the terminals' reconcile has the same guard)."""
+        stamp = str(row.get("last_activity_at") or "")
+        if not stamp or row.get("daemon_instance") not in ("", instance):
+            return False
+        try:
+            opened = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if opened.tzinfo is None:
+            opened = opened.replace(tzinfo=UTC)
+        return datetime.now(UTC) - opened < JUST_OPENED
 
     async def _adopt(self, link: Link, info: dict[str, Any]) -> None:
         """A group the daemon runs and no open row describes: this host went between opening it and

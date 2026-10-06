@@ -77,18 +77,47 @@ def check(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     if "panel=browser" not in page.url:
         say(f"the Browser tab is not in the address: {page.url}")
     frames = wait_frames(page, ROOT, 1)
-    # The picture asks the page to become the box it is drawn in, so a tall pane is not a short page
-    # with an empty band under it.
+    # By default the page keeps its own size (1280×800) and the picture is scaled into the pane: the
+    # agent's page does not reflow when the panel is resized. Fitting it to the pane is a button.
+    page.wait_for_timeout(1200)
+    if bs.posted("/viewport"):
+        say(f"the panel resized the page without being asked: {bs.posted('/viewport')}")
+    fit = page.locator(f"{ROOT} .bp-fit")
+    if fit.get_attribute("aria-pressed") != "false":
+        say("the fit button is not off by default")
+    fit.click()
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline and not bs.posted("/viewport"):
         page.wait_for_timeout(100)
     views = bs.posted("/viewport")
     box = page.locator(f"{ROOT} .bv").bounding_box()
-    print(f"[{lang}] viewport: {views[-1] if views else None} box: {box}")
+    print(f"[{lang}] fitted viewport: {views[-1] if views else None} box: {box}")
     if not views or box is None:
-        say("the panel did not ask the page to fill the picture")
+        say("the fit button did not ask the page to fill the picture")
     elif abs(views[-1]["w"] - box["width"]) > 24 or abs(views[-1]["h"] - box["height"]) > 24:
         say(f"the page was asked for {views[-1]}, not the picture {box['width']:.0f}×{box['height']:.0f}")
+    fitted = len(views)
+    fit.click()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and len(bs.posted("/viewport")) == fitted:
+        page.wait_for_timeout(100)
+    back = bs.posted("/viewport")[fitted:]
+    if back[-1:] != [{"w": 1280, "h": 800}]:
+        say(f"turning fitting off did not give the page back its own size: {back}")
+    if fit.get_attribute("aria-pressed") != "false":
+        say("the fit button did not turn off")
+    # The choice is the device's: another window of it keeps fitting off and sends nothing, the page
+    # having been given its size back already.
+    page.wait_for_timeout(500)
+    sent = len(bs.posted("/viewport"))
+    other = open_page(context, bs, stub, f"{BASE}/agents/{S1}?token=t&scheme=dark&lang={lang}&panel=browser")
+    other.wait_for_selector(f"{ROOT} .bv[data-state='live']", timeout=10000)
+    other.wait_for_timeout(1200)
+    if other.locator(f"{ROOT} .bp-fit").get_attribute("aria-pressed") != "false":
+        say("another window of this device did not keep fitting off")
+    if len(bs.posted("/viewport")) != sent:
+        say(f"another window with fitting off resized the page: {bs.posted('/viewport')[sent:]}")
+    other.close()
     live = next(c for c in bs.clients if c.tier == "live" and not c.closed)
     page.wait_for_timeout(300)
     print(f"[{lang}] frames drawn: {frames}; acks: {live.of('ack')}; attach: {live.of('attach')}")

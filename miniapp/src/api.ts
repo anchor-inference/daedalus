@@ -573,7 +573,7 @@ export type WebSearchConf = {
 };
 
 /** One WebSearch backend: `available` is null when the key proxy could not be asked. */
-export type SearchBackendInfo = { id: string; label: string; needs_key: boolean; available?: boolean | null };
+export type SearchBackendInfo = { id: string; label: string; needs_key: boolean; available?: boolean | null; proxy?: "ok" | "refused" | "unreachable" | "none" };
 
 export type SearchCheck = {
   backend: string;

@@ -218,8 +218,11 @@ async def test_reconcile_after_a_daemon_restart_and_an_adoption_by_labels(db: Da
     staff = owners.add(Owner("staff", "m7", project_id="proj1", staff_id="m7"))
     await service.open(SESSION, actor="agent:sess1")
     await daemon.restart()
-    await wait_until(lambda: _status(db, "s-sess1"), "lost")
-    assert any(p["reason"] == "lost" for p, _ in bus.of("browser.closed"))
+    # Waited for by the announcement, not the row. Closing writes the row first and announces after an
+    # audit write, so a poll of the row could see "lost" while the announcement was still on its way;
+    # on a loaded machine that audit write was slow enough for the assertion on the bus to fail.
+    await wait_until(lambda: _async([p["reason"] for p, _ in bus.of("browser.closed")]), ["lost"])
+    assert await _status(db, "s-sess1") == "lost"
     # A group this host has no row for is adopted from its labels; one whose owner is gone is closed.
     daemon._open({"group_id": "m-m7", "profile": "project-proj1", "labels": staff.labels()})
     daemon._open({"group_id": "s-gone", "profile": "session-gone", "labels": Owner("session", "gone").labels()})
@@ -227,6 +230,27 @@ async def test_reconcile_after_a_daemon_restart_and_an_adoption_by_labels(db: Da
     await service._reconcile(link)
     assert await _status(db, "m-m7") == "open"
     assert "s-gone" not in daemon.groups
+
+
+async def test_a_group_opened_while_the_daemon_was_being_listed_is_not_closed(db: Database, service: Browsers, owners: FakeOwners) -> None:
+    """The listing came back before the open reached the daemon, and the row was written after it."""
+    owners.add(SESSION)
+    await service.open(SESSION, actor="agent:sess1")
+    link = service.links["container"]
+    real = link.client.call
+
+    async def listed_too_early(method: str, params: dict) -> dict:  # type: ignore[type-arg]
+        if method == "group.list":
+            return {"groups": []}
+        return await real(method, params)
+
+    link.client.call = listed_too_early  # type: ignore[method-assign]
+    await service._reconcile(link)
+    assert await _status(db, "s-sess1") == "open", "a browser just given to the agent was closed as idle"
+    # Long after its open, a group the same daemon does not list really is gone.
+    await db.execute("UPDATE browser_groups SET last_activity_at = '2026-01-01T00:00:00+00:00' WHERE id = 's-sess1'")
+    await service._reconcile(link)
+    assert await _status(db, "s-sess1") == "closed"
 
 
 async def _status(db: Database, group: str) -> str | None:

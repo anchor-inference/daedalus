@@ -504,9 +504,13 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.wait_for_selector(".composer .model-select", timeout=15000)
     page.locator(".composer .model-select").click()
     page.wait_for_selector(".model-list .model-row", timeout=5000)
-    providers = page.locator(".provider-row")
-    # Three providers and the free-model group, which opens like a provider.
-    if providers.count() != 4 or page.locator(".model-list .model-row.on").count():
+    # The first step also carries the free models as a group of their own, a row of the same kind
+    # without a provider behind it, so the three providers are counted by the provider they name
+    # and the group is held to being the only other row there. No model is on this step: a model's
+    # row is the one that carries its thinking or fast mark.
+    providers = page.locator(".provider-row[data-provider]")
+    free_group = page.locator(".provider-row:not([data-provider])")
+    if providers.count() != 3 or free_group.count() != 1 or page.locator(".model-list .model-kind").count() or page.locator(".model-list .model-row.on").count():
         problems.append("the first step must list providers rather than every model")
     page.locator('.provider-row[data-provider="claude"]').click()
     if not page.locator(".model-list .model-row.on", has_text="Claude Opus 5").count():

@@ -85,6 +85,67 @@ function OwnershipDisclosure({ groupId, label }: { groupId: string; label?: stri
   </details>;
 }
 
+/** The page's own size, the daemon's default for a group (about 16:9): what the panel keeps unless
+ *  the operator asks it to fit the page to the window. */
+export const PAGE_DEFAULT = { w: 1280, h: 800 } as const;
+const FIT_KEY = "daedalus.browser.fit";
+/** Groups this device fitted to its window, so a later visit with fitting off can put them back. */
+const FITTED_KEY = "daedalus.browser.fitted";
+
+function readFit(): boolean {
+  try {
+    return localStorage.getItem(FIT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function fittedGroups(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FITTED_KEY) || "[]");
+    return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function markFitted(group: string, fitted: boolean): void {
+  try {
+    const rest = fittedGroups().filter((g) => g !== group);
+    localStorage.setItem(FITTED_KEY, JSON.stringify(fitted ? [...rest, group].slice(-50) : rest));
+  } catch {
+    /* nothing to remember it in: the next visit simply leaves the page as it is */
+  }
+}
+
+/**
+ * Whether the page follows the panel's size. Off by default: the page keeps the size it was opened
+ * at, the one the agent reads and clicks in, and the picture is scaled into the panel. Fitting was
+ * the default once, and every resize of the panel reflowed the page under the agent. Turned off (or
+ * found off on a visit to a group this device had fitted), the page goes back to its own size; a size
+ * the agent chose itself is never touched.
+ */
+function useFitChoice(group: string, enabled: boolean): [boolean, (on: boolean) => void] {
+  const [fit, setFit] = useState(readFit);
+  useEffect(() => {
+    if (!enabled || fit || !fittedGroups().includes(group)) return;
+    // Unmarked before the request and not marked again if it fails: a failure is a group that has
+    // closed or an older daemon, and a request cut off by leaving the page used to mark the group
+    // again, so every later visit sent the same restore.
+    markFitted(group, false);
+    void resizeViewport(group, PAGE_DEFAULT.w, PAGE_DEFAULT.h).catch(() => undefined);
+  }, [enabled, fit, group]);
+  const choose = useCallback((on: boolean) => {
+    try {
+      localStorage.setItem(FIT_KEY, on ? "1" : "0");
+    } catch {
+      /* the choice holds for this visit */
+    }
+    setFit(on);
+  }, []);
+  return [fit, choose];
+}
+
 const PAGE_MIN = 320;
 const PAGE_MAX = 3840;
 /** A resize settles, including the handoff that grows the corner card into this picture. */
@@ -112,6 +173,7 @@ function useFillPage(group: string, stage: { current: HTMLDivElement | null }, e
       const key = `${w}x${h}`;
       if (key === last) return;
       last = key;
+      markFitted(group, true);
       void resizeViewport(group, w, h).catch(() => {
         last = "";
       });
@@ -146,7 +208,8 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
   const viewing = snap.tabs.find((tab) => tab.id === (snap.viewing ?? snap.active)) ?? group.tabs.find((tab) => tab.active) ?? group.tabs[0] ?? null;
   const url = viewing?.url ?? "";
   const [logOpen, setLogOpen] = useState(false);
-  useFillPage(group.id, stage, !phone);
+  const [fit, setFit] = useFitChoice(group.id, !phone);
+  useFillPage(group.id, stage, !phone && fit);
   const recording = useRecording(group.id);
   const listed = useActions(group.id);
   // The replay frames an action's element from its row: the listing's, or the live event's while the
@@ -269,7 +332,7 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
       {phone ? (
         <PhoneBar group={group} url={url} tabs={tabs.length} control={control} />
       ) : (
-        <Toolbar group={group} groups={groups} onGroup={onGroup} live={live} snap={snap} url={url} tabs={tabs} viewing={viewing?.id ?? null} drive={drive} control={control} toast={toast} full={full}
+        <Toolbar group={group} groups={groups} onGroup={onGroup} live={live} snap={snap} url={url} tabs={tabs} viewing={viewing?.id ?? null} drive={drive} control={control} toast={toast} full={full} fit={fit} onFit={setFit}
           recording={recording.recording.frames} frames={frames} onReplay={() => setReplay(frames.length - 1)} recordable={drive === "you" && !steps} />
       )}
       <div className="bp-main">
@@ -411,7 +474,7 @@ function GiveBack({ anchor, onClose, onGive }: { anchor: HTMLElement; onClose: (
 
 // ── the toolbar ──────────────────────────────────────────────────────────────────────────────
 
-function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive, control, toast, full, recording, frames, onReplay, recordable }: {
+function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive, control, toast, full, recording, frames, onReplay, recordable, fit, onFit }: {
   group: BrowserGroup;
   groups: BrowserGroup[];
   onGroup?: (id: string) => void;
@@ -429,6 +492,9 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
   onReplay: () => void;
   /** The operator drives and records nothing yet: their steps can be recorded. */
   recordable: boolean;
+  /** The page follows the panel's size (off: it keeps its own, scaled into the panel). */
+  fit: boolean;
+  onFit: (on: boolean) => void;
 }) {
   const driving = drive === "you";
   const record = async (on: boolean) => {
@@ -488,6 +554,7 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
       <Address url={url} editable={driving} loading={tabs.find((x) => x.id === viewing)?.loading ?? false} onGo={(next) => live?.input({ t: "nav", action: "url", url: next })} />
       {tabs.length > 1 && <TabStrip tabs={tabs} viewing={viewing} active={snap.active} onPick={(id) => live?.view({ tab: id })} />}
       {recordable && <RecordButton group={group.id} toast={toast} />}
+      <button type="button" className={`iconbtn small bp-fit ${fit ? "on" : ""}`} aria-pressed={fit} onClick={() => onFit(!fit)} aria-label={t("browser.fit")} title={t(fit ? "browser.fit.on" : "browser.fit.off")} data-fit={fit ? "on" : "off"}><Icon name="expand" size={16} /></button>
       <ControlButton control={control} />
       <OverflowMenu label={t("browser.menu")} small items={items} />
     </div>

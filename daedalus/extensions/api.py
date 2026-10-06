@@ -5546,7 +5546,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         base = keyproxy_base()
         return base if any(is_keyproxy_url(p.base_url) for p in app.config.providers.values()) else ""
 
-    upstreams_cache: dict[str, Any] = {"at": 0.0, "value": None, "client": None}
+    upstreams_cache: dict[str, Any] = {"at": 0.0, "value": None, "client": None, "state": "none"}
 
     def keyproxy_client() -> httpx.AsyncClient:
         """One client for the health probe, kept for the life of the app rather than built per call."""
@@ -5571,6 +5571,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         """
         origin = _keyproxy_origin()
         if not origin:
+            upstreams_cache["state"] = "none"
             return None
         if upstreams_cache["at"] and time.monotonic() - float(upstreams_cache["at"]) < KEYPROXY_CACHE_SECONDS:
             return upstreams_cache["value"]  # type: ignore[return-value]
@@ -5578,7 +5579,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             response = await keyproxy_client().get(origin + "/keys", headers={"x-daedalus-token": api_token})
             listed = response.json().get("upstreams") if response.status_code == 200 else None
         except (httpx.HTTPError, ValueError):
+            upstreams_cache["state"] = "unreachable"
             return None
+        # A 403 is a proxy that answered and did not recognise this bot's token — a second
+        # installation sharing another's proxy reads its token from the other database. Reported
+        # as "not reachable" it sent the operator looking for a network fault that was not there.
+        upstreams_cache["state"] = "ok" if response.status_code == 200 else "refused" if response.status_code == 403 else "unreachable"
         value = None
         if isinstance(listed, dict):
             value = {str(name): {"configured": bool(row.get("configured")), "kind": str(row.get("kind") or "api_key")} for name, row in listed.items() if isinstance(row, dict)}
@@ -5655,6 +5661,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         keyed = await keyproxy_upstreams()
         for entry in view["search_backends"]:
             entry["available"] = True if not entry["needs_key"] else (None if keyed is None else entry["id"] in keyed)
+            if entry["needs_key"] and keyed is None:
+                # Why it is unknown, so the screen can say "refused" rather than "not reachable".
+                entry["proxy"] = upstreams_cache["state"]
         return view
 
     pet_calls: dict[str, Any] = {"day": "", "count": 0, "last": 0.0}
