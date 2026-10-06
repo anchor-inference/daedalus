@@ -28,6 +28,7 @@ from daedalus.staff_runtime import BoardTask, Started
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.database import Database
 from daedalus.stores.outbox import OutboxStore
+from daedalus.stores.result_anchors import result_turn_refs
 from daedalus.stores.staff import StaffStore
 from tests.support.waiting import until_await
 from tests.unit.test_launch_controls import OPERATOR, launch_fixture
@@ -398,6 +399,10 @@ async def test_actual_native_worker_launch_and_report_preserve_the_full_original
 
         result = await db.fetchone("SELECT id FROM result_receipts WHERE task_id = ?", (task["id"],))
         assert await OrchestratorDomain(db).original(task["id"], result["id"]) == original.encode()
+        # The result names the worker's chat turn it was handed in from, so its source is one click away.
+        chat = (await db.fetchone("SELECT session_id FROM staff_sessions WHERE task_id = ?", (task["id"],)))[0]
+        refs = await result_turn_refs(db, task["id"], result["id"])
+        assert [(ref["session_id"], ref["source_current"]) for ref in refs] == [(chat, True)]
         assert (await db.fetchone("SELECT state FROM execution_attempts WHERE task_id = ?", (task["id"],)))[0] == "completed"
         assert (await db.fetchone("SELECT status FROM board_tasks WHERE id = ?", (task["id"],)))[0] == "review"
 
