@@ -517,17 +517,24 @@ async def test_a_slow_summariser_finishes_on_its_retry(settings: Settings, db: D
     async def slow(request: Any) -> LLMResponse:
         nonlocal attempts
         attempts += 1
-        await asyncio.sleep(0.03)  # longer than one limit, shorter than two
         return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=SECTIONED)]), stop_reason=StopReason.end_turn)
 
     provider.complete_text = slow  # type: ignore[method-assign]
     orig = asyncio.wait_for
+    takes = 1.5 * config.compaction.call_timeout_seconds  # longer than one limit, shorter than two
 
-    async def scaled_wait_for(coro: Any, timeout: float) -> Any:  # 90 s becomes 0.02 s, the retry's 180 s 0.04 s
-        return await orig(coro, timeout=timeout * 0.02 / config.compaction.call_timeout_seconds)
+    async def clocked_wait_for(coro: Any, timeout: float) -> Any:
+        # The call's duration is decided here rather than measured. This test once raced a real 30 ms
+        # sleep against real 20 ms and 40 ms deadlines, and on a loaded machine it failed: when the event
+        # loop woke late, both timers were due in the same pass, the deadline's cancel ran before the
+        # finished sleep could resume the call, and the retry timed out as well.
+        if timeout < takes:
+            coro.close()
+            raise TimeoutError
+        return await coro
 
     await _measured(manager, state, 60_000, "r1")
-    sr.asyncio.wait_for = scaled_wait_for  # type: ignore[assignment]
+    sr.asyncio.wait_for = clocked_wait_for  # type: ignore[assignment]
     try:
         await manager._maybe_auto_compact(state)
     finally:

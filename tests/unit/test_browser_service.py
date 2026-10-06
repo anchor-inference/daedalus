@@ -218,8 +218,11 @@ async def test_reconcile_after_a_daemon_restart_and_an_adoption_by_labels(db: Da
     staff = owners.add(Owner("staff", "m7", project_id="proj1", staff_id="m7"))
     await service.open(SESSION, actor="agent:sess1")
     await daemon.restart()
-    await wait_until(lambda: _status(db, "s-sess1"), "lost")
-    assert any(p["reason"] == "lost" for p, _ in bus.of("browser.closed"))
+    # Waited for by the announcement, not the row. Closing writes the row first and announces after an
+    # audit write, so a poll of the row could see "lost" while the announcement was still on its way;
+    # on a loaded machine that audit write was slow enough for the assertion on the bus to fail.
+    await wait_until(lambda: _async([p["reason"] for p, _ in bus.of("browser.closed")]), ["lost"])
+    assert await _status(db, "s-sess1") == "lost"
     # A group this host has no row for is adopted from its labels; one whose owner is gone is closed.
     daemon._open({"group_id": "m-m7", "profile": "project-proj1", "labels": staff.labels()})
     daemon._open({"group_id": "s-gone", "profile": "session-gone", "labels": Owner("session", "gone").labels()})
