@@ -225,6 +225,17 @@ async def test_a_key_proxy_that_cannot_be_asked_says_it_does_not_know(client: ht
     assert held and set(held.values()) == {None}
 
 
+async def test_a_proxy_that_refuses_this_installation_is_told_apart_from_one_that_is_down(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second installation on another's proxy gets a 403 for its token; the screen says so, not "unreachable"."""
+
+    def refusing(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"error": "this endpoint answers the agent only"})
+
+    _answering(monkeypatch, refusing)
+    keyed = [b for b in (await client.get("/api/settings", headers=H)).json()["search_backends"] if b["needs_key"]]
+    assert keyed and all(b["available"] is None and b["proxy"] == "refused" for b in keyed), keyed
+
+
 async def test_an_endpoint_reached_directly_needs_no_proxy_to_be_ready(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
     _keyproxy_answering(monkeypatch, ONE_KEY, seen=[])
     assert (await client.put("/api/providers/workshop", json={"kind": "openai_compat", "base_url": "http://10.0.0.5:9000/v1", "api_key": ""}, headers=H)).status_code == 200
