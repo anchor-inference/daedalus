@@ -107,7 +107,7 @@ async def test_wake_me_wakes_the_scripted_orchestrator_with_its_note_once(settin
     r = await rig(settings, db, tmp_path, script)
     scheduler = with_scheduler(r)
     try:
-        sid = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
+        sid = (await r.orch.enable(r.project.id, autonomy="ask")).settings.orchestrator.session_id
         await r.manager.submit(sid, "Keep an eye on the migration")
         await until_await(lambda: _idle(r.manager, sid), "the first turn ended")
         [proposal] = await r.team.app.extensions["schedule_proposals"].list()
@@ -295,7 +295,7 @@ async def test_cancel_and_the_tool_refusals(settings: Settings, db: Database, tm
     r = await rig(settings, db, tmp_path)
     with_scheduler(r)
     try:
-        project = await r.orch.enable(r.project.id)
+        project = await r.orch.enable(r.project.id, autonomy="ask")
         sid = project.settings.orchestrator.session_id
         said = await r.call(sid, "wake_me", note="Look at the queue", at=(datetime.now(UTC) + timedelta(hours=2)).isoformat(),
                             client_operation_id="pending-wake")

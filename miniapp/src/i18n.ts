@@ -2276,6 +2276,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "lifecycle.read.pending": { en: "Reading owned work…", ru: "Загружается связанная работа…" },
   "lifecycle.reason": { en: "Reason for stopping", ru: "Причина остановки" },
   "authority.title": { en: "Coordinator permissions", ru: "Полномочия координатора" },
+  "authority.standing": { en: "With autonomy “{level}” the coordinator plans, assigns, runs and reviews this project's tasks by itself. Set autonomy to “ask first” to approve each task.", ru: "При самостоятельности «{level}» координатор сам планирует, назначает, запускает и проверяет задачи проекта. Выберите «спрашивать», чтобы одобрять каждую задачу." },
   "authority.intro": { en: "Approve specific actions for this project's current coordinator. Enabling the coordinator does not grant these permissions.", ru: "Разрешите конкретные действия текущему координатору проекта. Само включение координатора таких прав не даёт." },
   "authority.offline": { en: "Connection is unavailable. Permission changes are paused.", ru: "Нет связи. Изменение полномочий приостановлено." },
   "authority.readFailed": { en: "Permissions could not be confirmed. Changes are unavailable.", ru: "Не удалось подтвердить полномочия. Изменения недоступны." },

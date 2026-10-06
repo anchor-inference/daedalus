@@ -87,7 +87,7 @@ async def test_first_assignment_has_task_scope_and_cannot_edit_the_card(settings
     r = await rig(settings, db, tmp_path)
     try:
         fake(r)
-        sid = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
+        sid = (await r.orch.enable(r.project.id, autonomy="ask")).settings.orchestrator.session_id
         member = await r.manager.staff.hire(r.project.id, name="Ada", role="Menu", isolation="shared")
         task_id = await board_task(r.manager, r.project, "Menu page")
         other_id = await board_task(r.manager, r.project, "Other page")
@@ -133,7 +133,7 @@ async def test_unchanged_assigned_task_starts_with_task_execution_grant_only(set
     r = await rig(settings, db, tmp_path)
     try:
         fake(r)
-        sid = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
+        sid = (await r.orch.enable(r.project.id, autonomy="ask")).settings.orchestrator.session_id
         member = await r.manager.staff.hire(r.project.id, name="Ada", role="Menu", isolation="shared")
         task_id = await board_task(r.manager, r.project, "Menu page")
         await r.manager.db.execute("UPDATE board_tasks SET assignee_staff_id = ? WHERE id = ?", (member.id, task_id))
@@ -719,7 +719,7 @@ async def test_release_needs_a_current_operator_approval_before_stopping_a_worke
     r = await rig(settings, db, tmp_path)
     try:
         runtime = fake(r)
-        sid = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
+        sid = (await r.orch.enable(r.project.id, autonomy="ask")).settings.orchestrator.session_id
         member, live = await working(r)
         with pytest.raises(Refused, match="operator-issued orchestrator grant|no current grant"):
             await r.call(sid, "release", staff=member.name)

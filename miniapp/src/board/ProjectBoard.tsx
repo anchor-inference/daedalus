@@ -485,6 +485,9 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
   const [folderOpen, setFolderOpen] = useState(false);
   const projects = useQuery<Project[]>("/api/projects", { staleMs: 15000 });
   const folders = projects.data?.find((project) => project.id === projectId)?.folders ?? [];
+  // Autonomy normal or full already lets the coordinator assign and run a task; only ``ask`` needs
+  // the per-task permission, so only then is the way to give it shown.
+  const asksFirst = projects.data?.find((project) => project.id === projectId)?.settings.orchestrator?.autonomy === "ask";
   const comparisons = useQuery<{ groups: { state: string }[] }>(task && folderOpen ? `/api/board/${encodeURIComponent(task.id)}/comparisons?limit=20` : null, { staleMs: 0 });
   const folderBlocked = !!task && (task.status !== "todo" || !comparisons.data || !!comparisons.error ||
     comparisons.data.groups.some((group) => ["planned", "active", "ready", "unknown"].includes(group.state)));
@@ -727,7 +730,7 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
       {task && !gone && (task.status === "todo" || task.status === "blocked") && (
         <div className="sub">
           {team.length === 0 && !task.assignee && <div>{t("pboard.assignee.none")} <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "team"))}>{t("pboard.team.hire")}</button></div>}
-          <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id, grant: task.assignee ? "execution" : "assignment_execution" }))}>{t(task.assignee ? "pboard.grant.execution.open" : "pboard.grant.open")}</button>
+          {asksFirst && <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id, grant: task.assignee ? "execution" : "assignment_execution" }))}>{t(task.assignee ? "pboard.grant.execution.open" : "pboard.grant.open")}</button>}
         </div>
       )}
       {task && task.status === "review" && task.branch && (

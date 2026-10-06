@@ -25,13 +25,18 @@ def scenario(language: str, width: int, coordinator: bool, staff_state: str, pre
     task = BoardStub.task("first-task", "Prepare menu", project_id=PID, entity_revision=1,
                           assignee=assignee, checklist=[{"text": "All items listed", "done": False}])
     staff = [{"id": "first-worker", "name": "First worker", "color": "blue", "harness": "daedalus"}] if staff_state != "empty" else []
-    stub = BoardStub(project(), staff=staff, tasks=[task])
+    # The per-task permission is what a project whose autonomy asks first needs; normal and full
+    # autonomy give the coordinator a standing grant and never show this path.
+    asking = project()
+    asking["settings"]["orchestrator"] = {"enabled": True, "session_id": "orch-bakery", "model": "", "autonomy": "ask",
+                                          "concurrency": 6, "concurrency_cap": 10, "telegram_topic_id": 0}
+    stub = BoardStub(asking, staff=staff, tasks=[task])
     unhandled = Unhandled()
     approvals: list[dict] = []
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(executable_path=CHROMIUM)
         page = browser.new_page(viewport={"width": width, "height": 844 if width < 1024 else 900})
-        serve(page, stub, unhandled)
+        serve(page, stub, unhandled, asking)
 
         def authority(route):  # type: ignore[no-untyped-def]
             request = route.request
@@ -130,6 +135,28 @@ def scenario(language: str, width: int, coordinator: bool, staff_state: str, pre
     assert unhandled.report() == 0
 
 
+def standing(language: str) -> None:
+    """Under normal autonomy the coordinator needs no per-task permission, so none is offered."""
+    task = BoardStub.task("first-task", "Prepare menu", project_id=PID, entity_revision=1,
+                          checklist=[{"text": "All items listed", "done": False}])
+    staff = [{"id": "first-worker", "name": "First worker", "color": "blue", "harness": "daedalus"}]
+    normal = project()
+    normal["settings"]["orchestrator"] = {"enabled": True, "session_id": "orch-bakery", "model": "", "autonomy": "normal",
+                                          "concurrency": 6, "concurrency_cap": 10, "telegram_topic_id": 0}
+    unhandled = Unhandled()
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(executable_path=CHROMIUM)
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        serve(page, BoardStub(normal, staff=staff, tasks=[task]), unhandled, normal)
+        page.goto(f"{BASE}/project/{PID}/board?task=first-task&token=t&lang={language}")
+        sheet = page.locator(".sheet.pboard-sheet")
+        expect(sheet).to_contain_text("Prepare menu")
+        name = "Let the coordinator assign and run this task" if language == "en" else "Разрешить координатору назначить и запустить задачу"
+        expect(sheet.get_by_role("button", name=name)).to_have_count(0)
+        browser.close()
+    assert unhandled.report() == 0
+
+
 if __name__ == "__main__":
     expect_app(BASE)
     for lang in ("en", "ru"):
@@ -140,3 +167,5 @@ if __name__ == "__main__":
                     print(f"first task grant {lang} {viewport} coordinator={enabled} staff={staff_state}: PASS")
         scenario(lang, 390, True, "empty", previous_coordinator=True)
         print(f"first task grant {lang} previous coordinator: PASS")
+        standing(lang)
+        print(f"first task grant {lang} standing autonomy: PASS")

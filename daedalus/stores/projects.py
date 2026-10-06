@@ -881,10 +881,14 @@ class ProjectStore:
             patch["autonomy"] = autonomy
         if telegram_topic_id is not None:
             patch["telegram_topic_id"] = int(telegram_topic_id)
-        await self._db.execute(
-            "UPDATE projects SET settings = json_patch(settings, ?) WHERE id = ?",
-            (json.dumps({"orchestrator": patch}), project_id),
-        )
+        async with self._db.transaction() as conn:
+            await conn.execute("UPDATE projects SET settings = json_patch(settings, ?) WHERE id = ?",
+                               (json.dumps({"orchestrator": patch}), project_id))
+            if autonomy == "ask" and current.autonomy != "ask":
+                # Imported here: the authority module builds on this store, not the other way round.
+                from daedalus.extensions.coordinator_authority import withdraw_standing_grants_in
+                from daedalus.stores.control import ControlStore
+                await withdraw_standing_grants_in(ControlStore(self._db), conn, project_id)
         updated = await self.get(project_id)
         assert updated is not None
         return updated

@@ -21,7 +21,7 @@ async def test_task_tool_create_requires_live_grant_and_collection_revision(
 ) -> None:
     run = await rig(settings, db, tmp_path)
     try:
-        session_id = (await run.orch.enable(run.project.id)).settings.orchestrator.session_id
+        session_id = (await run.orch.enable(run.project.id, autonomy="ask")).settings.orchestrator.session_id
         scope = Scope("project", run.project.id)
         revision = await ControlStore(db).revision(scope, Entity("collection", scope.id))
         assert f"collection revision {revision}" in await run.call(session_id, "tasks", op="list")

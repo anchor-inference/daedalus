@@ -69,7 +69,7 @@ def fits(page: Page, where: str) -> None:
     assert overflow <= 0, f"{where}: the page scrolls sideways by {overflow}px"
 
 
-def serve(page: Page, stub: BoardStub, unhandled: Unhandled) -> None:
+def serve(page: Page, stub: BoardStub, unhandled: Unhandled, listed: dict | None = None) -> None:
     team = TeamStub(project())
 
     def handle(route) -> None:  # type: ignore[no-untyped-def]
@@ -82,7 +82,7 @@ def serve(page: Page, stub: BoardStub, unhandled: Unhandled) -> None:
             status, payload = answered
             return route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
         if path == "/api/projects":
-            return route.fulfill(status=200, content_type="application/json", body=json.dumps([project()]))
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps([listed or project()]))
         if request.method == "GET" and path == f"/api/projects/{PID}/next-actions":
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"project_id": PID, "actions": []}))
         if path == "/api/sessions":

@@ -654,7 +654,11 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
       <ProjectExtensions projectId={project.id} toast={toast} />
       <ProjectArchive project={project} toast={toast} onChanged={afterChange} readFailed={!!projects.error}
         onOpenRestored={(id) => { rememberProject(id); onClose(); navigate(projectPagePath(id, "team")); }} />
-      <CoordinatorAuthority projectId={project.id} toast={toast} onChanged={() => { afterChange(); projects.refresh(); }} />
+      {/* Under normal or full autonomy the coordinator holds a standing project grant; the per-task
+          permissions only exist for a project that asks first. */}
+      {project.settings.orchestrator?.enabled && project.settings.orchestrator.autonomy !== "ask"
+        ? <p className="sub">{t("authority.standing", { level: t(`focus.autonomy.${project.settings.orchestrator.autonomy}`) })}</p>
+        : <CoordinatorAuthority projectId={project.id} toast={toast} onChanged={() => { afterChange(); projects.refresh(); }} />}
       <ProjectKnowledge projectId={project.id} toast={toast} />
       <ExecutionHosts toast={toast} />
       <LifecycleCancel kind="project_goal" id={project.id} projectId={project.id} onDone={afterChange} toast={toast} />

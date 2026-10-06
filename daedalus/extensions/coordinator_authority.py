@@ -30,6 +30,40 @@ AUTHORITY_BUNDLES = {
 }
 
 
+AUTONOMY_ISSUER = Principal("operator:autonomy", "operator")
+"""Who a standing grant is recorded as issued by: the operator, through the project's autonomy choice."""
+STANDING_OPERATIONS = sorted({op for bundle in AUTHORITY_BUNDLES.values() for op in bundle["operations"]})
+STANDING_EFFECTS = sorted({effect for bundle in AUTHORITY_BUNDLES.values() for effect in bundle["effects"]})
+STANDING_DAYS = 365
+"""Long enough to outlive any worker launched under it: a worker's own grant dies with its parent."""
+
+
+async def standing_grant_in(control: ControlStore, conn: Any, project_id: str, session_id: str) -> dict[str, Any] | None:
+    """Issue the coordinator's project-wide grant when the project's autonomy already allows its work.
+
+    Asking the operator for a separate expiring grant before each assignment made the first result
+    stall at a permission step in every project. Autonomy ``normal`` or ``full`` is that permission,
+    given once in the project's settings; ``ask`` keeps the explicit grants, and switching a project
+    to ``ask`` withdraws the standing one (see :func:`withdraw_standing_grants_in`)."""
+    project = await one(conn, "SELECT settings FROM projects WHERE id = ?", (project_id,))
+    office = json.loads(project["settings"]).get("orchestrator", {}) if project else {}
+    if office.get("autonomy", "normal") not in ("normal", "full"):
+        return None
+    expires = (datetime.now(UTC) + timedelta(days=STANDING_DAYS)).isoformat()
+    return await control.issue_grant_in(conn, AUTONOMY_ISSUER, Principal(f"orchestrator:{session_id}", "agent"),
+                                        Scope("project", project_id), operations=STANDING_OPERATIONS,
+                                        effects=STANDING_EFFECTS, expires_at=expires)
+
+
+async def withdraw_standing_grants_in(control: ControlStore, conn: Any, project_id: str) -> None:
+    async with conn.execute("SELECT id FROM actor_grants WHERE project_id = ? AND issuer_id = ? AND revoked_at IS NULL",
+                            (project_id, AUTONOMY_ISSUER.actor_id)) as cursor:
+        rows = await cursor.fetchall()
+    for row in rows:
+        await control.revoke_grant_in(conn, AUTONOMY_ISSUER, row["id"],
+                                      reason="the project's autonomy now asks before acting")
+
+
 async def _office_or_none(conn: Any, project_id: str) -> str | None:
     try:
         return await current_office(conn, project_id)
@@ -170,6 +204,11 @@ async def resolve_authority(app: Application, *, session_id: str, project_id: st
                 await ControlStore(app.db).authorize(conn, principal, scope, operation, task_id=task_id)
             except ControlDenied:
                 continue
+            return principal
+        standing = await standing_grant_in(ControlStore(app.db), conn, project_id, session_id)
+        if standing is not None:
+            principal = Principal(f"orchestrator:{session_id}", "agent", standing["grant_id"], standing["generation"])
+            await ControlStore(app.db).authorize(conn, principal, scope, operation, task_id=task_id)
             return principal
     raise ControlDenied("the coordinator has no current grant for this operation")
 

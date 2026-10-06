@@ -642,8 +642,9 @@ async def assign(
                          and not renamed and not given and priority is None and depends_on is None
                          and folder is None and files is None and requirements is None and inputs is None
                          and checks is None and not handover and not reopen_after_exit)
+            # A card a worker left behind still names its attempt; only the update path may hand it on.
             first_assignment = (task["status"] == "todo" and not task["assignee_staff_id"]
-                                and not renamed and not given and priority is None and depends_on is None
+                                and not task.get("current_attempt_id") and not renamed and not given and priority is None and depends_on is None
                                 and folder is None and files is None and requirements is None and inputs is None
                                 and checks is None and not handover and not reopen_after_exit)
             if first_assignment:

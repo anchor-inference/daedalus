@@ -23,7 +23,8 @@ OPERATOR = Principal.operator({"via": "cookie", "user_id": 1})
 
 
 async def office(db: Database):
-    settings = {"orchestrator": {"enabled": True, "session_id": "coordinator"}}
+    # ``ask``: these tests are about the explicit grants that autonomy ``ask`` still requires.
+    settings = {"orchestrator": {"enabled": True, "session_id": "coordinator", "autonomy": "ask"}}
     await db.execute("INSERT INTO projects(id,name,created_at,settings) VALUES ('project','Work','2026-01-01',?)", (json.dumps(settings),))
     await db.execute("INSERT INTO sessions(id,tenant_id,project_id,metadata,created_at,last_message_at)"
                      " VALUES ('coordinator','tenant','project',?, '2026-01-01','2026-01-01')",
@@ -145,3 +146,20 @@ async def test_one_task_grant_covers_first_assignment_and_launch_without_edit_or
         with pytest.raises(ControlDenied, match="no current grant"):
             await resolve_authority(app, session_id="coordinator", project_id="project",
                                     task_id=task_id, operation=operation)
+
+
+async def test_normal_autonomy_is_a_standing_grant_and_ask_withdraws_it(db: Database) -> None:
+    app, settings = await office(db)
+    settings["orchestrator"]["autonomy"] = "normal"
+    await db.execute("UPDATE projects SET settings = ? WHERE id = 'project'", (json.dumps(settings),))
+    first = await resolve_authority(app, session_id="coordinator", project_id="project",
+                                    operation="board.task.create")
+    launch = await resolve_authority(app, session_id="coordinator", project_id="project",
+                                     task_id="task", operation="task.launch")
+    assert first.grant_id == launch.grant_id
+    grant = await db.fetchone("SELECT issuer_id,scope_kind FROM actor_grants WHERE id = ?", (first.grant_id,))
+    assert (grant["issuer_id"], grant["scope_kind"]) == ("operator:autonomy", "project")
+    from daedalus.stores.projects import ProjectStore
+    await ProjectStore(db).update_orchestrator("project", autonomy="ask")
+    with pytest.raises(ControlDenied, match="no current grant"):
+        await resolve_authority(app, session_id="coordinator", project_id="project", operation="board.task.create")
