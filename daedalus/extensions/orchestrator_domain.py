@@ -1169,6 +1169,14 @@ async def set_next_action(
             "kind": kind, "owner_kind": owner_kind, "owner_id": owner_id, "state": "active"}
 
 
+async def clear_next_action(conn: aiosqlite.Connection, *, task_id: str) -> dict[str, Any]:
+    """Withdraw the task's active next action, so the attention list stops naming a step no longer due."""
+    if await _one(conn, "SELECT 1 FROM board_tasks WHERE id = ?", (task_id,)) is None:
+        raise KeyError(task_id)
+    await conn.execute("UPDATE next_actions SET state = 'cancelled' WHERE task_id = ? AND state = 'active'", (task_id,))
+    return {"task_id": task_id, "state": "cleared"}
+
+
 async def next_action_readiness(conn: aiosqlite.Connection, task_id: str) -> dict[str, Any] | None:
     task = await _one(conn, "SELECT contract_revision FROM board_tasks WHERE id = ?", (task_id,))
     if task is None:

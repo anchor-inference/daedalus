@@ -144,7 +144,10 @@ async def team(context: ToolContext, staff: str | None = None, concurrency: int 
         "'create' (title and the four brief parts: objective, deliverable, boundaries, done_when; priority 1-5, "
         "depends_on, assignee to queue it), 'update' (task_id and what changes), "
         "'move' (task_id, status: todo|blocked|dropped; with blocked, waiting_on says who or what it "
-        "waits for — the operator, someone outside, a date, another task). Execution, review and completion "
+        "waits for — the operator, someone outside, a date, another task), 'next' (task_id, next_kind: "
+        "answer_question|provide_input|review|retry|assign|wait, owner: operator, you, system or a member's name; "
+        "next_kind='none' clears it — the card's next step as the operator's attention list shows it, and a "
+        "card whose next step is assign to a member is handed to it once its dependencies are ready). Execution, review and completion "
         "use their exact receipt commands. 'list' and 'get' show the collection and entity revisions required "
         "for writes; 'get' also shows the card's "
         "checks (C…), requirements (R…) and acceptance. A new card for work already on the board is refused with "
@@ -168,13 +171,15 @@ async def tasks(
     waiting_on: str = "",
     new: bool = False,
     reason: str = "",
+    next_kind: str | None = None,
+    owner: str = "",
     expected_entity_revision: int | None = None,
     expected_collection_revision: int | None = None,
 ) -> ToolResult:
     return await _call(
         context, "tasks", op=op, task_id=task_id, title=title, objective=objective, deliverable=deliverable, boundaries=boundaries,
         done_when=done_when, status=status, priority=priority, depends_on=depends_on, assignee=assignee, note=note, waiting_on=waiting_on,
-        new=new, reason=reason, client_operation_id=call_id(context),
+        new=new, reason=reason, next_kind=next_kind, owner=owner, client_operation_id=call_id(context),
         expected_entity_revision=expected_entity_revision,
         expected_collection_revision=expected_collection_revision,
     )
