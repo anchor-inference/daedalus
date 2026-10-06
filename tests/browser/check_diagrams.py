@@ -10,6 +10,7 @@ and language. With SHOTS set, the pictures go there.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -85,6 +86,40 @@ def fits(page: Page, selector: str) -> None:
         assert rect["x"] >= 0 and rect["x"] + rect["width"] <= width + 0.5, f"a bar control sticks out: {rect}"
 
 
+def outline(element: dict) -> tuple[float, float, float, float]:
+    points = element.get("points") or [[0, 0], [element.get("width", 0), element.get("height", 0)]]
+    xs = [element["x"] + point[0] for point in points]
+    ys = [element["y"] + point[1] for point in points]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def on_screen(page: Page, box_selector: str, elements: list[dict]) -> None:
+    """Every top-level shape of the drawing inside the canvas once it has opened: the open fits the
+    whole drawing, zooming out as far as it must, on a phone as on a desktop. The canvas writes its
+    zoom and scroll onto its box; a scene point lands on screen at (point + scroll) * zoom."""
+    shapes = [element for element in elements if not element.get("containerId") and not element.get("isDeleted")]
+    assert shapes, "nothing to look for"
+    outside: list[str] = []
+    for _ in range(60):
+        view = page.locator(box_selector).first.get_attribute("data-view")
+        frame = page.locator(box_selector).first.bounding_box()
+        outside = ["no view yet"]
+        if view and frame:
+            state = json.loads(view)
+            zoom, sx, sy = state["zoom"], state["scrollX"], state["scrollY"]
+            outside = []
+            for element in shapes:
+                left, top, right, bottom = outline(element)
+                x1, y1 = frame["x"] + (left + sx) * zoom, frame["y"] + (top + sy) * zoom
+                x2, y2 = frame["x"] + (right + sx) * zoom, frame["y"] + (bottom + sy) * zoom
+                if x1 < frame["x"] - 0.5 or y1 < frame["y"] - 0.5 or x2 > frame["x"] + frame["width"] + 0.5 or y2 > frame["y"] + frame["height"] + 0.5:
+                    outside.append(f"{element['id']} at {x1:.0f},{y1:.0f}-{x2:.0f},{y2:.0f} in {frame}")
+            if not outside and 0.1 <= zoom <= 1:
+                return
+        page.wait_for_timeout(100)
+    raise AssertionError(f"shapes off the canvas after it opened: {outside}")
+
+
 def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-untyped-def]
     stub = DiagramStub()
     ids = seed(stub, lang)
@@ -116,6 +151,7 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
     expect(page.locator(".rail")).to_be_visible()
     expect(page.locator(".diagram-side")).to_have_count(0)
     expect(page.locator(".diagram-history")).to_have_count(0)
+    on_screen(page, ".diagram-canvas", stub.diagrams[ids["flow"]]["scene"]["elements"])
     canvas_box = page.locator(".diagram-canvas").bounding_box()
     assert canvas_box is not None and canvas_box["x"] <= 60 and canvas_box["width"] >= 1440 - 60, canvas_box
     expect(page.locator(".diagram-status")).to_have_class("diagram-status saved")
@@ -161,6 +197,7 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
     drawer.locator(".diagram-revision").nth(3).click()
     expect(page.locator(".diagram-preview .diagram-banner")).to_be_visible()
     expect(page.locator(".diagram-preview .excalidraw")).to_be_visible(timeout=20000)
+    on_screen(page, ".diagram-preview-canvas", stub.revisions[ids["flow"]][3]["scene"]["elements"])
     shot(page, f"desktop-history-{lang}-{SCHEME}")
     before = stub.diagrams[ids["flow"]]["version"]
     page.get_by_role("button", name="Восстановить эту версию" if ru else "Restore this version").click()
@@ -244,6 +281,7 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
     expect(page.locator(".diagram-shared header")).to_contain_text("Архитектура" if ru else "Architecture")
     expect(page.locator(".diagram-shared-made")).to_be_visible()
     expect(page.locator(".diagram-shared .excalidraw")).to_be_visible(timeout=20000)
+    on_screen(page, ".diagram-shared .diagram-canvas", stub.diagrams[shared]["scene"]["elements"])
     shot(page, f"desktop-shared-{lang}-{SCHEME}")
     context.close()
 
@@ -262,8 +300,10 @@ def phone(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-unt
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     expect(page.locator(".diagram-card .diagram-thumb img").first).to_be_visible()
     shot(page, f"phone-list-{lang}-{SCHEME}")
+    opened = page.locator(".diagram-card-title").first.inner_text()
     page.locator(".diagram-card-open").first.click()
     wait_canvas(page)
+    on_screen(page, ".diagram-canvas", next(item for item in stub.diagrams.values() if item["title"] == opened)["scene"]["elements"])
     expect(page.locator(".tabbar")).to_have_count(0)
     expect(page.locator(".diagram-side")).to_have_count(0)
     expect(page.locator(".diagram-history, .diagram-history-sheet")).to_have_count(0)
@@ -287,6 +327,9 @@ def phone(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-unt
     shot(page, f"phone-history-{lang}-{SCHEME}")
     sheet.locator(".diagram-revision").nth(2).click()
     expect(page.locator(".diagram-preview .diagram-banner")).to_be_visible()
+    expect(page.locator(".diagram-preview .excalidraw")).to_be_visible(timeout=20000)
+    on_screen(page, ".diagram-preview-canvas", stub.revisions[ids["flow"]][2]["scene"]["elements"])
+    shot(page, f"phone-preview-{lang}-{SCHEME}")
     expect(page.locator(".diagram-history-sheet")).to_have_count(0)
     page.get_by_role("button", name="К текущей" if ru else "Back to current").click()
     expect(page.locator(".diagram-preview")).to_have_count(0)

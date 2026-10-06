@@ -83,7 +83,7 @@
 .diagram-canvas .excalidraw { height: 100%; }
 .diagram-loading { display: grid; place-items: center; flex: 1; color: var(--fg-3); }
 .diagram-preview { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; background: var(--bg); }
-.diagram-preview > .excalidraw-wrapper, .diagram-preview > div:last-child { flex: 1; min-height: 0; }
+.diagram-preview-canvas { position: relative; flex: 1; min-height: 0; }
 
 /* History: a drawer at the canvas's right edge on a desktop, closed until asked for. It takes its
    width from the canvas rather than lying over it: drawn on top, it hid the right of the drawing

@@ -23,7 +23,7 @@ import type { MenuItem } from "../ui/dialogs";
 import { copyText } from "../ui/components";
 import { changeSummary, clockTime, groupByDay, type RevisionItem } from "../diagram-history";
 import { relTimeLong } from "../format";
-import { DiagramThumb, UI_OPTIONS, download, fileName, fitOnOpen, sceneSignature, useExcalidrawLang, useScheme, type Diagram, type Head, type Scene } from "./diagramparts";
+import { DiagramThumb, UI_OPTIONS, download, fileName, exposeView, fitOnOpen, sceneSignature, useExcalidrawLang, useScheme, type Diagram, type Head, type Scene } from "./diagramparts";
 import "./diagrams.css";
 
 type Status = "saved" | "editing" | "saving" | "offline" | "conflict";
@@ -73,6 +73,7 @@ function Editor({ initial, listPath, toast }: { initial: Diagram; listPath: stri
   const [shareOpen, setShareOpen] = useState(false);
   const [version, setVersion] = useState(initial.version);
   const shareButton = useRef<HTMLButtonElement>(null);
+  const canvasBox = useRef<HTMLDivElement>(null);
   const excalidraw = useRef<ExcalidrawImperativeAPI | null>(null);
   const sceneRef = useRef<Scene>(initial.scene);
   const signatureRef = useRef("");
@@ -316,9 +317,9 @@ function Editor({ initial, listPath, toast }: { initial: Diagram; listPath: stri
         </div>
       )}
       <div className="diagram-stage">
-        <div className="diagram-canvas">
+        <div ref={canvasBox} className="diagram-canvas">
           <Excalidraw
-            excalidrawAPI={(handle) => { excalidraw.current = handle; }}
+            excalidrawAPI={(handle) => { excalidraw.current = handle; fitOnOpen(handle); exposeView(handle, canvasBox.current); }}
             initialData={{ elements: initial.scene.elements as any, appState: { ...initial.scene.appState, collaborators: new Map() } as any, files: initial.scene.files as any, scrollToContent: true }}
             theme={theme}
             langCode={langCode}
@@ -330,11 +331,9 @@ function Editor({ initial, listPath, toast }: { initial: Diagram; listPath: stri
               // changes the document, and saving either used to overwrite a newer agent edit.
               const signature = sceneSignature(elements as any[], files as Record<string, unknown>);
               if (!initializedRef.current) {
-                const first = signatureRef.current === "";
                 initializedRef.current = true;
                 signatureRef.current = signature;
                 sceneRef.current = scene;
-                if (first && excalidraw.current) fitOnOpen(excalidraw.current);
                 return;
               }
               if (signatureRef.current === signature) return;
@@ -468,6 +467,7 @@ function HistoryPanel({ id, current, selected, phone, hidden, onSelect, onClose,
 
 function RevisionPreview({ id, version, theme, langCode, current, onRestore, onClose }: { id: string; version: number; theme: "light" | "dark"; langCode: string; current: boolean; onRestore: () => void; onClose: () => void }) {
   const [revision, setRevision] = useState<Revision | null>(null);
+  const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let active = true;
     setRevision(null);
@@ -482,17 +482,17 @@ function RevisionPreview({ id, version, theme, langCode, current, onRestore, onC
         <button className="btn small" onClick={onClose}>{t("diagrams.return")}</button>
         {!current && <button className="btn small primary" disabled={!revision} onClick={onRestore}><Icon name="undo" size={14} />{t("diagrams.restore")}</button>}
       </div>
-      {revision && (
+      <div ref={box} className="diagram-preview-canvas">{revision && (
         <Excalidraw
           key={version}
-          excalidrawAPI={(handle) => fitOnOpen(handle)}
+          excalidrawAPI={(handle) => { fitOnOpen(handle); exposeView(handle, box.current); }}
           viewModeEnabled
           theme={theme}
           langCode={langCode}
           UIOptions={UI_OPTIONS}
           initialData={{ elements: revision.scene.elements as any, appState: { ...revision.scene.appState, collaborators: new Map() } as any, files: revision.scene.files as any, scrollToContent: true }}
         />
-      )}
+      )}</div>
     </div>
   );
 }

@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Excalidraw } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import { api } from "../api";
 import { relTimeLong } from "../format";
 import { t } from "../i18n";
-import { UI_OPTIONS, fitOnOpen, useExcalidrawLang, useScheme, type Scene } from "./diagramparts";
+import { UI_OPTIONS, exposeView, fitOnOpen, useExcalidrawLang, useScheme, type Scene } from "./diagramparts";
 import "./diagrams.css";
 
 type SharedScene = { title: string; version: number; updated_at?: string; scene: Scene };
@@ -16,6 +16,7 @@ export function SharedDiagram({ token }: { token: string }) {
   const langCode = useExcalidrawLang();
   const [diagram, setDiagram] = useState<SharedScene | null>(null);
   const [failed, setFailed] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const tag = document.createElement("meta");
     tag.name = "robots";
@@ -42,8 +43,8 @@ export function SharedDiagram({ token }: { token: string }) {
         </div>
         <span className="diagram-shared-made">{t("diagrams.shared.made")}</span>
       </header>
-      <div className="diagram-canvas">
-        <Excalidraw excalidrawAPI={(handle) => fitOnOpen(handle)} viewModeEnabled theme={theme} langCode={langCode} UIOptions={UI_OPTIONS} initialData={{ elements: diagram.scene.elements as any, appState: { ...diagram.scene.appState, collaborators: new Map() } as any, files: diagram.scene.files as any, scrollToContent: true }} />
+      <div ref={box} className="diagram-canvas">
+        <Excalidraw excalidrawAPI={(handle) => { fitOnOpen(handle); exposeView(handle, box.current); }} viewModeEnabled theme={theme} langCode={langCode} UIOptions={UI_OPTIONS} initialData={{ elements: diagram.scene.elements as any, appState: { ...diagram.scene.appState, collaborators: new Map() } as any, files: diagram.scene.files as any, scrollToContent: true }} />
       </div>
     </div>
   );
