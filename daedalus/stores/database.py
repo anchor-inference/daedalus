@@ -1769,8 +1769,29 @@ MIGRATIONS.append(PHASE_CLOCK_MIGRATION)
 MIGRATIONS.append(CAPACITY_MIGRATION)
 MIGRATIONS.append(ATTEMPT_FAULT_MIGRATION)
 MIGRATIONS.append(RETRY_MIGRATION)
+# A generic effect approval gate that nothing ever used. Its table stays in the list so a database
+# that already ran it keeps its numbering; the last migration drops it again.
+MIGRATIONS.append("""
+CREATE TABLE effect_approvals (
+    id TEXT PRIMARY KEY,
+    effect_id TEXT NOT NULL REFERENCES effect_outbox(id) ON DELETE CASCADE,
+    operation_digest TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    target_digest TEXT NOT NULL,
+    artifact_revision TEXT NOT NULL,
+    scope_json TEXT NOT NULL CHECK(json_valid(scope_json)),
+    expires_at TEXT NOT NULL,
+    approved_by TEXT NOT NULL,
+    revoked_at TEXT,
+    receipt_id TEXT NOT NULL REFERENCES operation_receipts(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+    created_at TEXT NOT NULL,
+    UNIQUE(operation_digest, actor_id, target_digest, artifact_revision)
+);
+CREATE INDEX effect_approvals_by_effect ON effect_approvals(effect_id, revoked_at);
+""")
 MIGRATIONS.append(CALENDAR_DIAGRAM_MIGRATION)
 MIGRATIONS.append(WRITER_CONTAINMENT_MIGRATION)
+MIGRATIONS.append("DROP TABLE effect_approvals;")
 
 BRANCH_BASE_SCHEMA = MIGRATIONS.index(CONTROL_MIGRATION)
 
