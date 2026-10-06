@@ -18,6 +18,7 @@ import { ExecutionHosts } from "./project/ExecutionHosts";
 import { LifecycleCancel } from "./project/LifecycleCancel";
 import { CoordinatorAuthority } from "./project/CoordinatorAuthority";
 import { ProjectKnowledge } from "./project/ProjectKnowledge";
+import { ProjectWorktrees } from "./project/ProjectWorktrees";
 import { ProjectArchive } from "./project/ProjectArchive";
 import { ProjectBudget, budgetKey } from "./project/ProjectBudget";
 import { ProjectResources, resourceProfileKey } from "./project/ProjectResources";
@@ -668,6 +669,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
         ? <p className="sub">{t("authority.standing", { level: t(`focus.autonomy.${project.settings.orchestrator.autonomy}`) })}</p>
         : <CoordinatorAuthority projectId={project.id} toast={toast} onChanged={() => { afterChange(); projects.refresh(); }} />}
       <ProjectKnowledge projectId={project.id} toast={toast} />
+      <ProjectWorktrees projectId={project.id} toast={toast} />
       <ExecutionHosts toast={toast} />
       <LifecycleCancel kind="project_goal" id={project.id} projectId={project.id} onDone={afterChange} toast={toast} />
       {project.sessions.length > 0 && (
