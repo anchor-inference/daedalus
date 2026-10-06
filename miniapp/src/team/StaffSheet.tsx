@@ -3,8 +3,7 @@
 // different executor keeps a different transcript — so the edit form shows them and does not offer them.
 
 import { useEffect, useMemo, useState } from "react";
-import { api, type TerminalEnv } from "../api";
-import { useQuery } from "../store";
+import { api } from "../api";
 import { Sheet } from "../ui/dialogs";
 import { Icon } from "../icons";
 import { confirmAsync, errorText } from "../ui";
@@ -28,7 +27,6 @@ import {
   defaultIsolation,
   foldersFor,
   modelGroups,
-  sharedWriterAvailable,
 } from "./team";
 
 const DAEDALUS_EFFORTS = ["", "off", "low", "medium", "high", "xhigh"];
@@ -78,7 +76,6 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
   // read off the folder rather than fixed to the bot's own; a command-line member picks one.
   const chosenDaedalusFolder = project.folders.find((f) => f.id === folderId) ?? project.folders[0];
   const env: Env = daedalus ? chosenDaedalusFolder?.env ?? project.local_env : cliEnv;
-  const sharedQuery = useQuery<{ envs: TerminalEnv[] }>(!daedalus && isolation === "shared" ? "/api/terminals/envs" : null, { staleMs: 5000 });
   const catalogs = useCatalogs();
   const catalog = catalogs[env];
   const entry = daedalus ? undefined : catalog?.[harness];
@@ -114,9 +111,7 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
   const models = daedalus ? team.choices.presets : [...groups.offered, ...groups.others].map((m) => ({ id: m, label: m }));
   const defaultModel = team.choices.presets.find((p) => p.id === team.choices.default_preset)?.label ?? "";
   const worktreeProblem = isolation === "worktree" && folder && (folder.readonly ? t("team.isolation.readonlyfolder") : folder.env === project.local_env && !folder.is_git ? t("team.isolation.nogit") : "");
-  const sharedBlocked = !daedalus && isolation === "shared" && !sharedWriterAvailable(harness, sharedQuery.data?.envs.find((item) => item.env === env));
-  const unsafeSharedChange = sharedBlocked && (!editing || member?.isolation !== "shared");
-  const canSave = !busy && name.trim().length > 0 && name.trim().length <= 32 && (editing || reason === "") && !worktreeProblem && !unsafeSharedChange && folders.length > 0;
+  const canSave = !busy && name.trim().length > 0 && name.trim().length <= 32 && (editing || reason === "") && !worktreeProblem && folders.length > 0;
 
   async function save() {
     if (!canSave) return;
@@ -300,11 +295,6 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
       </div>
       {worktreeProblem ? (
         <div className="sub attn">{worktreeProblem}</div>
-      ) : sharedBlocked ? (
-        <div className="sub attn" role="status">
-          {sharedQuery.loading ? t("team.isolation.shared.checking") : sharedQuery.error ? t("team.isolation.shared.unknown") : t("team.isolation.shared.unavailable")}
-          {sharedQuery.error && <button className="linkbtn" type="button" onClick={() => void sharedQuery.refresh()}>{t("common.retry")}</button>}
-        </div>
       ) : isolation === "worktree" ? (
         <div className="sub">{t("team.isolation.branch")} <code className="branch-preview">{branchPreview(member?.name ?? name, t("team.branch.task"))}</code></div>
       ) : (

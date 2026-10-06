@@ -103,6 +103,8 @@ def playing(page) -> dict:  # type: ignore[no-untyped-def]
 def open_page(browser, wire: Wire, viewport: dict):  # type: ignore[no-untyped-def]
     context = browser.new_context(viewport=viewport, color_scheme="dark", permissions=["microphone"])
     context.add_init_script(PLAYED)
+    # The companion now stands in for the orb by default; this check drives the orb view.
+    context.add_init_script("localStorage.setItem('daedalus.voice.mascot', 'off')")
     page = context.new_page()
     page.route("**/api/**", wire.route)
     page.goto(f"{BASE}/voice?token=t&scheme=dark&lang=en")

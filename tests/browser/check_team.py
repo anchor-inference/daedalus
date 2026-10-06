@@ -119,10 +119,10 @@ def run_one(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
     sheet.locator(".executor", has_text="Claude Code").click()
     expect(sheet.locator("#staff-permissions")).to_be_visible()
     isolation = sheet.get_by_role("group", name="Isolation" if lang == "en" else "Изоляция")
+    # A machine that cannot contain a shared writer still offers it: the worker then runs uncontained.
     isolation.get_by_role("button", name=words["shared"]).click()
-    expect(sheet.get_by_text(words["blocked"], exact=False)).to_be_visible()
-    expect(sheet.locator(".sheet-foot").get_by_role("button", name=words["hire"], exact=True)).to_be_disabled()
-    fits(page, f"{lang} {width} shared refusal")
+    expect(sheet.get_by_text(words["blocked"], exact=False)).to_have_count(0)
+    fits(page, f"{lang} {width} shared without containment")
     isolation.get_by_role("button", name=words["worktree"]).click()
     sheet.locator("#staff-name").fill("Rex")
     sheet.locator("#staff-agent").select_option("code-reviewer")

@@ -129,18 +129,27 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
             raise ControlConflict("the runtime handoff preview is stale or its source is not released")
     strict_profile = profile is not None and profile["state"] == "enabled"
     writer_only = not strict_profile and member_row["harness"] != "daedalus" and member_row["isolation"] == "shared"
+    # Containing a shared writable CLI is used where this machine can provide it, never required.
+    # Requiring it refused every shared command-line worker on a host without delegated cgroup v2,
+    # every OpenCode worker, and every task with files, which on most installations was all of them.
     if writer_only and await app.db.fetchone("SELECT 1 FROM task_files WHERE task_id = ? LIMIT 1", (task_id,)):
-        raise ControlConflict("shared writer containment cannot own initial file delivery; "
-                              "use an isolated Git worktree member for a task with files")
-    if strict_profile or writer_only:
-        if strict_profile and harness == "daedalus":
+        writer_only = False
+    terminals = app.extensions.get("terminals")
+    if writer_only:
+        try:
+            capability = await terminals.containment_capability(env) if terminals is not None else {}
+            resources = writer_target(env=env, harness=harness, capability=capability)
+        except Exception:  # noqa: BLE001 — an unanswering daemon is one more machine that cannot contain
+            writer_only = False
+    if strict_profile:
+        if harness == "daedalus":
             strict_target(profile, env=env, harness=harness, capability={})
-        terminals = app.extensions.get("terminals")
         if terminals is None:
             raise ControlConflict("the terminal daemon cannot prove resource containment")
         capability = await terminals.containment_capability(env)
-        resources = (strict_target(profile, env=env, harness=harness, capability=capability)
-                     if strict_profile else writer_target(env=env, harness=harness, capability=capability))
+        resources = strict_target(profile, env=env, harness=harness, capability=capability)
+    if strict_profile or writer_only:
+        assert resources is not None and terminals is not None
         resources["folder_id"] = folder["id"]
         resources["workspace_path_digest"] = digest(folder["path"])
         resources["launch_workspace_digest"] = digest(workspace_path)

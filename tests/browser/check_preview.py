@@ -147,7 +147,8 @@ def run() -> int:
         page.get_by_role("button", name="1:1", exact=True).click()
         expect(page.locator(".image-pan.actual")).to_be_visible()
         open_file("sample.pdf", ".preview-frame")
-        assert page.locator(".preview-frame").get_attribute("src").startswith("blob:")
+        # A data URL, not the blob URL: the PDF document gets an opaque origin, apart from the app's.
+        assert page.locator(".preview-frame").get_attribute("src").startswith("data:application/pdf")
         open_file("sample.wav", "audio")
         page.wait_for_function("document.querySelector('audio').readyState >= 1")
         open_file("sample.webm", "video")

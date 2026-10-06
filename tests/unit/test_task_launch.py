@@ -170,7 +170,7 @@ async def test_unknown_launch_operator_check_requires_saved_runtime_proof(
         app.executions.release()
 
 
-async def test_writable_cli_queue_pins_containment_without_a_ceiling_profile(db: Database) -> None:
+async def test_writable_cli_is_contained_where_possible_and_launches_plainly_elsewhere(db: Database) -> None:
     app, _, team, _, revision = await queued_fixture(db)
     await db.execute("UPDATE staff SET harness = 'claude',isolation = 'shared' WHERE id = 'worker'")
     capability = {"available": True, "kind": "cgroup_v2", "sandbox": "ok", "daemon_instance": "daemon-one"}
@@ -178,11 +178,15 @@ async def test_writable_cli_queue_pins_containment_without_a_ceiling_profile(db:
                                 preflight_attempt_resources=AsyncMock(return_value={}))
     app.extensions["terminals"] = terminals
     try:
-        with pytest.raises(ControlConflict, match="delegated writer containment"):
-            terminals.containment_capability.return_value = {**capability, "available": False}
-            await queue_launch(app, "task", OPERATOR, staff_id="worker",
-                               client_operation_id="uncontained", expected_entity_revision=revision)
-        assert (await db.fetchone("SELECT count(*) FROM effect_outbox"))[0] == 0
+        # A machine that cannot contain a writer still runs it, as an ordinary launch.
+        terminals.containment_capability.return_value = {**capability, "available": False}
+        plain = await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                                   client_operation_id="uncontained", expected_entity_revision=revision)
+        effect = await db.fetchone("SELECT payload_json FROM effect_outbox WHERE id = ?", (plain["effect_id"],))
+        assert json.loads(effect["payload_json"])["data"].get("resources") is None
+        await db.execute("DELETE FROM effect_outbox")
+        await db.execute("UPDATE board_tasks SET entity_revision = entity_revision WHERE id = 'task'")
+        revision = (await db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = 'task'"))[0]
         terminals.containment_capability.return_value = capability
         result = await queue_launch(app, "task", OPERATOR, staff_id="worker",
                                     client_operation_id="contained", expected_entity_revision=revision)

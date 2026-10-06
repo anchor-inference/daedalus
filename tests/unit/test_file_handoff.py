@@ -43,7 +43,7 @@ from daedalus.harness.runtime import CliStaffRuntime
 from daedalus.host.handoff import Handoff
 from daedalus.host.session_runner import Attachment
 from daedalus.stores import files as files_module
-from daedalus.stores.control import ControlConflict, ControlStore, Entity, Principal, Scope
+from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
 from daedalus.stores.files import MAIN, FileRefused
 from daedalus.stores.harness import HarnessStore
@@ -540,17 +540,16 @@ async def test_refusals_are_said_before_anything_is_sent(settings: Settings, db:
         assert c.opened() == []
 
 
-async def test_shared_host_cli_without_delegated_containment_is_refused_before_launch(settings: Settings, db: Database, tmp_path: Path) -> None:
+async def test_shared_host_cli_without_delegated_containment_launches_uncontained(settings: Settings, db: Database, tmp_path: Path) -> None:
     async with chain(settings, db, tmp_path) as c:
         member = await c.manager.staff.hire(c.project.id, name="shared", harness="claude", env="host", isolation="shared")
         task_id = await board_task(c.manager, c.project, "Read a note", brief=brief_task("Read a note"))
         revision = await ControlStore(db).revision(Scope("project", c.project.id), Entity("task", task_id))
-        with pytest.raises(ControlConflict, match="delegated writer containment.*isolated Git worktree or read-only member"):
-            await queue_launch(c.r.team.app, task_id, Principal.operator({"via": "token", "user_id": 1}),
-                               staff_id=member.id, client_operation_id=uuid.uuid4().hex,
-                               expected_entity_revision=revision)
-        assert await db.fetchone("SELECT 1 FROM effect_outbox LIMIT 1") is None
-        assert await db.fetchone("SELECT 1 FROM execution_attempts LIMIT 1") is None
+        queued = await queue_launch(c.r.team.app, task_id, Principal.operator({"via": "token", "user_id": 1}),
+                                    staff_id=member.id, client_operation_id=uuid.uuid4().hex,
+                                    expected_entity_revision=revision)
+        effect = await db.fetchone("SELECT payload_json FROM effect_outbox WHERE id = ?", (queued["effect_id"],))
+        assert effect is not None and json.loads(effect["payload_json"])["data"].get("resources") is None
 
 
 async def test_an_old_host_daemon_without_fs_write_is_refused_with_how_to_update(settings: Settings, db: Database, tmp_path: Path) -> None:

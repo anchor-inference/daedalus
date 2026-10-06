@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HARNESSES, HARNESS_BADGES, availability, branchPreview, placeExecutor, branchSlug, colourVar, defaultIsolation, foldersFor, initials, modelGroups, sharedWriterAvailable, statusTone } from "./team";
+import { HARNESSES, HARNESS_BADGES, availability, branchPreview, placeExecutor, branchSlug, colourVar, defaultIsolation, foldersFor, initials, modelGroups, statusTone } from "./team";
 
 describe("the executor badge", () => {
   it("gives every executor its own two letters", () => {
@@ -117,15 +117,6 @@ describe("folders and isolation", () => {
     expect(defaultIsolation(undefined)).toBe("shared");
   });
 
-  it("offers shared CLI writing only when the daemon can contain it", () => {
-    const host = { env: "host", available: true, reason: "", version: "", sandbox: "ok",
-      containment: { kind: "cgroup_v2", available: true }, shell: "", home: "", port_range: "" } as const;
-    expect(sharedWriterAvailable("claude", host)).toBe(true);
-    expect(sharedWriterAvailable("claude", { ...host, containment: { kind: "cgroup_v2", available: false } })).toBe(false);
-    expect(sharedWriterAvailable("claude", { ...host, sandbox: "not available" })).toBe(false);
-    expect(sharedWriterAvailable("claude", undefined)).toBe(false);
-    expect(sharedWriterAvailable("opencode", host)).toBe(false);
-  });
 });
 
 describe("the hiring form's models", () => {

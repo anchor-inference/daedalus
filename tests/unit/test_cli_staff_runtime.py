@@ -31,7 +31,7 @@ from daedalus.extensions.effects import EffectDispatcher
 from daedalus.extensions.harness import catalog_roots
 from daedalus.extensions.staff import Team
 from daedalus.extensions.task_launch import TaskLaunchEffect
-from daedalus.harness.capabilities import capabilities
+from daedalus.harness.capabilities import RESTRICTIVE_MODES, capabilities
 from daedalus.harness.claude import LEVEL_MODES, PERMISSION_MODES
 from daedalus.harness.contract import (
     LAUNCH_DIR,
@@ -272,7 +272,10 @@ class Stand:
 
     async def hire(self, name: str = "Ada") -> Staff:
         # The fake daemon has no cgroup delegation; these tests exercise the CLI conversation.
-        return await self.manager.staff.hire(self.project.id, name=name, harness=getattr(self.adapter, "name", "claude"), isolation="readonly")
+        harness = getattr(self.adapter, "name", "claude")
+        # Read-only starts a CLI in its own no-write mode; one without such a mode shares the folder.
+        isolation = "readonly" if harness in RESTRICTIVE_MODES else "shared"
+        return await self.manager.staff.hire(self.project.id, name=name, harness=harness, isolation=isolation)
 
     async def task(self, title: str = "Menu page", *,
                    requirements: list[dict[str, str]] | None = None) -> str:

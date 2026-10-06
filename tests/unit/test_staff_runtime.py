@@ -902,17 +902,16 @@ async def test_without_the_terminals_service_command_line_staff_wait_with_the_re
         await manager.close()
 
 
-async def test_writable_cli_without_containment_creates_no_assignment(settings: Settings, db: Database, tmp_path: Path) -> None:
+async def test_writable_cli_without_containment_launches_as_an_ordinary_worker(settings: Settings, db: Database, tmp_path: Path) -> None:
+    # No terminal daemon to contain it: the shared command-line worker still gets its launch.
     manager, team, _runtime, project = await fake_team(settings, db, tmp_path, capacity=Capacity())
     try:
         team.runtimes["claude"] = FakeStaffRuntime(kind="claude")
         member = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="shared")
         task_id = await board_task(manager, project, "Menu")
-        with pytest.raises(ControlConflict, match="terminal daemon cannot prove resource containment"):
-            await operator_assignment(team, member, task_id, wait_for_admission=False)
-        row = await manager.db.fetchone("SELECT status,assignee_staff_id FROM board_tasks WHERE id = ?", (task_id,))
-        assert row is not None and (row["status"], row["assignee_staff_id"]) == ("todo", None)
-        assert await manager.db.fetchone("SELECT 1 FROM effect_outbox WHERE kind = 'task.launch'") is None
+        await operator_assignment(team, member, task_id, wait_for_admission=False)
+        launch = await manager.db.fetchone("SELECT payload_json FROM effect_outbox WHERE kind = 'task.launch'")
+        assert launch is not None and json.loads(launch["payload_json"])["data"].get("resources") is None
     finally:
         await close_team(manager)
         await manager.close()
