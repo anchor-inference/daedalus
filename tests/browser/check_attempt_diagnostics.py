@@ -27,6 +27,13 @@ def scenario(language: str, width: int) -> None:
 
         def diagnostics(route):  # type: ignore[no-untyped-def]
             path = urlsplit(route.request.url).path
+            if path == "/api/board/task-one/attempts/attempt-one/resources":
+                return route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                    "attempt_id": "attempt-one", "kind": "cgroup_v2", "state": "released",
+                    "limits": {"memory_bytes": 2147483648, "cpu_millis": 0, "process_count": 64, "disk_bytes": 0},
+                    "observation": {"observation_kind": "exit", "memory_peak_bytes": 2147483648,
+                                    "oom_kills": 1, "pids_max_events": 0},
+                }))
             if path != "/api/board/task-one/attempts/attempt-one/diagnostics":
                 return route.fallback()
             reads.append(path)
@@ -46,6 +53,9 @@ def scenario(language: str, width: int) -> None:
         expect(details).to_contain_text("needs recovery" if language == "en" else "требует восстановления")
         expect(details).to_contain_text("Launch failed" if language == "en" else "Сбой запуска")
         expect(details).to_contain_text("fault-3")
+        # A resource limit that stopped the worker is said in words, not left in the raw record.
+        expect(details).to_contain_text("ran out of memory" if language == "en" else "закончилась память")
+        expect(details.get_by_role("button", name="Copy diagnostics" if language == "en" else "Скопировать диагностику")).to_be_visible()
         assert "sk-private-credential" not in page.locator("body").inner_text()
         assert reads == ["/api/board/task-one/attempts/attempt-one/diagnostics"]
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
