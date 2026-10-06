@@ -6,8 +6,9 @@ import asyncio
 import json
 import logging
 import os
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,21 @@ from daedalus.config import native_mode
 
 logger = logging.getLogger(__name__)
 
-Migration = str | Callable[["Database"], str] | tuple[str, bool]
+
+
+@dataclass(frozen=True)
+class DataMigration:
+    """SQL followed by a Python step on the same transaction, for a change SQL cannot say.
+
+    The step reads and rewrites rows (a scene's JSON, a summary computed from two of them) with the
+    open connection; it must not commit, and whatever it raises rolls the whole migration back with
+    the schema change before it, so a half-repaired database never carries the new version."""
+
+    sql: str
+    step: Callable[[aiosqlite.Connection], Awaitable[None]]
+
+
+Migration = str | Callable[["Database"], str] | tuple[str, bool] | DataMigration
 """A migration is its SQL, or a function that writes the SQL from what the opening database knows
 (the managed workspaces folder, the environment it runs in). A callable keeps a migration that
 needs such a value in its numbered place instead of being special-cased by its index."""
@@ -1739,6 +1754,24 @@ INSERT INTO diagram_revisions(diagram_id,version,title,scene_json,saved_at)
 SELECT id,version,title,scene_json,updated_at FROM diagrams;
 """)
 
+
+async def _diagram_history(conn: aiosqlite.Connection) -> None:
+    from daedalus.stores.diagrams import repair_history  # Lazy: the store imports this module.
+
+    await repair_history(conn)
+
+
+MIGRATIONS.append(DataMigration("""
+ALTER TABLE diagrams ADD COLUMN updated_by TEXT NOT NULL DEFAULT 'user' CHECK (updated_by IN ('user', 'agent'));
+ALTER TABLE diagrams ADD COLUMN preview_svg TEXT NOT NULL DEFAULT '';
+ALTER TABLE diagram_revisions ADD COLUMN source TEXT NOT NULL DEFAULT 'user' CHECK (source IN ('user', 'agent'));
+ALTER TABLE diagram_revisions ADD COLUMN kind TEXT NOT NULL DEFAULT 'edit' CHECK (kind IN ('create', 'edit', 'restore'));
+ALTER TABLE diagram_revisions ADD COLUMN restored_from INTEGER;
+ALTER TABLE diagram_revisions ADD COLUMN started_at TEXT;
+ALTER TABLE diagram_revisions ADD COLUMN summary_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE diagram_revisions ADD COLUMN preview_svg TEXT NOT NULL DEFAULT '';
+""", _diagram_history))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
@@ -1866,6 +1899,10 @@ class Database:
         for index, script in enumerate(MIGRATIONS, start=1):
             if index <= current:
                 continue
+            if isinstance(script, DataMigration):
+                await self._migrate_with_data(index, script, current)
+                current = index
+                continue
             if callable(script):
                 script = script(self)
             foreign_keys_off = isinstance(script, tuple) and script[1]
@@ -1889,6 +1926,21 @@ class Database:
                     if foreign_keys_off:
                         await self.conn.execute("PRAGMA foreign_keys=ON")
             current = index
+
+    async def _migrate_with_data(self, index: int, migration: DataMigration, current: int) -> None:
+        version = f"INSERT INTO schema_version(version) VALUES ({index})" if current == 0 and index == 1 else f"UPDATE schema_version SET version = {index}"
+        async with self._lock:
+            # executescript would commit an open transaction before running, so the transaction is
+            # begun by the script itself and the step and the version follow on the same one.
+            try:
+                await self.conn.executescript(f"BEGIN;\n{migration.sql}")
+                await migration.step(self.conn)
+                await self.conn.execute(version)
+                await self.conn.execute("COMMIT")
+            except BaseException:
+                with suppress(Exception):
+                    await self.conn.execute("ROLLBACK")
+                raise
 
     async def execute(self, sql: str, params: Sequence[Any] = ()) -> None:
         async with self._lock:
