@@ -270,7 +270,7 @@ export type Review = {
   patch_complete: boolean;
   conflicts: string[] | null;
   receipts: { criterion: string; command: string; exit_code: number; passed: boolean; at: string }[];
-  ci_status: "passed" | "blocked";
+  ci_status: "passed" | "blocked" | "not_required";
   ci_checks: { provider: string; repository_id: string; check_name: string; head_sha: string | null; state: string; delivery_id: string | null }[];
   can_merge: boolean;
   blockers: ReviewBlocker[];

@@ -44,8 +44,7 @@ def install_routes(api: FastAPI, app: Application, auth: Callable[..., Any]) -> 
         async with app.db.transaction() as conn:
             return {"task_id": task_id, "contract_revision": task["contract_revision"],
                     "head_sha": head_sha,
-                    **await ci_readiness(conn, task_id, task["contract_revision"], head_sha,
-                                         require_policy=bool(task["branch"]))}
+                    **await ci_readiness(conn, task_id, task["contract_revision"], head_sha)}
 
     @api.post("/api/board/{task_id}/ci/requirements")
     async def requirements(task_id: str, body: Requirements,

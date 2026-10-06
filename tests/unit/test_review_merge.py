@@ -217,25 +217,32 @@ async def test_exact_review_merges_a_commit_then_accepts_the_same_result(setting
         await r.close()
 
 
-async def test_branch_without_ci_policy_cannot_gain_an_accepted_verdict(settings: Settings, db: Database,
-                                                                         tmp_path: Path) -> None:
+async def test_branch_without_ci_checks_merges_after_review(settings: Settings, db: Database,
+                                                            tmp_path: Path) -> None:
+    # Most folders have no GitHub CI. Treating "no checks declared" as "CI failed" once left every
+    # branch task in such a folder unmergeable, so this walks the whole path without any checks.
     r = await rig(settings, db, tmp_path)
     try:
         member = await r.hire()
         task_id, _request = await r.reviewed(member, "Menu", {"menu.md": "bread\n"}, ci=False)
         review = await r.review.review(task_id)
-        assert review["ci_status"] == "blocked" and review["ci_checks"] == []
-        assert "ci" in [blocker["code"] for blocker in review["blockers"]]
-        assert not review["can_merge"]
+        assert review["ci_status"] == "not_required" and review["ci_checks"] == []
+        assert "ci" not in [blocker["code"] for blocker in review["blockers"]]
         async with r.client() as client:
-            refused = await client.post(f"/api/board/{task_id}/results/{review['result_id']}/verdicts", json={
-                "client_operation_id": "verdict:without-ci",
+            result_id, verdict_id = await r.approve(client, task_id)
+            queued = await client.post(f"/api/board/{task_id}/results/{result_id}/merge", json={
+                "client_operation_id": "merge:no-ci", "verdict_id": verdict_id,
                 "expected_entity_revision": (await task_row(r.manager, task_id))["entity_revision"],
-                "verification": "verified", "accepted": True,
-                "head": review["head_sha"], "base": review["base_sha"],
-                "evidence_ids": [], "reason": "Reviewed",
             })
-            assert refused.status_code == 409 and "required CI" in refused.text
+            assert queued.status_code == 200, queued.text
+            action_id = queued.json()["action_id"]
+
+            async def merged() -> bool:
+                row = await r.manager.db.fetchone("SELECT state FROM effect_outbox WHERE id = ?", (action_id,))
+                return row is not None and row["state"] == "completed"
+
+            await until_await(merged, "review merge completed")
+            assert (r.folder / "menu.md").read_text() == "bread\n"
     finally:
         await r.close()
 
@@ -632,7 +639,7 @@ async def test_comparison_review_uses_member_worktree_without_projecting_branch(
         assert projected["comparison_group_id"] == "candidate-group"
         assert projected["result_id"] == "candidate-result"
         assert projected["can_merge"] is False
-        assert [item["code"] for item in projected["blockers"]] == ["ci", "verdict_missing"]
+        assert [item["code"] for item in projected["blockers"]] == ["verdict_missing"]
         task = await task_row(r.manager, task_id)
         assert task["branch"] is None and task["current_attempt_id"] is None and task["status"] == "todo"
         with pytest.raises(ReviewRefused, match="comparison attempt"):

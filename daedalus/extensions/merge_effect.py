@@ -56,9 +56,8 @@ class MergeEffect:
                 row["contract_revision"] != row["current_revision"] or row["status"] != "review"):
             return EffectOutcome("failed", "result, verdict, or task review state changed")
         async with self.app.db.transaction() as conn:
-            ci = await ci_readiness(conn, claim.task_id, row["contract_revision"], row["head_sha"],
-                                    require_policy=True)
-            if ci["state"] != "passed":
+            ci = await ci_readiness(conn, claim.task_id, row["contract_revision"], row["head_sha"])
+            if ci["state"] == "blocked":
                 return EffectOutcome("failed", "required CI changed or is missing for the reviewed head")
             latest = await conn.execute("SELECT id FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
                                         " AND attempt_id IS ? ORDER BY created_at DESC,rowid DESC LIMIT 1",
@@ -81,9 +80,8 @@ class MergeEffect:
         # The effect lease check can await while another delivery records a newer failing CI run.
         # Re-read the durable result at the last host-controlled point before touching Git.
         async with self.app.db.transaction() as conn:
-            ci = await ci_readiness(conn, claim.task_id, row["contract_revision"], row["head_sha"],
-                                    require_policy=True)
-            if ci["state"] != "passed":
+            ci = await ci_readiness(conn, claim.task_id, row["contract_revision"], row["head_sha"])
+            if ci["state"] == "blocked":
                 return EffectOutcome("failed", "required CI changed or is missing for the reviewed head")
             try:
                 current_source = await source_identity(conn, row["result_id"], row["verdict_id"])

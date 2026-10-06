@@ -52,8 +52,8 @@ async def test_review_projection_blocks_missing_and_stale_result_binding(tmp_pat
         review = Review(app, Team())  # type: ignore[arg-type]
         missing = await review.review("task1")
         assert missing["can_merge"] is False
-        assert {item["code"] for item in missing["blockers"]} == {"result_missing", "ci"}
-        assert missing["ci_status"] == "blocked" and missing["ci_checks"] == []
+        assert {item["code"] for item in missing["blockers"]} == {"result_missing"}
+        assert missing["ci_status"] == "not_required" and missing["ci_checks"] == []
         await db.execute("INSERT INTO result_receipts(id,task_id,contract_revision,outcome,original_text,"
                          " original_digest,original_size_bytes,checks_json,limitations_json,actor_id,created_at)"
                          " VALUES ('result1','task1',1,'complete','Report',?,6,'[]','[]',"
@@ -64,7 +64,7 @@ async def test_review_projection_blocks_missing_and_stale_result_binding(tmp_pat
                          " 'Seen','2026-01-01')")
         stale = await review.review("task1")
         assert stale["can_merge"] is False
-        assert {item["code"] for item in stale["blockers"]} == {"verdict_stale", "ci"}
+        assert {item["code"] for item in stale["blockers"]} == {"verdict_stale"}
         assert stale["result_id"] == "result1" and stale["verdict_id"] == "verdict1"
     finally:
         await db.close()

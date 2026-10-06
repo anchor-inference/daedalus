@@ -21,7 +21,7 @@ const COMMITS_SHOWN = 5;
 
 /** A blocker in the reader's language; the host's own sentence when the app has no words for its code. */
 export function blockerText(blocker: ReviewBlocker, review: Pick<Review, "current" | "base" | "conflicts" | "ci_checks">): string {
-  if (blocker.code === "ci") return t(review.ci_checks.length ? "pboard.review.block.ciPending" : "pboard.review.block.ciMissing");
+  if (blocker.code === "ci") return t("pboard.review.block.ciPending");
   if (!(BLOCKER_CODES as readonly string[]).includes(blocker.code)) return blocker.text;
   return t(`pboard.review.block.${blocker.code}`, { current: review.current, base: review.base, files: (review.conflicts ?? []).slice(0, 3).join(", ") });
 }
@@ -145,9 +145,11 @@ export function ReviewPanel({ taskId, onChanged, toast }: { taskId: string; onCh
           ))}
         </ul>
       )}
-      <div className={`sub ${data.ci_status === "passed" ? "ok" : "attn"}`}>
-        {t(data.ci_status === "passed" ? "pboard.review.ci.passed" : "pboard.review.ci.blocked", { head: data.head_sha?.slice(0, 10) || "?" })}
-      </div>
+      {data.ci_status !== "not_required" && (
+        <div className={`sub ${data.ci_status === "passed" ? "ok" : "attn"}`}>
+          {t(data.ci_status === "passed" ? "pboard.review.ci.passed" : "pboard.review.ci.blocked", { head: data.head_sha?.slice(0, 10) || "?" })}
+        </div>
+      )}
       {data.ci_checks.length > 0 && (
         <ul className="review-receipts" aria-label={t("pboard.review.ci.checks")}>
           {data.ci_checks.map((check) => (
@@ -158,7 +160,7 @@ export function ReviewPanel({ taskId, onChanged, toast }: { taskId: string; onCh
           ))}
         </ul>
       )}
-      {data.ci_status === "blocked" && data.status === "review" && !data.merged && <CiRequirements taskId={taskId} checks={data.ci_checks} onChanged={onChanged} toast={toast} />}
+      {data.ci_status !== "passed" && data.status === "review" && !data.merged && <CiRequirements taskId={taskId} checks={data.ci_checks} onChanged={onChanged} toast={toast} />}
       {others.length > 0 && (
         <ul className="review-blockers">
           {others.map((b) => <li key={b.code} className={b.code === "conflicts" ? "bad" : "attn"} title={b.text}>{blockerText(b, data)}</li>)}

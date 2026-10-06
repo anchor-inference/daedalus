@@ -138,12 +138,10 @@ class Review:
                                             " WHERE id = ?", (task_id,))
         candidate_attempt = comparison_attempt_id if member is not None else binding["current_attempt_id"] if binding else None
         async with self.app.db.transaction() as conn:
-            ci = await ci_readiness(conn, task_id, binding["contract_revision"], head_sha,
-                                    require_policy=True) if binding is not None else {"state": "blocked", "checks": []}
-        if ci["state"] != "passed":
-            reason = ("no required CI checks are configured; return the task, set its GitHub checks, and run them on this head" if not ci["checks"] else
-                      "required CI has not passed for the current branch HEAD")
-            blockers.append({"code": "ci", "text": reason})
+            ci = await ci_readiness(conn, task_id, binding["contract_revision"], head_sha) \
+                if binding is not None else {"state": "not_required", "checks": []}
+        if ci["state"] == "blocked":
+            blockers.append({"code": "ci", "text": "required CI has not passed for the current branch HEAD"})
         result = await self.app.db.fetchone(
             "SELECT id,outcome FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
             " AND attempt_id IS ? ORDER BY created_at DESC,rowid DESC LIMIT 1",

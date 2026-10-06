@@ -2170,7 +2170,6 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "pboard.review.block.unknown": { en: "git could not tell whether the merge would conflict", ru: "git не смог определить, будет ли конфликт" },
   "pboard.review.block.conflicts": { en: "the merge would conflict in {files}; the orchestrator is told", ru: "при слиянии будет конфликт в {files}; оркестратор узнает об этом" },
   "pboard.review.block.checklist": { en: "the checklist has open items", ru: "в чек-листе есть незакрытые пункты" },
-  "pboard.review.block.ciMissing": { en: "required CI checks are not configured", ru: "обязательные проверки CI не настроены" },
   "pboard.review.block.ciPending": { en: "required CI has not passed for the current branch head", ru: "обязательный CI не пройден для текущего коммита ветки" },
   "pboard.open.staff": { en: "Open {name}'s session", ru: "Открыть сессию: {name}" },
   "pboard.brief": { en: "Brief", ru: "Бриф" },

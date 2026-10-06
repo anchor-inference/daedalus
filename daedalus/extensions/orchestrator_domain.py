@@ -564,9 +564,7 @@ async def record_verdict(
     if accepted and (verification != "verified" or result["outcome"] != "complete"):
         raise DomainConflict("only a verified complete result can be accepted")
     if accepted:
-        branch = await _one(conn, "SELECT branch FROM board_tasks WHERE id = ?", (result["task_id"],))
-        ci = await ci_readiness(conn, result["task_id"], result["contract_revision"], head,
-                                require_policy=bool((branch and branch["branch"]) or comparison is not None))
+        ci = await ci_readiness(conn, result["task_id"], result["contract_revision"], head)
         if ci["state"] == "blocked":
             raise DomainConflict("required CI has not passed for the reviewed head")
     if accepted and comparison is None and task["status"] != "review":
@@ -733,8 +731,7 @@ async def accept_result(
         raise DomainConflict("the verdict belongs to another result or contract")
     if verdict["verification"] != "verified" or not verdict["accepted"]:
         raise DomainConflict("the result has no approving verified verdict")
-    ci = await ci_readiness(conn, task_id, contract_revision, current_head,
-                            require_policy=bool(task["branch"]))
+    ci = await ci_readiness(conn, task_id, contract_revision, current_head)
     if ci["state"] == "blocked":
         raise DomainConflict("required CI changed or is missing for the accepted head")
     if await unresolved_review_comments(conn, result_id):

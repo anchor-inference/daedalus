@@ -198,8 +198,8 @@ def conflicting(page: Page, lang: str) -> None:
 def configure_ci(page: Page, lang: str) -> None:
     focus = FocusStub.bakery(lang)
     task = endpoint(focus)
-    review = BoardStub.review(task, blockers=[{"code": "ci", "text": "required CI checks missing"}])
-    review["ci_status"] = "blocked"
+    review = BoardStub.review(task, blockers=[])
+    review["ci_status"] = "not_required"
     review["ci_checks"] = []
     focus.board.reviews[task["id"]] = review
     focus.board.ci_requirement_conflicts = 1
@@ -207,8 +207,8 @@ def configure_ci(page: Page, lang: str) -> None:
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
     page.locator(".pcard", has_text=task["title"]).locator(".pcard-title").click()
     panel = page.locator(".sheet.pboard-sheet .review-panel")
-    missing = "required CI checks are not configured" if lang == "en" else "обязательные проверки CI не настроены"
-    expect(panel.locator(".review-why")).to_contain_text(missing)
+    # A folder without CI says nothing about CI; naming checks stays one fold away.
+    expect(panel).not_to_contain_text("CI has not passed" if lang == "en" else "CI не пройден")
     setup = panel.locator(".review-ci-setup")
     expect(setup.locator(".review-ci-fields")).not_to_be_visible()
     setup.locator("summary").click()

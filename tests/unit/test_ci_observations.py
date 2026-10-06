@@ -62,11 +62,11 @@ async def test_newer_green_run_survives_late_old_failure_and_stale_head_is_unkno
     assert stale["state"] == "blocked" and stale["checks"][0]["state"] == "unknown"
 
 
-async def test_branch_policy_absence_blocks(ci_db: Database) -> None:
+async def test_no_declared_checks_do_not_block(ci_db: Database) -> None:
     async with ci_db.transaction() as conn:
         await conn.execute("UPDATE board_tasks SET contract_revision = 2 WHERE id = 'task1'")
-        readiness = await ci_readiness(conn, "task1", 2, "a" * 40, require_policy=True)
-    assert readiness == {"state": "blocked", "checks": []}
+        readiness = await ci_readiness(conn, "task1", 2, "a" * 40)
+    assert readiness == {"state": "not_required", "checks": []}
 
 
 def test_non_github_delivery_cannot_become_a_required_check() -> None:

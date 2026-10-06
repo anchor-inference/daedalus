@@ -207,17 +207,21 @@ async def set_required_checks(conn: aiosqlite.Connection, *, task_id: str, provi
 
 
 async def ci_readiness(conn: aiosqlite.Connection, task_id: str, contract_revision: int,
-                       head_sha: str | None, *, require_policy: bool = False) -> dict[str, Any]:
-    """A prior green head never satisfies a new head; missing order or check remains unknown."""
+                       head_sha: str | None) -> dict[str, Any]:
+    """A prior green head never satisfies a new head; missing order or check remains unknown.
+
+    A task with no declared checks is ``not_required``: the reviewer's verdict and the operator's
+    acceptance are its gate, and CI joins it only once the operator names checks for the task.
+    """
     cursor = await conn.execute("SELECT provider,repository_id,check_name FROM ci_required_checks"
                                 " WHERE task_id = ? AND contract_revision = ? ORDER BY check_name",
                                 (task_id, contract_revision))
     required = await cursor.fetchall()
     await cursor.close()
     if not required:
-        # A branch with no declared checks has no CI evidence. Treating that absence as success let
-        # an unpushed staff branch pass review without a single check having run.
-        return {"state": "blocked" if require_policy else "not_required", "checks": []}
+        # Blocking on absent checks made every branch task in a local repository unmergeable: most
+        # folders have no GitHub CI at all, and the review card told the operator to invent some.
+        return {"state": "not_required", "checks": []}
     checks = []
     for item in required:
         cursor = await conn.execute(
