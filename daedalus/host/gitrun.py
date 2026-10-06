@@ -25,6 +25,17 @@ class GitError(RuntimeError):
         self.returncode = returncode
 
 
+_SECRET_ENV = re.compile(r"^(TELEGRAM_.*|KEYPROXY_.*|.*_API_KEY|.*_SECRET|.*_PASSWORD|.*_TOKEN)$")
+
+
+def setup_environment(extra: dict[str, str]) -> dict[str, str]:
+    """The environment a project's setup command runs with: the host's, minus its credentials.
+
+    A setup command is the project's own script (``npm ci``, ``uv sync``); it needs PATH and the
+    toolchains, not the bot's Telegram or provider keys in its logs."""
+    return {**{k: v for k, v in os.environ.items() if not _SECRET_ENV.match(k)}, **extra}
+
+
 def mask_credentials(text: str) -> str:
     """Hide the user-and-token part of an ``https://user:token@host`` URL."""
     return _TOKEN_RE.sub(r"\1***@", text)

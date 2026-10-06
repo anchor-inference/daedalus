@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from daedalus.stores.control import ControlStore
 from daedalus.stores.database import Database
 
 ENVIRONMENTS = ("container", "host")
@@ -891,10 +892,7 @@ class ProjectStore:
             await conn.execute("UPDATE projects SET settings = json_patch(settings, ?) WHERE id = ?",
                                (json.dumps({"orchestrator": patch}), project_id))
             if autonomy == "ask" and current.autonomy != "ask":
-                # Imported here: the authority module builds on this store, not the other way round.
-                from daedalus.extensions.coordinator_authority import withdraw_standing_grants_in
-                from daedalus.stores.control import ControlStore
-                await withdraw_standing_grants_in(ControlStore(self._db), conn, project_id)
+                await ControlStore(self._db).withdraw_standing_grants_in(conn, project_id)
         updated = await self.get(project_id)
         assert updated is not None
         return updated

@@ -6,7 +6,17 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope, now, one
+from daedalus.stores.control import (
+    AUTONOMY_ISSUER,
+    ControlConflict,
+    ControlDenied,
+    ControlStore,
+    Entity,
+    Principal,
+    Scope,
+    now,
+    one,
+)
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -30,8 +40,6 @@ AUTHORITY_BUNDLES = {
 }
 
 
-AUTONOMY_ISSUER = Principal("operator:autonomy", "operator")
-"""Who a standing grant is recorded as issued by: the operator, through the project's autonomy choice."""
 STANDING_OPERATIONS = sorted({op for bundle in AUTHORITY_BUNDLES.values() for op in bundle["operations"]})
 STANDING_EFFECTS = sorted({effect for bundle in AUTHORITY_BUNDLES.values() for effect in bundle["effects"]})
 STANDING_DAYS = 365
@@ -44,7 +52,7 @@ async def standing_grant_in(control: ControlStore, conn: Any, project_id: str, s
     Asking the operator for a separate expiring grant before each assignment made the first result
     stall at a permission step in every project. Autonomy ``normal`` or ``full`` is that permission,
     given once in the project's settings; ``ask`` keeps the explicit grants, and switching a project
-    to ``ask`` withdraws the standing one (see :func:`withdraw_standing_grants_in`)."""
+    to ``ask`` withdraws the standing one (see :meth:`ControlStore.withdraw_standing_grants_in`)."""
     project = await one(conn, "SELECT settings FROM projects WHERE id = ?", (project_id,))
     office = json.loads(project["settings"]).get("orchestrator", {}) if project else {}
     if office.get("autonomy", "normal") not in ("normal", "full"):
@@ -53,15 +61,6 @@ async def standing_grant_in(control: ControlStore, conn: Any, project_id: str, s
     return await control.issue_grant_in(conn, AUTONOMY_ISSUER, Principal(f"orchestrator:{session_id}", "agent"),
                                         Scope("project", project_id), operations=STANDING_OPERATIONS,
                                         effects=STANDING_EFFECTS, expires_at=expires)
-
-
-async def withdraw_standing_grants_in(control: ControlStore, conn: Any, project_id: str) -> None:
-    async with conn.execute("SELECT id FROM actor_grants WHERE project_id = ? AND issuer_id = ? AND revoked_at IS NULL",
-                            (project_id, AUTONOMY_ISSUER.actor_id)) as cursor:
-        rows = await cursor.fetchall()
-    for row in rows:
-        await control.revoke_grant_in(conn, AUTONOMY_ISSUER, row["id"],
-                                      reason="the project's autonomy now asks before acting")
 
 
 async def _office_or_none(conn: Any, project_id: str) -> str | None:

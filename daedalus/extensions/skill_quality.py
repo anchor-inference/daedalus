@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.effects import EffectOutcome, EffectResolution
-from daedalus.host.skills import DirectorySkillStore, parse_skill_markdown
+from daedalus.host.skills import DirectorySkillStore, assess, skill_declarations
 from daedalus.host.toolchain import status as toolchain_status
 from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
@@ -24,46 +24,8 @@ from daedalus.stores.outbox import Claim, OutboxStore
 if TYPE_CHECKING:
     from daedalus.app import Application
 
-SKILL_ID = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
-TOOL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,79}$")
-
-
-def _declarations(markdown: str) -> tuple[list[str], list[str]]:
-    meta, _ = parse_skill_markdown(markdown)
-    return (
-        [item.strip() for item in meta.get("requires", "").split(",") if item.strip()],
-        [item.strip() for item in meta.get("tools", "").split(",") if item.strip()],
-    )
-
-
 class SkillRefused(ValueError):
     """The authored skill does not meet the activation contract."""
-
-
-def assess(skill_id: str, markdown: str, dependencies: list[dict[str, str]]) -> dict[str, Any]:
-    errors: list[str] = []
-    if not SKILL_ID.fullmatch(skill_id):
-        errors.append("invalid skill id")
-    if not 80 <= len(markdown) <= 60_000:
-        errors.append("skill Markdown length is outside the supported range")
-    meta, body = parse_skill_markdown(markdown)
-    if not meta.get("name") or not 12 <= len(meta.get("description", "")) <= 500:
-        errors.append("name and descriptive purpose are required")
-    if "## When to use" not in body or "## Procedure" not in body or "## Checks" not in body:
-        errors.append("usage, procedure and checks sections are required")
-    requirements, tools = _declarations(markdown)
-    if len(requirements) > 8 or len(set(requirements)) != len(requirements) or any(item not in {"browser", "node"} for item in requirements):
-        errors.append("requires must name unique supported host components")
-    if len(tools) > 32 or len(set(tools)) != len(tools) or any(not TOOL_NAME.fullmatch(item) for item in tools):
-        errors.append("tools must name unique registered tool identifiers")
-    if not isinstance(dependencies, list) or len(dependencies) > 16:
-        errors.append("too many dependencies")
-    else:
-        for dependency in dependencies:
-            if not isinstance(dependency, dict) or set(dependency) != {"id", "version", "digest"} or not all(isinstance(value, str) and value for value in dependency.values()) or not re.fullmatch(r"[0-9a-f]{64}", dependency["digest"]):
-                errors.append("dependencies need exact id, version and digest pins")
-                break
-    return {"valid": not errors, "errors": errors, "digest": hashlib.sha256(markdown.encode()).hexdigest()}
 
 
 class SkillQuality:
@@ -80,7 +42,7 @@ class SkillQuality:
         self.requirement_status = requirement_status
 
     def _check_capabilities(self, markdown: str) -> None:
-        requirements, tools = _declarations(markdown)
+        requirements, tools = skill_declarations(markdown)
         for requirement in requirements:
             if self.requirement_status(requirement) != "ok":
                 raise SkillRefused(f"required host component {requirement} is unavailable")

@@ -96,7 +96,7 @@ from daedalus.stores.dispatches import DispatchStore
 from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.files import MAIN as MAIN_FILES
 from daedalus.stores.files import FileRefused, FileStore
-from daedalus.stores.knowledge import KnowledgeStore
+from daedalus.stores.knowledge import KnowledgeStore, project_facts_note
 from daedalus.stores.media import MediaStore
 from daedalus.stores.persistent import PersistentMemory, PersistentWorkspace
 from daedalus.stores.projects import Project, ProjectFolder, ProjectSettings, ProjectStore
@@ -3764,8 +3764,6 @@ class SessionManager:
         """
         if state.project is None or state.metadata.get("staff_id"):
             return ""
-        from daedalus.extensions.task_context import project_facts_note  # Lazy: the packet module imports the domain
-
         try:
             return self.redactor.redact(await project_facts_note(self.db, state.project.id))
         except Exception:  # noqa: BLE001 — a turn starts without the facts rather than not at all

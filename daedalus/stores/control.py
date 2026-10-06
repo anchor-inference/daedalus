@@ -91,6 +91,11 @@ async def one(conn: aiosqlite.Connection, sql: str, params: tuple[Any, ...] = ()
         return await cursor.fetchone()
 
 
+AUTONOMY_ISSUER = Principal("operator:autonomy", "operator")
+"""Who a coordinator's standing grant is recorded as issued by: the operator, through the project's
+autonomy choice (see ``daedalus.extensions.coordinator_authority.standing_grant_in``)."""
+
+
 class ControlStore:
     def __init__(self, db: Database) -> None:
         self.db = db
@@ -332,6 +337,14 @@ class ControlStore:
         await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ? WHERE grant_id = ? AND state = 'pending'", (reason, grant_id))
         await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ? WHERE state = 'pending'"
                            " AND grant_id IN (SELECT id FROM actor_grants WHERE parent_grant_id = ?)", (reason, grant_id))
+
+    async def withdraw_standing_grants_in(self, conn: aiosqlite.Connection, project_id: str) -> None:
+        """Revoke the grants a project's autonomy issued, when the project now asks before acting."""
+        async with conn.execute("SELECT id FROM actor_grants WHERE project_id = ? AND issuer_id = ? AND revoked_at IS NULL",
+                                (project_id, AUTONOMY_ISSUER.actor_id)) as cursor:
+            rows = await cursor.fetchall()
+        for row in rows:
+            await self.revoke_grant_in(conn, AUTONOMY_ISSUER, row["id"], reason="the project's autonomy now asks before acting")
 
     async def revision(self, scope: Scope, entity: Entity) -> int:
         async with self.db.transaction() as conn:

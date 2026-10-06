@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from daedalus.host.gitrun import GitError, mask_credentials, run_git
+from daedalus.host.gitrun import GitError, mask_credentials, run_git, setup_environment
 from daedalus.stores.projects import ProjectFolder
 
 logger = logging.getLogger(__name__)
@@ -357,7 +357,7 @@ async def _run_local(argv: list[str], *, cwd: Path, timeout: float) -> SetupResu
     megabytes, and only its last lines say why it failed. Its own session, so a timeout kills the
     whole group: ``npm ci`` under ``bash -c`` would otherwise outlive the shell that was killed."""
     proc = await asyncio.create_subprocess_exec(
-        *argv, cwd=str(cwd), env={**os.environ, **_QUIET},
+        *argv, cwd=str(cwd), env=setup_environment(_QUIET),
         stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
         start_new_session=True,
     )
