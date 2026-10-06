@@ -74,12 +74,15 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
   const [busy, setBusy] = useState(false);
 
   const daedalus = harness === "daedalus";
-  const env: Env = daedalus ? project.local_env : cliEnv;
+  // A Daedalus member works wherever its folder is, host folders included, so its environment is
+  // read off the folder rather than fixed to the bot's own; a command-line member picks one.
+  const chosenDaedalusFolder = project.folders.find((f) => f.id === folderId) ?? project.folders[0];
+  const env: Env = daedalus ? chosenDaedalusFolder?.env ?? project.local_env : cliEnv;
   const sharedQuery = useQuery<{ envs: TerminalEnv[] }>(!daedalus && isolation === "shared" ? "/api/terminals/envs" : null, { staleMs: 5000 });
   const catalogs = useCatalogs();
   const catalog = catalogs[env];
   const entry = daedalus ? undefined : catalog?.[harness];
-  const folders = foldersFor(project.folders, env);
+  const folders = daedalus ? project.folders : foldersFor(project.folders, env);
   const folder = folders.find((f) => f.id === folderId) ?? folders[0];
   const reason = availability(harness, catalog ?? null);
   // No folder chosen means the project's primary one, and follows it if the operator reorders the
@@ -269,7 +272,7 @@ export function StaffSheet({ team, member, onClose, onDone, toast }: { team: Tea
 
       <label className="field">{t("team.env")}</label>
       {daedalus ? (
-        <div className="sub">{t("team.env.daedalus", { env: t(`team.env.${project.local_env}`) })}</div>
+        <div className="sub">{t("team.env.daedalus", { env: t(`team.env.${env}`) })}</div>
       ) : (
         <div className="segmented" role="group" aria-label={t("team.env")}>
           {(["container", "host"] as Env[]).map((value) => (

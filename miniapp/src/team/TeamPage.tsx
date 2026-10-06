@@ -102,7 +102,8 @@ export function TeamPage({ projectId, toast, back }: { projectId: string; toast:
 
 function StaffRow({ member, team, spend, onOpen }: { member: Staff; team: Team; spend: string | null; onOpen?: () => void }) {
   const folder = team.project.folders.find((f) => f.id === member.default_folder_id);
-  const env = member.env || (member.harness === "daedalus" ? team.project.local_env : team.project.default_env);
+  // A Daedalus member runs where its folder is (the primary one when it names none).
+  const env = member.harness === "daedalus" ? (folder ?? team.project.folders[0])?.env ?? team.project.local_env : member.env || team.project.default_env;
   const model = member.model ? team.choices.presets.find((p) => p.id === member.model)?.label ?? member.model : t("team.model.default.short");
   const runs = [HARNESS_NAMES[member.harness], model, member.permission_mode].filter(Boolean).join(" · ");
   const where = [t(`team.env.${env}`), t(`team.isolation.${member.isolation}.short`), folder ? folder.label || folder.path.split("/").pop() : "", plural("team.count.sessions", member.sessions)].filter(Boolean).join(" · ");

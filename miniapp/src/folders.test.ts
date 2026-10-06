@@ -18,6 +18,11 @@ describe("a project's folders", () => {
     expect(projectReachable({ folders: [dir("site"), dir("docs", { position: 1, reachable: false })] })).toBe(true);
   });
 
+  it("is reachable through the host daemon when its primary folder is on the host", () => {
+    expect(projectReachable({ folders: [dir("tools", { env: "host", reach: "terminals", reachable: false })] })).toBe(true);
+    expect(projectReachable({ folders: [dir("tools", { env: "host", reach: "none", reachable: false })] })).toBe(false);
+  });
+
   it("answers for a project with no folder rather than throwing", () => {
     expect(primaryFolder({ folders: [] })).toBeUndefined();
     expect(projectPath({ folders: [] })).toBe("");
@@ -32,8 +37,10 @@ describe("a project's folders", () => {
 
   it("offers a new agent a folder only among those the bot can work in", () => {
     const one = { folders: [dir("site"), dir("tools", { env: "host", reach: "terminals" })] };
-    expect(agentFolders(one).map((f) => f.id)).toEqual(["site"]);
-    expect(offersFolderChoice(one)).toBe(false);
+    // A host folder is one a native agent can work in too, through the host daemon.
+    expect(agentFolders(one).map((f) => f.id)).toEqual(["site", "tools"]);
+    expect(offersFolderChoice(one)).toBe(true);
+    expect(offersFolderChoice({ folders: [dir("site"), dir("tools", { env: "host", reach: "none", reachable: false })] })).toBe(false);
     expect(offersFolderChoice({ folders: [dir("site"), dir("docs")] })).toBe(true);
     // A session's own copy of its project carries no reach and offers nothing rather than guessing.
     expect(offersFolderChoice({ folders: [dir("site", { reach: undefined }), dir("docs", { reach: undefined })] })).toBe(false);
