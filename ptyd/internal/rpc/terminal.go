@@ -196,8 +196,6 @@ func (d *Daemon) create(ctx context.Context, c *server.Conn, params json.RawMess
 		}
 		program, argv, path = argv, plan.Argv, plan.Argv[0]
 	}
-	// A future read-scoped plan owns mount descriptors even when a later containment check fails.
-	defer plan.Close()
 	logPath := ""
 	if p.LogToDisk {
 		logPath = filepath.Join(d.Config.StateDir, "terminals", p.ID+".log")
@@ -207,7 +205,6 @@ func (d *Daemon) create(ctx context.Context, c *server.Conn, params json.RawMess
 		labels = map[string]string{}
 	}
 	var owned containment.Handle
-	var requestedScope *containment.Scope
 	if p.Resources != nil {
 		if box == nil {
 			return nil, wire.Errorf(wire.CodeForbidden, "strict attempt containment needs a read-only system mount")
@@ -228,14 +225,13 @@ func (d *Daemon) create(ctx context.Context, c *server.Conn, params json.RawMess
 		if err != nil {
 			return nil, wire.Errorf(wire.CodeUnsupported, "attempt containment: %v", err)
 		}
-		requestedScope = &p.Resources.Scope
 	}
-	t, err := d.startTerminal(term.Spec{
+	t, err := d.Registry.Create(term.Spec{
 		ID: p.ID, Path: path, Argv: argv, Cwd: cwd, CwdFallback: fallback, Env: env, Cols: p.Cols, Rows: p.Rows,
 		Title: p.Title, RingBytes: ring, LogPath: logPath, InputIdle: idle, LaunchID: p.LaunchID, Labels: labels,
 		Shell: shell, Nonce: nonce, Integration: integration, Sandbox: box != nil, Program: program,
 		Containment: owned,
-	}, &plan, requestedScope)
+	})
 	d.launchStarted(t, p.LaunchID, p.ID)
 	if err != nil {
 		if owned != nil {
@@ -270,26 +266,6 @@ func (d *Daemon) create(ctx context.Context, c *server.Conn, params json.RawMess
 		reply["sandbox"] = map[string]any{"writable": plan.Writable, "skipped": skipped}
 	}
 	return reply, nil
-}
-
-// startTerminal keeps every mount descriptor tied to the daemon's exact attempt handle until spawn.
-// An ordinary terminal cannot acquire a descriptor-bearing plan by adding sandbox options.
-func (d *Daemon) startTerminal(spec term.Spec, plan *sandbox.Plan, scope *containment.Scope) (*term.Terminal, error) {
-	if err := validateTerminalPlan(spec, plan, scope); err != nil {
-		return nil, err
-	}
-	spec.ExtraFiles = plan.ExtraFiles
-	return d.Registry.Create(spec)
-}
-
-func validateTerminalPlan(spec term.Spec, plan *sandbox.Plan, scope *containment.Scope) error {
-	if len(plan.ExtraFiles) != 0 {
-		if spec.Containment == nil || scope == nil || spec.LaunchID == "" ||
-			*scope != spec.Containment.Scope() || scope.LaunchID != spec.LaunchID {
-			return wire.Errorf(wire.CodeForbidden, "scoped mount descriptors need this launch's attempt containment")
-		}
-	}
-	return nil
 }
 
 // lookupEnv finds a variable in an environment list; the last assignment wins, as for a process.

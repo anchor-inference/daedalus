@@ -3,10 +3,7 @@
 // program's tree is held in a job object, which is how that system ends a tree.
 package ptyproc
 
-import (
-	"errors"
-	"os"
-)
+import "errors"
 
 // Spec is what to run.
 type Spec struct {
@@ -27,9 +24,6 @@ type Spec struct {
 	// UseContainment places the child in an already limited cgroup at clone, before its code runs.
 	UseContainment bool
 	ContainmentFD  int
-
-	// ExtraFiles are borrowed until Start returns; child descriptors begin at 3.
-	ExtraFiles []*os.File
 }
 
 // Exit is how the program ended.

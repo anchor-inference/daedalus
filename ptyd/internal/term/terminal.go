@@ -66,7 +66,6 @@ type Spec struct {
 	Cwd         string
 	CwdFallback bool
 	Env         []string
-	ExtraFiles  []*os.File // borrowed during Start; ownership stays with the spawn plan
 	Cols, Rows  int
 	Title       string
 	RingBytes   int
@@ -176,7 +175,7 @@ func Start(spec Spec, deps Deps) (*Terminal, error) {
 	}
 	tag := "DAEDALUS_TERMINAL_ID=" + spec.ID
 	program := ptyproc.Spec{Path: spec.Path, Argv: spec.Argv, Dir: spec.Cwd, Env: spec.Env,
-		Cols: spec.Cols, Rows: spec.Rows, Tag: tag, Wrapped: spec.Sandbox, ExtraFiles: spec.ExtraFiles}
+		Cols: spec.Cols, Rows: spec.Rows, Tag: tag, Wrapped: spec.Sandbox}
 	if spec.Containment != nil {
 		program.UseContainment, program.ContainmentFD = true, spec.Containment.FD()
 	}

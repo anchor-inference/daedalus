@@ -58,10 +58,9 @@ type Skip struct {
 
 // Plan is the command to run and what it makes writable.
 type Plan struct {
-	Argv       []string
-	Writable   []string
-	Skipped    []Skip
-	ExtraFiles []*os.File // owned mount descriptors; close after spawn, including failed spawn
+	Argv     []string
+	Writable []string
+	Skipped  []Skip
 }
 
 // Wrap returns the bubblewrap command for o.
