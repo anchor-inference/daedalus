@@ -43,7 +43,7 @@ from daedalus.stores.resource_profiles import (
     writer_target,
 )
 from daedalus.stores.runtime_release import attempt_released_in, no_entry_in
-from daedalus.stores.staff import DAEDALUS_EFFORTS, StaffError, daedalus_cannot_reach, daedalus_reaches
+from daedalus.stores.staff import DAEDALUS_EFFORTS, SetupFailed, StaffError, daedalus_cannot_reach, daedalus_reaches
 from daedalus.stores.update_drains import UpdateDrainActive, assert_admission_open_in
 
 if TYPE_CHECKING:
@@ -525,6 +525,10 @@ class TaskLaunchEffect:
             if refused:
                 return EffectOutcome("deferred", canonical({"reason": "update_drain", "detail": str(exc)}))
             raise
+        except SetupFailed as exc:
+            # Refused before the worker had a session to enter: a known failure, not an uncertain
+            # one, or the card could not be assigned again until someone reconciled it.
+            return EffectOutcome("failed", str(exc))
         except Exception:
             async with self.app.db.transaction() as conn:
                 refused = await no_entry_in(conn, claim.payload["attempt_id"])

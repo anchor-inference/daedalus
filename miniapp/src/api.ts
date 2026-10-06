@@ -911,7 +911,7 @@ export type Project = {
   entity_revision?: number;
   name: string;
   created_at: string;
-  settings: { snapshots: boolean; system?: string; ephemeral?: boolean; default_env?: "container" | "host"; orchestrator?: OrchestratorSettings };
+  settings: { snapshots: boolean; system?: string; ephemeral?: boolean; default_env?: "container" | "host"; setup_command?: string; orchestrator?: OrchestratorSettings };
   /** Non-empty on a project the installation made for itself: "voice" is the concierge's. It cannot be moved or removed. */
   system?: string;
   /** In order; the first is the primary folder, where an agent works unless it is given another. */

@@ -1155,6 +1155,11 @@ export const DICT: Record<string, Record<Lang, string>> = {
     en: "a hidden commit before every turn and after every run, so a change can be undone. On a large repository this costs a walk of the whole tree twice a turn.",
     ru: "скрытый коммит перед каждым ходом и после каждого запуска, чтобы изменение можно было отменить. На большом репозитории это обход всего дерева дважды за ход.",
   },
+  "project.setup": { en: "Setup command", ru: "Команда подготовки" },
+  "project.setup.hint": {
+    en: "One line, such as uv sync --frozen && npm ci. Runs once in each new worker worktree before the worker starts; if it fails, the task stays unstarted with its output on the card.",
+    ru: "Одна строка, например uv sync --frozen && npm ci. Выполняется один раз в каждом новом рабочем дереве исполнителя до его запуска; если она падает, задача не стартует, а вывод попадает на карточку.",
+  },
   "project.added": { en: "{name} added", ru: "{name}: проект добавлен" },
   "project.added.unmounted": { en: "{name} added — its folder is not mounted here yet", ru: "{name}: проект добавлен, но его папка здесь ещё не подключена" },
   "project.reachable": { en: "Reachable from where the bot runs.", ru: "Доступна оттуда, где работает бот." },

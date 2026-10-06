@@ -79,8 +79,10 @@ class ProjectCommands:
     async def settings(self, principal: Principal, project_id: str, *,
                        client_operation_id: str, expected_entity_revision: int,
                        name: str | None = None, snapshots: bool | None = None,
-                       default_env: str | None = None, keep: bool = False) -> dict[str, Any]:
-        payload = {"name": name, "snapshots": snapshots, "default_env": default_env, "keep": keep}
+                       default_env: str | None = None, keep: bool = False,
+                       setup_command: str | None = None) -> dict[str, Any]:
+        payload = {"name": name, "snapshots": snapshots, "default_env": default_env, "keep": keep,
+                   "setup_command": setup_command}
 
         async def effect(conn: aiosqlite.Connection, _: Mutation) -> dict[str, Any]:
             self.check_env(default_env)
@@ -95,6 +97,12 @@ class ProjectCommands:
                 settings_patch["snapshots"] = snapshots
             if default_env is not None:
                 settings_patch["default_env"] = default_env
+            if setup_command is not None:
+                # One line: it runs as ``bash -lc``, where a second line's success would hide the
+                # first line's failure; ``&&`` says what should stop the setup.
+                if "\n" in setup_command.strip():
+                    raise ProjectError("the setup command is one line; join commands with &&")
+                settings_patch["setup_command"] = setup_command.strip()
             if keep:
                 settings_patch["ephemeral"] = False
             await conn.execute(
