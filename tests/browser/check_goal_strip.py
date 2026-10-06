@@ -3,7 +3,8 @@
 The compact line names the operator's next decision. Pressed, it opens the work and result list:
 each card's owner, acceptance and blocker; reports awaiting the orchestrator's decision; an accepted
 result linked to its exact immutable report; and the promises. A changed revision or failed original
-read is shown plainly. Nothing scrolls sideways.
+read is shown plainly. A work row or an open result opens its card on the board, by click or by
+Enter. Nothing scrolls sideways.
 
     cd miniapp && npx vite build --outDir /tmp/app-dist
     mkdir -p /tmp/app-root && ln -s /tmp/app-dist /tmp/app-root/app
@@ -156,6 +157,23 @@ def check(page: Page, lang: str, width: int) -> None:
     fits(page, f"{where} list")
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/goal-list-{lang}-{width}.png")
+
+    # Each work row and each open result is a link to its card on the board: a click on the first,
+    # and the keyboard alone (Tab to it, Enter) on a result.
+    expect(first).to_have_attribute("role", "link")
+    first.click()
+    page.wait_for_url(f"**/project/{PID}/board?*task=t-checkout*")
+    page.goto(f"{BASE}/orchestration/project/{PID}?token=t&lang={lang}")
+    line.click()
+    lev = listing.locator(".goal-sec").nth(1).locator(".goal-item").nth(0)
+    expect(lev).to_have_attribute("role", "link")
+    lev.focus()
+    expect(lev).to_be_focused()
+    page.keyboard.press("Enter")
+    page.wait_for_url(f"**/project/{PID}/board?*task=t-photos*")
+    page.goto(f"{BASE}/orchestration/project/{PID}?token=t&lang={lang}")
+    line.click()
+    accepted = listing.locator(".goal-sec").nth(2)
 
     # A row opens its own immutable report through the board, with the exact identity in the route.
     accepted.get_by_role("button", name=words["open_accepted"]).click()

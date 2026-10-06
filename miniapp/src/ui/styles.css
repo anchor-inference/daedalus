@@ -1903,6 +1903,9 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 .health-mark.ok { color: var(--ok); }
 .health-mark.warn { color: var(--warn); }
 .health-mark.bad { color: var(--bad); }
+.health-mark.info { color: var(--muted); }
+.integration-detail summary { cursor: pointer; width: max-content; }
+.integration-detail code { display: block; font-family: var(--mono); font-size: var(--fs-12); overflow-wrap: anywhere; color: var(--muted); }
 .settings-color { display: inline-flex; align-items: center; gap: 8px; }
 .settings-color input { width: 28px; height: 28px; padding: 0; border: 0; background: transparent; }
 .settings-faces { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); }
@@ -3371,6 +3374,9 @@ button.staff-row:hover { background: var(--surface-2); }
 .goal-item.blocked, .goal-item.result.report_needs_input, .goal-item.result.task_unowned { box-shadow: inset 2px 0 0 var(--warn); }
 .goal-item.result.report_done { box-shadow: inset 2px 0 0 var(--ok); }
 .goal-item.result.report_stuck { box-shadow: inset 2px 0 0 var(--bad); }
+/* A row that opens its card says so on hover (the focus ring is the global one); a result with no card stays plain. */
+.goal-item.linked { cursor: pointer; border-radius: var(--radius-sm); }
+.goal-item.linked:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
 .goal-item-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .goal-title { flex: 1; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
 .goal-status, .goal-age { flex: none; font-size: var(--fs-11); color: var(--fg-3); }

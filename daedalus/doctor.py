@@ -78,6 +78,23 @@ async def run_checks(ctx: DoctorContext) -> list[Check]:
     return checks
 
 
+def provider_key_source(settings: Settings, provider: Any) -> str:
+    """Where a provider's key comes from: ``key``, ``proxy``, ``keyless`` or ``missing``.
+
+    Shared by the default-provider check and the integration rows on the Health screen, so the two
+    can never disagree about one endpoint. A built-in vendor kind pointed somewhere other than the
+    vendor is behind the key proxy, which holds the key; a self-hosted kind may honestly have none.
+    """
+    env_key = {"deepseek": settings.deepseek_api_key, "openrouter": settings.openrouter_api_key, "vllm": settings.vllm_api_key}.get(provider.kind, "")
+    if provider.api_key or env_key:
+        return "key"
+    if provider.kind in ("deepseek", "openrouter", "opencode") and not _is_vendor_host(provider.kind, provider.base_url):
+        return "proxy"
+    if provider.kind in ("vllm", "llamacpp", "openai_compat"):
+        return "keyless"
+    return "missing"
+
+
 def _timeout(ctx: DoctorContext) -> float:
     return float(ctx.config.ops.doctor_probe_timeout_seconds)
 
@@ -125,10 +142,10 @@ async def _config(ctx: DoctorContext) -> list[Check]:
         if provider is None:
             out.append(Check("default provider", False, f"preset {pid} uses provider '{preset.provider}', which is not configured", "fail", "add the provider in Settings → Models, or pick another default preset"))
         else:
-            env_key = {"deepseek": st.deepseek_api_key, "openrouter": st.openrouter_api_key, "vllm": st.vllm_api_key}.get(provider.kind, "")
-            has_key = bool(provider.api_key or env_key)
-            via_proxy = provider.kind in ("deepseek", "openrouter", "opencode") and not _is_vendor_host(provider.kind, provider.base_url)
-            out.append(Check("default provider key", has_key or via_proxy or provider.kind in ("vllm", "llamacpp", "openai_compat"), "configured" if has_key else ("held by the key proxy" if via_proxy else "no API key (fine for a keyless self-hosted endpoint)"), "ok" if has_key or via_proxy or provider.kind in ("vllm", "llamacpp", "openai_compat") else "warn", "set the key in Settings → Models → provider"))
+            source = provider_key_source(st, provider)
+            fine = source != "missing"
+            detail = {"key": "configured", "proxy": "held by the key proxy", "keyless": "no API key (fine for a keyless self-hosted endpoint)"}.get(source, "no API key")
+            out.append(Check("default provider key", fine, detail, "ok" if fine else "warn", "set the key in Settings → Models → provider"))
             if provider.kind == "llamacpp":
                 out.append(Check("pricing for the default model", True, "local llama.cpp inference is recorded at $0 and does not consume spending caps", "ok"))
             else:
@@ -832,4 +849,4 @@ async def run_and_render(ctx: DoctorContext, *, as_json: bool = False) -> str:
     return render_text(checks)
 
 
-__all__ = ["Check", "DoctorContext", "render_text", "run_and_render", "run_checks", "summarize"]
+__all__ = ["Check", "DoctorContext", "provider_key_source", "render_text", "run_and_render", "run_checks", "summarize"]
