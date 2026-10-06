@@ -185,19 +185,12 @@ def scenario(language: str, width: int) -> None:
         sheet.locator("#staff-role").fill("Prepare the menu")
         sheet.get_by_role("button", name="Hire" if language == "en" else "Нанять", exact=True).click()
         expect(sheet).to_have_count(0)
+        # Under the default autonomy the coordinator needs no per-task permission: the board offers
+        # none, and its first action is what issues the project's standing grant.
         page.goto(f"{base}/app/orchestration/project/{project_id}/board?task={task_id}&token={token}&lang={language}")
-        page.get_by_role("button", name="Let the coordinator assign and run this task" if language == "en" else "Разрешить координатору назначить и запустить задачу").click()
-        sheet = page.locator(".sheet.pboard-sheet")
-        sheet.get_by_role("button", name="Approve" if language == "en" else "Разрешить", exact=True).click()
-        page.get_by_role("button", name="Approve" if language == "en" else "Разрешить", exact=True).last.click()
-        expect(sheet.get_by_text("Permission is ready" if language == "en" else "Разрешение готово", exact=False)).to_be_visible()
+        expect(page.locator(".sheet.pboard-sheet")).to_be_visible()
+        expect(page.get_by_role("button", name="Let the coordinator assign and run this task" if language == "en" else "Разрешить координатору назначить и запустить задачу")).to_have_count(0)
         authority = api("GET", f"/api/projects/{project_id}/orchestrator/authority")
-        bundle = next(b for b in authority["available_bundles"] if b["id"] == "assignment_execution")
-        assert not bundle["blockers"]
-        assert any(grant["scope"] == {"kind": "task", "id": task_id} and grant["state"] == "active"
-                   and grant["session_id"] == authority["current_coordinator_session_id"]
-                   and set(grant["operations"]) == set(bundle["operations"])
-                   and set(grant["effects"]) == set(bundle["effects"]) for grant in authority["grants"])
         team = api("GET", f"/api/projects/{project_id}/staff?archived=0")
         member = next(member for member in team["staff"] if member["name"] == "Menu worker")
         task = next(row for row in api("GET", f"/api/projects/{project_id}/board")["tasks"] if row["id"] == task_id)
@@ -230,7 +223,10 @@ def scenario(language: str, width: int) -> None:
         original = api("GET", f"/api/board/{task_id}/results/{result['result_id']}/original")
         assert original["original_text"] == ORIGINAL
         assert provider.requests, "the configured fake provider was never called"
-        assert provider.coordinator.requests, "the coordinator never used its scoped grant"
+        assert provider.coordinator.requests, "the coordinator never acted"
+        standing = api("GET", f"/api/projects/{project_id}/orchestrator/authority")["grants"]
+        assert any(grant["scope"] == {"kind": "project", "id": project_id} and grant["state"] == "active"
+                   for grant in standing), "the coordinator acted without its standing project grant"
         page.goto(f"{base}/app/project/{project_id}/board?task={task_id}&token={token}&lang={language}")
         sheet = page.locator(".sheet.pboard-sheet")
         expect(sheet).to_be_visible()
