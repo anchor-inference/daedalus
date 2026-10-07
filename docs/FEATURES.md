@@ -87,11 +87,11 @@ A single tool result is clipped to a limit you set; the twenty results already b
 
 <table>
 <tr>
-<td width="50%"><img src="screenshots/bots.png" alt="Agents grouped by workspace: a fork under its origin, subagents under their leader, a loop with its cadence" /></td>
+<td width="50%"><img src="screenshots/bots.png" alt="Agents grouped by project: every folder open, a fork under its origin, a loop with its cadence, and the start of a new conversation beside them" /></td>
 <td width="50%"><img src="screenshots/dual.png" alt="Two sessions side by side on a wide screen" /></td>
 </tr>
 <tr>
-<td align="center"><sub>Agents — grouped by workspace; a fork sits under its origin, subagents under their leader, a loop shows its cadence</sub></td>
+<td align="center"><sub>Agents — grouped by project; a fork sits under its origin, a loop shows its cadence</sub></td>
 <td align="center"><sub>Two sessions side by side; each pane has its own files and settings</sub></td>
 </tr>
 <tr>
@@ -101,6 +101,14 @@ A single tool result is clipped to a limit you set; the twenty results already b
 <tr>
 <td align="center"><sub>Memory — what the agent remembered, global and per session; edit, add, forget in bulk</sub></td>
 <td align="center"><sub>The panel — files, previews and uploads beside the conversation</sub></td>
+</tr>
+<tr>
+<td><img src="screenshots/composer-queued.png" alt="A run under way: a message written meanwhile waits above the composer for the end of the turn, with Steer to hand it over now, beside one already steered" /></td>
+<td><img src="screenshots/health.png" alt="Health: the integrations — GitHub, MCP servers, model providers — with what to do about a failing one, and the doctor's checks under them" /></td>
+</tr>
+<tr>
+<td align="center"><sub>Written during a run — queued for the end of the turn; Steer hands it to the agent now</sub></td>
+<td align="center"><sub>Health — each integration and check in one line, and the fix for the one that fails</sub></td>
 </tr>
 </table>
 

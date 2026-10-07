@@ -266,7 +266,7 @@ terminal. A failure the launcher recognises — no network, Docker not answering
 disk — is a sentence too, with the program's own text kept behind *What happened*.
 
 <p align="center">
-  <img src="../docs/screenshots/launcher-setup-en-1440.png" alt="The launcher's first screen: how it runs, one provider key, a daily spending cap" width="100%" />
+  <img src="../docs/screenshots/launcher-setup-en-1440.png" alt="The launcher's first screen: the setup wizard's welcome, with the companion, the choice of language and how long setup takes" width="100%" />
 </p>
 
 Pictures of all three, in both languages, at a window's width and a phone's, are in

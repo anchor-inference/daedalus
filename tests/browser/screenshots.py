@@ -566,6 +566,36 @@ ONBOARDING = {"has_model": True, "presets": 4, "default_preset": "deepseek-flash
 FRESH = {"has_model": False, "presets": 0, "default_preset": "", "providers": PROVIDERS, "keyproxy_base": "http://keyproxy:3200", "needs": ["model"], "message": "No model is configured yet. Add one in the app: Settings \u2192 Models \u2192 Add a model."}
 
 
+# The Health screen of this installation: mostly green, with the two things a real one tends to have
+# outstanding, so the picture shows what a warning and a failure look like and what each asks for.
+# The checks share api_stub's quiet answer, which several harnesses rely on staying quiet.
+def _check(name: str, ok: bool, message: str, severity: str, fix: str = "") -> dict:
+    return {"name": name, "ok": ok, "message": message, "severity": severity, "fix_hint": fix, "fixable": False, "fixed": False}
+
+
+DOCTOR = {"checks": [
+    _check("default model", True, "deepseek-flash = DeepSeek Flash", "ok"),
+    _check("default provider key", True, "held by the key proxy", "ok"),
+    _check("pricing for the default model", True, "known", "ok"),
+    _check("vision preset", True, "claude-opus-5", "ok"),
+    _check("fallback chain", True, "deepseek-flash, gpt-5.6-luna", "ok"),
+    _check("exec sandbox", True, "bubblewrap, network filtered", "ok"),
+    _check("per-run spend cap", True, "$2.00 per run, $20.00 per day", "ok"),
+    _check("local speech", True, "Nemotron 3.5 Streaming 0.6B active (streaming)", "ok"),
+    _check("disk free", True, "41.2 GB free", "ok"),
+    _check("workspace size", False, "11.8 GB in /srv/workspaces", "warn", "close finished sessions with 'delete the agent + workspace', or /cleanup"),
+    _check("secrets dir", True, "private", "ok"),
+    _check("boot health", True, "this boot was clean", "ok"),
+], "summary": {"ok": 11, "warn": 1, "fail": 0, "fixed": 0}}
+INTEGRATIONS = {"rows": [
+    {"kind": "github", "name": "GitHub", "state": "authenticated", "severity": "ok", "detail": ""},
+    {"kind": "mcp", "name": "calendar", "state": "connected", "severity": "ok", "detail": "4 tools"},
+    {"kind": "mcp", "name": "notes", "state": "auth_required", "severity": "fail", "detail": "authorization required: the refresh token was revoked"},
+    {"kind": "provider", "name": "deepseek", "state": "ready", "severity": "ok", "detail": "deepseek, key: proxy"},
+    {"kind": "provider", "name": "openrouter", "state": "rate_limited", "severity": "warn", "detail": "HTTP 429 on the last call"},
+]}
+
+
 def catalogue_entry(id_: str, name: str, context: int, *, images: bool, reasoning: bool, price_in: float, price_out: float) -> dict:
     return {
         "id": id_,
@@ -716,6 +746,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, {"telegram": None, "passkeys": 1, "pairing": True})
     if rel == "/api/sessions":
         return respond(route, listing())
+    if rel == "/api/doctor":
+        return respond(route, DOCTOR)
+    if rel == "/api/integrations/health":
+        return respond(route, INTEGRATIONS)
     if rel == "/api/services":
         return respond(route, SERVICES_ALL)
     if rel.startswith("/api/sessions/"):
@@ -741,7 +775,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         if tail == "tools/timing":
             return respond(route, {"items": [{"name": "Exec", "calls": 9, "errors": 0, "total_ms": 21000, "mean_ms": 2333}, {"name": "Read", "calls": 14, "errors": 0, "total_ms": 900, "mean_ms": 64}]})
         if tail == "steer":
-            return respond(route, [])
+            # What the host holds for the running agent: empty unless a scene puts a written-during-
+            # the-run message there, which is the only way the card with its Steer button is drawn.
+            return respond(route, getattr(stub, "queued", []) if sid == S1 and getattr(stub, "running", False) else [])
         if tail == "checkpoints":
             return respond(route, {"checkpoints": [], "total": 0, "pruned": False, "pruned_before": None, "removed": 0, "note": "", "keep_days": 30, "keep_last": 50})
         if tail == "mcp":
@@ -918,9 +954,11 @@ PHONE = {"width": 390, "height": 844}
 # picked by class or by data, which no translation moves.
 WORDS = {
     "en": {"steps": "8 steps", "panel": "Panel", "access": "Access", "actions": "Session actions", "details": "Details", "role": "Writes the delivery page",
-           "permission": "waiting for permission · 1 min", "answer": "Answer", "checkout": "Checkout page", "q.note": "like last spring"},
+           "permission": "waiting for permission · 1 min", "answer": "Answer", "checkout": "Checkout page", "q.note": "like last spring",
+           "queued": "Then put the opening hours from the shop calendar in the footer.", "steered": "Keep the old prices on the archive page."},
     "ru": {"steps": "8 шагов", "panel": "Панель", "access": "Доступ", "actions": "Действия с сессией", "details": "Сведения", "role": "Пишет страницу доставки",
-           "permission": "ждёт разрешения · 1 мин", "answer": "Ответить", "checkout": "Оформление заказа", "q.note": "как прошлой весной"},
+           "permission": "ждёт разрешения · 1 мин", "answer": "Ответить", "checkout": "Оформление заказа", "q.note": "как прошлой весной",
+           "queued": "Потом добавь в подвал часы работы из календаря магазина.", "steered": "На странице архива оставь старые цены."},
 }
 
 
@@ -999,6 +1037,15 @@ def pick_a_model(page: Page) -> None:
     page.locator(".pickgrid .pick", has_text="OpenRouter").first.click()
     page.wait_for_selector(".modelgrid .pick", timeout=15000)
     page.locator(".modelgrid .pick", has_text="Claude Opus 5").first.click()
+    # Picking a model scrolls the page down to how it runs, which left the endpoints out of the
+    # picture: the two ways of paying OpenCode side by side are what this page has to show first.
+    page.wait_for_timeout(400)
+    # A phone's column holds the endpoints one under another, so there it starts at OpenCode Go and
+    # Zen is still above the bar at the bottom.
+    if (page.viewport_size or {}).get("width", 0) < 600:
+        page.locator(".pickgrid .pick", has_text="OpenCode Go").first.evaluate("e => e.scrollIntoView({block: 'start'})")
+    else:
+        page.evaluate("document.querySelector('.addmodel .step-head').scrollIntoView({block: 'start'})")
 
 
 def open_more(page: Page) -> None:
@@ -1560,10 +1607,22 @@ def run_main() -> int:
     phone the list the Orchestration tab opens, then the chat as a detail of it (``ONLY=main``)."""
     OUT.mkdir(parents=True, exist_ok=True)
     main = MainStub(LANG)
+    # The projects the main chat hands work to have orchestrators of their own. Without them in the
+    # listing the column and the phone's Orchestration page said no project had one, under a chat
+    # dispatching to two.
+    orchestrated = [
+        {"id": "p-bakery", "name": "Bakery", "folders": folders("/srv/workspaces/bakery"), "created_at": ago(days=6), "settings": {"snapshots": True},
+         "total": 5, "active": 3, "loops": 0, "last_message_at": ago(minutes=3), "orchestrator": {"enabled": True, "session_id": "orch-bakery", "staff": 4, "working": 3, "needs_you": 2}},
+        {"id": "p-garden", "name": "Garden", "folders": folders("/srv/workspaces/garden"), "created_at": ago(days=1), "settings": {"snapshots": False}, "setup_by": "dispatcher",
+         "total": 1, "active": 0, "loops": 0, "last_message_at": ago(minutes=40), "orchestrator": {"enabled": True, "session_id": "orch-garden", "staff": 0, "working": 0, "needs_you": 0}},
+    ]
 
     def handle(route) -> None:  # type: ignore[no-untyped-def]
         request = route.request
         url = urlsplit(request.url)
+        if url.path.endswith("/api/sessions") and request.method == "GET":
+            rows = listing()
+            return respond(route, {**rows, "projects": orchestrated + rows["projects"]})
         body = request.post_data_json if request.method in ("POST", "PUT", "PATCH") and request.post_data else None
         answered = main.answer(request.method, url.path[url.path.index("/api/"):], body)
         if answered is not None:
@@ -1802,9 +1861,18 @@ def run() -> int:
         browser = p.chromium.launch(executable_path=CHROMIUM)
         desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
         desk.add_init_script("try { localStorage.setItem('daedalus.session.panel', 'details'); localStorage.setItem('agents.groupBy', 'workspace'); } catch (e) {}")
-        page = desk.new_page()
+        # The agents picture has every project folder open, so the fork under its origin, the
+        # subagent under its leader and the loop's cadence are in it; collapsed, as the list opens,
+        # it showed folder names and nothing the caption speaks of. Its own context, so the open
+        # folders do not crowd every later picture's sidebar.
+        opened = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
+        opened.add_init_script("try { localStorage.setItem('agents.groupBy', 'workspace'); " + " ".join(f"localStorage.setItem('daedalus.folder.{p_['id']}', '1');" for p_ in PROJECTS) + " } catch (e) {}")
+        page = opened.new_page()
         page.route("**/api/**", stub)
         shot(page, "bots", "agents")
+        opened.close()
+        page = desk.new_page()
+        page.route("**/api/**", stub)
         shot(page, "session", f"agents/{S1}", wait=".chat-scroll .timeline", before=expand_steps, settle=300)
         shot(page, "session-panel-files", f"agents/{S1}", wait=".chat-scroll .timeline", before=open_panel_files, settle=800)
         shot(page, "session-panel-preview", f"agents/{S1}", wait=".chat-scroll .timeline", before=open_panel_preview, settle=1200)
@@ -1830,6 +1898,7 @@ def run() -> int:
         shot(page, "cron", "schedules")
         shot(page, "services", "services")
         shot(page, "usage", "usage", settle=1500)
+        shot(page, "health", "health", settle=900)
         shot(page, "memory", "memory")
         # The settings index, because the language switch is its first row.
         # Settings is a centred stage of its own now, with no `.screen` to wait for.
@@ -1864,6 +1933,7 @@ def run() -> int:
         terminals_shots(phone, "phone-")
         shot(page, "phone-voice", "voice")
         shot(page, "phone-memory", "memory")
+        shot(page, "phone-health", "health", settle=900)
         shot(page, "phone-more", "agents", before=open_more)
         shot(page, "phone-team", f"project/{P1}/team", wait=".phone-staff-row")
         shot(page, "phone-settings-notifications", "settings/notifications", wait=".nrows .nrow", before=open_first_kind, settle=500)
@@ -2009,8 +2079,16 @@ def open_modes(page: Page) -> None:
     page.wait_for_selector(".mode-menu .mode-row, .mode-sheet .mode-row", timeout=5000)
 
 
+def queued_messages() -> list[dict]:
+    return [
+        {"id": "q-steered", "kind": "steer", "text": word("steered"), "queued_at": ago(seconds=50)},
+        {"id": "q-follow", "kind": "follow_up", "text": word("queued"), "queued_at": ago(seconds=20)},
+    ]
+
+
 def run_modes() -> int:
-    """The mode chip and its menu, with YAGNI on, on a desktop and on a phone (``ONLY=modes``)."""
+    """The mode chip and its menu, with YAGNI on, on a desktop and on a phone, and the card a message
+    written during a run waits in (``ONLY=modes``)."""
     OUT.mkdir(parents=True, exist_ok=True)
     stub.yagni = True  # type: ignore[attr-defined]
     try:
@@ -2028,7 +2106,17 @@ def run_modes() -> int:
             shot(page, "phone-composer-modes", f"agents/{S1}", wait=".composer .composer-mode", before=open_modes)
             stub.running = True  # type: ignore[attr-defined]
             shot(page, "phone-composer-yagni", f"agents/{S1}", wait=".composer .composer-mode.yagni")
+            # A message written during the run waits for the end of the turn as a card above the
+            # composer, with Steer to hand it to the agent now; one already steered sits beside it.
+            stub.queued = queued_messages()  # type: ignore[attr-defined]
+            shot(page, "phone-composer-queued", f"agents/{S1}", wait=".steers .steer .steer-now")
             phone.close()
+            desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
+            desk.add_init_script("try { localStorage.setItem('daedalus.session.panel', '0'); } catch (e) {}")
+            page = desk.new_page()
+            page.route("**/api/**", stub)
+            shot(page, "composer-queued", f"agents/{S1}", wait=".steers .steer .steer-now")
+            desk.close()
             # The narrowest phone, idle, with a model whose name does not fit: the name is cut inside
             # its pill, the effort beside it and the mode chip keep their words.
             stub.running = False  # type: ignore[attr-defined]
@@ -2042,6 +2130,7 @@ def run_modes() -> int:
     finally:
         stub.yagni = False  # type: ignore[attr-defined]
         stub.running = False  # type: ignore[attr-defined]
+        stub.queued = []  # type: ignore[attr-defined]
         stub.model = None  # type: ignore[attr-defined]
     return UNHANDLED.report()
 

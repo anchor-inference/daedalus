@@ -199,7 +199,7 @@ exists: pick an endpoint, pick a model from the list it serves — with its cont
 modalities and its prices beside it — and save. The same screen adds the next one later, from
 Settings → Models.
 
-<p align="center"><img src="screenshots/add-model.png" alt="Add a model: the endpoint, the model from its own list with context window and prices, and how it runs" width="100%" /></p>
+<p align="center"><img src="screenshots/add-model.png" alt="Add a model: the endpoints this installation can reach, OpenCode Go and OpenCode Zen among them, and the model from the chosen one's own list with its context window and prices" width="100%" /></p>
 
 ## What each gives up
 
