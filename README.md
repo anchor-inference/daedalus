@@ -60,11 +60,11 @@ Each of these at full length: [docs/FEATURES.md](docs/FEATURES.md).
 
 <table>
 <tr>
-<td width="50%"><img src="docs/screenshots/orchestration.gif" alt="The main orchestrator's chat: dispatches to project orchestrators, their progress, the Questions tab answered and sent, and a project's team of staff" /></td>
-<td width="50%"><img src="docs/screenshots/session.gif" alt="A session: the agent's answer with its checks and the files it sent, the steps it took, and the site it built in the panel's browser" /></td>
+<td width="50%"><img src="docs/screenshots/orchestration.gif" alt="The main orchestrator's chat: a question answered in the Questions tab and sent; then a project whose goal line opens the work in hand, a result handed in opened on the board with its review and diff, and the reviewed branch sent to merge" /></td>
+<td width="50%"><img src="docs/screenshots/session.gif" alt="A session: the agent's answer with its checks and the files it sent, the steps it took, and the agent's browser live in the panel with the actions it takes" /></td>
 </tr>
 <tr>
-<td align="center"><sub>Orchestration — the main chat hands work to projects, and what waits for you is one Questions tab</sub></td>
+<td align="center"><sub>Orchestration — the main chat hands work to projects; a project's goal line leads to the result on its board, reviewed and sent to merge</sub></td>
 <td align="center"><sub>A session — the answer with its checks and files, the steps behind it, and the agent's browser beside it</sub></td>
 </tr>
 <tr>
@@ -86,7 +86,7 @@ Each of these at full length: [docs/FEATURES.md](docs/FEATURES.md).
 </table>
 
 <p align="center">
-  <img src="docs/screenshots/phone.gif" width="100%" alt="Phone: the agents, a session with its answer, the mode sheet, and the agent's browser" />
+  <img src="docs/screenshots/phone.gif" width="100%" alt="Phone: the agents, a session with its answer and the agent's browser as a sheet; then a project with its own bar of Orchestrator, Board, Team and Terminals, and the More sheet" />
 </p>
 <p align="center"><sub>The same app on a phone — inside Telegram as a Mini App, or in any browser</sub></p>
 
