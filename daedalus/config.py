@@ -2181,7 +2181,8 @@ def _seed_opencode_go_subscription(raw: dict[str, Any]) -> bool:
         if isinstance(provider, dict) and provider.get("kind") == "opencode" and _opencode_go_route(str(provider.get("base_url") or "")):
             provider["billing"] = "subscription"
             provider.pop("pricing", None)
-            provider.setdefault("name", "OpenCode Go")
+            if not provider.get("name"):  # an empty name, as the setup wizard writes it, is no name
+                provider["name"] = "OpenCode Go"
     zen = providers.setdefault("opencode_zen", {"name": "OpenCode Zen", "base_url": keyproxy_base() + "/opencode_zen", "timeout_seconds": 900.0})
     if isinstance(zen, dict) and zen.get("kind", "openai_compat") == "openai_compat" and not _opencode_go_route(str(zen.get("base_url") or "")):
         zen["kind"] = "opencode"

@@ -225,7 +225,7 @@ def _live_shaped_opencode() -> dict:
     return {
         "seeded": ["claude-subscription", "openai-anthropic-keys", "more-provider-endpoints"],
         "providers": {
-            "opencode": {"kind": "opencode", "base_url": "http://keyproxy:3200/opencode", "timeout_seconds": 900.0, "pricing": {
+            "opencode": {"kind": "opencode", "name": "", "base_url": "http://keyproxy:3200/opencode", "timeout_seconds": 900.0, "pricing": {
                 "deepseek-v4.1-flash": {"input": 0.30, "output": 1.20, "cache_hit": 0.006},
                 "glm-5.3-flash": {"input": 0.15, "output": 0.50, "cache_hit": 0.03},
                 "kimi-k3": {"input": 3.00, "output": 15.00, "cache_hit": 0.30},
