@@ -148,6 +148,8 @@ async def _config(ctx: DoctorContext) -> list[Check]:
             out.append(Check("default provider key", fine, detail, "ok" if fine else "warn", "set the key in Settings → Models → provider"))
             if provider.kind == "llamacpp":
                 out.append(Check("pricing for the default model", True, "local llama.cpp inference is recorded at $0 and does not consume spending caps", "ok"))
+            elif provider.billing == "subscription":
+                out.append(Check("pricing for the default model", True, "a prepaid subscription: its calls are recorded at $0 and do not consume spending caps", "ok"))
             else:
                 try:
                     table = pricing_table(provider.kind, provider.pricing)

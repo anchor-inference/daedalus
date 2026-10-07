@@ -747,6 +747,8 @@ class ProviderPatch(BaseModel):
     """Sampling temperature for this endpoint. ``null`` clears a pin and returns to the host default."""
     pricing: dict[str, dict[str, Any]] | None = None
     """Per-model USD per 1M tokens; a subscription-backed endpoint sets zeros so its runs are metered, not unknown."""
+    billing: Literal["metered", "subscription"] | None = None
+    """``subscription`` for a prepaid plan (OpenCode Go): recorded at $0, never counted against a dollar cap."""
 
 
 class ModelsLookupBody(BaseModel):
@@ -5125,8 +5127,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         tokens = {k: int(body.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_read_tokens", "reasoning_tokens")}
         cost: float | None = None
         try:
-            pricing = manager.providers.get(provider_id).endpoint.pricing_for(model)
-            cost = pricing.cost(tokens) if pricing is not None else None
+            endpoint = manager.providers.get(provider_id).endpoint
+            pricing = endpoint.pricing_for(model)
+            # A prepaid plan's call spends its allowance, not money, however it reached the plan.
+            cost = 0.0 if endpoint.subscription else pricing.cost(tokens) if pricing is not None else None
         except KeyError:
             cost = None
         await manager.usage.record(
@@ -5544,6 +5548,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         data["dispatcher"]["middle"] = app.config.middle_preset() or ""
         # What a preset left to its model does with the on-demand tool groups, so the switch can say it.
         data["on_demand_defaults"] = {pid: on_demand_tool_groups_for(None, preset.model) for pid, preset in app.config.presets.items()}
+        data["keyproxy_base"] = _keyproxy_origin()
         return mask_provider_keys(data)
 
     def _keyproxy_origin() -> str:
@@ -5638,6 +5643,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "kind": pc.kind,
             "name": pc.name,
             "base_url": pc.base_url,
+            "billing": pc.billing,
             "via_proxy": via_proxy,
             "key_held": key_held,
             "key_kind": key_kind,
@@ -5661,6 +5667,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "presets": len(app.config.presets),
             "default_preset": default[0] if default else "",
             "providers": providers,
+            # Where a provider the app adds on its own (OpenCode Go or Zen) is reached: the key proxy's
+            # route when this installation has one, "" when providers are reached at the vendor directly.
+            "keyproxy_base": _keyproxy_origin(),
             "needs": needs,
             "message": "" if app.config.has_model else NO_MODEL_MESSAGE,
         }

@@ -218,3 +218,63 @@ def test_cloud_voice_leaves_a_configured_asr_alone_and_local_or_off_change_nothi
         monkeypatch.setenv("DAEDALUS_VOICE", answer)
         other = tmp_path / f"{answer}.toml"
         assert RuntimeConfig.load(other).asr.provider == ""
+
+
+def _live_shaped_opencode() -> dict:
+    """The OpenCode part of a config written while Go still carried its list prices as per-token pricing."""
+    return {
+        "seeded": ["claude-subscription", "openai-anthropic-keys", "more-provider-endpoints"],
+        "providers": {
+            "opencode": {"kind": "opencode", "base_url": "http://keyproxy:3200/opencode", "timeout_seconds": 900.0, "pricing": {
+                "deepseek-v4.1-flash": {"input": 0.30, "output": 1.20, "cache_hit": 0.006},
+                "glm-5.3-flash": {"input": 0.15, "output": 0.50, "cache_hit": 0.03},
+                "kimi-k3": {"input": 3.00, "output": 15.00, "cache_hit": 0.30},
+            }},
+        },
+        "presets": {
+            "opencode.deepseek-v4.1-flash": {"provider": "opencode", "model": "deepseek-v4.1-flash"},
+            "opencode.space-bunny-free": {"provider": "opencode", "model": "space-bunny-free", "free_only": True},
+        },
+        "model": {"preset": "opencode.deepseek-v4.1-flash", "chain": ["opencode.space-bunny-free"]},
+    }
+
+
+def test_opencode_go_becomes_a_subscription_and_zen_is_offered_beside_it_once(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    with path.open("wb") as fh:
+        tomli_w.dump(_live_shaped_opencode(), fh)
+    config = RuntimeConfig.load(path)
+    go = config.providers["opencode"]
+    assert go.billing == "subscription" and go.pricing == {} and go.name == "OpenCode Go"
+    assert go.kind == "opencode" and go.base_url == "http://keyproxy:3200/opencode"
+    zen = config.providers["opencode_zen"]
+    assert (zen.kind, zen.billing, zen.name) == ("opencode", "metered", "OpenCode Zen")
+    assert zen.base_url.endswith("/opencode_zen")
+    # The operator's models are untouched: the change is how their calls are paid for, not which ones run.
+    assert set(config.presets) == {"opencode.deepseek-v4.1-flash", "opencode.space-bunny-free"}
+    assert config.model.preset == "opencode.deepseek-v4.1-flash" and config.model.chain == ["opencode.space-bunny-free"]
+    assert "opencode-go-subscription" in config.seeded
+
+    # Once: a list price the operator writes back afterwards, or a Zen they remove, stays as they left it.
+    config.providers["opencode"].pricing = {"kimi-k3": {"input": 3.0, "output": 15.0, "cache_hit": 0.3}}
+    del config.providers["opencode_zen"]
+    config.save(path)
+    again = RuntimeConfig.load(path)
+    assert again.providers["opencode"].pricing and "opencode_zen" not in again.providers
+
+
+def test_a_zen_endpoint_the_setup_wizard_added_becomes_the_opencode_kind(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    raw = _live_shaped_opencode()
+    raw["providers"]["opencode_zen"] = {"kind": "openai_compat", "name": "OpenCode Zen", "base_url": "http://keyproxy:3200/opencode_zen"}
+    with path.open("wb") as fh:
+        tomli_w.dump(raw, fh)
+    zen = RuntimeConfig.load(path).providers["opencode_zen"]
+    assert (zen.kind, zen.billing) == ("opencode", "metered")
+
+
+def test_a_fresh_config_has_go_as_a_subscription_and_zen_metered(tmp_path: Path) -> None:
+    config = RuntimeConfig.load(tmp_path / "config.toml")
+    assert config.providers["opencode"].billing == "subscription" and config.providers["opencode"].pricing == {}
+    assert config.providers["opencode_zen"].billing == "metered"
+    assert "opencode-go-subscription" in config.seeded

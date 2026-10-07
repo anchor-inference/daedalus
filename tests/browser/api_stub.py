@@ -232,7 +232,7 @@ GATES: dict[str, object] = {
     "/api/maintenance": {"notice": None},
     "/api/conversation-search/settings": {"mode": "off", "paused": False, "reason": "off", "busy": False, "indexed": 0, "pending": 0, "label": "Multilingual E5 Small", "size_bytes": 135429554, "licence": "MIT", "installed": False},
     # Drawn before any screen: no model means the whole app is the "Add a model" flow.
-    "/api/onboarding": {"has_model": True, "presets": 1, "default_preset": "p", "providers": [], "needs": [], "message": ""},
+    "/api/onboarding": {"has_model": True, "presets": 1, "default_preset": "p", "providers": [], "keyproxy_base": "", "needs": [], "message": ""},
     "/api/providers/free-catalog": {"providers": [], "updated_at": None, "stale": False},
     # Decides which screens the navigation has at all.
     "/api/capabilities": {

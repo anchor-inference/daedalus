@@ -180,6 +180,20 @@ def test_provider_put_creates_and_masks_key() -> None:
     assert "sekret" not in r.text
 
 
+def test_provider_put_carries_the_opencode_plan_and_the_views_say_which_one() -> None:
+    client, app = _client()
+    headers = {"X-Daedalus-Token": "tok"}
+    r = client.put("/api/providers/opencode", json={"kind": "opencode", "name": "OpenCode Go", "base_url": "https://opencode.ai/zen/go/v1", "billing": "subscription"}, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["providers"]["opencode"]["billing"] == "subscription"
+    assert app.saved[-1].providers["opencode"].billing == "subscription"
+    r = client.put("/api/providers/opencode_zen", json={"kind": "opencode", "base_url": "https://opencode.ai/zen/v1"}, headers=headers)
+    assert r.json()["providers"]["opencode_zen"]["billing"] == "metered"
+    assert client.put("/api/providers/opencode", json={"billing": "free"}, headers=headers).status_code == 422
+    cards = {card["id"]: card for card in client.get("/api/onboarding", headers=headers).json()["providers"]}
+    assert (cards["opencode"]["billing"], cards["opencode_zen"]["billing"]) == ("subscription", "metered")
+
+
 def test_provider_put_validates_and_refuses_empty_base_url() -> None:
     client, app = _client()
     r = client.put("/api/providers/x", json={"kind": "vllm", "base_url": ""}, headers={"X-Daedalus-Token": "tok"})

@@ -1314,6 +1314,8 @@ export type ProviderConf = {
   api_key?: string; // always "" from the API — stored keys are masked
   api_key_set?: boolean;
   pricing?: Record<string, unknown>;
+  /** `subscription` is a prepaid plan (OpenCode Go): recorded at $0 and never counted against a dollar cap. */
+  billing?: "metered" | "subscription";
 };
 
 export type Preset = {
@@ -1370,6 +1372,8 @@ export type Settings = {
   };
   providers_available: string[];
   search_backends?: SearchBackendInfo[];
+  /** The key proxy's address when providers are reached through it, "" when they are reached directly. */
+  keyproxy_base?: string;
 };
 
 export function telegram() {

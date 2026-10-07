@@ -385,11 +385,11 @@ def usage_data() -> dict:
         day = (NOW - timedelta(days=13 - d)).date().isoformat()
         daily.append({"day": day, "provider_id": "deepseek", "model": "deepseek-flash", "calls": 40 + (d * 7) % 23, "input_tokens": 900_000 + (d * 131_000) % 700_000, "output_tokens": 38_000 + (d * 9_000) % 30_000, "cache_read_tokens": 600_000, "reasoning_tokens": 12_000, "cost_usd": round(0.42 + ((d * 37) % 90) / 100, 2), "unmetered": 0})
         daily.append({"day": day, "provider_id": "claude", "model": "claude-opus-5", "calls": 12 + (d * 5) % 11, "input_tokens": 500_000, "output_tokens": 21_000, "cache_read_tokens": 450_000, "reasoning_tokens": 0, "cost_usd": 0, "unmetered": 12 + (d * 5) % 11})
-        daily.append({"day": day, "provider_id": "opencode", "model": "gpt-5.6-luna", "calls": 20 + (d * 3) % 9, "input_tokens": 300_000, "output_tokens": 15_000, "cache_read_tokens": 200_000, "reasoning_tokens": 4_000, "cost_usd": round(0.2 + ((d * 17) % 50) / 100, 2), "unmetered": 0})
+        daily.append({"day": day, "provider_id": "opencode", "model": "gpt-5.6-luna", "calls": 20 + (d * 3) % 9, "input_tokens": 300_000, "output_tokens": 15_000, "cache_read_tokens": 200_000, "reasoning_tokens": 4_000, "cost_usd": 0.0, "unmetered": 0})
     recent = [
         {"at": ago(minutes=3), "provider_id": "claude", "model": "claude-opus-5", "purpose": "stream", "session_id": S1, "session_title": "Bakery site", "run_id": "r1", "input_tokens": 41_200, "output_tokens": 1_180, "cache_read_tokens": 39_000, "reasoning_tokens": 0, "cost_usd": 0, "duration_ms": 8_400, "raw": {}},
         {"at": ago(minutes=4), "provider_id": "deepseek", "model": "deepseek-flash", "purpose": "stream", "session_id": S4, "session_title": "Weekly digest", "run_id": "r4", "input_tokens": 18_300, "output_tokens": 640, "cache_read_tokens": 16_000, "reasoning_tokens": 210, "cost_usd": 0.0061, "duration_ms": 3_100, "raw": {}},
-        {"at": ago(minutes=12), "provider_id": "opencode", "model": "gpt-5.6-luna", "purpose": "stream", "session_id": S3, "session_title": "Support inbox", "run_id": "r3", "input_tokens": 22_800, "output_tokens": 2_010, "cache_read_tokens": 20_000, "reasoning_tokens": 800, "cost_usd": 0.0142, "duration_ms": 12_900, "raw": {}},
+        {"at": ago(minutes=12), "provider_id": "opencode", "model": "gpt-5.6-luna", "purpose": "stream", "session_id": S3, "session_title": "Support inbox", "run_id": "r3", "input_tokens": 22_800, "output_tokens": 2_010, "cache_read_tokens": 20_000, "reasoning_tokens": 800, "cost_usd": 0.0, "duration_ms": 12_900, "raw": {}},
         {"at": ago(minutes=40), "provider_id": "deepseek", "model": "deepseek-flash", "purpose": "structured", "session_id": S6, "session_title": "Expense tracker", "run_id": None, "input_tokens": 61_000, "output_tokens": 1_900, "cache_read_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.019, "duration_ms": 22_000, "raw": {}},
     ]
     sessions = [
@@ -556,13 +556,14 @@ PROVIDERS = [
     {"id": "openrouter", "kind": "openrouter", "base_url": "http://keyproxy:3200/openrouter", "via_proxy": True, "key_held": True, "key_kind": "api_key", "ready": True},
     {"id": "codex", "kind": "openai_compat", "base_url": "http://keyproxy:3200/codex/v1", "via_proxy": True, "key_held": True, "key_kind": "cli_login", "ready": True},
     {"id": "grok", "kind": "openai_compat", "base_url": "http://keyproxy:3200/grok/v1", "via_proxy": True, "key_held": True, "key_kind": "cli_login", "ready": True},
-    {"id": "opencode", "kind": "opencode", "base_url": "http://keyproxy:3200/opencode", "via_proxy": True, "key_held": False, "key_kind": "api_key", "ready": False},
+    # OpenCode Go only: Zen, the other way of paying OpenCode, is the plan the page offers to add.
+    {"id": "opencode", "kind": "opencode", "billing": "subscription", "base_url": "http://keyproxy:3200/opencode", "via_proxy": True, "key_held": False, "key_kind": "api_key", "ready": False},
     {"id": "deepseek", "kind": "deepseek", "base_url": "http://keyproxy:3200/deepseek", "via_proxy": True, "key_held": False, "key_kind": "api_key", "ready": False},
     {"id": "claude", "kind": "openai_compat", "base_url": "http://keyproxy:3200/claude/v1", "via_proxy": True, "key_held": False, "key_kind": "cli_login", "ready": False},
     {"id": "vllm", "kind": "vllm", "base_url": "", "via_proxy": False, "key_held": False, "key_kind": "endpoint", "ready": False},
 ]
-ONBOARDING = {"has_model": True, "presets": 4, "default_preset": "deepseek-flash", "providers": PROVIDERS, "needs": [], "message": ""}
-FRESH = {"has_model": False, "presets": 0, "default_preset": "", "providers": PROVIDERS, "needs": ["model"], "message": "No model is configured yet. Add one in the app: Settings \u2192 Models \u2192 Add a model."}
+ONBOARDING = {"has_model": True, "presets": 4, "default_preset": "deepseek-flash", "providers": PROVIDERS, "keyproxy_base": "http://keyproxy:3200", "needs": [], "message": ""}
+FRESH = {"has_model": False, "presets": 0, "default_preset": "", "providers": PROVIDERS, "keyproxy_base": "http://keyproxy:3200", "needs": ["model"], "message": "No model is configured yet. Add one in the app: Settings \u2192 Models \u2192 Add a model."}
 
 
 def catalogue_entry(id_: str, name: str, context: int, *, images: bool, reasoning: bool, price_in: float, price_out: float) -> dict:

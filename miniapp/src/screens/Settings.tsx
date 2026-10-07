@@ -35,6 +35,7 @@ import { CompactionModelSelect } from "../compactionmodel";
 import { AsrSettingsCard } from "./AsrSettings";
 import { DesktopAppCard } from "../updatedialog";
 import { ProviderLimit } from "./ProviderLimit";
+import { OPENCODE_KEY_URL, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
 
 const DEFAULT_KINDS = ["deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"];
 /** The generic protocol also serves remote vendors, so temperature is available there too. */
@@ -268,6 +269,8 @@ function ProviderBlock({ id, p, kinds, available, onPatch, onRemove }: {
   const [name, setName] = useState(p.name ?? "");
   const [baseUrl, setBaseUrl] = useState(p.base_url);
   const [keyDraft, setKeyDraft] = useState("");
+  const plan = opencodePlanOf(p.kind, p.billing);
+  const keyLink = KEY_LINKS[id] ?? (plan ? OPENCODE_KEY_URL : undefined);
   useEffect(() => setBaseUrl(p.base_url), [p.base_url]);
   useEffect(() => setName(p.name ?? ""), [p.name]);
   useEffect(() => setKeyDraft(""), [p.api_key_set]);
@@ -277,6 +280,7 @@ function ProviderBlock({ id, p, kinds, available, onPatch, onRemove }: {
         <button className="mmain" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
           <span className="mtitle">{p.name || id}</span>
           <span className="mmeta">{p.kind} · {p.base_url || t("settings.provider.noaddress")}</span>
+          {plan && <span className="mmeta opencode-hint">{t(plan.hint)}</span>}
         </button>
         <div className="mtags">
           <span className={`pill ${available ? "idle" : "waiting"}`}>{t(available ? "settings.provider.ready" : "settings.provider.needs")}</span>
@@ -361,7 +365,7 @@ function ProviderBlock({ id, p, kinds, available, onPatch, onRemove }: {
                   </button>
                 )}
               </div>
-              {KEY_LINKS[id] && <span className="sub">{t("free.key.get")} <a href={KEY_LINKS[id]} target="_blank" rel="noopener noreferrer">{p.name} ↗</a></span>}
+              {keyLink && <span className="sub">{t("free.key.get")} <a href={keyLink} target="_blank" rel="noopener noreferrer">{p.name || id} ↗</a></span>}
             </label>
           </div>
           <ProviderLimit providerId={id} />
@@ -373,6 +377,23 @@ function ProviderBlock({ id, p, kinds, available, onPatch, onRemove }: {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** The OpenCode plans no endpoint is yet, each one click away with its route already wired. */
+function AddOpencodeRow({ providers, keyproxyBase, onAdd }: { providers: Record<string, ProviderConf>; keyproxyBase: string; onAdd: (id: string, patch: Record<string, unknown>) => void }) {
+  const absent = missingPlans(Object.values(providers)).filter((plan) => !providers[plan.id]);
+  if (!absent.length) return null;
+  return (
+    <div className="opencode-add">
+      <span className="sub">{t("settings.provider.opencode")}</span>
+      {absent.map((plan) => (
+        // The hint opens with the plan's name, so it is the whole label: the name twice read as a stutter.
+        <button key={plan.id} className="btn small" onClick={() => onAdd(plan.id, opencodeProvider(plan, keyproxyBase))}>
+          ＋ {t(plan.hint)}
+        </button>
+      ))}
     </div>
   );
 }
@@ -1305,6 +1326,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
                   <ProviderBlock key={id} id={id} p={s.providers[id]} kinds={kinds} available={(s.providers_available ?? []).includes(id)} onPatch={patchProvider} onRemove={(pid) => void removeProvider(pid)} />
                 ))}
               </div>
+              <AddOpencodeRow providers={s.providers ?? {}} keyproxyBase={s.keyproxy_base ?? ""} onAdd={(pid, patch) => void patchProvider(pid, patch)} />
               <AddProviderRow kinds={kinds} toast={toast} onAdd={(pid, base, kind) => void patchProvider(pid, { kind, base_url: base })} />
             </div>}
           </>

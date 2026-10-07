@@ -50,9 +50,10 @@ def config() -> RuntimeConfig:
     return runtime
 
 
-async def started(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> tuple[SessionManager, list[httpx.Request]]:
+async def started(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch,
+                  runtime: RuntimeConfig | None = None) -> tuple[SessionManager, list[httpx.Request]]:
     settings.usd_per_day = 3.0
-    manager = SessionManager(settings, config(), db=db)
+    manager = SessionManager(settings, runtime or config(), db=db)
     await manager.start(recovering=False)
     sent: list[httpx.Request] = []
     for adapter in manager.providers._providers.values():
@@ -193,6 +194,114 @@ async def test_a_closed_daily_flag_stops_priced_calls_only(settings: Settings, d
         await manager.close()
 
 
+GO_LIST_PRICE = {"input": 3.0, "output": 15.0, "cache_hit": 0.3}
+MODELS_DEV = {
+    "opencode-go": {"models": {"kimi-k3": {"cost": {"input": 3.0, "output": 15.0, "cache_read": 0.3}}}},
+    "opencode": {"models": {"kimi-k3": {"cost": {"input": 2000.0, "output": 10000.0, "cache_read": 200.0}},
+                            "big-pickle": {"cost": {"input": 0, "output": 0, "cache_read": 0}}}},
+}
+
+
+def opencode_config() -> RuntimeConfig:
+    """Go and Zen side by side, as the seed leaves them: one prepaid plan, one gateway billed per token."""
+    runtime = RuntimeConfig(
+        providers={"opencode": ProviderConfig(kind="opencode", base_url=f"{BASE}/opencode", billing="subscription",
+                                              # A list price left behind on the plan must not become a charge.
+                                              pricing={"kimi-k3": GO_LIST_PRICE}),
+                   "opencode_zen": ProviderConfig(kind="opencode", base_url=f"{BASE}/opencode_zen")},
+        presets={"opencode.kimi-k3": ModelPresetConfig(provider="opencode", model="kimi-k3"),
+                 "opencode_zen.kimi-k3": ModelPresetConfig(provider="opencode_zen", model="kimi-k3"),
+                 "opencode_zen.big-pickle": ModelPresetConfig(provider="opencode_zen", model="big-pickle")},
+        model={"preset": "opencode.kimi-k3"},
+    )
+    runtime.limits.usd_per_run = 5.0
+    return runtime
+
+
+async def opencode_started(settings: Settings, db: Database,
+                           monkeypatch: pytest.MonkeyPatch) -> tuple[SessionManager, list[httpx.Request]]:
+    from daedalus.providers import modelsdev
+
+    async def catalog(client: Any = None, *, timeout: float = 15.0) -> dict[str, Any]:
+        return MODELS_DEV
+
+    monkeypatch.setattr(modelsdev, "fetch_catalog", catalog)
+    manager, sent = await started(settings, db, monkeypatch, opencode_config())
+    await manager.providers.refresh_prices(None, force=True)
+    return manager, sent
+
+
+def go_reply(request: httpx.Request) -> httpx.Response:
+    """The gateway's answer, with the list-price cost OpenCode reports for a call beside its token counts."""
+    chunks = [{"choices": [{"delta": {"content": "answered"}, "finish_reason": "stop"}]},
+              {"choices": [], "usage": {"prompt_tokens": 12_000, "completion_tokens": 3_000, "cost": 0.081}}]
+    return httpx.Response(200, text="".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n")
+
+
+async def test_an_opencode_go_run_under_dollar_caps_is_not_charged_against_them(
+        settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager, sent = await opencode_started(settings, db, monkeypatch)
+    for adapter in manager.providers._providers.values():
+        adapter._client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: sent.append(request) or go_reply(request)))
+    try:
+        endpoint = manager.providers.get("opencode").endpoint
+        assert endpoint.subscription and endpoint.pricing == {} and not endpoint.measures_spend("kimi-k3")
+        # A day already past its dollar cap on priced work does not stop the plan.
+        await manager.usage.record(UsageRecord(provider_id="deepseek", model="deepseek-flash", purpose="stream",
+                                               raw={}, normalized={}, cost_usd=2.99, duration_ms=1,
+                                               run_id="earlier", session_id=None))
+        state = await manager.create_session("go")
+        for text in ("first", "second"):
+            outcome, events = await run(manager, state.session.id, text)
+            assert outcome == "completed", errors(events)
+        rows = await db.fetchall("SELECT cost_usd FROM usage_events WHERE provider_id = 'opencode'")
+        assert [row["cost_usd"] for row in rows] == [0.0, 0.0]
+        assert (await db.fetchone("SELECT count(*) FROM inference_reservations"))[0] == 0
+        assert await manager.cap_breach(state, "opencode", "kimi-k3") is None
+        spent, unmetered = await manager.spend()
+        assert (spent, unmetered) == (pytest.approx(2.99), 0)
+        assert len(sent) == 2 and all(request.url.path.startswith("/opencode/") for request in sent)
+    finally:
+        await manager.close()
+
+
+async def test_a_priced_zen_model_is_charged_and_capped_and_a_free_one_is_free(
+        settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager, sent = await opencode_started(settings, db, monkeypatch)
+    try:
+        zen = manager.providers.get("opencode_zen").endpoint
+        assert not zen.subscription and zen.pricing_for("kimi-k3").input == 2000.0  # Zen's price, not Go's
+        assert zen.measures_spend("kimi-k3") and not zen.measures_spend("big-pickle")
+
+        priced = await manager.create_session("zen priced")
+        await manager.set_model(priced.session.id, preset="opencode_zen.kimi-k3")
+        outcome, events = await run(manager, priced.session.id, "spend")
+        assert outcome == "completed", errors(events)
+        charged = (await db.fetchone("SELECT cost_usd FROM usage_events WHERE provider_id = 'opencode_zen'"))[0]
+        assert charged == pytest.approx((12 * 2000.0 + 3 * 10000.0) / 1_000_000)
+
+        free = await manager.create_session("zen free")
+        await manager.set_model(free.session.id, preset="opencode_zen.big-pickle")
+        outcome, events = await run(manager, free.session.id, "free")
+        assert outcome == "completed", errors(events)
+        assert (await db.fetchone("SELECT cost_usd FROM usage_events WHERE model = 'big-pickle'"))[0] == 0.0
+
+        # Past the total cap the priced Zen model is refused; the free one and the plan are not.
+        manager.config.limits.usd_total = 3.0
+        await manager.usage.record(UsageRecord(provider_id="opencode_zen", model="kimi-k3", purpose="stream",
+                                               raw={}, normalized={}, cost_usd=3.5, duration_ms=1,
+                                               run_id="earlier", session_id=None))
+        breach = await manager.cap_breach(priced, "opencode_zen", "kimi-k3")
+        assert breach is not None and breach[0] == "total_cap"
+        assert await manager.cap_breach(free, "opencode_zen", "big-pickle") is None
+        go = await manager.create_session("go")
+        assert await manager.cap_breach(go, "opencode", "kimi-k3") is None
+        outcome, events = await run(manager, go.session.id, "still on the plan")
+        assert outcome == "completed", errors(events)
+    finally:
+        await manager.close()
+
+
 @pytest.mark.parametrize("kind,model,price,measured", [
     ("llamacpp", "local", None, False),
     ("openai_compat", "grok-4", None, False),
@@ -202,11 +311,13 @@ async def test_a_closed_daily_flag_stops_priced_calls_only(settings: Settings, d
     ("openai_compat", "local", {"input": 0.0, "output": 0.0}, False),
     ("openrouter", "vendor/model", None, True),
     ("deepseek", "deepseek-flash", {"input": 0.3, "output": 1.2}, True),
+    ("opencode", "kimi-k3", {"input": 3.0, "output": 15.0}, True),
+    ("opencode go", "kimi-k3", {"input": 3.0, "output": 15.0}, False),
 ])
 def test_which_calls_a_cap_can_measure(kind: str, model: str, price: dict[str, float] | None, measured: bool) -> None:
     from daedalus.providers.pricing import ModelPricing
 
-    endpoint = ProviderEndpoint(id="p", kind=kind, base_url=BASE,
+    endpoint = ProviderEndpoint(id="p", kind=kind.split()[0], base_url=BASE, subscription=kind.endswith(" go"),
                                 pricing={} if price is None else {model: ModelPricing.from_entry(price)})
     assert endpoint.measures_spend(model) is measured
 

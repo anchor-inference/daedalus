@@ -142,8 +142,10 @@ class ProviderRegistry:
             # A llama.cpp process runs the operator's own model. It has no billable token price, so
             # neither a similarly named hosted model nor a stale hand-written price may make its
             # calls consume a session, provider, total or daily spending cap.
-            pricing={} if pc.kind == "llamacpp" else {**self._fetched.get(pc.kind, {}), **pricing_table(pc.kind, pc.pricing)},
+            # A prepaid plan is not charged per token either: a list price under it would read as money spent.
+            pricing={} if pc.kind == "llamacpp" or pc.billing == "subscription" else {**self._fetched.get(pc.kind, {}), **pricing_table(pc.kind, pc.pricing)},
             temperature=pc.temperature,
+            subscription=pc.billing == "subscription",
         )
 
     async def refresh_prices(self, db: Any | None = None, *, force: bool = False) -> int:
@@ -177,7 +179,7 @@ class ProviderRegistry:
         config = getattr(self, "_config", None)
         for provider_id, provider in self._providers.items():
             table = tables.get(provider.endpoint.kind)
-            if not table:
+            if not table or provider.endpoint.subscription:
                 continue
             configured = set(config.providers[provider_id].pricing if config and provider_id in config.providers else {})
             for model, price in table.items():

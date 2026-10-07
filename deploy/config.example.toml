@@ -83,10 +83,21 @@ timeout_seconds = 600.0
 
 [providers.openrouter.pricing]
 
-# OpenCode Go (https://opencode.ai/go): OPENCODE_API_KEY in keyproxy.env, one key for all of its models.
+# OpenCode Go (https://opencode.ai/go): OPENCODE_API_KEY in keyproxy.env, one key for all of its models. A prepaid
+# subscription: its calls are recorded at $0 and never count against a dollar cap.
 [providers.opencode]
 kind = "opencode"
+name = "OpenCode Go"
 base_url = "http://keyproxy:3200/opencode"
+timeout_seconds = 900.0
+billing = "subscription"
+
+# OpenCode Zen (https://opencode.ai/zen): the same key, pay per token at Zen's prices (from models.dev), capped like
+# any priced provider; its free models stay free.
+[providers.opencode_zen]
+kind = "opencode"
+name = "OpenCode Zen"
+base_url = "http://keyproxy:3200/opencode_zen"
 timeout_seconds = 900.0
 
 [providers.vllm]

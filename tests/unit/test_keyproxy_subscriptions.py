@@ -419,3 +419,33 @@ def test_key_status_lists_anthropic_and_a_keyless_local_endpoint(monkeypatch: py
 ])
 def test_a_free_model_passes_the_daily_flag(body: bytes, free: bool) -> None:
     assert proxy.free_model_request(body) is free
+
+
+async def test_one_opencode_key_serves_go_and_zen_on_their_own_routes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("OPENCODE_API_KEY", "oc-test")
+    monkeypatch.delenv("KEYPROXY_UPSTREAM_OPENCODE_ZEN", raising=False)
+    go = await _through_proxy(monkeypatch, tmp_path, "GET", "/opencode/models")
+    zen = await _through_proxy(monkeypatch, tmp_path, "GET", "/opencode_zen/models")
+    assert str(go.url) == "https://opencode.ai/zen/go/v1/models"
+    assert str(zen.url) == "https://opencode.ai/zen/v1/models"
+    assert go.headers["authorization"] == zen.headers["authorization"] == "Bearer oc-test"
+    assert proxy.key_status()["opencode_zen"] == {"configured": True, "kind": proxy.API_KEY}
+
+
+async def test_the_daily_flag_refuses_zen_but_not_the_prepaid_go_plan(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("OPENCODE_API_KEY", "oc-test")
+    monkeypatch.delenv("KEYPROXY_UPSTREAM_OPENCODE_ZEN", raising=False)
+    flag = tmp_path / "BUDGET_EXCEEDED"
+    flag.write_text("priced daily cap")
+    monkeypatch.setattr(proxy, "BUDGET_FLAG", flag)
+    body = json.dumps({"model": "kimi-k3", "messages": []})
+    sent = await _through_proxy(monkeypatch, tmp_path, "POST", "/opencode/chat/completions", data=body)
+    assert str(sent.url) == "https://opencode.ai/zen/go/v1/chat/completions"
+    app = proxy.make_app()
+    await app["client"].aclose()
+    # A refused call never leaves the proxy; an upstream that answers would mean it had.
+    app["client"] = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(500)))
+    async with TestClient(TestServer(app)) as client:
+        refused = await client.post("/opencode_zen/chat/completions", data=body)
+        assert refused.status == 402
+        assert (await refused.json())["error"]["type"] == "budget_exceeded"

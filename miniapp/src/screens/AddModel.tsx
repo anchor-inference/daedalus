@@ -17,6 +17,7 @@ import { LangPicker, Switch } from "../ui/index";
 import { errorText, numInput } from "../ui";
 import { BLANK, ModelEntry, Picked, PricingDraft, REASONING_EFFORTS, prefilled, presetIdFor, priceFor, pricingFromDraft, retyped } from "../models";
 import { FreeModels } from "./FreeModels";
+import { Billing, OPENCODE_KEY_URL, OPENCODE_PLANS, OpencodePlan, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
 
 export type { ModelEntry, Picked } from "../models";
 export { presetIdFor } from "../models";
@@ -29,6 +30,7 @@ export type ProviderCard = {
   kind: string;
   name?: string;
   base_url: string;
+  billing?: Billing;
   via_proxy: boolean;
   /** Whether a credential really exists. `null` only when nothing could answer — the proxy is down. */
   key_held: boolean | null;
@@ -41,6 +43,8 @@ export type OnboardingState = {
   presets: number;
   default_preset: string;
   providers: ProviderCard[];
+  /** Where an endpoint the app adds itself is reached: the key proxy, or "" for the vendor directly. */
+  keyproxy_base?: string;
   needs: string[];
   message: string;
 };
@@ -48,18 +52,20 @@ export type OnboardingState = {
 /** Not a provider id: the provider ids the server accepts cannot contain a space. */
 const CUSTOM = "a new endpoint";
 const LLAMACPP = "a new llama.cpp endpoint";
+/** An OpenCode plan no endpoint is yet, picked to be added; the id after the prefix is the plan's. */
+const OPENCODE_NEW = "a new OpenCode endpoint: ";
 const KIND_NAMES: Record<string, string> = {
   deepseek: "DeepSeek",
   openrouter: "OpenRouter",
-  opencode: "OpenCode Go",
+  opencode: "OpenCode",
   vllm: "vLLM",
   llamacpp: "llama.cpp",
 };
 /** Endpoints named after the tool whose login they borrow: the kind says nothing, the id does. */
 const ID_NAMES: Record<string, string> = { codex: "Codex", grok: "Grok", claude: "Claude", openai: "OpenAI" };
 
-function providerName(id: string, kind: string, name = ""): string {
-  return name || ID_NAMES[id] || KIND_NAMES[kind] || id;
+function providerName(id: string, kind: string, name = "", billing?: Billing): string {
+  return name || ID_NAMES[id] || opencodePlanOf(kind, billing)?.name || KIND_NAMES[kind] || id;
 }
 
 function money(usd: number): string {
@@ -107,7 +113,9 @@ function ProviderStep({ state, chosen, onPick }: { state: OnboardingState | null
   const [filter, setFilter] = useState("");
   const query = filter.trim().toLocaleLowerCase();
   const ordered = [...providers.filter((p) => p.ready), ...providers.filter((p) => !p.ready)]
-    .filter((p) => !query || `${providerName(p.id, p.kind, p.name)} ${p.id}`.toLocaleLowerCase().includes(query));
+    .filter((p) => !query || `${providerName(p.id, p.kind, p.name, p.billing)} ${p.id}`.toLocaleLowerCase().includes(query));
+  // Both ways of paying OpenCode stay on offer: a plan with no endpoint yet is a card that adds one.
+  const absent = missingPlans(providers).filter((plan) => !query || plan.name.toLocaleLowerCase().includes(query));
   return (
     <>
     {providers.length > 8 && <label className="mfield" style={{ marginBottom: 12 }}>
@@ -117,6 +125,7 @@ function ProviderStep({ state, chosen, onPick }: { state: OnboardingState | null
     <div className="pickgrid">
       {ordered.map((p) => {
         const { pill, tone, note } = keyWords(p);
+        const plan = opencodePlanOf(p.kind, p.billing);
         // An endpoint with no credential is not a choice: picking it produced a list of URLs and
         // HTTP codes, and the operator had to work backwards from those to "there is no key".
         const blocked = p.key_held === false;
@@ -126,14 +135,24 @@ function ProviderStep({ state, chosen, onPick }: { state: OnboardingState | null
           // `aria-disabled` says the same thing and keeps the card reachable.
           <button key={p.id} className={`pick ${chosen === p.id ? "on" : ""} ${blocked ? "blocked" : ""}`} aria-disabled={blocked} onClick={() => !blocked && onPick(p.id)} aria-pressed={chosen === p.id}>
             <span className="pick-top">
-              <b className="truncate">{providerName(p.id, p.kind, p.name)}</b>
+              <b className="truncate">{providerName(p.id, p.kind, p.name, p.billing)}</b>
               <span className={`pill ${tone}`}>{pill}</span>
             </span>
+            {plan && <span className="sub opencode-hint">{t(plan.hint)}</span>}
             <span className="sub mono truncate">{p.base_url || t("add.noaddress")}</span>
             {note && <span className="sub faint">{note}</span>}
           </button>
         );
       })}
+      {absent.map((plan) => (
+        <button key={plan.id} className={`pick dashed ${chosen === OPENCODE_NEW + plan.id ? "on" : ""}`} onClick={() => onPick(OPENCODE_NEW + plan.id)} aria-pressed={chosen === OPENCODE_NEW + plan.id}>
+          <span className="pick-top">
+            <b>{plan.name}</b>
+            <span className="pill">{t("add.custom.new")}</span>
+          </span>
+          <span className="sub opencode-hint">{t(plan.hint)}</span>
+        </button>
+      ))}
       {(!query || "llama.cpp".includes(query)) && <button className={`pick dashed ${chosen === LLAMACPP ? "on" : ""}`} onClick={() => onPick(LLAMACPP)} aria-pressed={chosen === LLAMACPP}>
         <span className="pick-top">
           <b>{t("add.llamacpp")}</b>
@@ -176,6 +195,31 @@ function CustomProvider({ kind, busy, onCreate }: { kind: "llamacpp" | "openai_c
       <div className="mfield end">
         <button className="btn primary" disabled={busy || !clean || !baseUrl.trim()} onClick={() => onCreate(clean, id.trim(), baseUrl.trim(), apiKey, kind)}>
           {busy ? t("add.custom.saving") : t("add.custom.save")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Step 1b for OpenCode: the plan's endpoint, wired to its route; a key only when there is no key proxy to hold it. */
+function OpencodeProvider({ plan, keyproxyBase, busy, onCreate }: { plan: OpencodePlan; keyproxyBase: string; busy: boolean; onCreate: (body: Record<string, string>) => void }) {
+  const [apiKey, setApiKey] = useState("");
+  const body = opencodeProvider(plan, keyproxyBase, apiKey.trim());
+  return (
+    <div className="mfields reveal" style={{ marginTop: 12 }}>
+      <div className="mfield wide">
+        <span className="sub">{t(plan.hint)}</span>
+        <span className="sub mono truncate">{body.base_url}</span>
+      </div>
+      {!keyproxyBase && <label className="mfield wide">
+        <span>{t("opencode.key")}</span>
+        <input className="field" type="password" value={apiKey} placeholder="sk-…" onChange={(e) => setApiKey(e.target.value)} autoComplete="off" />
+        <span className="sub">{t("free.key.get")} <a href={OPENCODE_KEY_URL} target="_blank" rel="noopener noreferrer">opencode.ai/auth ↗</a></span>
+      </label>}
+      {keyproxyBase && <div className="mfield wide"><span className="sub">{t("free.key.get")} <a href={OPENCODE_KEY_URL} target="_blank" rel="noopener noreferrer">opencode.ai/auth ↗</a></span></div>}
+      <div className="mfield end">
+        <button className="btn primary" disabled={busy || (!keyproxyBase && !apiKey.trim())} onClick={() => onCreate(body)}>
+          {busy ? t("add.custom.saving") : t("opencode.save", { name: plan.name })}
         </button>
       </div>
     </div>
@@ -304,14 +348,19 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
     setPricing(null);
     setPriceDraft(null);
     setPriceError("");
-    setPreset({ ...BLANK, provider: id === CUSTOM || id === LLAMACPP ? "" : id });
-    if (id !== CUSTOM && id !== LLAMACPP) void lookup(id);
+    const adding = id === CUSTOM || id === LLAMACPP || id.startsWith(OPENCODE_NEW);
+    setPreset({ ...BLANK, provider: adding ? "" : id });
+    if (!adding) void lookup(id);
   }
 
   async function createProvider(id: string, name: string, baseUrl: string, apiKey: string, kind: string) {
+    await putProvider(id, { kind, name, base_url: baseUrl, api_key: apiKey });
+  }
+
+  async function putProvider(id: string, body: Record<string, string>) {
     setBusy(true);
     try {
-      await api.put<Settings>(`/api/providers/${encodeURIComponent(id)}`, { kind, name, base_url: baseUrl, api_key: apiKey });
+      await api.put<Settings>(`/api/providers/${encodeURIComponent(id)}`, body);
       setState(await api.get<OnboardingState>("/api/onboarding"));
       pickProvider(id);
     } catch (e) {
@@ -349,9 +398,12 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
   }
 
   const model = (typed.trim() || preset.model).trim();
-  const onEndpoint = !!provider && provider !== CUSTOM && provider !== LLAMACPP;
+  const newPlan = OPENCODE_PLANS.find((plan) => OPENCODE_NEW + plan.id === provider) ?? null;
+  const onEndpoint = !!provider && provider !== CUSTOM && provider !== LLAMACPP && !newPlan;
   const ready = onEndpoint && !!model;
-  const providerKind = state?.providers.find((entry) => entry.id === provider)?.kind;
+  const providerCard = state?.providers.find((entry) => entry.id === provider);
+  const providerKind = providerCard?.kind;
+  const prepaid = providerCard?.billing === "subscription";
   const hasSpendCap = !!settings && (settings.limits.usd_per_run > 0 || settings.limits.usd_total > 0
     || (settings.limits.usd_total_per_provider?.[provider] ?? 0) > 0);
   const visibleDraft = priceDraft?.model === model ? priceDraft : null;
@@ -404,6 +456,7 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
         <ProviderStep state={state} chosen={provider} onPick={pickProvider} />
         {provider === CUSTOM && <CustomProvider key={CUSTOM} kind="openai_compat" busy={busy} onCreate={createProvider} />}
         {provider === LLAMACPP && <CustomProvider key={LLAMACPP} kind="llamacpp" busy={busy} onCreate={createProvider} />}
+        {newPlan && <OpencodeProvider key={newPlan.id} plan={newPlan} keyproxyBase={state?.keyproxy_base ?? ""} busy={busy} onCreate={(body) => void putProvider(newPlan.id, body)} />}
       </Step>
 
       <Step n={2} title={t("add.step2")} sub={t("add.step2.sub")} active={onEndpoint && !model} done={!!model}>
@@ -449,7 +502,9 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
             <span>{t("add.images")}</span>
           </label>
         </div>
-        {onEndpoint && providerKind !== "llamacpp" && <>
+        {/* A prepaid plan has no per-token price to record, and a rate typed here would be counted as dollars spent. */}
+        {onEndpoint && prepaid && <p className="sub addmodel-prepaid">{t("add.pricing.subscription")}</p>}
+        {onEndpoint && providerKind !== "llamacpp" && !prepaid && <>
           {hasSpendCap && <p className="sub">{t("add.pricing.capHint")}</p>}
           <details className="sheet-section addmodel-pricing">
             <summary>{t("add.pricing.title")}</summary>

@@ -16,11 +16,17 @@ CATALOG = {
 }
 
 
-def test_go_prices_win_over_zen_and_zen_fills_the_rest() -> None:
+def test_the_first_source_wins_on_a_shared_model_and_the_rest_fill_in() -> None:
     table = modelsdev.prices_from_catalog(CATALOG, ("opencode-go", "opencode"))
     assert table["kimi-k3"].input == 3.0 and table["kimi-k3"].cache_hit == 0.3
     assert table["claude-sonnet-5"].output == 10.0
     assert set(table) == {"kimi-k3", "glm-5.3-flash", "claude-sonnet-5"}
+
+
+def test_an_opencode_endpoint_is_priced_at_zen_rates_only() -> None:
+    """Metered OpenCode is Zen; Go, the prepaid plan, is never priced per token, so its list never applies."""
+    table = modelsdev.prices_from_catalog(CATALOG, modelsdev.SOURCES["opencode"])
+    assert table["kimi-k3"].input == 9.0 and "glm-5.3-flash" not in table
 
 
 class _Db:
@@ -37,7 +43,7 @@ class _Db:
 @pytest.mark.asyncio
 async def test_refresh_puts_fetched_prices_under_the_operators_and_caches_them(monkeypatch: pytest.MonkeyPatch) -> None:
     config = RuntimeConfig()
-    config.providers["opencode"] = ProviderConfig(kind="opencode", base_url="http://keyproxy:3200/opencode", pricing={"kimi-k3": {"input": 1.0, "output": 1.0, "cache_hit": 0.1}})
+    config.providers["opencode_zen"] = ProviderConfig(kind="opencode", base_url="http://keyproxy:3200/opencode_zen", pricing={"kimi-k3": {"input": 1.0, "output": 1.0, "cache_hit": 0.1}})
     registry = ProviderRegistry(Settings(), config)
     calls: list[int] = []
 
@@ -47,13 +53,16 @@ async def test_refresh_puts_fetched_prices_under_the_operators_and_caches_them(m
 
     monkeypatch.setattr(modelsdev, "fetch_catalog", fake_fetch)
     db = _Db()
-    assert await registry.refresh_prices(db) == 3
-    endpoint = registry.get("opencode").endpoint
+    assert await registry.refresh_prices(db) == 2
+    endpoint = registry.get("opencode_zen").endpoint
     assert endpoint.pricing_for("kimi-k3").input == 1.0  # the operator's entry stays
-    assert endpoint.pricing_for("glm-5.3-flash").output == 0.5  # fetched
-    assert endpoint.pricing_for("claude-sonnet-5").input == 2.0
+    assert endpoint.pricing_for("claude-sonnet-5").input == 2.0  # fetched
+    assert endpoint.pricing_for("glm-5.3-flash") is None  # Go's alone: unknown on Zen, never zero
+    # The Go subscription beside it takes no price at all, fetched or not.
+    assert registry.get("opencode").endpoint.pricing == {}
     # A second refresh within the day reads the cache, not the network, and a reload keeps the fetched prices.
-    assert await registry.refresh_prices(db) == 3
+    assert await registry.refresh_prices(db) == 2
     assert len(calls) == 1
     registry.reload(config)
-    assert registry.get("opencode").endpoint.pricing_for("glm-5.3-flash").output == 0.5
+    assert registry.get("opencode_zen").endpoint.pricing_for("claude-sonnet-5").output == 10.0
+    assert registry.get("opencode").endpoint.pricing == {}

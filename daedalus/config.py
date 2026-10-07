@@ -169,6 +169,7 @@ ProviderKind = Literal["deepseek", "openrouter", "opencode", "vllm", "llamacpp",
 PROVIDER_KINDS: tuple[ProviderKind, ...] = ("deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat")
 """``opencode`` is the OpenCode Go / Zen gateway: OpenAI-compatible, wants a stable session id per conversation in
 ``x-opencode-session`` for routing and prompt caching, and passes DeepSeek's thinking fields through as they are."""
+ProviderBilling = Literal["metered", "subscription"]
 
 
 class Settings(BaseSettings):
@@ -499,6 +500,11 @@ class ProviderConfig(BaseModel):
     """Per-model USD per 1M tokens overriding the built-in table (``daedalus.providers.pricing``):
     ``{"model": {"input", "output", "cache_hit"[, "*_off_peak", "peak_utc", "peak_weekdays_only"]}}``.
     A model with no price anywhere is recorded with an unknown cost."""
+    billing: ProviderBilling = "metered"
+    """``subscription`` is a prepaid plan (OpenCode Go): its calls are recorded at $0, never count against a
+    dollar cap, and the plan's own allowance is what limits them, read from the key proxy beside the other
+    subscriptions. Any per-token price for it is ignored, so a list price cannot become a charge. ``metered``
+    is everything billed per token, priced or not."""
 
 
 KNOWN_TOOL_LIMITS: tuple[tuple[str, int], ...] = (("grok", 350), ("gemini", 128))
@@ -1710,36 +1716,6 @@ class TelegramConfig(BaseModel):
         return self.mode or ("topics" if self.forum_chat_id else "private")
 
 
-OPENCODE_GO_PRICING: dict[str, dict[str, float]] = {
-    # OpenCode Go list prices (USD per 1M tokens, opencode.ai/docs/go): the subscription is prepaid, the metered
-    # spend is what counts against its $12 / 5 h, $30 / week and $60 / month allowance.
-    "deepseek-v4.1-flash": {"input": 0.30, "output": 1.20, "cache_hit": 0.006},
-    "deepseek-v4-flash": {"input": 0.30, "output": 1.20, "cache_hit": 0.006},
-    "deepseek-flash": {"input": 0.30, "output": 1.20, "cache_hit": 0.006},
-    "deepseek-v4-pro": {"input": 1.32, "output": 3.96, "cache_hit": 0.044},
-    "glm-5.3-flash": {"input": 0.15, "output": 0.50, "cache_hit": 0.03},
-    "glm-5": {"input": 1.40, "output": 4.40, "cache_hit": 0.26},
-    "kimi-k3": {"input": 3.00, "output": 15.00, "cache_hit": 0.30},
-    "kimi-k2.7-code": {"input": 0.95, "output": 4.00, "cache_hit": 0.19},
-    "kimi-k2.6": {"input": 0.95, "output": 4.00, "cache_hit": 0.16},
-    "qwen3.8-max": {"input": 2.00, "output": 6.00, "cache_hit": 0.25},
-    "qwen3.8-flash": {"input": 0.15, "output": 0.47, "cache_hit": 0.016},
-    "qwen3.7-max": {"input": 2.50, "output": 7.50, "cache_hit": 0.50},
-    "qwen3.7-plus": {"input": 0.40, "output": 1.60, "cache_hit": 0.04},
-    "qwen3.6-plus": {"input": 0.50, "output": 3.00, "cache_hit": 0.05},
-    "minimax-m3": {"input": 0.30, "output": 1.20, "cache_hit": 0.06},
-    "minimax-m2.7": {"input": 0.30, "output": 1.20, "cache_hit": 0.06},
-    "mimo-v2.5-pro": {"input": 0.435, "output": 0.87, "cache_hit": 0.003625},
-    "mimo-v2.5": {"input": 0.14, "output": 0.28, "cache_hit": 0.0028},
-    "longcat-2.0": {"input": 0.30, "output": 1.20, "cache_hit": 0.006},
-    "hy4-preview": {"input": 0.834, "output": 2.501, "cache_hit": 0.042},
-    "hy3": {"input": 0.14, "output": 0.58, "cache_hit": 0.035},
-    "grok-4.6": {"input": 4.00, "output": 12.00, "cache_hit": 1.00},
-    "gpt-5.6-luna": {"input": 0.40, "output": 1.80, "cache_hit": 0.04},
-    "muse-spark": {"input": 0.10, "output": 0.20, "cache_hit": 0.002},
-}
-
-
 class RuntimeConfig(BaseModel):
     seeded: list[str] = Field(default_factory=list)
     """Seeds already applied to this file (``claude-subscription`` …). A seed adds a provider or presets once;
@@ -1757,7 +1733,8 @@ class RuntimeConfig(BaseModel):
             "grok": ProviderConfig(kind="openai_compat", base_url=keyproxy_base() + "/grok/v1", timeout_seconds=900.0, pricing={"grok": {"input": 0.0, "output": 0.0, "cache_hit": 0.0}}),
             "codex": ProviderConfig(kind="openai_compat", base_url=keyproxy_base() + "/codex/v1", timeout_seconds=900.0, pricing={"gpt": {"input": 0.0, "output": 0.0, "cache_hit": 0.0}}),
             "claude": ProviderConfig(kind="openai_compat", base_url=keyproxy_base() + "/claude/v1", timeout_seconds=900.0, pricing={"claude": {"input": 0.0, "output": 0.0, "cache_hit": 0.0}}),
-            "opencode": ProviderConfig(kind="opencode", base_url=keyproxy_base() + "/opencode", timeout_seconds=900.0, pricing=OPENCODE_GO_PRICING),
+            "opencode": ProviderConfig(kind="opencode", name="OpenCode Go", base_url=keyproxy_base() + "/opencode", timeout_seconds=900.0, billing="subscription"),
+            "opencode_zen": ProviderConfig(kind="opencode", name="OpenCode Zen", base_url=keyproxy_base() + "/opencode_zen", timeout_seconds=900.0),
             "openai": ProviderConfig(kind="openai_compat", name="OpenAI API", base_url=keyproxy_base() + "/openai"),
             "anthropic": ProviderConfig(kind="openai_compat", base_url=keyproxy_base() + "/anthropic"),
             "zai": ProviderConfig(name="Z.AI API", base_url=keyproxy_base() + "/zai"),
@@ -2019,7 +1996,7 @@ def _seed_presets(raw: dict[str, Any]) -> bool:
     return True
 
 
-SEEDS = ("claude-subscription", "openai-anthropic-keys", "more-provider-endpoints")
+SEEDS = ("claude-subscription", "openai-anthropic-keys", "more-provider-endpoints", "opencode-go-subscription")
 """Every seed a config can have had applied, in the order they were introduced. The seeds that follow
 the setup wizard's environment (``voice-cloud``, ``local-model:<id>``) are not listed: a new file
 should get them, because the wizard's answers are about this installation."""
@@ -2134,7 +2111,7 @@ def _seed_from_setup(raw: dict[str, Any]) -> bool:
             if free_provider == "kilo":
                 providers.setdefault("kilo", {"kind": "openai_compat", "name": "Kilo Gateway", "base_url": keyproxy_base() + "/kilo"})
             if free_provider == "opencode_zen":
-                providers.setdefault("opencode_zen", {"kind": "openai_compat", "name": "OpenCode Zen", "base_url": keyproxy_base() + "/opencode_zen"})
+                providers.setdefault("opencode_zen", {"kind": "opencode", "name": "OpenCode Zen", "base_url": keyproxy_base() + "/opencode_zen"})
             pid = free_preset_id_for(free_provider, free_model)
             presets.setdefault(pid, {"provider": free_provider, "model": free_model, "label": free_model,
                                      "thinking": False, "context_window": 128_000, "max_output_tokens": 8_192,
@@ -2173,6 +2150,41 @@ def _seed_provider_endpoints(raw: dict[str, Any]) -> bool:
             ("kimi_coding", "Kimi Code"),
         ):
             providers.setdefault(provider_id, {"kind": "openai_compat", "name": name, "base_url": keyproxy_base() + "/" + provider_id})
+    return True
+
+
+def _opencode_go_route(base_url: str) -> bool:
+    """Whether an address reaches OpenCode Go: the key proxy's ``/opencode`` route, or the vendor's ``/zen/go``."""
+    url = base_url.rstrip("/")
+    return url.endswith("/opencode") or "/zen/go" in url
+
+
+def _seed_opencode_go_subscription(raw: dict[str, Any]) -> bool:
+    """Make OpenCode Go the subscription it is, and offer OpenCode Zen beside it, once.
+
+    Go carried its list prices as per-token pricing, so every call was recorded as dollars spent and
+    counted against the operator's caps, though the plan is prepaid and a call costs nothing extra.
+    Every ``opencode`` endpoint on the Go route becomes a subscription and loses that table; Zen, the
+    pay-per-token gateway, is added (or turned from a generic endpoint into the ``opencode`` kind, so
+    it gets Zen's published prices) and stays metered.
+    """
+    seeded = raw.setdefault("seeded", [])
+    if not isinstance(seeded, list):
+        seeded = raw["seeded"] = []
+    if "opencode-go-subscription" in seeded:
+        return False
+    seeded.append("opencode-go-subscription")
+    providers = raw.setdefault("providers", {})
+    if not isinstance(providers, dict):
+        return True
+    for provider in providers.values():
+        if isinstance(provider, dict) and provider.get("kind") == "opencode" and _opencode_go_route(str(provider.get("base_url") or "")):
+            provider["billing"] = "subscription"
+            provider.pop("pricing", None)
+            provider.setdefault("name", "OpenCode Go")
+    zen = providers.setdefault("opencode_zen", {"name": "OpenCode Zen", "base_url": keyproxy_base() + "/opencode_zen", "timeout_seconds": 900.0})
+    if isinstance(zen, dict) and zen.get("kind", "openai_compat") == "openai_compat" and not _opencode_go_route(str(zen.get("base_url") or "")):
+        zen["kind"] = "opencode"
     return True
 
 
@@ -2249,6 +2261,7 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _seed_claude_subscription(raw) or changed
     changed = _seed_openai_anthropic_keys(raw) or changed
     changed = _seed_provider_endpoints(raw) or changed
+    changed = _seed_opencode_go_subscription(raw) or changed
     changed = _seed_from_setup(raw) or changed
     changed = _migrate_web_search(raw) or changed
     for provider in (raw.get("providers") or {}).values():
@@ -2281,6 +2294,7 @@ __all__ = [
     "PROVIDER_KINDS",
     "PromptConfig",
     "ProviderConfig",
+    "ProviderBilling",
     "ProviderKind",
     "ReasoningEffort",
     "RuntimeConfig",

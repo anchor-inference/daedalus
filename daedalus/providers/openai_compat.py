@@ -245,6 +245,8 @@ class ProviderEndpoint:
     pricing: dict[str, ModelPricing] = field(default_factory=dict)
     temperature: float | None = None
     """When set, every request to this endpoint samples at this temperature (a benchmark pin)."""
+    subscription: bool = False
+    """A prepaid plan (``billing = "subscription"``): every call is recorded at $0 and no dollar cap counts it."""
 
     def source_digest(self) -> str:
         """Bind a saved provider decision to this connection without retaining its credentials."""
@@ -262,12 +264,12 @@ class ProviderEndpoint:
     def measures_spend(self, model: str) -> bool:
         """Whether a dollar cap can count what a call to this model costs.
 
-        Not for the operator's own hardware, a model published at a zero price or under a free
-        name, or one with no price at all: a subscription login (Grok, Codex, Claude) or a
-        self-hosted server. OpenRouter is the exception to the last, since it reports each call's
-        cost itself.
+        Not for the operator's own hardware, a prepaid plan (OpenCode Go), a model published at a
+        zero price or under a free name, or one with no price at all: a subscription login (Grok,
+        Codex, Claude) or a self-hosted server. OpenRouter is the exception to the last, since it
+        reports each call's cost itself.
         """
-        if self.kind == "llamacpp" or model.endswith((":free", "-free")):
+        if self.kind == "llamacpp" or self.subscription or model.endswith((":free", "-free")):
             return False
         price = self.pricing_for(model)
         if price is not None and price.input is not None and price.output is not None:
@@ -736,6 +738,10 @@ class OpenAICompatibleProvider(ILLMProvider):
             # This is inference on the operator's own hardware, not a hosted token sale. Recording
             # zero rather than an unknown price keeps the usage ledger complete while ensuring every
             # spending cap treats the call as free.
+            cost = 0.0
+        elif self.endpoint.subscription:
+            # The plan is paid for up front: a call spends its allowance, not money. A gateway that
+            # reports a list-price cost in the usage would otherwise book that as dollars charged.
             cost = 0.0
         elif raw.get("cost") is not None:
             cost = float(raw["cost"])

@@ -1466,6 +1466,9 @@ body.resizing iframe { pointer-events: none; }
 .mtitle { font-weight: 600; font-size: var(--fs-14); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .mtitle.mono, .sub.mono { font-family: var(--mono); font-size: var(--fs-13); }
 .mmeta { color: var(--muted); font-size: var(--fs-12); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* A sentence about how the endpoint is paid for, not an address: read in the body face, and allowed to wrap. */
+.mmeta.opencode-hint { font-family: inherit; white-space: normal; }
+.opencode-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
 .mtags { grid-area: tags; display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 6px; }
 .mactions { grid-area: actions; display: flex; align-items: center; gap: 6px; }
 .mactions .chev { display: inline-block; font-size: var(--fs-18); line-height: 1; color: var(--muted); transition: transform .15s; }

@@ -1,6 +1,6 @@
 """Current list prices from models.dev for gateways that publish none of their own.
 
-OpenCode Go and Zen answer ``/models`` with ids only; models.dev (the catalogue OpenCode itself reads) carries
+OpenCode Zen answers ``/models`` with ids only; models.dev (the catalogue OpenCode itself reads) carries
 each model's USD per 1M tokens for input, output and cached input. The table is fetched once a day, kept in the
 database between starts, and overlaid under the operator's own ``pricing`` entries, which always win.
 """
@@ -18,9 +18,9 @@ from daedalus.providers.pricing import ModelPricing
 logger = logging.getLogger(__name__)
 
 MODELS_DEV_URL = "https://models.dev/api.json"
-SOURCES: dict[str, tuple[str, ...]] = {"opencode": ("opencode-go", "opencode")}
-"""Provider kind → the models.dev provider ids whose prices apply, first one winning on a shared model id (a Go
-key is billed at Go's prices; a model only Zen offers is priced pay-as-you-go)."""
+SOURCES: dict[str, tuple[str, ...]] = {"opencode": ("opencode",)}
+"""Provider kind → the models.dev provider ids whose prices apply, first one winning on a shared model id. Only Zen's:
+an ``opencode`` endpoint that is metered is the Zen gateway, and Go, the subscription, takes no per-token price at all."""
 REFRESH_SECONDS = 24 * 3600
 KV_KEY = "modelsdev_prices"
 

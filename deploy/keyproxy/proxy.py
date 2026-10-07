@@ -9,8 +9,10 @@ refused here — below the agent, where a self-modification cannot reach.
 Upstreams: ``deepseek`` → https://api.deepseek.com, ``openrouter`` → https://openrouter.ai/api/v1,
 ``openai`` → https://api.openai.com/v1, ``anthropic`` → https://api.anthropic.com/v1 (its OpenAI-compatible
 chat and models endpoints; the key goes in ``x-api-key`` and the ``anthropic-version`` header is added when the
-caller sent none), ``opencode`` → https://opencode.ai/zen/go/v1 (OpenCode Go). Keys: ``DEEPSEEK_API_KEY``,
-``OPENROUTER_API_KEY``, ``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``, ``OPENCODE_API_KEY``. Extra upstreams: ``KEYPROXY_UPSTREAM_<NAME>=https://host/base`` with
+caller sent none), ``opencode`` → https://opencode.ai/zen/go/v1 (OpenCode Go, the prepaid subscription) and
+``opencode_zen`` → https://opencode.ai/zen/v1 (OpenCode Zen, pay per token); one OpenCode key serves both. Keys:
+``DEEPSEEK_API_KEY``, ``OPENROUTER_API_KEY``, ``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``, ``OPENCODE_API_KEY``. Extra
+upstreams: ``KEYPROXY_UPSTREAM_<NAME>=https://host/base`` with
 ``KEYPROXY_KEY_<NAME>=…`` and, for an API that does not take ``Authorization: Bearer``,
 ``KEYPROXY_AUTH_<NAME>=<header name>`` (``X-API-KEY`` for Serper, ``x-api-key`` for Exa…);
 the key is sent as that header's value.
@@ -70,6 +72,7 @@ DEFAULT_UPSTREAMS = {
     "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY"),
     "anthropic": ("https://api.anthropic.com/v1", "ANTHROPIC_API_KEY"),
     "opencode": ("https://opencode.ai/zen/go/v1", "OPENCODE_API_KEY"),
+    "opencode_zen": ("https://opencode.ai/zen/v1", "OPENCODE_API_KEY"),
     "zai": ("https://api.z.ai/api/paas/v4", "ZAI_API_KEY"),
     "zai_coding": ("https://api.z.ai/api/coding/paas/v4", "ZAI_CODING_API_KEY"),
     "minimax": ("https://api.minimax.io/v1", "MINIMAX_API_KEY"),
@@ -77,6 +80,9 @@ DEFAULT_UPSTREAMS = {
     "moonshot": ("https://api.moonshot.ai/v1", "MOONSHOT_API_KEY"),
     "kimi_coding": ("https://api.kimi.ai/coding/v1", "KIMI_CODING_API_KEY"),
 }
+PREPAID_UPSTREAMS = ("opencode",)
+"""Keyed upstreams that are prepaid plans (OpenCode Go): a call spends the plan's allowance, not money, so the daily
+dollar flag does not refuse it, the way it never refuses the subscriptions served through a CLI's login."""
 DEFAULT_AUTH_SCHEMES = {"anthropic": "x-api-key"}
 """Upstreams whose key is not an ``Authorization: Bearer`` one; ``KEYPROXY_AUTH_<NAME>`` still overrides."""
 ANTHROPIC_VERSION = "2023-06-01"
@@ -614,7 +620,7 @@ async def handle(request: web.Request) -> web.StreamResponse:
         return web.json_response({"error": f"unknown upstream {name!r}"}, status=404)
     else:
         base, key = table[name]
-        if budget_exceeded() and not budget_exempt(rest) and not free_model_request(await request.read()):
+        if name not in PREPAID_UPSTREAMS and budget_exceeded() and not budget_exempt(rest) and not free_model_request(await request.read()):
             return web.json_response({"error": {"message": "daily budget exceeded; refused by the key proxy", "type": "budget_exceeded"}}, status=402)
         if key:
             inject_key(headers, name, key)
