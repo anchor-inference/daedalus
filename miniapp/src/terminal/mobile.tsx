@@ -24,7 +24,7 @@ import { InputDeduper } from "./dedupe";
 import { copyText, fontSizeStep, setFontSize, storedFontSize, TerminalState } from "./instance";
 import { applyModifiers, composeBytes, keyBytes, PHONE_KEYS, PhoneKey, pinchFont, StickyModifier } from "./phonekeys";
 import { instanceFor } from "./terminals";
-import { copyLastOutput, CopyOutputButton, TerminalView } from "./view";
+import { copyLastOutput, TerminalView } from "./view";
 
 /** A change in rows alone waits this long, so the soft keyboard's slide is one RESIZE (fit.ts). */
 export const KEYBOARD_SETTLE_MS = 150;
@@ -221,8 +221,15 @@ export function PhoneTerminal({ id, row, onBack, onEnd, onRestart, onRemove, wor
   const running = !row || row.status === "running";
   const commands = state?.commands;
   const instance = () => instanceFor(id);
+  const copyAll = async () => {
+    const text = instance()?.screenText(200) ?? "";
+    toast((await copyText(text)) ? t("term.phone.copiedAll") : t("term.phone.copyFailed"));
+  };
+  // The header keeps search and this menu, as every phone bar does; the copies that were buttons in
+  // the header and the key row are the menu's first rows.
   const items: MenuItem[] = [
-    { label: t("term.phone.select"), icon: "copy", onSelect: openSelection },
+    { label: t("term.phone.copyAll"), icon: "copy", onSelect: () => void copyAll() },
+    { label: t("term.phone.select"), icon: "copy", hint: t("term.phone.select.hint"), onSelect: openSelection },
     ...(commands?.active
       ? [
           { label: t("term.marks.copy"), icon: "copy" as const, disabled: !commands.ended, onSelect: () => { const i = instance(); if (i) void copyLastOutput(i); } },
@@ -230,7 +237,6 @@ export function PhoneTerminal({ id, row, onBack, onEnd, onRestart, onRemove, wor
           { label: t("term.marks.next"), icon: "down" as const, disabled: commands.prompts === 0, onSelect: () => instance()?.jumpToCommand(1) },
         ]
       : []),
-    { label: t("term.search"), icon: "search", onSelect: () => instance()?.openSearch() },
     "-",
     { label: t("term.font.smaller"), icon: "compact", onSelect: () => fontSizeStep("font-smaller") },
     { label: t("term.font.bigger"), icon: "expand", onSelect: () => fontSizeStep("font-bigger") },
@@ -250,12 +256,12 @@ export function PhoneTerminal({ id, row, onBack, onEnd, onRestart, onRemove, wor
             {row?.sandbox && <Icon name="shield" size={12} />}
             <span className="truncate">{title}</span>
           </div>
-          {/* The folder alone: the pill beside says the environment, and the line saying it again
-              read "Container" twice across one header. */}
-          <div className="term-phone-cwd truncate">{cwd}</div>
+          {/* Where it runs and the folder, on one line under the title; only the machine itself keeps
+              its amber pill beside, because a command there reaches outside the container. */}
+          <div className="term-phone-cwd truncate">{env === "host" ? cwd : [t(`term.env.${env}`), cwd].filter(Boolean).join(" · ")}</div>
         </div>
-        <EnvPill env={env} />
-        <CopyOutputButton id={id} state={state ?? undefined} />
+        {env === "host" && <EnvPill env={env} />}
+        <button className="iconbtn" onClick={() => instance()?.openSearch()} aria-label={t("term.search")} title={t("term.search")}><Icon name="search" /></button>
         <OverflowMenu items={items} label={t("term.phone.menu")} />
       </div>
       <div className="term-phone-screen" ref={stage}>
