@@ -369,6 +369,37 @@ async def test_a_failed_turn_is_an_error_in_codexs_words(settings: Settings, db:
         assert "usageLimitExceeded" in failed.payload["detail"]
 
 
+async def test_a_codex_that_leaves_a_link_at_its_socket_is_reached_through_it(settings: Settings, db: Database) -> None:
+    # Codex 0.157 and later bind the app server's socket in a private directory of their own and leave
+    # a link at the path they were given; the daemon follows it there.
+    async with stand(settings, db, extra_env={"FAKE_CODEX_SOCKET": "link"}, **codex()) as s:
+        ada = await started(s, "echo:the panel answers")
+        await s.status_event(ada, "turn_done_unseen")
+        assert "error" not in await s.statuses(ada)
+
+
+async def test_a_dial_the_daemon_refuses_fails_the_start_at_once_in_the_daemons_words(settings: Settings, db: Database) -> None:
+    # A daemon that refused the link: the host used to dial on for a minute while the gate gave up at
+    # its timeout with "not ready" over the TUI's empty screen, and the refusal was never shown.
+    async with stand(settings, db, extra_env={"FAKE_CODEX_SOCKET": "link"}, ready_timeout_s=8.0, **codex()) as s:
+        s.ptyd.follow_links = False
+        ada = await started(s, "echo:never")
+        failed = await s.status_event(ada, "error", timeout=6.0)
+        assert "codex.sock is not a socket" in failed.payload["detail"] and "daemon predates" in failed.payload["detail"]
+        await asyncio.sleep(8.5)
+        errors = [e.payload for e in await s.events("staff.status", staff_id=ada.id) if e.payload["status"] == "error"]
+        assert all("not ready" not in e["detail"] for e in errors), errors
+
+
+async def test_an_app_server_that_fails_at_start_leaves_its_words_in_the_failure(settings: Settings, db: Database) -> None:
+    async with stand(settings, db, extra_env={"FAKE_CLI_FAULTS": "fail_at_start"}, **codex()) as s:
+        ada = await started(s, "echo:never")
+        failed = await s.status_event(ada, "error")
+        said = failed.payload["detail"]
+        assert said.startswith("side channel lost: the app-server exited with code 1; the app-server's screen last showed:")
+        assert "unknown field `model_catalog_json`" in said
+
+
 async def test_the_self_check_runs_a_codex_session_through_every_channel(settings: Settings, db: Database) -> None:
     async with stand(settings, db, **codex()) as s:
         env = RuntimeEnvironment(s.terminals, "container", home=str(s.home))

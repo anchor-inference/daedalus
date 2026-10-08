@@ -47,6 +47,7 @@ import re
 import secrets
 import shutil
 import signal as signals
+import stat
 import struct
 import termios
 import time
@@ -241,6 +242,9 @@ class LivePtyd(FakePtyd):
         self._next_channel = 0
         self._send_locks: dict[asyncio.StreamWriter, asyncio.Lock] = {}
         self._background: set[asyncio.Task[Any]] = set()
+        self.follow_links = True
+        """A link in a dial directory is followed to a private socket of this user, as the daemon
+        does; false is the daemon before it did, which refused every link as "not a socket"."""
 
     # -- lifecycle --------------------------------------------------------------------------------
 
@@ -1031,7 +1035,7 @@ class LivePtyd(FakePtyd):
                 name = target[5:]
                 if "/" in name or not name:
                     raise _RpcFail(-32602, "a unix target is a name in the launch's dial directory")
-                sock_reader, sock_writer = await asyncio.open_unix_connection(str(launch.dial_dir / name))
+                sock_reader, sock_writer = await asyncio.open_unix_connection(self._dial_path(launch, name))
             elif target.startswith("tcp:127.0.0.1:"):
                 port = int(target.rpartition(":")[2])
                 if port not in launch.ports:
@@ -1047,6 +1051,27 @@ class LivePtyd(FakePtyd):
         launch.streams.add(channel)
         self._bg(self._relay(channel, sock_reader, writer, launch))
         return {"channel": channel}
+
+    def _dial_path(self, launch: LiveLaunch, name: str) -> str:
+        """The socket a ``unix:`` target reaches, by the daemon's rule: a socket in the dial directory,
+        or a link there to a socket of this user in a directory no one else may write."""
+        path = launch.dial_dir / name
+        try:
+            entry = os.lstat(path)
+        except FileNotFoundError:
+            raise _RpcFail(1001, f"no socket {name}") from None
+        if stat.S_ISSOCK(entry.st_mode):
+            return str(path)
+        if not stat.S_ISLNK(entry.st_mode) or not self.follow_links:
+            raise _RpcFail(1004, f"forbidden: {name} is not a socket")
+        real = os.path.realpath(path)
+        try:
+            target, parent = os.lstat(real), os.lstat(os.path.dirname(real))
+        except FileNotFoundError:
+            raise _RpcFail(1001, f"{name} links to no socket yet") from None
+        if not stat.S_ISSOCK(target.st_mode) or target.st_uid != os.getuid() or parent.st_uid != os.getuid() or parent.st_mode & 0o022:
+            raise _RpcFail(1004, f"forbidden: {name} links to a socket that is not private to this user")
+        return real
 
     async def _relay(self, channel: int, sock_reader: asyncio.StreamReader, host: asyncio.StreamWriter, launch: LiveLaunch) -> None:
         with contextlib.suppress(ConnectionError, OSError):

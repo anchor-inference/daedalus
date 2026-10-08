@@ -143,6 +143,15 @@ def _settled_reply(ask: Any) -> dict[str, Any]:
     return {"text": words or ("yes" if allow else "no" if allow is False else "")}
 
 
+def _said(lines: list[str]) -> str:
+    """The last lines of a screen that say something, on one line. Printable characters only: the
+    words are stored as one line of text, and a store that refused them would leave the session
+    unended. A line with no word on it is a frame."""
+    kept = ["".join(c for c in line if c.isprintable()).strip() for line in lines]
+    said = " / ".join([line for line in kept if any(c.isalnum() for c in line)][-EXIT_SCREEN_LINES:])
+    return "…" + said[-EXIT_SCREEN_CHARS:] if len(said) > EXIT_SCREEN_CHARS else said
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -333,6 +342,9 @@ class CliSession:
     session went back to ``working`` and the message waited for a turn that had already ended."""
     resend_first: bool = False
     """After a restart during the start: the first message still has to go by channel once ready."""
+    start_failure: str = ""
+    """What the adapter reported as failed before the CLI was ready. The gate stops on it rather than
+    replacing it with its own "not ready" when its timeout comes."""
     channel: dict[str, str] = field(default_factory=dict)
     """What the host last heard on each channel of the launch: ``hook``, ``team`` (a call),
     ``hello`` (the team tools loaded), and the team tools' state (``connected`` or ``missing``)."""
@@ -662,8 +674,9 @@ class CliStaffRuntime:
         answered_at = 0.0
         screen = ""
         try:
+            await self._companions_gone(session)
             while not session.ready.is_set():
-                if session.exited.is_set() or session.finished:
+                if session.exited.is_set() or session.finished or session.start_failure:
                     return
                 screen = await session.term.screen()
                 step = self.adapter.readiness(screen)
@@ -683,7 +696,7 @@ class CliStaffRuntime:
                     last_answered = screen
                     answered_at = self.clock()
                 if self.clock() >= deadline:
-                    await self._failed(session, f"not ready after {cfg.ready_timeout_s:g} s", screen)
+                    await self._failed(session, f"not ready after {cfg.ready_timeout_s:g} s" + await self._companions_said(session), screen)
                     return
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(session.ready.wait(), cfg.ready_poll_ms / 1000)
@@ -699,6 +712,24 @@ class CliStaffRuntime:
         except Exception as exc:  # noqa: BLE001 — a broken gate is this session's failure, shown on it
             logger.exception("the readiness gate of %s failed", session.staff_session_id)
             await self._failed(session, f"the readiness gate failed: {exc}", screen)
+
+    async def _companions_said(self, session: CliSession, only: str = "") -> str:
+        """What the companions' screens last showed, as a clause for a failure. A Codex member that
+        never got ready showed an empty screen, its TUI still waiting for the thread, while the reason
+        was on the app server's screen, which nobody was shown."""
+        said = ""
+        for terminal_id, role in session.companions.items():
+            if only and terminal_id != only:
+                continue
+            try:
+                async with asyncio.timeout(EXIT_SCREEN_TIMEOUT):
+                    result = await self.terminals.read_screen(terminal_id, format="text", scrollback=EXIT_SCREEN_LINES)
+            except Exception:  # noqa: BLE001 — the failure stands without the companion's words
+                logger.info("the %s screen of %s could not be read", role, session.staff_session_id, exc_info=True)
+                continue
+            words = _said([str(line) for line in result.get("lines") or []])
+            said += f"; the {role}'s screen last showed: {words}" if words else f"; the {role}'s screen is empty"
+        return said
 
     async def _failed(self, session: CliSession, reason: str, screen: str) -> None:
         tail = screen[-SCREEN_TAIL_CHARS:].strip()
@@ -750,11 +781,25 @@ class CliStaffRuntime:
             if not session.stopping:
                 await self._apply(session, StaffEvent(EventKind.PROCESS_EXITED, event.at, {"exit_code": code}, launch_id=session.launch.launch_id))
             return
-        role = session.companions.get(event.terminal_id, "companion")
+        await self._companion_exited(session, event.terminal_id, code, event.at)
+
+    async def _companion_exited(self, session: CliSession, terminal_id: str, code: Any, at: str) -> None:
+        role = session.companions.get(terminal_id, "companion")
         if not session.stopping:
             # Without its companion the CLI has no channel to report through: an error the operator
-            # sees, not a silence that looks like thinking.
-            await self._apply(session, StaffEvent(EventKind.TURN_FAILED, event.at, {"failure": f"side channel lost: the {role} exited"}, launch_id=session.launch.launch_id))
+            # sees, not a silence that looks like thinking. What it printed as it went is the why.
+            ended = f" with code {code}" if isinstance(code, int) and code != 0 else ""
+            said = await self._companions_said(session, only=terminal_id)
+            await self._apply(session, StaffEvent(EventKind.TURN_FAILED, at, {"failure": f"side channel lost: the {role} exited{ended}{said}"}, launch_id=session.launch.launch_id))
+
+    async def _companions_gone(self, session: CliSession) -> None:
+        """A companion that died before the session was registered: its exit event found no session
+        to fail, and the launch then waited its whole readiness timeout for a server that was gone."""
+        for terminal_id in session.companions:
+            with contextlib.suppress(TerminalError):
+                view = await self.terminals.get(terminal_id)
+                if view.get("status") == "exited" and not session.start_failure:
+                    await self._companion_exited(session, terminal_id, view.get("exit_code"), str(view.get("exited_at") or _now()))
 
     async def _apply(self, session: CliSession, event: StaffEvent) -> None:
         """One event through the status machine, and what it changed to the ingress. Serialised per
@@ -773,6 +818,8 @@ class CliStaffRuntime:
         session.changed.set()
         if kind in (EventKind.READY, EventKind.PROMPT_ACKNOWLEDGED, EventKind.TURN_STARTED, EventKind.TOOL_STARTED, EventKind.PERMISSION_REQUESTED, EventKind.QUESTION_ASKED, EventKind.TURN_COMPLETED):
             session.ready.set()
+        if kind is EventKind.TURN_FAILED and not session.ready.is_set() and not session.start_failure:
+            session.start_failure = str(event.payload.get("failure") or "failed")
         if kind in (EventKind.TURN_CANCELLED, EventKind.TURN_FAILED):
             # A turn that ended any other way leaves nothing for the next one to count. The flag is
             # cleared at a turn's end, never at its start: a team call is answered as it arrives,
@@ -881,12 +928,7 @@ class CliStaffRuntime:
         except Exception:  # noqa: BLE001 — the reason stands without the screen
             logger.info("the screen of %s could not be read after it exited", session.staff_session_id, exc_info=True)
             return reason
-        # Printable characters only: the reason is stored as one line of text, and a store that
-        # refused it would leave the session unended. A line with no word on it is a frame.
-        lines = ["".join(c for c in line if c.isprintable()).strip() for line in screen.splitlines()]
-        said = " / ".join([line for line in lines if any(c.isalnum() for c in line)][-EXIT_SCREEN_LINES:])
-        if len(said) > EXIT_SCREEN_CHARS:
-            said = "…" + said[-EXIT_SCREEN_CHARS:]
+        said = _said(screen.splitlines())
         return f"{reason}; its screen last showed: {said}" if said else reason
 
     async def _located(self, session: CliSession, live: LiveSession, event: StaffEvent) -> None:

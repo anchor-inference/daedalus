@@ -668,7 +668,9 @@ async def test_a_companion_that_dies_takes_the_side_channel_with_it(settings: Se
         assert companion["title"].endswith("· app-server") and companion["created_by"].startswith("agent:staff:")
         await s.terminals.kill(launch.companion_terminal_id)
         failed = await s.status_event(ada, "error")
-        assert failed.payload["detail"] == "side channel lost: the app-server exited"
+        # What the companion's screen last showed goes with it: often the reason it went.
+        assert failed.payload["detail"].startswith("side channel lost: the app-server exited")
+        assert "the app-server's screen last showed: " in failed.payload["detail"]
 
 
 # -- the machine's cap ----------------------------------------------------------------------------------
