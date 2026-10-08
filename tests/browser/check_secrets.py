@@ -83,8 +83,17 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             HOST.secrets = [s for s in HOST.secrets if s["id"] != rel.rsplit("/", 1)[1]]
             return answer({"ok": True})
         if rel == f"/api/sessions/{SESSION}/messages" and isinstance(data, dict):
+            # The way a message arrives as the agent's turn ends: the host keeps the queued row, hidden, under
+            # the receipt id, and shows the copy that opens the next turn, whose stored words carry the
+            # secret's note and so never equal the typed ones. Only the receipt id on the shown copy can
+            # retire the app's temporary bubble.
             seq = len(HOST.messages) + 1
-            HOST.messages = HOST.messages + [message(seq, "user", str(data.get("text", "")), client_message_id=data.get("client_message_id"), secrets=[{"name": n, "scope": "session"} for n in data.get("secrets") or []] or None)]
+            text, cid = str(data.get("text", "")), data.get("client_message_id")
+            handed = [{"name": n, "scope": "session"} for n in data.get("secrets") or []] or None
+            HOST.messages = HOST.messages + [
+                message(seq, "user", f"{text}\n\n[The operator attached a secret for this chat: «secret:x» (shell: $DAEDALUS_SECRET_X). The value is not shown to you; use it by its placeholder.]", internal=True, delivery="follow_up", client_message_id=cid, secrets=handed),
+                message(seq + 1, "user", text, delivery="drained", client_message_ids=[cid], secrets=handed),
+            ]
             return answer({"run_id": "r2", "receipt": {"status": "consumed"}})
         return answer({})
     if rel == "/api/auth/me":
@@ -170,6 +179,12 @@ def send_and_read(page: Page, where: str, problems: list[str]) -> None:
     # The draft lets go of its chip once the host has confirmed the message, which can be a moment after
     # the transcript shows it.
     wait_for(page, lambda: page.locator(".composer .attachments .secret-chip").count() == 0, f"{where}: the chip leaving the draft after the message went", problems)
+    # The temporary bubble drawn the moment the message went has to go once the host's copy is shown. It
+    # stayed under the delivered message when the copy that opened the next turn named no receipt.
+    typed = "Log in and read the firmware version"
+    if wait_for(page, lambda: page.locator(".msg.user", has_text=typed).count() == 1, f"{where}: the temporary bubble leaving once the message is shown", problems):
+        if page.locator(".msg.user", has_text=typed).locator(".secret-chip").count() != 1:
+            problems.append(f"{where}: the one copy left is the temporary bubble, not the delivered message")
     shot(page, f"sent-{where}")
 
 
@@ -214,6 +229,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
 def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
     problems: list[str] = []
     HOST.secrets = []
+    HOST.messages = HOST.messages[:2]  # the desktop's message would be a second copy of the same words
     context = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="dark", is_mobile=True, has_touch=True)
     page = open_page(context)
     page.locator(".composer .iconbtn.plus").click()
