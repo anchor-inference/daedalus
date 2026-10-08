@@ -55,20 +55,32 @@ func (d *Dialer) Dial(target, launchID string) (net.Conn, *hooks.Launch, func(),
 			return nil, nil, nil, fmt.Errorf("%w: unix:<name> names a socket in the launch's dial directory", ErrInvalid)
 		}
 		address = filepath.Join(l.DialDir, name)
-		if len(address) > 104 {
-			return nil, nil, nil, fmt.Errorf("%w: %s is longer than a unix socket path may be", ErrInvalid, address)
-		}
 		st, err := os.Lstat(address)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("%w: no socket %s", ErrNotFound, name)
 		}
-		if st.Mode()&fs.ModeSocket == 0 {
-			return nil, nil, nil, fmt.Errorf("%w: %s is not a socket", ErrForbidden, name)
-		}
 		// The launch's programs can write where the socket lives. A dial directory they replaced by
 		// a link would send the host's stream to whatever socket the link names instead.
-		if real, err := filepath.EvalSymlinks(address); err != nil || real != d.launches.RealDialPath(l, name) {
+		want := d.launches.RealDialPath(l, name)
+		if real, err := filepath.EvalSymlinks(filepath.Dir(address)); err != nil || real != filepath.Dir(want) {
 			return nil, nil, nil, fmt.Errorf("%w: %s is not in the launch's dial directory", ErrForbidden, name)
+		}
+		switch {
+		case st.Mode()&fs.ModeSocket != 0:
+		case st.Mode()&fs.ModeSymlink != 0:
+			// Codex from 0.157 on binds its app server's socket in a short private directory of its
+			// own and leaves a link at the path it was told to listen on; refusing every link made
+			// each Codex launch wait on a socket the host could never reach. A link is followed only
+			// to a socket of this daemon's user in a directory nobody else may write.
+			address, err = d.linkedSocket(l, name, address)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+		default:
+			return nil, nil, nil, fmt.Errorf("%w: %s is not a socket", ErrForbidden, name)
+		}
+		if len(address) > 104 {
+			return nil, nil, nil, fmt.Errorf("%w: %s is longer than a unix socket path may be", ErrInvalid, address)
 		}
 		network = "unix"
 	case strings.HasPrefix(target, "tcp:127.0.0.1:"):
@@ -110,4 +122,32 @@ func (d *Dialer) Dial(target, launchID string) (net.Conn, *hooks.Launch, func(),
 		})
 	}
 	return nc, l, release, nil
+}
+
+// linkedSocket is the socket a link in the launch's dial directory names, resolved: the path that
+// is dialled, so the link cannot be swapped between the check and the dial. A link that names
+// nothing yet is "not found", as a socket not made yet is: the program may still be binding it.
+func (d *Dialer) linkedSocket(l *hooks.Launch, name, address string) (string, error) {
+	real, err := filepath.EvalSymlinks(address)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s links to no socket yet", ErrNotFound, name)
+	}
+	st, err := os.Lstat(real)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s links to no socket yet", ErrNotFound, name)
+	}
+	if st.Mode()&fs.ModeSocket == 0 {
+		return "", fmt.Errorf("%w: %s links to something that is not a socket", ErrForbidden, name)
+	}
+	// Another launch's sockets are that launch's: one member must not reach another's server
+	// through the host.
+	own := filepath.Dir(d.launches.RealDialPath(l, name))
+	root := filepath.Dir(own)
+	if strings.HasPrefix(real, root+string(filepath.Separator)) && !strings.HasPrefix(real, own+string(filepath.Separator)) {
+		return "", fmt.Errorf("%w: %s links into another launch's dial directory", ErrForbidden, name)
+	}
+	if err := privateSocket(real, st); err != nil {
+		return "", fmt.Errorf("%w: %s links to %v", ErrForbidden, name, err)
+	}
+	return real, nil
 }

@@ -568,7 +568,10 @@ require().definition.parameters.properties["kind"]["enum"] = ["quality", "scope"
         "op='inspect' returns result ids, current candidate and entity revision. op='verdict' requires "
         "result_id, expected_entity_revision, verification (verified, failed or stale), accepted, "
         "evidence_ids and reason; branch work also needs exact head/base. An accepted verdict means the "
-        "reviewer approved that result, not that the operator accepted the task. op='return' requires "
+        "reviewer approved that result, not that the operator accepted the task. op='accept' is for work "
+        "with no branch — a report, a diagnosis, an answer: with result_id, expected_entity_revision and "
+        "reason (what the report showed against the done-when) it accepts that result and finishes the "
+        "card. op='return' requires "
         "the exact result_id, verdict_id, contract_revision, expected_entity_revision and reason. "
         "Mutations require a host-issued reviewer grant; tool arguments cannot choose their actor."
     ),
@@ -596,7 +599,7 @@ async def review_result(
                        contract_revision=contract_revision, client_operation_id=call_id(context))
 
 
-review_result().definition.parameters.properties["op"]["enum"] = ["inspect", "verdict", "return"]
+review_result().definition.parameters.properties["op"]["enum"] = ["inspect", "verdict", "accept", "return"]
 review_result().definition.parameters.properties["verification"]["enum"] = ["unverified", "verified", "failed", "stale"]
 
 
@@ -609,8 +612,9 @@ review_result().definition.parameters.properties["verification"]["enum"] = ["unv
     description=(
         "Say that nothing further follows a result or a card, and why: it leaves the state block's list of results "
         "waiting for your decision, and the journal keeps the reason. task_id, or loop (the L… the state block "
-        "gives). For a card that waits on the operator, someone outside or a date, Tasks(op='move', "
-        "status='blocked', waiting_on=…) says so on the board instead."
+        "gives). It does not move the card: a handed-in report is finished with ReviewResult(op='accept'), "
+        "a card nobody will do is Tasks(op='move', status='dropped'), and for a card that waits on the operator, "
+        "someone outside or a date, Tasks(op='move', status='blocked', waiting_on=…) says so on the board."
     ),
 )
 async def decide(context: ToolContext, why: str, task_id: str | None = None, loop: str | None = None) -> ToolResult:

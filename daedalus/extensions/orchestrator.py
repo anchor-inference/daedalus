@@ -1301,7 +1301,7 @@ class Orchestrators:
         if p.get("kind") == "done" and p.get("task_id"):
             shown = [str(e.get("item")) for e in p.get("evidence") or [] if isinstance(e, dict)]
             said = (f"evidence for {', '.join(shown)}" if shown else "") + ("; " if shown and p.get("unproven") else "") + (f"none for {', '.join(p['unproven'])}" if p.get("unproven") else "")
-            parts.append(f"handed in, not accepted{': ' + said if said else ''} — ReviewResult(task_id='{p['task_id']}', op='inspect') shows the exact report")
+            parts.append(f"handed in, not accepted{': ' + said if said else ''} — ReviewResult(task_id='{p['task_id']}', op='inspect') shows the exact report, and op='accept' finishes a card with no branch")
         return (" — " + "; ".join(parts)) if parts else ""
 
     @staticmethod

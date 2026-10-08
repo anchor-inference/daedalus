@@ -409,6 +409,84 @@ func TestNetDialUnixSocketInTheDialDirectory(t *testing.T) {
 	}
 }
 
+// Codex from 0.157 on leaves a link at the socket path it is given, to a socket it binds in a private
+// directory of its own. The link is followed there, and only there.
+func TestNetDialFollowsALinkToAPrivateSocket(t *testing.T) {
+	f, _ := startSide(t)
+	var r registered
+	f.call(t, "hooks.register_launch", map[string]any{"launch_id": "L4"}, &r)
+	private, err := os.MkdirTemp("", "cxd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(private) })
+	os.Chmod(private, 0o700)
+	// A link that names nothing yet is a socket not made yet: the host dials again.
+	if err := os.Symlink(filepath.Join(private, "app.sock"), filepath.Join(r.DialDir, "codex.sock")); err != nil {
+		t.Fatal(err)
+	}
+	if we := f.callErr("net.dial", map[string]any{"target": "unix:codex.sock", "launch_id": "L4"}); we == nil || we.Code != wire.CodeNotFound {
+		t.Fatalf("a dangling link: %v", we)
+	}
+	ln, err := net.Listen("unix", filepath.Join(private, "app.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	echoServer(t, ln)
+	var dial struct {
+		Channel uint32 `json:"channel"`
+	}
+	f.call(t, "net.dial", map[string]any{"target": "unix:codex.sock", "launch_id": "L4"}, &dial)
+	if err := f.client.Send(dial.Channel, []byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	if got := frameOn(t, f, dial.Channel); string(got) != "ping" {
+		t.Fatalf("%q", got)
+	}
+
+	// Not to a socket in a directory others may write: anyone could have put it there.
+	open, err := os.MkdirTemp("", "cxo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(open) })
+	ln2, err := net.Listen("unix", filepath.Join(open, "app.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	echoServer(t, ln2)
+	os.Chmod(open, 0o777)
+	if err := os.Symlink(filepath.Join(open, "app.sock"), filepath.Join(r.DialDir, "open.sock")); err != nil {
+		t.Fatal(err)
+	}
+	if we := f.callErr("net.dial", map[string]any{"target": "unix:open.sock", "launch_id": "L4"}); we == nil || we.Code != wire.CodeForbidden {
+		t.Fatalf("a socket in a shared directory: %v", we)
+	}
+
+	// Not to another launch's socket, and not to a file that is no socket.
+	var other registered
+	f.call(t, "hooks.register_launch", map[string]any{"launch_id": "L5"}, &other)
+	ln3, err := net.Listen("unix", filepath.Join(other.DialDir, "codex.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	echoServer(t, ln3)
+	if err := os.Symlink(filepath.Join(other.DialDir, "codex.sock"), filepath.Join(r.DialDir, "theirs.sock")); err != nil {
+		t.Fatal(err)
+	}
+	if we := f.callErr("net.dial", map[string]any{"target": "unix:theirs.sock", "launch_id": "L4"}); we == nil || we.Code != wire.CodeForbidden {
+		t.Fatalf("another launch's socket: %v", we)
+	}
+	plain := filepath.Join(private, "plain")
+	os.WriteFile(plain, []byte("x"), 0o600)
+	if err := os.Symlink(plain, filepath.Join(r.DialDir, "plain.sock")); err != nil {
+		t.Fatal(err)
+	}
+	if we := f.callErr("net.dial", map[string]any{"target": "unix:plain.sock", "launch_id": "L4"}); we == nil || we.Code != wire.CodeForbidden {
+		t.Fatalf("a link to a plain file: %v", we)
+	}
+}
+
 func TestCreateWithAnUnknownLaunchIsRefused(t *testing.T) {
 	f, _ := startSide(t)
 	we := f.callErr("terminal.create", map[string]any{"id": "x1", "argv": []string{"sh"}, "launch_id": "never"})

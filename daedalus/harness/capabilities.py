@@ -120,7 +120,7 @@ CAPABILITIES: dict[str, Capabilities] = {
         paste=None,
         companion=True,
         pointer_dir_flag="",
-        tested_versions=("0.155.1", "0.157.0"),
+        tested_versions=("0.155.1", "0.161.0"),
         supported_major=0,
         # Codex's update check is switched off by a config override on its argv, not by environment.
         autoupdate_off=(),
