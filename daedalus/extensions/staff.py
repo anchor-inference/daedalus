@@ -36,7 +36,13 @@ from protocore.runtime.events.types import EventType
 from daedalus.extensions.board import NOTES_MAX_CHARS
 from daedalus.extensions.launch_controls import launch_resources
 from daedalus.extensions.notifications import ActionConflict, ActionOutcome, ActionRefused, Draft
-from daedalus.extensions.runtime_observations import admit_native_run, enter_runtime, observe_exit, observe_no_entry
+from daedalus.extensions.runtime_observations import (
+    admit_native_run,
+    enter_runtime,
+    observe_exit,
+    observe_native_output,
+    observe_no_entry,
+)
 from daedalus.extensions.staff_results import StaffReportService
 from daedalus.extensions.task_context import ContextUnavailable, assemble_task_context, render_task_context
 from daedalus.extensions.task_contract import RETURNED, Contracts
@@ -243,6 +249,9 @@ class Team:
             raise RuntimeError("the staff runtime and model calls must share the same execution owner")
         self.runtimes: dict[str, StaffRuntime] = {"daedalus": DaedalusStaffRuntime(self.manager)}
         self._execution_locks: dict[str, asyncio.Lock] = {}
+        self._answered_runs: set[str] = set()
+        """Native sessions whose current run has had the model's first output: the clock it settles is
+        settled once, not in a transaction for every step."""
         # A host folder in Docker is worked in through the host terminal bridge; the service is
         # looked up per call, so a bridge installed after the start is used without a restart.
         self.host_bridge = HostBridge(lambda: cast("Terminals | None", app.extensions.get("terminals")))
@@ -1755,6 +1764,9 @@ class Team:
             await self.ingress.status(live, "working", detail="signal again")
         else:
             await self.manager.staff.touch(live.id)
+        if event.type is EventType.MESSAGE_STOP and session_id not in self._answered_runs:
+            self._answered_runs.add(session_id)
+            await observe_native_output(self.app, live.id)
         if event.type is EventType.TOOL_CALL_PENDING and event.payload.get("kind") == "ask_user" and event.payload.get("tool_name") == "AskOrchestrator":
             questions = (event.payload.get("ask_user_payload") or {}).get("questions") or [{}]
             first = questions[0] if isinstance(questions[0], dict) else {}
@@ -1772,7 +1784,10 @@ class Team:
                     await self.ingress.message_state(str(message_id), "acknowledged")
 
     async def admit_run(self, staff_session_id: str, session_id: str, run_id: str) -> None:
-        await admit_native_run(self.app, staff_session_id, session_id, run_id)
+        # The model's first answer may take as long as a native member may be silent.
+        await admit_native_run(self.app, staff_session_id, session_id, run_id,
+                               first_output_s=self.manager.config.staff.silence_minutes * 60)
+        self._answered_runs.discard(session_id)
 
     async def on_run_started(self, session_id: str, run_id: str) -> None:
         live = await self.live_for_session(session_id)
@@ -1780,6 +1795,7 @@ class Team:
             await self.ingress.status(live, "working")
 
     async def on_run_finished(self, session_id: str, run_id: str, status: str) -> None:
+        self._answered_runs.discard(session_id)
         state = self.manager.live_state(session_id)
         staff_session_id = str(state.metadata.get("staff_session_id") or "") if state is not None else ""
         if staff_session_id and status in ("completed", "failed", "cancelled"):
