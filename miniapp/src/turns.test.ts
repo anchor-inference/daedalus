@@ -338,3 +338,72 @@ describe("when the streaming turn ends", () => {
     expect(state.text).toBe("One slow query, on the events table.");
   });
 });
+
+describe("a long run's steps and the words between them", () => {
+  // Nothing of a run is written to the transcript until it ends, so every message after the
+  // operator's is live, and an event reads only the last TAIL of them. Twelve steps are enough to
+  // outgrow that tail.
+  const TAIL = 24;
+  const live = (m: MessageView): MessageView => ({ ...m, live: true });
+  const steps = (prefix: string, n: number, from: number): MessageView[] =>
+    Array.from({ length: n }, (_, k) => [live(call(from + 2 * k, `${prefix}${k + 1}`)), live(result(from + 2 * k + 1, `${prefix}${k + 1}`, "ok"))]).flat();
+  const start = user(1, "build it");
+  const before = steps("a", 14, 2); // seq 2…29
+  const words = live(msg(30, { text: "The screenshot caught the wrong window. Bringing it forward and", tool_calls: [{ id: "b1", name: "Exec", arguments: {} }, { id: "b2", name: "Exec", arguments: {} }] }));
+  const wordsResults = [live(result(31, "b1", "ok")), live(result(32, "b2", "ok"))];
+  const after = steps("c", 3, 33); // seq 33…38
+
+  /** What the turn shows, in order: tool ids, and `note` where the words are. */
+  const order = (turn: ReturnType<typeof applyLive>) => turn.activity.map((a) => (a.kind === "tool" ? a.id : a.kind));
+  const streamed = (ids: string[], text = ""): LiveState => ({ ...EMPTY_LIVE, runId: undefined, text, tools: ids.map((id) => ({ id, name: "Exec", args: "{}", result: "ok" })) });
+  const ids = (prefix: string, n: number) => Array.from({ length: n }, (_, k) => `${prefix}${k + 1}`);
+
+  it("keeps the steps before the words above them once a short read no longer reaches them", () => {
+    // The screen opened on the whole page while the words were streaming…
+    let known = reconcile([], [start, ...before]).messages;
+    const streaming = applyLive(liveBase(buildTurns(known)), streamed(ids("a", 14), "The screenshot caught"), Date.now());
+    expect(order(streaming)).toEqual(ids("a", 14));
+    expect(streaming.answer).toBe("The screenshot caught");
+    // …then the words ended in two commands, and the steps went on. Each event reads a short tail.
+    for (const upto of [words, ...wordsResults, ...after]) {
+      const all = [start, ...before, words, ...wordsResults, ...after];
+      const page = all.slice(0, all.indexOf(upto) + 1).slice(-TAIL);
+      const merged = reconcile(known, page);
+      expect(merged.gap).toBe(false);
+      known = merged.messages;
+    }
+    const turn = applyLive(liveBase(buildTurns(known)), streamed([...ids("a", 14), "b1", "b2", ...ids("c", 3)]), Date.now());
+    expect(order(turn)).toEqual([...ids("a", 14), "note", "b1", "b2", ...ids("c", 3)]);
+    expect(turn.answer).toBe("");
+  });
+
+  it("stays in that order when the run ends and its rows are written", () => {
+    const all = [start, ...before, words, ...wordsResults, ...after];
+    const known = reconcile([], all).messages;
+    const written = all.map((m) => ({ ...m, live: undefined }));
+    const end = reconcile(known, written.slice(-TAIL));
+    // The written tail reaches back past what was settled: the screen reads the whole page again,
+    // and that page is the same order.
+    expect(end.gap).toBe(true);
+    const [turn] = buildTurns(reconcile([], written).messages);
+    expect(order(turn)).toEqual([...ids("a", 14), "note", "b1", "b2", ...ids("c", 3)]);
+  });
+
+  it("matches the live messages by who they are when a queued message takes a row in the middle", () => {
+    const all = [start, ...before, words];
+    let known = reconcile([], all).messages;
+    // The operator queues a message: it is written at once (hidden), and every live number moves up.
+    const queuedRow = { ...user(2, "later"), internal: true };
+    const shifted = all.slice(1).map((m) => ({ ...m, seq: m.seq! + 1 }));
+    known = reconcile(known, [start, queuedRow, ...shifted].slice(-TAIL)).messages;
+    const [turn] = buildTurns(known);
+    expect(order(turn)).toEqual([...ids("a", 14), "note", "b1", "b2"]);
+  });
+
+  it("does not put a streamed step the history has not read below the steps that came after it", () => {
+    // The turn's first steps are on a page the screen has not read: the stream still carries them.
+    const known = [start, ...before.slice(8), words];
+    const turn = applyLive(liveBase(buildTurns(known)), streamed([...ids("a", 14), "b1", "b2", "c1"]), Date.now());
+    expect(order(turn)).toEqual([...ids("a", 14).slice(4), "note", "b1", "b2", "c1"]);
+  });
+});
