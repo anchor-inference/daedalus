@@ -8,6 +8,7 @@ import { timeAgo } from "../ui/components";
 import { Icon, type IconName } from "../icons";
 import { t, useLang } from "../i18n";
 import { renderMarkdown } from "../md";
+import { RawHtml } from "../rawhtml";
 import { splitMediaAnswer, type AnswerPart } from "../mediaformat";
 
 type SharedMessage = { role: "user" | "assistant"; text: string; at: string; via?: string; media?: MediaPresentation[] };
@@ -18,7 +19,7 @@ const REFRESH_MS = 20_000;
 
 function Md({ text, className }: { text: string; className?: string }) {
   const html = useMemo(() => renderMarkdown(text), [text]);
-  return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+  return <RawHtml className={className} html={html} />;
 }
 
 function albumRatio(items: MediaPresentation["items"]): string | undefined {

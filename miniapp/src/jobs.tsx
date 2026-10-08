@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { api, MessageView, TaskView } from "./api";
 import { timeAgo } from "./ui/components";
 import { codeBlock } from "./md";
+import { RawHtml } from "./rawhtml";
 import { Icon } from "./icons";
 import { PanelEntry } from "./panel";
 import { PreviewSource, fileGlyph, previewKind, sessionBase } from "./preview";
@@ -116,7 +117,7 @@ export function JobsTab({ sessionId, messages, onOpen, onPreview, onOpenSession 
                 {r.sandboxed ? t("session.receipt.sandboxed") : ""}
                 {r.dependencies && t("session.receipt.depends", { list: r.dependencies })}
               </div>
-              <div dangerouslySetInnerHTML={{ __html: codeBlock(r.command, "sh") }} />
+              <RawHtml html={codeBlock(r.command, "sh")} />
               {r.output_head && (looksLikeDiff(r.output_head) ? <DiffView text={r.output_head} /> : <pre className="filetext">{r.output_head}</pre>)}
             </details>
           ))}
