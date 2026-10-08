@@ -11,6 +11,7 @@ import { missingPlans, opencodeBaseUrl, opencodePlanOf, opencodeProvider, OPENCO
 
 const calls = vi.hoisted(() => ({ onboarding: {} as Record<string, unknown>, put: [] as [string, unknown][] }));
 vi.mock("../api", () => ({
+  PROVIDER_KEYS_CHANGED: "daedalus:provider-keys",
   api: {
     get: async (path: string) => {
       if (path === "/api/onboarding") return calls.onboarding;

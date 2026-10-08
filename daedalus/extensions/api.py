@@ -3776,7 +3776,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         # The whole settings view comes back with the catalogue: the save moved the configuration's
         # revision, and a Settings screen still holding the old one refused its next save as "changed in
         # another window" when the other window was this one.
-        return {**await manager.tool_group_catalogue(), "settings": _settings_view()}
+        return {**await manager.tool_group_catalogue(), "settings": await _settings_view()}
 
     @api.get("/api/sessions/{session_id}/tool-groups")
     async def session_tool_groups(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -5535,7 +5535,18 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     # -- settings -------------------------------------------------------------------
 
-    def _settings_view() -> dict[str, Any]:
+    async def _settings_view() -> dict[str, Any]:
+        """The settings as the app edits them, with each endpoint's key state beside them.
+
+        The key state is :func:`_provider_view`'s, the same answer Add a model gets from
+        ``/api/onboarding``. Settings used to read "ready" from whether an adapter could be built and
+        "key stored" from the configuration's own field, neither of which says whether the key proxy
+        can sign a call, and so it showed an endpoint as ready with its key stored while Add a model,
+        asking the proxy, showed the same endpoint with no key.
+        """
+        await adopt_stored_proxy_keys()
+        keys = await keyproxy_keys()
+        usable = set(manager.providers.available())
         data = app.config.model_dump(mode="json")
         data["revision"] = config_revision(app.config)
         data["providers_available"] = list(manager.providers.available())
@@ -5549,7 +5560,17 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         # What a preset left to its model does with the on-demand tool groups, so the switch can say it.
         data["on_demand_defaults"] = {pid: on_demand_tool_groups_for(None, preset.model) for pid, preset in app.config.presets.items()}
         data["keyproxy_base"] = _keyproxy_origin()
-        return mask_provider_keys(data)
+        data["provider_keys"] = {pid: _key_state(_provider_view(pid, pc, usable, keys)) for pid, pc in app.config.providers.items()}
+        masked = mask_provider_keys(data)
+        for pid, entry in (masked.get("providers") or {}).items():
+            state = masked["provider_keys"].get(pid)
+            if state and state["via_proxy"]:
+                # The proxy's key is the only one that signs a call through it.
+                entry["api_key_set"] = state["key_held"] is True and state["key_kind"] == "api_key"
+        return masked
+
+    def _key_state(view: dict[str, Any]) -> dict[str, Any]:
+        return {name: view[name] for name in ("via_proxy", "key_held", "key_kind", "ready")}
 
     def _keyproxy_origin() -> str:
         """The one address this bot sends its own API token to, or "" when there is nothing to ask.
@@ -5606,6 +5627,68 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         upstreams_cache.update(at=time.monotonic(), value=value)
         return value
 
+    async def keyproxy_store_key(upstream: str, key: str) -> None:
+        """Give the key proxy one upstream's key, or with "" make it forget it; raise what to tell the operator.
+
+        Sent to the address the launcher gave this process and nowhere else, like ``/keys``. The
+        key travels in the body and is never logged; what comes back says only whether a key is held.
+        """
+        base = keyproxy_base()
+        headers = {"x-daedalus-token": api_token}
+        url = f"{base}/keys/{upstream}"
+        try:
+            if key:
+                response = await keyproxy_client().put(url, headers=headers, json={"key": key})
+            else:
+                response = await keyproxy_client().delete(url, headers=headers)
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, "the key proxy is not reachable, so the key was not saved") from exc
+        # Whatever the outcome, the next read asks again rather than answering from before the change.
+        upstreams_cache["at"] = 0.0
+        if response.status_code == 200:
+            return
+        try:
+            reason = str(response.json().get("error") or "")
+        except ValueError:
+            reason = ""
+        if response.status_code == 403:
+            raise HTTPException(502, "the key proxy refused this installation's token, so the key was not saved")
+        if response.status_code == 409:
+            raise HTTPException(409, reason or "this key proxy reads its keys from keyproxy.env only")
+        if response.status_code in (400, 404):
+            raise HTTPException(400, reason or f"the key proxy has no key for {upstream!r}")
+        raise HTTPException(502, reason or f"the key proxy answered {response.status_code}")
+
+    adopt_lock = asyncio.Lock()
+
+    async def adopt_stored_proxy_keys() -> None:
+        """Move a key kept in the configuration for an endpoint behind the key proxy into the proxy.
+
+        Settings used to store such a key in the configuration, where it signed nothing: the proxy
+        drops a caller's credentials and uses its own. Moved once, when the proxy can take it; until
+        then it stays where it is, and an endpoint keeps reading as having no key.
+        """
+        pending = {pid: pc for pid, pc in app.config.providers.items() if pc.api_key and keyproxy_upstream(pc.base_url)}
+        if not pending:
+            return
+        async with adopt_lock:
+            moved: list[str] = []
+            for pid, pc in pending.items():
+                if app.config.providers.get(pid) is not pc:
+                    continue
+                try:
+                    await keyproxy_store_key(keyproxy_upstream(pc.base_url), pc.api_key)
+                except HTTPException as exc:
+                    logger.warning("the key stored for %s stays in the configuration: %s", pid, exc.detail)
+                    continue
+                moved.append(pid)
+            if not moved:
+                return
+            raw = app.config.model_dump(mode="json")
+            for pid in moved:
+                raw["providers"][pid]["api_key"] = ""
+            await _apply_config(type(app.config).model_validate(raw))
+
     async def keyproxy_upstreams() -> list[str] | None:
         """The upstream names the proxy holds a credential for; None when it cannot be asked."""
         keys = await keyproxy_keys()
@@ -5657,6 +5740,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         A fresh install has provider endpoints but no model — a provider is an address, not a
         choice of model — so the app opens Add a model instead of a chat that cannot answer.
         """
+        await adopt_stored_proxy_keys()
         usable = set(manager.providers.available())
         keys = await keyproxy_keys()
         providers = [_provider_view(pid, pc, usable, keys) for pid, pc in app.config.providers.items()]
@@ -5676,7 +5760,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.get("/api/settings")
     async def get_settings(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        view = _settings_view()
+        view = await _settings_view()
         keyed = await keyproxy_upstreams()
         for entry in view["search_backends"]:
             entry["available"] = True if not entry["needs_key"] else (None if keyed is None else entry["id"] in keyed)
@@ -5793,16 +5877,19 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 # Sessions opened in the private chat have no topic; without one they would all
                 # speak in General at once, with nothing saying which is which.
                 await app.front.adopt_sessions_into_topics()
-        return _settings_view()
+        return await _settings_view()
 
     # -- provider endpoints ----------------------------------------------------------------
 
-    async def _save_provider_config(new_config: RuntimeConfig) -> dict[str, Any]:
+    async def _apply_config(new_config: RuntimeConfig) -> None:
         await app.save_config(new_config)
         await manager.providers.close_retired()
         if app.front is not None:
             app.front.config = new_config
-        return _settings_view()
+
+    async def _save_provider_config(new_config: RuntimeConfig) -> dict[str, Any]:
+        await _apply_config(new_config)
+        return await _settings_view()
 
     def _reference_check(config: RuntimeConfig, provider_id: str) -> str | None:
         users = [pid for pid, preset in config.presets.items() if preset.provider == provider_id]
@@ -5814,15 +5901,23 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     async def put_provider(provider_id: str, body: ProviderPatch, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         patch = body.model_dump(exclude_unset=True)
         if not patch:
-            return _settings_view()
+            return await _settings_view()
         raw = app.config.model_dump(mode="json")
         apply_provider_patch(raw.setdefault("providers", {}), provider_id, patch)
         try:
             new_config = type(app.config).model_validate(raw)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(400, str(exc)) from exc
-        if not new_config.providers[provider_id].base_url:
+        target = new_config.providers[provider_id]
+        if not target.base_url:
             raise HTTPException(400, "base_url is required for a provider endpoint")
+        upstream = keyproxy_upstream(target.base_url)
+        if upstream and (target.api_key or "api_key" in patch):
+            # An endpoint behind the key proxy is signed by the proxy alone, so its key goes there
+            # and the configuration keeps none; kept here, it was reported as stored and used by nothing.
+            await keyproxy_store_key(upstream, target.api_key)
+            raw["providers"][provider_id]["api_key"] = ""
+            new_config = type(app.config).model_validate(raw)
         return await _save_provider_config(new_config)
 
     @api.delete("/api/providers/{provider_id}")

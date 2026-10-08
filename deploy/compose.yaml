@@ -352,8 +352,11 @@ services:
       KEYPROXY_CODEX_AUTH: /home/keyproxy/.codex/auth.json
       KEYPROXY_GROK_AUTH: /home/keyproxy/.grok/auth.json
       KEYPROXY_CLAUDE_AUTH: /home/keyproxy/.claude/.credentials.json
+      # The same file as env_file, so a key saved in Settings is written where the next start reads it.
+      KEYPROXY_KEYS_FILE: /run/keyproxy/keyproxy.env
     volumes:
       - daedalus-state:/srv/state:ro
+      - ${DAEDALUS_SECRETS_FILE:-../../daedalus-secrets/keyproxy.env}:/run/keyproxy/keyproxy.env
       # Subscriptions: the CLIs' logins, served as /codex/v1, /grok/v1 and /claude/v1.
       - ${DAEDALUS_HARNESS_HOME:-~}/.codex:/home/keyproxy/.codex
       - ${DAEDALUS_HARNESS_HOME:-~}/.grok:/home/keyproxy/.grok

@@ -789,7 +789,8 @@ func supervisorEnv(p Paths, base []string, settings map[string]string) []string 
 // keyproxyEnv is what the key proxy runs with. The provider keys come from the file the launcher
 // keeps at 0600 outside every checkout, and they are read here rather than put in the supervisor's
 // environment: the agent's process never holds a key in native mode either, which is the one part
-// of the container's isolation that survives without a container.
+// of the container's isolation that survives without a container. KEYPROXY_KEYS_FILE names that
+// file so a key saved in Settings is written there by the proxy itself and read on the next call.
 func keyproxyEnv(p Paths, base []string, keys map[string]string, settings map[string]string, home string) []string {
 	env := append([]string(nil), base...)
 	for key, value := range keys {
@@ -800,6 +801,7 @@ func keyproxyEnv(p Paths, base []string, keys map[string]string, settings map[st
 	env = append(env,
 		"KEYPROXY_PORT="+parsePort(settings["KEYPROXY_PORT"], defaultKeyproxyPort),
 		"KEYPROXY_HOST=127.0.0.1",
+		"KEYPROXY_KEYS_FILE="+p.KeyproxyEnv,
 		"KEYPROXY_BUDGET_FLAG="+filepath.Join(p.State, "BUDGET_EXCEEDED"),
 		"KEYPROXY_BUDGET_DB="+filepath.Join(p.State, "daedalus.sqlite"),
 		"KEYPROXY_AGENT_API=http://127.0.0.1:"+parsePort(settings["API_PORT"], "8765"),

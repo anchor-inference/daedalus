@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, IconName } from "../icons";
 import { navigate, pathFor } from "../router";
 import { PageHeader, go, screenTitle, useMedia } from "../ui/index";
-import { api, telegram, HeartbeatStatus, Preset, ProviderConf, SearchBackendInfo, SearchCheck, Settings } from "../api";
+import { announceProviderKeys, api, telegram, HeartbeatStatus, Preset, ProviderConf, SearchBackendInfo, SearchCheck, Settings } from "../api";
 import { confirmAsync, errorText, numInput } from "../ui";
 import * as passkeys from "../passkeys";
 import { timeAgo } from "../ui/components";
@@ -256,12 +256,23 @@ function PresetRow({ id, p, onDemandByModel, isDefault, inChain, providers, onDe
   );
 }
 
+/**
+ * Whether a client can answer: the key state the host reports, the same one Add a model shows.
+ * Whether an adapter could be built said nothing about a key behind the key proxy, and read as
+ * "ready" for an endpoint whose every call the proxy refused for want of one.
+ */
+export function providerReady(s: Pick<Settings, "provider_keys">, id: string): boolean {
+  return s.provider_keys?.[id]?.ready ?? false;
+}
+
 /** One client: id, kind and readiness on a line; the address and the key behind it. */
-function ProviderBlock({ id, p, kinds, available, onPatch, onRemove }: {
+function ProviderBlock({ id, p, kinds, available, viaProxy, onPatch, onRemove }: {
   id: string;
   p: ProviderConf;
   kinds: string[];
   available: boolean;
+  /** Reached through the key proxy: a key typed here is handed to the proxy, which alone signs its calls. */
+  viaProxy: boolean;
   onPatch: Patch;
   onRemove: (id: string) => void;
 }) {
@@ -341,7 +352,7 @@ function ProviderBlock({ id, p, kinds, available, onPatch, onRemove }: {
               </label>
             )}
             <label className="mfield wide">
-              <span>{t(p.api_key_set ? "settings.provider.apikey.stored" : "settings.provider.apikey")}</span>
+              <span>{t(p.api_key_set ? "settings.provider.apikey.stored" : viaProxy ? "settings.provider.apikey.proxy" : "settings.provider.apikey")}</span>
               <div className="row" style={{ gap: 8 }}>
                 <input
                   className="field"
@@ -1124,6 +1135,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
     try {
       const next = await api.put<Settings>(`/api/providers/${encodeURIComponent(id)}`, patch);
       setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
+      if ("api_key" in patch) announceProviderKeys();
       return next;
     } catch (e) {
       toast((e as Error).message);
@@ -1323,7 +1335,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
               <div className="sub">{t("settings.providers.sub")}</div>
               <div className="mlist">
                 {providerIds.map((id) => (
-                  <ProviderBlock key={id} id={id} p={s.providers[id]} kinds={kinds} available={(s.providers_available ?? []).includes(id)} onPatch={patchProvider} onRemove={(pid) => void removeProvider(pid)} />
+                  <ProviderBlock key={id} id={id} p={s.providers[id]} kinds={kinds} available={providerReady(s, id)} viaProxy={s.provider_keys?.[id]?.via_proxy ?? false} onPatch={patchProvider} onRemove={(pid) => void removeProvider(pid)} />
                 ))}
               </div>
               <AddOpencodeRow providers={s.providers ?? {}} keyproxyBase={s.keyproxy_base ?? ""} onAdd={(pid, patch) => void patchProvider(pid, patch)} />

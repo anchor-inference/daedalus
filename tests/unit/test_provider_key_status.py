@@ -175,6 +175,7 @@ async def client(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPat
 
     app = SimpleNamespace(settings=settings, config=config, db=db, manager=manager, front=None, extensions={}, guard=None, create_session=manager.create_session, save_config=save_config)
     async with REAL_CLIENT(transport=httpx.ASGITransport(app=build_app(app, "tok")), base_url="http://test") as http:  # type: ignore[arg-type]
+        http.daedalus = app  # type: ignore[attr-defined]
         yield http
     await manager.close()
 
@@ -356,3 +357,213 @@ def test_a_base_url_without_a_scheme_is_answered_not_raised() -> None:
     assert keyproxy_upstream("my-keyproxy-host") == ""
     assert is_keyproxy_url("my-keyproxy-host") is False
     assert keyproxy_unresolved("my-keyproxy-host") is False
+
+
+# -- a key saved in Settings reaches the process that signs calls --------------------------------
+#
+# The reported fault, on a native Windows installation: Settings showed OpenRouter "ready" and "key
+# stored" while Add a model showed it with "no key". The key had gone into the bot's own
+# configuration; the proxy, which drops a caller's credentials and signs with its own, had none, so
+# the key was reported stored and used by nothing.
+
+
+def _keys_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, text: str = "") -> Path:
+    path = tmp_path / "keyproxy.env"
+    path.write_text(text, encoding="utf-8")
+    monkeypatch.setattr(proxy, "KEYS_FILE", str(path))
+    monkeypatch.setattr(proxy, "_keys_file_cache", (-1, -1, {}))
+    return path
+
+
+async def test_a_key_put_into_the_proxy_signs_the_next_call_without_a_restart(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    path = _keys_file(monkeypatch, tmp_path, "OPENROUTER_API_KEY=\nKEYPROXY_USD_PER_DAY=5\n")
+    monkeypatch.setattr(proxy, "agent_api_token", lambda: "tok")
+    monkeypatch.setattr(proxy, "budget_exceeded", lambda: False)
+    signed: list[str] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        signed.append(request.headers.get("authorization", ""))
+        return httpx.Response(200, json={"data": []})
+
+    app = proxy.make_app()
+    async with TestClient(TestServer(app)) as client:
+        await app["client"].aclose()
+        app["client"] = REAL_CLIENT(transport=httpx.MockTransport(upstream))
+        assert (await client.get("/openrouter/v1/models")).status == 503, "no key yet"
+        put = await client.put("/keys/openrouter", json={"key": "sk-or-test\n"}, headers={"x-daedalus-token": "tok"})
+        assert put.status == 200
+        answer = await put.json()
+        assert answer == {"upstream": "openrouter", "configured": True, "kind": "api_key"}
+        assert "sk-or-test" not in json.dumps(answer), "the answer carries the key"
+        assert (await client.get("/openrouter/v1/models", headers={"authorization": "Bearer from-the-caller"})).status == 200
+        assert signed == ["Bearer sk-or-test"], "the call was not signed with the stored key"
+        assert proxy.key_status()["openrouter"] == {"configured": True, "kind": "api_key"}
+        # The launcher reads the same file at the next start, and every other line is as it was.
+        assert path.read_text(encoding="utf-8") == "OPENROUTER_API_KEY=sk-or-test\nKEYPROXY_USD_PER_DAY=5\n"
+
+        forget = await client.delete("/keys/openrouter", headers={"x-daedalus-token": "tok"})
+        assert forget.status == 200 and (await forget.json())["configured"] is False
+        assert (await client.get("/openrouter/v1/models")).status == 503, "a forgotten key still signs calls"
+
+
+async def test_a_forgotten_key_is_forgotten_even_when_the_process_started_with_it(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The launcher put the file's keys in the environment at start; the file, not the start, is the truth."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "from-the-start")
+    _keys_file(monkeypatch, tmp_path, "DEEPSEEK_API_KEY=\n")
+    assert proxy.key_status()["deepseek"]["configured"] is False
+    assert "deepseek" not in proxy.upstreams()
+
+
+async def test_setting_a_key_answers_the_agent_and_nobody_else(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    path = _keys_file(monkeypatch, tmp_path)
+    monkeypatch.setattr(proxy, "agent_api_token", lambda: "tok")
+    async with TestClient(TestServer(proxy.make_app())) as client:
+        assert (await client.put("/keys/openrouter", json={"key": "k"})).status == 403
+        assert (await client.put("/keys/openrouter", json={"key": "k"}, headers={"x-daedalus-token": "guessed"})).status == 403
+        assert (await client.put("/keys/codex", json={"key": "k"}, headers={"x-daedalus-token": "tok"})).status == 400, "a CLI login is not a key"
+        assert (await client.put("/keys/never-heard-of-it", json={"key": "k"}, headers={"x-daedalus-token": "tok"})).status == 404
+        assert (await client.put("/keys/openrouter", json={"key": "  "}, headers={"x-daedalus-token": "tok"})).status == 400
+        assert path.read_text(encoding="utf-8") == "", "a refused request wrote the file"
+        monkeypatch.setattr(proxy, "KEYS_FILE", "")
+        refused = await client.put("/keys/openrouter", json={"key": "k"}, headers={"x-daedalus-token": "tok"})
+        assert refused.status == 409, "a proxy with nowhere to write a key pretended to keep it"
+
+
+def test_opencode_zen_declared_by_the_launcher_still_takes_the_opencode_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The launcher writes ``KEYPROXY_UPSTREAM_OPENCODE_ZEN`` with no key beside it.
+
+    That declaration used to make Zen an endpoint that "needs no key", called unsigned, while the
+    one OpenCode key that serves it sat unused in ``OPENCODE_API_KEY``.
+    """
+    _keys_file(monkeypatch, tmp_path, "OPENCODE_API_KEY=\nKEYPROXY_KEY_OPENCODE_ZEN=\nKEYPROXY_UPSTREAM_OPENCODE_ZEN=https://opencode.ai/zen/v1\n")
+    monkeypatch.delenv("OPENCODE_API_KEY", raising=False)
+    assert proxy.key_status()["opencode_zen"] == {"configured": False, "kind": "api_key"}
+    assert "opencode_zen" not in proxy.upstreams(), "Zen would be called with no key"
+    _keys_file(monkeypatch, tmp_path, "OPENCODE_API_KEY=oc-key\nKEYPROXY_UPSTREAM_OPENCODE_ZEN=https://opencode.ai/zen/v1\n")
+    assert proxy.key_status()["opencode_zen"] == {"configured": True, "kind": "api_key"}
+    assert proxy.upstreams()["opencode_zen"] == ("https://opencode.ai/zen/v1", "oc-key")
+    assert proxy.upstream_key("opencode_zen", proxy.settings()) == "OPENCODE_API_KEY"
+    _keys_file(monkeypatch, tmp_path, "OPENCODE_API_KEY=oc-key\nKEYPROXY_KEY_OPENCODE_ZEN=zen-key\nKEYPROXY_UPSTREAM_OPENCODE_ZEN=https://opencode.ai/zen/v1\n")
+    assert proxy.upstreams()["opencode_zen"] == ("https://opencode.ai/zen/v1", "zen-key"), "a Zen key of its own wins"
+
+
+class FakeProxy:
+    """A key proxy that keeps keys the way the real one does: per upstream, never handed back."""
+
+    def __init__(self, held: dict[str, dict[str, Any]]) -> None:
+        self.held = {name: dict(row) for name, row in held.items()}
+        self.keys: dict[str, str] = {}
+        self.writes: list[tuple[str, str]] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if request.headers.get("x-daedalus-token") != "tok":
+            return httpx.Response(403, json={"error": "this endpoint answers the agent only"})
+        if request.url.path == "/keys":
+            return httpx.Response(200, json={"upstreams": self.held})
+        if request.url.path.startswith("/keys/"):
+            name = request.url.path[len("/keys/") :]
+            if self.held.get(name, {}).get("kind") == "cli_login":
+                return httpx.Response(400, json={"error": f"{name!r} signs in with its command-line tool, not with a key"})
+            key = json.loads(request.content)["key"] if request.method == "PUT" else ""
+            self.writes.append((request.method, name))
+            self.keys[name] = key
+            self.held[name] = {"configured": bool(key), "kind": "api_key"}
+            return httpx.Response(200, json={"upstream": name, **self.held[name]})
+        return httpx.Response(404, json={"error": "not here"})
+
+
+NO_KEY = {**ONE_KEY, "openrouter": {"configured": False, "kind": "api_key"}}
+
+
+async def test_a_key_saved_in_settings_goes_to_the_proxy_and_every_screen_agrees(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeProxy(NO_KEY)
+    _answering(monkeypatch, fake)
+    before = (await client.get("/api/settings", headers=H)).json()
+    assert before["providers"]["openrouter"]["api_key_set"] is False
+    assert before["provider_keys"]["openrouter"]["ready"] is False, "Settings called an endpoint with no key ready"
+
+    saved = await client.put("/api/providers/openrouter", json={"api_key": "sk-or-typed"}, headers=H)
+    assert saved.status_code == 200, saved.text
+    assert fake.keys == {"openrouter": "sk-or-typed"}, "the key never reached the proxy"
+    assert "sk-or-typed" not in saved.text
+    view = saved.json()
+    assert view["providers"]["openrouter"]["api_key_set"] is True
+    assert view["provider_keys"]["openrouter"] == {"via_proxy": True, "key_held": True, "key_kind": "api_key", "ready": True}
+
+    # Read straight after the save, inside the cache window: the answer is the new one.
+    onboarding = (await client.get("/api/onboarding", headers=H)).json()
+    card = next(p for p in onboarding["providers"] if p["id"] == "openrouter")
+    assert card["key_held"] is True and card["ready"] is True
+    settings_now = (await client.get("/api/settings", headers=H)).json()
+    for p in onboarding["providers"]:
+        assert settings_now["provider_keys"][p["id"]] == {k: p[k] for k in ("via_proxy", "key_held", "key_kind", "ready")}, p["id"]
+
+    forgotten = await client.put("/api/providers/openrouter", json={"api_key": ""}, headers=H)
+    assert forgotten.status_code == 200
+    assert fake.writes[-1] == ("DELETE", "openrouter")
+    assert forgotten.json()["providers"]["openrouter"]["api_key_set"] is False
+
+
+async def test_the_configuration_keeps_no_key_for_an_endpoint_behind_the_proxy(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeProxy(NO_KEY)
+    _answering(monkeypatch, fake)
+    assert (await client.put("/api/providers/openrouter", json={"api_key": "sk-or-typed"}, headers=H)).status_code == 200
+    assert client.daedalus.config.providers["openrouter"].api_key == "", "the key was kept where nothing uses it"  # type: ignore[attr-defined]
+
+
+async def test_a_key_the_proxy_cannot_take_is_not_reported_as_saved(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("nothing is listening", request=request)
+
+    _answering(monkeypatch, down)
+    response = await client.put("/api/providers/openrouter", json={"api_key": "sk-or-typed"}, headers=H)
+    assert response.status_code == 502 and "key proxy" in response.json()["detail"]
+    assert "sk-or-typed" not in response.text
+    assert client.daedalus.config.providers["openrouter"].api_key == "", "a key the proxy never took was kept anyway"  # type: ignore[attr-defined]
+
+
+async def test_a_cli_login_takes_no_key(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _answering(monkeypatch, FakeProxy(NO_KEY))
+    claude = await client.put("/api/providers/claude", json={"api_key": "nope"}, headers=H)
+    assert claude.status_code == 400 and "command-line" in claude.json()["detail"]
+
+
+async def test_an_endpoint_reached_directly_keeps_its_key_in_the_configuration(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeProxy(NO_KEY)
+    _answering(monkeypatch, fake)
+    saved = await client.put("/api/providers/workshop", json={"kind": "openai_compat", "base_url": "http://10.0.0.5:9000/v1", "api_key": "direct"}, headers=H)
+    assert saved.status_code == 200
+    assert fake.writes == [], "a key for an endpoint the proxy does not serve was sent to it"
+    assert saved.json()["providers"]["workshop"]["api_key_set"] is True
+
+
+async def test_a_key_an_older_version_left_in_the_configuration_moves_to_the_proxy(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The installation that reported the fault holds its OpenRouter key in config.toml; it must not stay stranded there."""
+    monkeypatch.setenv("KEYPROXY_BASE_URL", NATIVE_BASE)
+    raw = _config().model_dump(mode="json")
+    raw["providers"]["openrouter"]["api_key"] = "sk-or-stranded"
+    config = RuntimeConfig.model_validate(raw)
+    manager = SessionManager(settings, config, db=db)
+    await manager.start()
+    saved: list[RuntimeConfig] = []
+
+    async def save_config(cfg: RuntimeConfig) -> None:
+        saved.append(cfg)
+        app.config = cfg
+        manager.reload_config(cfg)
+
+    app = SimpleNamespace(settings=settings, config=config, db=db, manager=manager, front=None, extensions={}, guard=None, create_session=manager.create_session, save_config=save_config)
+    fake = FakeProxy(NO_KEY)
+    _answering(monkeypatch, fake)
+    try:
+        async with REAL_CLIENT(transport=httpx.ASGITransport(app=build_app(app, "tok")), base_url="http://test") as http:  # type: ignore[arg-type]
+            body = (await http.get("/api/onboarding", headers=H)).json()
+            card = next(p for p in body["providers"] if p["id"] == "openrouter")
+            assert card["key_held"] is True and card["ready"] is True
+            assert fake.keys == {"openrouter": "sk-or-stranded"}
+            assert app.config.providers["openrouter"].api_key == "", "the key stayed in the configuration"
+            await http.get("/api/onboarding", headers=H)
+            assert len(fake.writes) == 1 and len(saved) == 1, "the move ran again"
+    finally:
+        await manager.close()

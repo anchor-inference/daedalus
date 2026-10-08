@@ -17,6 +17,11 @@ upstreams: ``KEYPROXY_UPSTREAM_<NAME>=https://host/base`` with
 ``KEYPROXY_AUTH_<NAME>=<header name>`` (``X-API-KEY`` for Serper, ``x-api-key`` for Exa…);
 the key is sent as that header's value.
 
+Keys set from the app: with ``KEYPROXY_KEYS_FILE`` naming the env file the keys came from, the bot
+can write one upstream's key with ``PUT /keys/<upstream>`` (and clear it with ``DELETE``) on its own
+API token. The proxy writes the file and reads it again on every call, so a key saved in Settings
+signs the next request without a restart, and the agent's own configuration never holds it.
+
 The budget is checked in two independent ways: the supervisor's flag file, and — when
 ``KEYPROXY_USD_PER_DAY`` is set — the proxy's own read of today's spend from the read-only
 database, which nothing in the agent container can unlink.
@@ -119,17 +124,93 @@ CLAUDE_USAGE_BACKOFF_SECONDS = 120.0
 BEARER = "bearer"
 
 
+KEYS_FILE = os.environ.get("KEYPROXY_KEYS_FILE", "").strip()
+"""The env file the provider keys live in, when the proxy may write it; "" when keys come from the environment alone."""
+_keys_file_cache: tuple[int, int, dict[str, str]] = (-1, -1, {})
+
+
+def parse_env(text: str) -> dict[str, str]:
+    """An env file as the launcher reads it: comments skipped, ``export`` allowed, one pair of quotes taken off."""
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        line = line.removeprefix("export ")
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]:
+            value = value[1:-1]
+        out[key.strip()] = value
+    return out
+
+
+def file_settings() -> dict[str, str]:
+    """What the keys file says now, re-read only when it changed."""
+    global _keys_file_cache
+    if not KEYS_FILE:
+        return {}
+    try:
+        stat = os.stat(KEYS_FILE)
+    except OSError:
+        return {}
+    if (stat.st_mtime_ns, stat.st_size) != _keys_file_cache[:2]:
+        try:
+            text = Path(KEYS_FILE).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return _keys_file_cache[2]
+        _keys_file_cache = (stat.st_mtime_ns, stat.st_size, parse_env(text))
+    return _keys_file_cache[2]
+
+
+def settings() -> dict[str, str]:
+    """The environment with the keys file over it.
+
+    The file wins wherever it names a variable, an empty value included: the process started with
+    the keys the file held then, and a key forgotten since must stop signing calls rather than live
+    on in the environment until the next restart.
+    """
+    return {**os.environ, **file_settings()}
+
+
+def upstream_key(name: str, env: dict[str, str]) -> str:
+    """The variable that holds an upstream's key, or "" for a name the proxy holds no key for.
+
+    An extra upstream with no ``KEYPROXY_KEY_<NAME>`` of its own that is also a default one falls
+    back to the default's variable. The launcher declares ``KEYPROXY_UPSTREAM_OPENCODE_ZEN`` so the
+    address is written down, and without the fallback that declaration hid ``OPENCODE_API_KEY``,
+    which serves Zen as much as Go: Zen was called with no key at all and reported as needing none.
+    """
+    own = f"KEYPROXY_KEY_{name.upper()}"
+    if env.get(f"KEYPROXY_UPSTREAM_{name.upper()}"):
+        if env.get(own) or name not in DEFAULT_UPSTREAMS:
+            return own
+    if name in DEFAULT_UPSTREAMS:
+        return DEFAULT_UPSTREAMS[name][1]
+    return ""
+
+
+def extra_upstreams(env: dict[str, str]) -> dict[str, str]:
+    """name → base URL for every ``KEYPROXY_UPSTREAM_<NAME>`` that carries an address."""
+    return {var[len("KEYPROXY_UPSTREAM_"):].lower(): value.rstrip("/") for var, value in env.items() if var.startswith("KEYPROXY_UPSTREAM_") and value}
+
+
 def upstreams() -> dict[str, tuple[str, str]]:
-    """name → (base_url, api_key) from the environment."""
+    """name → (base_url, api_key) from the environment and the keys file."""
+    env = settings()
     out: dict[str, tuple[str, str]] = {}
     for name, (base, env_key) in DEFAULT_UPSTREAMS.items():
-        key = os.environ.get(env_key, "")
+        key = env.get(env_key, "")
         if key:
             out[name] = (base, key)
-    for var, value in os.environ.items():
-        if var.startswith("KEYPROXY_UPSTREAM_") and value:
-            name = var[len("KEYPROXY_UPSTREAM_"):].lower()
-            out[name] = (value.rstrip("/"), os.environ.get(f"KEYPROXY_KEY_{name.upper()}", ""))
+    for name, base in extra_upstreams(env).items():
+        key = env.get(upstream_key(name, env), "")
+        # A default upstream redeclared without a key is still one that needs a key: listing it
+        # keyless would forward the call unsigned instead of saying the key is missing.
+        if key or name not in DEFAULT_UPSTREAMS:
+            out[name] = (base, key)
     return out
 
 
@@ -166,13 +247,15 @@ def key_status() -> dict[str, dict[str, Any]]:
     difference from :func:`upstreams` is that the answer names every upstream the proxy can serve,
     including the ones it has no key for — "no key" is the fact worth reporting.
     """
+    env = settings()
     out: dict[str, dict[str, Any]] = {}
     for name, (_base, env_key) in DEFAULT_UPSTREAMS.items():
-        out[name] = {"configured": bool(os.environ.get(env_key, "")), "kind": API_KEY}
-    for var, value in os.environ.items():
-        if var.startswith("KEYPROXY_UPSTREAM_") and value:
-            name = var[len("KEYPROXY_UPSTREAM_"):].lower()
-            key = os.environ.get(f"KEYPROXY_KEY_{name.upper()}", "")
+        out[name] = {"configured": bool(env.get(env_key, "")), "kind": API_KEY}
+    for name in extra_upstreams(env):
+        key = env.get(upstream_key(name, env), "")
+        if name in DEFAULT_UPSTREAMS:
+            out[name] = {"configured": bool(key), "kind": API_KEY}
+        else:
             # An extra upstream is an address the operator wrote down; with no key beside it, it is
             # an endpoint that needs none rather than one whose key went missing.
             out[name] = {"configured": True, "kind": API_KEY if key else ENDPOINT}
@@ -202,9 +285,83 @@ async def handle_keys(request: web.Request) -> web.Response:
     return web.json_response({"upstreams": key_status()})
 
 
+def write_env_value(path: str, var: str, value: str) -> None:
+    """Set one variable in an env file, leaving every other line as it was.
+
+    Replaced through a temporary file so a reader never sees half of it; where the file is a bind
+    mount of its own (the compose stack mounts the one file, not its folder) a rename onto it fails,
+    and it is rewritten in place instead.
+    """
+    target = Path(path)
+    try:
+        lines = target.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+    for index, line in enumerate(lines):
+        stripped = line.lstrip(" \t")
+        if stripped.startswith(var + "=") or stripped.startswith("export " + var + "="):
+            lines[index] = f"{var}={value}"
+            break
+    else:
+        lines.append(f"{var}={value}")
+    text = "\n".join(lines) + "\n"
+    global _keys_file_cache
+    # Forgotten whatever the clock says: a key replaced by one of the same length within the
+    # file system's timestamp resolution would otherwise read as unchanged.
+    _keys_file_cache = (-1, -1, {})
+    temporary = target.with_name(target.name + ".tmp")
+    try:
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+        os.replace(temporary, target)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+        with open(target, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+
+
+async def handle_set_key(request: web.Request) -> web.Response:
+    """Store (PUT) or forget (DELETE) one upstream's key, for the bot alone. The key never comes back.
+
+    This is how a key typed into Settings reaches the process that signs calls with it. Before it,
+    the app kept the key in its own configuration and sent it to the proxy, which dropped the
+    caller's Authorization header as it must and then refused the call for want of a key of its own;
+    the Settings card said "key stored" while every other screen, rightly, said "no key".
+    """
+    if not agent_call(request):
+        return web.json_response({"error": "this endpoint answers the agent only"}, status=403)
+    name = request.match_info["upstream"].lower()
+    if not KEYS_FILE:
+        return web.json_response({"error": "this key proxy reads its keys from its environment only; put the key in keyproxy.env"}, status=409)
+    if name in CLI_LOGINS:
+        return web.json_response({"error": f"{name!r} signs in with its command-line tool, not with a key"}, status=400)
+    env = settings()
+    var = upstream_key(name, env)
+    if not var:
+        return web.json_response({"error": f"unknown upstream {name!r}"}, status=404)
+    key = ""
+    if request.method == "PUT":
+        try:
+            body = await request.json()
+        except (ValueError, UnicodeDecodeError):
+            body = None
+        key = str(body.get("key") or "") if isinstance(body, dict) else ""
+        # A newline would end the line and turn the rest of the key into a variable of its own.
+        key = key.replace("\r", "").replace("\n", "").strip()
+        if not key:
+            return web.json_response({"error": "no key given"}, status=400)
+    try:
+        write_env_value(KEYS_FILE, var, key)
+    except OSError as exc:
+        logger.warning("could not write the keys file: %s", type(exc).__name__)
+        return web.json_response({"error": f"the key proxy could not write its keys file ({type(exc).__name__})"}, status=500)
+    return web.json_response({"upstream": name, **key_status().get(name, {"configured": bool(key), "kind": API_KEY})})
+
+
 def auth_scheme(name: str) -> str:
     """How an upstream takes its key: ``bearer`` (``Authorization: Bearer <key>``) or the name of a header that carries the bare key."""
-    scheme = os.environ.get(f"KEYPROXY_AUTH_{name.upper()}", "").strip() or DEFAULT_AUTH_SCHEMES.get(name, "")
+    scheme = settings().get(f"KEYPROXY_AUTH_{name.upper()}", "").strip() or DEFAULT_AUTH_SCHEMES.get(name, "")
     return scheme if scheme and scheme.lower() != BEARER else BEARER
 
 
@@ -676,6 +833,8 @@ def make_app() -> web.Application:
     app["client"] = httpx.AsyncClient(timeout=httpx.Timeout(900.0, connect=30.0, pool=10.0), limits=httpx.Limits(max_connections=64, max_keepalive_connections=16), follow_redirects=False)
     app.router.add_get("/healthz", health)
     app.router.add_get("/keys", handle_keys)
+    app.router.add_put("/keys/{upstream}", handle_set_key)
+    app.router.add_delete("/keys/{upstream}", handle_set_key)
     app.router.add_get("/subscriptions/usage", handle_subscriptions_usage)
     app.router.add_route("*", "/{upstream}/{rest:.*}", handle)
 

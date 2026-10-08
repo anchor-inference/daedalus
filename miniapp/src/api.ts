@@ -1305,6 +1305,25 @@ export type HeartbeatStatus = {
   template?: string;
 };
 
+/** Whether an endpoint can authenticate, as the key proxy (or, for a direct endpoint, the configuration) says. */
+export type ProviderKeyState = {
+  via_proxy: boolean;
+  /** `null` only when nothing could answer — the key proxy is down. */
+  key_held: boolean | null;
+  key_kind: "api_key" | "cli_login" | "endpoint";
+  ready: boolean;
+};
+
+/**
+ * Said on the window when an endpoint's key was saved or forgotten, so a screen showing key state
+ * that the change did not come from (Add a model, open beside Settings) asks again.
+ */
+export const PROVIDER_KEYS_CHANGED = "daedalus:provider-keys";
+
+export function announceProviderKeys(): void {
+  window.dispatchEvent(new Event(PROVIDER_KEYS_CHANGED));
+}
+
 export type ProviderConf = {
   kind: string;
   name?: string;
@@ -1371,6 +1390,8 @@ export type Settings = {
     photo_caption_wait_seconds: number;
   };
   providers_available: string[];
+  /** Per endpoint, whether a credential really exists — the answer Add a model gets too. */
+  provider_keys?: Record<string, ProviderKeyState>;
   search_backends?: SearchBackendInfo[];
   /** The key proxy's address when providers are reached through it, "" when they are reached directly. */
   keyproxy_base?: string;

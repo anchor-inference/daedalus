@@ -3580,6 +3580,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "settings.provider.temperature.hint": { en: "Sampling temperature for this endpoint (0–2). Empty uses the host default.", ru: "Температура сэмплирования для этого адреса (0–2). Пустое поле — значение хоста по умолчанию." },
   "settings.provider.apikey.stored": { en: "API key (stored)", ru: "Ключ API (сохранён)" },
   "settings.provider.apikey": { en: "API key (optional; a key proxy or a self-hosted endpoint needs none)", ru: "Ключ API (необязательно: прокси ключей или свой адрес обходятся без него)" },
+  "settings.provider.apikey.proxy": { en: "API key (kept by the key proxy, never in the settings)", ru: "Ключ API (хранится в прокси ключей, не в настройках)" },
   "settings.provider.apikey.placeholder": { en: "•••• stored — type to replace", ru: "•••• сохранён — введите новый, чтобы заменить" },
   "settings.provider.apikey.none": { en: "no key needed", ru: "ключ не нужен" },
   "settings.provider.forget": { en: "Forget key", ru: "Забыть ключ" },

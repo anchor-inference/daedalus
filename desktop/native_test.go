@@ -212,6 +212,11 @@ func TestTheKeysGoToTheKeyProxyAndNotToTheAgent(t *testing.T) {
 	if proxy["KEYPROXY_PORT"] != "19160" {
 		t.Errorf("the key proxy is on %q, not the port the file names", proxy["KEYPROXY_PORT"])
 	}
+	// A key typed into Settings is written by the proxy into the file its keys came from; without
+	// the file's name it has nowhere to keep one, and the key went to the agent's configuration instead.
+	if proxy["KEYPROXY_KEYS_FILE"] != paths.KeyproxyEnv {
+		t.Errorf("the key proxy was told its keys live in %q, not %q", proxy["KEYPROXY_KEYS_FILE"], paths.KeyproxyEnv)
+	}
 	agent := envMap(supervisorEnv(paths, nil, settings))
 	for name := range keys {
 		if _, found := agent[name]; found {

@@ -10,7 +10,7 @@
 // six ready endpoints and fail on the first one picked.
 
 import { ReactNode, useEffect, useMemo, useState } from "react";
-import { api, Preset, Settings } from "../api";
+import { api, Preset, PROVIDER_KEYS_CHANGED, Settings } from "../api";
 import { Icon } from "../icons";
 import { plural, t, useLang } from "../i18n";
 import { LangPicker, Switch, useMedia } from "../ui/index";
@@ -410,6 +410,14 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
     api.get<OnboardingState>("/api/onboarding").then(setState).catch((e) => toast(errorText(e)));
     api.get<Settings>("/api/settings").then(setSettings).catch(() => setSettings(null));
   }, [toast]);
+
+  // A key saved in Settings while this screen is open changes what its cards say; without asking
+  // again the card went on saying "no key" for a key that had just been stored.
+  useEffect(() => {
+    const refresh = () => { api.get<OnboardingState>("/api/onboarding").then(setState).catch(() => undefined); };
+    window.addEventListener(PROVIDER_KEYS_CHANGED, refresh);
+    return () => window.removeEventListener(PROVIDER_KEYS_CHANGED, refresh);
+  }, []);
 
   async function lookup(id: string) {
     setLoading(true);
