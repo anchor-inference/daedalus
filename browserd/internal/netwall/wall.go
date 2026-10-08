@@ -249,11 +249,20 @@ func (w *Wall) judge(ctx context.Context, p *Proxy, host string, port int) Verdi
 		return v
 	}
 	v.Decision = Allow
+	public, lan := false, false
 	for _, a := range addrs {
-		d, reason := w.judgeAddr(ctx, r, p, host, a, port)
+		d, reason, onLAN := w.judgeAddr(ctx, r, p, host, a, port)
 		if severity(d) > severity(v.Decision) {
 			v.Decision, v.Reason = d, reason
 		}
+		public = public || classify(a) == classPublic
+		lan = lan || onLAN
+	}
+	if public && lan && v.Decision != Deny {
+		// An ask about a LAN address names the host, and a grant opens the name: one that also
+		// answers public is a page's own name pointed at the LAN, never a device to be allowed —
+		// before a grant or after it, when a granted name starts answering both ways.
+		v.Decision, v.Reason = Deny, ReasonMixed
 	}
 	if v.Decision == Allow {
 		v.Addrs = addrs
@@ -261,60 +270,69 @@ func (w *Wall) judge(ctx context.Context, p *Proxy, host string, port int) Verdi
 	return v
 }
 
-// judgeAddr decides about one address. host is what was asked for, which is what a grant names.
-func (w *Wall) judgeAddr(ctx context.Context, r *rules, p *Proxy, host string, a netip.Addr, port int) (Decision, string) {
+// judgeAddr decides about one address, and says whether it is on the LAN beyond this machine and
+// the Docker host. host is what was asked for, which is what a grant names.
+func (w *Wall) judgeAddr(ctx context.Context, r *rules, p *Proxy, host string, a netip.Addr, port int) (Decision, string, bool) {
 	c := classify(a)
 	local := c == classLoopback || w.isLocal(a)
 	if local && (r.sealed[uint16(port)] || (p != nil && p.port == port)) {
 		// Sealed on every address of this machine, not only on loopback: an API bound to all
 		// interfaces is reached through the machine's own LAN or public address just as well.
-		return Deny, ReasonSealedPort
+		return Deny, ReasonSealedPort, false
 	}
 	switch c {
 	case classMetadata:
-		return Deny, ReasonMetadata
+		return Deny, ReasonMetadata, false
 	case classMulticast:
-		return Deny, ReasonMulticast
+		return Deny, ReasonMulticast, false
 	case classReserved:
-		return Deny, ReasonReserved
+		return Deny, ReasonReserved, false
 	}
 	if local {
 		if r.rewrite == "" && r.inServices(port) {
-			return Allow, ""
+			return Allow, "", false
 		}
 		if r.rewrite != "" {
 			// This machine is the browser's own container.
-			return Deny, ReasonLoopback
+			return Deny, ReasonLoopback, false
 		}
-		return r.localSite(p, host, port, ReasonLoopback)
+		d, reason := r.localSite(p, host, port, ReasonLoopback)
+		return d, reason, false
 	}
 	if r.hostAddrs[a.Unmap()] || w.isGateway(ctx, r, a) {
 		if r.sealed[uint16(port)] {
 			// The installation's own doors are published on the Docker host too (the API on its
 			// loopback, which the host's forwarding makes reachable): sealed there as well.
-			return Deny, ReasonSealedPort
+			return Deny, ReasonSealedPort, false
 		}
 		if r.inServices(port) {
-			return Allow, ""
+			return Allow, "", false
 		}
-		return r.localSite(p, host, port, ReasonGateway)
+		d, reason := r.localSite(p, host, port, ReasonGateway)
+		return d, reason, false
 	}
 	switch c {
 	case classPrivate, classLinkLocal:
 		for _, prefix := range r.lan {
 			if prefix.Contains(a) {
 				if p != nil && p.granted(host, port) {
-					return Allow, ""
+					return Allow, "", true
 				}
-				return Ask, ReasonLAN
+				return Ask, ReasonLAN, true
 			}
 		}
 		if c == classLinkLocal {
-			return Deny, ReasonLinkLocal
+			return Deny, ReasonLinkLocal, true
 		}
-		return Deny, ReasonPrivate
+		if r.lanAsk {
+			if p != nil && p.granted(host, port) {
+				return Allow, "", true
+			}
+			return Ask, ReasonPrivate, true
+		}
+		return Deny, ReasonPrivate, true
 	}
-	return Allow, ""
+	return Allow, "", false
 }
 
 // localSite decides about a port of this machine (natively) or of the Docker host (in a container)

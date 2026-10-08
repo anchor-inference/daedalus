@@ -49,6 +49,7 @@ const (
 	ReasonScheme       = "scheme"       // file:, data:, blob:, javascript:, chrome: and the rest
 	ReasonEgressAllow  = "egress_allow" // a top-level navigation outside the operator's allowlist
 	ReasonLAN          = "lan_allow"    // a LAN address the operator listed: asked once, then open
+	ReasonMixed        = "mixed"        // a name that answers with a public address and a private one at once
 	ReasonBadTarget    = "bad_target"   // not a host and port the proxy can make sense of
 )
 
@@ -57,6 +58,12 @@ const (
 	LocalServices = "services"
 	LocalAsk      = "ask"
 	LocalAllow    = "allow"
+)
+
+// The values of Config.LANSites.
+const (
+	LANListed = "listed"
+	LANAsk    = "ask"
 )
 
 // Limits on what the host may configure; they bound the work of every decision.
@@ -95,9 +102,15 @@ type Config struct {
 	// http://<lan address>:5173 is the same local site as http://127.0.0.1:5173.
 	HostAddrs []string `json:"host_addrs,omitempty"`
 	// LANAllow lists LAN addresses (an address or a prefix: "172.20.1.20", "10.0.3.0/24") the
-	// operator may open for the browser: each is asked, never open by itself. Everything private not
-	// listed is refused. Metadata addresses cannot be listed.
+	// operator may open for the browser: each is asked, never open by itself. Metadata addresses
+	// cannot be listed.
 	LANAllow []string `json:"lan_allow"`
+	// LANSites is what a private address outside LANAllow is: "listed" (and empty) refuses it,
+	// "ask" makes it an ask like a listed one, so an agent that needs the router's page or a device
+	// on the LAN asks for it rather than meeting a refusal nobody can lift. A link-local address
+	// outside the list stays refused either way: on a LAN it is a device that failed to get an
+	// address, and it is the neighbourhood the metadata services live in.
+	LANSites string `json:"lan_sites,omitempty"`
 	// EgressAllow, when present, is the operator's allowlist of hosts ("example.com",
 	// "*.example.com"): a top-level navigation to any other host is asked. Subresources are not
 	// judged by it (blocking them would break most pages) but every host is still in the egress log.
@@ -131,6 +144,7 @@ type rules struct {
 	local     string
 	hostAddrs map[netip.Addr]bool
 	lan       []netip.Prefix
+	lanAsk    bool
 	egress    []string
 	hasEgress bool
 }
@@ -144,6 +158,13 @@ func (c Config) compile() (*rules, error) {
 		r.local = c.LocalSites
 	default:
 		return nil, fmt.Errorf("local_sites: %q is not services, ask or allow", c.LocalSites)
+	}
+	switch c.LANSites {
+	case "", LANListed:
+	case LANAsk:
+		r.lanAsk = true
+	default:
+		return nil, fmt.Errorf("lan_sites: %q is not listed or ask", c.LANSites)
 	}
 	if len(c.HostAddrs) > maxListEntries {
 		return nil, fmt.Errorf("host_addrs: at most %d entries", maxListEntries)
@@ -393,7 +414,12 @@ func (v Verdict) Message() string {
 		}
 		return where + " is the Docker host outside the services ranges; the operator can open local sites in the browser settings"
 	case ReasonPrivate:
-		return where + " is on a private network; the operator can list LAN addresses in the browser settings"
+		if v.Decision == Ask {
+			return where + " is an address on the local network; it opens once the request for it is allowed"
+		}
+		return where + " is on a private network; the operator can let the browser ask for LAN addresses in the browser settings"
+	case ReasonMixed:
+		return v.Host + " answers with a public address and a private one at once, which is what a rebinding attack looks like"
 	case ReasonLinkLocal:
 		return where + " is a link-local address"
 	case ReasonMetadata:

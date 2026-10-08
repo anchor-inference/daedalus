@@ -1254,8 +1254,8 @@ class CliStaffRuntime:
                 reply = {"text": f"the {name or 'unnamed'} tools are not available in this installation", "error": True}
             else:
 
-                async def ask(key: str, what: str, summary: str) -> bool | None:
-                    return await self._ask_operator(session, live, key, what, summary)
+                async def ask(key: str, what: str, summary: str, *, route: str | None = "operator") -> bool | None:
+                    return await self._ask_tool(session, live, key, what, summary, route=route)
 
                 text, failed = await tools.call(live, tool, dict(arguments or {}), ask=ask, launch_id=session.launch.launch_id, cwd=session.cwd)
                 reply = {"text": text, "error": bool(failed)}
@@ -1266,12 +1266,14 @@ class CliStaffRuntime:
         if post.reply_id:
             await session.term.reply(post.reply_id, reply)
 
-    async def _ask_operator(self, session: CliSession, live: LiveSession, key: str, tool: str, summary: str) -> bool | None:
-        """Put a tool call's question to the operator and wait for it up to the permission hold.
+    async def _ask_tool(self, session: CliSession, live: LiveSession, key: str, tool: str, summary: str, *, route: str | None = "operator") -> bool | None:
+        """Put a tool call's question on the member's request list and wait for it up to the
+        permission hold.
 
-        Always the operator's: a tool set asks only what the operator decides (what a browser buys,
-        sends or deletes), whatever the project's autonomy gives the orchestrator. An answer that
-        arrives after the call gave up is kept for the same call made again, once."""
+        The operator's by default: what a browser buys, sends or deletes is theirs whatever the
+        project's autonomy gives the orchestrator. ``route=None`` lets the autonomy decide, which is
+        how the browser asks to open an address. An answer that arrives after the call gave up is kept
+        for the same call made again, once, and the member is told of it."""
         if key in session.tool_grants:
             return session.tool_grants.pop(key)
         ref = f"tools:{key}"
@@ -1279,10 +1281,14 @@ class CliStaffRuntime:
         if future is None or future.done():
             future = asyncio.get_running_loop().create_future()
             session.tool_asks[ref] = future
-            await self.ingress.permission(live, ref, tool, summary, route="operator", risk="elevated")
+            await self.ingress.permission(live, ref, tool, summary, route=route, risk="elevated" if route == "operator" else "routine")
         try:
             return await asyncio.wait_for(asyncio.shield(future), self.config().permission_hold_s)
         except TimeoutError:
+            # Nobody waits on it now. Left in place, a late answer resolved this abandoned future and
+            # was lost: the member was neither told nor let through when it made the call again.
+            if session.tool_asks.get(ref) is future:
+                del session.tool_asks[ref]
             return None
 
     @staticmethod

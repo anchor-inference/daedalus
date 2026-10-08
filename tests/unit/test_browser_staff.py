@@ -1,7 +1,8 @@
 """Command-line staff and the browser: every adapter puts the browser's tool set into its launch, and
 the runtime answers the calls ``ptyd tools-mcp`` posts with the same tools a Daedalus session runs —
 the policy, the credential wall and a sensitive action held as the operator's question until it is
-answered, never the orchestrator's."""
+answered, never the orchestrator's; the network wall's question about a LAN address goes to the
+orchestrator, as the member's other permissions do."""
 
 from __future__ import annotations
 
@@ -228,3 +229,74 @@ async def test_a_secret_field_refuses_a_cli_member_too(browsing: Browsing) -> No
     assert reply is not None and reply["error"] and "BrowserHandoff" in reply["text"]
     _, reply = await b.call("BrowserEvaluate", {"script": "document.cookie"})
     assert reply is not None and reply["error"] and "no browser tool" in reply["text"]
+
+
+async def _open_ask(b: Browsing) -> Any:
+    for _ in range(400):
+        asks = [a for a in await b.s.manager.asks.open_for(b.s.project.id) if a.kind == "permission"]
+        if asks:
+            return asks[0]
+        await asyncio.sleep(0.05)
+    raise AssertionError("no permission request was opened")
+
+
+async def test_a_cli_members_request_for_a_lan_address_goes_to_its_orchestrator(browsing: Browsing) -> None:
+    """The router's page a Codex member could not open: the wall asks, the request goes to the
+    orchestrator with the address, the member and its reason; a grant the operator's words back reaches
+    the daemon, and the call goes through."""
+    b = browsing
+    ada = await _started(b)
+    await b.call("BrowserOpen", {})
+    group = f"m-{ada.id}"
+    b.daemon.walled["10.20.0.1"] = ("ask", "private")
+    opening = asyncio.create_task(b.call("BrowserNavigate", {"url": "http://10.20.0.1/", "why": "read the router's DHCP leases"}))
+    ask = await _open_ask(b)
+    assert ask.routed_to == "orchestrator" and ask.request_ref.startswith("tools:") and ask.staff_id == ada.id
+    assert "http://10.20.0.1:80" in ask.text and "read the router's DHCP leases" in ask.text and "local network" in ask.text
+    assert not opening.done()
+    # A reason of its own is not enough where the autonomy asks for the operator's words.
+    with pytest.raises(StaffError, match="basis"):
+        await b.s.team.answer(ask.short_id, allow=True, by="orchestrator", basis="the member needs it")
+    await b.s.manager.projects.set_brief(b.s.project.id, "allowed_without_operator", "open the router's admin page at 10.20.0.1", "operator")
+    await b.s.team.answer(ask.short_id, allow=True, by="orchestrator", basis="open the router's admin page at 10.20.0.1")
+    _, reply = await asyncio.wait_for(opening, 30)
+    assert reply is not None and not reply["error"] and "10.20.0.1" in reply["text"]
+    assert (b.daemon.groups[group].browser_id, "10.20.0.1", 80) in b.daemon.grants
+
+    # Escalated, it is the operator's; refused, the member is told not to reach it another way.
+    b.daemon.walled["10.0.0.7"] = ("ask", "private")
+    refusing = asyncio.create_task(b.call("BrowserNavigate", {"url": "http://10.0.0.7:8080/"}))
+    ask = await _open_ask(b)
+    assert ask.routed_to == "orchestrator"
+    assert await b.s.team.escalate(ask, why="the operator has not said this device may be opened")
+    ask = await b.s.manager.asks.get(ask.id)
+    assert ask is not None and ask.routed_to == "operator"
+    await b.s.team.answer(ask.short_id, allow=False, by="operator")
+    _, reply = await asyncio.wait_for(refusing, 30)
+    assert reply is not None and reply["error"] and "was refused" in reply["text"] and "another way" in reply["text"]
+    assert not any(host == "10.0.0.7" for _, host, _ in b.daemon.grants)
+
+    # What the wall denies is never a question: the metadata service is refused outright.
+    b.daemon.walled["169.254.169.254"] = ("deny", "metadata")
+    _, reply = await b.call("BrowserNavigate", {"url": "http://169.254.169.254/latest/meta-data/"})
+    assert reply is not None and reply["error"] and "network wall refused 169.254.169.254" in reply["text"]
+    assert not [a for a in await b.s.manager.asks.open_for(b.s.project.id) if a.kind == "permission"]
+
+
+async def test_a_cli_members_lan_request_left_open_says_where_it_waits(browsing: Browsing) -> None:
+    """The hold gives up before the orchestrator answers: the member reads that the request is with its
+    orchestrator, and a later grant is kept for the same call made again."""
+    b = browsing
+    ada = await _started(b)
+    await b.call("BrowserOpen", {})
+    held = b.s.runtime.config().model_copy(update={"permission_hold_s": 0})
+    b.s.runtime.config = lambda: held
+    b.daemon.walled["10.20.0.1"] = ("ask", "private")
+    _, reply = await b.call("BrowserNavigate", {"url": "http://10.20.0.1/"})
+    assert reply is not None and reply["error"] and "your orchestrator" in reply["text"] and "make the same call again" in reply["text"]
+    ask = await _open_ask(b)
+    await b.s.manager.projects.update_orchestrator(b.s.project.id, enabled=True, autonomy="full")
+    await b.s.team.answer(ask.short_id, allow=True, by="orchestrator", basis="the operator asked for the router's page")
+    _, reply = await b.call("BrowserNavigate", {"url": "http://10.20.0.1/"})
+    assert reply is not None and not reply["error"]
+    assert (b.daemon.groups[f"m-{ada.id}"].browser_id, "10.20.0.1", 80) in b.daemon.grants

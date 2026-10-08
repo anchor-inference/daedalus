@@ -125,7 +125,7 @@ func TestClassifyTable(t *testing.T) {
 }
 
 func TestDecodeConfigIsStrict(t *testing.T) {
-	good := `{"sealed_ports":[8765,3200],"services_ports":[[8100,8119],[8120,8139]],"loopback_rewrite":"host.docker.internal","local_sites":"services","host_addrs":["172.30.0.9"],"lan_allow":["172.20.1.20","10.0.3.0/24"],"egress_allow":["example.com","*.example.org"]}`
+	good := `{"sealed_ports":[8765,3200],"services_ports":[[8100,8119],[8120,8139]],"loopback_rewrite":"host.docker.internal","local_sites":"services","host_addrs":["172.30.0.9"],"lan_allow":["172.20.1.20","10.0.3.0/24"],"lan_sites":"ask","egress_allow":["example.com","*.example.org"]}`
 	c, err := DecodeConfig(json.RawMessage(good))
 	if err != nil {
 		t.Fatal(err)
@@ -413,6 +413,59 @@ func TestLocalSites(t *testing.T) {
 	}
 	if _, err := DecodeConfig(json.RawMessage(`{"host_addrs":["not-an-address"]}`)); err == nil {
 		t.Error("a host address that is not one was accepted")
+	}
+}
+
+// The LAN beyond the operator's list: refused while lan_sites is "listed" (and before the host says
+// anything), asked when it is "ask", and open after a grant for exactly the host and port asked. The
+// metadata services, link-local addresses, a name that also answers public and the installation's own
+// doors stay refused whatever it says, granted or not.
+func TestLANSites(t *testing.T) {
+	names := map[string][]string{"router.example": {"10.20.0.1"}, "mixed.example": {"203.0.113.11", "10.20.0.1"}, "metadata.example": {"169.254.169.254"}}
+	judge := func(c Config, host string, port int, grant bool) (Decision, string) {
+		w, _, _ := newTestWall(t, c, names)
+		p, _ := w.Listen("b1")
+		defer p.Close()
+		if grant {
+			p.Grant(host, port, time.Now().Add(time.Hour))
+		}
+		v := w.judge(context.Background(), p, host, port)
+		return v.Decision, v.Reason
+	}
+	asking := nativeConfig
+	asking.LANSites = LANAsk
+	for _, c := range []struct {
+		cfg    Config
+		host   string
+		port   int
+		grant  bool
+		d      Decision
+		reason string
+	}{
+		{Config{}, "10.20.0.1", 80, false, Deny, ReasonPrivate},
+		{nativeConfig, "10.20.0.1", 80, false, Deny, ReasonPrivate},
+		{nativeConfig, "10.20.0.1", 80, true, Deny, ReasonPrivate},
+		{asking, "10.20.0.1", 80, false, Ask, ReasonPrivate},
+		{asking, "router.example", 443, false, Ask, ReasonPrivate},
+		{asking, "[fd00::1]", 8080, false, Ask, ReasonPrivate},
+		{asking, "10.20.0.1", 80, true, Allow, ""},
+		{asking, "router.example", 443, true, Allow, ""},
+		// A grant is for the host and port asked, not for the address or another port.
+		{asking, "10.20.0.1", 8080, false, Ask, ReasonPrivate},
+		{asking, "172.20.1.20", 80, false, Ask, ReasonLAN},
+		{asking, "mixed.example", 80, false, Deny, ReasonMixed},
+		{asking, "mixed.example", 80, true, Deny, ReasonMixed},
+		{asking, "169.254.169.254", 80, true, Deny, ReasonMetadata},
+		{asking, "metadata.example", 80, true, Deny, ReasonMetadata},
+		{asking, "169.254.1.1", 80, true, Deny, ReasonLinkLocal},
+		{asking, "172.20.1.5", 8765, true, Deny, ReasonSealedPort},
+	} {
+		if d, reason := judge(c.cfg, c.host, c.port, c.grant); d != c.d || reason != c.reason {
+			t.Errorf("lan_sites %q, %s:%d (granted %v) = %s/%s, want %s/%s", c.cfg.LANSites, c.host, c.port, c.grant, d, reason, c.d, c.reason)
+		}
+	}
+	if _, err := DecodeConfig(json.RawMessage(`{"lan_sites":"all"}`)); err == nil {
+		t.Error("an unknown lan_sites was accepted")
 	}
 }
 

@@ -1611,8 +1611,16 @@ class BrowserConfig(BaseModel):
     asks about each port, ``allow`` opens them all. The installation's own doors (the API, the key
     proxy, the daemons, the launcher) stay shut whatever it says."""
     lan_allow: list[str] = Field(default_factory=list)
-    """Addresses or prefixes on the local network the browser may reach after the operator's yes
-    (the network wall asks about each; it never lets metadata addresses through)."""
+    """Addresses or prefixes on the local network the browser may reach after a yes (the network wall
+    asks about each; it never lets metadata addresses through). A link-local address is askable only
+    when listed here."""
+    lan_sites: Literal["listed", "ask"] = "ask"
+    """The rest of the local network — a router's page, a printer, a NAS: ``listed`` refuses every
+    private address outside ``lan_allow``, ``ask`` asks about each like a listed one, so an agent that
+    needs one asks rather than meeting a refusal nobody can lift. A staff member's request goes to its
+    orchestrator, which allows what the operator already allowed for the work and escalates the rest;
+    anyone else's goes to the operator. A yes opens that host and port for the asking browser for an
+    hour."""
     rules: list[BrowserRuleConfig] = Field(default_factory=list)
     """The operator's rules about sensitive actions by site. A rule never allows ``credentials``:
     typing into a sign-in is the operator's, however the site is trusted."""

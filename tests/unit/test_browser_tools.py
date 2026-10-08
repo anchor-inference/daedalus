@@ -425,7 +425,7 @@ async def test_the_walls_ask_becomes_the_operators_question_and_a_yes_a_grant(ri
     rig.daemon.walled["nas.lan.test"] = ("ask", "lan_allow")
     rig.daemon.walled["router.lan.test"] = ("deny", "private")
     text, failed = await rig.call(sid, "BrowserNavigate", url="http://router.lan.test/")
-    assert failed and "network wall refused router.lan.test" in text
+    assert failed and "network wall refused router.lan.test" in text and "LAN sites" in text
     text, failed = await rig.call(sid, "BrowserNavigate", url="http://nas.lan.test/")
     assert failed and "needs the operator's approval" in text and "nas.lan.test:80" in text and "rule browser.network" in text
     key = text.split("Approval key: ")[1].split(".")[0]
@@ -433,6 +433,37 @@ async def test_the_walls_ask_becomes_the_operators_question_and_a_yes_a_grant(ri
     text, failed = await rig.call(sid, "BrowserNavigate", url="http://nas.lan.test/")
     assert not failed and "nas.lan.test" in text
     assert (rig.daemon.groups[f"s-{sid}"].browser_id, "nas.lan.test", 80) in rig.daemon.grants
+
+
+async def test_a_lan_address_is_the_operators_question_in_their_chat_and_the_orchestrators_for_staff(rig: Rig) -> None:
+    """The wall asks about the router's page. In the operator's own chat the question is theirs; a staff
+    member's goes where its other permissions go (no ``routed_to``, so the team routes it to the
+    orchestrator by the project's autonomy), and the member is told to wait rather than reach the
+    address another way. Either yes is a grant the daemon receives."""
+    # The rest of the LAN is asked about by default, so the daemon makes it an ask rather than a refusal.
+    assert rig.daemon.wall is not None and rig.daemon.wall["lan_sites"] == "ask"
+    rig.daemon.walled["10.20.0.1"] = ("ask", "private")
+    own = await rig.session()
+    await rig.call(own, "BrowserOpen")
+    text, failed = await rig.call(own, "BrowserNavigate", url="http://10.20.0.1/", why="check the router's port forwarding")
+    assert failed and "needs the operator's approval" in text and "an address on the local network" in text
+    pending = [e for e in await rig.events("permission.pending") if e.session_id == own]
+    assert pending[-1].payload["routed_to"] == "operator" and pending[-1].payload["browser"]["kinds"] == ["network"]
+    assert "open http://10.20.0.1:80 in the browser" in pending[-1].payload["text"] and "check the router's port forwarding" in pending[-1].payload["text"]
+
+    member = await rig.session("router check", staff_session_id="ss-router", staff_id="st-speed")
+    await rig.call(member, "BrowserOpen")
+    text, failed = await rig.call(member, "BrowserOpen", url="http://10.20.0.1/", why="read the DHCP leases")
+    assert failed and "gone to your orchestrator" in text and "another way" in text and "operator's approval" not in text
+    pending = [e for e in await rig.events("permission.pending") if e.session_id == member]
+    assert "routed_to" not in pending[-1].payload and "read the DHCP leases" in pending[-1].payload["text"]
+    key = pending[-1].payload["request_id"]
+    await rig.manager.grant(member, key, via="orchestrator")
+    text, failed = await rig.call(member, "BrowserNavigate", url="http://10.20.0.1/")
+    assert not failed and "10.20.0.1" in text
+    assert (rig.daemon.groups[f"s-{member}"].browser_id, "10.20.0.1", 80) in rig.daemon.grants
+    # The grant opens the member's browser, not the one of the operator's chat.
+    assert not any(host == "10.20.0.1" for b, host, _ in rig.daemon.grants if b == rig.daemon.groups[f"s-{own}"].browser_id)
 
 
 async def test_the_action_log_shows_what_was_typed_while_the_session_lasts(rig: Rig) -> None:

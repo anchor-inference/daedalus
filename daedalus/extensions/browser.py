@@ -82,6 +82,7 @@ def build(app: Application) -> Browsers:
             "services_ports": ranges,
             "local_sites": app.config.browser.local_sites,
             "lan_allow": list(app.config.browser.lan_allow),
+            "lan_sites": app.config.browser.lan_sites,
         }
         if env == "container":
             # The daemon's own network reaches this container's published ports on the Docker host;

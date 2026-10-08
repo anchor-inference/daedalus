@@ -29,6 +29,7 @@ export const DEFAULT_BROWSER: BrowserSettings = {
   control_wait_seconds: 20,
   local_sites: "ask",
   lan_allow: [],
+  lan_sites: "ask",
   record_frames: false,
   record_takeover: false,
   record_retention_days: 7,
@@ -364,6 +365,12 @@ function Network({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserS
       </Row>
       <div className="section-title">{t("bs.lan.title")}</div>
       <div className="sub">{t("bs.lan.sub")}</div>
+      <Row title={t("bs.lan.title")} stack>
+        <Dropdown id="browser-lan-sites" label={t("bs.lan.title")} value={b.lan_sites} onChange={(lan_sites) => set({ lan_sites })} options={[
+          { id: "ask", label: t("bs.lan.ask") },
+          { id: "listed", label: t("bs.lan.listed") },
+        ]} />
+      </Row>
       <label className="field" htmlFor="browser-lan">{t("bs.lan.label")}</label>
       <textarea id="browser-lan" className="field bs-list" rows={3} value={text} spellCheck={false} placeholder="10.0.5.20" onChange={(e) => setText(e.target.value)} onBlur={() => {
         const next = lines(text);
