@@ -156,7 +156,7 @@ from daedalus.stores.database import Database
 from daedalus.stores.harness import HarnessStore
 from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.media import MEDIA_TENANT
-from daedalus.stores.projects import Project
+from daedalus.stores.projects import Project, ProjectError
 from daedalus.stores.sqlite import ReceiptConflict, message_text
 from daedalus.stores.staff import ACTIVE_STATUSES, HARNESSES, Staff, StaffBusy, StaffError
 from daedalus.terminals.gateway import TERMINAL_WS_MAX_BYTES, Gateway, SocketGone, ticket_who
@@ -491,6 +491,9 @@ class NewSessionBody(BaseModel):
     """The model preset the session starts on; empty = the global default."""
     loop: LoopBody | None = None
     """Make it a loop agent: woken up for this instruction on an interval or when it says so."""
+    env: Literal["container", "host"] | None = None
+    """Where a chat that names no project runs: ``host`` puts its scratch folder on the host and runs
+    every command there through the host terminal daemon. Only a Docker installation offers it."""
 
 
 class MoveSessionBody(BaseModel):
@@ -1990,6 +1993,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             """The whole path, for the tooltip on a row: a folder named by its last segment alone says
             nothing about which folder it is, and the list no longer groups by it."""
             row["workspace_own"] = bool(row["metadata"].get("directory"))
+            row["env"] = manager.env_of(row["id"], row["metadata"], project)
+            """Where its commands run, for the "Host" mark on a row; the app marks only a session
+            that runs somewhere other than the installation does."""
             row["project"] = names[row["project_id"]]
             row["terminals"] = running_terminals.get(row["id"], 0)
             overrides = overrides_by_id.get(row["id"], {})
@@ -2056,7 +2062,19 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 raise HTTPException(409, f"the folder of {project.name} ({folder.path}) is not reachable from here yet; mount it and restart before starting an agent in it")
         elif body.folder_id:
             raise HTTPException(400, "a folder is named within a project")
+        on_host = body.env == "host"
+        if on_host:
+            # Refused here with the reason rather than as a chat that fails its first command.
+            if body.project_id:
+                raise HTTPException(400, "a chat on the host names no project; a project's folder decides where its chats run")
+            if manager.projects.local_env == "host":
+                raise HTTPException(409, "this installation runs on the host already, so every chat works there")
+            problem = manager.host_unreachable()
+            if problem:
+                raise HTTPException(409, f"a chat cannot be started on the host now: {problem}")
         create_args: dict[str, Any] = {"metadata": metadata or None, "project_id": body.project_id or None}
+        if on_host:
+            create_args["on_host"] = True
         if body.folder_id:
             create_args["folder_id"] = body.folder_id
         if body.own_directory:
@@ -2066,6 +2084,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         except HostUnreachable as exc:
             # The daemon went away between the check above and the session.
             raise HTTPException(409, str(exc)) from exc
+        except ProjectError as exc:
+            # A host chat's folder the store would not take: one nested in another project's.
+            raise HTTPException(400, str(exc)) from exc
         if body.preset:
             # Before the first run, so the session's opening task already goes to the chosen model.
             try:
@@ -2197,6 +2218,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "workspace": str(state.workspace),
             "workspace_name": state.workspace.name,
             "workspace_own": bool(state.metadata.get("directory")),
+            "env": manager.env_of(session_id, state.metadata, state.project),
             "project": state.project.view(),
             "folder_id": state.metadata.get("folder_id") or (state.project.primary.id if state.project.folders else ""),
             "folders": _session_folders(state),

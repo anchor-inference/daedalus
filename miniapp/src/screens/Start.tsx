@@ -28,6 +28,8 @@ import { screenTitle, useMedia } from "../ui/index";
 import { Banner, IconButton, ListRow, SectionHeader, SheetRow, TopBar } from "../ui/phone";
 import { enterSends, errorText } from "../ui";
 import { t } from "../i18n";
+import { EnvPill } from "../envpill";
+import { RunOn, RunOnRow, RunOnSelect, useRunOn } from "../runon";
 
 export function StartScreen({ onOpen, toast, project = "", projects = [], onProjects, onPickProject }: { onOpen: (id: string) => void; toast: (t: string) => void; project?: string; projects?: Project[]; onProjects?: () => void; onPickProject?: (id: string) => void }) {
   const phone = !useMedia("(min-width: 1024px)");
@@ -35,6 +37,7 @@ export function StartScreen({ onOpen, toast, project = "", projects = [], onProj
   const creating = route.query.get("new") === "1";
   const closeNew = () => navigate(pathFor("agents"), { replace: true });
   const model = useStartModel();
+  const run = useRunOn(project);
   const sheet = creating && <NewAgentSheet onClose={closeNew} onCreated={onOpen} toast={toast} project={project} />;
   if (phone && route.query.get("view") === "chats") {
     return <>
@@ -44,7 +47,7 @@ export function StartScreen({ onOpen, toast, project = "", projects = [], onProj
   }
   if (phone) {
     return <>
-      <PhoneHome onOpen={onOpen} toast={toast} project={project} projects={projects} model={model} onProjects={onProjects} />
+      <PhoneHome onOpen={onOpen} toast={toast} project={project} projects={projects} model={model} run={run} onProjects={onProjects} />
       {sheet}
     </>;
   }
@@ -53,7 +56,7 @@ export function StartScreen({ onOpen, toast, project = "", projects = [], onProj
       <div className="start">
         <div className="start-hero">
           <h1 className="start-greeting">{t("start.greeting")}</h1>
-          <StartComposer phone={false} project={project} toast={toast} model={model} />
+          <StartComposer phone={false} project={project} toast={toast} model={model} run={run} />
         </div>
       </div>
       {sheet}
@@ -70,7 +73,7 @@ const LIVE = 3;
  * whole list is the Chats page (the drawer, or "See all"). Offline, the live rows stay, dimmed, with
  * the time they were last confirmed, and the composer keeps the draft until the bot is back.
  */
-function PhoneHome({ onOpen, toast, project, projects, model, onProjects }: { onOpen: (id: string) => void; toast: (t: string) => void; project: string; projects: Project[]; model: StartModel; onProjects?: () => void }) {
+function PhoneHome({ onOpen, toast, project, projects, model, run, onProjects }: { onOpen: (id: string) => void; toast: (t: string) => void; project: string; projects: Project[]; model: StartModel; run: RunOn; onProjects?: () => void }) {
   const live = useStreamUp();
   const offline = useOffline();
   const summary = useSummary();
@@ -102,6 +105,8 @@ function PhoneHome({ onOpen, toast, project, projects, model, onProjects }: { on
           <Icon name="logo" size={36} />
           <h1>{t("start.greeting")}</h1>
           {lens && onProjects && <button type="button" className="ph-btn sm" onClick={onProjects}><Icon name="folder" size={16} />{lens.name}</button>}
+          {/* The host is picked in the + sheet; said here too, since the composer at rest has no room for it. */}
+          {run.env === "host" && <span className="runon-hero" aria-label={`${t("runon.label")}: ${t("term.env.host")}`}><EnvPill env="host" /></span>}
         </div>
         {shown.length > 0 && (
           <>
@@ -118,7 +123,7 @@ function PhoneHome({ onOpen, toast, project, projects, model, onProjects }: { on
           </>
         )}
       </div>
-      <StartComposer phone project={project} toast={toast} model={model} />
+      <StartComposer phone project={project} toast={toast} model={model} run={run} />
     </div>
   );
 }
@@ -165,7 +170,7 @@ function useStartModel() {
   return { chosen, label, effort, setEffort, shownEffort, choose, open, setOpen };
 }
 
-function StartComposer({ phone, project, toast, model }: { phone: boolean; project: string; toast: (t: string) => void; model: StartModel }) {
+function StartComposer({ phone, project, toast, model, run }: { phone: boolean; project: string; toast: (t: string) => void; model: StartModel; run: RunOn }) {
   const { chosen, effort, setEffort, shownEffort, choose } = model;
   const modelLabel = model.label;
   const modelOpen = model.open;
@@ -214,6 +219,7 @@ function StartComposer({ phone, project, toast, model }: { phone: boolean; proje
         title: text || files[0]?.name,
         preset: chosen && "preset" in chosen ? chosen.preset : undefined,
         project_id: project || undefined,
+        ...run.body,
       });
       // The model and the effort in one change, before the message: the first turn is the one
       // that has to think the way the operator asked.
@@ -335,6 +341,7 @@ function StartComposer({ phone, project, toast, model }: { phone: boolean; proje
             <button ref={plusButton} type="button" className="iconbtn flat plus" aria-haspopup="menu" aria-expanded={plusOpen} onClick={() => setPlusOpen(!plusOpen)} aria-label={t("composer.plus")} title={t("composer.plus")}><Icon name="plus" /></button>
             {plusOpen && <Popover anchor={plusButton.current} onClose={() => setPlusOpen(false)} className="plus-menu" label={t("composer.plus")}>{plusItems}</Popover>}
             <div className="composer-tools">
+              <RunOnSelect run={run} />
               <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone}
                 effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} />
               {asr?.configured && <MicButton note={note} />}
@@ -386,7 +393,7 @@ function StartComposer({ phone, project, toast, model }: { phone: boolean; proje
           onPhoto={() => photoInput.current?.click()}
           onFiles={() => fileInput.current?.click()}
           onRecord={asr?.configured && note.supported && note.state.phase === "idle" ? () => void note.start() : undefined}
-          extra={<SheetRow icon="settings" label={t("ph.plus.options")} hint={t("ph.plus.options.hint")} chevron onClick={() => { setPlusOpen(false); navigate(pathFor("agents", null, { new: "1" })); }} />} />
+          extra={<><RunOnRow run={run} onDone={() => setPlusOpen(false)} /><SheetRow icon="settings" label={t("ph.plus.options")} hint={t("ph.plus.options.hint")} chevron onClick={() => { setPlusOpen(false); navigate(pathFor("agents", null, { new: "1" })); }} /></>} />
       )}
     </div>
   );

@@ -9,7 +9,8 @@ import { FolderSection, SessionsScreen } from "./Sessions";
 
 const listing = vi.hoisted(() => ({ data: { sessions: [] as SessionSummary[], projects: [] as ProjectFolder[] } }));
 vi.mock("../store", () => ({ useQuery: () => ({ data: listing.data, loading: false }) }));
-vi.mock("../projects", () => ({ ProjectChip: () => null, useProjects: () => ({ data: [] }), ProjectSettingsSheet: () => <div data-settings /> }));
+const environments = vi.hoisted(() => ({ docker: true }));
+vi.mock("../projects", () => ({ ProjectChip: () => null, useProjects: () => ({ data: [] }), useEnvironments: () => ({ data: { local: environments.docker ? "container" : "host", docker: environments.docker, host_bridge: true, available: [] } }), ProjectSettingsSheet: () => <div data-settings /> }));
 vi.mock("../shell", () => ({ PageHeader: ({ children }: { children: React.ReactNode }) => <header>{children}</header>, screenTitle: () => "Agents" }));
 
 const project: ProjectFolder = { id: "p", name: "Garden", created_at: "2026-01-01T00:00:00Z", settings: { snapshots: false }, folders: [{ id: "f-p", path: "/projects/garden", label: "", env: "container", is_git: false, readonly: false, position: 0, managed: false, reachable: true, writable: true }], total: 1, members: 1, active: 0, loops: 0, last_message_at: "2026-09-18T00:00:00Z" };
@@ -24,6 +25,7 @@ beforeEach(() => {
   localStorage.clear();
   setLang("en");
   listing.data = { sessions: [agent], projects: [project] };
+  environments.docker = true;
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -38,6 +40,19 @@ async function folder(sessions = [agent], p = project, compact = false) {
 async function click(selector: string) { await act(async () => (host.querySelector(selector) as HTMLElement).click()); }
 
 describe("project conversations", () => {
+  it("marks a session that runs on the host from the container, in the sidebar and the list, and nothing natively", async () => {
+    const onHost = { ...agent, env: "host" as const };
+    for (const compact of [false, true]) {
+      await folder([onHost, { ...agent, id: "b", title: "Water", env: "container" }], { ...project, total: 2, members: 2 }, compact);
+      if (!host.querySelector(".erow")) await click(".folder-head");
+      const marks = Array.from(host.querySelectorAll(".erow")).map((row) => !!row.querySelector(".host-mark .term-env.host"));
+      expect(marks.sort()).toEqual([false, true]);
+    }
+    environments.docker = false;
+    await folder([onHost, { ...agent, id: "b", title: "Water" }], { ...project, total: 2, members: 2 }, false);
+    expect(host.querySelectorAll(".erow")).toHaveLength(2);
+    expect(host.querySelector(".host-mark")).toBeNull();
+  });
   it("opens a single agent directly, with model, status, activity and project controls", async () => {
     await folder();
     expect(host.querySelector(".folder.single")).not.toBeNull();

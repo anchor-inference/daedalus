@@ -11,7 +11,7 @@ import { ChatsScreen, chatSections, dayGroup } from "./Chats";
 
 const listing = vi.hoisted(() => ({ data: null as SessionList | null, error: null as string | null, refresh: () => undefined }));
 vi.mock("../store", () => ({ useQuery: () => ({ data: listing.data ?? undefined, loading: !listing.data && !listing.error, error: listing.error, refresh: listing.refresh }), useOffline: () => false, invalidate: () => undefined }));
-vi.mock("../projects", () => ({ useProjects: () => ({ data: [{ id: "bakery", name: "Bakery site" }] }), ProjectSettingsSheet: () => <div data-settings />, MoveSessionSheet: () => <div data-move /> }));
+vi.mock("../projects", () => ({ useEnvironments: () => ({ data: { local: "container", docker: true, host_bridge: true, available: [] } }), useProjects: () => ({ data: [{ id: "bakery", name: "Bakery site" }] }), ProjectSettingsSheet: () => <div data-settings />, MoveSessionSheet: () => <div data-move /> }));
 vi.mock("../events", () => ({ useStreamUp: () => true }));
 
 const NOW = new Date("2026-10-08T12:00:00");

@@ -100,7 +100,7 @@ from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.knowledge import KnowledgeStore, project_facts_note
 from daedalus.stores.media import MediaStore
 from daedalus.stores.persistent import PersistentMemory, PersistentWorkspace
-from daedalus.stores.projects import Project, ProjectFolder, ProjectSettings, ProjectStore
+from daedalus.stores.projects import FolderSpec, Project, ProjectFolder, ProjectSettings, ProjectStore
 from daedalus.stores.provider_holds import (
     PROVIDER_RESUME_NOTE,
     pin_resumed_run_in,
@@ -414,6 +414,30 @@ def host_home_name(session_id: str) -> str:
     has it without a migration of its metadata.
     """
     return "host-" + re.sub(r"[^A-Za-z0-9_-]", "_", session_id)
+
+
+HOST_CHATS = "${XDG_STATE_HOME:-$HOME/.local/state}/daedalus/chats"
+"""Where a chat started on the host from the container works: ``<this>/<session id>`` on the host,
+as the host's shell expands it.
+
+A chat that names no project gets a scratch folder, and on the host that folder has to be somewhere
+the operator did not choose. The state directory rather than a visible folder in the home: the
+folder is as disposable as the container's scratch projects, it goes with the chat, and a directory
+appearing in the home for every chat would be clutter the operator never asked for. Beside the
+terminal daemon's own ``daedalus-ptyd`` but not inside it, since the daemon seals its state
+directory against every file read. A chat whose files matter is kept as a project, which keeps its
+folder too."""
+
+
+def host_chat_path(path: Path, session_id: str) -> bool:
+    """Whether ``path`` is the host scratch folder :data:`HOST_CHATS` makes for this session: the one
+    host path this process ever deletes, so the test is of the exact shape and nothing looser."""
+    return path.is_absolute() and path.name == session_id and path.parent.name == "chats" and path.parent.parent.name == "daedalus"
+
+
+class HostChatRefused(ValueError):
+    """A chat cannot be started on the host here: the installation already runs there (natively),
+    or the chat named a project, whose folder decides where it runs."""
 
 
 class HostUnreachable(ValueError):
@@ -1227,6 +1251,14 @@ class SessionManager:
             return services.workspace_dir
         return state.workspace
 
+    def env_of(self, session_id: str, metadata: dict[str, Any], project: Project | None) -> str:
+        """Where the session's commands and file tools run: ``host`` for one working in a host folder
+        through the daemon, else this process's own environment. A project's coordinator with a home
+        of its own only reads the host, and runs here."""
+        if not home_of(metadata) and self.host_folder_of(session_id, metadata, project) is not None:
+            return "host"
+        return self.projects.local_env
+
     def host_unreachable(self) -> str:
         """Why a session cannot be started in a host folder now, or ``""`` when it can."""
         bridge = self.host_bridge
@@ -1248,11 +1280,25 @@ class SessionManager:
         project_id: str | None = None,
         own_directory: bool = False,
         folder_id: str | None = None,
+        on_host: bool = False,
     ) -> SessionState:
+        """Make a session. ``on_host`` starts a chat that names no project on the host from the
+        container: its scratch project's one folder is on the host, so every command and file tool
+        of it runs there through the terminal daemon, as in any host folder."""
         sid = session_id or uuid.uuid4().hex[:12]
         project = await self.projects.get(project_id) if project_id else None
         if project_id and project is None:
             raise KeyError(project_id)
+        if on_host:
+            if project is not None or workspace is not None or folder_id:
+                raise HostChatRefused("a chat on the host names no project; a project's folder decides where its chats run")
+            if self.projects.local_env == "host":
+                raise HostChatRefused("this installation runs on the host already, so every chat works there")
+            problem = self.host_unreachable()
+            if problem:
+                raise HostUnreachable(f"a chat cannot be started on the host now: {problem}")
+            folder = await self._make_host_chat_folder(sid)
+            project = await self.projects.create(title, [FolderSpec(folder, env="host")], settings=ProjectSettings(ephemeral=True), project_id=sid)
         meta = dict(metadata or {})
         if folder_id:
             folder = project.folder(folder_id) if project is not None else None
@@ -1295,6 +1341,34 @@ class SessionManager:
         self._states[sid] = state
         self.register_services(state)
         return state
+
+    async def _make_host_chat_folder(self, session_id: str) -> str:
+        """Make the host scratch folder of a chat (:data:`HOST_CHATS`) and return its absolute path
+        as the host spells it. Run from ``/``, because the daemon wants an existing absolute working
+        directory and this process does not know the operator's home there; the shell does."""
+        backend = HostExecBackend(lambda: self.host_bridge, "/")
+        script = f'd="{HOST_CHATS}/{session_id}" && mkdir -p -- "$d" && cd -- "$d" && pwd -P'
+        outcome = await backend.run(script, cwd="/", env=None, timeout=30.0)
+        lines = [line.strip() for line in outcome.output.splitlines() if line.strip()]
+        path = lines[-1] if lines else ""
+        if outcome.exit_code != 0 or not host_chat_path(Path(path), session_id):
+            raise HostUnreachable(f"could not make the chat's folder on the host: {outcome.output.strip() or 'no answer'}")
+        return path
+
+    async def _remove_host_chat_folder(self, project: Project, session_id: str) -> None:
+        """Remove a deleted host chat's scratch folder through the daemon. Only a folder of exactly
+        the shape :data:`HOST_CHATS` makes, for this session, of an ephemeral project of its own: an
+        operator's folder never goes with a chat. A daemon that is down leaves the folder behind,
+        which costs a directory and nothing else."""
+        if not (project.id == session_id and project.settings.ephemeral and len(project.folders) == 1):
+            return
+        folder = project.primary
+        if folder.env != "host" or self.projects.local_env == "host" or not host_chat_path(folder.path, session_id):
+            return
+        backend = HostExecBackend(lambda: self.host_bridge, "/")
+        outcome = await backend.run(f"rm -rf -- {shlex.quote(str(folder.path))}", cwd="/", env=None, timeout=60.0)
+        if outcome.exit_code != 0:
+            logger.warning("session %s deleted; its folder on the host stays: %s", session_id, outcome.output.strip())
 
     async def _make_host_directory(self, path: Path, folder: ProjectFolder) -> None:
         """Make a session's own directory inside a host folder, through the daemon, as ``_ensure_inbox``
@@ -1614,9 +1688,13 @@ class SessionManager:
             await conn.execute("DELETE FROM learning_records WHERE session_id = ?", (session_id,))
             await conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             project = state.project
-            if project is not None and project.folders and project.primary.managed:
+            # A host chat's scratch project goes the same way, but only while it is still marked
+            # ephemeral: a chat the operator kept as a project is not re-marked here, as an older
+            # managed one is, since its folder is on the operator's machine.
+            host_chat = project is not None and project.folders and project.primary.env == "host" and host_chat_path(project.primary.path, session_id)
+            if project is not None and project.folders and (project.primary.managed or host_chat):
                 # Remember ownership for older projects too, even when their creator goes first.
-                if project.id == session_id:
+                if project.id == session_id and not host_chat:
                     await conn.execute("UPDATE projects SET settings = json_set(settings, '$.ephemeral', json('true')) WHERE id = ?", (project.id,))
                 await conn.execute(
                     "DELETE FROM projects WHERE id = ? AND system = '' AND json_extract(settings, '$.ephemeral') = 1 "
@@ -1624,6 +1702,8 @@ class SessionManager:
                     (project.id,),
                 )
         await self.projects.list()
+        if state.project is not None and await self.projects.get(state.project.id) is None:
+            await self._remove_host_chat_folder(state.project, session_id)
         # The logs a read-only folder's session kept in the state volume are the session's alone.
         # Removed whether or not the folder is read-only today: it may have been when they were written.
         shutil.rmtree(session_scratch_dir(self.settings.state_dir, session_id), ignore_errors=True)

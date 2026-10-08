@@ -605,6 +605,8 @@ export type SessionSummary = {
   /** The whole path of it, for the row's tooltip: the list groups by project now, not by folder. */
   workspace_path?: string;
   workspace_own?: boolean;
+  /** Where its commands run; "host" from a container installation is marked on its row. */
+  env?: "container" | "host";
   /** The project this agent works in: the id it is grouped by and the name shown. */
   project_id: string;
   project: string;
@@ -782,6 +784,8 @@ export type SessionDetail = {
   workspace: string;
   workspace_name?: string;
   workspace_own?: boolean;
+  /** Where its commands and file tools run: "host" for one working on the host from the container. */
+  env?: "container" | "host";
   workspace_sessions?: { id: string; title: string }[];
   /** The project this session belongs to. */
   project: ProjectRef;

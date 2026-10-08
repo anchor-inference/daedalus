@@ -680,6 +680,20 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .model-select .ic { flex:none; color:var(--fg-3); }
 .model-select .model-label { min-width:0; }
 .model-select.attn { color:var(--warn); }
+/* Where a new chat runs, beside the model in the start composer: the environment's own pill, on a
+   control's height, opening the two choices with the reason the host is greyed out when it is. */
+.runon-select { display:inline-flex; align-items:center; height:var(--ctl-h-sm); padding:0 4px; background:transparent; border:0; border-radius:var(--radius-sm); cursor:pointer; flex:none; }
+.runon-select:hover, .runon-select[aria-expanded="true"] { background:var(--surface-2); }
+.runon-menu { width:min(320px, 92vw); max-width:min(320px, 92vw); }
+.menu .runon-option { align-items:flex-start; padding:8px 10px; }
+.runon-option-main { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
+.runon-option-main .sub { font-size:var(--fs-12); white-space:normal; }
+.menu .runon-option:disabled { cursor:default; opacity:.7; }
+.menu .runon-option:disabled:hover { background:none; }
+.menu .runon-option.on > .ic { color:var(--accent); margin-top:2px; }
+/* A session that runs on the host, on its row and in its details: the host pill, never squeezed. */
+.host-mark { display:inline-flex; flex:none; }
+.runon-hero { display:inline-flex; }
 /* The fallback's two names: the stand-in, then an arrow and the configured model. */
 .model-select .model-label.model-fallback { display:inline-flex; align-items:baseline; gap:4px; }
 .model-select .model-to, .model-select .model-from { min-width:0; }

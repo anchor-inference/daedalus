@@ -11,7 +11,7 @@ import { type Folder, type Row, agentName, arrange, kindOf } from "../grouping";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { agentsListingOf } from "../mode";
-import { ProjectSettingsSheet, useProjects } from "../projects";
+import { ProjectSettingsSheet, useEnvironments, useProjects } from "../projects";
 import { navigate, pathFor, useRoute } from "../router";
 import { useOffline, useQuery } from "../store";
 import { useStreamUp } from "../events";
@@ -81,6 +81,8 @@ function RowIcon({ s, fork }: { s: SessionSummary; fork?: boolean }) {
 /** The meta line: the state in its colour when it asks for attention, then the model and what hangs off the chat. */
 function RowMeta({ row, fork }: { row: Row; fork?: number }) {
   const s = row.s;
+  // The host as a word of the meta line, as a phone row says everything else that hangs off a chat.
+  const onHost = useEnvironments().data?.docker && s.env === "host";
   const live = s.status === "waiting" || s.status === "running" || s.status === "failed";
   const extra = [
     s.metadata?.loop ? loopLine(s) : "",
@@ -88,6 +90,7 @@ function RowMeta({ row, fork }: { row: Row; fork?: number }) {
     s.model ? shortModel(s.model, 28) : "",
     row.kids.length ? plural("ph.subagents", row.kids.length) : "",
     s.workspace_own && !fork ? t("agents.own.chip") : "",
+    onHost ? t("term.env.host") : "",
     s.terminals ? plural("term.count", s.terminals) : "",
     s.metadata?.subagent_of ? t("agents.orphan") : "",
   ].filter(Boolean).join(" · ");

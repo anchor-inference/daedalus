@@ -17,6 +17,7 @@ import { WindowedRows } from "../virtual";
 import { errorText } from "../ui";
 import { plural, t } from "../i18n";
 import { useReveal } from "../reveal";
+import { HostMark, RunEnv, useRunOn } from "../runon";
 
 type SearchList = SessionList & { semantic: boolean; reason: string; partial: boolean; indexing: boolean };
 
@@ -328,7 +329,7 @@ function loopLine(s: SessionSummary): string {
  *  memo keeps the old row and the dot never appears. */
 function sameRow(a: RowProps, b: RowProps): boolean {
   const l = a.s, r = b.s;
-  if (l.id !== r.id || l.title !== r.title || l.status !== r.status || !!l.unread_result !== !!r.unread_result || l.last_message_at !== r.last_message_at || l.model !== r.model || l.workspace_path !== r.workspace_path) return false;
+  if (l.id !== r.id || l.title !== r.title || l.status !== r.status || !!l.unread_result !== !!r.unread_result || l.last_message_at !== r.last_message_at || l.model !== r.model || l.workspace_path !== r.workspace_path || l.env !== r.env) return false;
   if ((l.terminals ?? 0) !== (r.terminals ?? 0)) return false;
   if (a.projectName !== b.projectName || l.match?.snippet !== r.match?.snippet) return false;
   if (a.onProject !== b.onProject) return false;
@@ -378,6 +379,7 @@ const Row = memo(function Row({ s, kids, onOpen, current, fork, compact, project
         <div className="erow-main">
           <div className="erow-head">
             <span className="erow-title truncate">{projectName && projectName !== agentName(s) && <span className="erow-project">{projectName} · </span>}{agentName(s)}</span>
+            <HostMark env={s.env} />
             <TerminalCount n={s.terminals} />
             {unreadDot}
             <span className="erow-time num" title={new Date(s.last_message_at).toLocaleString()}>{relTime(s.last_message_at)}</span>
@@ -403,6 +405,7 @@ const Row = memo(function Row({ s, kids, onOpen, current, fork, compact, project
         <div className="erow-head">
           <span className="erow-title clamp-2">{projectName && projectName !== agentName(s) && <span className="erow-project">{projectName} · </span>}{agentName(s)}</span>
           {s.workspace_own && !fork && <span className="chip tiny" title={s.workspace_path}>{t("agents.own.chip")}</span>}
+          <HostMark env={s.env} />
           <TerminalCount n={s.terminals} />
           {unreadDot}
           <span className="erow-time num" title={new Date(s.last_message_at).toLocaleString()}>{relTime(s.last_message_at)}</span>
@@ -522,6 +525,7 @@ export function NewAgentSheet({ onClose, onCreated, toast, project: initial = ""
   const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
   const projects = useProjects();
+  const run = useRunOn(project);
   const chosen = (projects.data ?? []).find((p) => p.id === project);
   const folderChoice = chosen && offersFolderChoice(chosen) ? agentFolders(chosen) : [];
   // Empty is the primary: the session then follows whichever folder is first, as one that named
@@ -542,7 +546,7 @@ export function NewAgentSheet({ onClose, onCreated, toast, project: initial = ""
       const loop = loopOn && loopText.trim()
         ? { instruction: loopText.trim(), mode: loopMode, interval_minutes: loopMode === "interval" ? Math.max(1, Number(loopMinutes) || 10) : null, max_runs: loopMax.trim() ? Math.max(1, Number(loopMax) || 1) : null }
         : undefined;
-      const created = await api.post<{ id: string }>("/api/sessions", { title: title.trim(), prompt: prompt.trim() || undefined, tools_off: toolsOff, loop, project_id: project || undefined, folder_id: chosenFolder?.id, own_directory: ownDirectory, preset: preset || undefined });
+      const created = await api.post<{ id: string }>("/api/sessions", { title: title.trim(), prompt: prompt.trim() || undefined, tools_off: toolsOff, loop, project_id: project || undefined, folder_id: chosenFolder?.id, own_directory: ownDirectory, preset: preset || undefined, ...run.body });
       onClose();
       onCreated(created.id);
     } catch (e) {
@@ -586,6 +590,16 @@ export function NewAgentSheet({ onClose, onCreated, toast, project: initial = ""
         </>
       )}
       {chosen ? <div className="sub">{t("newagent.where.inside", { root: chosenFolder?.path ?? projectPath(chosen) })}</div> : <div className="sub">{t("newagent.where.newproject.hint")}</div>}
+      {run.offered && (
+        <>
+          <label className="field" htmlFor="newagent-runon">{t("runon.label")}</label>
+          <select id="newagent-runon" className="field" value={run.env} onChange={(e) => run.pick(e.target.value as RunEnv)}>
+            <option value="container">{t("folder.env.container.long")}</option>
+            <option value="host" disabled={!run.hostReady}>{t("folder.env.host.long")}</option>
+          </select>
+          <div className="sub">{run.hostReady ? t(`runon.${run.env}.hint`) : t("runon.host.down")}</div>
+        </>
+      )}
       {chosen && <label className="toggle-row"><input type="checkbox" checked={ownDirectory} onChange={(e) => setOwnDirectory(e.target.checked)} /><span>{t("newagent.directory.own")}</span><span className="sub">{t("newagent.directory.own.hint")}</span></label>}
       <button type="button" className="disclosure" onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced}>
         <span className={`chev ${advanced ? "down" : ""}`}>›</span> {t("newagent.advanced")}{loopOn ? t("newagent.advanced.loop") : ""}{toolsOff.length ? t("newagent.advanced.tools", { n: toolsOff.length }) : ""}

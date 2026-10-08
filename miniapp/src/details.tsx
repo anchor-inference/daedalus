@@ -12,6 +12,7 @@ import { Icon } from "./icons";
 import { confirmAsync, errorText, fmtTok } from "./ui";
 import { plural, t } from "./i18n";
 import { SessionToolGroups } from "./toolgroupsview";
+import { HostMark } from "./runon";
 
 export type DetailsActions = {
   rename: (title: string) => void;
@@ -158,6 +159,7 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, modes,
         <button className="aside-row link" onClick={on.openFiles} title={detail.project ? projectPath(detail.project) : detail.workspace}>
           <Icon name="folder" size={16} />
           <span className="grow name">{detail.project ? t("session.aside.project", { name: detail.project.name }) : detail.workspace_own === false ? t("session.aside.workspace", { name: detail.workspace_name ?? "" }) : t("session.aside.own")}</span>
+          <HostMark env={detail.env} />
           <span className="sub">{t("panel.tab.files")}</span>
         </button>
         <div className="dt-row sub path" title={detail.workspace}>
