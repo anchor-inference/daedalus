@@ -1459,7 +1459,7 @@ def terminals_shots(context, prefix: str = "") -> None:  # type: ignore[no-untyp
     page.route("**/api/**", stub)
     term.install(page)
     page.goto(f"{BASE}/terminals?token=t&scheme=dark&lang={LANG}")
-    page.wait_for_selector(".term-card .term-card-line", timeout=15000)
+    page.wait_for_selector(".term-card .term-card-line, .ph-tcard .ph-tcard-term", timeout=15000)
     page.wait_for_timeout(700)
     page.screenshot(path=str(OUT / f"{prefix}terminals.png"))
     print(f"wrote {prefix}terminals")
@@ -1515,7 +1515,7 @@ def run_notifications() -> int:
         phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
         page = phone.new_page()
         page.route("**/api/**", stub)
-        shot(page, "phone-inbox", "inbox", wait=".needs-you .notice-row")
+        shot(page, "phone-inbox", "inbox", wait=".ph-needs .ph-irow")
         # Two at once: the banner holds the first, and the second is counted beside Close all.
         stub.events = notify_frames(PERMISSION, finished)  # type: ignore[attr-defined]
         shot(page, "phone-toast", "agents", wait=".notice-toasts.banner .notice-toast", settle=500)
@@ -1670,7 +1670,7 @@ def run_details() -> int:
     def member_details(scope: str):  # type: ignore[no-untyped-def]
         def before(page: Page) -> None:
             if scope == ".sheet":
-                page.locator(".staff-cli .chat-head .head-actions .iconbtn").last.tap()
+                page.locator(".staff-cli .ph-top .ph-ib").last.tap()
             page.locator(f"{scope} .panel-tab[data-tab='details']").click()
             page.wait_for_selector(f"{scope} [data-staff-details]", timeout=5000)
         return before
@@ -1692,7 +1692,7 @@ def run_details() -> int:
         page.route("**/api/**", focus_stub(focus))
         shot(page, "phone-orchestrator-details", f"project/{pid}?panel=details", wait=".panel-sheet .details [data-usage-today]", settle=900)
         page, pid = staff_stand(phone)
-        shot(page, "phone-staff-details", f"project/{pid}/staff/st-ira", wait=".staff-cli .chat-head", before=member_details(".sheet"), settle=900)
+        shot(page, "phone-staff-details", f"project/{pid}/staff/st-ira", wait=".staff-cli .ph-top", before=member_details(".sheet"), settle=900)
         phone.close()
         browser.close()
     return UNHANDLED.report()
@@ -1849,7 +1849,7 @@ def run_staff() -> int:
             desk.close()
         phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
         page, pid = staff_stand(phone)
-        shot(page, "phone-staff-feed", f"project/{pid}/staff/st-ira", wait=".staff-request .ask-answers-row .btn", settle=900)
+        shot(page, "phone-staff-feed", f"project/{pid}/staff/st-ira", wait=".staff-request .ph-ask .ph-btn", settle=900)
         phone.close()
         browser.close()
     return UNHANDLED.report()
