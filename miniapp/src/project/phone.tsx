@@ -16,12 +16,12 @@ import { plural, t } from "../i18n";
 import { EnvPill } from "../envpill";
 import { Icon, type IconName } from "../icons";
 import { go, PageHeader } from "../shell";
-import { ORCHESTRATION_LIST, navigate, pathFor, useRoute, projectHome, projectPagePath, projectSessionPath, projectStaffPath } from "../router";
+import { ORCHESTRATION_LIST, navigate, useRoute, projectHome, projectPagePath, projectSessionPath, projectStaffPath } from "../router";
 import { alwaysServer, answeredBy, askWords, canAlways, composerWhen, nowChoice } from "../staff/model";
 import { HealthLine } from "../staff/health";
 import { invalidate, useOffline, useQuery } from "../store";
 import { PhoneTerminal, type PhoneTerminalProps } from "../terminal/mobile";
-import { TerminalRowMenu } from "../terminal/rowmenu";
+import { TerminalCard } from "../terminal/phonecard";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { StaffSheet } from "../team/StaffSheet";
 import { ProjectSettingsSheet } from "../projects";
@@ -424,12 +424,6 @@ export function PhoneBoard({ projectId, toast, board }: { projectId: string; toa
 
 // ── the terminals ────────────────────────────────────────────────────────────────────────────
 
-/** A terminal's line on a phone: running, how long ago it spoke, or how it ended. */
-function terminalLine(row: TerminalRow): string {
-  if (row.status !== "running") return row.exit_signal ? t("term.state.exitedSignal", { signal: row.exit_signal }) : t("focus.terminal.code", { code: row.exit_code ?? "?" });
-  return row.last_output_at ? t("phone.term.spoke", { when: relTime(row.last_output_at) }) : t("term.running");
-}
-
 export function PhoneTerminals({ projectId, toast }: { projectId: string; toast: (text: string) => void }) {
   const offline = useOffline();
   const { project } = useProject(projectId);
@@ -464,20 +458,9 @@ export function PhoneTerminals({ projectId, toast }: { projectId: string; toast:
         <NeedsYouBanner projectId={projectId} toast={toast} />
         {!data && <Skeleton rows={2} />}
         {data && rows.length === 0 && <div className="empty calm">{t("focus.terminals.empty")}</div>}
-        <div className="phone-terms" role="list">
-          {rows.map((row) => (
-            <div key={row.id} role="listitem" className="phone-term-row">
-              <a className={`phone-term ${row.status === "running" ? "" : "ended"} ${row.env}`} href={pathFor("terminals", row.id)} onClick={(e) => go(e, pathFor("terminals", row.id))} data-terminal={row.id}>
-                <Icon name={row.env === "host" ? "lock" : "terminal"} size={18} />
-                <span className="phone-term-main">
-                  <span className="phone-term-title truncate">{row.title || t("term.untitled")}</span>
-                  <span className="phone-term-line truncate">{[row.owner.label, terminalLine(row)].filter(Boolean).join(" · ")}</span>
-                </span>
-                <EnvPill env={row.env} />
-              </a>
-              {!offline && <TerminalRowMenu row={row} toast={toast} />}
-            </div>
-          ))}
+        {/* The cards of the Terminals screen, so a terminal looks and answers the same in both places. */}
+        <div className="ph-tcards" role="list">
+          {rows.map((row) => <div key={row.id} role="listitem"><TerminalCard row={row} projectName={project?.name ?? null} toast={toast} /></div>)}
         </div>
       </div>
     </>

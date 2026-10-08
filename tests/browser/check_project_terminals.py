@@ -35,7 +35,12 @@ WORDS = {
 }
 
 
-def menu(page: Page, tid: str, item: str) -> None:
+def menu(page: Page, tid: str, item: str, phone: bool = False) -> None:
+    if phone:
+        # A phone's card keeps its commands behind a long press (or a right click), in a sheet.
+        page.locator(f".ph-tcard[data-terminal='{tid}'] .ph-tcard-open").dispatch_event("contextmenu")
+        page.locator(".ph-actions .ph-mrow", has_text=item).first.click()
+        return
     page.locator(f"[data-terminal-menu='{tid}'] button").first.click()
     page.get_by_role("menuitem", name=item, exact=True).click()
 
@@ -55,18 +60,19 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     context = browser.new_context(viewport=size, is_mobile=phone, has_touch=phone, color_scheme="dark")
     shown = "" if phone else "t=tm-build&"
     page = open_page(context, focus, term, EventFeed(), f"{BASE}/project/{pid}/terminals?{shown}token=t&lang={lang}")
-    expect(page.locator("[data-terminal-menu='tm-build']")).to_be_visible(timeout=20000)
+    handle = (lambda tid: f".ph-tcard[data-terminal='{tid}']") if phone else (lambda tid: f"[data-terminal-menu='{tid}']")
+    expect(page.locator(handle("tm-build"))).to_be_visible(timeout=20000)
     for tid in ("tm-ira", "tm-naya", "tm-build", "tm-done"):
-        if page.locator(f"[data-terminal-menu='{tid}']").count() != 1:
+        if page.locator(handle(tid)).count() != 1:
             say(f"{tid} has no menu")
 
-    if os.environ.get("SHOTS"):
+    if os.environ.get("SHOTS") and not phone:
         page.locator("[data-terminal-menu='tm-build'] button").first.click()
         page.wait_for_timeout(300)
         page.screenshot(path=f"{os.environ['SHOTS']}/project-terminals-{lang}-{size['width']}.png")
         page.keyboard.press("Escape")
     # A program runs: End asks, and yes ends it once.
-    menu(page, "tm-build", words["end"])
+    menu(page, "tm-build", words["end"], phone)
     dialog = page.get_by_role("alertdialog")
     expect(dialog).to_contain_text(words["busy"])
     dialog.get_by_role("button", name=words["end"], exact=True).click()
@@ -75,7 +81,7 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
         say(f"End asked the host {kills(term, 'tm-build')} times")
 
     # A staff member's session: always asks, names the member, and No leaves it be.
-    menu(page, "tm-ira", words["end"])
+    menu(page, "tm-ira", words["end"], phone)
     dialog = page.get_by_role("alertdialog")
     expect(dialog).to_contain_text(words["staff"])
     expect(dialog).to_contain_text("Ira")
@@ -85,7 +91,7 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
         say("the member's terminal was ended although the operator said no")
 
     # Rename.
-    menu(page, "tm-naya", words["rename"])
+    menu(page, "tm-naya", words["rename"], phone)
     field = page.get_by_role("textbox", name=words["rename"])
     field.fill("naya · bot")
     page.get_by_role("button", name=words["save"], exact=True).click()
@@ -96,15 +102,15 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
         say(f"the rename sent {patched}")
 
     # Remove an ended one.
-    menu(page, "tm-done", words["remove"])
-    expect(page.locator("[data-terminal-menu='tm-done']")).to_have_count(0, timeout=5000)
+    menu(page, "tm-done", words["remove"], phone)
+    expect(page.locator(handle("tm-done"))).to_have_count(0, timeout=5000)
     if page.evaluate("document.documentElement.scrollWidth - innerWidth") > 0:
         say("the page scrolls sideways")
 
     if phone:
-        # The row itself still leads to the terminal, the menu beside it does not.
-        link = page.locator(".phone-term[data-terminal='tm-naya']")
-        expect(link).to_have_attribute("href", "/app/terminals/tm-naya")
+        # The card itself leads to the terminal; its commands are only behind the long press.
+        page.locator(".ph-tcard[data-terminal='tm-naya'] .ph-tcard-open").tap()
+        page.wait_for_url("**/terminals/tm-naya**", timeout=5000)
     context.close()
 
 

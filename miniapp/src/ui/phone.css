@@ -285,8 +285,9 @@
   .ph-kico.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
   .ph-kico.error { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); }
   .ph-kico.info { background: color-mix(in srgb, var(--info) 12%, transparent); color: var(--info); }
-  .ph-answers { display: flex; flex-wrap: nowrap; gap: var(--space-2); margin-top: 10px; overflow-x: auto; scrollbar-width: none; }
-  .ph-answers .ph-btn { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+  /* The answers wrap rather than scroll: a long Russian label clipped at the edge read as a broken button. */
+  .ph-answers { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: 10px; }
+  .ph-answers .ph-btn { flex: none; max-width: 100%; padding: 0 14px; overflow: hidden; text-overflow: ellipsis; }
   .ph-answers.grid { display: grid; grid-template-columns: 1fr 1fr; margin-top: 0; overflow: visible; }
   .ph-answers.grid .ph-btn { max-width: none; height: var(--tap); }
   .ph-answers.grid .ph-btn::after { display: none; }
@@ -316,6 +317,98 @@
   .notice-toast .notice-actions .btn.danger { color: var(--bad); }
   .notice-toasts.banner .notice-foot { padding: 0 2px; border: 0; background: none; }
   .notice-toasts.banner .notice-foot .btn, .notice-toasts.banner .notice-more { min-height: var(--tap); padding: 0 8px; border: 0; background: none; color: var(--fg-2); font-size: var(--fs-13); }
+
+  /* ── Terminals: one capacity line, cards with the screen's last rows, the sheets ─────────── */
+  .ph-cap { flex: none; display: flex; flex-direction: column; gap: 8px; width: 100%; min-height: var(--tap); padding: 4px var(--gutter) 10px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .ph-cap-l { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-13); color: var(--fg-2); }
+  .ph-cap-l > .ic:last-child { margin-left: auto; color: var(--fg-3); }
+  .ph-cap[data-level="warn"] .ph-cap-l { color: var(--warn); } .ph-cap[data-level="bad"] .ph-cap-l { color: var(--bad); }
+  .ph-cbar { display: flex; width: 100%; height: 4px; border-radius: 2px; overflow: hidden; background: var(--surface-2); }
+  .ph-cbar.big { height: 12px; border-radius: 6px; }
+  .ph-cbar i { display: block; height: 100%; flex: none; }
+  .ph-cbar .o { background: var(--fg-3); }
+  .ph-cbar .n { background: var(--ok); }
+  .ph-cbar .k { background: repeating-linear-gradient(135deg, var(--ok) 0 3px, color-mix(in srgb, var(--ok) 35%, transparent) 3px 6px); }
+  .ph-cbar[data-level="warn"] .n { background: var(--warn); } .ph-cbar[data-level="warn"] .k { background: repeating-linear-gradient(135deg, var(--warn) 0 3px, color-mix(in srgb, var(--warn) 35%, transparent) 3px 6px); }
+  .ph-cbar[data-level="bad"] .n { background: var(--bad); } .ph-cbar[data-level="bad"] .k { background: repeating-linear-gradient(135deg, var(--bad) 0 3px, color-mix(in srgb, var(--bad) 35%, transparent) 3px 6px); }
+  .ph-cap-big { font-size: var(--fs-22); font-weight: 600; line-height: 1.25; }
+  .ph-legend { display: flex; flex-direction: column; }
+  .ph-legend > div { display: flex; align-items: center; gap: 10px; min-height: 36px; font-size: var(--fs-15); }
+  .ph-legend .sw { width: 14px; height: 14px; flex: none; border-radius: 4px; }
+  .ph-legend .sw.o { background: var(--fg-3); } .ph-legend .sw.n { background: var(--ok); } .ph-legend .sw.f { background: var(--surface-3); }
+  .ph-legend .sw.k { background: repeating-linear-gradient(135deg, var(--ok) 0 3px, transparent 3px 6px); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 40%, transparent); }
+  .ph-legend .v { margin-left: auto; color: var(--fg-2); }
+  .ph-kv[data-level="warn"] > :last-child { color: var(--warn); } .ph-kv[data-level="bad"] > :last-child { color: var(--bad); }
+  .ph-tcards { display: flex; flex-direction: column; gap: var(--space-2); padding: 0 var(--gutter); }
+  .ph-tcard { border-radius: var(--radius-md); background: var(--surface-1); overflow: hidden; }
+  .ph-tcard.ask { box-shadow: inset 3px 0 0 var(--warn); }
+  .ph-tcard.ended { opacity: .7; }
+  .ph-tcard-open { display: block; padding: 12px 12px 0 14px; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+  .ph-tcard-open:active { background: var(--surface-2); }
+  .ph-tcard-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .ph-tcard-hd { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .ph-tcard-nm { flex: 1; min-width: 0; font-family: var(--mono); font-size: var(--fs-15); font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-tcard .term-env { height: 24px; padding: 0 8px; margin: 0; border: 0; font-size: var(--fs-12); }
+  .ph-tcard .term-env.container { color: var(--fg-2); background: var(--surface-2); }
+  .ph-tcard-sb { display: block; margin-top: 2px; font-size: var(--fs-13); color: var(--fg-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-tcard-term { margin: 8px 0 0; padding: 8px 10px; border-radius: 10px; background: var(--term-bg, #000); font-family: var(--mono); font-size: var(--fs-12); line-height: 1.45; white-space: pre; overflow: hidden; }
+  .ph-tcard-term > div { overflow: hidden; text-overflow: ellipsis; min-height: 1.45em; }
+  .ph-tcard-ft { display: flex; align-items: center; gap: 8px; min-height: var(--tap); padding: 0 8px 0 14px; font-size: var(--fs-13); color: var(--fg-2); }
+  .ph-tcard-st { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-tcard-st[data-level="warn"] { color: var(--warn); } .ph-tcard-st[data-level="bad"] { color: var(--bad); }
+  .ph-dot[data-level="ok"] { background: var(--ok); } .ph-dot[data-level="warn"] { background: var(--warn); } .ph-dot[data-level="bad"] { background: var(--bad); }
+  .ph-dot[data-level="idle"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--fg-3); }
+  .ph-terms .ph-page-pad { padding-bottom: var(--space-1); }
+  .ph-opts { display: flex; flex-direction: column; gap: var(--space-2); }
+  .ph-opt { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 14px; border: 0; border-radius: var(--radius-md); background: var(--surface-2); color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+  .ph-opt.on { box-shadow: inset 0 0 0 1.5px var(--accent); }
+  .ph-opt:disabled { opacity: .45; }
+  .ph-opt > .ic { color: var(--fg-2); flex: none; }
+  .ph-opt.host > .ic { color: var(--warn); }
+  .ph-radio { width: 22px; height: 22px; flex: none; margin-top: 1px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--fg-3); }
+  .ph-opt.on .ph-radio { box-shadow: inset 0 0 0 6px var(--accent); }
+  .ph-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .ph-opt-t { font-size: var(--fs-16); font-weight: 500; }
+  .ph-opt-m { margin-top: 2px; font-size: var(--fs-13); line-height: 1.4; color: var(--fg-2); }
+  .ph-opt.host .ph-opt-m { color: var(--warn); }
+  .ph-field.mono { font-family: var(--mono); font-size: var(--fs-16); }
+  .ph-foot-row > .ph-field { flex: 1; min-width: 0; }
+  .ph-btn.block { width: 100%; }
+  .ph-ask { display: flex; flex-direction: column; gap: var(--space-2); }
+  .ph-ask-row { display: flex; gap: var(--space-2); }
+  .ph-ask-row > .ph-btn { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ph-ask-wide { width: 100%; }
+  .ph-ask-note { font-size: var(--fs-13); color: var(--warn); }
+  .ph-ask-own { display: flex; flex-direction: column; gap: var(--space-2); }
+
+  /* The full-screen terminal: the page's bar (back, the title in the terminal's face over where it
+     runs, the command jumps, ⋮), round keys, and a compose line in the composer's shape. With the
+     soft keyboard up the keys and the line become one raised card above it, so the terminal keeps
+     every row the keyboard leaves. */
+  .term-phone { background: var(--term-bg, var(--bg)); }
+  .term-phone-head { min-height: var(--top-h); padding: 0 var(--space-1); gap: 0; border: 0; background: var(--bg); }
+  .term-phone-head .iconbtn { width: var(--tap); height: var(--tap); border-radius: var(--radius-pill); }
+  .term-phone-head .iconbtn:disabled { opacity: .35; }
+  .term-phone-titles { padding: 0 var(--space-2); }
+  .term-phone-title { font-size: var(--fs-15); font-weight: 500; }
+  .term-phone-cwd { display: flex; align-items: center; gap: 4px; font-family: inherit; font-size: var(--fs-13); color: var(--fg-2); }
+  .term-phone-cwd.host { color: var(--warn); }
+  .term-phone-actions { padding: var(--space-2) var(--space-2) var(--space-1); border: 0; background: var(--bg); }
+  .term-phone-ask-text { font-size: var(--fs-13); }
+  .term-keys { gap: 6px; padding: 6px 8px; border: 0; background: var(--bg); }
+  .term-key { position: relative; min-width: 44px; height: 36px; padding: 0 10px; border: 0; border-radius: 10px; background: var(--surface-2); font-size: var(--fs-15); }
+  .term-key::after { content: ""; position: absolute; inset: -4px 0; }
+  .term-key.on { background: var(--fg); color: var(--bg); }
+  .term-key.locked { box-shadow: inset 0 -3px 0 var(--accent); }
+  .term-compose { align-items: center; gap: 4px; margin: 0 var(--space-2) var(--space-2); padding: 6px; border-radius: var(--radius-composer); background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line-strong); }
+  .term-compose-field { min-height: 36px; padding: 7px 8px; border: 0; border-radius: 0; background: none; font-size: var(--fs-16); line-height: 22px; }
+  .term-compose-field:focus { border: 0; }
+  .term-compose .iconbtn { position: relative; width: var(--ctl-round); height: var(--ctl-round); min-height: var(--ctl-round); border-radius: 50%; }
+  .term-compose .iconbtn::after { content: ""; position: absolute; inset: -4px; }
+  .term-compose-enter { font-size: var(--fs-17); }
+  :root[data-keyboard="open"] .term-phone .term-keys { margin: 0 var(--space-2); padding: 6px 6px 2px; border-radius: var(--radius-xl) var(--radius-xl) 0 0; background: var(--surface-1); box-shadow: inset 1px 1px 0 var(--line-strong), inset -1px 0 0 var(--line-strong); }
+  :root[data-keyboard="open"] .term-phone .term-compose { margin-top: 0; margin-bottom: var(--space-2); border-radius: 0 0 var(--radius-xl) var(--radius-xl); box-shadow: inset 1px -1px 0 var(--line-strong), inset -1px 0 0 var(--line-strong); }
+  :root[data-keyboard="open"] .term-phone .term-key { background: var(--surface-2); }
 
   /* ── the creation pill ───────────────────────────────────────────────────────────────────── */
   .ph-newchat { height: 48px; display: inline-flex; align-items: center; gap: 8px; padding: 0 20px 0 16px; border: 0; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-ink); font: inherit; font-size: var(--fs-16); font-weight: 600; white-space: nowrap; cursor: pointer; }

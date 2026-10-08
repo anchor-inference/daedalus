@@ -198,10 +198,10 @@ def run_one(page: Page, lang: str, width: int) -> None:
     page.locator("nav.project-tabs a[data-tab='terminals']").tap()
     page.wait_for_url(f"**/project/{PID}/terminals**")
     tabs(page, words, "terminals")
-    rows = page.locator(".phone-term")
+    rows = page.locator(".ph-tcard")
     expect(rows).to_have_count(3)
-    expect(rows.first).to_have_attribute("href", "/app/terminals/tm-ira")
-    tall_enough(page, ".phone-term", where)
+    expect(rows.first).to_have_attribute("data-terminal", "tm-ira")
+    tall_enough(page, ".ph-tcard-ft", where)
     fits(page, f"{where} terminals")
 
     # The orchestrator: its chat, its composer above the tabs.
