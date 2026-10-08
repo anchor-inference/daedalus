@@ -59,6 +59,7 @@ import { useQuery } from "../store";
 import { sentMessageReachedTranscript } from "../pending-message";
 import { Banner, IconButton } from "../ui/phone";
 import { SecretChip } from "../secrets";
+import { RawHtml } from "../rawhtml";
 import { RenameSheet, SearchSheet, SessionMenuSheet, SessionTopBar, StateSub, SubagentsSheet, type SessionRow, type SessionTile } from "./SessionPhone";
 
 /**
@@ -67,7 +68,7 @@ import { RenameSheet, SearchSheet, SessionMenuSheet, SessionTopBar, StateSub, Su
  */
 const Md = memo(function Md({ text, className, cacheKey }: { text: string; className?: string; cacheKey?: string }) {
   const html = useMemo(() => (cacheKey ? renderCached(cacheKey, text) : renderMarkdown(text)), [text, cacheKey]);
-  return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+  return <RawHtml className={className} html={html} />;
 });
 
 /** How much of the end of the conversation a run's event is answered with. */
@@ -2544,8 +2545,8 @@ function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {
 function ToolCard({ item }: { item: ToolItem }) {
   const a = item.args;
   const parts: ReactNode[] = [];
-  if (item.name === "Exec") parts.push(<div key="c" dangerouslySetInnerHTML={{ __html: codeBlock(String(a.command ?? ""), "bash") }} />);
-  else if (item.name === "Write") parts.push(<div key="c" dangerouslySetInnerHTML={{ __html: codeBlock(String(a.content ?? "").slice(0, 4000), langOf(String(a.path ?? ""))) }} />);
+  if (item.name === "Exec") parts.push(<RawHtml key="c" html={codeBlock(String(a.command ?? ""), "bash")} />);
+  else if (item.name === "Write") parts.push(<RawHtml key="c" html={codeBlock(String(a.content ?? "").slice(0, 4000), langOf(String(a.path ?? "")))} />);
   else if (item.name === "Edit") {
     const before = String(a.old_string ?? a.old ?? "");
     const after = String(a.new_string ?? a.new ?? "");
@@ -2568,7 +2569,7 @@ function ToolCard({ item }: { item: ToolItem }) {
       </div>,
     );
   }
-  else parts.push(<div key="c" dangerouslySetInnerHTML={{ __html: codeBlock(JSON.stringify(a, null, 2), "args") }} />);
+  else parts.push(<RawHtml key="c" html={codeBlock(JSON.stringify(a, null, 2), "args")} />);
   if (item.result !== undefined) parts.push(<ToolResultText key="r" item={item} />);
   return <div className="toolcard">{parts}</div>;
 }
@@ -2608,7 +2609,7 @@ function ReceiptDialog({ sessionId, receipt, onClose }: { sessionId: string; rec
                   {row.sandboxed ? t("session.receipt.sandboxed") : ""}
                   {row.dependencies && t("session.receipt.depends", { list: row.dependencies })}
                 </div>
-                <div dangerouslySetInnerHTML={{ __html: codeBlock(row.command, "sh") }} />
+                <RawHtml html={codeBlock(row.command, "sh")} />
                 {row.output_head && (looksLikeDiff(row.output_head) ? <DiffView text={row.output_head} /> : <pre className="filetext">{row.output_head}</pre>)}
               </>
             )}

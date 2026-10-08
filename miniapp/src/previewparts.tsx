@@ -6,6 +6,7 @@ import { highlightLines, langOf, HIGHLIGHT_MAX_LINES } from "./highlight";
 import { jsonRows, parseJsonText, toggleRow } from "./jsontree";
 import { diffFileName, lineAnchor, parseDiff } from "./diff";
 import { t } from "./i18n";
+import { RawHtml } from "./rawhtml";
 
 export function SourceView({ text, name, range }: { text: string; name: string; range?: { from: number; to: number } | null }) {
   const [wrap, setWrap] = useState(false);
@@ -25,7 +26,7 @@ export function SourceView({ text, name, range }: { text: string; name: string; 
     </div>
     <div className={`filetext lined source-view ${wrap ? "wrap" : ""}`}>
       {start > 0 && <button className="linkbtn" onClick={() => setAt(Math.max(1, at - 280))}>{t("preview.previous")}</button>}
-      {lines.slice(start, end).map((line, i) => { const n = start + i + 1; return <div key={n} data-line={n} className={`line ${mark && n >= mark.from && n <= mark.to ? "cited" : ""}`} ref={n === at ? first : undefined}><span className="linenum">{n}</span><span className="linebody" dangerouslySetInnerHTML={{ __html: line || " " }} /></div>; })}
+      {lines.slice(start, end).map((line, i) => { const n = start + i + 1; return <div key={n} data-line={n} className={`line ${mark && n >= mark.from && n <= mark.to ? "cited" : ""}`} ref={n === at ? first : undefined}><span className="linenum">{n}</span><RawHtml as="span" className="linebody" html={line || " "} /></div>; })}
       {end < lines.length && <button className="linkbtn" onClick={() => setAt(at + 280)}>{t("preview.next")}</button>}
     </div>
   </>;

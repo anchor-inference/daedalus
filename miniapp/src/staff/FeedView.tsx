@@ -10,6 +10,7 @@ import { clock, tokens, usd } from "../format";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { renderMarkdown } from "../md";
+import { RawHtml } from "../rawhtml";
 import { api } from "../api";
 import { mergeTurns, nextSince } from "./model";
 
@@ -100,7 +101,7 @@ function FeedTurn({ turn, name }: { turn: StaffTurn; name: string }) {
         {spend && <span className="feed-turn-spend">{spend}</span>}
       </div>
       {turn.role === "assistant" ? (
-        html ? <div className="answer feed-answer" dangerouslySetInnerHTML={{ __html: html }} /> : null
+        html ? <RawHtml className="answer feed-answer" html={html} /> : null
       ) : (
         turn.text && <div className="feed-prompt">{turn.text}</div>
       )}

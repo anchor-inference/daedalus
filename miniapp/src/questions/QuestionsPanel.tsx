@@ -12,6 +12,7 @@ import { absTime, relTime } from "../format";
 import { plural, t } from "../i18n";
 import { Icon, type IconName } from "../icons";
 import { renderMarkdown } from "../md";
+import { RawHtml } from "../rawhtml";
 import { answeredLine } from "../main/model";
 import { projectHome } from "../router";
 import { go } from "../shell";
@@ -392,7 +393,7 @@ function QuestionCard({ q, draft, fate, fresh, onChange, onClear, onDismiss }: C
       </header>
       {body && (
         <>
-          <div className={`q-text ${long && !open ? "folded" : ""}`} dangerouslySetInnerHTML={{ __html: html }} />
+          <RawHtml className={`q-text ${long && !open ? "folded" : ""}`} html={html} />
           {long && (
             <button type="button" className="q-more" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
               {t(open ? "questions.less" : "questions.more")}

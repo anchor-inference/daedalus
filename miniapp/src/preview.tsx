@@ -11,6 +11,7 @@ import { renderMarkdown } from "./md";
 import { errorText, fmtBytes } from "./ui";
 import { t } from "./i18n";
 import { SourceView, JsonView, DiffView, ImageView } from "./previewparts";
+import { RawHtml } from "./rawhtml";
 import { HtmlPreview, HtmlNavigation } from "./htmlpreview";
 import { parseCsv } from "./csv";
 export { parseCsv } from "./csv";
@@ -287,8 +288,8 @@ export function Viewer({ src, onInfo, onNavigation, className }: { src: PreviewS
         {!failure && pdfUrl && kind === "pdf" && <iframe className="preview-frame" src={pdfUrl} title={name} />}
         {!failure && url && kind === "audio" && <audio className="preview-media" controls src={url} />}
         {!failure && url && kind === "video" && <video className="preview-media" controls src={url} />}
-        {!failure && body?.html && kind === "markdown" && <div className="answer preview-doc" dangerouslySetInnerHTML={{ __html: body.html }} />}
-        {!failure && body?.html && kind === "docx" && <div className="answer preview-doc docx" dangerouslySetInnerHTML={{ __html: body.html }} />}
+        {!failure && body?.html && kind === "markdown" && <RawHtml className="answer preview-doc" html={body.html} />}
+        {!failure && body?.html && kind === "docx" && <RawHtml className="answer preview-doc docx" html={body.html} />}
         {!failure && body?.text !== undefined && kind === "html" && <HtmlPreview text={body.text} base={"base" in src ? src.base : undefined} path={"path" in src ? src.path : name} onNavigation={onNavigation} />}
         {!failure && body?.text !== undefined && kind === "text" && <SourceView text={body.text} name={name} range={cited} />}
         {!failure && body?.text !== undefined && kind === "json" && <JsonView text={body.text} />}
