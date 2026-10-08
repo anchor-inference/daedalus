@@ -13,6 +13,7 @@ import { ActionButtons, NeedsYou, NotificationList, NotificationRow, byDay, byPr
 import { PushNudge } from "../pushui";
 import { errorText } from "../ui";
 import { plural, t } from "../i18n";
+import { PhoneInbox } from "./InboxPhone";
 
 type Filter = "all" | "unseen" | "problems" | "projects";
 
@@ -20,7 +21,13 @@ type Filter = "all" | "unseen" | "problems" | "projects";
  * The notification centre, and on a phone the only one: what needs the operator first, with its
  * buttons; the change proposals waiting for a decision; then everything else, by day or by project.
  */
-export function InboxScreen({ toast, onOpen }: { toast: (t: string) => void; onOpen: (id: string) => void }) {
+export function InboxScreen(props: { toast: (t: string) => void; onOpen: (id: string) => void }) {
+  // A phone draws the same lists from its own pieces (InboxPhone.tsx): rows, sheets and a selection.
+  const phone = !useMedia("(min-width: 1024px)");
+  return phone ? <PhoneInbox {...props} /> : <DesktopInbox {...props} />;
+}
+
+function DesktopInbox({ toast, onOpen }: { toast: (t: string) => void; onOpen: (id: string) => void }) {
   const split = useMedia("(min-width: 1280px)");
   const [filter, setFilter] = useState<Filter>("all");
   const view = filter === "projects" ? "all" : filter;

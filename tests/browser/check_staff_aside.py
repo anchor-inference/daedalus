@@ -118,7 +118,7 @@ def phone(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     page = open_page(context, focus, term, feed, f"{BASE}/project/{pid}/staff/st-ira?token=t&lang={lang}")
     page.wait_for_selector(".staff-cli .feed-turn", timeout=15000)
     check.that(page.locator(".staff-aside").count() == 0, f"{lang} phone: a column is drawn beside the Feed")
-    page.locator(".staff-cli .chat-head .head-actions .iconbtn").last.tap()
+    page.locator(".staff-cli .ph-top .ph-ib").last.tap()
     expect(page.locator(".sheet .staff-panel")).to_be_visible(timeout=5000)
     check.that(page.locator(".sheet .pane-handle").count() == 0, f"{lang} phone: the sheet has an edge to drag")
     check.that(sideways(page) <= 0, f"{lang} phone: the sheet scrolls sideways by {sideways(page)} px")

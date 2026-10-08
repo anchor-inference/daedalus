@@ -348,14 +348,25 @@ def navigation(browser, problems: list[str]) -> None:  # type: ignore[no-untyped
         problems.append("the drawer has no Terminals")
     else:
         more.first.click()
-        page.wait_for_selector(".term-card", timeout=10000)
+        page.wait_for_selector(".ph-tcard", timeout=10000)
         width = page.evaluate("() => document.documentElement.scrollWidth")
         if width > 390:
             problems.append(f"the Terminals screen scrolls sideways on a phone: {width} px")
-        cards = page.eval_on_selector_all(".term-card", "(c) => c.map((e) => Math.round(e.getBoundingClientRect().width))")
-        if cards and max(cards) > 390 - 16:
+        cards = page.eval_on_selector_all(".ph-tcard", "(c) => c.map((e) => Math.round(e.getBoundingClientRect().width))")
+        if cards and max(cards) > 390 - 2 * 16:
             problems.append(f"a card is wider than the phone allows: {cards}")
-        page.locator("[data-terminal='k1tests00000'] .term-card-open").tap()
+        # The capacity is one line under the bar, and the whole picture a tap away in its sheet.
+        if not page.locator(".ph-cap .ph-cbar").count():
+            problems.append("the phone's Terminals has no capacity line")
+        else:
+            page.locator(".ph-cap").tap()
+            try:
+                page.wait_for_selector(".ph-capacity .ph-legend", timeout=5000)
+            except Exception:  # noqa: BLE001
+                problems.append("the capacity line does not open the capacity sheet")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+        page.locator("[data-terminal='k1tests00000'] .ph-tcard-open").tap()
         # On a phone the full-screen address shows the phone's terminal, with its keys (mobile.tsx).
         page.wait_for_selector(".term-phone .term-view[data-terminal-view='k1tests00000']", timeout=10000)
         if page.locator("nav.tabbar").count():

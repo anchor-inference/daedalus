@@ -14,7 +14,8 @@ import { t } from "../i18n";
 import { Icon } from "../icons";
 import { LoadBar } from "../loadbar";
 import { navigate, pathFor } from "../router";
-import { PageHeader, screenTitle } from "../ui/index";
+import { PageHeader, screenTitle, useMedia } from "../ui/index";
+import { PhoneTerminals } from "./TerminalsPhone";
 import { invalidate, peek, useQuery } from "../store";
 import { errorText } from "../ui";
 import { createTerminalConfirmed } from "../terminal/actions";
@@ -54,7 +55,13 @@ export async function openFreeTerminal(env: TerminalEnvName, cwd: string | undef
   navigate(terminalPath(row.id));
 }
 
-export function TerminalsScreen({ toast, project, projects }: { toast: (text: string) => void; project: string; projects: Project[] }) {
+export function TerminalsScreen(props: { toast: (text: string) => void; project: string; projects: Project[] }) {
+  // A phone draws the same listing from its own pieces (TerminalsPhone.tsx): a capacity line, cards, sheets.
+  const phone = !useMedia("(min-width: 1024px)");
+  return phone ? <PhoneTerminals {...props} /> : <DesktopTerminals {...props} />;
+}
+
+function DesktopTerminals({ toast, project, projects }: { toast: (text: string) => void; project: string; projects: Project[] }) {
   const [filter, setFilter] = useState<TerminalFilter>("all");
   const [creating, setCreating] = useState(false);
   // The host says how often a preview is worth refreshing; the environments come with the listing.

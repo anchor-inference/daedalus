@@ -409,10 +409,10 @@ def run() -> int:
             if not wait(page, lambda: tab.count() and tab.inner_text() == str(Centre.summary()["unseen"]), 3):
                 problems.append(f"the bell's badge is {tab.inner_text() if tab.count() else 'missing'}, not {Centre.summary()['unseen']}")
             bell.click()
-            page.wait_for_selector(".needs-you .notice-row", timeout=10000)
-            first = page.eval_on_selector(".screen", "el => el.firstElementChild && el.firstElementChild.className")
+            page.wait_for_selector(".ph-inbox .ph-needs .ph-irow", timeout=10000)
+            first = page.eval_on_selector(".ph-inbox .ph-page-body", "el => el.firstElementChild && el.firstElementChild.className")
             print("the Inbox starts with:", first)
-            if first != "needs-you":
+            if first != "ph-needs":
                 problems.append(f"the Inbox does not start with Needs you: {first}")
             phone.close()
             browser.close()

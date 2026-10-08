@@ -286,10 +286,10 @@ def phone(page: Page, lang: str) -> None:
         if where == "team":
             # Each member's spend where the member is: dollars and tokens, or the subscription window used.
             # A phone draws the team as its own rows, not the desktop's, and the spend goes with them.
-            rows = page.locator(".phone-staff-item")
-            expect(rows.filter(has_text="Lev").locator(".staff-spend")).to_have_text(WORDS[lang]["levspend"])
-            expect(rows.filter(has_text="Ira").locator(".staff-spend")).to_have_text(WORDS[lang]["iraspend"])
-            expect(rows.filter(has_text="Max").locator(".staff-spend")).to_have_count(0)
+            rows = page.locator("[data-staff]")
+            expect(rows.filter(has_text="Lev").locator(".ph-member-spend")).to_have_text(WORDS[lang]["levspend"])
+            expect(rows.filter(has_text="Ira").locator(".ph-member-spend")).to_have_text(WORDS[lang]["iraspend"])
+            expect(rows.filter(has_text="Max").locator(".ph-member-spend")).to_have_count(0)
         if where == "wakeups":
             expect(page.locator(".watch-row").first).to_contain_text(WORDS[lang]["watch_queued"])
             expect(page.locator(".watch-row").first).to_contain_text(WORDS[lang]["watch_blocked"])

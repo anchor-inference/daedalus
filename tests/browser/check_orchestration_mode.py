@@ -288,8 +288,8 @@ def phone(page: Page, lang: str) -> None:
 
     # A notification with the old link, opened from the Inbox.
     go(page, "/inbox", lang)
-    # The Inbox's card of an unread entry opens its link at once.
-    page.locator(".notice-row[data-notice='77']").first.click()
+    # The Inbox's row of an entry with a link opens it at once.
+    page.locator("[data-notice='77'] .ph-row").first.click()
     page.wait_for_url(f"**/app/orchestration/project/{PID}/board**")
     expect(page.locator(".ph-board")).to_be_visible()
     expect(page.locator("nav.tabbar.project-tabs .active")).to_have_attribute("data-tab", "board")

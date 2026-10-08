@@ -11,6 +11,7 @@ import { t } from "../i18n";
 import { applyMessageEvent, stripRows } from "../staff/model";
 import { invalidate, peek, prime, useQuery } from "../store";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
+import { Icon } from "../icons";
 import { HARNESS_NAMES, type Staff } from "../team/team";
 import { confirmAsync, errorText } from "../ui";
 import { useFocus } from "./data";
@@ -33,7 +34,7 @@ export function useMember(staffId: string | null) {
  * `facts` goes after the status in the pill ("turn 4 · 18 min"); `details` replaces the line under the
  * name with what the caller knows better (a command-line member's version, worktree and task).
  */
-export function StaffHeader({ projectId, staffId, toast, facts, details, children }: { projectId: string; staffId: string; toast: (text: string) => void; facts?: string; details?: ReactNode; children?: ReactNode }) {
+export function StaffHeader({ projectId, staffId, toast, facts, details, children, compact = false }: { projectId: string; staffId: string; toast: (text: string) => void; facts?: string; details?: ReactNode; children?: ReactNode; compact?: boolean }) {
   const { data: member } = useMember(staffId);
   const { board } = useFocus(projectId);
   if (!member) return null;
@@ -54,6 +55,26 @@ export function StaffHeader({ projectId, staffId, toast, facts, details, childre
       toast(errorText(e));
     }
   }
+  const state = wait ? t("focus.wait.line", { reason: t(waitKey(wait.reason)), n: wait.position }) : live?.pause_requested ? t("focus.staff.paused") : t(`team.status.${member.status}`);
+  // A phone's member page names the member in its bar, so the header is only the state and the two
+  // controls a turn needs; Release, the weightiest, is in the details sheet beside the rest.
+  if (compact) {
+    return (
+      <div className="staff-head compact">
+        <div className="staff-head-row">
+          <span className={`focus-dot tone-${tone}`} aria-hidden />
+          <span className="staff-head-state truncate" data-status={member.status} title={wait?.detail || live?.waiting_for || undefined}>{state}{facts && !wait && ` · ${facts}`}</span>
+          {live && (
+            <span className="staff-head-actions">
+              <button type="button" className="ph-btn sm" onClick={() => void act("pause")} disabled={live.pause_requested}><Icon name="pause" size={16} />{t("ph.member.pause")}</button>
+              <button type="button" className="ph-btn sm" onClick={() => void act("interrupt")}><Icon name="stop" size={16} />{t("focus.staff.interrupt")}</button>
+            </span>
+          )}
+        </div>
+        {children}
+      </div>
+    );
+  }
   return (
     <div className="staff-head">
       <div className="staff-head-row">
@@ -71,7 +92,7 @@ export function StaffHeader({ projectId, staffId, toast, facts, details, childre
         </div>
         <span className={`focus-pill tone-${tone}`} title={wait?.detail || live?.waiting_for || undefined} data-status={member.status}>
           <span className={`focus-dot tone-${tone}`} aria-hidden />
-          {wait ? t("focus.wait.line", { reason: t(waitKey(wait.reason)), n: wait.position }) : live?.pause_requested ? t("focus.staff.paused") : t(`team.status.${member.status}`)}
+          {state}
           {facts && !wait && <span className="staff-head-facts"> · {facts}</span>}
         </span>
         {live && (

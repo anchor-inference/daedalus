@@ -1,5 +1,6 @@
 """Every Settings page on a phone, 390 and 360 px wide, in both languages: nothing leaves the screen
-sideways, an open list stays on it, and each kind of control stands in one place in its row.
+sideways, an open list stays on it, and each kind of control stands in one place in its row (the
+row's content box: on a phone each row is a padded tile).
 
 On a phone the rows' controls stood wherever their content put them. A long pick (the web search's
 fallbacks) grew its control past the row, and the row, aligned to its end, pushed it off the left
@@ -58,9 +59,13 @@ MEASURE = """() => {
       : ctl.querySelector(':scope > input.field, :scope > textarea') ? 'text'
       : null;
     if (!kind || ctl.children.length !== 1) continue;
+    // Measured from the row's content edges: a phone draws each row as a tile with padding of its
+    // own, and the control is meant to fill the tile's width inside it, as the words above it do.
     const box = row.getBoundingClientRect(), c = ctl.getBoundingClientRect(), text = row.querySelector(':scope > .settings-row-text').getBoundingClientRect();
+    const pad = getComputedStyle(row);
     const inner = ctl.firstElementChild.getBoundingClientRect();
-    rows.push({ kind, title: row.querySelector('.settings-row-title')?.textContent?.trim().slice(0, 40), left: Math.round(inner.left - box.left), right: Math.round(box.right - inner.right), below: c.top >= text.bottom - 0.5 });
+    const left = box.left + parseFloat(pad.paddingLeft), right = box.right - parseFloat(pad.paddingRight);
+    rows.push({ kind, title: row.querySelector('.settings-row-title')?.textContent?.trim().slice(0, 40), left: Math.round(inner.left - left), right: Math.round(right - inner.right), below: c.top >= text.bottom - 0.5 });
   }
   return { outside, rows };
 }"""

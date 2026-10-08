@@ -27,8 +27,8 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "9f3c2a1b7d40"
 
 WORDS = {
-    "en": {"title": "Team · Bakery", "hire": "Hire", "save": "Save", "dismiss": "Dismiss", "signedout": "not signed in", "missing": "not installed", "working": "working", "edit": "Edit {name}", "empty": "No staff yet", "kept": "How these settings are kept", "walls": "the host's walls refuse", "worker": "Worker", "reviewer": "Reviewer", "enable": "coordinator on", "shared": "Shared folder", "worktree": "Own worktree", "blocked": "This environment cannot safely write in a shared folder"},
-    "ru": {"title": "Команда · Bakery", "hire": "Нанять", "save": "Сохранить", "dismiss": "Уволить", "signedout": "нет входа", "missing": "не установлен", "working": "работает", "edit": "Изменить: {name}", "empty": "Сотрудников пока нет", "kept": "Как соблюдаются эти настройки", "walls": "хост отклоняет", "worker": "Исполнитель", "reviewer": "Ревьюер", "enable": "Включить координатора", "shared": "Общая папка", "worktree": "Свой worktree", "blocked": "Эта среда не может безопасно писать в общую папку"},
+    "en": {"title": "Team · Bakery", "hire": "Hire", "save": "Save", "dismiss": "Dismiss", "signedout": "not signed in", "missing": "not installed", "working": "working", "edit": "Edit {name}", "edit.phone": "Edit", "empty": "No staff yet", "empty.phone": "No one on the team yet", "kept": "How these settings are kept", "walls": "the host's walls refuse", "worker": "Worker", "reviewer": "Reviewer", "enable": "coordinator on", "shared": "Shared folder", "worktree": "Own worktree", "blocked": "This environment cannot safely write in a shared folder"},
+    "ru": {"title": "Команда · Bakery", "hire": "Нанять", "save": "Сохранить", "dismiss": "Уволить", "signedout": "нет входа", "missing": "не установлен", "working": "работает", "edit": "Изменить: {name}", "edit.phone": "Изменить", "empty": "Сотрудников пока нет", "empty.phone": "В команде пока никого", "kept": "Как соблюдаются эти настройки", "walls": "хост отклоняет", "worker": "Исполнитель", "reviewer": "Ревьюер", "enable": "Включить координатора", "shared": "Общая папка", "worktree": "Свой worktree", "blocked": "Эта среда не может безопасно писать в общую папку"},
 }
 
 
@@ -71,10 +71,17 @@ def run_one(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
 
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/project/{PID}/team?token=t&lang={lang}")
-    # On a phone the team is a tab of the project (project/phone.tsx): the header names the project,
-    # a row opens the member's work and the button beside it edits the member, under the same name.
+    # On a phone the team is a tab of the project (project/phone.tsx, team/phone.tsx): the header
+    # names the project, a row opens the member's work and its long press holds Edit among the rest.
     phone = width < 1024
-    row = ".phone-staff-item" if phone else ".staff-row"
+    row = "[data-staff]" if phone else ".staff-row"
+
+    def edit(name: str) -> None:
+        if phone:
+            page.locator(row, has_text=name).locator(".ph-row").dispatch_event("contextmenu")
+            page.locator(".ph-actions .ph-mrow", has_text=words["edit.phone"]).click()
+        else:
+            page.get_by_role("button", name=words["edit"].format(name=name)).click()
     expect(page.get_by_role("heading", name="Bakery" if phone else words["title"], exact=True)).to_be_visible()
     cleo = page.locator(row, has_text="Cleo")
     expect(cleo).to_contain_text(words["working"])
@@ -137,7 +144,7 @@ def run_one(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
     expect(page.locator(row, has_text="Rex").locator(".harness-badge")).to_have_text("CC")
 
     # Edit it. Under a fold, the sheet says how each setting is kept: a Daedalus member's folder by the host.
-    page.get_by_role("button", name=words["edit"].format(name="Ada Lovelace")).click()
+    edit("Ada Lovelace")
     expect(sheet).to_be_visible()
     expect(sheet.locator("#staff-name")).to_have_count(0)
     fold = sheet.locator("[data-kept-fold]")
@@ -154,13 +161,13 @@ def run_one(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
     expect(ada).to_contain_text("Tests the menu page")
 
     # Dismiss it: asked first, then gone from the current team.
-    page.get_by_role("button", name=words["edit"].format(name="Ada Lovelace")).click()
+    edit("Ada Lovelace")
     sheet.get_by_role("button", name=words["dismiss"]).click()
     page.locator(".dialog").get_by_role("button", name=words["dismiss"]).click()
     expect(page.locator(row, has_text="Ada Lovelace")).to_have_count(0)
 
     # A member at work cannot be dismissed; the refusal is shown as the host words it.
-    page.get_by_role("button", name=words["edit"].format(name="Cleo")).click()
+    edit("Cleo")
     sheet.get_by_role("button", name=words["dismiss"]).click()
     page.locator(".dialog").get_by_role("button", name=words["dismiss"]).click()
     expect(page.locator(".toast")).to_contain_text("release the session first")
@@ -195,7 +202,7 @@ def run_setups(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
 
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/project/{PID}/team?token=t&lang={lang}")
-    expect(page.get_by_text(words["empty"], exact=True)).to_be_visible()
+    expect(page.get_by_text(words["empty.phone" if width < 1024 else "empty"], exact=True)).to_be_visible()
     setups = page.locator("[data-team-setups]")
     expect(setups.locator("[data-setup]")).to_have_count(3)
     fits(page, f"{lang} {width} setups")
@@ -217,7 +224,7 @@ def run_setups(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
     expect(steps).to_have_count(2)
     expect(steps.nth(0)).to_contain_text(words["enable"])
     dialog.locator(".dialog-actions .btn.primary").click()
-    expect(page.locator(".phone-staff-item" if width < 1024 else ".staff-row", has_text=words["worker"])).to_be_visible()
+    expect(page.locator("[data-staff]" if width < 1024 else ".staff-row", has_text=words["worker"])).to_be_visible()
     assert len(team.enabled) == 1, team.enabled
     assert [(h["name"], h["harness"], h["isolation"]) for h in team.hired] == [(words["worker"], "daedalus", "worktree")], team.hired
 

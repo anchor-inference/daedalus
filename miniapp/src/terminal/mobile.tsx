@@ -17,7 +17,6 @@ import { createPortal } from "react-dom";
 import type { TerminalEnvName, TerminalView as TerminalRow } from "../api";
 import { MenuItem, OverflowMenu, toast } from "../ui/dialogs";
 import { t } from "../i18n";
-import { EnvPill } from "../envpill";
 import { Icon } from "../icons";
 import { useEdgeFade } from "../edgefade";
 import { InputDeduper } from "./dedupe";
@@ -228,15 +227,10 @@ export function PhoneTerminal({ id, row, onBack, onEnd, onRestart, onRemove, wor
   // The header keeps search and this menu, as every phone bar does; the copies that were buttons in
   // the header and the key row are the menu's first rows.
   const items: MenuItem[] = [
-    { label: t("term.phone.copyAll"), icon: "copy", onSelect: () => void copyAll() },
+    { label: t("term.search"), icon: "search", onSelect: () => instance()?.openSearch() },
+    { label: t("term.phone.copyAll"), icon: "copy", onSelect: () => { const text = instance()?.screenText(200); if (text !== undefined) void copyText(text).then((ok) => toast(ok ? t("term.phone.copiedAll") : t("term.phone.copyFailed"))); } },
+    ...(commands?.active ? [{ label: t("term.marks.copy"), icon: "copy" as const, disabled: !commands.ended, onSelect: () => { const i = instance(); if (i) void copyLastOutput(i); } }] : []),
     { label: t("term.phone.select"), icon: "copy", hint: t("term.phone.select.hint"), onSelect: openSelection },
-    ...(commands?.active
-      ? [
-          { label: t("term.marks.copy"), icon: "copy" as const, disabled: !commands.ended, onSelect: () => { const i = instance(); if (i) void copyLastOutput(i); } },
-          { label: t("term.marks.previous"), icon: "up" as const, disabled: commands.prompts === 0, onSelect: () => instance()?.jumpToCommand(-1) },
-          { label: t("term.marks.next"), icon: "down" as const, disabled: commands.prompts === 0, onSelect: () => instance()?.jumpToCommand(1) },
-        ]
-      : []),
     "-",
     { label: t("term.font.smaller"), icon: "compact", onSelect: () => fontSizeStep("font-smaller") },
     { label: t("term.font.bigger"), icon: "expand", onSelect: () => fontSizeStep("font-bigger") },
@@ -256,13 +250,21 @@ export function PhoneTerminal({ id, row, onBack, onEnd, onRestart, onRemove, wor
             {row?.sandbox && <Icon name="shield" size={12} />}
             <span className="truncate">{title}</span>
           </div>
-          {/* Where it runs and the folder, on one line under the title; only the machine itself keeps
-              its amber pill beside, because a command there reaches outside the container. */}
-          <div className="term-phone-cwd truncate">{env === "host" ? cwd : [t(`term.env.${env}`), cwd].filter(Boolean).join(" · ")}</div>
+          {/* Where it runs and the folder on one line: a host terminal's line is amber with its lock,
+              the way the pill marked it before the header lost the room for one. */}
+          <div className={`term-phone-cwd truncate ${env}`}>{env === "host" && <Icon name="lock" size={12} />}{[t(`term.env.${env}`), cwd].filter(Boolean).join(" · ")}</div>
         </div>
-        {env === "host" && <EnvPill env={env} />}
-        <button className="iconbtn" onClick={() => instance()?.openSearch()} aria-label={t("term.search")} title={t("term.search")}><Icon name="search" /></button>
-        <OverflowMenu items={items} label={t("term.phone.menu")} />
+        {/* The previous and the next command, where the shell marks them: the jump the menu also has,
+            one tap away, because scrolling a long output back on a phone is the slow way. */}
+        {commands?.active ? (
+          <>
+            <button className="iconbtn term-phone-jump" onClick={() => instance()?.jumpToCommand(-1)} disabled={commands.prompts === 0} aria-label={t("term.marks.previous")} title={t("term.marks.previous")}><Icon name="up" /></button>
+            <button className="iconbtn term-phone-jump" onClick={() => instance()?.jumpToCommand(1)} disabled={commands.prompts === 0} aria-label={t("term.marks.next")} title={t("term.marks.next")}><Icon name="down" /></button>
+          </>
+        ) : (
+          <CopyOutputButton id={id} state={state ?? undefined} />
+        )}
+        <OverflowMenu items={items} icon="vdots" label={t("term.phone.menu")} />
       </div>
       <div className="term-phone-screen" ref={stage}>
         <div className="term-phone-zoom" ref={zoom}>

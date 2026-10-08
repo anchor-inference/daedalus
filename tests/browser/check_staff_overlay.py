@@ -120,8 +120,8 @@ def run(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ignor
 
     context = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme="dark")
     page = open_page(context, focus, term, EventFeed(), f"{BASE}/project/{pid}/staff/st-ira?token=t&scheme=dark&lang={lang}")
-    page.wait_for_selector(".staff-cli .chat-head", timeout=20000)
-    page.locator(".staff-cli .chat-head .head-actions button[aria-pressed]").last.tap()
+    page.wait_for_selector(".staff-cli .ph-top", timeout=20000)
+    page.locator(".staff-cli .ph-top .ph-ib").last.tap()
     page.wait_for_selector(".staff-sheet .staff-panel", timeout=5000)
     if page.locator(".staff-sheet .staff-expand").count():
         say("the phone's sheet offers to expand")
