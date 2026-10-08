@@ -203,13 +203,15 @@ export function excerptOf(text: string, max = EXCERPT_MAX): string {
 }
 
 /** The body a message is posted with, with what it answers when the operator chose something. */
-export function messageBody(text: string, opts: { followUp?: boolean; clientMessageId?: string; reply?: ReplyRef | null }): Record<string, unknown> {
+export function messageBody(text: string, opts: { followUp?: boolean; clientMessageId?: string; reply?: ReplyRef | null; secrets?: string[] }): Record<string, unknown> {
   return {
     text,
     ...(opts.followUp ? { follow_up: true } : {}),
     expected_running: !!opts.followUp,
     client_message_id: opts.clientMessageId,
     ...(opts.reply ? { reply_to: { seq: opts.reply.seq, excerpt: opts.reply.excerpt } } : {}),
+    // The operator's secrets by name; their values went to the host on their own request.
+    ...(opts.secrets?.length ? { secrets: opts.secrets } : {}),
   };
 }
 

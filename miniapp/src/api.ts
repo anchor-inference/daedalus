@@ -753,6 +753,8 @@ export type MessageView = {
   reply_to?: ReplyRef | null;
   /** A member's steps for the operator that the host put into the orchestrator's chat. */
   operator_steps?: OperatorSteps | null;
+  /** The operator's secrets the message carried, by name and scope; a value never comes back. */
+  secrets?: { name: string; scope: "session" | "project" }[] | null;
   text: string;
   thinking: string;
   tool_calls: { id: string; name: string; arguments: Record<string, unknown> }[];

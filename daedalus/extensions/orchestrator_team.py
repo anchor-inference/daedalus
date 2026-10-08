@@ -34,6 +34,8 @@ from daedalus.extensions.task_contract import (
 )
 from daedalus.harness.capabilities import MODE_MEANINGS, RESTRICTIVE_MODES
 from daedalus.host.events import EventFilter
+from daedalus.security import operator_secrets
+from daedalus.security.operator_secrets import SecretError
 from daedalus.staff_runtime import LiveSession, ReadRequest
 from daedalus.stores.control import ControlStore, Principal, Scope
 from daedalus.stores.files import FileRefused, StoredFile
@@ -477,6 +479,7 @@ async def assign(
     expected_entity_revision: int | None = None,
     expected_collection_revision: int | None = None,
     effort: str | None = None,
+    secrets: list[str] | None = None,
 ) -> str:
     team = _team(orch)
     board = orch.board
@@ -533,6 +536,9 @@ async def assign(
         raise Refused("Assign needs staff: who takes the new task")
     if effort is not None and (member.harness != "daedalus" or effort not in DAEDALUS_EFFORTS[1:]):
         raise Refused("an assignment's effort is a Daedalus effort: off, low, medium, high or xhigh")
+    # Before anything is written, so a misspelt name refuses the whole hand-over; and before the launch, which
+    # reads the member's secrets when it starts (a Daedalus member's session, when its turn does).
+    secrets_handed = await _hand_secrets(project, session_id, member, secrets)
     handover = ""
     at_work = existing is not None and existing["status"] == "doing"
     if owner is not None and owner.active and not owner.one_off and owner.id != member.id and not at_work:
@@ -702,6 +708,8 @@ async def assign(
         )
     if added:
         notes.append(added)
+    if secrets_handed:
+        notes.append(f"Handed over: {', '.join(secret.placeholder for secret in secrets_handed)}; the launch carries them, never the brief.")
     tail = "".join(" " + note for note in notes)
     admission = await OutboxStore(orch.manager.db).view(launched["effect_id"])
     waiting = (f" queue position {admission['wait_position']} ({admission['wait_reason']})"
@@ -916,7 +924,30 @@ async def _delivered_note(orch: Orchestrators, task_id: str, handed: list[Stored
 # -- talking and reading -------------------------------------------------------------------------------------
 
 
-async def tell(orch: Orchestrators, project: Project, session_id: str, *, staff: str, text: str, when: str = "now", files: list[str] | None = None) -> str:
+async def _hand_secrets(project: Project, session_id: str, member: Staff, names: list[str] | None) -> list[operator_secrets.Secret]:
+    """Hand a member the operator's secrets this chat may use, by name. Never by value: a value in a message
+    is in the transcript, the member's history and the provider's logs for good."""
+    if not names:
+        return []
+    store = operator_secrets.shared()
+    if store is None:
+        raise Refused("the operator's secrets are not available on this installation")
+    try:
+        handed, unknown = await store.grant(names, from_session=session_id, staff_id=member.id, project_id=project.id)
+    except SecretError as exc:
+        raise Refused(str(exc)) from exc
+    if unknown:
+        raise Refused(
+            f"no secret called {', '.join(unknown)} in this chat or project; the operator attaches one with the lock in the composer. "
+            "Never put a value in a message instead"
+        )
+    return handed
+
+
+async def tell(
+    orch: Orchestrators, project: Project, session_id: str, *, staff: str, text: str, when: str = "now", files: list[str] | None = None,
+    secrets: list[str] | None = None,
+) -> str:
     if when not in MESSAGE_MODES:
         raise Refused(f"when is one of {', '.join(MESSAGE_MODES)}")
     body = (text or "").strip()
@@ -926,6 +957,9 @@ async def tell(orch: Orchestrators, project: Project, session_id: str, *, staff:
         raise Refused(f"a message is at most {TELL_MAX} characters; put the detail in the task or the journal")
     member = await _member(orch, project, staff)
     handed = await _files(orch, project, session_id, files)
+    secrets_handed = await _hand_secrets(project, session_id, member, secrets)
+    if secrets_handed:
+        body = body + "\n\n" + await _team(orch).secrets_note(member, secrets_handed)
     try:
         receipt = await _team(orch).tell(member, body, when=when, by="orchestrator", files=handed)
     except StaffError as exc:
@@ -945,6 +979,8 @@ async def tell(orch: Orchestrators, project: Project, session_id: str, *, staff:
         )
     if receipt.get("files"):
         line += f", with {len(receipt['files'])} file{'s' if len(receipt['files']) > 1 else ''} copied where they can open {'it' if len(receipt['files']) == 1 else 'them'}"
+    if secrets_handed:
+        line += f", handing over {', '.join(secret.placeholder for secret in secrets_handed)}"
     degraded = receipt.get("degraded_to")
     if degraded:
         line += " — " + _degraded(member, degraded)

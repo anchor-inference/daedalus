@@ -225,7 +225,9 @@ upload_ids?, x?, y?, allow_point?, dry_run?, origin?}`
   `cc-*`, or a field the operator typed into while driving, fail `1105` and publish `needs_you
   {reason: "field_forbidden"}`. Clicking such a field is allowed, and so is pressing Enter or Tab in
   it (Enter submits, which the sensitive preflight calls `credentials`); typing into it is the
-  operator's.
+  operator's. The one exception is a `type` the host sends with `operator_secret: true`: the text is
+  a secret the operator handed the agent for this, put in by the host in place of a
+  `«secret:name»` placeholder the model wrote, so the model never saw it.
 - **Covered elements.** A click whose point lands on another element than the ref (an overlay, a
   cookie banner, something a page put there to catch clicks) is refused with `1004 {ref,
   covered_by}` rather than dispatched: the click would act on something the snapshot did not name.

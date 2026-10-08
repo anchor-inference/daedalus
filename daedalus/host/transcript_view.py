@@ -32,9 +32,9 @@ from protocore.runtime.wire_format import is_compacted_placeholder, parse_compac
 from daedalus.host import prompts
 from daedalus.host.prompts import split_headline
 from daedalus.host.run_outcome import OUTCOME_METADATA_KEY
-from daedalus.security import redact
+from daedalus.security import operator_secrets, redact
 
-VIEW_VERSION = 10
+VIEW_VERSION = 11
 """Bumped whenever the shape below changes; stored views from an older version are recomputed. It
 covers this file only — what the redactor masks is covered by the key, by value and by shape, so a
 new secret format does not depend on anyone remembering this number."""
@@ -93,6 +93,9 @@ def message_view(message: Message) -> dict[str, Any]:
     reply = message.metadata.get("daedalus.reply_to") if isinstance(message.metadata, dict) else None
     if reply and body.startswith("[In reply to: «"):
         body = body.split("\n", 1)[1] if "\n" in body else ""  # the chat draws what it answers from ``reply_to``
+    handed = message.metadata.get("daedalus.secrets") if isinstance(message.metadata, dict) else None
+    if handed:
+        body = operator_secrets.without_attachment_lines(body)  # the chat draws a chip per name instead
     headline = ""
     if message.role is MessageRole.assistant:
         body, headline = split_headline(body)
@@ -134,6 +137,8 @@ def message_view(message: Message) -> dict[str, Any]:
         "delivery": delivery if isinstance(delivery, str) else None,
         # What the message answers (a report, an event line), as the operator chose it in the chat.
         "reply_to": message.metadata.get("daedalus.reply_to") if isinstance(message.metadata, dict) else None,
+        # The operator's secrets attached to the message, by name and scope; never a value.
+        "secrets": handed if isinstance(handed, list) else None,
         # A member's steps for the operator the host put in the chat, drawn as a card of their own.
         "operator_steps": message.metadata.get("daedalus.operator_steps") if isinstance(message.metadata, dict) else None,
     }

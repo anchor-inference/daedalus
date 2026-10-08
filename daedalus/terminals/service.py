@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any
 
 from daedalus import load as load_math
 from daedalus.harness.env import staff_inherited_env
+from daedalus.security import operator_secrets
 from daedalus.terminals import wire
 from daedalus.terminals.client import Channel, PtydClient, Unavailable
 from daedalus.terminals.endpoint import absolute_on, remember_hook_port, remember_state_dir
@@ -139,6 +140,20 @@ def rpc_failure(exc: wire.RpcError, what: str) -> TerminalError:
     if code == wire.STALE_LAUNCH:
         return StaleLaunch(f"{what}: {exc.message}")
     return TerminalError(f"{what}: {exc.message} ({code})")
+
+
+def _operator_secrets(spec: TerminalSpec) -> dict[str, str]:
+    """The secrets an operator's terminal for a chat or a project has as variables, as the agent's commands
+    there do. Asked for here rather than by the route, so a restart carries them too; a staff member's
+    launch puts its own in. No file paths: the daemon is another container or the operator's machine."""
+    store = operator_secrets.shared()
+    if store is None or spec.created_by != "operator" or not spec.owner.id:
+        return {}
+    if spec.owner.kind == "session":
+        return store.environment(spec.owner.id, files=False)
+    if spec.owner.kind == "project":
+        return store.variables(store.listed(scope_kind="project", scope_id=spec.owner.id), files=False)
+    return {}
 
 
 @dataclass(slots=True)
@@ -761,7 +776,7 @@ class Terminals(SideChannels):
         over_cap = await self._admit(spec, row, confirm_over_cap=confirm_over_cap, wait=wait)
         params: dict[str, Any] = {
             "id": terminal_id,
-            "env": dict(spec.env_vars),
+            "env": {**_operator_secrets(spec), **spec.env_vars},
             "strip_env": list(spec.strip_env),
             "cols": spec.cols,
             "rows": spec.rows,

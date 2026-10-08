@@ -351,3 +351,13 @@ what `PushSubscription.toJSON()` returns plus a `device` name, `GET` lists the d
 permission request or a short question carries Allow/Deny (or its options) on the notification where
 the platform shows buttons; a host-level permission never does and is answered in the app. When a
 pushed request is answered anywhere else, the other devices are told to close it.
+
+**Secrets the agent uses without reading.** `POST /api/secrets` with `{"session_id", "scope":
+"session"|"project", "name", "value", "note"}` keeps a value for that chat or for its project (staff
+included); the value is sealed with AES-GCM under a key in the secrets directory and is never sent
+back. `GET /api/secrets` lists every one — `{"id", "name", "scope", "scope_title", "note",
+"placeholder", "env", "last_used_at", "last_used_by", "uses", "readable"}` — and `?session_id=` lists
+the ones that chat may use, with the project it could file one under. `DELETE /api/secrets/{id}` takes
+one back at once. A message names the secrets it carries in `secrets` (a list on
+`/messages`, comma-separated on `/upload`); the model is told the name, the note and the placeholder
+`«secret:name»`, never the value.

@@ -18,6 +18,8 @@ from typing import Any, Literal
 from protocore.contracts.tools import Tool, ToolContext
 from protocore.contracts.types import ToolResult
 
+from daedalus.security import redact
+
 _ARG_ERROR = re.compile(r"unexpected keyword argument '(?P<extra>\w+)'|missing \d+ required (?:positional|keyword-only) arguments?: (?P<missing>.+)$")
 
 
@@ -35,12 +37,18 @@ def _explained(exc: TypeError, tool: Tool) -> str | None:
 
 
 def _guarded(tool: Tool) -> Tool:
-    """A call with a misspelled or missing argument answers with the accepted names, not a Python traceback."""
+    """A call with a misspelled or missing argument answers with the accepted names, not a Python traceback.
+
+    The result also leaves with the operator's secrets put back as their placeholders. The redacting hook
+    after it masks only the text the model is shown; the core keeps the value the tool returned beside that
+    text, writes it into the stored history and hands it to compaction, so a password a command printed
+    would sit on disk in the clear. Masked here, there is no unmasked copy to keep.
+    """
     original = tool.invoke
 
     async def invoke(context: ToolContext, arguments: dict[str, Any]) -> ToolResult:
         try:
-            return await original(context, arguments)
+            return _concealed(await original(context, arguments))
         except TypeError as exc:
             # Only the call boundary is caught: an error raised deeper inside the tool has a real traceback.
             frames = inspect.trace()
@@ -51,6 +59,15 @@ def _guarded(tool: Tool) -> Tool:
 
     tool.invoke = invoke  # type: ignore[method-assign]
     return tool
+
+
+def _concealed(result: ToolResult) -> ToolResult:
+    redactor = redact.shared()
+    content = redactor.conceal_named(result.content)
+    projection = redactor.conceal_named(result.model_projection) if result.model_projection is not None else None
+    if content == result.content and projection == result.model_projection:
+        return result
+    return result.model_copy(update={"content": content, "model_projection": projection})
 
 
 def search_hint(text: str) -> Callable[[type[Tool]], type[Tool]]:

@@ -36,6 +36,7 @@ import { AsrSettingsCard } from "./AsrSettings";
 import { DesktopAppCard } from "../updatedialog";
 import { ProviderLimit } from "./ProviderLimit";
 import { OPENCODE_KEY_URL, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
+import { SecretsCard } from "../secrets";
 
 const DEFAULT_KINDS = ["deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"];
 /** The generic protocol also serves remote vendors, so temperature is available there too. */
@@ -1016,6 +1017,7 @@ function SecurityTab({ toast }: { toast: (t: string) => void }) {
           </button>
         </Row>
       </div>
+      <SecretsCard toast={toast} ago={timeAgo} confirm={(title, body) => confirmAsync(title, { body, action: t("common.remove") })} />
       <div className="card">
         <Row title={t("settings.security.signoutall")} desc={t("settings.security.signoutall.sub")}>
           <button className="btn small" onClick={() => void signOutEverywhere()}>{t("settings.security.signoutall.action")}</button>

@@ -11,6 +11,7 @@ import shutil
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,6 +43,7 @@ from daedalus.config import NO_MODEL_MESSAGE, NoModelConfigured, RuntimeConfig, 
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.prompts import DEFAULT_RULES, split_headline
 from daedalus.host.session_runner import Attachment, SessionManager, SessionState
+from daedalus.security.operator_secrets import SecretError
 from daedalus.speech.service import LocalSpeech, recogniser_available, transcribe_recording
 from daedalus.stores.sqlite import DeliveryLedger
 from daedalus.transport.telegram.markdown import markdown_to_html, split_message, strip_tags
@@ -93,6 +95,7 @@ HELP_TAIL = """/main — the main orchestrator: in a group it lives in General; 
 /schedules · /schedule run|on|off|delete &lt;id&gt; — scheduled tasks
 /inbox [all|clear] · /heartbeat [on|off|run] · /doctor · /intents — inbox, the periodic check, health, standing intents
 /mode [quick|deep|careful|default] — limits and rules for this session · /yagni [on|off] — the smallest change that does the job
+/secret &lt;name&gt; &lt;value&gt; — hand this session a password or key to use without reading it; the message is deleted
 /board [all] · /peer here &lt;name&gt;|list|forget &lt;name&gt; — the task board; name this session as a peer other sessions can ask
 /approval manual|auto · /verbosity 0|1|2 — self-change approval, chat detail
 /rebuild · /rollback [n] · /panic — supervisor operations
@@ -980,6 +983,7 @@ class TelegramFront:
         r.message.register(self.cmd_operator, Command("rebuild", "rollback", "panic", "schedules", "verbosity", "approval", "balance", "schedule", "inbox", "heartbeat", "doctor", "intents", "board", "peer", "allow"))
         r.message.register(self.cmd_mode, Command("mode"))
         r.message.register(self.cmd_yagni, Command("yagni"))
+        r.message.register(self.cmd_secret, Command("secret"))
         r.message.register(
             self.on_message,
             F.text | F.caption | F.document | F.photo | F.audio | F.video | F.voice | F.video_note | F.animation | F.sticker | F.location | F.contact | F.poll,
@@ -1631,6 +1635,34 @@ class TelegramFront:
             return
         await self.manager.set_yagni(state.session.id, wanted)
         await message.answer(f"YAGNI: {'on' if wanted else 'off'} (the next turn is told)")
+
+    async def cmd_secret(self, message: Message, command: CommandObject) -> None:
+        """``/secret <name> <value>``: keep a value for this session to use without reading it, and delete the
+        message that carried it. Registered as a command so it never reaches the model as text, which an
+        unknown command otherwise does."""
+        if not self._is_owner(message.from_user.id if message.from_user else None):
+            return
+        name, _, value = (command.args or "").strip().partition(" ")
+        value = value.strip() if "\n" not in value else value.strip("\n ")
+        deleted = False
+        if value:
+            # First, whatever happens next: the value must not stay in the chat's history.
+            with suppress(TelegramAPIError):
+                deleted = bool(await self.bot.delete_message(message.chat.id, message.message_id))
+        state = await self._session_for_message(message)
+        if state is None or (self._is_general(message) and message.chat.type != "private"):
+            await message.answer("Use /secret inside a session topic (or the private chat).")
+            return
+        if not name or not value:
+            await message.answer("usage: /secret <name> <value> — for example /secret router_admin hunter2. The message is deleted once it is kept.")
+            return
+        try:
+            secret = await self.manager.secrets.put("session", state.session.id, name, value)
+        except SecretError as exc:
+            await message.answer(f"Not kept: {exc}")
+            return
+        gone = "The message with the value was deleted." if deleted else "Delete the message with the value yourself: the bot could not."
+        await message.answer(f"🔒 Kept {secret.placeholder} for this session ({secret.env} in its commands). {gone}")
 
     async def cmd_status(self, message: Message) -> None:
         if not self._is_owner(message.from_user.id if message.from_user else None):

@@ -37,7 +37,7 @@ The agent edits its host or its core in a git worktree, opens a PR, you approve 
 <td valign="top">
 
 **🔐 Keys it never sees**<br/>
-Provider keys live in a key proxy — a second container in Docker mode, a second process on `127.0.0.1` natively — that injects them into upstream calls and stops paying once the daily budget is spent. The agent's own process never holds one. Your ChatGPT, Claude Code and SuperGrok logins work as providers too, with their quota windows on screen.
+Provider keys live in a key proxy — a second container in Docker mode, a second process on `127.0.0.1` natively — that injects them into upstream calls and stops paying once the daily budget is spent. The agent's own process never holds one. Your ChatGPT, Claude Code and SuperGrok logins work as providers too, with their quota windows on screen. A password of your own — a router's, a service's — goes in through the composer's + → Secret (or `/secret` in Telegram): stored encrypted, the agent knows it only as `«secret:name»`, types it into a page, passes it to an MCP tool or reads it in a command as `$DAEDALUS_SECRET_NAME`, and everything that prints it comes back as the placeholder.
 
 </td>
 </tr>

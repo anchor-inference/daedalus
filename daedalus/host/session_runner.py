@@ -89,7 +89,7 @@ from daedalus.providers.chain import build_chain
 from daedalus.providers.free_catalog import approved_endpoint
 from daedalus.providers.free_catalog import catalog as free_catalog
 from daedalus.providers.registry import ProviderRegistry
-from daedalus.security import redact
+from daedalus.security import operator_secrets, redact
 from daedalus.stores.blobs import FileBlobStore
 from daedalus.stores.database import Database
 from daedalus.stores.dispatches import DispatchStore
@@ -569,6 +569,14 @@ class SessionManager:
         capabilities.publish(self.capabilities, settings.state_dir)
         """And the supervisor reads it from there rather than resolving it a second time."""
         self._configure_redactor(settings, config)
+        self.secrets = operator_secrets.OperatorSecrets(
+            db, settings.secrets_dir / operator_secrets.KEY_FILE, self.redactor, files_dir=settings.state_dir.parent / "operator-secrets",
+        )
+        """The values the operator handed the agent to use without reading. Opened at start; the redactor
+        learns them there, and the files commands read are written beside the state directory, not in it,
+        because the policy refuses every command that names the sealed state directory."""
+        self.secrets.project_of = self._project_of
+        self.secrets.staff_of = self._staff_of
         self.hooks = DaedalusHookManager(self.redactor, hooks_config=lambda: self.config.hooks)
         self.bus = EventBus(db, redactor=self.redactor, queue_size=config.ops.event_subscriber_queue, replay_max=config.ops.event_replay_max)
         """What happens to sessions, terminals and staff, for whoever subscribes: the app's stream,
@@ -651,9 +659,21 @@ class SessionManager:
 
     # -- lifecycle ------------------------------------------------------------------
 
+    def _project_of(self, session_id: str) -> str | None:
+        state = self._states.get(session_id)
+        return state.project.id if state is not None and state.project is not None else None
+
+    def _staff_of(self, session_id: str) -> str | None:
+        state = self._states.get(session_id)
+        if state is None:
+            return None
+        return str(state.metadata.get("staff_id") or "") or None
+
     async def start(self, *, recovering: bool | None = None) -> None:
         """Open the stores; ``recovering`` (default: whether a previous process left runs behind) gates new runs until resume_unfinished()."""
         await self.memory.load()
+        await self.secrets.load()
+        operator_secrets.install(self.secrets)
         await self.workspace_units.load()
         await self.bus.start()
         await self.presence.load()
@@ -715,6 +735,9 @@ class SessionManager:
     async def close(self) -> None:
         """Shut down keeping every active run resumable (snapshots stay in place)."""
         self.shutting_down = True
+        await self.secrets.settle()
+        if operator_secrets.shared() is self.secrets:
+            operator_secrets.install(None)
         # What a finished run still owes is a task of its own now, and a task is something a shutdown
         # can kill. It used to run inside the run, which had already ended by the time this looked at
         # it, so nothing was ever lost here. So it is given its moment before anything is cancelled:
@@ -2710,6 +2733,7 @@ class SessionManager:
         via: str = "app",
         operator_words: Sequence[str] | None = None,
         reply_to: dict[str, Any] | None = None,
+        secrets: Sequence[str] = (),
         _provider_resume: tuple[str, str, str] | None = None,
     ) -> str:
         """Deliver input. Starts a run, or queues a follow-up when one is active.
@@ -2721,7 +2745,13 @@ class SessionManager:
         of the turn (or the session's ``queue_mode`` says so); ``steer`` wins over both.
         ``operator_words`` are the operator's passages a runtime note relays verbatim (an answer
         among a wake-up's events): compaction quotes them, and nothing else of the note.
+        ``secrets`` names operator's secrets attached to the message: each becomes a line saying what the
+        model may use and how, and the message carries the names for the app to draw.
         """
+        # Whatever reaches a session — the operator's words, a staff member's report relayed, a wake-up — goes
+        # in with each value the operator handed over put back as its placeholder. A password pasted into a
+        # message by habit is then still not in the transcript, the model's input or the provider's logs.
+        text = self.redactor.conceal_named(text)
         words = operator_words_metadata(origin, text, operator_words)
         if reply_to:
             # Rides with the operator's words on every copy of the message, so the app draws what it answers.
@@ -2729,6 +2759,10 @@ class SessionManager:
         state = await self.get_state(session_id)
         if state is None:
             raise KeyError(session_id)
+        if secrets and (handed := self.secrets.named(secrets, session_id)):
+            lines = "\n".join(operator_secrets.attachment_text(secret) for secret in handed)
+            text = f"{text.rstrip()}\n\n{lines}" if text.strip() else lines
+            words = {**words, "daedalus.secrets": [{"name": secret.name, "scope": secret.scope_kind} for secret in handed]}
         if origin == "operator":
             # Writing to a session is having read it: the unread mark of its last result goes.
             try:
@@ -3814,7 +3848,12 @@ class SessionManager:
         yagni = await self._yagni_note(state)
         if yagni:
             volatile.append("\n- " + yagni)
-        context = prompts.turn_context(notes="".join(volatile))
+        if handed := operator_secrets.prompt_section(self.secrets.available(state.session.id)):
+            # In the turn context rather than the system prompt: the set changes whenever the operator adds
+            # one, and the system prompt is the part every later call is cached on.
+            volatile.append("\n\n" + handed)
+        # A report, a board line or a note can quote a value the operator handed over; it goes in as its placeholder.
+        context = prompts.turn_context(notes=self.redactor.conceal_named("".join(volatile)))
         blocks = list(message.content_blocks)
         said = blocks[at].text  # type: ignore[union-attr]
         blocks[at] = TextBlock(text=f"{said.rstrip()}\n\n{context}")

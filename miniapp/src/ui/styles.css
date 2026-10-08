@@ -1221,6 +1221,29 @@ body.resizing iframe { pointer-events: none; }
 /* On touch the ✕ is pressed, not clicked: its hit area reaches 40 px around the 22 px circle the
    eye sees, so removing a file is not a matter of aim. */
 @media (pointer: coarse) { .attachment-x::after { content: ""; position: absolute; inset: -9px; } }
+/* The operator's secrets: a chip that names one (a draft's or a sent message's) and the form that keeps
+   one. The value field is masked like a password field but takes several lines, which a password input
+   cannot; the eye shows it while the operator checks what they pasted. */
+.secret-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--fg); font: inherit; font-size: var(--fs-13); font-family: var(--mono); position: relative; }
+button.secret-chip { cursor: pointer; }
+button.secret-chip:hover { background: var(--card-2); }
+.secret-chip[data-scope="project"] { border-color: color-mix(in srgb, var(--info) 45%, var(--line)); }
+.secret-chip-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-right: -4px; border: 0; border-radius: 50%; padding: 0; background: color-mix(in srgb, var(--fg) 14%, transparent); color: var(--fg); cursor: pointer; position: relative; }
+.secret-chip-x:hover { background: var(--bad); color: #fff; }
+@media (pointer: coarse) { .secret-chip-x::after { content: ""; position: absolute; inset: -11px; } }
+.attachments .secret-chip { align-self: center; }
+.msg-secrets { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 4px; }
+.secret-form .secret-heading { margin: 10px 0 4px; color: var(--muted); font-size: var(--fs-12); }
+.secret-form .secret-why { margin: 0 0 4px; }
+.secret-hint { margin-top: 4px; }
+.secret-hint.bad { color: var(--bad); }
+.secret-value-row { position: relative; display: flex; }
+.secret-value { flex: 1; resize: vertical; padding-right: 40px; font-family: var(--mono); -webkit-text-security: disc; }
+.secret-value.shown { -webkit-text-security: none; }
+.secret-eye { position: absolute; top: 4px; right: 4px; }
+.secret-eye[aria-pressed="true"] { color: var(--accent); }
+.secret-reuse { margin-top: 12px; }
+.secret-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .dropzone { position: absolute; inset: 0; z-index: 25; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(4px); border: 2px dashed var(--info); border-radius: var(--radius-lg); margin: 8px; color: var(--fg); font-size: var(--fs-15); pointer-events: none; }
 .chat { position: relative; }
 

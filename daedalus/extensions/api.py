@@ -89,6 +89,7 @@ from daedalus.extensions import (
     api_resource_profiles,
     api_runtime,
     api_runtime_handoff,
+    api_secrets,
     api_skill_quality,
     api_staff,
     api_staff_reports,
@@ -334,6 +335,8 @@ class SendMessageBody(BaseModel):
     client_message_id: str = Field(default="", max_length=64)
     reply_to: ReplyTo | None = None
     """What in the chat the message answers: a report, an event line, a reply of the agent's."""
+    secrets: list[str] = Field(default_factory=list, max_length=20)
+    """Names of the operator's secrets the message carries (stored first through ``POST /api/secrets``)."""
 
 
 class VoiceSayBody(BaseModel):
@@ -1550,6 +1553,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_resource_profiles.register(api, app, auth)
     api_runtime.register(api, app, auth)
     api_runtime_handoff.register(api, app, auth)
+    api_secrets.register(api, app, auth)
     api_update_drains.register(api, app, auth)
     api_lifecycle.register(api, app, auth)
     api_staff_reports.register(api, app, auth)
@@ -2532,6 +2536,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 expected_running=body.expected_running,
                 client_message_id=body.client_message_id or None,
                 reply_to=reply,
+                secrets=body.secrets,
             )
         except KeyError as exc:
             raise HTTPException(404, "no such session") from exc
@@ -2551,9 +2556,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         follow_up: bool = Form(False),
         expected_running: bool | None = Form(None),
         files: list[UploadFile] = File(default=[]),
+        secret_names: str = Form("", alias="secrets", max_length=1200),
         _: dict[str, Any] = Depends(auth),
     ) -> dict[str, Any]:
-        """Send a message with attachments (or attachments alone) from the Mini App."""
+        """Send a message with attachments (or attachments alone) from the Mini App. ``secrets`` is a comma-separated
+        list of the operator's secrets' names the message carries."""
         state = await manager.get_state(session_id)
         if state is None:
             raise HTTPException(404, "no such session")
@@ -2588,6 +2595,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 follow_up=follow_up,
                 expected_running=expected_running,
                 client_message_id=client_message_id or None,
+                secrets=[name.strip() for name in secret_names.split(",") if name.strip()],
             )
         except ReceiptConflict as exc:
             raise HTTPException(409, str(exc)) from exc

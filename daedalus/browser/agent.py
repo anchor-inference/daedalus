@@ -49,6 +49,7 @@ from daedalus.browser.model import (
 from daedalus.browser.monitor import InjectionMonitor
 from daedalus.browser.notes import ACTIVE, NOTE, PROCEDURE, SiteNotes
 from daedalus.host.policy import ALLOW, ASK, Decision, approval_key, browser_sensitive, host_allowed
+from daedalus.security import operator_secrets
 from daedalus.security.untrusted import fenced as untrusted
 from daedalus.security.untrusted import origin_of
 
@@ -1009,6 +1010,7 @@ class BrowserAgent:
                 base[key] = value
         if text is not None:
             base["text"] = text
+        handed = self._operator_secrets(caller, base, url)
         if step.submit:
             base["submit"] = True
         if step.pointed:
@@ -1036,8 +1038,12 @@ class BrowserAgent:
         if step.pointed:
             detail["at"] = {"x": step.x, "y": step.y}
         if text is not None:
+            # The text as the model wrote it: with an operator's secret in it, the placeholder, so neither the
+            # audit's hash (a short password's hash is the password) nor the policy's grant key carries it.
             detail["text_len"] = len(text)
             detail["text_sha256"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if handed:
+            detail["secrets"] = handed
         if step.keys:
             detail["keys"] = step.keys[:100]
         if uploads:
@@ -1120,6 +1126,29 @@ class BrowserAgent:
         shown = text if text is not None and action == "type" and not (secret or done.get("secret")) else None
         await self._audit(group, caller, "act", detail, typed=shown)
         return result, name
+
+    def _operator_secrets(self, caller: Caller, base: dict[str, Any], url: str) -> list[str]:
+        """Put the value of each operator's secret the caller may use in place of its placeholder in what is
+        typed, and say so to the daemon when the text is the placeholder alone: then it may go into a
+        password field, which the operator handed it over for. The names used, for the audit.
+
+        Everything else — the policy's question, the audit's hash, the operator's action log — keeps seeing
+        the placeholder. A page that shows the typed value back reaches the model through the redactor,
+        which knows the value and writes the placeholder where it was.
+        """
+        text = base.get("text")
+        store = operator_secrets.shared()
+        if not isinstance(text, str) or store is None or "«secret:" not in text:
+            return []
+        owner = caller.owner
+        pool = store.pool(session_id=owner.session_id, staff_id=owner.staff_id, project_id=owner.project_id)
+        resolved, used = store.substitute(text, owner.session_id or "", used_by=f"BrowserAct ({caller.actor}) on {origin_of(url)}", pool=pool)
+        if not used:
+            return []
+        base["text"] = resolved
+        if operator_secrets.is_whole_placeholder(text):
+            base["operator_secret"] = True
+        return [secret.name for secret in used]
 
     def _act_lines(self, action: str, tab: dict[str, Any], result: dict[str, Any], name: str, *, diff: bool) -> list[str]:
         """What an action did, a sentence each: the first says it was done, the rest what followed."""
