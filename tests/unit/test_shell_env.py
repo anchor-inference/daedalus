@@ -48,7 +48,7 @@ def test_credentials_stay_out_and_the_toolchain_gets_in(host_env) -> None:  # ty
     env = shell_environment("sess-1")
     for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_API_HASH", "KEYPROXY_UPSTREAMS", "EXAMPLE_API_KEY", "EXAMPLE_SECRET", "EXAMPLE_PASSWORD", "GITHUB_TOKEN", "OWNER_USER_ID", "SUPERVISOR_SOCKET"):
         assert name not in env, name
-    for name in ("PATH", "HOME", "LANG", "HTTPS_PROXY", "SSL_CERT_FILE", "UV_PROJECT_ENVIRONMENT", "GIT_AUTHOR_NAME", "GIT_TERMINAL_PROMPT"):
+    for name in ("PATH", "HOME", "LANG", "HTTPS_PROXY", "SSL_CERT_FILE", "GIT_AUTHOR_NAME", "GIT_TERMINAL_PROMPT"):
         assert env[name] == host_env[name], name
     assert env["DAEDALUS_SESSION_ID"] == "sess-1"
 
@@ -110,3 +110,17 @@ def test_a_worktree_opens_its_git_metadata_but_not_the_whole_repository(tmp_path
     plain = tmp_path / "plain"
     plain.mkdir()
     assert worktree_writable_paths(plain) == [plain]
+
+
+def test_the_bots_own_virtualenv_goes_only_to_its_own_checkouts(host_env, monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """A workspace project's ``uv add`` must build the project's own ``.venv``: pointed at the bot's
+    virtualenv, which the sandbox mounts read-only, it failed with "Read-only file system"."""
+    bot, core, workspace = tmp_path / "daedalus", tmp_path / "core", tmp_path / "workspaces" / "w1"
+    for folder in (bot / "daedalus", core, workspace):
+        folder.mkdir(parents=True)
+    monkeypatch.setenv("BOT_REPO_DIR", str(bot))
+    monkeypatch.setenv("CORE_REPO_DIR", str(core))
+    assert "UV_PROJECT_ENVIRONMENT" not in shell_environment("sess-1", cwd=workspace)
+    assert "UV_PROJECT_ENVIRONMENT" not in shell_environment("sess-1")
+    assert shell_environment("sess-1", cwd=bot / "daedalus")["UV_PROJECT_ENVIRONMENT"] == "/tmp/venv"
+    assert shell_environment("sess-1", cwd=core)["UV_PROJECT_ENVIRONMENT"] == "/tmp/venv"

@@ -251,15 +251,33 @@ _SECRET_ENV = re.compile(r"^(TELEGRAM_.*|KEYPROXY_.*|.*_API_KEY|.*_SECRET|.*_PAS
 """Never inherited even when a prefix would admit them."""
 
 
-def shell_environment(session_id: str, extra: dict[str, str] | None = None) -> dict[str, str]:
+def _own_checkout(cwd: str | Path | None) -> bool:
+    """Whether ``cwd`` lies in one of the checkouts this installation runs from."""
+    if cwd is None:
+        return False
+    here = Path(cwd).resolve()
+    for checkout in (os.environ.get("BOT_REPO_DIR", "/srv/daedalus"), os.environ.get("CORE_REPO_DIR", "/srv/protocore-exp")):
+        if here.is_relative_to(Path(checkout).resolve()):
+            return True
+    return False
+
+
+def shell_environment(session_id: str, extra: dict[str, str] | None = None, *, cwd: str | Path | None = None) -> dict[str, str]:
     """The environment a tool's subprocess gets: what a shell and its toolchains need, without the bot's own credentials.
 
     This is hygiene, not containment: the bot's Telegram and provider credentials do not
     propagate into child processes and their logs, but a shell in the same container can still
     read the parent's environment through ``/proc``. A caller that needs a specific value passes
     it through the tool's ``env`` parameter.
+
+    ``UV_PROJECT_ENVIRONMENT`` names the bot's own virtualenv and goes only to a command running in
+    the bot's own checkouts (``cwd``). Handed to every command, it made ``uv add`` in any workspace
+    project install into that virtualenv instead of the project's ``.venv``, which the sandbox
+    mounts read-only: the agent saw "Read-only file system" and could not add a library at all.
     """
     env = {k: v for k, v in os.environ.items() if (k in _SAFE_ENV_BASE or k.startswith(_SAFE_ENV_PREFIXES)) and not _SECRET_ENV.match(k)}
+    if not _own_checkout(cwd):
+        env.pop("UV_PROJECT_ENVIRONMENT", None)
     env.update(extra or {})
     if agent_bin := os.environ.get("DAEDALUS_AGENT_BIN", ""):
         env["PATH"] = agent_bin + os.pathsep + env.get("PATH", "")
@@ -313,7 +331,7 @@ async def exec_command(
         return ok(context, text, exit_code=outcome.exit_code)
     if not workdir.exists():
         return error(context, f"working directory does not exist: {workdir}")
-    environment = shell_environment(context.session_id, env)
+    environment = shell_environment(context.session_id, env, cwd=workdir)
     try:
         argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable())
     except SandboxUnavailable as exc:
@@ -571,7 +589,7 @@ async def _start_job(context: ToolContext, services: Any, command: str, workdir:
     fh = log.open("wb")
     try:
         process = await asyncio.create_subprocess_exec(
-            *argv, cwd=str(workdir), stdout=fh, stderr=subprocess.STDOUT, env=shell_environment(context.session_id, env), start_new_session=True
+            *argv, cwd=str(workdir), stdout=fh, stderr=subprocess.STDOUT, env=shell_environment(context.session_id, env, cwd=workdir), start_new_session=True
         )
     finally:
         fh.close()

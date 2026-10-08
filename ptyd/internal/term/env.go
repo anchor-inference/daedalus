@@ -15,12 +15,13 @@ const TagName = "DAEDALUS_TERMINAL_ID"
 // either belongs to the daemon (its own settings, or the ids of a terminal it runs inside when it is
 // being developed from one), or tells a program that it runs inside some other terminal or
 // multiplexer and so changes its behaviour, or — CLAUDE* — would make a coding CLI believe it is
-// nested inside itself.
+// nested inside itself. UV_PROJECT_ENVIRONMENT is the container image's own virtualenv: inherited,
+// it sent `uv add` in any project to that read-only virtualenv instead of the project's .venv.
 var strippedEnv = []string{
 	"DAEDALUS_PTYD_*", "DAEDALUS_TERMINAL_ID", "DAEDALUS_LAUNCH_*", "DAEDALUS_HOOK_*", "DAEDALUS_DIAL_DIR",
 	"DAEDALUS_SI_*", "DAEDALUS_SHELL_LOGIN", "DAEDALUS_USER_ZDOTDIR",
 	"TERM_PROGRAM*", "VSCODE_*", "TMUX*", "STY", "WINDOW", "KITTY_*", "ITERM_*", "WT_SESSION",
-	"CLAUDE*",
+	"CLAUDE*", "UV_PROJECT_ENVIRONMENT",
 }
 
 // keptEnv are inherited although a pattern above matches them; only the caller's strip_env removes

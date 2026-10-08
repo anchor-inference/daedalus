@@ -231,7 +231,7 @@ class Services:
         log_dir = session_services.logs_dir(LOG_DIR) if session_services is not None else state.workspace / LOG_DIR
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{name}.log"
-        env = shell_environment(session_id, {"PORT": str(chosen)} if chosen else None)
+        env = shell_environment(session_id, {"PORT": str(chosen)} if chosen else None, cwd=workdir)
         env["HOST"] = "0.0.0.0"
         # The same wall Exec has: a service is a long-lived command, not a way around the sandbox.
         argv, _sandboxed = await sandbox_argv(command, self.app.config.tools.exec, writable=session_services.sandbox_writable() if session_services is not None else [state.workspace])

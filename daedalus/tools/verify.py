@@ -373,7 +373,7 @@ async def verify(context: ToolContext, criterion: str, command: str, cwd: str | 
         return error(context, str(exc))
     proc = await asyncio.create_subprocess_exec(
         *argv, cwd=str(workdir), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-        env=shell_environment(context.session_id, env), start_new_session=True,
+        env=shell_environment(context.session_id, env, cwd=workdir), start_new_session=True,
     )
     # The head feeds two consumers: the OUTPUT_HEAD_CHARS-char DB field and the
     # model-facing clip at services.max_tool_output_chars. Cap the in-memory
