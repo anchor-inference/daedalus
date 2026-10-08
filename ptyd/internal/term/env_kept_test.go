@@ -43,3 +43,16 @@ func TestSelectedInheritanceExcludesOtherProviderSecrets(t *testing.T) {
 		t.Fatal("empty selection inherited daemon variables")
 	}
 }
+
+// A terminal in the container must not inherit the image's own virtualenv: `uv add` in a project
+// then installed into it (read-only in the sandbox) instead of the project's .venv.
+func TestTheImagesVirtualenvIsNotInherited(t *testing.T) {
+	inherited := []string{"UV_PROJECT_ENVIRONMENT=/srv/venv", "UV_LINK_MODE=copy", "PATH=/usr/bin"}
+	env := BuildEnv(inherited, nil, nil, "t1")
+	if slices.Contains(env, "UV_PROJECT_ENVIRONMENT=/srv/venv") {
+		t.Fatalf("UV_PROJECT_ENVIRONMENT survived: %v", env)
+	}
+	if !slices.Contains(env, "UV_LINK_MODE=copy") {
+		t.Fatalf("the rest of uv's settings went with it: %v", env)
+	}
+}
