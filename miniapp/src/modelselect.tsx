@@ -6,6 +6,8 @@ import { ControlTrigger } from "./ui/control-trigger";
 
 import { useEffect, useRef, useState } from "react";
 import { api, ModelFallback, Preset, ProviderConf } from "./api";
+import { SegmentedControl } from "./ui/phone";
+import { REASONING_EFFORTS, effortIndex } from "./models";
 import { Popover, Sheet } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { shortModel, tokens } from "./format";
@@ -89,7 +91,8 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
 
       </ControlTrigger>
       {open && sheet && (
-        <Sheet title={t("composer.settings")} onClose={() => onOpenChange(false)} className="model-sheet">
+        <Sheet title={t("session.model")} onClose={() => onOpenChange(false)} className="model-sheet"
+          head={cat ? <span className="model-sheet-sub">{t("composer.model.forchat", { n: num(Object.keys(cat.presets).length) })}</span> : undefined}>
           {list}
         </Sheet>
       )}
@@ -135,6 +138,15 @@ function ModelList({ cat, failed, model, fallback, onPick, effort, thinking, onC
     const m = rest.join("/");
     onPick(m ? { provider: prov, model: m } : { model: prov });
   };
+  if (sheet) return (
+    <PhoneModelList
+      listRef={list} cat={cat} model={model} fallback={fallback} configured={configured} onPick={onPick}
+      query={query} setQuery={setQuery} provider={provider} setProvider={setProvider} freeGroup={freeGroup} setFreeGroup={setFreeGroup}
+      browsing={browsing} matched={matched} providers={providers} entries={entries} back={back}
+      effort={effort} thinking={thinking} onChooseEffort={onChooseEffort}
+      customOpen={customOpen} setCustomOpen={setCustomOpen} custom={custom} setCustom={setCustom} useCustom={useCustom}
+    />
+  );
   return (
     <div ref={list} className="model-list" onKeyDown={(e) => { if (e.key === "ArrowLeft" && provider !== null && e.target instanceof HTMLButtonElement) { e.preventDefault(); back(); } }}>
       {/* The heading carries the key to the two marks, so what they mean is on the screen and not
@@ -219,6 +231,121 @@ function ModelList({ cat, failed, model, fallback, onPick, effort, thinking, onC
             aria-label={t("session.model.custom")}
           />
           <button type="button" className="btn small primary" disabled={!custom.trim()} onClick={useCustom}>{t("session.model.use")}</button>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+type PhoneListProps = {
+  listRef: React.RefObject<HTMLDivElement | null>; cat: Catalogue; model: string; fallback: ModelFallback | null; configured: [string, Preset] | null; onPick: (c: ModelChoice) => void;
+  query: string; setQuery: (q: string) => void; provider: string | null; setProvider: (p: string | null) => void; freeGroup: boolean; setFreeGroup: (on: boolean) => void;
+  browsing: boolean; matched: [string, Preset][]; providers: string[]; entries: [string, Preset][]; back: () => void;
+  effort?: string; thinking?: boolean; onChooseEffort?: (value: string) => void;
+  customOpen: boolean; setCustomOpen: (open: boolean) => void; custom: string; setCustom: (value: string) => void; useCustom: () => void;
+};
+
+/** What a provider needs before it answers, in the words of its row: a key that is there or not. */
+function keyState(conf: ProviderConf | undefined): string {
+  if (!conf) return "";
+  if (conf.kind === "local" || conf.kind === "llamacpp" || conf.kind === "vllm" || conf.kind === "ollama") return t("composer.model.nokey");
+  if (conf.billing === "subscription") return t("composer.model.subscription");
+  return t(conf.api_key_set ? "composer.model.keyready" : "composer.model.keymissing");
+}
+
+/**
+ * The phone's model sheet, in the order the design gives it: search, the way back from a stand-in,
+ * effort as one row of choices, the models of the provider in use, then the other providers and
+ * manual entry. The same choices, class names and drill-down as the desktop's list, so a provider
+ * opens the same way and the keyboard behaves the same; only the layout is the phone's.
+ */
+function PhoneModelList(p: PhoneListProps) {
+  const { cat, model, fallback, configured, onPick } = p;
+  const currentEntry = p.entries.find(([id, preset]) => isCurrent(id, preset, model)) ?? null;
+  const home = currentEntry && !currentEntry[1].free_only ? currentEntry[1].provider : null;
+  const homeModels = home ? p.entries.filter(([, preset]) => preset.provider === home && !preset.free_only) : [];
+  const row = ([id, preset]: [string, Preset]) => {
+    const current = isCurrent(id, preset, model);
+    const billing = cat.providers[preset.provider]?.billing === "subscription" ? t("composer.model.subscription") : "";
+    return (
+      <button key={id} type="button" role="menuitem" className={`model-row ph-model-row ${current ? "on" : ""}`} onClick={() => onPick({ preset: id })} aria-current={current ? "true" : undefined}>
+        <span className="grow model-text">
+          <span className="ph-model-name"><span className="truncate">{preset.label || preset.model}</span>
+            <span className="ph-model-tag">{t(preset.thinking ? "composer.model.thinking" : "composer.model.fast")}</span>
+            {current && <span className="ph-model-tag on">{t("composer.model.current")}</span>}
+          </span>
+          <span className="sub truncate">{[preset.context_window > 0 ? t("composer.model.context", { n: tokens(preset.context_window) }) : `${preset.provider}/${preset.model}`, billing].filter(Boolean).join(" · ")}</span>
+        </span>
+        {current && <Icon name="check" size={18} />}
+      </button>
+    );
+  };
+  return (
+    <div ref={p.listRef} className="model-list ph-model-list" onKeyDown={(e) => { if (e.key === "ArrowLeft" && p.provider !== null && e.target instanceof HTMLButtonElement) { e.preventDefault(); p.back(); } }}>
+      <label className="ph-search ph-model-search">
+        <Icon name="search" size={18} />
+        <input className="model-search" type="search" value={p.query} onChange={(e) => p.setQuery(e.target.value)} placeholder={t("composer.model.search")} aria-label={t("composer.model.search")} />
+      </label>
+      {fallback && (
+        <div className="ph-model-fallback" role="status">
+          <Icon name="reload" size={18} />
+          <div className="grow">
+            <div>{t("composer.model.standing", { model: shortModel(fallback.to, 28) })}</div>
+            <div className="sub">{t("composer.model.configured", { model: fallback.from })}{DICT[`session.model.reason.${fallback.reason}`] ? ` · ${t(`session.model.reason.${fallback.reason}`)}` : ""}</div>
+            <button type="button" role="menuitem" className="model-row restore ph-btn sm" onClick={() => onPick(configured ? { preset: configured[0] } : { model: fallback.from })}>
+              <span className="truncate">{t("composer.model.restore", { model: shortModel(fallback.from, 24) })}</span>
+            </button>
+          </div>
+        </div>
+      )}
+      {p.onChooseEffort && p.browsing && !p.freeGroup && (
+        <>
+          <div className="ph-model-sec">{t("composer.effort.short")}</div>
+          <SegmentedControl className="ph-model-effort" label={t("composer.effort.short")}
+            value={p.thinking ? REASONING_EFFORTS[effortIndex(p.effort)] : "off"}
+            options={["off", ...REASONING_EFFORTS].map((value) => ({ id: value, label: t(value === "off" ? "composer.effort.offShort" : `add.effort.${value}`) }))}
+            onChange={(value) => p.onChooseEffort!(value)} />
+        </>
+      )}
+      {p.freeGroup && p.provider === null && <button type="button" role="menuitem" className="model-row provider-back" onClick={() => { p.setFreeGroup(false); p.setQuery(""); }}><Icon name="back" size={18} /><span className="grow">{t("composer.model.back")}</span></button>}
+      {p.provider !== null && <button type="button" role="menuitem" className="model-row provider-back" onClick={p.back} aria-label={t("composer.model.back")}>
+        <Icon name="back" size={18} /><ProviderMark id={p.provider} kind={cat.providers[p.provider]?.kind} />
+        <span className="grow">{providerName(p.provider, cat.providers[p.provider])}</span>
+      </button>}
+      {p.browsing && !p.freeGroup && home && (
+        <>
+          <div className="ph-model-sec">{[providerName(home, cat.providers[home]), keyState(cat.providers[home])].filter(Boolean).join(" · ")}</div>
+          {homeModels.map(row)}
+        </>
+      )}
+      {(p.provider !== null && cat.presets[cat.globalId]?.provider === p.provider || p.customOpen && !cat.presets[cat.globalId]) && <button type="button" role="menuitem" className="model-row" onClick={() => onPick({ clear: true })}>
+        <span className="model-text grow">
+          <span>{t("session.model.global")}</span>
+          <span className="sub">{cat.global}</span>
+        </span>
+      </button>}
+      {p.browsing && <div className="ph-model-sec">{t(p.freeGroup ? "composer.model.free" : "composer.model.providers")}</div>}
+      {p.browsing && p.providers.map((id) => {
+        const choices = p.entries.filter(([, preset]) => preset.provider === id && !!preset.free_only === p.freeGroup);
+        return <button key={id} type="button" role="menuitem" className="model-row provider-row" data-provider={id} onClick={() => { p.setProvider(id); p.setQuery(""); }}>
+          <span className="grow model-text"><span>{providerName(id, cat.providers[id])}</span><span className="sub truncate">{[keyState(cat.providers[id]), t("composer.model.count", { n: num(choices.length) })].filter(Boolean).join(" · ")}</span></span>
+          <span className="provider-count" hidden>{num(choices.length)}</span>
+          <Icon name="chevron" size={16} />
+        </button>;
+      })}
+      {p.browsing && !p.freeGroup && <button type="button" role="menuitem" className="model-row provider-row" onClick={() => { p.setFreeGroup(true); p.setQuery(""); }}>
+        <span className="grow model-text"><span>{t("composer.model.free")}</span><span className="sub">{t("composer.model.free.sub")}</span></span><Icon name="chevron" size={16} />
+      </button>}
+      {p.browsing && p.freeGroup && p.providers.length === 0 && <div className="model-row-note sub"><a href={pathFor("settings", "models", { tab: "free" })}>{t("free.chat.add")}</a></div>}
+      {!p.browsing && p.matched.length === 0 && <div className="model-row-note sub" role="status">{t("shell.search.nomatch")}</div>}
+      {!p.browsing && p.matched.map(row)}
+      <button type="button" role="menuitem" className="model-row" aria-expanded={p.customOpen} onClick={() => p.setCustomOpen(!p.customOpen)}><Icon name="pen" size={18} /><span className="grow">{t("composer.model.manual")}</span><Icon name="chevron" size={16} /></button>
+      {p.customOpen && <div className="model-custom">
+        <div className="sub">{t("session.model.custom")}</div>
+        <div className="ph-tray-answer">
+          <input className="ph-field" placeholder="vllm/Qwen3.6" value={p.custom} onChange={(e) => p.setCustom(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); p.useCustom(); } }} aria-label={t("session.model.custom")} />
+          <button type="button" className="ph-btn primary" disabled={!p.custom.trim()} onClick={p.useCustom}>{t("session.model.use")}</button>
         </div>
       </div>}
     </div>
