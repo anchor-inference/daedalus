@@ -412,8 +412,9 @@ decide or ask first. Every concrete condition the operator states about a piece 
 must be looked at first, what not to do — is a requirement on its card, in their words: requirements=[…] in \
 Assign, or Require(task_id, text, source="operator") later. Files the operator gives as a model to follow are \
 inputs (Assign(inputs=[…]) or Require(kind="input", file=…)), never a mention: the member gets them before it \
-starts and cannot hand the work in without opening them. A requirement reaches the member at work by itself, with \
-a receipt; Tell is for everything else. Letting a member fall short of an operator's requirement ("draw it if \
+starts and cannot hand the work in without opening them. A requirement reaches the member at work by itself, into \
+the run it is in, with a receipt — do not Tell the same thing as well, and do not restart a run to add a fact; Tell is \
+for everything else. Letting a member fall short of an operator's requirement ("draw it if \
 you cannot record it") is the operator's decision: AskOperator first, and replace the requirement only with \
 their answer as its source. What the operator allows for the work ("if something needs fixing, fix it") goes on \
 the card as it is, kind="scope" in their words; a safety condition of yours that narrows it is a constraint with \

@@ -20,8 +20,7 @@ from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.stores.database import Database
 from tests.support.authorized_launch import operator_task
 from tests.support.authorized_results import accept_branchless_result
-from tests.support.authorized_stop import bind_native_run, finish_native_stop, stop_native_task
-from tests.support.waiting import until_await
+from tests.support.authorized_stop import bind_native_run, stop_native_task
 from tests.unit.test_board_rounds import task_of
 from tests.unit.test_orchestrator import Rig, rig
 from tests.unit.test_orchestrator_team import fake, office
@@ -238,27 +237,20 @@ async def test_a_requirement_from_the_operators_message_carries_the_message_and_
 
         await r.manager.sessions.append_transcript(sid, [Message(role=MessageRole.user, content_blocks=[TextBlock(text="English only for now")], metadata={"daedalus.origin": "operator"})])
         seq = await r.orch.operator_message_seq(sid)
-        run_id, stops = await bind_native_run(r.team, live, monkeypatch)
-        staged = json.loads(await r.call(sid, "require", task_id=task_id, text="English only for now",
-                                         kind="scope", source="operator"))
-        assert staged["state"] == "pending_physical_exit"
-        assert runtime.sent == []
-        await finish_native_stop(r.team, live, run_id, staged["stop_effect_id"], stops)
-        await r.call(sid, "require", op="apply", task_id=task_id, intent_id=staged["intent_id"])
-        await r.call(sid, "assign", task_id=task_id, staff="Leo")
-        from tests.unit.test_orchestrator_team import admitted
-
-        await until_await(lambda: admitted(r, task_id), "the operator's revised scope launched")
-        assert "English only for now" in runtime.started[-1].first_message
+        _, stops = await bind_native_run(r.team, live, monkeypatch)
+        added = json.loads(await r.call(sid, "require", task_id=task_id, text="English only for now",
+                                        kind="scope", source="operator"))
+        assert added["state"] == "applied_live" and stops == []
+        assert "English only for now" in runtime.sent[-1][1].text
         [receipt] = (await r.orch.focus_state(await r.refreshed()))["receipts"][str(seq)]
         assert (receipt["kind"], receipt["label"], receipt["task_id"]) == ("requirement", "R1", task_id)
         assert receipt["deliveries"] == [{"staff_name": "Leo", "acknowledged": False, "opened": False,
-                                          "via": "brief", "cli": False}]
+                                          "via": "message", "cli": False}]
         member = await r.manager.staff.find(r.project.id, "Leo")
         assert member is not None
-        fresh = await r.team.live_of(member)
-        assert fresh is not None and fresh.id != live.id
-        await r.team.ingress.report(fresh, "checkpoint", "noted", acknowledged=["R1"],
+        same = await r.team.live_of(member)
+        assert same is not None and same.id == live.id
+        await r.team.ingress.report(live, "checkpoint", "noted", acknowledged=["R1"],
                                     call_id=f"fixture-report:{uuid.uuid4().hex}")
         [receipt] = (await r.orch.focus_state(await r.refreshed()))["receipts"][str(seq)]
         assert receipt["deliveries"][0]["acknowledged"] is True

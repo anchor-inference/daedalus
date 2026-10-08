@@ -1,4 +1,12 @@
-"""Stage a contract change until the preceding execution has physically stopped."""
+"""Change a task's contract: into the run that works it, or staged until that run has stopped.
+
+A requirement added while a member works the card used to stop the member's run before it could be
+written, so a plain addition from the operator ("speedtest is installed, you may use it") killed a
+Codex member mid-task, left the card in doing with nobody behind it, and made the orchestrator
+release and assign the work again from the start. A change to a running card now goes into that run:
+the contract takes its next revision, the live attempt is moved onto it, and the member is told in
+the turn it is in. Stopping first is kept for the orchestrator that asks for a fresh start.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +19,7 @@ import aiosqlite
 from daedalus.extensions.orchestrator_domain import DomainConflict, capture_contract_change
 from daedalus.extensions.task_contract import REQUIREMENT_KINDS, REQUIREMENT_MAX_CHARS, REQUIREMENTS_MAX
 from daedalus.stores.control import Principal, canonical, now, one
+from daedalus.stores.executions import ACTIVE
 from daedalus.stores.runtime_release import attempt_released_in
 
 
@@ -21,11 +30,47 @@ async def _exited_attempt(conn: aiosqlite.Connection, attempt_id: str) -> bool:
     return released and ended is not None
 
 
+async def _live_attempt(conn: aiosqlite.Connection, task: aiosqlite.Row) -> aiosqlite.Row | None:
+    """The run working the card now, when a change can go into it: a current attempt that is still
+    active, whose member's session has not ended, on a card in doing."""
+    if task["status"] != "doing" or task["current_attempt_id"] is None:
+        return None
+    return await one(conn, "SELECT a.id,a.contract_revision,a.staff_session_id,s.staff_id FROM execution_attempts a"
+                     " JOIN staff_sessions s ON s.id = a.staff_session_id"
+                     f" WHERE a.id = ? AND a.state IN ({','.join('?' for _ in ACTIVE)}) AND s.ended_at IS NULL",
+                     (task["current_attempt_id"], *ACTIVE))
+
+
+async def _rebind(conn: aiosqlite.Connection, *, task_id: str, attempt_id: str, staff_session_id: str,
+                  old: int, new: int) -> None:
+    """Move a live attempt from the contract revision it started on to the one just written.
+
+    Everything that authorises the run compares its revision with the card's: its reports, a native
+    member's next model call, the proof of its exit and the lifecycle owner that can cancel it. Left
+    on the old revision, the run would be alive but refused at its first report. The requirements
+    the member was already given count as given under the new revision too, with what it confirmed.
+    """
+    at = now()
+    await conn.execute("UPDATE execution_attempts SET contract_revision = ?,updated_at = ?"
+                       " WHERE id = ? AND contract_revision = ?", (new, at, attempt_id, old))
+    await conn.execute("UPDATE lifecycle_owners SET source_revision = ?,updated_at = ?"
+                       " WHERE child_kind = 'execution_attempt' AND child_id = ? AND source_revision = ?",
+                       (new, at, attempt_id, old))
+    await conn.execute("UPDATE lifecycle_parents SET contract_revision = ?,updated_at = ?"
+                       " WHERE parent_kind = 'task' AND parent_id = ? AND contract_revision = ?",
+                       (new, at, task_id, old))
+    await conn.execute("UPDATE requirement_deliveries SET contract_revision = ?"
+                       " WHERE task_id = ? AND staff_session_id = ? AND contract_revision = ?",
+                       (new, task_id, staff_session_id, old))
+
+
 async def stage_change_in(conn: aiosqlite.Connection, *, intent_id: str, receipt_id: str,
                           principal: Principal, project_id: str, task_id: str,
-                          client_operation_id: str, request: dict[str, Any]) -> dict[str, Any]:
-    """Remember the full request before asking another command to stop its current attempt."""
-    task = await one(conn, "SELECT project_id,status,contract_revision,current_attempt_id"
+                          client_operation_id: str, request: dict[str, Any],
+                          into_live_run: bool = False) -> dict[str, Any]:
+    """Apply the change into the card's live run when ``into_live_run`` and there is one; otherwise
+    remember the full request before asking another command to stop the current attempt."""
+    task = await one(conn, "SELECT project_id,status,contract_revision,current_attempt_id,acceptance_state"
                      " FROM board_tasks WHERE id = ?", (task_id,))
     if task is None or task["project_id"] != project_id:
         raise DomainConflict("the requested task is outside the project")
@@ -50,6 +95,11 @@ async def stage_change_in(conn: aiosqlite.Connection, *, intent_id: str, receipt
     if pending is not None:
         raise DomainConflict("another contract change awaits the task's physical stop or application")
     attempt_id = task["current_attempt_id"]
+    live = await _live_attempt(conn, task) if into_live_run else None
+    if live is not None and live["contract_revision"] == task["contract_revision"]:
+        return await _apply_live_in(conn, intent_id=intent_id, receipt_id=receipt_id, principal=principal,
+                                    project_id=project_id, task=task, task_id=task_id, live=live,
+                                    client_operation_id=client_operation_id, request=request)
     if attempt_id is not None:
         attempt = await one(conn, "SELECT state FROM execution_attempts WHERE id = ?", (attempt_id,))
         if attempt is None:
@@ -77,6 +127,40 @@ async def stage_change_in(conn: aiosqlite.Connection, *, intent_id: str, receipt
             "base_contract_revision": task["contract_revision"], "base_attempt_id": attempt_id}
 
 
+async def _apply_live_in(conn: aiosqlite.Connection, *, intent_id: str, receipt_id: str,
+                         principal: Principal, project_id: str, task: aiosqlite.Row, task_id: str,
+                         live: aiosqlite.Row, client_operation_id: str,
+                         request: dict[str, Any]) -> dict[str, Any]:
+    """Write the change, version the contract and keep the run working under the new revision."""
+    base = int(task["contract_revision"])
+    requirement_id, number = await _write_change_in(conn, intent_id=intent_id, project_id=project_id,
+                                                    task_id=task_id, request=request, principal=principal)
+    revision = await capture_contract_change(conn, task_id, origin_kind="requirement", origin_ref=request["source"])
+    if revision == base:
+        raise DomainConflict("the proposed requirement did not change the contract")
+    # A new revision marks the card's result as returned: right for a card that had one, wrong for
+    # work still in progress, which has handed in nothing to return.
+    await conn.execute("UPDATE board_tasks SET acceptance_state = ? WHERE id = ?",
+                       (task["acceptance_state"], task_id))
+    await _rebind(conn, task_id=task_id, attempt_id=live["id"], staff_session_id=live["staff_session_id"],
+                  old=base, new=revision)
+    await _narrowing_in(conn, intent_id=intent_id, project_id=project_id, task_id=task_id, request=request,
+                        requirement_id=requirement_id, number=number, revision=revision)
+    at = now()
+    await conn.execute("INSERT INTO contract_change_intents(id,project_id,task_id,actor_id,grant_id,operation_kind,"
+                       " client_operation_id,operation_receipt_id,base_contract_revision,base_attempt_id,"
+                       " request_json,state,apply_receipt_id,created_at,applied_at)"
+                       " VALUES (?,?,?,?,?,?,?,?,?,?,?,'applied',?,?,?)",
+                       (intent_id, project_id, task_id, principal.actor_id, principal.grant_id,
+                        "contract.withdraw" if request["mode"] == "withdraw" else "contract.require",
+                        client_operation_id, receipt_id, base, live["id"], canonical(request),
+                        receipt_id, at, at))
+    return {"intent_id": intent_id, "task_id": task_id, "state": "applied_live",
+            "base_contract_revision": base, "base_attempt_id": live["id"], "contract_revision": revision,
+            "requirement_id": requirement_id, "staff_session_id": live["staff_session_id"],
+            "staff_id": live["staff_id"]}
+
+
 async def link_stop_in(conn: aiosqlite.Connection, *, intent_id: str, actor_id: str,
                        stop_receipt_id: str, stop_effect_id: str | None) -> None:
     """Project the separately receipted stop on the staged request for inspection."""
@@ -102,6 +186,85 @@ async def link_stop_in(conn: aiosqlite.Connection, *, intent_id: str, actor_id: 
             raise DomainConflict("the previous stop effect still needs exact outcome reconciliation")
     await conn.execute("UPDATE contract_change_intents SET stop_receipt_id = ?,stop_effect_id = ? WHERE id = ?",
                        (stop_receipt_id, stop_effect_id, intent_id))
+
+
+async def _write_change_in(conn: aiosqlite.Connection, *, intent_id: str, project_id: str, task_id: str,
+                           request: dict[str, Any], principal: Principal) -> tuple[str, int | None]:
+    """Write the requirement a request adds, replaces or withdraws; its id and, for a new one, its number."""
+    mode = request["mode"]
+    if request.get("kind") not in REQUIREMENT_KINDS and mode != "withdraw":
+        raise DomainConflict("the staged requirement kind is invalid")
+    if mode == "withdraw":
+        target = await one(conn, "SELECT id,state FROM task_requirements WHERE id = ? AND task_id = ?",
+                           (request["target_id"], task_id))
+        if target is None or target["state"] != "active":
+            raise DomainConflict("the withdrawn requirement is no longer active")
+        await conn.execute("UPDATE task_requirements SET state = 'withdrawn',updated_at = ? WHERE id = ?",
+                           (now(), target["id"]))
+        return str(target["id"]), None
+    if mode not in ("add", "replace"):
+        raise ValueError("unsupported contract change")
+    body = request["text"].strip()
+    if not body or len(body) > REQUIREMENT_MAX_CHARS:
+        raise DomainConflict("the staged requirement text is invalid")
+    active = await one(conn, "SELECT COUNT(*) AS count FROM task_requirements"
+                       " WHERE task_id = ? AND state = 'active'", (task_id,))
+    if active is None or active["count"] - (1 if mode == "replace" else 0) >= REQUIREMENTS_MAX:
+        raise DomainConflict("the task has reached its requirement limit")
+    duplicate = await one(conn, "SELECT id FROM task_requirements WHERE task_id = ?"
+                          " AND state = 'active' AND lower(text) = lower(?) AND file_id IS ?",
+                          (task_id, body, request.get("file_id")))
+    if duplicate is not None and duplicate["id"] != request.get("target_id"):
+        raise DomainConflict("the same requirement is already active")
+    if mode == "replace":
+        target = await one(conn, "SELECT id,state FROM task_requirements WHERE id = ? AND task_id = ?",
+                           (request["target_id"], task_id))
+        if target is None or target["state"] != "active":
+            raise DomainConflict("the replaced requirement is no longer active")
+        await conn.execute("UPDATE task_requirements SET state = 'superseded',updated_at = ? WHERE id = ?",
+                           (now(), target["id"]))
+    file_id = request.get("file_id")
+    if file_id is not None:
+        access = await one(conn, "SELECT 1 FROM file_access WHERE file_id = ? AND scope = ?",
+                           (file_id, project_id))
+        if access is None:
+            raise DomainConflict("the input file is no longer available in this project")
+        await conn.execute("INSERT OR IGNORE INTO task_files(task_id,file_id,added_at,added_by)"
+                           " VALUES (?,?,?,?)", (task_id, file_id, now(), principal.actor_id))
+    next_number = await one(conn, "SELECT COALESCE(MAX(number),0)+1 AS n FROM task_requirements"
+                            " WHERE task_id = ?", (task_id,))
+    assert next_number is not None
+    requirement_id = uuid.uuid5(uuid.NAMESPACE_URL, f"requirement:{intent_id}").hex[:20]
+    await conn.execute("INSERT INTO task_requirements(id,task_id,project_id,number,text,kind,source,"
+                       " state,replaces,file_id,created_at,updated_at)"
+                       " VALUES (?,?,?,?,?,?,?,'active',?,?,?,?)",
+                       (requirement_id, task_id, project_id, next_number["n"],
+                        request["text"], request["kind"], request["source"],
+                        request.get("target_id"), file_id, now(), now()))
+    return requirement_id, int(next_number["n"])
+
+
+async def _narrowing_in(conn: aiosqlite.Connection, *, intent_id: str, project_id: str, task_id: str,
+                        request: dict[str, Any], requirement_id: str, number: int | None, revision: int) -> None:
+    """Journal a condition of the orchestrator's that narrows what the operator allowed."""
+    if request["mode"] == "withdraw" or request["kind"] != "constraint" or request["source"] != "orchestrator":
+        return
+    grant = await one(conn, "SELECT number,text FROM task_requirements WHERE task_id = ?"
+                      " AND kind = 'scope' AND state = 'active'"
+                      " AND (source = 'operator' OR source LIKE 'operator:%' OR source LIKE 'answer:%')"
+                      " ORDER BY number LIMIT 1", (task_id,))
+    if grant is None:
+        return
+    explanation = " ".join(request.get("why", "").split())
+    if len(explanation) < 8:
+        raise DomainConflict("a condition narrowing operator scope needs a reason")
+    await conn.execute("INSERT INTO project_journal(project_id,at,author,kind,text,refs_json)"
+                       " VALUES (?,?,?,'narrowing',?,?)",
+                       (project_id, now(), "orchestrator",
+                        f"Added R{number} to task {task_id} against operator scope R{grant['number']}: "
+                        f"{request['text']} — why: {explanation}",
+                        canonical({"task_id": task_id, "intent_id": intent_id,
+                                   "requirement_id": requirement_id, "contract_revision": revision})))
 
 
 async def apply_change_in(conn: aiosqlite.Connection, *, intent_id: str, principal: Principal,
@@ -180,79 +343,16 @@ async def apply_change_in(conn: aiosqlite.Connection, *, intent_id: str, princip
                            " AND resolved_by = 'operator' LIMIT 1", (intent["project_id"], short_id))
         if answer is None:
             raise DomainConflict("the staged operator answer is no longer valid")
-    mode = request["mode"]
-    if request.get("kind") not in REQUIREMENT_KINDS and mode != "withdraw":
-        raise DomainConflict("the staged requirement kind is invalid")
-    if mode == "withdraw":
-        target = await one(conn, "SELECT id,state FROM task_requirements WHERE id = ? AND task_id = ?",
-                           (request["target_id"], intent["task_id"]))
-        if target is None or target["state"] != "active":
-            raise DomainConflict("the withdrawn requirement is no longer active")
-        await conn.execute("UPDATE task_requirements SET state = 'withdrawn',updated_at = ? WHERE id = ?",
-                           (now(), target["id"]))
-        requirement_id = target["id"]
-    else:
-        if mode not in ("add", "replace"):
-            raise ValueError("unsupported contract change")
-        body = request["text"].strip()
-        if not body or len(body) > REQUIREMENT_MAX_CHARS:
-            raise DomainConflict("the staged requirement text is invalid")
-        active = await one(conn, "SELECT COUNT(*) AS count FROM task_requirements"
-                           " WHERE task_id = ? AND state = 'active'", (intent["task_id"],))
-        if active is None or active["count"] - (1 if mode == "replace" else 0) >= REQUIREMENTS_MAX:
-            raise DomainConflict("the task has reached its requirement limit")
-        duplicate = await one(conn, "SELECT id FROM task_requirements WHERE task_id = ?"
-                              " AND state = 'active' AND lower(text) = lower(?) AND file_id IS ?",
-                              (intent["task_id"], body, request.get("file_id")))
-        if duplicate is not None and duplicate["id"] != request.get("target_id"):
-            raise DomainConflict("the same requirement is already active")
-        if mode == "replace":
-            target = await one(conn, "SELECT id,state FROM task_requirements WHERE id = ? AND task_id = ?",
-                               (request["target_id"], intent["task_id"]))
-            if target is None or target["state"] != "active":
-                raise DomainConflict("the replaced requirement is no longer active")
-            await conn.execute("UPDATE task_requirements SET state = 'superseded',updated_at = ? WHERE id = ?",
-                               (now(), target["id"]))
-        file_id = request.get("file_id")
-        if file_id is not None:
-            access = await one(conn, "SELECT 1 FROM file_access WHERE file_id = ? AND scope = ?",
-                               (file_id, intent["project_id"]))
-            if access is None:
-                raise DomainConflict("the input file is no longer available in this project")
-            await conn.execute("INSERT OR IGNORE INTO task_files(task_id,file_id,added_at,added_by)"
-                               " VALUES (?,?,?,?)", (intent["task_id"], file_id, now(), principal.actor_id))
-        next_number = await one(conn, "SELECT COALESCE(MAX(number),0)+1 AS n FROM task_requirements"
-                                " WHERE task_id = ?", (intent["task_id"],))
-        assert next_number is not None
-        requirement_id = uuid.uuid5(uuid.NAMESPACE_URL, f"requirement:{intent_id}").hex[:20]
-        await conn.execute("INSERT INTO task_requirements(id,task_id,project_id,number,text,kind,source,"
-                           " state,replaces,file_id,created_at,updated_at)"
-                           " VALUES (?,?,?,?,?,?,?,'active',?,?,?,?)",
-                           (requirement_id, intent["task_id"], intent["project_id"], next_number["n"],
-                            request["text"], request["kind"], request["source"],
-                            request.get("target_id"), file_id, now(), now()))
+    requirement_id, number = await _write_change_in(conn, intent_id=intent_id, project_id=intent["project_id"],
+                                                    task_id=intent["task_id"], request=request, principal=principal)
     revision = await capture_contract_change(conn, intent["task_id"], origin_kind="requirement",
                                              origin_ref=request["source"])
     if revision == intent["base_contract_revision"]:
         raise DomainConflict("the proposed requirement did not change the contract")
     await conn.execute("UPDATE board_tasks SET status = 'todo',current_attempt_id = NULL WHERE id = ?",
                        (intent["task_id"],))
-    if mode != "withdraw" and request["kind"] == "constraint" and request["source"] == "orchestrator":
-        grant = await one(conn, "SELECT number,text FROM task_requirements WHERE task_id = ?"
-                          " AND kind = 'scope' AND state = 'active'"
-                          " AND (source = 'operator' OR source LIKE 'operator:%' OR source LIKE 'answer:%')"
-                          " ORDER BY number LIMIT 1", (intent["task_id"],))
-        if grant is not None:
-            explanation = " ".join(request.get("why", "").split())
-            if len(explanation) < 8:
-                raise DomainConflict("a condition narrowing operator scope needs a reason")
-            await conn.execute("INSERT INTO project_journal(project_id,at,author,kind,text,refs_json)"
-                               " VALUES (?,?,?,'narrowing',?,?)",
-                               (intent["project_id"], now(), "orchestrator",
-                                f"Added R{next_number['n']} to task {intent['task_id']} against operator scope R{grant['number']}: "
-                                f"{request['text']} — why: {explanation}",
-                                canonical({"task_id": intent["task_id"], "intent_id": intent_id,
-                                           "requirement_id": requirement_id, "contract_revision": revision})))
+    await _narrowing_in(conn, intent_id=intent_id, project_id=intent["project_id"], task_id=intent["task_id"],
+                        request=request, requirement_id=requirement_id, number=number, revision=revision)
     await conn.execute("UPDATE contract_change_intents SET state = 'applied',apply_receipt_id = ?,applied_at = ?"
                        " WHERE id = ?", (receipt_id, now(), intent_id))
     return {"intent_id": intent_id, "task_id": intent["task_id"], "state": "applied",

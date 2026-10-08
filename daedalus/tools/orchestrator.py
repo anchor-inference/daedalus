@@ -524,9 +524,11 @@ assign().definition.parameters.properties["requirements"] = {
         "chat (source='operator'), sometimes yours (source='orchestrator'), or from an answer of theirs "
         "(source='answer:<request id>'). kind: quality, scope, constraint, or input with file=<att:…>: a file the work "
         "starts from, which the member must open before handing in. It is numbered (R1 …) in the next "
-        "contract. An active worker must first stop with physical exit proof; op='stage' returns a durable "
-        "intent. If stop was unavailable, op='stop' with intent_id retries under current authority; "
-        "op='apply' with intent_id applies it after exact stop proof. Launch again explicitly. replaces=R2 puts it in "
+        "contract. On a card a member is working, it goes into that run: the member is told in the turn it is in "
+        "and keeps working, so do not also Tell them the same thing. restart=true is only for a change the work "
+        "cannot absorb: it stops the run, applies the requirement once the run has exited, and you Assign the card "
+        "again. A card nobody works gets it applied at once and its next brief carries it. op='stop' or "
+        "op='apply' with intent_id finishes a change that could not be applied in its own call. replaces=R2 puts it in "
         "place of an older one; withdraw=R2 takes one out. The operator's own requirement is replaced or withdrawn "
         "only with their answer as source — ask them first. What the operator allows for the work ('if something "
         "needs fixing, fix it') is kind='scope' in their words; a constraint of yours that narrows it takes why, "
@@ -547,11 +549,12 @@ async def require(
     intent_id: str | None = None,
     client_operation_id: str = "",
     expected_entity_revision: int | None = None,
+    restart: bool = False,
 ) -> ToolResult:
     return await _call(context, "require", task_id=task_id, text=text, kind=kind, source=source,
                        replaces=replaces, withdraw=withdraw, file=file, why=why, op=op,
-                       intent_id=intent_id, client_operation_id=client_operation_id,
-                       expected_entity_revision=expected_entity_revision)
+                       intent_id=intent_id, client_operation_id=client_operation_id or call_id(context),
+                       expected_entity_revision=expected_entity_revision, restart=restart)
 
 
 require().definition.parameters.properties["kind"]["enum"] = ["quality", "scope", "constraint", "input"]
