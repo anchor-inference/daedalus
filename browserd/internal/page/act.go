@@ -38,6 +38,10 @@ type ActParams struct {
 	X          *float64 `json:"x,omitempty"`
 	Y          *float64 `json:"y,omitempty"`
 	AllowPoint bool     `json:"allow_point,omitempty"`
+	// OperatorSecret says the text is a secret the operator handed the agent for this purpose, put in by
+	// the host in place of a placeholder the model wrote: the model never saw it. A type action carrying
+	// one may go into a password or one-time-code field, which is otherwise the operator's alone.
+	OperatorSecret bool `json:"operator_secret,omitempty"`
 }
 
 // MaxTypeText bounds what one type action inserts.
@@ -232,7 +236,8 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 				chordPrintable = c.printable()
 			}
 		}
-		if ap.Action == "type" || ap.Action == "select" || chordPrintable {
+		handedOver := ap.Action == "type" && ap.OperatorSecret
+		if (ap.Action == "type" || ap.Action == "select" || chordPrintable) && !handedOver {
 			p.needsYou(t, "field_forbidden", "The agent reached a "+strings.ReplaceAll(orDefault(pr.Element.SecretKind, "password"), "_", " ")+
 				" field ("+orDefault(pr.Element.Name, ref)+") and needs you to fill it in.", t.URL(), "")
 			return nil, fieldForbidden(ref, pr.Element.SecretKind)

@@ -63,6 +63,7 @@ from daedalus.host.worktrees import (
     branch_name,
     staff_slug,
 )
+from daedalus.security import operator_secrets, redact
 from daedalus.staff_runtime import (
     AskRef,
     BoardTask,
@@ -1001,6 +1002,10 @@ class Team:
         first = self.first_message(member, task, folder, worktree, predecessor, by, fresh, earlier,
                                    rules=await self.rules_block(project.id), contract=contract)
         first += "\n\n" + context_text
+        if member.harness != "daedalus" and (store := operator_secrets.shared()) is not None:
+            # A Daedalus member is a session and reads its secrets in its turn context; a coding CLI has only this.
+            if handed := operator_secrets.staff_section(store.for_staff(member.id, project.id)):
+                first += "\n\n" + handed
         try:
             recorded = await self.manager.staff.add_message(member.id, first, origin=by, mode="after_turn", staff_session_id=session.id)
             first_id = recorded.id
@@ -1255,6 +1260,9 @@ class Team:
         live = await self.live_of(member)
         if live is None:
             raise StaffError(f"{member.name} has no live session; assign a task to start one")
+        # A value of the operator's pasted into a message by habit goes as its placeholder; the member has
+        # the value where it may use it.
+        text = _concealed(text)
         delivered: list[Delivered] = []
         if files:
             folder, cwd = await self.cwd_of(live)
@@ -1283,6 +1291,27 @@ class Team:
             receipt = Receipt("failed", str(exc)[:500])
         await self.ingress.message_state(message.id, receipt.state, receipt.error)
         return {"message_id": message.id, "state": receipt.state, "error": receipt.error, "degraded_to": receipt.degraded_to, "files": [d.path for d in delivered]}
+
+    async def secrets_note(self, member: Staff, handed: list[operator_secrets.Secret]) -> str:
+        """Make secrets handed to a member at work usable now, and return what the message tells it.
+
+        A Daedalus member is a session: its commands take the variables from its next call on. A coding CLI's
+        environment was fixed when it started, so the value goes into its launch directory as a file, which
+        the next launch also carries as a variable."""
+        if not handed:
+            return ""
+        if member.harness == "daedalus":
+            return operator_secrets.prompt_section(handed)
+        live = await self.live_of(member)
+        session = getattr(self.runtimes.get(member.harness), "sessions", {}).get(live.id) if live is not None else None
+        if session is None:
+            return operator_secrets.staff_section(handed)
+        for secret in handed:
+            try:
+                await session.term.put_file(operator_secrets.LAUNCH_FILE_PREFIX + secret.name, (secret.value or "").encode("utf-8"))
+            except Exception:  # noqa: BLE001 — a file already there (the project's secret was in the launch) is the file wanted
+                logger.info("secret %s is already in %s's launch, or the launch refused it", secret.name, member.name)
+        return operator_secrets.staff_section(handed, mid_launch=True)
 
     async def interrupt(self, member: Staff) -> None:
         live = await self.live_of(member)
@@ -2090,6 +2119,10 @@ class Team:
         raise ValueError(op)
 
 
+def _concealed(text: str) -> str:
+    return redact.shared().conceal_named(text)
+
+
 class Ingress:
     """:class:`daedalus.staff_runtime.TeamIngress`: every change of a staff session's state, written and announced."""
 
@@ -2164,6 +2197,7 @@ class Ingress:
             await self.team._settle_pause(LiveSession(live.staff, session))
 
     async def _open(self, live: LiveSession, kind: str, request_ref: str, text: str, detail: dict[str, Any], event_ref: str | None, route: str | None = None, risk: str = "routine") -> Ask:
+        text = _concealed(text)
         if request_ref:
             # The same request seen again — a hook the daemon replayed after the host restarted — is
             # the request already open, not a second one for the orchestrator to answer twice.
@@ -2242,6 +2276,10 @@ class Ingress:
         call_id: str | None = None, evidence: list[dict[str, str]] | None = None, acknowledged: list[str] | None = None,
         operator_steps: dict[str, Any] | None = None,
     ) -> str:
+        # What a member says goes to its coordinator, the board and the operator: a value it printed from
+        # one of the operator's secrets goes as that secret's placeholder.
+        note = _concealed(note)
+        remember = _concealed(remember) if remember else remember
         response, event = await StaffReportService(self.team.app).submit(
             live, kind, note, artifacts=artifacts, remember=remember, evidence=evidence,
             acknowledged=acknowledged, operator_steps=operator_steps, call_id=call_id or "",
@@ -2272,6 +2310,7 @@ class Ingress:
                 logger.exception("a report hook failed on %s", event.seq)
 
     async def implicit_report(self, live: LiveSession, kind: str, text: str) -> None:
+        text = _concealed(text)
         task = await self.team.task(live.session.task_id) if live.session.task_id else None
         payload: dict[str, Any] = {"kind": kind, "text": text[:NOTE_MAX], "actor": "system", "implicit": True}
         if task is not None:

@@ -443,7 +443,9 @@ async def dismiss(context: ToolContext, staff: str, release: bool = False, keep_
         "for a new card or entity revision from Tasks(get) for an existing card. resume_from is an optional "
         "session id from StaffSessions: "
         "it resumes that CLI conversation only in the same launch folder and worktree branch. "
-        "effort overrides a Daedalus member's default for this assignment: off, low, medium, high or xhigh."
+        "effort overrides a Daedalus member's default for this assignment: off, low, medium, high or xhigh. "
+        "secrets: names of the operator's secrets this chat may use (router_admin), handed to the member by name; "
+        "their launch carries the values. Never write a password or key into a brief or a message."
     ),
 )
 async def assign(
@@ -468,13 +470,14 @@ async def assign(
     expected_entity_revision: int | None = None,
     expected_collection_revision: int | None = None,
     effort: str | None = None,
+    secrets: list[str] | None = None,
 ) -> ToolResult:
     return await _call(
         context, "assign", staff=staff, task_id=task_id, title=title, objective=objective, deliverable=deliverable, boundaries=boundaries,
         done_when=done_when, folder=folder, priority=priority, depends_on=depends_on, files=files, new=new,
         requirements=requirements, inputs=inputs, checks=checks, reason=reason, resume_from=resume_from,
         client_operation_id=call_id(context), expected_entity_revision=expected_entity_revision,
-        expected_collection_revision=expected_collection_revision, effort=effort,
+        expected_collection_revision=expected_collection_revision, effort=effort, secrets=secrets,
     )
 
 
@@ -638,11 +641,12 @@ async def decide(context: ToolContext, why: str, task_id: str | None = None, loo
         "stops the turn first, for when what they are doing is wrong or wasted. Where an executor cannot take a "
         "message into a running turn, the receipt says what happened instead. files: handles (att:…) or paths in the "
         "project's folders, copied where the member can open them; the message names the copies. Returns the "
-        "delivery receipt: queued, written, submitted, acknowledged or failed."
+        "delivery receipt: queued, written, submitted, acknowledged or failed. secrets: names of the operator's "
+        "secrets this chat may use, handed to the member by name (never paste a value into text)."
     ),
 )
-async def tell(context: ToolContext, staff: str, text: str, when: str = "now", files: list[str] | None = None) -> ToolResult:
-    return await _call(context, "tell", staff=staff, text=text, when=when, files=files)
+async def tell(context: ToolContext, staff: str, text: str, when: str = "now", files: list[str] | None = None, secrets: list[str] | None = None) -> ToolResult:
+    return await _call(context, "tell", staff=staff, text=text, when=when, files=files, secrets=secrets)
 
 
 # The decorator describes a str as any string at all; the model is shown the three timings as the only

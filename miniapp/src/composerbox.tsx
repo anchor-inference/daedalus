@@ -16,6 +16,7 @@ import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "./voicebar";
 import { landWords } from "./voicenote";
 import { loadDraftFiles, saveDraftFiles } from "./project/draftfiles";
 import { useReply } from "./project/chat";
+import { AttachedSecret, SecretChip, SecretSheet } from "./secrets";
 import {
   Approval,
   ComposerStatus,
@@ -59,7 +60,7 @@ export type ComposerProps = {
   sessionId: string;
   status: ComposerStatus;
   /** Send the text and the files; with `queue` (a run is on) the host holds it for the end of the turn. Rejects on failure. */
-  onSend: (text: string, files: File[], queue: boolean, clientMessageId?: string, onProgress?: (fraction: number) => void) => Promise<"sent" | "queued">;
+  onSend: (text: string, files: File[], queue: boolean, clientMessageId?: string, onProgress?: (fraction: number) => void, secrets?: string[]) => Promise<"sent" | "queued">;
   onStop: () => void;
   commands: SlashCommand[];
   /** Installed skills, offered in the same palette: picking one asks the agent to use it. */
@@ -124,6 +125,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [progress, setProgress] = useState<number | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
+  // The operator's secrets on this draft, by name: the value went to the host when the form was sent.
+  const [secrets, setSecrets] = useState<AttachedSecret[]>([]);
+  const [secretOpen, setSecretOpen] = useState(false);
   const focus = useComposerFocus(phone);
   const focused = focus.focused;
   const offline = useOffline();
@@ -138,6 +142,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   useEffect(() => {
     setDraftState(readDraft(sessionId));
     setSavedTarget(readDraftTarget(sessionId));
+    setSecrets([]);
     setFileReadySession(null);
     setFileStorageError(false);
     let active = true;
@@ -203,6 +208,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     observer.observe(el);
     return () => observer.disconnect();
   }, [fit]);
+
+  // A secret this draft made goes when its chip does: nothing else asked for it. One attached again from
+  // the chat's list stays where it was.
+  async function unattachSecret(secret: AttachedSecret) {
+    setSecrets((list) => list.filter((other) => other.id !== secret.id));
+    if (!secret.fresh) return;
+    try {
+      await api.delete(`/api/secrets/${secret.id}`);
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
 
   const addFiles = useCallback((incoming: Iterable<File>) => {
     const named = Array.from(incoming).map((f) => {
@@ -284,11 +301,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }
 
   // ── send / stop / queue ──
-  const { action, enabled } = primaryAction({ status, hasDraft: !!draft.trim(), hasFiles: files.length > 0, asking, sending });
+  const { action, enabled } = primaryAction({ status, hasDraft: !!draft.trim(), hasFiles: files.length > 0 || secrets.length > 0, asking, sending });
   async function send(override?: string) {
     const text = (override ?? draft).trim();
     const going = files;
-    if (sending || fileReadySession !== sessionId || (!text && going.length === 0)) return;
+    const handed = secrets.map((secret) => secret.name);
+    if (sending || fileReadySession !== sessionId || (!text && going.length === 0 && handed.length === 0)) return;
     if (needsReview) return;
     const queue = status === "running";
     if (text.startsWith("/") && going.length === 0 && commands.some((c) => c.name === text.slice(1).split(" ")[0].toLowerCase())) {
@@ -296,17 +314,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       return;
     }
     setSending(true);
-    const fingerprint = JSON.stringify({ text, files: going.map((file) => [file.name, file.size, file.lastModified, file.type]), target: currentTarget, queue });
+    const fingerprint = JSON.stringify({ text, files: going.map((file) => [file.name, file.size, file.lastModified, file.type]), secrets: handed, target: currentTarget, queue });
     const clientMessageId = sendIntent(sessionId, fingerprint);
     // Keep the complete draft until the server confirms it. A dropped reply may be an unknown
     // outcome; the same client message id is used if the operator explicitly retries.
     if (going.length) setProgress(0);
     try {
-      const delivery = await onSend(text, going, queue, clientMessageId, going.length ? setProgress : undefined);
+      const delivery = await onSend(text, going, queue, clientMessageId, going.length ? setProgress : undefined, handed.length ? handed : undefined);
       clearSendIntent(sessionId);
       setDraftState("");
       clearDraft(sessionId);
       setFiles([]);
+      setSecrets([]);
       setSavedTarget(null);
       writeDraftTarget(sessionId, null);
       if (fileInput.current) fileInput.current.value = "";
@@ -448,7 +467,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // A phone draws the composer in two shapes (ui/phone.css): one 48 px row at rest, and the text over
   // a toolbar once the field has the reader or holds anything. The white circle is a voice
   // conversation while the field is empty and nothing runs, Send with text, Stop while a run is on.
-  const empty = !draft.trim() && files.length === 0;
+  const empty = !draft.trim() && files.length === 0 && secrets.length === 0;
   // A question or a permission request does not open the field: they sit in the tray above it, and
   // the field stays the one 48 px row the reader can answer in with words of their own.
   const shape = !phone ? undefined : focused || !empty || progress !== null || needsReview ? "open" : "idle";
@@ -618,11 +637,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {!phone && fileStorageError && files.length > 0 && <div className="sub upload-progress" role="status">{t("composer.attachments.unsaved")}</div>}
         {fileReadySession !== sessionId && <div className="sub upload-progress" role="status">{t("composer.attachments.restoring")}</div>}
         {!phone && needsReview && <div className="sub upload-progress" role="status">{t("composer.draft.targetChanged")} <button type="button" className="btn small" onClick={useCurrent}>{t("composer.draft.useCurrent")}</button></div>}
-        {files.length > 0 && !voiceBar && (
+        {(files.length > 0 || secrets.length > 0) && !voiceBar && (
           <div className="attachments" aria-label={t("session.attachments")}>
             {files.map((f, i) => (
               <AttachmentCard key={`${f.name}-${f.size}-${f.lastModified}-${i}`} file={f} onOpen={() => props.onPreviewFile?.(f)} onRemove={() => { if (!sending) setFiles((p) => p.filter((_, j) => j !== i)); }} />
             ))}
+            {secrets.map((secret) => <SecretChip key={secret.id} name={secret.name} scope={secret.scope} onRemove={() => { if (!sending) void unattachSecret(secret); }} />)}
           </div>
         )}
         <textarea
@@ -652,6 +672,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               onPaste={() => void pasteFromClipboard()}
               onRecord={props.asr?.configured && note.supported && note.state.phase === "idle" ? () => void note.start() : undefined}
               onCommands={commands.length || props.skills?.length ? () => { setDraft("/"); window.setTimeout(() => textarea.current?.focus(), 0); } : undefined}
+              onSecret={() => setSecretOpen(true)}
               commandsHint={commands.length || props.skills?.length ? t("ph.plus.commands.hint", { n: commands.length + (props.skills?.length ?? 0) }) : undefined}
               place={place.map((chip) => chip.name).join(" · ") || undefined} />
           )}
@@ -661,8 +682,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               {phone && <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); photoInput.current?.click(); }}><Icon name="image" size={16} />{t("composer.photo")}</button>}
               {props.asr?.configured && <button type="button" role="menuitem" disabled={!note.supported || note.state.phase !== "idle"} onClick={() => { setPlusOpen(false); void note.start(); }}><Icon name="mic" size={16} />{t("session.mic")}</button>}
               <button type="button" role="menuitem" onClick={() => void pasteFromClipboard()}><Icon name="copy" size={16} />{t("composer.paste")}</button>
+              <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); setSecretOpen(true); }}><Icon name="lock" size={16} />{t("composer.secret")}</button>
             </Popover>
           )}
+          {secretOpen && <SecretSheet sessionId={sessionId} phone={phone} attached={secrets.map((secret) => secret.name)} onClose={() => setSecretOpen(false)}
+            onAttach={(secret) => setSecrets((list) => [...list.filter((other) => other.name !== secret.name), secret])} />}
           {props.onChooseMode && props.onYagni
             ? <ModeSelect mode={props.mode ?? ""} modes={props.modes ?? []} yagni={!!props.yagni} onChooseMode={props.onChooseMode} onYagni={props.onYagni} sheet={phone} />
             : <span className="composer-mode">{t("composer.mode.agent")}</span>}
@@ -758,9 +782,9 @@ export function VoiceCircle() {
  * The composer's "+" on a phone: three tiles for what is attached most (a photo now, a picture from the
  * gallery, a file) and rows for the rest. Each command is offered only where the composer has it.
  */
-export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onRecord, onCommands, commandsHint, place, extra }: {
+export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onRecord, onCommands, commandsHint, onSecret, place, extra }: {
   onClose: () => void; onPhoto: () => void; onPhotos?: () => void; onFiles: () => void; onPaste?: () => void; onRecord?: () => void;
-  onCommands?: () => void; commandsHint?: string; place?: string; extra?: ReactNode;
+  onCommands?: () => void; commandsHint?: string; onSecret?: () => void; place?: string; extra?: ReactNode;
 }) {
   const run = (fn: () => void) => () => { onClose(); fn(); };
   return (
@@ -773,6 +797,7 @@ export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onReco
       {onPaste && <SheetRow icon="paste" label={t("composer.paste")} hint={t("ph.plus.paste.hint")} onClick={onPaste} />}
       {onRecord && <SheetRow icon="mic" label={t("session.mic")} onClick={run(onRecord)} />}
       {onCommands && <SheetRow icon="bolt" label={t("ph.plus.commands")} hint={commandsHint} chevron onClick={run(onCommands)} />}
+      {onSecret && <SheetRow icon="lock" label={t("composer.secret")} hint={t("composer.secret.hint")} onClick={run(onSecret)} />}
       {place && <SheetRow icon="folder" label={t("ph.plus.place")} hint={t("ph.plus.place.hint")} value={place} />}
       {extra}
     </BottomSheet>

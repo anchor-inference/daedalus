@@ -24,6 +24,7 @@ from collections import OrderedDict
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from daedalus.security import operator_secrets
 from daedalus.terminals import wire
 from daedalus.terminals.client import Channel, PtydClient, Unavailable
 from daedalus.terminals.endpoint import absolute_on
@@ -80,6 +81,14 @@ def side_failure(exc: wire.RpcError, what: str) -> TerminalError:
     if code == wire.INVALID_PARAMS:
         return InvalidRequest(text)
     return TerminalError(f"{text} ({code})")
+
+
+def _file_digest(name: str, data: bytes) -> str:
+    """What the audit keeps of a launch file: its hash, except for an operator's secret, whose hash would be
+    the value itself to anyone with a list of likely passwords."""
+    if name.startswith(operator_secrets.LAUNCH_FILE_PREFIX):
+        return "operator secret"
+    return hashlib.sha256(data).hexdigest()
 
 
 class ByteStream:
@@ -355,7 +364,7 @@ class SideChannels:
         self._hook_queues.setdefault(launch_id, _HookQueue())
         if launch.terminal_id:
             self._launch_terminals[launch_id] = launch.terminal_id
-        files = {name: hashlib.sha256(data).hexdigest() for name, data in launch.files.items()}
+        files = {name: _file_digest(name, data) for name, data in launch.files.items()}
         await self.audit(launch.terminal_id, env, actor, "launch", {"launch_id": launch_id, "files": files, "ports": list(launch.ports)})
         return Launch(
             env=env,
@@ -371,7 +380,7 @@ class SideChannels:
     async def put_launch_file(self, env: str, launch_id: str, name: str, data: bytes, *, actor: str = "system") -> str:
         """Add a file to an open launch's directory and return its path: a message too long to type,
         which the CLI is told to read. The daemon refuses a name that is a path or already exists."""
-        detail: dict[str, Any] = {"launch_id": launch_id, "name": name, "sha256": hashlib.sha256(data).hexdigest(), "length": len(data)}
+        detail: dict[str, Any] = {"launch_id": launch_id, "name": name, "sha256": _file_digest(name, data), "length": len(data)}
         terminal_id = self._launch_terminals.get(launch_id, "")
         try:
             result = await self._side_call(env, "hooks.put_file", {"launch_id": launch_id, "name": name, "data": base64.b64encode(data).decode()}, what="adding a file to the launch")

@@ -28,7 +28,7 @@ from protocore.contracts.types import ToolDefinition, ToolParameterSchema, ToolR
 
 from daedalus.config import McpServerConfig
 from daedalus.mcp.oauth import MCPOAuthClient, NeedsAuthorization
-from daedalus.security import redact
+from daedalus.security import operator_secrets, redact
 from daedalus.security.untrusted import fenced
 from daedalus.tools._common import clip
 
@@ -137,6 +137,10 @@ class McpToolProxy(Tool):
 
     async def invoke(self, context: ToolContext, arguments: dict[str, Any]) -> ToolResult:
         call_id = str(context.metadata.get("tool_call_id") or "")
+        if (store := operator_secrets.shared()) is not None:
+            # The operator's secrets first, then the server's own references: a «secret:…» is the operator's
+            # value for whatever this session calls, a «ref:…» only ever goes back to the server that gave it.
+            arguments, _used = store.substitute(arguments, context.session_id, used_by=f"MCP {self.server} ({self.name}) in {context.session_id}")
         try:
             result = await self._connection.call(self._remote, self._connection.vault.resolve(arguments))
         except Exception as exc:  # noqa: BLE001

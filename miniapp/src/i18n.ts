@@ -6503,3 +6503,38 @@ Object.assign(DICT, {
   "cal.keys.help": { en: "This list", ru: "Этот список" },
   "cal.keys.drag": { en: "Drag on the grid to create, drag an event to move it, drag its lower edge to change its length.", ru: "Протяните по сетке, чтобы создать событие; перетащите событие, чтобы перенести; потяните за нижний край, чтобы изменить длительность." },
 });
+
+// The operator's secrets: the composer's "+" entry and form, the chip a message carries, and their list in
+// Settings → Security. The value is never shown back, so no string here ever has a slot for it.
+Object.assign(DICT, {
+  "composer.secret": { en: "Secret", ru: "Секрет" },
+  "composer.secret.hint": { en: "A password or key the agent uses without seeing it", ru: "Пароль или ключ, которым агент пользуется, не видя его" },
+  "secret.title": { en: "Hand over a secret", ru: "Передать секрет" },
+  "secret.why": { en: "The agent gets the name and your note, never the value. It can type it into a page, pass it to a tool or read it in a command as a variable; anything that prints it comes back masked.", ru: "Агент получит имя и вашу заметку, но не значение. Он может ввести его на странице, передать инструменту или прочитать в команде как переменную; всё, что его выводит, возвращается скрытым." },
+  "secret.name": { en: "Name", ru: "Имя" },
+  "secret.name.as": { en: "The agent sees {placeholder}", ru: "Агент увидит {placeholder}" },
+  "secret.name.bad": { en: "A letter, then letters, digits or underscores", ru: "Буква, затем буквы, цифры или подчёркивания" },
+  "secret.value": { en: "Value", ru: "Значение" },
+  "secret.value.show": { en: "Show the value", ru: "Показать значение" },
+  "secret.value.hide": { en: "Hide the value", ru: "Скрыть значение" },
+  "secret.note": { en: "Note for the agent", ru: "Заметка для агента" },
+  "secret.note.placeholder": { en: "What it is for: router web admin, user admin", ru: "Для чего: веб-панель роутера, пользователь admin" },
+  "secret.scope": { en: "Available to", ru: "Доступен" },
+  "secret.scope.session": { en: "This chat", ru: "Этому чату" },
+  "secret.scope.project": { en: "The project", ru: "Проекту" },
+  "secret.scope.project.hint": { en: "Every chat and staff member of {project} can use it", ru: "Им смогут пользоваться все чаты и сотрудники проекта {project}" },
+  "secret.reuse": { en: "Already here", ru: "Уже есть здесь" },
+  "secret.attach": { en: "Attach", ru: "Прикрепить" },
+  "secret.chip.session": { en: "Secret {name}, for this chat", ru: "Секрет {name}, для этого чата" },
+  "secret.chip.project": { en: "Secret {name}, for the project", ru: "Секрет {name}, для проекта" },
+  "secret.list.title": { en: "Secrets you handed the agent", ru: "Секреты, переданные агенту" },
+  "secret.list.sub": { en: "Stored encrypted. The agent uses them by name and never sees a value. Removing one takes it away at once.", ru: "Хранятся зашифрованными. Агент пользуется ими по имени и не видит значений. Удаление отзывает секрет сразу." },
+  "secret.list.none": { en: "None yet. Attach one with + → Secret in a chat.", ru: "Пока нет. Прикрепите в чате через + → Секрет." },
+  "secret.list.session": { en: "Chat: {title}", ru: "Чат: {title}" },
+  "secret.list.project": { en: "Project: {title}", ru: "Проект: {title}" },
+  "secret.list.used": { en: "used {t} by {by}", ru: "использован {t}: {by}" },
+  "secret.list.unused": { en: "not used yet", ru: "ещё не использован" },
+  "secret.list.unreadable": { en: "cannot be opened: the key changed", ru: "не открывается: ключ изменился" },
+  "secret.remove.title": { en: "Remove {name}?", ru: "Удалить {name}?" },
+  "secret.remove.body": { en: "The agent and the staff lose it at once. A command already running keeps what it was started with.", ru: "Агент и сотрудники сразу теряют к нему доступ. Уже запущенная команда сохраняет то, с чем стартовала." },
+});

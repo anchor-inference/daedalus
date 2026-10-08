@@ -22,6 +22,7 @@ from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
 from daedalus.processes import end_tree
+from daedalus.security import operator_secrets
 from daedalus.tools import search_hint
 from daedalus.tools._common import FRAME_CHARS, clip, error, ok, services_for, tool_config
 
@@ -167,7 +168,9 @@ def operator_git_dirs(checkouts: Sequence[Path] | None = None) -> list[Path]:
     return [path for path in dict.fromkeys(found) if path.is_dir()]
 
 
-async def sandbox_argv(command: str, exec_config: Any, *, writable: Sequence[Path], sealed: Sequence[Path] | None = None) -> tuple[list[str], bool]:
+async def sandbox_argv(
+    command: str, exec_config: Any, *, writable: Sequence[Path], sealed: Sequence[Path] | None = None, session_id: str | None = None,
+) -> tuple[list[str], bool]:
     """The argv to run ``command`` with: plain bash, or bash inside bubblewrap when the sandbox is on.
 
     The sandbox binds the whole filesystem read-only, makes ``writable`` (the session's writable
@@ -184,6 +187,10 @@ async def sandbox_argv(command: str, exec_config: Any, *, writable: Sequence[Pat
     inside the operator's ``.git`` through exactly such a bind, and every ``git fetch`` in the
     checkout failed until the entries were removed by hand. Self-development's worktrees belong to a
     repository of the agent's own, so nothing a session legitimately does needs these directories.
+
+    The folder of the operator's secrets' files is hidden behind an empty one, and only the scopes
+    ``session_id`` draws from are bound back, read-only: the read-only root bind would otherwise show a
+    session every other chat's and project's secrets.
     """
     global _warned_missing_bwrap
     plain = shell_argv(command)
@@ -211,6 +218,12 @@ async def sandbox_argv(command: str, exec_config: Any, *, writable: Sequence[Pat
     for path in operator_git_dirs() if sealed is None else sealed:
         if not path.is_symlink() and path.is_dir():
             argv += ["--ro-bind", str(path), str(path)]
+    store = operator_secrets.shared()
+    if store is not None and store.files_dir is not None and store.files_dir.is_dir():
+        argv += ["--tmpfs", str(store.files_dir)]
+        for scope in store.scope_dirs(session_id or ""):
+            if scope.is_dir():
+                argv += ["--ro-bind", str(scope), str(scope)]
     return argv + shell_argv(command), True
 
 
@@ -265,6 +278,9 @@ def _own_checkout(cwd: str | Path | None) -> bool:
 def shell_environment(session_id: str, extra: dict[str, str] | None = None, *, cwd: str | Path | None = None) -> dict[str, str]:
     """The environment a tool's subprocess gets: what a shell and its toolchains need, without the bot's own credentials.
 
+    The operator's secrets the session may use are in it (``DAEDALUS_SECRET_<NAME>`` and ``…_FILE``): this
+    is the one door every command, job, check, service and hook script of a session goes through.
+
     This is hygiene, not containment: the bot's Telegram and provider credentials do not
     propagate into child processes and their logs, but a shell in the same container can still
     read the parent's environment through ``/proc``. A caller that needs a specific value passes
@@ -278,11 +294,32 @@ def shell_environment(session_id: str, extra: dict[str, str] | None = None, *, c
     env = {k: v for k, v in os.environ.items() if (k in _SAFE_ENV_BASE or k.startswith(_SAFE_ENV_PREFIXES)) and not _SECRET_ENV.match(k)}
     if not _own_checkout(cwd):
         env.pop("UV_PROJECT_ENVIRONMENT", None)
+    # Never one of the host's own: the prefix is the operator's handed-over secrets', and only the session's
+    # own go in, below.
+    env = {k: v for k, v in env.items() if not k.startswith(operator_secrets.ENV_PREFIX)}
+    if (store := operator_secrets.shared()) is not None:
+        env.update(store.environment(session_id))
     env.update(extra or {})
     if agent_bin := os.environ.get("DAEDALUS_AGENT_BIN", ""):
         env["PATH"] = agent_bin + os.pathsep + env.get("PATH", "")
     env["DAEDALUS_SESSION_ID"] = session_id
     return env
+
+
+def _with_secrets(session_id: str, command: str, env: dict[str, str] | None, *, remote: bool) -> tuple[str, dict[str, str] | None]:
+    """The command with the operator's secrets' placeholders turned into their variables, and the
+    environment it runs with. A local command gets the variables from :func:`shell_environment`; a
+    command on another machine (the operator's host) gets them here, without the file paths, which name
+    files on this one. Whatever the command names is recorded as a use."""
+    store = operator_secrets.shared()
+    if store is None:
+        return command, env
+    command, named = store.rewrite_command(command, session_id)
+    if named:
+        store.record_use(named, f"Exec in {session_id}")
+    if remote and (variables := store.environment(session_id, files=False)):
+        env = {**variables, **(env or {})}
+    return command, env
 
 
 @search_hint(
@@ -312,6 +349,7 @@ async def exec_command(
     workdir = services.resolve(cwd)
     limit = float(timeout_seconds or services.tool_timeout_seconds)
     started = time.monotonic()
+    command, env = _with_secrets(context.session_id, command, env, remote=services.exec_backend is not None)
     if background:
         if services.exec_backend is not None:
             return await _start_remote_job(context, services, command, workdir, env)
@@ -333,7 +371,7 @@ async def exec_command(
         return error(context, f"working directory does not exist: {workdir}")
     environment = shell_environment(context.session_id, env, cwd=workdir)
     try:
-        argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable())
+        argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable(), session_id=context.session_id)
     except SandboxUnavailable as exc:
         return error(context, str(exc))
     proc = await asyncio.create_subprocess_exec(
@@ -583,7 +621,7 @@ async def _start_job(context: ToolContext, services: Any, command: str, workdir:
     log.parent.mkdir(parents=True, exist_ok=True)
     _prune_spills(log.parent)  # the same bound as the spill directory: the newest logs stay
     try:
-        argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable())
+        argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable(), session_id=context.session_id)
     except SandboxUnavailable as exc:
         return error(context, str(exc))
     fh = log.open("wb")

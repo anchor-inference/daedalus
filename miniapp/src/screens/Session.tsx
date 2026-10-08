@@ -58,6 +58,7 @@ import { FullResult, ToolResultView } from "../toolresult";
 import { useQuery } from "../store";
 import { sentMessageReachedTranscript } from "../pending-message";
 import { Banner, IconButton } from "../ui/phone";
+import { SecretChip } from "../secrets";
 import { RenameSheet, SearchSheet, SessionMenuSheet, SessionTopBar, StateSub, SubagentsSheet, type SessionRow, type SessionTile } from "./SessionPhone";
 
 /**
@@ -1104,11 +1105,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   // The message goes out; while a run is on the host holds it until the turn ends, and the queue is
   // re-read so its card — the one that offers to steer instead — is there before the stream says so.
-  async function send(text: string, files: File[], followUp: boolean, clientMessageId?: string, onProgress?: (fraction: number) => void): Promise<"sent" | "queued"> {
+  async function send(text: string, files: File[], followUp: boolean, clientMessageId?: string, onProgress?: (fraction: number) => void, secrets?: string[]): Promise<"sent" | "queued"> {
     const reply = orchestrating ? currentReply(id) : null;
     let result: { receipt?: { status: string } };
     const pendingId = clientMessageId ?? crypto.randomUUID();
-    const pendingText = text || files.map((file) => file.name).join(", ");
+    const pendingText = text || [...files.map((file) => file.name), ...(secrets ?? []).map((name) => `🔒 ${name}`)].join(", ");
     // Submission can wait behind a busy run for several seconds. Show the operator's words
     // immediately, then let the durable transcript replace this temporary bubble.
     setSendingMessages((current) => [...current, { id: pendingId, text: pendingText }]);
@@ -1121,9 +1122,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         if (followUp) form.append("follow_up", "true");
         form.append("expected_running", followUp ? "true" : "false");
         for (const f of files) form.append("files", f, f.name);
+        if (secrets?.length) form.append("secrets", secrets.join(","));
         result = await api.upload<{ receipt?: { status: string } }>(`/api/sessions/${id}/upload`, form, onProgress);
       } else {
-        result = await api.post<{ receipt?: { status: string } }>(`/api/sessions/${id}/messages`, messageBody(text, { followUp, clientMessageId: pendingId, reply }));
+        result = await api.post<{ receipt?: { status: string } }>(`/api/sessions/${id}/messages`, messageBody(text, { followUp, clientMessageId: pendingId, reply, secrets }));
       }
       if (result.receipt?.status !== "queued" && result.receipt?.status !== "consumed") throw new Error(t("composer.delivery.unconfirmed"));
     } catch (error) {
@@ -1955,6 +1957,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
             {turn.user.yagni && <span className="msg-origin msg-yagni" title={t("turn.yagni.title")}>{t(turn.user.yagni === "on" ? "turn.yagni.on" : "turn.yagni.off")}</span>}
             {turn.user.reply_to && <ReplyQuote reply={turn.user.reply_to} />}
             <Md className="msg-text" text={withoutAttachedList(turn.user.text)} cacheKey={live ? undefined : `u${seq ?? turn.key}`} />
+            {turn.user.secrets?.length ? <div className="msg-secrets">{turn.user.secrets.map((secret) => <SecretChip key={secret.name} name={secret.name} scope={secret.scope} />)}</div> : null}
           </UserBubble>
           <KeptFiles text={turn.user.text} onOpen={preview} />
           {focusChat?.orchestrator && <MessageFate message={turn.user} sessionId={sessionId} projectId={focusChat.projectId} />}

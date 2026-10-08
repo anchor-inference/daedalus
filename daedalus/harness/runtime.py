@@ -55,6 +55,7 @@ from daedalus.harness.contract import (
 from daedalus.harness.delivery import DeliveryWorker, Pending, normalised, pending_of, same_prompt
 from daedalus.harness.env import terminal_environment
 from daedalus.harness.state import OpenRequest, StaffState, StateContext, next_state
+from daedalus.security import operator_secrets
 from daedalus.staff_runtime import (
     AskRef,
     Availability,
@@ -158,6 +159,35 @@ def _now() -> str:
 
 def _substitute(value: str, directory: str, dial_dir: str = "") -> str:
     return value.replace(LAUNCH_DIR, directory).replace(DIAL_DIR, dial_dir)
+
+
+def handed_secrets(req: StartRequest) -> list[operator_secrets.Secret]:
+    """The operator's secrets a staff member's launch carries: its project's and the ones its coordinator
+    handed it by name."""
+    store = operator_secrets.shared()
+    if store is None:
+        return []
+    handed = store.for_staff(req.staff.id, req.project.id)
+    if handed:
+        store.record_use(handed, f"staff {req.staff.name} ({req.staff.harness}) launch")
+    return handed
+
+
+def secret_file(name: str) -> str:
+    return operator_secrets.LAUNCH_FILE_PREFIX + name
+
+
+def secret_variables(handed: list[operator_secrets.Secret], launch_dir: str) -> dict[str, str]:
+    """``DAEDALUS_SECRET_<NAME>`` and ``…_FILE``, the file being the launch's own copy. Kept out of the
+    launch-directory substitution the plan's own variables go through: a value is the operator's, whatever
+    it happens to contain."""
+    env: dict[str, str] = {}
+    for secret in handed:
+        if secret.value is None:
+            continue
+        env[secret.env] = secret.value
+        env[secret.env + "_FILE"] = f"{launch_dir}/{secret_file(secret.name)}"
+    return env
 
 
 def port_range(text: str) -> tuple[int, int]:
@@ -560,6 +590,11 @@ class CliStaffRuntime:
                                                  host_generation=req.resources["host_generation"],
                                                  launch_id=launch_id)
             req = replace(req, resources=resources)
+        handed = handed_secrets(req)
+        if handed:
+            # Each value as a file of the launch too, owner-only, gone with it: Codex runs its commands with
+            # every variable whose name says SECRET, KEY or TOKEN left out, so for it the file is the way in.
+            plan = replace(plan, files={**plan.files, **{secret_file(s.name): (s.value or "").encode("utf-8") for s in handed}})
         cfg = self.config()
         hold = max([cfg.ask_hold_s * 1000 + HOLD_MARGIN_MS, cfg.permission_hold_s * 1000 + HOLD_MARGIN_MS, *plan.hooks.hold_ms.values(), *(t.hold_ms + HOLD_MARGIN_MS for t in spec.tool_sets)])
         registered = False
@@ -570,16 +605,17 @@ class CliStaffRuntime:
             if plan.ports and (taken := await self._taken_port(req.env, launch_id, plan.ports, f"agent:{actor}")) is not None:
                 raise _PortTaken(taken)
             directory, dials = daemon_launch.dir, daemon_launch.dial_dir
+            secret_env = secret_variables(handed, directory)
             cwd = _substitute(plan.cwd, directory, dials) or str(req.cwd)
             title = f"{req.staff.name} · {req.task.title}" if req.task is not None else req.staff.name
             companions: dict[str, str] = {}
             for companion in plan.companions:
-                view = await self._create(req, actor, launch_id, [_substitute(a, directory, dials) for a in companion.argv], {k: _substitute(v, directory, dials) for k, v in companion.env.items()}, cwd, f"{title} · {companion.role}")
+                view = await self._create(req, actor, launch_id, [_substitute(a, directory, dials) for a in companion.argv], {**secret_env, **{k: _substitute(v, directory, dials) for k, v in companion.env.items()}}, cwd, f"{title} · {companion.role}")
                 created.append(view["id"])
                 companions[view["id"]] = companion.role
                 if companion.ready_pattern and not (await self.terminals.wait_for(view["id"], regex=companion.ready_pattern, timeout=cfg.ready_timeout_s)).get("matched") == "regex":
                     raise RuntimeError(f"the {companion.role} of {self.adapter.capabilities.label} did not start within {cfg.ready_timeout_s:g} s")
-            view = await self._create(req, actor, launch_id, [_substitute(a, directory, dials) for a in plan.argv], {k: _substitute(v, directory, dials) for k, v in plan.env.items()}, cwd, title)
+            view = await self._create(req, actor, launch_id, [_substitute(a, directory, dials) for a in plan.argv], {**secret_env, **{k: _substitute(v, directory, dials) for k, v in plan.env.items()}}, cwd, title)
             created.append(view["id"])
             launch = await self.store.update_launch(launch_id, terminal_id=view["id"], companion_terminal_id=next(iter(companions), None), launch_dir=directory)
         except BaseException:

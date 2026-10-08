@@ -180,6 +180,14 @@ func TestSecretsNeverLeaveThePage(t *testing.T) {
 			t.Fatalf("%v: %v", a, err)
 		}
 	}
+	// A secret the operator handed over, put in by the host in place of its placeholder, may be typed there.
+	h.mustAct(tab, map[string]any{"action": "type", "ref": pw, "text": "handed-over", "element": "password", "operator_secret": true})
+	if s := h.snapshot(tab); strings.Contains(s.Text, "handed-over") {
+		t.Fatalf("the handed-over secret is in the snapshot:\n%s", s.Text)
+	}
+	if _, err := h.act(tab, map[string]any{"action": "press", "ref": pw, "keys": "a", "element": "password", "operator_secret": true}); code(err) != 1105 {
+		t.Fatalf("a key press is not a handed-over secret: %v", err)
+	}
 	// Enter in a password field is allowed; it is the submit, and a credentials ask for the host.
 	dry := h.mustAct(tab, map[string]any{"action": "press", "ref": pw, "keys": "Enter", "element": "submit", "dry_run": true})
 	if !slices.Contains(dry.Sensitive.Kinds, "credentials") {

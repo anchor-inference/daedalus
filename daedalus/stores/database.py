@@ -1958,7 +1958,36 @@ ALTER TABLE diagram_revisions ADD COLUMN preview_svg TEXT NOT NULL DEFAULT '';
 
 MAIN_LINE_LATER = (len(MIGRATIONS) - 1, len(MIGRATIONS))
 """The planner's two migrations, which the main line ran right after its two calendar migrations
-(its schemas 56 and 57) and which sit last here. A database from that line has already run them."""
+(its schemas 56 and 57) and which sit at these two positions here; later migrations follow them. A database
+from that line has already run them."""
+
+# The secrets the operator hands the agent to use without reading. The value is sealed (AES-GCM, the key in
+# the secrets directory, the row's identity as associated data); the rest is what the app lists. No foreign
+# key: a scope is a session or a project, and the store drops a secret whose scope is gone when it opens.
+# A grant is a coordinator handing one of its chat's secrets to a staff member by name.
+MIGRATIONS.append("""
+CREATE TABLE operator_secrets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    scope_kind TEXT NOT NULL CHECK (scope_kind IN ('session', 'project')),
+    scope_id TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    sealed BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_used_at TEXT,
+    last_used_by TEXT NOT NULL DEFAULT '',
+    uses INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (scope_kind, scope_id, name)
+);
+CREATE TABLE operator_secret_grants (
+    secret_id TEXT NOT NULL REFERENCES operator_secrets(id) ON DELETE CASCADE,
+    staff_id TEXT NOT NULL,
+    granted_by TEXT NOT NULL,
+    granted_at TEXT NOT NULL,
+    PRIMARY KEY (secret_id, staff_id)
+);
+""")
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

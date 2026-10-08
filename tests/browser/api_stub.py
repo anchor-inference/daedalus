@@ -230,6 +230,9 @@ GATES: dict[str, object] = {
     # Settings → Tools opens on the tool groups.
     "/api/tool-groups": TOOL_GROUP_CATALOGUE,
     "/api/maintenance": {"notice": None},
+    # Settings → Security lists the secrets handed to the agent, and the composer's Secret form reads the
+    # chat's; none here. check_secrets.py keeps a host of its own that stores them.
+    "/api/secrets": {"secrets": [], "project_id": None, "project_name": None},
     "/api/conversation-search/settings": {"mode": "off", "paused": False, "reason": "off", "busy": False, "indexed": 0, "pending": 0, "label": "Multilingual E5 Small", "size_bytes": 135429554, "licence": "MIT", "installed": False},
     # Drawn before any screen: no model means the whole app is the "Add a model" flow.
     "/api/onboarding": {"has_model": True, "presets": 1, "default_preset": "p", "providers": [], "keyproxy_base": "", "needs": [], "message": ""},
@@ -1678,7 +1681,9 @@ class FocusStub:
                     return 404, {"detail": "that message is not in this conversation"}
                 now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
                 messages.append({"role": "user", "seq": seq, "origin": "operator", "client_message_id": payload.get("client_message_id"), "text": payload.get("text", ""), "thinking": "", "tool_calls": [], "tool_results": [], "created_at": now,
-                                 "delivery": "steer" if payload.get("steer") else None, "reply_to": reply})
+                                 "delivery": "steer" if payload.get("steer") else None, "reply_to": reply,
+                                 # The operator's secrets by name, as the host writes them beside the words.
+                                 "secrets": [{"name": name, "scope": "session"} for name in payload.get("secrets") or []] or None})
                 # A missing receipt is an unconfirmed send: the composer must retain its draft and
                 # reply quote. Mirror the host's consumed receipt once the idle session starts a run.
                 run_id = f"run-{seq}"

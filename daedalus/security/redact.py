@@ -25,6 +25,7 @@ Mini App views (the display path), and the logging filter.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -32,10 +33,17 @@ import sys
 import traceback
 from collections.abc import Iterable
 from typing import Any
+from urllib.parse import quote
 
 MASK = "•••"
 REF_RE = re.compile(r"«ref:[0-9a-f]{10}»")
 """A placeholder the host handed out for a value it keeps (see :class:`daedalus.mcp.manager.SecretVault`): never masked."""
+SECRET_REF_RE = re.compile(r"«secret:[a-z][a-z0-9_]{0,47}»")
+"""A placeholder for a secret the operator handed over (see :mod:`daedalus.security.operator_secrets`): never masked."""
+MIN_NAMED_LENGTH = 4
+"""An operator secret shorter than this is not looked for in text: a three-character value would turn up
+inside every other word. The operator declared these secret on purpose, so the bar is lower than for
+configured values, whose length says nothing about how deliberately they were chosen."""
 _TEMPLATE_RE = re.compile(r"^\{[A-Za-z_][A-Za-z0-9_]*\}$")
 """``{edit_token}`` in an API's own documentation of its request shape is a slot, not a value."""
 MIN_VALUE_LENGTH = 8
@@ -90,6 +98,9 @@ class Redactor:
 
     def __init__(self, values: Iterable[str] = ()) -> None:
         self._values: list[str] = []
+        self._named: list[tuple[str, str]] = []
+        """``(value, placeholder)`` for the operator's own secrets: put back as their placeholder, not
+        masked, so that what reaches the model still says which secret was there."""
         self._fingerprint = ""
         self.add_values(values)
 
@@ -103,7 +114,8 @@ class Redactor:
         come from the code, and ``shapes_digest`` is what covers them.
         """
         if not self._fingerprint:
-            digest = hashlib.sha256("\n".join(self._values).encode("utf-8", "surrogateescape")).hexdigest()
+            known = self._values + [value for value, _ in self._named]
+            digest = hashlib.sha256("\n".join(known).encode("utf-8", "surrogateescape")).hexdigest()
             self._fingerprint = digest[:12]
         return self._fingerprint
 
@@ -126,6 +138,24 @@ class Redactor:
     def values(self) -> tuple[str, ...]:
         return tuple(self._values)
 
+    def replace_named(self, named: Iterable[tuple[str, str]]) -> None:
+        """Set the operator's secrets, as ``(value, placeholder)`` pairs, replacing the previous set.
+
+        Kept apart from the configured values because those are rebuilt from the configuration on every
+        reload, which knows nothing of these. Each value is also looked for in the two spellings a tool's
+        output most often carries it in — percent-encoded in a URL and escaped inside a JSON string — since
+        a multi-line value printed by ``json.dumps`` is otherwise a different string.
+        """
+        pairs: dict[str, str] = {}
+        for value, placeholder in named:
+            if not isinstance(value, str) or len(value.strip()) < MIN_NAMED_LENGTH:
+                continue
+            for spelling in {value, value.strip(), quote(value, safe=""), json.dumps(value, ensure_ascii=False)[1:-1]}:
+                if len(spelling.strip()) >= MIN_NAMED_LENGTH:
+                    pairs.setdefault(spelling, placeholder)
+        self._named = sorted(pairs.items(), key=lambda item: len(item[0]), reverse=True)
+        self._fingerprint = ""
+
     def redact(self, text: str) -> str:
         return self._apply(text, lambda _name, _value: MASK)
 
@@ -135,17 +165,32 @@ class Redactor:
         private-key blocks are masked outright: they are never handed back to anyone."""
         return self._apply(text, lambda name, value: MASK if name == "pem" else str(keep(value)))
 
+    def conceal_named(self, text: str) -> str:
+        """Only the operator's secrets, back to their placeholders, and nothing else touched: for the
+        operator's own words, where a shape that looks like a key may be exactly what they meant to say."""
+        if not text or not self._named:
+            return text
+        for value, placeholder in self._named:
+            if value in text:
+                text = text.replace(value, placeholder)
+        return text
+
     def _apply(self, text: str, replacement: Any) -> str:
         if not text:
             return text
         out = text
+        for value, placeholder in self._named:
+            if value in out:
+                out = out.replace(value, placeholder)
         for value in self._values:
             if value in out:
                 out = out.replace(value, MASK)
 
         def sub(name: str, value: str) -> str:
             # A placeholder the host issued, or a template slot, is not a secret, whatever key it sits under.
-            return value if REF_RE.fullmatch(value) or _TEMPLATE_RE.fullmatch(value) else replacement(name, value)
+            if REF_RE.fullmatch(value) or SECRET_REF_RE.fullmatch(value) or _TEMPLATE_RE.fullmatch(value):
+                return value
+            return replacement(name, value)
 
         for name, pattern in _SHAPES:
             if name in ("auth_header", "api_header", "bare_member"):
@@ -277,4 +322,4 @@ def redact(text: str) -> str:
     return _shared.redact(text)
 
 
-__all__ = ["MASK", "REF_RE", "Redactor", "RedactingFilter", "install_logging_filter", "redact", "shapes_digest", "shared"]
+__all__ = ["MASK", "REF_RE", "SECRET_REF_RE", "Redactor", "RedactingFilter", "install_logging_filter", "redact", "shapes_digest", "shared"]

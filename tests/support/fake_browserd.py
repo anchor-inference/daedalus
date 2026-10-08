@@ -965,7 +965,8 @@ class FakeBrowserd:
             return {"action_id": "", "ok": True, "effects": {}, "element": described, "point": point, "box": box, "sensitive": sensitive, **({"ref": ref} if pointed else {})}
         keys = str(params.get("keys") or "")
         typing = action in ("type", "select") or (action == "press" and keys not in ("Enter", "Tab"))
-        if element is not None and typing and (element.secret or element.ref in self.human_typed):
+        handed_over = action == "type" and bool(params.get("operator_secret"))
+        if element is not None and typing and not handed_over and (element.secret or element.ref in self.human_typed):
             self.emit("needs_you", {"group_id": group.id, "tab_id": tab.id, "reason": "field_forbidden", "what": f"type into {element.name}", "url": tab.page.url, "by": "daemon"})
             raise _Fail(1105, "this is a secret field", {"ref": ref, "field": element.field_kind()})
         if element is not None and element.covered_by and action in ("click", "double_click", "right_click", "check", "uncheck"):

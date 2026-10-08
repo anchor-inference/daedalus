@@ -234,7 +234,9 @@ class Services:
         env = shell_environment(session_id, {"PORT": str(chosen)} if chosen else None, cwd=workdir)
         env["HOST"] = "0.0.0.0"
         # The same wall Exec has: a service is a long-lived command, not a way around the sandbox.
-        argv, _sandboxed = await sandbox_argv(command, self.app.config.tools.exec, writable=session_services.sandbox_writable() if session_services is not None else [state.workspace])
+        argv, _sandboxed = await sandbox_argv(
+            command, self.app.config.tools.exec, writable=session_services.sandbox_writable() if session_services is not None else [state.workspace], session_id=session_id,
+        )
         with open(log_path, "ab") as log:
             log.write(f"\n=== {_now()} start: {command}\n".encode())
             proc = subprocess.Popen(argv, cwd=str(workdir), env=env, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)  # noqa: S603
