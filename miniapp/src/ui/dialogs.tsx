@@ -39,7 +39,7 @@ export function useLayer(onEscape: () => void) {
   }, []);
 }
 
-function trapDialogTab(e: React.KeyboardEvent<HTMLDivElement>) {
+export function trapDialogTab(e: React.KeyboardEvent<HTMLElement>) {
   if (e.key !== "Tab") return;
   const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex='0']")).filter((el) => el.getClientRects().length > 0);
   if (!items.length) { e.preventDefault(); return; }

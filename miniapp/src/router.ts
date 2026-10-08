@@ -156,6 +156,25 @@ export function navigate(path: string, opts: { replace?: boolean; keepHash?: boo
   emit();
 }
 
+/**
+ * An entry for a layer that Back closes, at the address the reader is already on: the phone's drawer.
+ * It counts as depth like any other entry, so a destination chosen inside the layer replaces it
+ * (`navigate(path, { replace: true })`) and Back from there returns to the page under the drawer,
+ * not to the drawer. `inLayer` says whether the entry on top is still the layer's.
+ */
+export function pushLayer(): void {
+  depth += 1;
+  try {
+    window.history.pushState({ d: depth, layer: true }, "", window.location.href);
+  } catch {
+    /* a sandboxed frame: the layer still closes by every other means */
+  }
+}
+
+export function inLayer(): boolean {
+  return !!(window.history.state as { layer?: boolean } | null)?.layer;
+}
+
 /** Back when there is an app entry to go back to; the given fallback otherwise (a fresh load, a deep link). */
 export function back(fallback: string): void {
   if (depth > 0) window.history.back();

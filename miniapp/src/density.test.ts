@@ -2,11 +2,19 @@
 // of words. The app once grew to 15 px body text, 44 px round buttons and 64 px session rows one
 // rule at a time, each of them reasonable on its own; this is what stops the next one.
 //
-// Four claims, and Settings' own column and row. Every size comes from the scale in :root. Nothing outside the answer, the headings
-// and the prose is drawn above 14 px, in whatever unit it is written. No box that is not a surface
-// of its own is given a height a row or a control would not have. Rows and controls take their
-// height from the row and control tokens, so a phone gets its 44 px from one media rule and not
-// from forty.
+// Four claims for the desktop, and Settings' own column and row. Every size comes from the scale in
+// :root. Nothing outside the answer, the headings and the prose is drawn above 14 px on a desktop, in
+// whatever unit it is written. No box that is not a surface of its own is given a height a row or a
+// control would not have. Rows and controls take their height from the row and control tokens, so a
+// phone gets its 44 px from one media rule and not from forty.
+//
+// The phone has its own scale since the redesign that took the chat apps on the operator's phone as
+// its reference: six steps, 12 / 13 / 15 / 16 / 17 / 22, and nothing else below 1024 px. A 14 px cap there
+// kept list titles and fields smaller than every app on the same phone, which is what the operator
+// measured against. So a rule inside the phone media query is held to the six steps instead of to the
+// cap, the phone's :root block must move every desktop step onto one of them, and the phone's rows,
+// top bar, chips and composer must take their sizes from the phone tokens (60 px rows, a 56 px bar,
+// a 48 px idle composer, 44 px targets). check_density.py measures the same claims on a drawn page.
 //
 // The three functions below are the guard; the claims run them over the real stylesheet, and the
 // last describe runs them over a sheet of planted regressions, because a guard that is never shown
@@ -17,8 +25,9 @@ import { describe, expect, it } from "vitest";
 import legacy from "./ui/styles.css?raw";
 import tokens from "./ui/tokens.css?raw";
 import desktop from "./ui/desktop.css?raw";
+import phone from "./ui/phone.css?raw";
 import petHost from "./pethost.tsx?raw";
-const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop;
+const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone;
 
 type Rule = { selector: string; media: string; body: string };
 
@@ -57,7 +66,11 @@ function rules(source: string): Rule[] {
   return out;
 }
 
-const TOKENS: Record<string, number> = { "--fs-11": 11, "--fs-12": 12, "--fs-13": 13, "--fs-14": 14, "--fs-15": 15, "--fs-16": 16, "--fs-18": 18, "--fs-20": 20, "--fs-22": 22, "--fs-mono": 12.5, "--fs-prose": 15 };
+const TOKENS: Record<string, number> = { "--fs-11": 11, "--fs-12": 12, "--fs-13": 13, "--fs-14": 14, "--fs-15": 15, "--fs-16": 16, "--fs-17": 17, "--fs-18": 18, "--fs-20": 20, "--fs-22": 22, "--fs-mono": 12.5, "--fs-prose": 15 };
+
+/** The phone's six steps. */
+const PHONE_STEPS = [12, 13, 15, 16, 17, 22];
+const PHONE = "max-width: 1023px";
 
 /** The document never re-sizes its root, so a rem is the browser's own step and an em is the 14 px body. */
 const ROOT_PX = 16;
@@ -66,14 +79,14 @@ const BODY_PX = 14;
 /** The pixels a font-size stands for: null only where the rule states no size of its own, and
  *  Infinity — a finding, quoted back with its value — where the unit cannot be read at all. A size
  *  the guard does not understand is the one that gets through it. */
-function pixels(value: string): number | null {
+function pixels(value: string, tokens: Record<string, number> = TOKENS): number | null {
   const v = value.trim();
   if (v === "inherit" || v === "unset" || v === "initial" || v === "revert") return null;
   // The companion slider only shrinks; a scaled font cannot exceed its named step.
   const petScale = /^calc\(var\((--fs-[a-z0-9]+)\)\s*\*\s*var\(--pet-scale\)\)$/.exec(v);
-  if (petScale) return TOKENS[petScale[1]] ?? Number.POSITIVE_INFINITY;
+  if (petScale) return tokens[petScale[1]] ?? Number.POSITIVE_INFINITY;
   const token = /^var\((--fs-[a-z0-9]+)\)/.exec(v);
-  if (token) return TOKENS[token[1]] ?? Number.POSITIVE_INFINITY;
+  if (token) return tokens[token[1]] ?? Number.POSITIVE_INFINITY;
   const clamp = /^clamp\(\s*([\d.]+)px/.exec(v);
   if (clamp) return Number(clamp[1]);
   const px = /^(\d*\.?\d+)px/.exec(v);
@@ -122,6 +135,13 @@ const BOX_ALLOWED = [
 /** The height a box is given outright, in px, or 0 where it is a token, a calc or a proportion. */
 const BOX_LIMIT = 40;
 
+/** On a phone the 44 px target is the floor and the 60 px list row the tallest row, so a phone rule may
+ *  state a box up to a row's height; above it only the phone's own surfaces: the empty state, the
+ *  attachment tiles of the + sheet and the home's greeting, each a block that holds content rather
+ *  than being a row. */
+const PHONE_BOX_LIMIT = 61;
+const PHONE_SURFACES = [".ph-empty", ".ph-tile", ".ph-hero"];
+
 /** Content with an intentional height: two-line file cards and search hits, a message placeholder,
  *  and the document viewport. Keep their limits explicit so larger boxes still fail the guard. */
 const CONTENT_BOXES = [
@@ -162,6 +182,8 @@ function oversizeFonts(all: Rule[]): string[] {
   for (const r of all) {
     // A text field on a touch screen is 16 px on purpose: the alternative is Safari zooming the page.
     if (r.media.includes("hover: none")) continue;
+    // The phone's rules answer to the phone's scale (offScale), not to the desktop's cap.
+    if (r.media.includes(PHONE)) continue;
     for (const m of r.body.matchAll(/(?:^|;)\s*font(?:-size)?\s*:\s*([^;]+)/g)) {
       const size = pixels(m[1]);
       if (size === null || size <= 14) continue;
@@ -172,6 +194,37 @@ function oversizeFonts(all: Rule[]): string[] {
     }
   }
   return large;
+}
+
+/** The token table a phone resolves: the desktop's, with the phone's :root block laid over it. */
+function phoneTokens(all: Rule[]): Record<string, number> {
+  const out = { ...TOKENS };
+  for (const r of all) {
+    if (r.selector !== ":root" || !r.media.includes(PHONE)) continue;
+    for (const m of r.body.matchAll(/(--fs-[a-z0-9]+)\s*:\s*([^;]+)/g)) {
+      const value = m[2].trim();
+      const px = /^(\d*\.?\d+)px$/.exec(value);
+      const ref = /^var\((--fs-[a-z0-9]+)\)$/.exec(value);
+      out[m[1]] = px ? Number(px[1]) : ref ? out[ref[1]] ?? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY;
+    }
+  }
+  return out;
+}
+
+/** Every size a phone rule states that is not one of the six steps, read with the phone's tokens. A
+ *  size the guard cannot read is a finding here too. */
+function offScale(all: Rule[]): string[] {
+  const tokens = phoneTokens(all);
+  const off: string[] = [];
+  for (const r of all) {
+    if (!r.media.includes(PHONE) || r.selector === ":root" || r.selector.startsWith(":root[")) continue;
+    for (const m of r.body.matchAll(/(?:^|;)\s*font(?:-size)?\s*:\s*([^;]+)/g)) {
+      const size = pixels(m[1], tokens);
+      if (size === null || PHONE_STEPS.includes(size)) continue;
+      for (const selector of selectors(r)) off.push(`${selector} { font-size: ${m[1].trim()} }`);
+    }
+  }
+  return off;
 }
 
 function numericFonts(all: Rule[]): string[] {
@@ -197,9 +250,11 @@ function oversizeBoxes(all: Rule[]): string[] {
     for (const m of r.body.matchAll(/(?:^|;)\s*(height|min-height|padding)\s*:\s*([^;]+)/g)) {
       const value = m[2].trim();
       const box = m[1] === "padding" ? verticalPadding(value) : Number(/^(\d*\.?\d+)px\s*$/.exec(value)?.[1] ?? 0);
-      if (box < BOX_LIMIT) continue;
+      const phone = r.media.includes(PHONE);
+      if (box < (phone ? PHONE_BOX_LIMIT : BOX_LIMIT)) continue;
       for (const selector of selectors(r)) {
         if (covered(selector, BOX_ALLOWED)) continue;
+        if (phone && covered(selector, PHONE_SURFACES)) continue;
         if (CONTENT_BOXES.some((entry) => selector === entry.selector && m[1] === entry.property && box <= entry.max)) continue;
         fat.push(`${selector} { ${m[1]}: ${value} }`);
       }
@@ -218,7 +273,8 @@ describe("the scale", () => {
   it("is declared once, in :root", () => {
     const root = all.find((r) => r.selector === ":root" && !r.media);
     expect(root).toBeDefined();
-    for (const name of [...Object.keys(TOKENS), "--space-2", "--radius-sm", "--radius-md", "--radius-lg", "--row-h", "--row-h-dense", "--row-h-touch", "--ctl-h", "--ctl-h-sm", "--ctl-h-lg", "--avatar", "--sidebar-w", "--rail-w", "--panel-w", "--pip-w", "--reading-w", "--chat-w", "--head-h"]) {
+    for (const name of [...Object.keys(TOKENS), "--space-2", "--radius-sm", "--radius-md", "--radius-lg", "--row-h", "--row-h-dense", "--row-h-touch", "--ctl-h", "--ctl-h-sm", "--ctl-h-lg", "--avatar", "--sidebar-w", "--rail-w", "--panel-w", "--pip-w", "--reading-w", "--chat-w", "--head-h",
+      "--top-h", "--list-row-h", "--list-row-h-1", "--nav-row-h", "--set-row-h", "--tabbar-h", "--ctl-round", "--chip-h", "--drawer-w", "--gutter", "--radius-xl", "--radius-composer"]) {
       expect(root!.body, name).toContain(`${name}:`);
     }
   });
@@ -236,8 +292,12 @@ describe("the scale", () => {
 });
 
 describe("every size", () => {
-  it("is at or under 14 px outside prose, headings and glyphs", () => {
+  it("is at or under 14 px on a desktop outside prose, headings and glyphs", () => {
     expect(oversizeFonts(all)).toEqual([]);
+  });
+
+  it("is one of the six phone steps in every phone rule", () => {
+    expect(offScale(all)).toEqual([]);
   });
 
   it("names a step of the scale rather than a number", () => {
@@ -248,6 +308,57 @@ describe("every size", () => {
 describe("every box", () => {
   it("is a row's height, a control's height, or a surface that says it is one", () => {
     expect(oversizeBoxes(all)).toEqual([]);
+  });
+});
+
+describe("the phone", () => {
+  const phoneRule = (selector: string) => all.filter((r) => r.media.includes(PHONE) && selectors(r).includes(selector)).map((r) => r.body).join(";");
+  const rootPhone = all.filter((r) => r.selector === ":root" && r.media.includes(PHONE)).map((r) => r.body).join(";");
+
+  it("moves every desktop step onto the six, once, in its :root block", () => {
+    // The desktop's 11, 14, 18 and 20 have no place on the phone's scale; one block moves them to
+    // 12, 15 and 17 so a rule written for the desktop lands on the scale without a phone copy of it.
+    const tokens = phoneTokens(all);
+    for (const [name, px] of Object.entries(tokens)) expect(PHONE_STEPS, `${name} is ${px}px on a phone`).toContain(px);
+  });
+
+  it("takes its bar, rows, targets and composer from the phone tokens", () => {
+    // The geometry of the redesign: a 56 px top bar with no rule under it, 60 px rows (52 with one
+    // line), 44 px targets for every glyph, 32 px chips that reach 44 px to the finger, a 56 px
+    // project tab bar and an idle composer of one 48 px row with 36 px circles.
+    const declared = all.find((r) => r.selector === ":root" && !r.media)!.body;
+    expect(declared).toContain("--top-h: 56px");
+    expect(declared).toContain("--list-row-h: 60px");
+    expect(declared).toContain("--list-row-h-1: 52px");
+    expect(declared).toContain("--chip-h: 32px");
+    expect(declared).toContain("--ctl-round: 36px");
+    expect(declared).toContain("--tabbar-h: 56px");
+    expect(declared).toContain("--row-h-touch: 44px");
+    expect(rootPhone).toContain("--composer-h: 48px");
+    expect(rootPhone).toContain("--head-h: var(--top-h)");
+    expect(phoneRule(".ph-top")).toContain("min-height: var(--top-h)");
+    expect(phoneRule(".ph-top")).not.toMatch(/border/);
+    expect(phoneRule(".pagehead-row")).toContain("min-height: var(--top-h)");
+    expect(phoneRule(".pagehead")).toContain("backdrop-filter: none");
+    expect(phoneRule(".ph-ib")).toContain("width: var(--tap)");
+    expect(phoneRule(".ph-ib")).toContain("height: var(--tap)");
+    expect(phoneRule(".ph-row")).toContain("min-height: var(--list-row-h)");
+    expect(phoneRule(".ph-row.one")).toContain("min-height: var(--list-row-h-1)");
+    expect(phoneRule(".ph-row")).not.toMatch(/border/);
+    expect(phoneRule(".ph-chip")).toContain("height: var(--chip-h)");
+    expect(phoneRule(".ph-chip::after")).toContain("inset: -6px 0");
+    expect(phoneRule(".ph-mrow")).toContain("min-height: var(--list-row-h-1)");
+    expect(phoneRule(".ph-srow")).toContain("min-height: var(--set-row-h)");
+    expect(phoneRule('.composer[data-shape="idle"] .composer-box')).toContain("min-height: var(--composer-h)");
+    expect(phoneRule(".composer[data-shape] .composer-box")).toContain("border-radius: var(--radius-composer)");
+    expect(phoneRule(".composer[data-shape] .roundbtn")).toContain("width: var(--ctl-round)");
+    expect(phoneRule(".tabbar.project-tabs > a")).toContain("height: var(--tabbar-h)");
+    expect(phoneRule(".ph-drawer")).toContain("width: var(--drawer-w)");
+  });
+
+  it("keeps every phone rule inside the phone media query, so a desktop never reads one", () => {
+    const outside = rules(phone).filter((r) => !r.media.includes(PHONE)).map((r) => r.selector);
+    expect(outside).toEqual([]);
   });
 });
 
@@ -397,6 +508,16 @@ describe("the guard itself", () => {
     expect(oversizeBoxes(planted)).toContain(".probe-fat-row { min-height: 64px }");
     expect(oversizeBoxes(planted)).toContain(".probe-fat-row { padding: 20px }");
     expect(oversizeBoxes(planted)).toContain(".probe-fat-btn { height: 48px }");
+  });
+
+  it("refuses a phone size off the six steps, and a desktop step the phone block forgot to move", () => {
+    const planted = rules(`
+      @media (max-width: 1023px) { .probe-phone-14 { font-size: 14px; } .probe-phone-ok { font-size: var(--fs-16); } .probe-phone-18 { font-size: var(--fs-18); } }
+    `);
+    expect(offScale(planted)).toEqual([".probe-phone-14 { font-size: 14px }", ".probe-phone-18 { font-size: var(--fs-18) }"]);
+    expect(oversizeFonts(planted)).toEqual([]);
+    const tall = rules("@media (max-width: 1023px) { .probe-phone-row { min-height: 72px; } .ph-tile { height: 72px; } }");
+    expect(oversizeBoxes(tall)).toEqual([".probe-phone-row { min-height: 72px }"]);
   });
 
   it("reads a size it does not understand as a finding rather than as nothing", () => {

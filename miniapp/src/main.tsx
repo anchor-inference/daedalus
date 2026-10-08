@@ -4,6 +4,7 @@ import { ContextMenuHost } from "./ui/context-menu";
 import { App } from "./App";
 import "./ui/styles.css";
 import "./ui/desktop.css";
+import "./ui/phone.css";
 
 // Installable as an app: the service worker keeps the shell and the hashed assets; nothing of the API is cached.
 if ("serviceWorker" in navigator && window.location.protocol === "https:") {
