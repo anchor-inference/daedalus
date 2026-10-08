@@ -457,6 +457,32 @@ async def test_a_follow_up_the_engine_holds_is_steered_once_even_past_a_stale_re
     await manager.close()
 
 
+async def test_a_steered_follow_up_the_round_places_takes_its_card_away(settings: Settings, db: Database) -> None:
+    """Once the run reads a message the operator steered, the app is told its card is gone."""
+    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    manager = await _manager(settings, db, provider)
+    changes = _watch(manager)
+    state = await manager.create_session("steered and read")
+    sid = state.session.id
+    await manager.submit(sid, "start")
+    await asyncio.sleep(0.3)
+    engine = state.engine
+    assert engine is not None
+    await manager.submit(sid, "cheaper, please", follow_up=True)
+    item_id = (await manager.queued_input(sid))[0]["id"]
+    assert await manager.steer_queued(sid, item_id)
+
+    # The next round is handed the steer and places it before any round wrote back in between.
+    await engine.reload_live_control(engine)
+    assert [item["id"] for item in engine._steer_queue] == [item_id]
+    engine._steer_queue = []
+    await engine.persist_live_control(engine)
+    assert await manager.queued_input(sid) == []
+    assert [c["reason"] for c in changes] == ["queued", "steered", "consumed"]
+    assert changes[-1]["queued"] == []
+    await manager.close()
+
+
 async def test_a_follow_up_the_run_is_placing_cannot_be_steered(settings: Settings, db: Database) -> None:
     provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
     manager = await _manager(settings, db, provider)
