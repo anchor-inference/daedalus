@@ -74,6 +74,13 @@ export function agentsListing<T extends { sessions: SessionSummary[]; projects: 
   };
 }
 
+/** The same, for a listing read from the wire: null until it has the shape of one. An older bot, or
+ *  a stub that answers with sessions alone, must not take a phone's drawer and home down with it. */
+export function agentsListingOf<T extends { sessions: SessionSummary[]; projects: ProjectFolder[] }>(listing: T | null | undefined): T | null {
+  if (!listing || !Array.isArray(listing.sessions)) return null;
+  return agentsListing({ ...listing, projects: Array.isArray(listing.projects) ? listing.projects : [] });
+}
+
 /** The projects Orchestration mode lists under Main: those with an orchestrator, most recent first. */
 export function orchestratedProjects(projects: ProjectFolder[]): ProjectFolder[] {
   return projects

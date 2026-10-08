@@ -154,9 +154,11 @@ function ProjectMoreSheet({ projectId, current, badge, unknown, onClose }: { pro
 
 // ── the header ───────────────────────────────────────────────────────────────────────────────
 
-/** The project's header on a phone: back to orchestration's list of projects, its name and how the
- *  work goes, and the environment it runs in. Its other pages are in the bar's "More" sheet, not in a
- *  menu here: two menus listing the same pages left the operator guessing which one to open. */
+/** The project's header on a phone: the hamburger to the app's drawer (Inbox, Agents, Settings and
+ *  every project are there, so nothing outside the project is out of reach from inside it), its name
+ *  and how the work goes, and the environment it runs in. Its other pages are in the bar's "More"
+ *  sheet, not in a menu here: two menus listing the same pages left the operator guessing which one
+ *  to open. All projects stays in that sheet as well. */
 export function ProjectPhoneHead({ projectId, title, subtitle, actions }: { projectId: string; title?: string; subtitle?: string; actions?: ReactNode }) {
   const { project } = useProject(projectId);
   const { data: budget } = useGoalBudget(projectId);
@@ -169,7 +171,6 @@ export function ProjectPhoneHead({ projectId, title, subtitle, actions }: { proj
     <PageHeader
       title={title ?? project?.name ?? "…"}
       subtitle={subtitle ?? (team ? line : undefined)}
-      back={ORCHESTRATION_LIST}
       actions={
         <>
           {actions}

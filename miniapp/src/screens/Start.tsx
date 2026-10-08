@@ -1,123 +1,188 @@
 // The screen you land on: a greeting and the composer, so a chat begins by typing it.
 // Naming it, choosing a folder and a loop stay in the new-agent sheet for when they matter.
+// On a phone it is the home of the redesign: the composer at the bottom, the model in the title and
+// only the live chats above it; the full list is the Chats page (Chats.tsx), at ?view=chats.
 
-import { type FocusEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api, AsrStatus, Preset, Project, Settings } from "../api";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { api, AsrStatus, Preset, Project, SessionList, SessionSummary, Settings } from "../api";
 import { fieldHeight } from "../composer";
-import { AttachmentCard } from "../composerbox";
+import { AttachmentCard, PlusSheet, VoiceCircle, useComposerFocus } from "../composerbox";
 import { Popover } from "../ui/dialogs";
 import { effortBody, effortOf, presetEffort, type Effort } from "../starteffort";
 import { ModelChoice, ModelSelect } from "../modelselect";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "../voicebar";
 import { landWords } from "../voicenote";
-import { NewAgentSheet, SessionsScreen } from "./Sessions";
+import { NewAgentSheet } from "./Sessions";
+import { ChatsScreen } from "./Chats";
+import { CHATS_PATH } from "../drawer";
 import { Icon } from "../icons";
 import { navigate, pathFor, sessionPath, useRoute } from "../router";
-import { invalidate, useQuery } from "../store";
-import { useMedia } from "../ui/index";
+import { invalidate, useOffline, useQuery } from "../store";
+import { useStreamUp } from "../events";
+import { useSummary } from "../notifications";
+import { agentsListingOf } from "../mode";
+import { agentName, kindOf } from "../grouping";
+import { relTime, shortModel, untilShort } from "../format";
+import { fmtInterval, statusWord } from "../ui/components";
+import { screenTitle, useMedia } from "../ui/index";
+import { Banner, IconButton, ListRow, SectionHeader, SheetRow, TopBar } from "../ui/phone";
 import { enterSends, errorText } from "../ui";
 import { t } from "../i18n";
 
-export function StartScreen({ onOpen, toast, project = "", projects = [], onProjects }: { onOpen: (id: string) => void; toast: (t: string) => void; project?: string; projects?: Project[]; onProjects?: () => void }) {
+export function StartScreen({ onOpen, toast, project = "", projects = [], onProjects, onPickProject }: { onOpen: (id: string) => void; toast: (t: string) => void; project?: string; projects?: Project[]; onProjects?: () => void; onPickProject?: (id: string) => void }) {
   const phone = !useMedia("(min-width: 1024px)");
   const route = useRoute();
   const creating = route.query.get("new") === "1";
   const closeNew = () => navigate(pathFor("agents"), { replace: true });
-  const finding = useFinding();
+  const model = useStartModel();
+  const sheet = creating && <NewAgentSheet onClose={closeNew} onCreated={onOpen} toast={toast} project={project} />;
+  if (phone && route.query.get("view") === "chats") {
+    return <>
+      <ChatsScreen onOpen={onOpen} toast={toast} project={project} projects={projects} onPickProject={onPickProject} />
+      {sheet}
+    </>;
+  }
+  if (phone) {
+    return <>
+      <PhoneHome onOpen={onOpen} toast={toast} project={project} projects={projects} model={model} onProjects={onProjects} />
+      {sheet}
+    </>;
+  }
   return (
     <>
-      <div className={`start ${phone && finding.on ? "finding" : ""}`}>
+      <div className="start">
         <div className="start-hero">
           <h1 className="start-greeting">{t("start.greeting")}</h1>
-          <StartComposer phone={phone} project={project} toast={toast} />
+          <StartComposer phone={false} project={project} toast={toast} model={model} />
         </div>
       </div>
-      {phone && (
-        <div className="start-list" onFocus={finding.focus} onBlur={finding.blur}>
-          <div className="start-list-head">
-            <div className="section-title">{t("start.chats")}</div>
-            {onProjects && <button type="button" className="iconbtn" onClick={onProjects} title={t("shell.projects")} aria-label={t("shell.projects")}><Icon name="skill" /></button>}
-          </div>
-          <SessionsScreen onOpen={onOpen} toast={toast} project={project} projects={projects} bare />
-        </div>
-      )}
-      {creating && <NewAgentSheet onClose={closeNew} onCreated={onOpen} toast={toast} project={project} />}
+      {sheet}
     </>
   );
 }
 
-/** Whether the phone's search field has the reader: the greeting and its composer step aside then.
- *
- * On a phone the composer took the upper half of the screen above the search field, so the one
- * result a search found sat in the lower third behind an idle block. It hides while the field is
- * focused and stays hidden while a query is typed, so tapping a result does not bring it back first.
- * An empty field gives the composer back only once the finger is up: returning it on the blur that a
- * press causes would push the list down under that finger and the tap would land on another row. */
-function useFinding() {
-  const [on, setOn] = useState(false);
-  const held = useRef(false);
-  useEffect(() => {
-    const down = () => { held.current = true; };
-    const up = () => { held.current = false; };
-    window.addEventListener("pointerdown", down, true);
-    window.addEventListener("pointerup", up, true);
-    window.addEventListener("pointercancel", up, true);
-    return () => {
-      window.removeEventListener("pointerdown", down, true);
-      window.removeEventListener("pointerup", up, true);
-      window.removeEventListener("pointercancel", up, true);
-    };
-  }, []);
-  const isSearch = (el: EventTarget) => el instanceof HTMLInputElement && el.type === "search";
-  const focus = (event: FocusEvent<HTMLDivElement>) => {
-    if (isSearch(event.target)) setOn(true);
-  };
-  const blur = (event: FocusEvent<HTMLDivElement>) => {
-    if (!isSearch(event.target) || (event.target as HTMLInputElement).value.trim()) return;
-    // Back in a search field by the time the finger is up (the reader tapped it again): stay aside.
-    const release = () => setTimeout(() => { if (!isSearch(document.activeElement ?? document.body)) setOn(false); }, 0);
-    if (!held.current) release();
-    else window.addEventListener("pointerup", release, { once: true });
-  };
-  return { on, focus, blur };
+/** How many live chats the home shows above its composer; the rest are one tap away in Chats. */
+const LIVE = 3;
+
+/**
+ * A phone's home is a new chat: the composer at the bottom, the model in the title, and above it only
+ * what is live — the chats that need the operator, the ones at work, the loops — three at most. The
+ * whole list is the Chats page (the drawer, or "See all"). Offline, the live rows stay, dimmed, with
+ * the time they were last confirmed, and the composer keeps the draft until the bot is back.
+ */
+function PhoneHome({ onOpen, toast, project, projects, model, onProjects }: { onOpen: (id: string) => void; toast: (t: string) => void; project: string; projects: Project[]; model: StartModel; onProjects?: () => void }) {
+  const live = useStreamUp();
+  const offline = useOffline();
+  const summary = useSummary();
+  const { data, updatedAt } = useQuery<SessionList>("/api/sessions?view=all", { pollMs: live ? 60000 : 5000, staleMs: 3000 });
+  const lens = projects.find((p) => p.id === project);
+  const rows = useMemo(() => {
+    const listing = agentsListingOf(data);
+    const rank = (s: SessionSummary) => ({ waiting: 0, working: 1, loop: 2, idle: 3 })[kindOf(s, false)];
+    return (listing?.sessions ?? [])
+      .filter((s) => !s.metadata?.subagent_of && !s.archived && (!project || s.project_id === project) && rank(s) < 3)
+      .sort((a, b) => rank(a) - rank(b) || Date.parse(b.last_message_at) - Date.parse(a.last_message_at));
+  }, [data, project]);
+  const waiting = rows.filter((s) => s.status === "waiting").length;
+  const shown = rows.slice(0, LIVE);
+  const confirmed = updatedAt ? new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  return (
+    <div className="ph-page ph-home">
+      <TopBar
+        center
+        pip={waiting > 0}
+        title={<>{model.label}<Icon name="chevron" size={14} /></>}
+        onTitle={() => model.setOpen(true)}
+        titleLabel={`${t("session.model.for")}: ${model.label}`}
+        actions={<IconButton icon="bell" label={screenTitle("inbox")} href={pathFor("inbox")} badge={summary.unseen} />}
+      />
+      {offline && <Banner strip tone="bad" icon="offline">{t("app.offline")}</Banner>}
+      <div className="ph-page-body">
+        <div className={`ph-hero ${offline ? "offline" : ""}`}>
+          <Icon name="logo" size={36} />
+          <h1>{t("start.greeting")}</h1>
+          {lens && onProjects && <button type="button" className="ph-btn sm" onClick={onProjects}><Icon name="folder" size={16} />{lens.name}</button>}
+        </div>
+        {shown.length > 0 && (
+          <>
+            <SectionHeader count={offline && confirmed ? t("ph.live.confirmed", { time: confirmed }) : undefined}
+              action={<button type="button" className="ph-link" onClick={() => navigate(CHATS_PATH)}>{t("ph.seeall")}</button>}>{t("ph.live")}</SectionHeader>
+            <div className={`ph-list ph-live ${offline ? "stale" : ""}`}>
+              {shown.map((s) => (
+                <ListRow key={s.id} data={{ session: s.id }} title={agentName(s)} onOpen={() => onOpen(s.id)}
+                  lead={<span className="ph-sicon"><Icon name={s.metadata?.loop ? "loop" : "bots"} size={18} />{s.status !== "idle" && <span className={`ph-st ${s.status}`} />}</span>}
+                  meta={<LiveMeta s={s} />}
+                  trail={relTime(s.last_message_at)} />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      <StartComposer phone project={project} toast={toast} model={model} />
+    </div>
+  );
+}
+
+function LiveMeta({ s }: { s: SessionSummary }) {
+  if (s.status === "waiting" || s.status === "running" || s.status === "failed") {
+    return <><span className={s.status}>{statusWord(s.status)}</span>{s.model && <><span className="ph-sep" /><span className="ph-ell">{shortModel(s.model, 28)}</span></>}</>;
+  }
+  const loop = s.metadata?.loop;
+  const words = [t("ph.loop"), loop?.mode === "interval" ? t("loop.every", { t: fmtInterval(loop.interval_seconds) }) : t("loop.selfpaced"), loop?.next_run_at ? t("ph.loop.next", { t: untilShort(loop.next_run_at) }) : ""].filter(Boolean).join(" · ");
+  return <span className="ph-ell">{words}</span>;
 }
 
 type Chosen = { preset: string } | { provider: string; model: string } | { model: string };
 
-function StartComposer({ phone, project, toast }: { phone: boolean; project: string; toast: (t: string) => void }) {
+/** The model and effort of the chat about to start: held above the composer because a phone picks
+ *  the model from the page's title, a desktop from the composer's own control, and both open one list. */
+type StartModel = ReturnType<typeof useStartModel>;
+
+function useStartModel() {
   const settings = useQuery<Settings>("/api/settings", { staleMs: 60000 });
   const presets = settings.data?.presets ?? {};
   const defaultId = settings.data?.model?.preset ?? "";
-  const [draft, setDraft] = useState("");
   const [chosen, setChosen] = useState<Chosen | null>(null);
-  const [files, setFiles] = useState<File[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<number | null>(null);
-  const [modelOpen, setModelOpen] = useState(false);
+  const [open, setOpen] = useState(false);
   // Picked here and carried into the session it makes; null leaves the model's own.
   const [effort, setEffort] = useState<Effort | null>(null);
-  const { data: asr } = useQuery<AsrStatus>("/api/asr", { staleMs: 60000 });
-  const field = useRef<HTMLTextAreaElement>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const plusButton = useRef<HTMLButtonElement>(null);
-  const [plusOpen, setPlusOpen] = useState(false);
   const labelOf = (id: string) => {
     const item = presets[id] as Preset | undefined;
     return item ? item.label || `${item.provider}/${item.model}` : id;
   };
-  const modelLabel = chosen
+  const label = chosen
     ? "preset" in chosen ? labelOf(chosen.preset) : "provider" in chosen ? `${chosen.provider}/${chosen.model}` : chosen.model
     : defaultId ? labelOf(defaultId) : t("newagent.model.default");
   // A model picked outside the presets keeps the thinking the session starts with, the default's.
   const presetId = chosen && "preset" in chosen ? chosen.preset : defaultId;
   const shownEffort = effort ?? presetEffort(presets[presetId] as Preset | undefined);
-
   function choose(choice: ModelChoice) {
     if ("clear" in choice) setChosen(null);
     else if ("preset" in choice) setChosen({ preset: choice.preset });
     else if ("provider" in choice) setChosen({ provider: choice.provider, model: choice.model });
     else setChosen({ model: choice.model });
   }
+  return { chosen, label, effort, setEffort, shownEffort, choose, open, setOpen };
+}
+
+function StartComposer({ phone, project, toast, model }: { phone: boolean; project: string; toast: (t: string) => void; model: StartModel }) {
+  const { chosen, effort, setEffort, shownEffort, choose } = model;
+  const modelLabel = model.label;
+  const modelOpen = model.open;
+  const setModelOpen = model.setOpen;
+  const [draft, setDraft] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
+  const focus = useComposerFocus(phone);
+  const focused = focus.focused;
+  const offline = useOffline();
+  const { data: asr } = useQuery<AsrStatus>("/api/asr", { staleMs: 60000 });
+  const field = useRef<HTMLTextAreaElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+  const plusButton = useRef<HTMLButtonElement>(null);
+  const [plusOpen, setPlusOpen] = useState(false);
 
   // A desktop lands here to type. A phone keeps the keyboard down until the field is touched:
   // opening it over the list of chats hides the thing the reader came to find.
@@ -218,11 +283,79 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
   });
   const voiceBar = note.state.phase === "recording" || note.state.phase === "transcribing";
   const chooseEffort = (value: string) => setEffort(effortOf(value));
+  const textarea = (
+    <textarea
+      hidden={voiceBar}
+      ref={field}
+      value={draft}
+      rows={1}
+      placeholder={t("session.composer.idle")}
+      aria-label={t("session.composer.idle")}
+      onChange={(event) => setDraft(event.target.value)}
+      onPaste={(event) => {
+        const pasted = Array.from(event.clipboardData?.items ?? []).filter((item) => item.kind === "file").map((item) => item.getAsFile()).filter((file): file is File => !!file);
+        if (!pasted.length) return;
+        event.preventDefault();
+        addFiles(pasted);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && !event.shiftKey && enterSends()) {
+          event.preventDefault();
+          void send();
+        }
+      }}
+    />
+  );
 
+  const empty = !draft.trim() && files.length === 0;
+  const plusItems = (
+    <>
+      <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><Icon name="attach" size={16} />{t("session.attach")}</button>
+      {asr?.configured && <button type="button" role="menuitem" disabled={!note.supported || note.state.phase !== "idle"} onClick={() => { setPlusOpen(false); void note.start(); }}><Icon name="mic" size={16} />{t("session.mic")}</button>}
+    </>
+  );
+
+  if (!phone) {
+    return (
+      <div className="start-composer composer" data-primary="send" onDragOver={(event) => { if (event.dataTransfer?.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (!event.dataTransfer?.files.length) return; event.preventDefault(); addFiles(event.dataTransfer.files); }}>
+        <VoiceNoteFailed note={note} />
+        <div className={`composer-box ${voiceBar ? "voicing" : ""}`}>
+          {voiceBar && <VoiceBar note={note} />}
+          {progress !== null && <div className="sub upload-progress" role="status">{t("upload.progress", { percent: Math.floor(progress * 100) })}</div>}
+          {files.length > 0 && !voiceBar && (
+            <div className="attachments" aria-label={t("session.attachments")}>
+              {files.map((file, i) => (
+                <AttachmentCard key={`${file.name}-${file.size}-${file.lastModified}-${i}`} file={file} onOpen={() => openFile(file)} onRemove={() => setFiles((held) => held.filter((_, j) => j !== i))} />
+              ))}
+            </div>
+          )}
+          {textarea}
+          <div className="composer-row" hidden={voiceBar}>
+            <input ref={fileInput} type="file" multiple hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
+            <button ref={plusButton} type="button" className="iconbtn flat plus" aria-haspopup="menu" aria-expanded={plusOpen} onClick={() => setPlusOpen(!plusOpen)} aria-label={t("composer.plus")} title={t("composer.plus")}><Icon name="plus" /></button>
+            {plusOpen && <Popover anchor={plusButton.current} onClose={() => setPlusOpen(false)} className="plus-menu" label={t("composer.plus")}>{plusItems}</Popover>}
+            <div className="composer-tools">
+              <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone}
+                effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} />
+              {asr?.configured && <MicButton note={note} />}
+              <button type="button" className="roundbtn primary" onClick={() => void send()} disabled={busy || (!draft.trim() && files.length === 0)} aria-label={t("session.send")}><Icon name="up" /></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // A phone: one 48 px row at rest, the text above a toolbar once the field has the reader or holds
+  // something (ui/phone.css reads data-shape). The white circle is a voice conversation while the
+  // field is empty and Send once it is not; offline the draft waits here and Send waits with it.
+  const shape = focused || !empty || progress !== null ? "open" : "idle";
   return (
-    <div className="start-composer composer" data-primary="send" onDragOver={(event) => { if (event.dataTransfer?.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (!event.dataTransfer?.files.length) return; event.preventDefault(); addFiles(event.dataTransfer.files); }}>
+    <div className="start-composer composer" data-primary="send" data-shape={shape} data-typed={draft.trim() ? "" : undefined}
+      onFocus={focus.onFocus}
+      onBlur={focus.onBlur}>
       <VoiceNoteFailed note={note} />
-      <div className={`composer-box ${voiceBar ? "voicing" : ""}`}>
+      <div className={`composer-box ${voiceBar ? "voicing" : ""}`} onClick={(e) => { if (e.target === e.currentTarget) field.current?.focus(); }}>
         {voiceBar && <VoiceBar note={note} />}
         {progress !== null && <div className="sub upload-progress" role="status">{t("upload.progress", { percent: Math.floor(progress * 100) })}</div>}
         {files.length > 0 && !voiceBar && (
@@ -232,42 +365,29 @@ function StartComposer({ phone, project, toast }: { phone: boolean; project: str
             ))}
           </div>
         )}
-        <textarea
-          hidden={voiceBar}
-          ref={field}
-          value={draft}
-          rows={1}
-          placeholder={t("session.composer.idle")}
-          aria-label={t("session.composer.idle")}
-          onChange={(event) => setDraft(event.target.value)}
-          onPaste={(event) => {
-            const pasted = Array.from(event.clipboardData?.items ?? []).filter((item) => item.kind === "file").map((item) => item.getAsFile()).filter((file): file is File => !!file);
-            if (!pasted.length) return;
-            event.preventDefault();
-            addFiles(pasted);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && enterSends()) {
-              event.preventDefault();
-              void send();
-            }
-          }}
-        />
+        {textarea}
         <div className="composer-row" hidden={voiceBar}>
           <input ref={fileInput} type="file" multiple hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
-          <button ref={plusButton} type="button" className="iconbtn flat plus" aria-haspopup="menu" aria-expanded={plusOpen} onClick={() => setPlusOpen(!plusOpen)} aria-label={t("composer.plus")} title={t("composer.plus")}><Icon name="plus" /></button>
-          {plusOpen && <Popover anchor={plusButton.current} onClose={() => setPlusOpen(false)} className="plus-menu" label={t("composer.plus")}>
-            <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><Icon name="attach" size={16} />{t("session.attach")}</button>
-            {asr?.configured && <button type="button" role="menuitem" disabled={!note.supported || note.state.phase !== "idle"} onClick={() => { setPlusOpen(false); void note.start(); }}><Icon name="mic" size={16} />{t("session.mic")}</button>}
-          </Popover>}
+          <input ref={photoInput} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
+          <button ref={plusButton} type="button" className="iconbtn flat plus" aria-haspopup="dialog" aria-expanded={plusOpen} onClick={() => setPlusOpen(!plusOpen)} aria-label={t("composer.plus")} title={t("composer.plus")}><Icon name="plus" /></button>
+          {offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">
-            <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone}
+            <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet
               effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} />
             {asr?.configured && <MicButton note={note} />}
-            <button type="button" className="roundbtn primary" onClick={() => void send()} disabled={busy || (!draft.trim() && files.length === 0)} aria-label={t("session.send")}><Icon name="up" /></button>
+            {empty && !offline
+              ? <VoiceCircle />
+              : <button type="button" className="roundbtn primary" onClick={() => void send()} disabled={busy || offline || empty} aria-label={t("session.send")}><Icon name="up" /></button>}
           </div>
         </div>
       </div>
+      {plusOpen && (
+        <PlusSheet onClose={() => setPlusOpen(false)}
+          onPhoto={() => photoInput.current?.click()}
+          onFiles={() => fileInput.current?.click()}
+          onRecord={asr?.configured && note.supported && note.state.phase === "idle" ? () => void note.start() : undefined}
+          extra={<SheetRow icon="settings" label={t("ph.plus.options")} hint={t("ph.plus.options.hint")} chevron onClick={() => { setPlusOpen(false); navigate(pathFor("agents", null, { new: "1" })); }} />} />
+      )}
     </div>
   );
 }

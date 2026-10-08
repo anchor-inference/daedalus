@@ -1,9 +1,9 @@
 import { useContextActions } from "../ui/context-menu";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, Project, ProjectFolder, SessionList, SessionSummary, Settings } from "../api";
 import { agentFolders, folderName, offersFolderChoice, projectPath, projectReachable } from "../folders";
 import { Avatar, Dot, Skeleton, Status, ToolPicker, fmtInterval, statusWord } from "../ui/components";
-import { OverflowMenu, Sheet, confirmDialog, toast } from "../ui/dialogs";
+import { type MenuItem, OverflowMenu, Sheet, confirmDialog, toast } from "../ui/dialogs";
 import { relTime, shortModel, untilShort } from "../format";
 import { Folder, Row as RowModel, agentName, arrange, folderOpen, rememberFolder } from "../grouping";
 import { Icon } from "../icons";
@@ -436,7 +436,12 @@ const Row = memo(function Row({ s, kids, onOpen, current, fork, compact, project
   );
 }, sameRow);
 
-function SessionRowMenu({ session, onProject, projectName }: { session: SessionSummary; onProject?: () => void; projectName?: string }) {
+/**
+ * A session's commands, for every place that offers them: the desktop row's ⋮ menu and the phone's
+ * long-press sheet list the same items and open the same sheets, so a command added here reaches both.
+ * `layers` are the sheets the commands open, to be rendered beside whatever shows the items.
+ */
+export function useSessionCommands(session: SessionSummary, opts: { onProject?: () => void; projectName?: string } = {}): { items: MenuItem[]; layers: ReactNode } {
   const [editing, setEditing] = useState(false);
   const [moving, setMoving] = useState(false);
   const [title, setTitle] = useState(session.title);
@@ -467,14 +472,14 @@ function SessionRowMenu({ session, onProject, projectName }: { session: SessionS
       invalidate("/api/sessions");
     } catch (error) { toast(errorText(error)); }
   }
-  return <span className="session-row-menu" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-    <OverflowMenu contextSelector="[data-session]" small className="quiet" label={`${session.title}: ${t("dlg.menu")}`} items={[
-      { label: t("session.rename"), icon: "pen", onSelect: () => { setTitle(session.title); setEditing(true); } },
-      { label: t("session.project.move"), icon: "folder", onSelect: () => setMoving(true) },
-      ...(onProject ? [{ label: t("project.settings.for", { name: projectName ?? session.project }), onSelect: onProject }] : []),
-      { label: t(session.archived ? "agents.restore" : "agents.archive"), icon: "archive", onSelect: () => void archive() },
-      { label: t("common.delete"), icon: "trash", danger: true, onSelect: () => void remove() },
-    ]} />
+  const items: MenuItem[] = [
+    { label: t("session.rename"), icon: "pen", onSelect: () => { setTitle(session.title); setEditing(true); } },
+    { label: t("session.project.move"), icon: "folder", onSelect: () => setMoving(true) },
+    ...(opts.onProject ? [{ label: t("project.settings.for", { name: opts.projectName ?? session.project }), icon: "settings" as const, onSelect: opts.onProject }] : []),
+    { label: t(session.archived ? "agents.restore" : "agents.archive"), icon: "archive", onSelect: () => void archive() },
+    { label: t("common.delete"), icon: "trash", danger: true, onSelect: () => void remove() },
+  ];
+  const layers = <>
     {moving && <MoveSessionSheet sessionId={session.id} current={session.project_id} currentOwn={!!session.workspace_own} onClose={() => setMoving(false)} onMoved={() => invalidate("/api/sessions")} toast={toast} />}
     {editing && <Sheet title={t("session.rename")} onClose={() => setEditing(false)} size="narrow">
       <form onSubmit={(event) => { event.preventDefault(); void rename(); }}>
@@ -482,6 +487,17 @@ function SessionRowMenu({ session, onProject, projectName }: { session: SessionS
         <button className="btn primary" type="submit" disabled={saving || !title.trim()}>{t("common.save")}</button>
       </form>
     </Sheet>}
+  </>;
+  return { items, layers };
+}
+
+function SessionRowMenu({ session, onProject, projectName }: { session: SessionSummary; onProject?: () => void; projectName?: string }) {
+  const { items, layers } = useSessionCommands(session, { onProject, projectName });
+  // The project settings item had no icon on the desktop menu; it keeps none there.
+  const shown = items.map((item) => (item !== "-" && item.icon === "settings" ? { ...item, icon: undefined } : item));
+  return <span className="session-row-menu" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+    <OverflowMenu contextSelector="[data-session]" small className="quiet" label={`${session.title}: ${t("dlg.menu")}`} items={shown} />
+    {layers}
   </span>;
 }
 

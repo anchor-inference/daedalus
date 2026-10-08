@@ -6,7 +6,9 @@ import type { AuthConfig } from "./screens/Login";
 import type { OnboardingState } from "./screens/AddModel";
 import * as passkeys from "./passkeys";
 import { ORCHESTRATION, ORCHESTRATION_LIST, back, migrateLegacyLocation, navigate, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
-import { Counts, MoreSheet, Palette, PaletteItem, TabBar, go, screenTitle, useMedia, useShortcuts } from "./shell";
+import { Counts, Palette, PaletteItem, go, screenTitle, useMedia, useShortcuts } from "./shell";
+import { AppDrawer } from "./drawer";
+import { closeDrawer } from "./ui/phone";
 import { Sidebar, useSidebar } from "./sidebar";
 import { NavMenu } from "./navmenu";
 import { shortcutFor } from "./navigation";
@@ -160,7 +162,6 @@ export function App() {
   }, [routeMode, lastMode]);
   const mode = routeMode ?? lastMode;
   const [picking, setPicking] = useState(false);
-  const [more, setMore] = useState(false);
   const [palette, setPalette] = useState(false);
   // Which project the operator is looking at ("" is all of them). A lens over every list of agents
   // rather than a destination, so it lives in the shell and not in the route.
@@ -457,9 +458,12 @@ export function App() {
   }, [scrollKey]);
 
   useEffect(() => {
-    setMore(false);
     setMenu(false);
   }, [route.screen, route.session]);
+  // A window widened past the phone's size has no drawer to leave open behind the desktop's column.
+  useEffect(() => {
+    if (wide) closeDrawer();
+  }, [wide]);
 
   // Stable, so the Agents list can skip a folder that did not change between two polls: a new
   // function on every render of the shell would defeat every memo below it.
@@ -570,7 +574,7 @@ export function App() {
   } else {
     content = (
       <ErrorBoundary key={route.screen}>
-        {route.screen === "agents" && <StartScreen onOpen={open} toast={showToast} project={project} projects={agentProjects} onProjects={wide ? undefined : () => setSwitching(true)} />}
+        {route.screen === "agents" && <StartScreen onOpen={open} toast={showToast} project={project} projects={agentProjects} onProjects={wide ? undefined : () => setSwitching(true)} onPickProject={pickProject} />}
         {route.screen === "voice" && <VoiceScreen onOpen={open} toast={showToast} />}
         {route.screen === "inbox" && <InboxScreen onOpen={open} toast={showToast} />}
         {route.screen === "board" && <BoardScreen onOpen={open} toast={showToast} selected={route.detail} project={projectList.find((p) => p.id === project) ?? null} />}
@@ -616,12 +620,10 @@ export function App() {
   // A terminal full screen takes the column the way a conversation does: no scrolling page around it
   // and, on a phone, no tab bar under it.
   const terminalOpen = (route.screen === "terminals" || route.screen === "browser") && !!route.detail;
-  // A project on a phone has its own four tabs and a More in the place of the app's (project/phone.tsx); a
-  // session inside it is a detail with a back of its own and no bar under it.
+  // A project on a phone keeps a bar of its own: four tabs and a More (project/phone.tsx); a session
+  // inside it is a detail with a back of its own and no bar under it. Everywhere else a phone has no
+  // bottom bar at all: the destinations are in the drawer, which every top bar's hamburger opens.
   const projectBar = !wide && focusProject ? phoneTab(focusView(route.page, route.inner)) : null;
-  // The main chat on a phone is a detail of orchestration's list, with a back of its own and no bar under it.
-  // An open diagram is a detail with its own back and no bar under it, like a terminal.
-  const tabBar = !wide && !sessionId && !focusProject && !terminalOpen && !mainChat && !diagramOpen;
   return (
     <div ref={shell} className={`app ${projectBar ? "project-phone" : ""} ${route.screen === "settings" ? "settings-open" : ""} ${diagramOpen ? "focus-mode" : ""}`} style={wide ? { ["--sidebar-w" as string]: `${columnFolded ? 0 : sidebarWidth}px` } : undefined}>
       {wide && (
@@ -678,7 +680,6 @@ export function App() {
       </div>
       {palette && <Palette items={paletteItems()} onClose={() => setPalette(false)} />}
       {switching && <ProjectSwitcher projects={agentProjects} archived={archivedProjects} current={project} onPick={pickProject} onClose={() => setSwitching(false)} toast={showToast} />}
-      {tabBar && <TabBar screen={route.screen} counts={counts} waiting={waiting} selfdev={selfdev} onMore={() => setMore((m) => !m)} moreOpen={more} />}
       {projectBar?.bar && focusProject && (
         <ErrorBoundary key={`tabs-${focusProject}`}>
           <Suspense fallback={<nav className="tabbar five project-tabs" aria-hidden />}>
@@ -686,7 +687,7 @@ export function App() {
           </Suspense>
         </ErrorBoundary>
       )}
-      {more && <MoreSheet screen={route.screen} counts={counts} selfdev={selfdev} onClose={() => setMore(false)} />}
+      {!wide && <AppDrawer mode={mode} counts={counts} waiting={waiting} selfdev={selfdev} projects={agentProjects} onPickProject={pickProject} onProjects={() => setSwitching(true)} />}
       {picking && sessionId && <SessionPicker exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
       <NotificationToasts />
       <PetHost needsReply={notifications.needs_you > 0} activity={route.screen} />

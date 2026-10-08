@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { locale, t, useLang } from "../i18n";
 import { Icon } from "../icons";
+import { MenuButton } from "../ui/phone";
 import { navigate, pathFor } from "../router";
 import { hold, invalidate, peek, prime, release, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
@@ -579,8 +580,11 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
   return (
     <div ref={shell} className={`screen cal-screen ${phone ? "phone" : "desk"}`}>
       <header className="cal-head">
+        {/* A phone reaches the other destinations from the app's drawer; the planner's own drawer of
+            calendars and tasks keeps a button of its own beside it, under the planner's flag. */}
+        {phone && <MenuButton />}
         <button type="button" className="iconbtn" onClick={toggleSide} aria-label={sideInline ? (sideOpen ? t("cal.side.hide") : t("cal.side.show")) : t("cal.side.open")} title={sideInline ? (sideOpen ? t("cal.side.hide") : t("cal.side.show")) : t("cal.side.open")} aria-expanded={sideInline ? sideOpen : sheet === "drawer"}>
-          <Icon name={sideInline ? "sidebar" : "menu"} />
+          <Icon name={sideInline ? "sidebar" : phone ? "flag" : "menu"} />
         </button>
         {!phone && <button type="button" className="btn cal-today" onClick={goToday} title={`${t("cal.today")} (T)`}>{t("cal.today")}</button>}
         {!phone && (
