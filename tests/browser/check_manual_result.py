@@ -17,6 +17,20 @@ BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 
 
+def reveal(page, locator):  # type: ignore[no-untyped-def]
+    """On a phone the task is a page of tabs (Task, Result, Diff) with the others mounted and hidden;
+    the control the step needs is on one of them. On a desktop the sheet shows it at once."""
+    tabs = page.locator(".ph-taskpage-tabs [role='radio']")
+    for i in range(tabs.count() + 1):
+        try:
+            expect(locator.first).to_be_visible(timeout=2500)
+            return locator
+        except AssertionError:
+            if i < tabs.count():
+                tabs.nth(i).click()
+    return locator
+
+
 def scenario(language: str, width: int, file_bound: bool) -> None:
     project = {"id": "p1", "name": "Bakery", "entity_revision": 1, "folders": folders("/home/operator/work/bakery"),
                "created_at": "2026-09-20T00:00:00Z", "settings": {"snapshots": False}, "system": "", "sessions": []}
@@ -159,9 +173,10 @@ def scenario(language: str, width: int, file_bound: bool) -> None:
 
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/project/p1/board?token=t&lang={language}")
-        page.locator(".pcard", has_text="Update catalog").first.click()
+        # A desktop's card, or the row of a phone's list.
+        page.locator(".pcard, .ph-row", has_text="Update catalog").first.click()
         sheet = page.locator(".sheet.pboard-sheet")
-        sheet.get_by_role("button", name="Submit my result" if language == "en" else "Сдать мой результат").click()
+        reveal(page, sheet.get_by_role("button", name="Submit my result" if language == "en" else "Сдать мой результат")).click()
         if file_bound:
             sheet.get_by_role("button", name="Use attached prices.csv" if language == "en" else "Использовать прикреплённый prices.csv").click()
             expect(sheet.get_by_label("prices.csv")).to_be_visible()
@@ -171,16 +186,16 @@ def scenario(language: str, width: int, file_bound: bool) -> None:
         page.reload()
         sheet = page.locator(".sheet.pboard-sheet")
         expect(sheet).to_be_visible()
-        sheet.get_by_role("button", name="Submit my result" if language == "en" else "Сдать мой результат").click()
+        reveal(page, sheet.get_by_role("button", name="Submit my result" if language == "en" else "Сдать мой результат")).click()
         expect(sheet.get_by_label("What was completed?" if language == "en" else "Что выполнено?")).to_have_value("Updated all catalog prices")
         sheet.get_by_role("button", name="Submit for review" if language == "en" else "Сдать на проверку").click()
         expect(sheet).to_contain_text("Couldn't confirm" if language == "en" else "Не удалось подтвердить")
         page.reload()
         sheet = page.locator(".sheet.pboard-sheet")
         expect(sheet).to_be_visible()
-        sheet.get_by_role("button", name="Submit my result" if language == "en" else "Сдать мой результат").click()
+        reveal(page, sheet.get_by_role("button", name="Submit my result" if language == "en" else "Сдать мой результат")).click()
         sheet.get_by_role("button", name="Try again" if language == "en" else "Ещё раз").last.click()
-        expect(sheet.locator(".result-flow")).to_be_visible()
+        expect(reveal(page, sheet.locator(".result-flow"))).to_be_visible()
         assert calls[0] == calls[1] and len(calls) == 2
         flow = sheet.locator(".result-flow")
         flow.get_by_text("Review my result" if language == "en" else "Проверить мой результат", exact=True).click()
@@ -192,9 +207,11 @@ def scenario(language: str, width: int, file_bound: bool) -> None:
             flow.get_by_role("button", name="Record file observation" if language == "en" else "Записать проверку файла").click()
         flow.get_by_label("Review conclusion" if language == "en" else "Вывод проверки").fill("All criteria observed")
         flow.get_by_role("button", name="Approve reviewed result" if language == "en" else "Одобрить проверенный результат").click()
-        expect(flow.get_by_role("button", name="Accept this result" if language == "en" else "Принять этот результат")).to_be_enabled()
-        flow.get_by_role("button", name="Accept this result" if language == "en" else "Принять этот результат").click()
-        expect(flow.get_by_text("Reopen accepted work" if language == "en" else "Вернуть принятую работу", exact=True)).to_be_visible()
+        # The decision is the review page's footer on a phone, the result's own actions on a desktop.
+        decide = page.locator(".ph-taskpage .ph-decide") if width < 1024 else flow
+        expect(decide.get_by_role("button", name="Accept this result" if language == "en" else "Принять этот результат")).to_be_enabled()
+        decide.get_by_role("button", name="Accept this result" if language == "en" else "Принять этот результат").click()
+        expect(reveal(page, flow.get_by_text("Reopen accepted work" if language == "en" else "Вернуть принятую работу", exact=True))).to_be_visible()
         flow.get_by_text("Reopen accepted work" if language == "en" else "Вернуть принятую работу", exact=True).click()
         flow.get_by_label("Why is more work needed?" if language == "en" else "Почему нужна доработка?").fill("One price needs correction")
         flow.get_by_role("button", name="Reopen for work" if language == "en" else "Вернуть на доработку").click()
@@ -202,7 +219,7 @@ def scenario(language: str, width: int, file_bound: bool) -> None:
         page.reload()
         sheet = page.locator(".sheet.pboard-sheet")
         expect(sheet).to_be_visible()
-        sheet.get_by_role("button", name="Try again" if language == "en" else "Повторить").click()
+        reveal(page, sheet.get_by_role("button", name="Try again" if language == "en" else "Повторить")).click()
         expect(sheet).to_contain_text("Returned for another round" if language == "en" else "Возвращено на доработку")
         assert len(reopen_calls) == 2 and reopen_calls[0] == reopen_calls[1]
         assert page.evaluate("document.documentElement.scrollWidth - window.innerWidth") <= 0

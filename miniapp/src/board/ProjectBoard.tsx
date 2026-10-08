@@ -31,6 +31,7 @@ import { TaskContext } from "./TaskContext";
 import { ManualResult } from "./ManualResult";
 import { ManualReopenRecovery } from "./ManualReopen";
 import { IssueImport } from "./IssueImport";
+import { PhoneTaskPage } from "./TaskPage";
 import { Harness, statusTone } from "../team/team";
 import { confirmAsync, errorText } from "../ui";
 import {
@@ -715,29 +716,9 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
     </Sheet>
   );
 
-  return (
-    <Sheet
-      title={task ? task.title : t("pboard.new")}
-      onClose={onClose}
-      className={`pboard-sheet ${task ? "" : "new"}`}
-      head={
-        // A phone's new task is decided at the top, where the thumb starts: Create beside the title,
-        // the close button as Cancel. The footer's pair stays for the desktop.
-        !task && phone ? <button className="ph-btn accent sm pboard-create" disabled={busy || writeBlocked || !title.trim() || !changed} onClick={save}>{t("common.create")}</button> :
-        task && (
-          <OverflowMenu
-            small
-            label={t("board.actions")}
-            items={[
-              ...(task.assignee?.session_id ? [{ label: t("pboard.open.staff", { name: task.assignee.name }), icon: "bots" as const, onSelect: () => navigate(projectSessionPath(projectId, task.assignee!.session_id!)) }] : []),
-              { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
-              "-",
-              { label: t("pboard.archive.action"), icon: "trash", danger: true, disabled: writeBlocked || busy || !["todo", "blocked"].includes(task.status), hint: t("pboard.archive.unavailable"), onSelect: () => void archiveTask() },
-            ]}
-          />
-        )
-      }
-    >
+  // The sheet's parts, named so a phone can lay them out as the review page's three tabs (Task,
+  // Result, Diff) while the desktop keeps them in this one order.
+  const taskHead = <>
       {task && (
         <div className="erow-meta pboard-sheet-status">
           <span className="chip">{t(`board.col.${task.status}`)}</span>
@@ -754,9 +735,13 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
           {asksFirst && <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id, grant: task.assignee ? "execution" : "assignment_execution" }))}>{t(task.assignee ? "pboard.grant.execution.open" : "pboard.grant.open")}</button>}
         </div>
       )}
+  </>;
+  const diffPart = <>
       {task && task.status === "review" && task.branch && (
         <ReviewPanel taskId={task.id} onChanged={onDone} toast={toast} />
       )}
+  </>;
+  const resultPart = <>
       {task && resultReference && <AcceptedResultDetail task={task} reference={resultReference} />}
       {task && !resultReference && (task.status === "review" || task.acceptance_state === "operator_approved") && <ResultFlow task={task} onAccepted={onDone} toast={toast} />}
       {task?.status === "done" && task.acceptance_state === "operator_approved" && (
@@ -771,6 +756,8 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
           <span> · <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "journal"))}>{t("pboard.cost.coordination")}</button></span>
         </p>
       )}
+  </>;
+  const taskMiddle = <>
       {task && (NEXT[task.status].length > 0 || task.status === "review") && (
         <div className="btnrow pboard-moves" role="group" aria-label={t("board.moveto")}>
           {NEXT[task.status].length > 0 && <span className="sub">{t("board.moveto")}</span>}
@@ -790,8 +777,12 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
       {task && <TaskComparison task={task} staff={data.staff} onChanged={onDone} toast={toast} />}
       {task && <RuntimeHandoff task={task} onChanged={onDone} toast={toast} />}
 
+  </>;
+  const acceptancePart = <>
       {task && hasAcceptance(task) && <AcceptanceSection task={task} />}
 
+  </>;
+  const formPart = <>
       {/* Bringing in work that is already written down as issues sits beside making a card by hand,
           rather than as another button in the board's header. */}
       {!task && onImport && <button type="button" className="linkbtn pboard-import" onClick={onImport}>{t("issues.open")}</button>}
@@ -910,6 +901,41 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
         <button className="btn primary" disabled={busy || writeBlocked || !title.trim() || !changed} onClick={save}>{task ? t("common.save") : t("common.create")}</button>
       </div>
       {writeBlocked && <div className="result-warning" role="status">{t("result.block.unconfirmed")}</div>}
+  </>;
+  if (phone && task) return (
+    <PhoneTaskPage projectId={projectId} task={task} onClose={onClose} toast={toast} busy={busy} writeBlocked={writeBlocked} onArchive={() => void archiveTask()} onMove={(status) => void move(status)}
+      taskTab={<>{taskHead}{taskMiddle}{formPart}</>} resultTab={task.status === "review" || task.acceptance_state === "operator_approved" || !!resultReference || hasAcceptance(task) ? <>{resultPart}{acceptancePart}</> : null}
+      diffTab={task.status === "review" && task.branch ? diffPart : null} />
+  );
+  return (
+    <Sheet
+      title={task ? task.title : t("pboard.new")}
+      onClose={onClose}
+      className={`pboard-sheet ${task ? "" : "new"}`}
+      head={
+        // A phone's new task is decided at the top, where the thumb starts: Create beside the title,
+        // the close button as Cancel. The footer's pair stays for the desktop.
+        !task && phone ? <button className="ph-btn accent sm pboard-create" disabled={busy || writeBlocked || !title.trim() || !changed} onClick={save}>{t("common.create")}</button> :
+        task && (
+          <OverflowMenu
+            small
+            label={t("board.actions")}
+            items={[
+              ...(task.assignee?.session_id ? [{ label: t("pboard.open.staff", { name: task.assignee.name }), icon: "bots" as const, onSelect: () => navigate(projectSessionPath(projectId, task.assignee!.session_id!)) }] : []),
+              { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
+              "-",
+              { label: t("pboard.archive.action"), icon: "trash", danger: true, disabled: writeBlocked || busy || !["todo", "blocked"].includes(task.status), hint: t("pboard.archive.unavailable"), onSelect: () => void archiveTask() },
+            ]}
+          />
+        )
+      }
+    >
+      {taskHead}
+      {diffPart}
+      {resultPart}
+      {taskMiddle}
+      {acceptancePart}
+      {formPart}
     </Sheet>
   );
 }

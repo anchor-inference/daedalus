@@ -270,44 +270,68 @@ def phone(page: Page, lang: str, unhandled: Unhandled) -> None:
     stub = board()
     serve(page, stub, unhandled)
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
-    expect(page.get_by_role("heading", name=words["title"])).to_be_visible()
+    expect(page.locator(".ph-board .ph-top-t")).to_have_text("Board" if lang == "en" else "Доска")
     expect(page.locator(".pboard-cols")).to_have_count(0)
-    chips = page.locator(".pboard-chips .chip")
-    expect(chips).to_have_count(5)
-    expect(chips.nth(0)).to_contain_text(f"{words['needs']} · 1")
-    expect(chips.nth(4)).to_contain_text(f"{words['done']} · 1")
-    sections = page.locator(".pboard-list > .pboard-section")
+    # All, then one chip per column with something in it; Needs you in amber.
+    chips = page.locator(".ph-board .ph-chip")
+    expect(chips).to_have_count(6)
+    expect(chips.nth(1)).to_contain_text(words["needs"])
+    expect(chips.nth(1).locator(".ph-chip-n")).to_have_text("1")
+    expect(chips.nth(5)).to_contain_text(words["done"])
+    sections = page.locator(".ph-board .ph-board-sec")
     # Without a chip: every open column that has something, finished work folded.
     expect(sections).to_have_count(4)
     fits(page, f"{lang} phone list")
+    rows = page.locator(".ph-board .ph-row")
+    for box in [r.bounding_box() for r in rows.all()]:
+        assert box and 59.5 <= box["height"] <= 90, f"{lang}: a board row is {box}"
 
-    chips.nth(0).click()
-    expect(chips.nth(0)).to_have_attribute("aria-pressed", "true")
+    chips.nth(1).click()
+    expect(chips.nth(1)).to_have_attribute("aria-pressed", "true")
     expect(sections).to_have_count(1)
-    expect(sections.first.locator(".pcard.need")).to_contain_text("SPRING10")
-    chips.nth(0).click()
+    expect(sections.first.locator(".ph-task.need")).to_contain_text("SPRING10")
+    chips.nth(1).click()
     expect(sections).to_have_count(4)
 
-    page.locator(".pboard-chips .chip", has_text=words["review"]).click()
+    # A long press opens the task's sheet: Open, Move to as chips, then the rest.
+    row = page.locator(".ph-board .ph-row.ph-task:not(.need)", has_text="Checkout").first
+    box = row.bounding_box()
+    assert box
+    page.evaluate("""([x, y]) => { const el = document.elementFromPoint(x, y).closest('.ph-row');
+      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', clientX: x, clientY: y })); }""", [box["x"] + 60, box["y"] + 20])
+    page.wait_for_timeout(700)
+    menu = page.locator(".ph-task-menu")
+    expect(menu).to_be_visible()
+    expect(menu.locator(".ph-move-chips .ph-chip")).not_to_have_count(0)
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
+
+    page.locator(".ph-board .ph-chip", has_text=words["review"]).click()
     expect(sections).to_have_count(1)
-    card = sections.first.locator(".pcard", has_text="Notify endpoint")
-    card.click()
-    sheet = page.locator(".sheet.pboard-sheet")
-    expect(sheet.locator(".result-flow button", has_text="Accept" if lang == "en" else "Принять")).to_be_disabled()
+    sections.first.locator(".ph-row", has_text="Notify endpoint").click()
+    # The review page: its footer holds the decision, disabled until the result is current and checked.
+    expect(page.locator(".ph-taskpage .ph-decide .ph-btn.primary")).to_be_disabled()
     assert not stub.accepted
     page.keyboard.press("Escape")
+    expect(page.locator(".ph-taskpage")).to_have_count(0)
 
-    page.locator(".pboard-chips .chip", has_text=words["done"]).click()
-    expect(page.locator(".pboard-list .pcard", has_text="Old price list")).to_be_visible()
-    expect(page.locator(".pboard-list .pcard", has_text="Notify endpoint")).to_have_count(0)
+    page.locator(".ph-board .ph-chip", has_text=words["done"]).click()
+    expect(page.locator(".ph-board .ph-row", has_text="Old price list")).to_be_visible()
+    expect(page.locator(".ph-board .ph-row", has_text="Notify endpoint")).to_have_count(0)
 
-    # The task sheet on a phone: every brief field reachable, nothing sideways.
-    page.locator(".pboard-list .pcard", has_text="Old price list").click()
-    sheet = page.locator(".sheet.pboard-sheet")
+    # The task on a phone is a page: every brief field reachable, nothing sideways.
+    page.locator(".ph-board .ph-row", has_text="Old price list").click()
+    sheet = page.locator(".ph-taskpage")
     expect(sheet).to_be_visible()
     for field in ("objective", "deliverable", "boundaries", "done_when"):
         expect(sheet.locator(f"#ptask-{field}")).to_be_attached()
     fits(page, f"{lang} phone sheet")
+    page.keyboard.press("Escape")
+
+    # A new task is decided at the top: Create beside the title.
+    page.locator(".ph-board .ph-top .ph-ib[aria-label]").last.click()
+    expect(page.locator(".sheet.pboard-sheet.new .pboard-create")).to_be_disabled()
+    page.keyboard.press("Escape")
 
 
 def run() -> int:

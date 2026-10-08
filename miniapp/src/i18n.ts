@@ -5389,6 +5389,38 @@ Object.assign(DICT, {
   "pbph.noproject": { en: "Agents, no project", ru: "Агенты без проекта" },
 });
 
+// A task and its result on a phone: the review page's tabs, its decision footer, the changed files one
+// at a time and the note left on a line.
+Object.assign(DICT, {
+  "pres.tabs": { en: "Task, result and changes", ru: "Задача, результат и изменения" },
+  "pres.tab.task": { en: "Task", ru: "Задача" },
+  "pres.tab.result": { en: "Result", ru: "Результат" },
+  "pres.tab.diff": { en: "Diff", ru: "Изменения" },
+  "pres.step.handed_in": { en: "Handed in", ru: "Сдан" },
+  "pres.step.accepted": { en: "Checked", ru: "Проверен" },
+  "pres.step.operator_approved": { en: "Approved", ru: "Принят" },
+  "pres.return": { en: "Return…", ru: "Вернуть…" },
+  "pres.return.title": { en: "Return the result", ru: "Вернуть результат" },
+  "pres.merge.waiting": { en: "Merge requested; waiting for the result", ru: "Слияние запрошено, ждём результата" },
+  "pres.blocking": { en: "{n} blocking note is open.|{n} blocking notes are open.", ru: "Открыто {n} блокирующее замечание.|Открыто {n} блокирующих замечания.|Открыто {n} блокирующих замечаний." },
+  "pres.show": { en: "Show", ru: "Показать" },
+  "pres.note.title": { en: "Add note", ru: "Замечание" },
+  "pres.note.where": { en: "{path} · line {line}", ru: "{path} · строка {line}" },
+  "pres.note.line": { en: "line {line}", ru: "строка {line}" },
+  "pres.note.importance": { en: "Importance", ru: "Важность" },
+  "pres.note.label": { en: "Note", ru: "Замечание" },
+  "pres.note.save": { en: "Save note", ru: "Сохранить" },
+  "pres.priority.blocking": { en: "Blocking", ru: "Блокирует" },
+  "pres.priority.important": { en: "Should fix", ru: "Исправить" },
+  "pres.priority.suggestion": { en: "Nit", ru: "Мелочь" },
+  "pres.notes": { en: "{n} note|{n} notes", ru: "{n} замечание|{n} замечания|{n} замечаний" },
+  "pres.files.more": { en: "and {n} more file|and {n} more files", ru: "и ещё {n} файл|и ещё {n} файла|и ещё {n} файлов" },
+  "pres.file.prev": { en: "Previous file", ru: "Предыдущий файл" },
+  "pres.file.next": { en: "Next file", ru: "Следующий файл" },
+  "pres.unconfirmed": { en: "The exact result could not be confirmed", ru: "Не удалось подтвердить точный результат" },
+  "pres.unconfirmed.sub": { en: "Retry loading it. Accepting is off until the result is confirmed.", ru: "Загрузите его снова. Принять нельзя, пока результат не подтверждён." },
+});
+
 // A command-line staff member's own view: its Feed and terminal, the messages sent to it, the keyboard
 // banner, its requests answered in place, the composer's "when", the column beside it and whether the
 // host still hears it.

@@ -104,17 +104,21 @@ def run() -> int:
     unhandled = Unhandled()
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(executable_path=os.environ.get("CHROMIUM", CHROMIUM))
-        page = browser.new_page(viewport={"width": int(os.environ.get("RESULT_WIDTH", "390")), "height": 760}, is_mobile=True, has_touch=True)
+        width = int(os.environ.get("RESULT_WIDTH", "390"))
+        phone = width < 1024
+        page = browser.new_page(viewport={"width": width, "height": 760}, is_mobile=True, has_touch=True)
         serve(page, stub, unhandled)
         page.goto(f"{BASE}/project/{PID}/board?token=t&lang=en")
-        page.locator(".pboard-list .pcard", has_text="Verify export").click()
+        # A phone opens the task as its review page; the decision is that page's footer.
+        page.locator(".ph-board .ph-row, .pboard-list .pcard", has_text="Verify export").first.click()
+        decide = page.locator(".ph-taskpage .ph-decide") if phone else page.locator(".result-flow .result-action")
         flow = page.locator(".result-flow")
         expect(flow).to_be_visible()
         expect(flow.locator(".result-summary")).to_contain_text("An export was generated")
         flow.get_by_text("Earlier results (1)").click()
         expect(flow.locator(".result-compare")).to_contain_text("Export was missing a field")
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "result comparison overflow"
-        expect(flow.get_by_role("button", name="Accept this result")).to_be_disabled()
+        expect(decide.locator(".ph-btn.primary") if phone else flow.get_by_role("button", name="Accept this result")).to_be_disabled()
         flow.get_by_text("Evidence and original report").click()
         # A stored screenshot shows as a picture card, named by its file and captioned by its key.
         shot = flow.locator(".result-artifacts .artifact.image", has_text="checkout.png")
@@ -135,21 +139,37 @@ def run() -> int:
         flow.get_by_role("textbox", name="What did you observe?").fill("Opened the export and checked its schema")
         flow.get_by_role("button", name="Record observation").click()
         expect(flow).to_contain_text("Evidence recorded")
-        # A tap on an added line opens the note form pinned to that file and head line.
-        page.locator(".review-panel").get_by_role("button", name="Diff").click()
-        page.locator(".review-diff .diff-line", has_text="if order.paid:").tap()
-        expect(page.locator(".review-diff")).to_have_count(0)
-        expect(flow.get_by_role("textbox", name="File path")).to_have_value("api/notify.py")
-        expect(flow.get_by_role("spinbutton", name="Line number")).to_have_value("2")
-        flow.locator("#comment-review-one").fill("Guard the unpaid case in a test too")
-        flow.get_by_role("button", name="Add note").click()
-        expect(flow).to_contain_text("api/notify.py:2")
+        if phone:
+            # A phone's Diff tab lists the files; one opens over the page, and a tap on an added line
+            # opens the note sheet pinned to that file and head line. The note then stands under it.
+            page.locator(".ph-taskpage-tabs [role='radio']").last.tap()
+            page.locator(".ph-frow[data-file='api/notify.py']").tap()
+            page.locator(".ph-filediff .diff-line", has_text="if order.paid:").tap()
+            sheet = page.locator(".ph-note-sheet")
+            expect(sheet).to_contain_text("api/notify.py")
+            sheet.locator("textarea").fill("Guard the unpaid case in a test too")
+            sheet.locator(".ph-sheet-foot .ph-btn.primary").click()
+            expect(sheet).to_have_count(0)
+            expect(page.locator(".ph-filediff .ph-linenote")).to_contain_text("Guard the unpaid case")
+            page.locator(".ph-filediff .ph-top .ph-ib").first.tap()
+            page.locator(".ph-taskpage-tabs [role='radio']").nth(1).tap()
+            expect(flow).to_contain_text("api/notify.py:2")
+        else:
+            # A tap on an added line opens the note form pinned to that file and head line.
+            page.locator(".review-panel").get_by_role("button", name="Diff").click()
+            page.locator(".review-diff .diff-line", has_text="if order.paid:").tap()
+            expect(page.locator(".review-diff")).to_have_count(0)
+            expect(flow.get_by_role("textbox", name="File path")).to_have_value("api/notify.py")
+            expect(flow.get_by_role("spinbutton", name="Line number")).to_have_value("2")
+            flow.locator("#comment-review-one").fill("Guard the unpaid case in a test too")
+            flow.get_by_role("button", name="Add note").click()
+            expect(flow).to_contain_text("api/notify.py:2")
         flow.get_by_role("textbox", name="Review conclusion").fill("Export matches the requested schema")
         flow.get_by_role("button", name="Approve reviewed result").click()
-        expect(flow.get_by_role("button", name="Merge reviewed branch")).to_be_enabled()
-        flow.get_by_role("button", name="Merge reviewed branch").click()
-        expect(flow.get_by_role("button", name="Accept this result")).to_be_enabled()
-        flow.get_by_role("button", name="Accept this result").click()
+        expect(decide.get_by_role("button", name="Merge reviewed branch")).to_be_enabled()
+        decide.get_by_role("button", name="Merge reviewed branch").click()
+        expect(decide.get_by_role("button", name="Accept this result")).to_be_enabled()
+        decide.get_by_role("button", name="Accept this result").click()
         expect(page.locator(".toast")).to_contain_text("Result accepted")
         assert [kind for kind, _ in stub.operations] == ["check", "evidence", "comment", "verdict", "merge", "accept"], stub.operations
         check = dict(stub.operations)["check"]

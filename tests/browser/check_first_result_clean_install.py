@@ -261,7 +261,8 @@ def scenario(language: str, width: int) -> None:
         expect(page.locator(".toast")).to_contain_text("Result accepted" if language == "en" else "Результат принят")
         page.reload()
         expect(sheet.locator(".result-state")).to_contain_text("Operator approved" if language == "en" else "Оператор принял")
-        sheet.locator(".result-details summary").first.click()
+        # A phone's task page keeps its other tabs mounted and hidden; the result's own fold is the visible one.
+        sheet.locator(".result-details summary:visible").first.click()
         sheet.get_by_role("button", name="Show original report" if language == "en" else "Показать исходный отчёт").click()
         expect(sheet.locator(".result-original")).to_contain_text("Bread 3 EUR")
         task = next(row for row in api("GET", f"/api/projects/{project_id}/board?include_done=1")["tasks"] if row["id"] == task_id)
