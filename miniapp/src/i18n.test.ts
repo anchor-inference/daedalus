@@ -217,6 +217,8 @@ describe("the keys the code asks for", () => {
       ["comp.state.", ["installed", "missing", "installing", "unavailable"]],
       ["comp.enables.", ["stt", "tts", "voicenotes", "skills.browser", "screenshots", "skills.node", "npx", "selfdev", "projects", "search", "sandbox"]],
       ["comp.mode.", ["native", "docker"]],
+      // The file manager is named after the host's platform, which the capability answer says.
+      ["reveal.", ["windows", "macos", "linux"]],
       // A staff member's status, isolation and colour come from the host by name; each has a word.
       ["team.status.", listed("./team/team.ts", "STAFF_STATUSES")],
       ["team.isolation.", listed("./team/team.ts", "ISOLATIONS")],

@@ -1,7 +1,7 @@
 import { useContextActions } from "../ui/context-menu";
 import { Component, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { api, ApiError, AsrStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, SessionDetail, Compacting } from "../api";
+import { api, ApiError, AsrStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, SessionDetail, Compacting, type SessionFolder } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
 import { MenuItem, OverflowMenu, Popover, confirmDialog, Overlay } from "../ui/dialogs";
 import { absDate, clock, commandPreview, duration, plainPreview, shortDateTime } from "../format";
@@ -13,7 +13,9 @@ import { Activity, LiveStore, SummaryItem, SystemNote, ToolItem, Turn, activityS
 import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
 import { looksLikeDiff } from "../diff";
-import { ArtifactCard, KeptFiles } from "../artifact";
+import { KeptFiles, TurnFiles } from "../artifact";
+import { placeOf, turnFiles } from "../turnfiles";
+import { useReveal } from "../reveal";
 import { withoutAttachedList } from "../keptfiles";
 import { InlineMedia, mediaCopyText, splitMediaAnswer } from "../media";
 import { Answer, Composer, ComposerHandle } from "../composerbox";
@@ -1310,12 +1312,13 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     () => ({
       id,
       workspace: detail?.workspace ?? "",
+      folders: detail?.folders ?? NO_FOLDERS,
       preview: openPreview,
       openJobs: () => panel.open("jobs"),
       toast,
       link,
     }),
-    [id, detail?.workspace, openPreview, panel.open, toast, link],
+    [id, detail?.workspace, detail?.folders, openPreview, panel.open, toast, link],
   );
 
   // What the answer cited, clicked: a file opens at the lines it named, a Verify receipt opens as a
@@ -1353,6 +1356,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const lastSeq = detail?.messages.reduce<number | null>((last, message) => (typeof message.seq === "number" ? message.seq : last), null) ?? null;
   // The phone's bar and its ⋮ sheet hold the same commands as the desktop header above; a command
   // added there belongs in one of these two lists too, or a phone loses it.
+  // The workspace in the operator's own file manager, where there is one in front of them.
+  const revealer = useReveal();
+  const revealWorkspace = () => void revealer?.reveal({ session_id: id });
   const phoneTiles: SessionTile[] = phone && !pane ? [
     { id: "search", icon: "search", label: t("session.phone.search"), onSelect: () => setPhoneSheet("search") },
     { id: "terminal", icon: "terminal", label: t("session.phone.terminal"), count: sessionTerminals.running.length, disabled: !!terminalDock.reason && sessionTerminals.running.length === 0, onSelect: () => terminalDock.setSheet(true) },
@@ -1374,6 +1380,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(onSplit ? [{ icon: "split" as IconName, label: t("session.split"), onSelect: onSplit }] : []),
     { icon: "share", label: t("session.share"), value: detail?.share && detail.share.mode !== "local" ? t(detail.share.mode === "public" ? "session.share.chip.public" : "session.share.chip.key") : undefined, onSelect: () => setSharing(true) },
     { icon: "download", label: t("session.export"), onSelect: exportMarkdown },
+    ...(revealer && hasDetails ? [{ icon: "external" as IconName, label: revealer.label, onSelect: revealWorkspace }] : []),
     { icon: "compact", label: t("session.compact"), value: contextPct !== null ? `${contextPct} %` : undefined, disabled: busy, onSelect: compact },
     ...(detail?.telegram_linked ? [{ icon: "unlink" as IconName, label: t("session.telegram.detach"), onSelect: detachTelegram }] : []),
     { icon: "trash", label: t("session.clear"), danger: true, disabled: busy, onSelect: clearHistory },
@@ -1478,6 +1485,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 ? [
                     { label: t("panel.tab.details"), icon: "settings" as IconName, onSelect: () => { setDetailsFocus("session"); panel.open("details"); } },
                     ...(panelTabs.includes("files") ? [{ label: t("session.files"), icon: "folder" as IconName, onSelect: () => panel.open("files") }] : []),
+                    ...(revealer ? [{ label: revealer.label, icon: "external" as IconName, onSelect: revealWorkspace }] : []),
                     ...(panelTabs.includes("jobs") ? [{ label: t("panel.tab.jobs"), icon: "terminal" as IconName, onSelect: () => panel.open("jobs") }] : []),
                     { label: t("session.mcp"), icon: "plug" as IconName, onSelect: () => { setDetailsFocus("mcp"); panel.open("details"); } },
                   ]
@@ -1676,7 +1684,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 }}
               />
             : undefined}
-            files={hasDetails && panelTabs.includes("files") ? <Explorer key={id} base={sessionBase(id)} root={detail?.project?.name} upload folders={detail?.folders} home={detail?.folder_id} onPreview={openPreview} toast={toast} refresh={filesGeneration} written={producedFiles(turns.at(-1)?.activity ?? []).filter((f) => f.how === "wrote").map((f) => workspaceRelative(f.path, detail.workspace) ?? "")} /> : undefined}
+            files={hasDetails && panelTabs.includes("files") ? <Explorer key={id} base={sessionBase(id)} root={detail?.project?.name} upload folders={detail?.folders} home={detail?.folder_id} onPreview={openPreview} toast={toast} refresh={filesGeneration} written={producedFiles(turns.at(-1)?.activity ?? []).filter((f) => f.how === "wrote").map((f) => { const place = placeOf(f.path, detail.workspace); return place && !place.folder ? place.rel : ""; })} /> : undefined}
             jobs={hasDetails ? <JobsTab sessionId={id} messages={detail.messages} onOpen={panel.openFile} onPreview={openPreview} onOpenSession={onOpen} /> : undefined}
           />
         )}
@@ -1894,7 +1902,7 @@ function SystemNoteRow({ note, cacheKey, run }: { note: SystemNote; cacheKey?: s
 }
 
 const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Turn; live: boolean; onTurnAction?: (kind: "revert" | "fork" | "retry", seq: number) => void }) {
-  const { id: sessionId, preview, toast, link } = useContext(SessionContext);
+  const { id: sessionId, workspace, folders, preview, toast, link } = useContext(SessionContext);
   const focusChat = useFocusChat();
   const [open, setOpen] = useDisclosed(`${sessionId}:turn:${turn.key}`, false);
   const [folded, setFolded] = useDisclosed(`${sessionId}:run:${turn.key}`, false);
@@ -1923,7 +1931,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   const seq = turn.user?.seq ?? null;
   const settled = !!seq && !!onTurnAction && !live;
   const inbound = turn.user?.origin?.startsWith("inbound:") ? turn.user.origin.slice(8) : "";
-  const artifacts = live ? [] : producedFiles(turn.activity);
+  const files = live ? null : turnFiles(turn.activity, workspace, folders);
   const families = open ? "" : focusChat?.orchestrator ? stepLine(turn.activity) : familyLine(turn.activity);
   const copyLink = async () => {
     const url = `${window.location.origin}${link}#m${seq}`;
@@ -1993,16 +2001,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
         </div>
       ) : <Md className={`answer ${live ? "streaming" : ""}`} text={turn.answer} cacheKey={live ? undefined : `a${turn.key}`} />)}
       {turn.answer && !live && <KeptFiles text={turn.answer} onOpen={preview} />}
-      {artifacts.length > 0 && (
-        <div className="artifacts" aria-label={t("turn.artifacts")}>
-          {artifacts.map((a) => {
-            // A written file is in the workspace; a sent one is served by the call that sent it, so a
-            // path outside the workspace opens too.
-            const src: PreviewSource = a.how === "sent" ? { base: `${sessionBase(sessionId)}/sent/${encodeURIComponent(a.callId)}`, path: a.name } : { base: sessionBase(sessionId), path: a.path.replace(/^\.\//, "") };
-            return <ArtifactCard key={a.callId} item={a} src={src} downloadUrl={downloadHref(src.base, src.path)} onOpen={preview} />;
-          })}
-        </div>
-      )}
+      {files && <TurnFiles sessionId={sessionId} sent={files.sent} changed={files.changed} onOpen={preview} />}
       {turn.answer && !live && (
         <MessageActions
           text={mediaCopyText(turn.answer, turn.media ?? [])}
@@ -2618,9 +2617,12 @@ function ReceiptDialog({ sessionId, receipt, onClose }: { sessionId: string; rec
 }
 
 /** `link` is the address this chat lives at, which a link to one of its messages starts from. */
-const SessionContext = createContext<{ id: string; workspace: string; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string }>({
+const NO_FOLDERS: SessionFolder[] = [];
+
+const SessionContext = createContext<{ id: string; workspace: string; folders: SessionFolder[]; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string }>({
   id: "",
   workspace: "",
+  folders: NO_FOLDERS,
   preview: () => undefined,
   openJobs: () => undefined,
   toast: () => undefined,

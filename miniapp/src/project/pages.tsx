@@ -12,6 +12,7 @@ import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { ProjectSettingsSheet } from "../projects";
 import { folderName, reachIsProblem, reachKey } from "../folders";
+import { RevealButton } from "../reveal";
 import { navigate, pathFor, projectPagePath } from "../router";
 import { go, PageHeader } from "../shell";
 import { invalidate, useQuery } from "../store";
@@ -281,6 +282,7 @@ export function FoldersPage({ projectId, back, compact, toast }: { projectId: st
             {reachIsProblem(reachKey(folder)) && <div className="focus-folder-warn"><Icon name="alert" size={12} /><span>{t(reachKey(folder))}</span></div>}
           </div>
           <EnvPill env={folder.env} />
+          {folder.reachable !== false && <RevealButton target={{ project_id: projectId, folder_id: folder.id }} />}
         </div>
       ))}
       <button className="btn small" onClick={() => setManaging(true)}><Icon name="settings" size={14} /> {t("focus.folders.manage")}</button>

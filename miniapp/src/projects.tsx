@@ -22,6 +22,7 @@ import { ProjectWorktrees } from "./project/ProjectWorktrees";
 import { ProjectArchive } from "./project/ProjectArchive";
 import { ProjectBudget, budgetKey } from "./project/ProjectBudget";
 import { ProjectResources, resourceProfileKey } from "./project/ProjectResources";
+import { RevealButton } from "./reveal";
 
 const PICKED = "daedalus.project";
 
@@ -525,6 +526,7 @@ function FolderRow({ project, folder, environments, write, canWrite }: { project
         {primary && <span className="badge" title={t("folder.primary.title")}>{t("folder.primary")}</span>}
         <EnvPill env={folder.env} tiny />
         {folder.is_git && <span className="badge">{t("comp.name.git")}</span>}
+        {folder.reachable !== false && <RevealButton target={{ project_id: project.id, folder_id: folder.id }} />}
         <button className="iconbtn small" onClick={remove} disabled={busy || only || !canWrite} title={only ? t("folder.remove.last") : t("folder.remove", { name: folderName(folder) })} aria-label={t("folder.remove", { name: folderName(folder) })}>
           <Icon name="trash" size={14} />
         </button>

@@ -16,6 +16,7 @@ import { useStreamUp } from "../events";
 import { WindowedRows } from "../virtual";
 import { errorText } from "../ui";
 import { plural, t } from "../i18n";
+import { useReveal } from "../reveal";
 
 type SearchList = SessionList & { semantic: boolean; reason: string; partial: boolean; indexing: boolean };
 
@@ -218,9 +219,12 @@ export const FolderSection = memo(function FolderSection({ folder, onOpen, curre
     setOpen(next);
     rememberFolder(folder.key, next);
   };
+  const revealer = useReveal();
+  const revealProject = folder.project && revealer ? folder.project.id : "";
   useContextActions(section, [
     { label:t("agents.new"), icon:"plus", onSelect:() => setAdding(true) },
     { label:t("project.settings.for", { name:folder.name }), icon:"settings", onSelect:editProject },
+    ...(revealProject && revealer ? [{ label:revealer.label, icon:"external" as const, onSelect:() => void revealer.reveal({ project_id:revealProject }) }] : []),
     { label:t(showing ? "agents.folder.hide" : "agents.folder.show", { name:folder.name }), onSelect:toggle },
   ]);
   // The Voice folder is the home of the voice agents, but the word in the list is the mode: the row

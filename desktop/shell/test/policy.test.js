@@ -72,3 +72,19 @@ test('every message exists in both languages', () => {
   assert.equal(policy.strings('en-GB'), policy.dictionary.en);
   assert.equal(policy.strings(undefined), policy.dictionary.en);
 });
+
+test('a folder is opened, a file is shown in its folder, and nothing else is touched', () => {
+  const dir = path.resolve('/opt/work/bakery');
+  const file = path.join(dir, 'menu.html');
+  const disk = new Map([[dir, 'dir'], [file, 'file'], [path.join(dir, 'pipe'), 'fifo']]);
+  const stat = (p) => {
+    const kind = disk.get(p);
+    if (!kind) throw new Error('ENOENT');
+    return { isDirectory: () => kind === 'dir', isFile: () => kind === 'file' };
+  };
+  assert.equal(policy.revealAction(dir, stat), 'open');
+  assert.equal(policy.revealAction(file, stat), 'show');
+  for (const bad of [path.join(dir, 'gone.txt'), path.join(dir, 'pipe'), 'menu.html', '', `${file}\0`, null, 42]) {
+    assert.equal(policy.revealAction(bad, stat), null, String(bad));
+  }
+});
