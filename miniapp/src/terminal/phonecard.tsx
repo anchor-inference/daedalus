@@ -96,4 +96,3 @@ function peekColour(projectId: string, staffId: string): string {
   const team = peek<{ staff?: { id: string; color: string }[] }>(`/api/projects/${encodeURIComponent(projectId)}/staff?archived=0`) ?? peek<{ staff?: { id: string; color: string }[] }>(`/api/projects/${encodeURIComponent(projectId)}/staff`);
   return team?.staff?.find((m) => m.id === staffId)?.color ?? "slate";
 }
-
