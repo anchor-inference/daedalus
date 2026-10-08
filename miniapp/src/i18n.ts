@@ -1523,6 +1523,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "ph.inbox.selected": { en: "{n} selected|{n} selected", ru: "Выбрана {n}|Выбрано {n}|Выбрано {n}" },
   "ph.inbox.done": { en: "Done selecting", ru: "Закончить выбор" },
   "ph.inbox.settings": { en: "Notification settings", ru: "Настройки уведомлений" },
+  "ph.inbox.details": { en: "Details", ru: "Подробности" },
   "ph.inbox.markread": { en: "Mark read", ru: "Прочитано" },
   "ph.inbox.unread": { en: "Unread", ru: "Непрочитано" },
   "ph.inbox.showall": { en: "Show all", ru: "Показать все" },

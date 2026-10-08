@@ -309,7 +309,7 @@ export function useLongPress(onLong: () => void) {
   // When the held finger last opened the sheet: the contextmenu Android sends for that same press
   // comes within a moment and is the same request. A flag alone stayed set after a right click (a
   // mouse's secondary press never reset it), and the next right click on that row did nothing.
-  const firedAt = useRef(0);
+  const firedAt = useRef(Number.NEGATIVE_INFINITY);
   const origin = useRef<{ x: number; y: number } | null>(null);
   const cancel = useCallback(() => {
     if (timer.current !== null) window.clearTimeout(timer.current);

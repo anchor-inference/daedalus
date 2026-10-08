@@ -286,7 +286,8 @@ def main() -> int:
         problems.extend(f"the page threw: {e}" for e in errors)
         context.close()
 
-        # Phone: the full-screen terminal has the copy in its header.
+        # Phone: the full-screen terminal's bar has the jumps between commands, and its menu the copy
+        # of the last output (the bar holds at most the two jumps and the menu).
         phone = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="dark", is_mobile=True, has_touch=True)
         phone.grant_permissions(["clipboard-read", "clipboard-write"], origin=BASE.split("/app")[0])
         phone.add_init_script(DEBUG)
@@ -294,13 +295,16 @@ def main() -> int:
         page.locator(".term-button").first.click()
         page.locator(".term-sheet-row").first.click()
         page.wait_for_selector(".term-full", timeout=10000)
-        if not wait_for(page, lambda: page.locator(".term-full .term-copy-output").count() == 1, 10000):
-            problems.append("phone: the full-screen terminal has no copy of the last output")
+        if not wait_for(page, lambda: page.locator(".term-full .term-phone-jump").count() == 2, 10000):
+            problems.append("phone: the full-screen terminal's bar has no jumps between commands")
         else:
-            button = page.locator(".term-full .term-copy-output").bounding_box()
-            assert button
-            if button["x"] + button["width"] > 390:
-                problems.append(f"phone: the copy button is off the screen ({button})")
+            for box in (b.bounding_box() for b in page.locator(".term-full .term-phone-jump").all()):
+                if not box or box["x"] + box["width"] > 390:
+                    problems.append(f"phone: a jump is off the screen ({box})")
+            page.locator(".term-phone-head button[aria-haspopup]").last.click()
+            item = page.get_by_role("menuitem", name="Copy last command output")
+            if not item.count():
+                problems.append("phone: the terminal's menu has no copy of the last output")
         phone.close()
         browser.close()
     for problem in problems:

@@ -139,6 +139,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
     const tone = toneClass(entry);
     const items: MenuItem[] = [
       ...((entry.link || entry.session_id) ? [{ label: t("notice.open"), icon: "forward" as const, onSelect: () => openEntry(entry) }] : []),
+      { label: t("ph.inbox.details"), icon: "inbox" as const, onSelect: () => setOpen({ kind: "entry", id: entry.id }) },
       entry.seen ? { label: t("inbox.markunread"), icon: "inbox" as const, onSelect: () => setSeen([entry.id], false) } : { label: t("ph.inbox.markread"), icon: "check" as const, onSelect: () => setSeen([entry.id], true) },
       { label: t("ph.inbox.select"), icon: "check" as const, onSelect: () => setSelected(new Set([entry.id])) },
       ...(!needsYou ? [{ label: t("common.delete"), icon: "trash" as const, danger: true, onSelect: () => remove([entry.id]) }] : []),
@@ -164,7 +165,9 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
             {needsYou && <Answers entry={entry} offline={offline} onDone={(r) => answeredHere(entry, r)} onOpen={() => openEntry(entry)} />}
           </>
         ) : undefined}
-        onOpen={() => (picking ? toggle(entry.id) : setOpen({ kind: "entry", id: entry.id }))}
+        // A request opens its detail, where it is answered; anything else with a place in the app
+        // opens that place, as a notification does — its detail is one item of the long press.
+        onOpen={() => (picking ? toggle(entry.id) : needsYou || done || !(entry.link || entry.session_id) ? setOpen({ kind: "entry", id: entry.id }) : openEntry(entry))}
         actions={picking || done ? undefined : items}
         more={false}
         preview={{ title: entry.title, meta: noticeLine(entry, names) }}

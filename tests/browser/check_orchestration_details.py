@@ -164,8 +164,8 @@ def phone(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     page.close()
 
     page = open_page(context, focus, term, f"{BASE}/project/{pid}/staff/st-ira?token=t&lang={lang}")
-    page.wait_for_selector(".staff-cli .chat-head", timeout=15000)
-    page.locator(".staff-cli .chat-head .head-actions .iconbtn").last.tap()
+    page.wait_for_selector(".staff-cli .ph-top", timeout=15000)
+    page.locator(".staff-cli .ph-top .ph-ib").last.tap()
     expect(page.locator(".sheet .staff-panel")).to_be_visible(timeout=5000)
     staff(page, lang, check, ".sheet", "phone member")
     context.close()
