@@ -3454,7 +3454,15 @@ class SessionManager:
             gone = await self.live.replace_seen(
                 session_id, steer, follow_up, seen_steer=state.steer_seen, seen_follow_up=state.follow_up_seen,
             )
-            consumed = [item_id for item_id in gone if item_id not in state.queue_withdrawn | state.follow_up_steered]
+            # A follow-up turned into a steer leaves the follow-up queue without being read, so it
+            # is not consumed, unless this round was handed it as a steer and placed it. Excluding
+            # every turned item once left the card of a delivered steer standing above the composer.
+            handed_steers = set(state.steer_seen)
+            consumed = [
+                item_id for item_id in gone
+                if item_id not in state.queue_withdrawn
+                and (item_id not in state.follow_up_steered or item_id in handed_steers)
+            ]
             state.steer_seen = [str(item.get("id") or "") for item in steer]
             state.follow_up_seen = [str(item.get("id") or "") for item in follow_up]
             state.queue_withdrawn.clear()
