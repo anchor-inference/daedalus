@@ -48,12 +48,14 @@ def run() -> None:
             page.locator(".composer textarea").fill("")
             assert page.locator(".composer-box").bounding_box()["height"] <= 130
             page.locator(".composer .model-select").click()
-            # Effort is one row of five choices in the phone's model sheet, each 44 px to the finger.
+            # Effort is one row of five choices in the phone's model sheet, each drawn 32 px tall and
+            # 44 px to the finger through its ::after.
             choices = page.locator(".sheet .ph-model-effort button[role='radio']")
             choices.first.wait_for(timeout=5000)
             assert choices.count() == 5
             for choice in choices.all():
-                assert round(choice.bounding_box()["height"]) >= 34
+                reach = choice.evaluate("el => { const a = getComputedStyle(el, '::after'); return el.getBoundingClientRect().height - parseFloat(a.top || 0) - parseFloat(a.bottom || 0); }")
+                assert round(choice.bounding_box()["height"]) >= 32 and round(reach) >= 44, reach
             # One the session is not on already: the earlier width left its own choice behind.
             target = "low" if HOST.effort != "low" else "high"
             choices.nth(1 if target == "low" else 3).click()

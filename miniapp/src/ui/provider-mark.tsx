@@ -6,6 +6,9 @@ const NAMES: Record<string, string> = {
   google:"Google", gemini:"Google", vllm:"vLLM", llamacpp:"llama.cpp", ollama:"Ollama",
 };
 
+/** The families with a mark of their own; every other endpoint is a letter tile when named. */
+const BRANDS = new Set(["anthropic", "claude", "openai", "codex", "deepseek", "google", "gemini", "openrouter", "opencode", "zai", "zhipu", "grok", "xai"]);
+
 function family(id: string, kind?: string): string {
   const key = id.toLowerCase().replace(/[^a-z0-9]/g, "");
   const known = Object.keys(NAMES).find((name) => key === name || key.startsWith(name));
@@ -16,11 +19,27 @@ export function providerName(id: string, conf?: ProviderConf): string {
   return conf?.name || NAMES[id.toLowerCase()] || id;
 }
 
-/** Local vector marks distinguish endpoint families without fetching third-party assets. */
-export function ProviderMark({ id, kind }: { id: string; kind?: string }) {
+/** The tile's letter: the first letter or digit of the name the operator sees. */
+function initial(name: string): string {
+  return (/[\p{L}\p{N}]/u.exec(name)?.[0] ?? "?").toLocaleUpperCase();
+}
+
+/**
+ * Local vector marks distinguish endpoint families without fetching third-party assets.
+ *
+ * Given the provider's display `name`, an endpoint with no brand mark of its own (a vLLM or llama.cpp
+ * server, any custom address) is drawn as a tile with the name's initial instead of the shared
+ * terminal or crosshair glyph: on a phone list two such endpoints side by side ("vLLM",
+ * "Work-test-vllm") were otherwise one picture twice. The desktop picker passes no name and keeps
+ * its glyphs.
+ */
+export function ProviderMark({ id, kind, name, className = "" }: { id: string; kind?: string; name?: string; className?: string }) {
   const key = family(id, kind);
   const local = ["vllm", "llamacpp", "ollama"].includes(key);
-  return <span className={`provider-mark provider-${key}`} aria-hidden="true">
+  if (name && (local || !BRANDS.has(key))) {
+    return <span className={`provider-mark provider-letter ${className}`} aria-hidden="true">{initial(name)}</span>;
+  }
+  return <span className={`provider-mark provider-${key} ${className}`.trim()} aria-hidden="true">
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
       {key === "anthropic" || key === "claude" ? <path d="M5 18L10 6l5 12M7 14h6M17 6l3 12" />
         : key === "deepseek" ? <path d="M4 12c1-5 7-7 12-3l4-3v6c0 5-5 8-10 6-3-1-5-3-6-6zM8 11h.01M11 7l-1-3M13 17l-2 3" />

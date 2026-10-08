@@ -606,7 +606,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
 
 
 def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
-    """The phone's composer: one 48 px row at rest at the bottom of the screen — +, the field, the
+    """The phone's composer: one 44 px row at rest at the bottom of the screen — +, the field, the
     white circle (a voice conversation while the field is empty) — that opens onto its toolbar
     (mode, model and effort, the context ring, Send) once the field has the reader; the model and the
     mode as sheets, the + as a sheet of tiles and rows."""
@@ -617,16 +617,16 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
     pill = page.locator(".composer-box").bounding_box()
     if not pill or pill["x"] < 0 or pill["x"] + pill["width"] > 391:
         problems.append(f"phone: the pill is outside the viewport ({pill})")
-    if not pill or round(pill["height"]) != 48:
-        problems.append(f"phone: the idle composer is not one 48 px row ({pill})")
+    if not pill or round(pill["height"]) != 44:
+        problems.append(f"phone: the idle composer is not one 44 px row ({pill})")
     elif 844 - (pill["y"] + pill["height"]) > 24:
         problems.append(f"phone: the idle composer is not at the bottom ({pill})")
     if page.locator('.composer[data-shape="idle"]').count() != 1:
         problems.append("phone: the composer does not rest in its idle shape")
     circle = page.locator('.composer .roundbtn[data-action="voice"]')
     box = circle.bounding_box() if circle.count() else None
-    if not box or (round(box["width"]), round(box["height"])) != (36, 36):
-        problems.append(f"phone: the empty field's white circle is not the 36 px voice button ({box})")
+    if not box or (round(box["width"]), round(box["height"])) != (34, 34):
+        problems.append(f"phone: the empty field's white circle is not the 34 px voice button ({box})")
     if page.locator(".composer .model-select").is_visible():
         problems.append("phone: the model selector crowds the idle row")
     if page.locator(".composer .effort-select").count():

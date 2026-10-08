@@ -187,8 +187,9 @@ def composer_fits(browser, lang: str, width: int, model: str, running: bool) -> 
     else:
         if facts["modeCut"]:
             problems.append(f"{where}: the mode chip's name is cut")
-        # The phone's pills are the design's: 15 px type with room inside.
-        if mode["pad"] < 8 or mode["fs"] != 15:
+        # The phone's pills are the design's: 14 px type with room inside (15 until the phone's scale
+        # came down a step, a size too large beside the chat apps on the same phone).
+        if mode["pad"] < 8 or mode["fs"] != 14:
             problems.append(f"{where}: the mode chip has {mode['pad']}px inside and {mode['fs']}px type")
     if running:
         if pill:
@@ -196,7 +197,7 @@ def composer_fits(browser, lang: str, width: int, model: str, running: bool) -> 
     elif not pill:
         problems.append(f"{where}: no model pill")
     else:
-        if pill["pad"] < 8 or pill["fs"] != 15:
+        if pill["pad"] < 8 or pill["fs"] != 14:
             problems.append(f"{where}: the model pill has {pill['pad']}px inside and {pill['fs']}px type")
         if not facts["effort"] or facts["effortCut"]:
             problems.append(f"{where}: the effort is missing or cut ({facts['effort']!r})")

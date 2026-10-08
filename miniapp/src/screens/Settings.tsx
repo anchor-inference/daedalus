@@ -32,6 +32,7 @@ import { NotificationSettings } from "./NotificationSettings";
 import { EnvironmentsTab } from "./Environments";
 import { ToolGroupsSettings } from "../toolgroupsview";
 import { CompactionModelSelect } from "../compactionmodel";
+import { ProviderMark, providerName as providerTitle } from "../ui/provider-mark";
 import { AsrSettingsCard } from "./AsrSettings";
 import { DesktopAppCard } from "../updatedialog";
 import { ProviderLimit } from "./ProviderLimit";
@@ -156,7 +157,9 @@ function PresetRow({ id, p, onDemandByModel, isDefault, inChain, providers, onDe
     <div className={`mrow ${isDefault ? "default" : ""} ${open ? "open" : ""}`}>
       <div className="mline noradio">
         <button className="mmain" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-          <span className="mtitle">{title}</span>
+          {/* The provider's mark leads the title on a phone, where these cards are the list of models;
+              the desktop row keeps its own layout, so the mark is phone-only there. */}
+          <span className="mtitle"><ProviderMark id={p.provider} name={providerTitle(p.provider)} className="phone-only" />{title}</span>
           <span className="mmeta">{p.provider} · {p.model}</span>
         </button>
         <div className="mtags">
@@ -289,7 +292,7 @@ function ProviderBlock({ id, p, kinds, available, viaProxy, onPatch, onRemove }:
     <div className={`mrow ${open ? "open" : ""}`}>
       <div className="mline noradio">
         <button className="mmain" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-          <span className="mtitle">{p.name || id}</span>
+          <span className="mtitle"><ProviderMark id={id} kind={p.kind} name={providerTitle(id, p)} className="phone-only" />{p.name || id}</span>
           <span className="mmeta">{p.kind} · {p.base_url || t("settings.provider.noaddress")}</span>
           {plan && <span className="mmeta opencode-hint">{t(plan.hint)}</span>}
         </button>

@@ -264,11 +264,15 @@ function PhoneModelList(p: PhoneListProps) {
   const currentEntry = p.entries.find(([id, preset]) => isCurrent(id, preset, model)) ?? null;
   const home = currentEntry && !currentEntry[1].free_only ? currentEntry[1].provider : null;
   const homeModels = home ? p.entries.filter(([, preset]) => preset.provider === home && !preset.free_only) : [];
+  const mark = (id: string) => <ProviderMark id={id} kind={cat.providers[id]?.kind} name={providerName(id, cat.providers[id])} />;
+  // A search spans every provider, so each of its rows carries its provider's mark; under a section
+  // header or inside one provider the header already shows it.
   const row = ([id, preset]: [string, Preset]) => {
     const current = isCurrent(id, preset, model);
     const billing = cat.providers[preset.provider]?.billing === "subscription" ? t("composer.model.subscription") : "";
     return (
       <button key={id} type="button" role="menuitem" className={`model-row ph-model-row ${current ? "on" : ""}`} onClick={() => onPick({ preset: id })} aria-current={current ? "true" : undefined}>
+        {!p.browsing && p.provider === null && mark(preset.provider)}
         <span className="grow model-text">
           <span className="ph-model-name"><span className="truncate">{preset.label || preset.model}</span>
             <span className="ph-model-tag">{t(preset.thinking ? "composer.model.thinking" : "composer.model.fast")}</span>
@@ -309,12 +313,12 @@ function PhoneModelList(p: PhoneListProps) {
       )}
       {p.freeGroup && p.provider === null && <button type="button" role="menuitem" className="model-row provider-back" onClick={() => { p.setFreeGroup(false); p.setQuery(""); }}><Icon name="back" size={18} /><span className="grow">{t("composer.model.back")}</span></button>}
       {p.provider !== null && <button type="button" role="menuitem" className="model-row provider-back" onClick={p.back} aria-label={t("composer.model.back")}>
-        <Icon name="back" size={18} /><ProviderMark id={p.provider} kind={cat.providers[p.provider]?.kind} />
+        <Icon name="back" size={18} />{mark(p.provider)}
         <span className="grow">{providerName(p.provider, cat.providers[p.provider])}</span>
       </button>}
       {p.browsing && !p.freeGroup && home && (
         <>
-          <div className="ph-model-sec">{[providerName(home, cat.providers[home]), keyState(cat.providers[home])].filter(Boolean).join(" · ")}</div>
+          <div className="ph-model-sec">{mark(home)}<span className="truncate">{[providerName(home, cat.providers[home]), keyState(cat.providers[home])].filter(Boolean).join(" · ")}</span></div>
           {homeModels.map(row)}
         </>
       )}
@@ -327,13 +331,18 @@ function PhoneModelList(p: PhoneListProps) {
       {p.browsing && <div className="ph-model-sec">{t(p.freeGroup ? "composer.model.free" : "composer.model.providers")}</div>}
       {p.browsing && p.providers.map((id) => {
         const choices = p.entries.filter(([, preset]) => preset.provider === id && !!preset.free_only === p.freeGroup);
+        // The count is a number at the row's end rather than a second line of "Models: 1": the
+        // chevron already says there is more, and the second line doubled every row's height.
+        const key = keyState(cat.providers[id]);
         return <button key={id} type="button" role="menuitem" className="model-row provider-row" data-provider={id} onClick={() => { p.setProvider(id); p.setQuery(""); }}>
-          <span className="grow model-text"><span>{providerName(id, cat.providers[id])}</span><span className="sub truncate">{[keyState(cat.providers[id]), t("composer.model.count", { n: num(choices.length) })].filter(Boolean).join(" · ")}</span></span>
-          <span className="provider-count" hidden>{num(choices.length)}</span>
+          {mark(id)}
+          <span className="grow model-text"><span className="truncate">{providerName(id, cat.providers[id])}</span>{key && <span className="sub truncate">{key}</span>}</span>
+          <span className="provider-count" title={t("composer.model.count", { n: num(choices.length) })} aria-label={t("composer.model.count", { n: num(choices.length) })}>{num(choices.length)}</span>
           <Icon name="chevron" size={16} />
         </button>;
       })}
       {p.browsing && !p.freeGroup && <button type="button" role="menuitem" className="model-row provider-row" onClick={() => { p.setFreeGroup(true); p.setQuery(""); }}>
+        <span className="provider-mark provider-free" aria-hidden="true"><Icon name="model" size={18} /></span>
         <span className="grow model-text"><span>{t("composer.model.free")}</span><span className="sub">{t("composer.model.free.sub")}</span></span><Icon name="chevron" size={16} />
       </button>}
       {p.browsing && p.freeGroup && p.providers.length === 0 && <div className="model-row-note sub"><a href={pathFor("settings", "models", { tab: "free" })}>{t("free.chat.add")}</a></div>}

@@ -43,9 +43,9 @@
   --fs-12: 12px;   /* meta: chips, group labels, aside values, table cells, crumbs */
   --fs-13: 13px;   /* ui: a row's second line, buttons, panel tabs, the composer's footer */
   --fs-14: 14px;   /* ui-lg: row titles, nav items, headers, step rows, the user's card */
-  --fs-15: 15px;   /* prose on a desktop */
-  --fs-16: 16px;   /* prose on a phone, and any text field on a touch screen (or Safari zooms) */
-  --fs-17: 17px;   /* phone: the top bar's title, a sheet's title (see the phone block below) */
+  --fs-15: 15px;   /* prose on a desktop; a phone's row titles and body */
+  --fs-16: 16px;   /* prose on a phone, its top bar's title, and any text field on a touch screen (or Safari zooms) */
+  --fs-17: 17px;   /* phone: a sheet's title and the home's greeting (see the phone block below) */
   --fs-18: 18px;   /* a sheet's title, the smallest heading in an answer */
   --fs-20: 20px;   /* the middle heading in an answer */
   --fs-22: 22px;   /* the top heading in an answer */
@@ -87,15 +87,17 @@
   --composer-h: 46px;
   /* The phone's own geometry. Declared here with the rest so every size has one home, and used only
      by rules inside the phone media query (ui/phone.css): a desktop never reads them. Measured from
-     the two chat apps the operator holds on the same phone every day. */
-  --top-h: 56px;          /* the top bar: one row of 44 px glyph targets, no background, no rule */
-  --list-row-h: 60px;     /* a list row with a title and a meta line */
-  --list-row-h-1: 52px;   /* a list row with a title only, and a sheet's action row */
-  --nav-row-h: 48px;      /* a destination in the drawer */
-  --set-row-h: 56px;      /* a row of a grouped settings card */
-  --tabbar-h: 56px;       /* the project's tab bar, above the home indicator */
-  --ctl-round: 36px;      /* the composer's filled circles: +, mic, send */
-  --chip-h: 32px;         /* a chip's visible height inside its 44 px hit area */
+     the two chat apps the operator holds on the same phone every day, and taken down a step after the
+     operator measured the first cut as too large next to them on that phone: their single-line rows
+     are 40 to 48 px, ours were 52, and every two-line row of ours was 60. */
+  --top-h: 52px;          /* the top bar: one row of 44 px glyph targets, no background, no rule */
+  --list-row-h: 54px;     /* a list row with a title and a meta line */
+  --list-row-h-1: 44px;   /* a list row with a title only, and a sheet's action row */
+  --nav-row-h: 44px;      /* a destination in the drawer */
+  --set-row-h: 48px;      /* a row of a grouped settings card */
+  --tabbar-h: 52px;       /* the project's tab bar, above the home indicator */
+  --ctl-round: 34px;      /* the composer's filled circles: +, mic, send */
+  --chip-h: 28px;         /* a chip's visible height inside its 44 px hit area */
   --drawer-w: min(86vw, 336px);
   --gutter: 16px;         /* a phone page's side padding: both reference apps measure 16 */
   --radius-xl: 20px;      /* a sheet's top corners, a grouped card's outer corners */
@@ -156,18 +158,23 @@
   --staff-blue: #2f6fe0; --staff-green: #1e9e56; --staff-amber: #b7791f; --staff-violet: #9b4dca;
   --staff-rose: #d0456f; --staff-teal: #0e9f8e; --staff-orange: #d46a1c; --staff-slate: #5b667a;
 }
-/* The phone's scale: six steps, 12 / 13 / 15 / 16 / 17 / 22, and nothing else below 1024 px. The
-   desktop steps that are not on it are moved to the nearest one here, once, so a rule written for the
-   desktop (14 px titles, an 11 px time, an 18 px heading) lands on the phone's scale without a phone
-   copy of itself: 11 becomes 12, 14 becomes 15, 18 and 20 become 17. density.test.ts holds this block
-   to the six steps and check_density.py measures the drawn page against them.
+/* The phone's scale: six steps, 12 / 13 / 14 / 15 / 16 / 17, and nothing else below 1024 px. It was
+   12 / 13 / 15 / 16 / 17 / 22 until the operator held it beside Claude and ChatGPT on the same phone
+   and found it a size too large: their row titles are 15 to 16 px with 12 to 13 px meta and a 16 to 17
+   px bar title, so ours came down one step (rows 16 to 15, secondary 15 to 14, bar 17 to 16, sheet
+   titles and the greeting 22 to 17). Text fields stay at 16, or Safari zooms on focus. The desktop
+   steps that are not on the scale are moved to the nearest one here, once, so a rule written for the
+   desktop (an 11 px time, an 18 px heading) lands on it without a phone copy of itself: 11 becomes
+   12, and 18, 20 and 22 become 17, so an answer's headings sit one step over its 16 px prose; the
+   desktop's 14 is on the scale now and stays. density.test.ts holds this block to the six steps and
+   check_density.py measures the drawn page against them.
    The surfaces follow the phone design too: one page colour from the status bar to the home indicator,
    a raised surface for the composer, sheets, the drawer and grouped cards, and a filled one for
    controls. The desktop keeps its own four greys. */
 @media (max-width: 1023px) {
   :root {
-    --fs-11: 12px; --fs-14: 15px; --fs-18: 17px; --fs-20: 17px; --fs-mono: 13px; --fs-prose: var(--fs-16);
-    --head-h: var(--top-h); --page-pad: var(--gutter); --composer-h: 48px;
+    --fs-11: 12px; --fs-18: 17px; --fs-20: 17px; --fs-22: 17px; --fs-mono: 13px; --fs-prose: var(--fs-16);
+    --head-h: var(--top-h); --page-pad: var(--gutter); --composer-h: 44px;
     --radius-md: 16px; --radius-lg: 20px;
     --bg: #131313; --surface-1: #1e1e1e; --surface-2: #2a2a2a; --surface-3: #333333; --surface-4: #3a3a3a;
     --line: rgba(255, 255, 255, 0.07); --line-strong: rgba(255, 255, 255, 0.10);

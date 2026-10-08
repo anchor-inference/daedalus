@@ -26,10 +26,12 @@ def main() -> int:
             trigger.click()
             providers = page.locator(".provider-row")
             expect(providers).to_have_count(4)
-            # A phone's sheet names providers in words with their key state, and leads with the models
-            # of the provider in use, the chosen one marked; a desktop's list has marks and no models.
+            # Every provider row leads with its mark on both. A phone's sheet also has one for Free and
+            # draws an endpoint without a brand mark of its own as a letter tile; it leads with the
+            # models of the provider in use, the chosen one marked, where a desktop's list has none.
             phone = width < 1024
-            expect(page.locator(".provider-mark svg")).to_have_count(0 if phone else 3)
+            expect(page.locator(".provider-row .provider-mark")).to_have_count(4 if phone else 3)
+            expect(page.locator('.provider-row[data-provider="local"] .provider-letter')).to_have_count(1 if phone else 0)
             expect(page.locator('.provider-row[data-provider="claude"] .provider-count')).to_have_text("2")
             page.locator(".provider-row", has_text="Free").click()
             expect(providers).to_have_count(1)

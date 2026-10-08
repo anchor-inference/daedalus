@@ -345,8 +345,9 @@ def phone(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     expect(page.locator(".sheet .staff-panel")).to_have_count(0, timeout=3000)
     buttons = page.locator(".staff-request .ph-ask .ph-btn")
     expect(buttons).to_have_count(4, timeout=5000)
-    heights = [b["height"] for b in (buttons.nth(i).bounding_box() for i in range(buttons.count())) if b]
-    check.that(min(heights) >= 44, f"{lang} phone: the request's buttons are {heights} px high")
+    # What the finger reaches: the button's box and the ::after that extends a 40 px button to 44.
+    heights = [round(buttons.nth(i).evaluate("el => { const a = getComputedStyle(el, '::after'); const r = el.getBoundingClientRect().height; return a.content === 'none' ? r : r - (parseFloat(a.top) || 0) - (parseFloat(a.bottom) || 0); }")) for i in range(buttons.count())]
+    check.that(min(heights) >= 44, f"{lang} phone: the request's buttons reach {heights} px")
     request = page.locator(".staff-request").bounding_box()
     composer = page.locator(".staff-compose").bounding_box()
     check.that(bool(request and composer and request["y"] + request["height"] <= composer["y"] + 0.5), f"{lang} phone: the request is not above the composer")

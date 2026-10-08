@@ -255,10 +255,11 @@ def run_one(page: Page, lang: str, width: int) -> None:
     page.wait_for_url("**/app/inbox**")
     expect(page.locator("nav.project-tabs")).to_have_count(0)
     expect(page.locator("nav.tabbar")).to_have_count(0)
-    # The project's bar is the redesign's: 56 px tall above the home indicator.
+    # The project's bar is the redesign's: 52 px tall above the home indicator (56 until the phone
+    # came down a step).
     page.goto(f"{BASE}/project/{PID}/team?token=t&lang={lang}")
     slot = page.locator("nav.project-tabs > a").first.bounding_box()
-    assert slot and round(slot["height"]) == 56, f"{where}: a project tab is {slot}"
+    assert slot and round(slot["height"]) == 52, f"{where}: a project tab is {slot}"
 
 
 def main() -> int:
