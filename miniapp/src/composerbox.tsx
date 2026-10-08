@@ -472,7 +472,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           {props.queued.map((s) => (
             <div key={s.id} className="steer" data-steer={s.id} data-kind={s.kind}>
               <Icon name="forward" size={14} />
-              <span className="steer-text clamp-2">{s.text}</span>
+              <span className="steer-text clamp-2">
+                {s.files.length > 0 && <span className="steer-files" title={t("composer.queued.files", { names: s.files.join(", ") })}><Icon name="attach" size={12} />{s.files.join(", ")}</span>}
+                {s.text}
+              </span>
               <span className="steer-hint sub">{t(s.kind === "follow_up" ? "composer.queued.hint" : "composer.steered.hint")}</span>
               {s.kind === "follow_up" && props.onSteer && status === "running" && (
                 <button type="button" className="btn small steer-now" onClick={() => props.onSteer!(s)} title={t("composer.steer.now.title")}>{t("composer.steer.now")}</button>

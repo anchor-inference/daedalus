@@ -14,6 +14,25 @@ from typing import Any
 from protocore.contracts.blob import BlobNotFoundError, IBlobStore
 from protocore.contracts.types import BlobMetadata
 
+WINDOWS = os.name == "nt"
+
+
+def sync_directory(directory: Path) -> None:
+    """Make a rename into ``directory`` durable, where the platform lets a directory be synced.
+
+    Windows cannot open a directory as a file at all: ``os.open`` on one raises ``PermissionError``,
+    so on a native Windows installation every blob write failed after its data was already in place,
+    and an image pasted into the composer answered 500. NTFS journals the rename itself, so there is
+    nothing to sync there and the step is skipped.
+    """
+    if WINDOWS:
+        return
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
 
 def _atomic_write(path: Path, data: bytes) -> None:
     descriptor, temporary = tempfile.mkstemp(prefix=".blob-", dir=path.parent)
@@ -23,11 +42,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        sync_directory(path.parent)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import os
 from types import SimpleNamespace
 from typing import Any
 
@@ -499,4 +501,108 @@ async def test_a_follow_up_the_run_is_placing_cannot_be_steered(settings: Settin
     engine._follow_up_queue = []
     assert not await manager.steer_queued(sid, item_id)
     assert (await manager.live.load(sid))["steer"] == []
+    await manager.close()
+
+
+# A one-pixel PNG: enough for the host to keep it as an image and hand it to the model.
+PIXEL = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082"
+)
+# The name a Windows clipboard gives a pasted screenshot, braces and all.
+PASTED = "{8928C48B-9635-4A10-B7D6-0123456789AB}.png"
+
+
+def _behave_like_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Open a directory the way native Windows does: it cannot be opened as a file at all."""
+    from daedalus.stores import blobs
+
+    real_open = os.open
+
+    def windows_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if os.path.isdir(path):
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(blobs, "WINDOWS", True, raising=False)
+    monkeypatch.setattr(blobs.os, "open", windows_open)
+
+
+def _images_the_model_saw(provider: ScriptedProvider) -> list[str]:
+    return [
+        str(ref["ref"])
+        for message in provider.requests[-1].messages
+        for ref in (message.metadata or {}).get("image_refs") or []
+    ]
+
+
+async def test_a_blob_is_kept_on_a_platform_that_cannot_open_a_directory(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from daedalus.stores.blobs import FileBlobStore
+
+    _behave_like_windows(monkeypatch)
+    meta = await FileBlobStore(tmp_path).put("t", PIXEL, content_type="image/png")
+    assert await FileBlobStore(tmp_path).get("t", meta.ref) == PIXEL
+
+
+@pytest.mark.parametrize("delivery", ["follow_up", "steer_now"])
+async def test_a_screenshot_sent_while_the_agent_works_waits_with_its_message_and_reaches_the_model(
+    settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch, delivery: str,
+) -> None:
+    # Pasted on a native Windows installation during a run, this answered 500: the image's blob
+    # write tried to sync its directory. Once that passed, the queued item still carried only words,
+    # so the model was told a path and never shown the picture.
+    _behave_like_windows(monkeypatch)
+    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 2"}}, {"text": "done"}, {"text": "looked"}])
+    manager = await _manager(settings, db, provider)
+    state = await manager.create_session("screenshot during a run")
+    sid = state.session.id
+    async with _client(settings, db, manager) as client:
+        await manager.submit(sid, "start")
+        await asyncio.sleep(0.3)
+        assert state.running
+        sent = await client.post(
+            f"/api/sessions/{sid}/upload",
+            data={"text": "", "client_message_id": "shot-1", "follow_up": "true", "expected_running": "true"},
+            files={"files": (PASTED, PIXEL, "image/png")}, headers=H,
+        )
+        assert sent.status_code == 200, sent.text
+        assert sent.json()["receipt"]["status"] == "queued"
+        assert sent.json()["files"] == [PASTED]
+        assert (state.workspace / "inbox" / PASTED).read_bytes() == PIXEL
+
+        cards = (await client.get(f"/api/sessions/{sid}/steer", headers=H)).json()
+        assert [(card["id"], card["kind"], card["text"], card["files"]) for card in cards] == [("shot-1", "follow_up", "", [PASTED])]
+        if delivery == "steer_now":
+            steered = await client.post(f"/api/sessions/{sid}/steer/shot-1", headers=H)
+            assert steered.status_code == 200
+            assert (await client.get(f"/api/sessions/{sid}/steer", headers=H)).json()[0]["files"] == [PASTED]
+    await _await_run(manager)
+    # One run either way: a steer is placed before the call after the tool, a follow-up at the end of
+    # the turn, which the core answers without starting another run.
+    assert len(provider.requests) == (2 if delivery == "steer_now" else 3)
+    digest = hashlib.sha256(PIXEL).hexdigest()
+    assert digest in _images_the_model_saw(provider)
+    texts = [b.text for m in provider.requests[-1].messages for b in m.content_blocks if isinstance(b, TextBlock)]
+    assert any(PASTED in text for text in texts)
+    await manager.close()
+
+
+async def test_a_queued_message_with_words_and_a_file_shows_the_words_and_names_the_file(settings: Settings, db: Database) -> None:
+    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 2"}}, {"text": "done"}, {"text": "after"}])
+    manager = await _manager(settings, db, provider)
+    state = await manager.create_session("words and a file")
+    sid = state.session.id
+    async with _client(settings, db, manager) as client:
+        await manager.submit(sid, "start")
+        await asyncio.sleep(0.3)
+        sent = await client.post(
+            f"/api/sessions/{sid}/upload",
+            data={"text": "look at this window", "client_message_id": "shot-2", "follow_up": "true", "expected_running": "true"},
+            # A client that names the file by its whole Windows path still gives it its own name.
+            files={"files": ("C:\\Users\\someone\\AppData\\Local\\Temp\\" + PASTED, PIXEL, "image/png")}, headers=H,
+        )
+        assert sent.status_code == 200, sent.text
+        card = (await client.get(f"/api/sessions/{sid}/steer", headers=H)).json()[0]
+        assert card["text"] == "look at this window" and card["files"] == [PASTED]
+        assert [path.name for path in (state.workspace / "inbox").iterdir()] == [PASTED]
     await manager.close()

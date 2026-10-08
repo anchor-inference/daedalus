@@ -199,6 +199,8 @@ class Attachment:
     name: str | None = None
     content_sha256: str | None = None
     stored_name: str | None = None
+    image_ref: str | None = None
+    """The blob an image was kept as, once ingested: what the model is shown alongside the words."""
 
 
 def _file_sha256(path: Path) -> str:
@@ -462,9 +464,15 @@ def _steer_cards(items: Sequence[tuple[str, dict[str, Any]]]) -> list[dict[str, 
         text = str(item.get("text") or "")
         if len(cards) >= STEER_CARD_LIMIT:
             break
+        files = [str(entry.get("name") or "") for entry in item.get("attachments") or [] if isinstance(entry, dict)]
+        if files and "caption" in item:
+            text = str(item.get("caption") or "")
         card: dict[str, Any] = {"id": str(item.get("id") or ""), "kind": kind, "text": text[:STEER_CARD_CHARS], "queued_at": item.get("queued_at")}
         if len(text) > STEER_CARD_CHARS:
             card["truncated"] = True
+        if files:
+            # The card says the message carries files, so the operator does not send the screenshot twice.
+            card["files"] = files
         cards.append(card)
     return cards
 
@@ -2827,7 +2835,7 @@ class SessionManager:
                     if client_message_id:
                         await self.live.consume(session_id, client_message_id, run_id=run_id, step_id="answer", message_seq=None)
                     return run_id
-                queued = {**new_queued_prompt("follow_up", body).to_dict(), "origin": origin, "operator_words": None if operator_words is None else list(operator_words), "queued_at": datetime.now(UTC).isoformat()}
+                queued = {**new_queued_prompt("follow_up", body, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": None if operator_words is None else list(operator_words), "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments)}
                 if client_message_id:
                     queued["id"] = client_message_id
                     receipt, created = await self.live.accept(
@@ -2843,7 +2851,7 @@ class SessionManager:
                 else:
                     await self.live.enqueue(session_id, "follow_up", queued)
                 await self.sessions.append_transcript(
-                    session_id, [Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], metadata={"daedalus.delivery": "follow_up", "daedalus.origin": origin, **words, "daedalus.queued": True, **({"daedalus.client_message_id": client_message_id} if client_message_id else {})})]
+                    session_id, [Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], metadata={"daedalus.delivery": "follow_up", "daedalus.origin": origin, **words, "daedalus.queued": True, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **_image_refs_metadata(image_refs)})]
                 )
                 await self.steer_changed(session_id, reason="queued")
                 return state.run_id or ""
@@ -2886,7 +2894,11 @@ class SessionManager:
                 # The operator's words are the message as written, never the host's note placed before it:
                 # compaction quotes them verbatim, and the note would have been quoted as the operator's.
                 said = list(operator_words) if operator_words is not None else ([body] if placed != body else None)
-                queued = {**new_queued_prompt(kind, placed).to_dict(), "origin": origin, "operator_words": said, "queued_at": datetime.now(UTC).isoformat()}
+                # The files travel in the item itself, as the core's own ``attachments`` field, so they
+                # survive every move the queue makes: a follow-up turned into a steer, a round that hands
+                # back what it did not place, the drain that opens the next run. Without them only the
+                # words reached the model, and a pasted screenshot arrived as a path it never looked at.
+                queued = {**new_queued_prompt(kind, placed, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": said, "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments)}
                 if client_message_id:
                     queued["id"] = client_message_id
                     receipt, created = await self.live.accept(
@@ -2904,7 +2916,7 @@ class SessionManager:
                 # The core folds queued prompts into the model's history later (and compaction may
                 # rewrite them); the transcript keeps the operator's words as sent.
                 await self.sessions.append_transcript(
-                    session_id, [Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], metadata={"daedalus.delivery": kind, "daedalus.origin": origin, **words, "daedalus.queued": True, **({"daedalus.client_message_id": client_message_id} if client_message_id else {})})]
+                    session_id, [Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], metadata={"daedalus.delivery": kind, "daedalus.origin": origin, **words, "daedalus.queued": True, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **_image_refs_metadata(image_refs)})]
                 )
                 await self.steer_changed(session_id, reason="queued")
                 return state.run_id or ""
@@ -2963,7 +2975,7 @@ class SessionManager:
                 message = Message(
                     role=MessageRole.user,
                     content_blocks=[TextBlock(text=body)],
-                    metadata={"daedalus.origin": origin, **words, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **({"image_refs": [{"ref": ref, "mime": mime} for ref, mime in image_refs]} if image_refs else {})},
+                    metadata={"daedalus.origin": origin, **words, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **_image_refs_metadata(image_refs)},
                 )
                 if _provider_resume is not None:
                     message.metadata["daedalus.provider_resume"] = {
@@ -3033,6 +3045,7 @@ class SessionManager:
             lines.append(f"- {stored.line()}")
             if stored.mime.startswith("image/"):
                 meta = await self.blobs.put(TENANT, await self.files.read(stored), content_type=stored.mime)
+                attachment.image_ref = meta.ref
                 image_refs.append((meta.ref, stored.mime))
         how = (
             "Read one with Files(op='read', file=…); pass them to a project with Delegate(files=[…])."
@@ -3086,6 +3099,7 @@ class SessionManager:
             lines.append(f"- {shown} ({attachment.mime_type}, {target.stat().st_size} bytes)")
             if attachment.mime_type.startswith("image/"):
                 meta = await self.blobs.put(TENANT, target.read_bytes(), content_type=attachment.mime_type)
+                attachment.image_ref = meta.ref
                 image_refs.append((meta.ref, attachment.mime_type))
         body = (text.strip() + "\n\n" if text.strip() else "") + "Attached files:\n" + "\n".join(lines)
         return body, image_refs
@@ -4224,7 +4238,7 @@ class SessionManager:
         origins = {str(item.get("origin") or "operator") for item in items}
         # The transcript already holds each item as it was sent; this copy only opens the run and stays hidden.
         origin = "operator" if "operator" in origins else next(iter(origins))
-        message = Message(role=MessageRole.user, content_blocks=[TextBlock(text="\n\n".join(texts))], metadata={"daedalus.origin": origin, "daedalus.delivery": "drained", **_merged_words(items)})
+        message = Message(role=MessageRole.user, content_blocks=[TextBlock(text="\n\n".join(texts))], metadata={"daedalus.origin": origin, "daedalus.delivery": "drained", **_merged_words(items), **_image_refs_metadata(_queued_image_refs(items))})
         await self.sessions.append_transcript(state.session.id, [message])
         seqs = await self.sessions.transcript_seqs(state.session.id, [self.sessions.transcript_key(message)])
         await self.checkpoint(state, kind="before", seq=seqs[0] if seqs else None)
@@ -4366,6 +4380,9 @@ class SessionManager:
                 message.metadata.update({"daedalus.origin": origin, "daedalus.delivery": event.payload.get("kind"), "daedalus.run_id": event.run_id})
                 if items:
                     message.metadata.update(_merged_words(items))
+                    # The core joins the placed items into one text block and leaves their files
+                    # behind; the images go back on here, before the model call this event precedes.
+                    message.metadata.update(_image_refs_metadata(_queued_image_refs(items)))
                 else:
                     # A placed prompt the queue no longer lists: its words are the operator's only
                     # when the operator sent it, and the text as placed is the best copy there is.
@@ -5788,6 +5805,42 @@ def operator_words_metadata(origin: str, text: str, passages: Sequence[str] | No
     else:
         words = [passage.strip() for passage in passages if passage and passage.strip()]
     return {OPERATOR_WORDS_METADATA_KEY: words or False}
+
+
+def _queued_attachments(attachments: Sequence[Attachment]) -> list[dict[str, Any]]:
+    """The files of a message that waits in a queue, as the item carries them: each kept file's name
+    and type, and the blob an image was kept as. A file the store refused was never kept and is not listed."""
+    out: list[dict[str, Any]] = []
+    for item in attachments:
+        if not item.stored_name:
+            continue
+        entry: dict[str, Any] = {"name": item.stored_name, "mime_type": item.mime_type}
+        if item.image_ref:
+            entry["image_ref"] = item.image_ref
+        out.append(entry)
+    return out
+
+
+def _queued_caption(text: str, attachments: Sequence[Attachment]) -> dict[str, Any]:
+    """What a queued card shows for a message with files: the words as typed, not the list of paths
+    the model is given. The upload's stand-in sentence for "no words" is shown as nothing."""
+    if not attachments:
+        return {}
+    return {"caption": "" if text in {"File attached.", "Files attached."} else text.strip()}
+
+
+def _queued_image_refs(items: Sequence[dict[str, Any]]) -> list[tuple[str, str]]:
+    refs: list[tuple[str, str]] = []
+    for item in items:
+        for entry in item.get("attachments") or []:
+            if isinstance(entry, dict) and entry.get("image_ref"):
+                refs.append((str(entry["image_ref"]), str(entry.get("mime_type") or "image/png")))
+    return refs
+
+
+def _image_refs_metadata(image_refs: Sequence[tuple[str, str]]) -> dict[str, Any]:
+    """The mark that makes the wire send a user message's images with it (see ``providers.wire``)."""
+    return {"image_refs": [{"ref": ref, "mime": mime} for ref, mime in image_refs]} if image_refs else {}
 
 
 def _merged_words(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
