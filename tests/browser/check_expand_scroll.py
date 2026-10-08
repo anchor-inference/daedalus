@@ -134,8 +134,17 @@ def up(page: Page, how: str) -> None:
 
 
 def expand(page: Page, where: str, *, last: bool = False) -> list[str]:
-    before = page.evaluate(MEASURE)
     picked = page.evaluate(PICK, last)
+    # On a phone the folded lines can stand further apart than the band PICK reads, so where the
+    # scroll came to rest decided whether one was in it, and the check failed one run in a few. A
+    # nudge up brings the next line in; what is checked is the opening, not where the scroll landed.
+    for _ in range(0 if last else 4):
+        if picked:
+            break
+        page.evaluate("(() => { document.querySelector('.chat-scroll').scrollTop -= 200; })()")
+        page.wait_for_timeout(400)
+        picked = page.evaluate(PICK, last)
+    before = page.evaluate(MEASURE)
     if not picked:
         return [f"{where}: no folded line of work on the screen to open"]
     page.locator("[data-picked]").click()
