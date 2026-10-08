@@ -22,6 +22,18 @@ def main() -> int:
             trigger = page.locator(".composer .model-select")
             reveal_composer(page)
             trigger.click()
+            if width < 1024:
+                # A phone's model sheet holds effort as one row of five choices, picked with a tap.
+                choices = page.locator(".ph-model-effort button[role='radio']")
+                expect(choices).to_have_count(5)
+                before = len(composer.posts("/model"))
+                choices.last.click()
+                expect(page.locator(".model-list")).to_have_count(0)
+                assert composer.reached(page, "/model", before, "phone effort selection", [])
+                assert composer.posts("/model")[-1][2] == {"thinking": True, "reasoning_effort": "xhigh"}
+                context.close()
+                print(f"unified effort {width}: ok")
+                continue
             entry = page.locator(".effort-entry")
             entry.wait_for()
             entry.focus()

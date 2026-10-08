@@ -77,11 +77,15 @@ def run() -> None:
         assert len(sent) == 2 and sent[1]["id"] != sent[0]["id"]
         expect(page.locator(".timeline .msg.user").filter(has_text="Attached files")).to_have_count(1)
         page.set_viewport_size({"width": 390, "height": 844})
-        expect(page.get_by_role("link", name="Session diagrams (1)")).to_be_in_viewport()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         if page.get_by_role("dialog", name="Project files panel").is_visible():
             page.keyboard.press("Escape")
-        page.get_by_role("link", name="Session diagrams (1)").click()
+        # A phone keeps the session's diagrams as a counted tile of the bar's ⋮ sheet.
+        page.locator(".ph-chat-top button[aria-haspopup='menu']").first.click()
+        tile = page.locator(".ph-session-menu [data-tile='diagrams']")
+        expect(tile).to_be_in_viewport()
+        expect(tile).to_contain_text("1")
+        tile.click()
         expect(page.locator(".diagrams-screen")).to_contain_text("Flow")
         browser.close()
     assert not shots.UNHANDLED.report()

@@ -176,7 +176,7 @@ def run_one(page: Page, lang: str, width: int) -> None:
     expect(page.locator(".chat.in-project")).to_be_visible()
     expect(page.locator("nav.project-tabs")).to_have_count(0)
     fits(page, f"{where} member")
-    page.locator(".chat-head .iconbtn").first.tap()
+    page.locator(".chat-head .iconbtn, .chat-head .ph-ib").first.tap()
     page.wait_for_url(f"**/project/{PID}/team**")
 
     # The board is a tab of its own: the list under chips.

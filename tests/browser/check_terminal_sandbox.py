@@ -25,7 +25,7 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
-from screenshots import S1, UNHANDLED, stub  # noqa: E402
+from screenshots import S1, UNHANDLED, phone_tool, stub  # noqa: E402
 from terminal_stub import DEBUG, ENVS, TerminalStub, dock_state, open_session, stub_requests, wait_live  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -192,7 +192,7 @@ def phone(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
     context = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="dark", is_mobile=True, has_touch=True)
     context.add_init_script(DEBUG)
     page = open_session(context, term, stub, BASE, S1)
-    page.locator(".chat-head .term-button").click()
+    phone_tool(page, "terminal")
     page.wait_for_selector(".term-sheet .term-sheet-row", timeout=5000)
     rows = page.locator(".term-sheet .term-sheet-row")
     marks = [rows.nth(i).locator(".term-shield").count() for i in range(rows.count())]

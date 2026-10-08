@@ -101,9 +101,7 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     expect(model.locator(".model-effort")).to_contain_text(words["high"])
     if phone:
         page.locator(".ph-top .ph-top-tb").click()
-        page.locator(".effort-entry").click()
-        page.locator(".sheet .effort-options input[value='low']").click()
-        page.keyboard.press("Escape")
+        page.locator(".sheet .ph-model-effort button[role='radio']").nth(1).click()
         page.wait_for_timeout(200)
     else:
         model.click()

@@ -1000,10 +1000,15 @@ def open_panel_preview(page: Page) -> None:
     page.wait_for_selector(".panel-body.tab-preview .preview-doc", timeout=5000)
 
 
+def phone_tool(page: Page, tile: str) -> None:
+    """On a phone the session's tools are tiles in the ⋮ sheet of its bar: open it and take one."""
+    page.locator(".ph-chat-top button[aria-haspopup='menu']").first.click()
+    page.locator(f".ph-session-menu [data-tile='{tile}']").click()
+
+
 def open_phone_panel(page: Page) -> None:
     """On a phone the tabs open as a full sheet from the session's action menu."""
-    page.get_by_role("button", name=word("actions"), exact=True).click()
-    page.get_by_role("menuitem", name=word("details"), exact=True).click()
+    phone_tool(page, "details")
     page.wait_for_selector(".panel-sheet .panel-tab", timeout=5000)
     page.locator(".panel-sheet .panel-tab[data-tab='files']").click()
     page.wait_for_selector(".panel-sheet .filerow", timeout=5000)
@@ -1018,8 +1023,7 @@ def open_tool_groups(page: Page) -> None:
 
 
 def open_phone_tool_groups(page: Page) -> None:
-    page.get_by_role("button", name=word("actions"), exact=True).click()
-    page.get_by_role("menuitem", name=word("details"), exact=True).click()
+    phone_tool(page, "details")
     page.wait_for_selector(".panel-sheet .stgroups .stgroup", timeout=5000)
     page.locator(".panel-sheet .stgroups").first.scroll_into_view_if_needed()
     page.wait_for_timeout(300)
@@ -1405,7 +1409,7 @@ def dock_shots(context, prefix: str = "") -> None:  # type: ignore[no-untyped-de
         # A phone has no dock: the header's list opens a terminal over the whole screen.
         page.goto(f"{BASE}/agents/{S1}?token=t&scheme=dark&lang={LANG}")
         page.wait_for_selector(".chat-scroll .timeline", timeout=15000)
-        page.locator(".chat-head .term-button").click()
+        phone_tool(page, "terminal")
         page.locator(".term-sheet .term-sheet-row").first.click()
         page.wait_for_selector(".term-full .term-view[data-state='live']", timeout=15000)
         page.wait_for_timeout(900)
@@ -1732,7 +1736,7 @@ def phone_terminal_shots(context) -> None:  # type: ignore[no-untyped-def]
     page.add_init_script("try { localStorage.setItem('daedalus.term.renderer', 'dom'); } catch (e) {}")
     page.goto(f"{BASE}/agents/{S1}?token=t&scheme=dark&lang={LANG}")
     page.wait_for_selector(".chat-scroll .timeline", timeout=15000)
-    page.locator(".chat-head .term-button").click()
+    phone_tool(page, "terminal")
     page.locator(".term-sheet .term-sheet-row").first.click()
     page.wait_for_selector(".term-phone .term-view[data-state='live']", timeout=15000)
     # The soft keyboard takes the lower 336 px: the picture is what stays visible above it.
@@ -1979,7 +1983,9 @@ def run_browser() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM)
-        scenes = render_scenes(browser)
+        # Also at the shape a phone's takeover asks the page to take (its screen under the bar and
+        # the keys), so that picture shows the page at the phone's width as the real one does.
+        scenes = render_scenes(browser, sizes=((PHONE["width"], PHONE["height"] - 220),))
         bs = BrowserStub(scenes)
         bs.add("g1", scene="shop", owner_id=S1, acting=True)
         bs.act("g1", "click", "size", name="5 kg", element="the 5 kg size option")
@@ -2067,8 +2073,7 @@ def run_browser() -> int:
         page = page_for(phone)
         page.goto(f"{BASE}/agents/{S1}?token=t&scheme=dark&lang={LANG}")
         page.wait_for_selector(".browser-headbtn", timeout=15000)
-        wait_frames(page, ".browser-headbtn", 1)
-        page.wait_for_timeout(500)
+        page.wait_for_timeout(800)
         page.screenshot(path=str(OUT / "phone-browser-head.png"))
         print("wrote phone-browser-head")
         page.locator(".browser-headbtn").tap()
@@ -2080,7 +2085,8 @@ def run_browser() -> int:
         page.locator(".panel-sheet .bp-control.take").tap()
         page.wait_for_selector(".bp-drive .bv.driving", timeout=5000)
         wait_frames(page, ".bp-drive", 1)
-        page.wait_for_timeout(700)
+        # The page takes the phone's shape a moment after the screen settles.
+        page.wait_for_timeout(1200)
         page.screenshot(path=str(OUT / "phone-browser-takeover.png"))
         print("wrote phone-browser-takeover")
         phone.close()

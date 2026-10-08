@@ -254,7 +254,7 @@ def phone(page: Page, lang: str) -> None:
     serve(page, focus)
     page.goto(f"{BASE}/orchestration/project/{PID}?token=t&lang={lang}")
     button = page.locator(".chat-head .questions-headbtn")
-    expect(button.locator(".count")).to_have_text("6")
+    expect(button.locator(".ph-badge")).to_have_text("6")
     expect(page.locator(".timeline > .questions-line")).to_contain_text(words["line"])
     fits(page, f"{lang} 390 chat")
     button.tap()

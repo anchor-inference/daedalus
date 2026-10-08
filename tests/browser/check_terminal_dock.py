@@ -190,10 +190,12 @@ def phone(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
     page.wait_for_timeout(500)
     if page.locator(".term-dock").count():
         problems.append("a phone got the desktop dock")
-    button = page.locator(".chat-head .term-button")
-    if not button.count() or button.get_attribute("aria-pressed") is not None:
-        problems.append("the phone's header button is missing or pretends to be a toggle")
-    button.click()
+    # The phone's terminals are a tile of the bar's ⋮ sheet, counted, and open their list.
+    page.locator(".ph-chat-top button[aria-haspopup='menu']").first.click()
+    tile = page.locator(".ph-session-menu [data-tile='terminal']")
+    if not tile.count() or tile.get_attribute("aria-pressed") is not None:
+        problems.append("the phone's terminal tile is missing or pretends to be a toggle")
+    tile.click()
     page.wait_for_selector(".term-sheet .term-sheet-row", timeout=5000)
     page.locator(".term-sheet .term-sheet-row").first.click()
     page.wait_for_selector(".term-full .term-view[data-terminal-view='t1aaaaaaaaaa']", timeout=5000)

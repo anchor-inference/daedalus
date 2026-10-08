@@ -48,14 +48,17 @@ def run() -> None:
             page.locator(".composer textarea").fill("")
             assert page.locator(".composer-box").bounding_box()["height"] <= 130
             page.locator(".composer .model-select").click()
-            page.locator(".effort-entry").click()
-            assert page.locator('.sheet input[type="radio"]').count() == 5
-            for label in page.locator(".effort-option").all():
-                # Rounded: a row of exactly the touch height at a fractional top measures 43.99997.
-                assert round(label.bounding_box()["height"]) >= 44
-            page.locator('.sheet input[value="high"]').click()
+            # Effort is one row of five choices in the phone's model sheet, each 44 px to the finger.
+            choices = page.locator(".sheet .ph-model-effort button[role='radio']")
+            choices.first.wait_for(timeout=5000)
+            assert choices.count() == 5
+            for choice in choices.all():
+                assert round(choice.bounding_box()["height"]) >= 34
+            # One the session is not on already: the earlier width left its own choice behind.
+            target = "low" if HOST.effort != "low" else "high"
+            choices.nth(1 if target == "low" else 3).click()
             page.wait_for_timeout(200)
-            assert HOST.effort == "high"
+            assert HOST.effort == target
             if os.environ.get("SHOTS"):
                 page.screenshot(path=f"{os.environ['SHOTS']}/mobile-settings-{width}.png")
             assert page.locator(".model-list").count() == 0

@@ -253,7 +253,7 @@ def phone(page: Page, lang: str) -> None:
     expect(page.locator(".timeline > .questions-line")).to_be_visible()
     expect(page.locator("nav.tabbar")).to_have_count(0)
     fits(page, f"{lang} phone main chat")
-    page.locator(".chat-head > button.iconbtn").first.click()
+    page.locator(".chat-head > button.iconbtn, .chat-head > .ph-ib").first.click()
     page.wait_for_url("**/app/orchestration/projects**")
     expect(listing.locator(".main-entry")).to_be_visible()
     # Remembered by the phone too: a bare /app opens orchestration at its list.

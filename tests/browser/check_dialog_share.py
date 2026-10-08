@@ -90,7 +90,13 @@ def install(page: Page, transcript: dict | None, status: int = 200) -> None:
 
 def open_share(page: Page, words: dict[str, str]) -> None:
     page.get_by_role("button", name=words["actions"], exact=True).click()
-    page.get_by_role("menuitem", name=words["share"], exact=True).click()
+    # A phone's actions are rows of the bar's ⋮ sheet; a desktop's, a menu under its header button.
+    page.wait_for_selector(".ph-session-menu, [role='menu']", timeout=5000)
+    sheet = page.locator(".ph-session-menu")
+    if sheet.count():
+        sheet.get_by_role("button", name=words["share"], exact=True).click()
+    else:
+        page.get_by_role("menuitem", name=words["share"], exact=True).click()
     expect(page.locator(".access-options")).to_be_visible()
 
 

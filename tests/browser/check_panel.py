@@ -23,7 +23,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
-from screenshots import S1, S2, UNHANDLED, stub  # noqa: E402
+from screenshots import S1, S2, UNHANDLED, phone_tool, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -273,13 +273,13 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page = open_page(context, f"agents/{S1}")
     if page.locator(".panel").count():
         problems.append("a phone drew the panel as a column")
-    page.get_by_role("button", name="Session actions", exact=True).click()
-    page.get_by_role("menuitem", name="Details", exact=True).click()
+    phone_tool(page, "details")
     page.wait_for_selector(".panel-sheet", timeout=5000)
+    # The sheet rises to just under the session's 56 px bar, which stays in view above its corners.
     h = page.evaluate("() => Math.round(document.querySelector('.panel-sheet').getBoundingClientRect().height)")
     print("phone sheet height:", h)
-    if h < 800:
-        problems.append(f"the phone sheet is {h}px, not full height")
+    if h < 844 - 56 - 2:
+        problems.append(f"the phone sheet is {h}px, not the height under the bar")
     page.locator(".panel-sheet .panel-tab[data-tab='files']").click()
     page.wait_for_selector(".panel-sheet .filerow", timeout=5000)
     page.locator(".panel-sheet .filerow .title", has_text="NOTES.md").click()

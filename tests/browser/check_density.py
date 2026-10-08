@@ -407,6 +407,32 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
         if page.locator(".ph-swipe.end .ph-swipe-act").count() < 2:
             problems.append(f"chats {lang}: a swipe to the left does not reveal the row's quick actions")
 
+        # The session: the same 56 px bar with a two-line title and at most two glyphs, the answer's
+        # icon row in 44 px targets, the idle composer, and the ⋮ sheet with its tiles.
+        go(f"agents/{S1}", ".ph-chat-top")
+        m = read("session", ".chat")
+        top = page.locator(".ph-chat-top").bounding_box()
+        if not top or round(top["height"]) != 56:
+            problems.append(f"session {lang}: the bar is {top}, not 56 tall")
+        if page.evaluate("parseFloat(getComputedStyle(document.querySelector('.ph-chat-top')).borderBottomWidth)"):
+            problems.append(f"session {lang}: the bar has a rule under it")
+        glyphs = page.locator(".ph-chat-top .ph-top-actions > *").count()
+        if glyphs > 2:
+            problems.append(f"session {lang}: {glyphs} glyphs at the right of the bar, more than two")
+        if not page.locator(".ph-chat-top .ph-top-sub").count():
+            problems.append(f"session {lang}: the title has no second line")
+        if not m["idle"] or m["idle"]["h"] != 48:
+            problems.append(f"session {lang}: the idle composer is {m['idle']}, not one 48 px row")
+        page.locator(".ph-chat-top button[aria-haspopup='menu']").click()
+        page.wait_for_selector(".ph-session-menu .ph-tile", timeout=5000)
+        page.wait_for_timeout(300)
+        read("session-menu", ".ph-session-menu")
+        tiles = page.evaluate("[...document.querySelectorAll('.ph-session-menu .ph-tile')].map((e) => Math.round(e.getBoundingClientRect().height))")
+        if any(h != 72 for h in tiles):
+            problems.append(f"session {lang}: tiles {sorted(set(tiles))}, not 72")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(300)
+
         go("settings", ".settings-link")
         m = read("settings", ".main")
         if m["topBorder"]:

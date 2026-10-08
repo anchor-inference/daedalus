@@ -183,16 +183,11 @@ def orchestrator(page: Page, name: str, width: int, lang: str) -> list[str]:
     if chip.count():
         problems.append(f"{name}: the quote stayed after it was removed")
 
-    # A reply of the orchestrator's can be answered too: a button on a desk, a menu entry on a phone.
+    # A reply of the orchestrator's can be answered too: a button in its icon row, on a phone as on a desk.
     answer_row = chat.locator(".turn", has_text=words["orch.hours"]).locator(".msg-actions").last
     answer_row.scroll_into_view_if_needed()
     answer_row.hover()
-    if name.startswith("phone"):
-        answer_row.get_by_role("button", name=labels["more"]).click()
-        action_labels = page.locator('[role="menuitem"]').all_text_contents()
-        page.keyboard.press("Escape")
-    else:
-        action_labels = [b.get_attribute("aria-label") for b in answer_row.locator("button").all()]
+    action_labels = [b.get_attribute("aria-label") for b in answer_row.locator("button").all()]
     if not any(label and labels["reply"] in label for label in action_labels):
         problems.append(f"{name}: the orchestrator's reply has no {labels['reply']!r} ({action_labels})")
 
@@ -286,10 +281,6 @@ def run() -> int:
             labels = [b for row in rows for b in row["buttons"]]
             if "Copy" not in labels:
                 problems.append(f"{name}: no copy button ({labels})")
-            if name == "phone":
-                page.locator(".msg-actions").first.get_by_role("button", name="More actions").click()
-                labels += page.locator('[role="menuitem"]').all_text_contents()
-                page.keyboard.press("Escape")
             if not any(b and "Fork" in b for b in labels):
                 problems.append(f"{name}: the operator's turn has no fork action ({labels})")
             if not any(b and "Revert" in b for b in labels):

@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from check_message_anchor import go, landed, long_chat  # noqa: E402
 from check_orchestration_mode import PID, fits, serve  # noqa: E402
-from screenshots import UNHANDLED  # noqa: E402
+from screenshots import UNHANDLED, phone_tool  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -60,43 +60,54 @@ def check(page: Page, lang: str, name: str) -> list[str]:
     go(page, f"/orchestration/project/{PID}", lang)
     page.wait_for_selector(".chat-scroll .timeline [data-slot]", timeout=15000)
 
-    button = page.locator(".chat-head .chat-search-btn")
-    expect(button).to_have_attribute("aria-label", words["open"])
-    button.click()
-    field = page.locator(".chat-search-pop input[type=search]")
+    # A desktop opens the search from the header's button into a popover; a phone from the Search
+    # tile of the bar's ⋮ sheet into a sheet of its own. Everything after that is the same body.
+    phone = name == "phone"
+    pop = ".ph-search-sheet" if phone else ".chat-search-pop"
+
+    def open_search() -> None:
+        if phone:
+            phone_tool(page, "search")
+        else:
+            button = page.locator(".chat-head .chat-search-btn")
+            expect(button).to_have_attribute("aria-label", words["open"])
+            button.click()
+
+    open_search()
+    field = page.locator(f"{pop} input[type=search]")
     expect(field).to_be_focused()
     field.fill("sourdough")
-    hits = page.locator(".chat-search-pop .chat-hit")
+    hits = page.locator(f"{pop} .chat-hit")
     expect(hits).to_have_count(3, timeout=10000)
     seqs = hits.evaluate_all("(rows) => rows.map((r) => Number(r.dataset.seq))")
     if seqs != sorted(seqs, reverse=True):
         problems.append(f"{lang} {name}: the hits are not newest first ({seqs})")
     expect(hits.first.locator(".chat-hit-meta b")).to_have_text(words["agent"])
     expect(hits.first.locator("mark")).to_have_text("sourdough")
-    problems += inside(page, ".chat-search-pop", f"{lang} {name} search list")
+    problems += inside(page, pop, f"{lang} {name} search list")
     fits(page, f"{lang} {name} search list")
     if focus.searched[-1] != ("orch-bakery", "sourdough"):
         problems.append(f"{lang} {name}: the search asked the host for {focus.searched[-1]!r}")
 
     # The oldest hit is an answer four pages back: the chat opens at the turn that shows it.
     answer = questions[20] + 1
-    page.locator(f".chat-search-pop .chat-hit[data-seq='{answer}']").click()
-    expect(page.locator(".chat-search-pop")).to_have_count(0)
+    page.locator(f"{pop} .chat-hit[data-seq='{answer}']").click()
+    expect(page.locator(pop)).to_have_count(0)
     problems += landed(page, 20, f"{lang} {name} search hit")
     if not page.url.endswith(f"#m{answer}"):
         problems.append(f"{lang} {name}: the address does not say where the reader is ({page.url})")
 
     # Words found nowhere, and a host that is busy.
-    button.click()
+    open_search()
     expect(field).to_have_value("sourdough")
     field.fill("rye flour")
-    expect(page.locator(".chat-search-pop .chat-search-note")).to_have_text(words["empty"], timeout=10000)
+    expect(page.locator(f"{pop} .chat-search-note")).to_have_text(words["empty"], timeout=10000)
     focus.search_busy = True
     field.fill("sourdough starter")
-    expect(page.locator(".chat-search-pop .chat-search-note")).to_have_text(words["busy"], timeout=10000)
+    expect(page.locator(f"{pop} .chat-search-note")).to_have_text(words["busy"], timeout=10000)
     fits(page, f"{lang} {name} busy search")
     page.keyboard.press("Escape")
-    expect(page.locator(".chat-search-pop")).to_have_count(0)
+    expect(page.locator(pop)).to_have_count(0)
     return problems
 
 

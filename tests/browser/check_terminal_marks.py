@@ -31,12 +31,13 @@ from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
-from screenshots import S1, UNHANDLED, stub  # noqa: E402
+from screenshots import S1, UNHANDLED, phone_tool, stub  # noqa: E402
 from terminal_stub import DEBUG, TerminalStub, dock_state, open_session, stub_requests, text, wait_live  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 ID = "marksaaaaaaa"
+COPY_LAST = "Copy last command output"
 
 
 def wait_for(page: Page, predicate, timeout_ms: int = 10000) -> bool:  # type: ignore[no-untyped-def]
@@ -291,16 +292,18 @@ def main() -> int:
         phone.grant_permissions(["clipboard-read", "clipboard-write"], origin=BASE.split("/app")[0])
         phone.add_init_script(DEBUG)
         page = open_session(phone, term, stub, BASE, S1)
-        page.locator(".term-button").first.click()
+        phone_tool(page, "terminal")
         page.locator(".term-sheet-row").first.click()
         page.wait_for_selector(".term-full", timeout=10000)
-        if not wait_for(page, lambda: page.locator(".term-full .term-copy-output").count() == 1, 10000):
-            problems.append("phone: the full-screen terminal has no copy of the last output")
+        # The phone's bar keeps search and its menu; the copy of the last output is the menu's row.
+        page.locator(".term-phone-head button[aria-haspopup]").last.click()
+        if not wait_for(page, lambda: page.get_by_role("menuitem", name=COPY_LAST).count() == 1, 10000):
+            problems.append("phone: the full-screen terminal's menu has no copy of the last output")
         else:
-            button = page.locator(".term-full .term-copy-output").bounding_box()
-            assert button
-            if button["x"] + button["width"] > 390:
-                problems.append(f"phone: the copy button is off the screen ({button})")
+            item = page.get_by_role("menuitem", name=COPY_LAST).bounding_box()
+            assert item
+            if item["x"] + item["width"] > 390:
+                problems.append(f"phone: the copy row is off the screen ({item})")
         phone.close()
         browser.close()
     for problem in problems:

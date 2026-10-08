@@ -639,8 +639,8 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.locator(".composer .model-select").click()
     page.wait_for_selector(".sheet .model-list", timeout=5000)
     before = len(posts("/model"))
-    page.locator(".effort-entry").click()
-    page.locator('.sheet .effort-options input[value="low"]').click()
+    # Effort is one row of choices in the phone's model sheet.
+    page.locator(".sheet .ph-model-effort button[role='radio']").nth(1).click()
     reached(page, "/model", before, "phone: the effort choice", problems)
     if HOST.effort != "low":
         problems.append("phone: the named effort choice did not reach the host")
@@ -671,6 +671,7 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
 
 
 def failure_bar(browser) -> list[str]:  # type: ignore[no-untyped-def]
+    # A phone draws the failed run as a note with Retry in the conversation's column (.ph-runerror).
     problems: list[str] = []
     HOST.status = "failed"
     HOST.error = "HTTP 400: failed to parse grammar"
@@ -688,19 +689,19 @@ def failure_bar(browser) -> list[str]:  # type: ignore[no-untyped-def]
       };
     })();""")
     page = open_page(context, phone=True)
-    page.wait_for_selector(".runerror")
-    if HOST.error not in page.locator(".runerror").inner_text():
+    page.wait_for_selector(".ph-runerror")
+    if HOST.error not in page.locator(".ph-runerror").inner_text():
         problems.append("the session response's provider error was not drawn")
-    bounds = page.locator(".runerror").bounding_box()
+    bounds = page.locator(".ph-runerror").bounding_box()
     composer = page.locator(".composer").bounding_box()
     if not bounds or not composer or bounds["y"] + bounds["height"] > composer["y"] + 1:
         problems.append("the failure bar is not above the redesigned composer")
     page.evaluate("window.emitRunEvent('error', {message: 'provider refused again'})")
-    page.wait_for_function("document.querySelector('.runerror')?.textContent.includes('provider refused again')")
+    page.wait_for_function("document.querySelector('.ph-runerror')?.textContent.includes('provider refused again')")
     HOST.status = "running"
     HOST.error = ""
     page.evaluate("window.emitRunEvent('message_start', {})")
-    page.wait_for_selector(".runerror", state="detached")
+    page.wait_for_selector(".ph-runerror", state="detached")
     page.wait_for_selector(".composer .roundbtn.primary[data-action='stop']")
     HOST.status = "idle"
     context.close()

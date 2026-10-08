@@ -136,13 +136,15 @@ def run() -> int:
             if width != 390:
                 page_.close()
         phone.goto(f"{BASE}/agents/{S1}?token=t&lang=en&scheme=dark", wait_until="networkidle")
-        phone.locator(".subagents-trigger").click()
-        phone_popover = phone.locator(".subagents-popover")
-        expect(phone_popover).to_be_visible()
-        phone_box = phone_popover.bounding_box()
+        # A phone reaches the sub-agents from the bar's ⋮ sheet, as a sheet of rows of its own.
+        phone.locator(".ph-chat-top button[aria-haspopup='menu']").first.click()
+        phone.locator(".ph-session-menu .ph-mrow", has_text="Subagents").click()
+        phone_sheet = phone.locator(".sheet", has_text="Subagents")
+        expect(phone_sheet).to_be_visible()
+        phone_box = phone_sheet.bounding_box()
         assert phone_box
-        if phone_box["x"] < 8 or phone_box["x"] + phone_box["width"] > 382:
-            problems.append(f"the phone subagent window runs off screen: {phone_box}")
+        if phone_box["x"] < 0 or phone_box["x"] + phone_box["width"] > 390:
+            problems.append(f"the phone subagent sheet runs off screen: {phone_box}")
         phone.close()
         browser.close()
     print("problems:", problems or "none")
