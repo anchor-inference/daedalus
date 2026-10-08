@@ -62,6 +62,15 @@ async def test_a_coding_cli_starts_with_the_projects_secret_in_its_environment_a
         note = await s.team.secrets_note(ada, handed)
         assert (launch_dir / "secret-wifi").read_text() == "wifi-password-9"
         assert "$DAEDALUS_LAUNCH_DIR/secret-wifi" in note and "wifi-password-9" not in note
+        # Handed again with a corrected value: the running launch's file takes the new one, and both values
+        # stay masked in whatever a command prints afterwards.
+        await s.manager.secrets.put("session", chat.session.id, "wifi", "wifi-password-10")
+        handed, _ = await s.manager.secrets.grant(["wifi"], from_session=chat.session.id, staff_id=ada.id, project_id=s.project.id)
+        note = await s.team.secrets_note(ada, handed)
+        assert (launch_dir / "secret-wifi").read_text() == "wifi-password-10"
+        assert "not delivered" not in note and "wifi-password-10" not in note
+        masked = s.manager.secrets.redactor.redact("old wifi-password-9 new wifi-password-10")
+        assert "wifi-password" not in masked and masked.count("«secret:wifi»") == 2
         assert await s.team.release(ada)
 
 
@@ -88,7 +97,7 @@ async def test_a_coordinator_hands_its_chats_secret_to_a_member_by_name(settings
         # Refused before anything was written: no half-made card is left behind.
         assert (await r.manager.db.fetchone("SELECT count(*) AS n FROM board_tasks"))["n"] == cards["n"]
         said = await r.call(sid, "tell", staff="Ada", text="Log into the router and read the firmware version", secrets=["router_admin"])
-        assert "handing over «secret:router_admin»" in said
+        assert "handing over «secret:router_admin»" in said and "do not name a variable" in said
         assert [s.name for s in r.manager.secrets.for_staff(member.id, r.project.id)] == ["router_admin"]
         # A Daedalus member is a session: its commands have the variable from now on.
         assert [s.name for s in r.manager.secrets.available(staff_session["id"])] == ["router_admin"]

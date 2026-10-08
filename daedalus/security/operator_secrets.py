@@ -52,6 +52,27 @@ MAX_NOTE = 500
 KEY_FILE = "operator-secrets.key"
 LAUNCH_FILE_PREFIX = "secret-"
 """A staff launch's copy of a secret is the file ``secret-<name>`` in its launch directory."""
+ENV_SCRIPT_FILE = "secrets.sh"
+"""The launch file a CLI that re-reads its environment before each command sources: see :data:`ENV_SCRIPT`."""
+ENV_SCRIPT = """\
+# Exports DAEDALUS_SECRET_<NAME> and DAEDALUS_SECRET_<NAME>_FILE from this launch's secret-<name> files.
+# Sourced before every command, so a secret handed after the launch, or handed again with a new value,
+# is a variable from the next command on; the files are the truth and nothing here holds a value.
+# Listed with ls rather than a glob: zsh, a shell Claude Code may run commands in, stops on a glob
+# that matches nothing, and a launch with no secret yet would have every command fail.
+for _daedalus_entry in $(ls "$DAEDALUS_LAUNCH_DIR" 2>/dev/null); do
+  case $_daedalus_entry in secret-*) ;; *) continue ;; esac
+  _daedalus_file="$DAEDALUS_LAUNCH_DIR/$_daedalus_entry"
+  [ -f "$_daedalus_file" ] || continue
+  _daedalus_name=$(printf '%s' "${_daedalus_entry#secret-}" | tr '[:lower:]' '[:upper:]')
+  case $_daedalus_name in ''|*[!A-Z0-9_]*) continue ;; esac
+  # The trailing dot keeps a value's own final newlines, which $(...) would strip.
+  _daedalus_value=$(cat "$_daedalus_file"; printf .)
+  export "DAEDALUS_SECRET_${_daedalus_name}=${_daedalus_value%.}"
+  export "DAEDALUS_SECRET_${_daedalus_name}_FILE=$_daedalus_file"
+done
+unset _daedalus_entry _daedalus_file _daedalus_name _daedalus_value
+"""
 
 
 class SecretError(ValueError):
@@ -498,11 +519,18 @@ def prompt_section(available: list[Secret]) -> str:
     return "\n".join(lines)
 
 
-def staff_section(handed: list[Secret], *, mid_launch: bool = False) -> str:
-    """What a staff member that is a coding CLI is told about the secrets its launch carries. ``mid_launch``:
-    handed over while it runs, when its environment is already fixed and only the launch file is new."""
+def staff_section(handed: list[Secret], *, mid_launch: bool = False, live_variables: bool = False, undelivered: Iterable[str] = ()) -> str:
+    """What a staff member that is a coding CLI is told about the secrets its launch carries.
+
+    ``mid_launch``: handed over while it runs, when only the launch file is sure to be new. ``live_variables``:
+    the CLI sources :data:`ENV_SCRIPT` before each command (Claude Code), so the variable follows the file
+    from the next command on. Without it the variable is absent, or holds the value of an earlier hand-over,
+    until the next launch, and the member is told so: told of a variable it did not have, a member once
+    went looking through its environment and the launch directory, and the orchestrator refused that as
+    hunting for the password. ``undelivered`` names the secrets the running launch could not take."""
     if not handed:
         return ""
+    missing = set(undelivered)
     lines = [
         "## Secrets the operator handed you",
         "Values the operator stored for this work. You know each by name only; use it only for the purpose given. "
@@ -510,11 +538,19 @@ def staff_section(handed: list[Secret], *, mid_launch: bool = False) -> str:
     ]
     for secret in handed:
         note = f" — {secret.note}" if secret.note else ""
-        if mid_launch:
-            where = f"file: \"$DAEDALUS_LAUNCH_DIR/{LAUNCH_FILE_PREFIX}{secret.name}\""
+        file = f"$DAEDALUS_LAUNCH_DIR/{LAUNCH_FILE_PREFIX}{secret.name}"
+        if mid_launch and secret.name in missing:
+            where = "not delivered to this running session; it arrives with your next launch. Do not look for it: say so in a Report"
+        elif mid_launch and live_variables:
+            where = f"shell: \"${secret.env}\" from your next command on, file: \"{file}\""
+        elif mid_launch:
+            where = f"file: \"{file}\""
         else:
-            where = f"shell: \"${secret.env}\", file: \"${secret.env}_FILE\" (also $DAEDALUS_LAUNCH_DIR/{LAUNCH_FILE_PREFIX}{secret.name})"
+            where = f"shell: \"${secret.env}\", file: \"${secret.env}_FILE\" (also {file})"
         lines.append(f"- {secret.placeholder}{note} ({where})")
+    if mid_launch and not live_variables:
+        lines.append("Your environment was fixed when you started: the $" + ENV_PREFIX + "… variables are absent, or hold an earlier value, "
+                     "until your next launch. Read the file named above inside your script; never search the environment for a secret.")
     lines.append("Pass a value to a command from the variable or the file, never typed out. In the team browser tools, "
                  "write the placeholder as the text to type; the host types the value.")
     return "\n".join(lines)
@@ -549,6 +585,6 @@ def shared() -> OperatorSecrets | None:
 
 
 __all__ = [
-    "ATTACHMENT_PREFIX", "ENV_PREFIX", "LAUNCH_FILE_PREFIX", "NAME_RE", "PLACEHOLDER_RE", "OperatorSecrets", "Secret", "SecretError", "attachment_text", "env_name",
+    "ATTACHMENT_PREFIX", "ENV_PREFIX", "ENV_SCRIPT", "ENV_SCRIPT_FILE", "LAUNCH_FILE_PREFIX", "NAME_RE", "PLACEHOLDER_RE", "OperatorSecrets", "Secret", "SecretError", "attachment_text", "env_name",
     "install", "load_key", "normalise_name", "placeholder", "prompt_section", "shared", "staff_section", "without_attachment_lines",
 ]

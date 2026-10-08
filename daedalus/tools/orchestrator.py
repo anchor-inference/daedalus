@@ -642,7 +642,9 @@ async def decide(context: ToolContext, why: str, task_id: str | None = None, loo
         "message into a running turn, the receipt says what happened instead. files: handles (att:…) or paths in the "
         "project's folders, copied where the member can open them; the message names the copies. Returns the "
         "delivery receipt: queued, written, submitted, acknowledged or failed. secrets: names of the operator's "
-        "secrets this chat may use, handed to the member by name (never paste a value into text)."
+        "secrets this chat may use, handed to the member by name (never paste a value into text). The host appends "
+        "a note saying where the member finds each one, which differs by executor and by whether it was already "
+        "running; do not name a variable or a path yourself. Handing a secret again sends its current value."
     ),
 )
 async def tell(context: ToolContext, staff: str, text: str, when: str = "now", files: list[str] | None = None, secrets: list[str] | None = None) -> ToolResult:

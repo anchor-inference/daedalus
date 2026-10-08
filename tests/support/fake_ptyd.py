@@ -500,7 +500,7 @@ class FakePtyd:
             if launch is None:
                 raise _RpcFail(1008, "no such launch")
             name = str(params["name"])
-            if "/" in name or name in ("", ".", "..") or name in launch["files"]:
+            if "/" in name or name in ("", ".", "..") or (name in launch["files"] and not params.get("replace")):
                 raise _RpcFail(-32602, f"no file may be written as {name!r}")
             launch["files"][name] = base64.b64decode(params.get("data") or "")
             return {"path": f"/state/launches/{params['launch_id']}/{name}"}

@@ -506,8 +506,9 @@ class TerminalPort(Protocol):
         """Answer a held post; false when nothing waits any more (the hold expired, the CLI went)."""
         ...
 
-    async def put_file(self, name: str, data: bytes) -> str:
-        """Add a file to the launch directory (a message too long to type) and return its path."""
+    async def put_file(self, name: str, data: bytes, *, replace: bool = False) -> str:
+        """Add a file to the launch directory (a message too long to type) and return its path. An
+        existing name is refused unless ``replace``, which swaps the file whole."""
         ...
 
     async def dial(self, target: str) -> ByteStreamPort:

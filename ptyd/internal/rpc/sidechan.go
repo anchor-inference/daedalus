@@ -432,11 +432,12 @@ func (d *Daemon) putFile(ctx context.Context, c *server.Conn, params json.RawMes
 		LaunchID string `json:"launch_id"`
 		Name     string `json:"name"`
 		Data     []byte `json:"data"`
+		Replace  bool   `json:"replace"`
 	}
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
-	path, err := d.Side.Launches.PutFile(p.LaunchID, p.Name, p.Data)
+	path, err := d.Side.Launches.PutFile(p.LaunchID, p.Name, p.Data, p.Replace)
 	if err != nil {
 		return nil, sideError(err)
 	}

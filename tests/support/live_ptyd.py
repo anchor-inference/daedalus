@@ -897,12 +897,15 @@ class LivePtyd(FakePtyd):
         if "/" in name or name in ("", ".", ".."):
             raise _RpcFail(-32602, f"a file added later is one plain name: {name!r}")
         path = launch.dir / name
+        target = launch.dir / f".put-{secrets.token_hex(4)}-{name}" if params.get("replace") else path
         try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         except FileExistsError:
             raise _RpcFail(-32602, f"file {name} exists") from None
         with os.fdopen(fd, "wb") as handle:
             handle.write(base64.b64decode(params.get("data") or ""))
+        if target != path:
+            os.replace(target, path)
         return {"path": str(path)}
 
     async def _m_hooks_unregister_launch(self, params: dict[str, Any]) -> dict[str, Any]:

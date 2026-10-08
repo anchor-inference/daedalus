@@ -271,10 +271,14 @@ func (r *Registry) Register(s Spec) (Registered, error) {
 }
 
 // PutFile writes one more file into an open launch's directory — a message too long to type, which
-// the CLI is told to read by its path — and returns where. The name is one plain part and the file
-// must be new: nothing already in the directory, which the launch's own programs can write to, is
-// ever followed or overwritten.
-func (r *Registry) PutFile(launchID, name string, data []byte) (string, error) {
+// the CLI is told to read by its path — and returns where. The name is one plain part. Without
+// replace the file must be new: nothing already in the directory, which the launch's own programs can
+// write to, is ever followed or overwritten. With replace the content goes to a fresh hidden file
+// first and is renamed over the name, so a reader sees the old file or the new one, never half of it,
+// and a link planted under the name is replaced, not followed. Replace exists for an operator's secret
+// handed again with a new value: refusing the existing file once left a running member with the old
+// password and no way to get the new one short of a restart.
+func (r *Registry) PutFile(launchID, name string, data []byte, replace bool) (string, error) {
 	if err := checkFileName(name, false); err != nil {
 		return "", err
 	}
@@ -295,7 +299,11 @@ func (r *Registry) PutFile(launchID, name string, data []byte) (string, error) {
 	dir := l.Dir
 	r.mu.Unlock()
 	path := filepath.Join(dir, name)
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|noFollow, 0o600)
+	target := path
+	if replace {
+		target = filepath.Join(dir, fmt.Sprintf(".put-%d-%s", time.Now().UnixNano(), name))
+	}
+	f, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL|noFollow, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return "", fmt.Errorf("%w: file %s exists", ErrInvalid, name)
@@ -306,8 +314,11 @@ func (r *Registry) PutFile(launchID, name string, data []byte) (string, error) {
 	if cerr := f.Close(); werr == nil {
 		werr = cerr
 	}
+	if werr == nil && replace {
+		werr = os.Rename(target, path)
+	}
 	if werr != nil {
-		_ = os.Remove(path)
+		_ = os.Remove(target)
 		return "", werr
 	}
 	return path, nil
