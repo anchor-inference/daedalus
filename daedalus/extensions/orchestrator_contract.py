@@ -20,6 +20,7 @@ from daedalus.extensions.notifications import Draft
 from daedalus.extensions.orchestrator_domain import (
     DomainConflict,
     OrchestratorDomain,
+    accept_report,
     invalidate_moved_verdicts,
     record_verdict,
     return_result,
@@ -363,8 +364,8 @@ async def review_result(
         contract = await domain.contract(task_id)
         return json.dumps({"task_id": task_id, "contract": contract, "results": results},
                           ensure_ascii=False, sort_keys=True)
-    if op not in ("verdict", "return"):
-        raise Refused("op is inspect, verdict or return")
+    if op not in ("verdict", "return", "accept"):
+        raise Refused("op is inspect, verdict, accept or return")
     if not result_id or not client_operation_id or not isinstance(expected_entity_revision, int) or isinstance(expected_entity_revision, bool):
         raise Refused("mutation needs result_id, host call id and expected_entity_revision")
     if op == "return" and (not verdict_id or contract_revision is None):
@@ -376,7 +377,7 @@ async def review_result(
     if authority is None:
         raise Refused("review authority is unavailable")
     principal = await authority(session_id=session_id, project_id=project.id, task_id=task_id,
-                                operation="review.verdict" if op == "verdict" else "review.return")
+                                operation="review.return" if op == "return" else "review.verdict")
     if not isinstance(principal, Principal) or principal.origin_class != "agent" or not principal.grant_id:
         raise Refused("the host did not attest a scoped reviewer")
     control = ControlStore(orch.manager.db)
@@ -386,6 +387,10 @@ async def review_result(
                "reason": reason, "contract_revision": contract_revision}
 
     async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
+        if op == "accept":
+            return await accept_report(
+                conn, verdict_id=mutation.object_id, task_id=task_id, result_id=result_id,
+                reviewer_actor_id=principal.actor_id, reason=reason)
         if op == "verdict":
             return await record_verdict(
                 conn, verdict_id=mutation.object_id, result_id=result_id,
@@ -400,7 +405,7 @@ async def review_result(
 
     try:
         response = await control.mutate(principal, Scope("project", project.id),
-                                        "review.verdict" if op == "verdict" else "review.return",
+                                        "review.return" if op == "return" else "review.verdict",
                                         client_operation_id, expected_entity_revision,
                                         Entity("task", task_id), payload, effect)
     except (ControlConflict, ControlDenied, DomainConflict, ValueError, KeyError) as exc:

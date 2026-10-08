@@ -800,22 +800,103 @@ async def accept_result(
         if (merged is None or merged["state"] != "merged" or merged["head_sha"] != current_head or
                 merged["base_sha"] != current_base or merged["merge_sha"] != current_merge_sha):
             raise DomainConflict("the folder lacks a matching durable merge receipt")
+    await _finish_accepted(conn, task, task_id=task_id, result_id=result_id, verdict_id=verdict_id,
+                           contract_revision=contract_revision, attempt_id=result["attempt_id"],
+                           acceptance_state="operator_approved")
+    return {"task_id": task_id, "result_id": result_id, "verdict_id": verdict_id,
+            "contract_revision": contract_revision, "acceptance_state": "operator_approved"}
+
+
+async def _finish_accepted(conn: aiosqlite.Connection, task: aiosqlite.Row, *, task_id: str, result_id: str,
+                           verdict_id: str, contract_revision: int, attempt_id: str | None,
+                           acceptance_state: str) -> None:
     checked = [{**item, "done": True, "review_verdict_id": verdict_id} for item in check_items(task["checklist"])]
     await conn.execute("UPDATE board_tasks SET accepted_result_id = ?, accepted_contract_revision = ?,"
-                       " acceptance_state = 'operator_approved', status = 'done', checklist = ? WHERE id = ?",
-                       (result_id, contract_revision, _canonical(checked), task_id))
+                       " acceptance_state = ?, status = 'done', checklist = ? WHERE id = ?",
+                       (result_id, contract_revision, acceptance_state, _canonical(checked), task_id))
     # The exact result decision must close its open reminder in the same receipt transaction.
     await conn.execute("UPDATE open_loops SET closed_at = ?, closed_by = 'system', decision = ?"
                        " WHERE task_id = ? AND contract_revision = ? AND attempt_id IS ?"
                        " AND cause = 'report_done' AND closed_at IS NULL",
-                       (_now(), f"accepted result {result_id}", task_id, contract_revision, result["attempt_id"]))
+                       (_now(), f"accepted result {result_id}", task_id, contract_revision, attempt_id))
     if task["project_id"] is not None:
         await keep_task_commitments_in(conn, project_id=task["project_id"], task_id=task_id,
                                        result_id=result_id, verdict_id=verdict_id,
                                        contract_revision=contract_revision)
     await reconcile_dependents(conn, task_id)
+
+
+REPORT_REASON_MIN = 20
+"""An acceptance on the strength of reading a report keeps what was read as its only evidence, so it
+has to say something: a word or two would leave the journal unable to answer why the card closed."""
+
+
+async def accept_report(
+    conn: aiosqlite.Connection, *, verdict_id: str, task_id: str, result_id: str,
+    reviewer_actor_id: str, reason: str,
+) -> dict[str, Any]:
+    """Accept a result that is a report — a diagnosis, an answer, work outside any branch — and finish
+    its card.
+
+    A verdict needs bound evidence, and the evidence a reviewer can bind is a passing check on a
+    branch head or the operator's own statement. Work that only reports has neither, so its card
+    stayed handed in for good: the coordinator read the report, could not record that, and the
+    operator's "the question is closed" had nowhere to go. Here reading the report is the check, and
+    ``reason`` says what it showed. Branch work keeps its stricter path (a check on the head, then
+    the merge), and a file-bound requirement still needs its exact file proven.
+    """
+    task = await _one(conn, "SELECT project_id, status, contract_revision, branch, checklist, current_attempt_id"
+                      " FROM board_tasks WHERE id = ?", (task_id,))
+    if task is None:
+        raise KeyError(task_id)
+    if task["branch"]:
+        raise DomainConflict("branch work is accepted with a check on its head and the merge, not on its report")
+    if task["status"] != "review":
+        raise DomainConflict("a result can be accepted only while the task is in review")
+    body = " ".join((reason or "").split())
+    if len(body) < REPORT_REASON_MIN:
+        raise ValueError("say what the report showed against the done-when, in a sentence")
+    result = await _one(conn, "SELECT task_id, contract_revision, attempt_id, outcome, actor_id FROM result_receipts"
+                        " WHERE id = ?", (result_id,))
+    if (result is None or result["task_id"] != task_id
+            or int(result["contract_revision"]) != int(task["contract_revision"])):
+        raise DomainConflict("the result is missing or belongs to another revision of the task")
+    if result["outcome"] != "complete":
+        raise DomainConflict("only a complete result can be accepted")
+    latest = await _one(conn, "SELECT id FROM result_receipts WHERE task_id = ? AND contract_revision = ?"
+                        " AND attempt_id IS ? ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                        (task_id, task["contract_revision"], task["current_attempt_id"]))
+    if result["attempt_id"] != task["current_attempt_id"] or latest is None or latest["id"] != result_id:
+        raise DomainConflict("a newer result or attempt superseded the reviewed result")
+    if reviewer_actor_id == result["actor_id"]:
+        raise DomainConflict("the worker cannot independently review its own result")
+    if await _one(conn, "SELECT 1 FROM review_returns WHERE task_id = ? AND result_id = ? LIMIT 1",
+                  (task_id, result_id)):
+        raise DomainConflict("this result was returned or reopened and needs new work")
+    if await unresolved_review_comments(conn, result_id):
+        raise DomainConflict("blocking review comments remain unresolved")
+    contract = await _one(conn, "SELECT snapshot_json FROM task_contract_versions"
+                          " WHERE task_id = ? AND contract_revision = ?", (task_id, task["contract_revision"]))
+    snapshot = _json(contract["snapshot_json"], {}) if contract is not None else {}
+    if any(item.get("file_id") for item in snapshot.get("requirements", [])):
+        raise DomainConflict("a file-bound requirement needs verified evidence for its exact file")
+    ci = await ci_readiness(conn, task_id, int(task["contract_revision"]), None)
+    if ci["state"] == "blocked":
+        raise DomainConflict("required CI has not passed")
+    contract_revision = int(task["contract_revision"])
+    await conn.execute(
+        "INSERT INTO review_verdicts(id, result_id, contract_revision, reviewer_actor_id, verification, accepted,"
+        " head, base, environment_digest, evidence_json, reason, self_review_waiver_receipt_id, created_at)"
+        " VALUES (?, ?, ?, ?, 'verified', 1, NULL, NULL, NULL, '[]', ?, NULL, ?)",
+        (verdict_id, result_id, contract_revision, reviewer_actor_id, "report read: " + body, _now()),
+    )
+    # ``accepted`` is the coordinator's check, as the board already reads it; ``operator_approved``
+    # stays the operator's own word.
+    await _finish_accepted(conn, task, task_id=task_id, result_id=result_id, verdict_id=verdict_id,
+                           contract_revision=contract_revision, attempt_id=result["attempt_id"],
+                           acceptance_state="accepted")
     return {"task_id": task_id, "result_id": result_id, "verdict_id": verdict_id,
-            "contract_revision": contract_revision, "acceptance_state": "operator_approved"}
+            "contract_revision": contract_revision, "acceptance_state": "accepted", "status": "done"}
 
 
 async def return_result(

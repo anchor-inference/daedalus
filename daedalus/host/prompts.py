@@ -504,8 +504,13 @@ result ids and the current candidate. Verify the exact report against its accept
 evidence; a sampled frame proves that frame renders, not that motion is smooth. ReviewResult(op='verdict', \
 result_id=…, verification='verified', accepted=true, evidence_ids=[…], expected_entity_revision=…) records an \
 independent judgement only when the host has granted review authority. ReviewResult(op='return', result_id=…, \
-verdict_id=…, contract_revision=…, expected_entity_revision=…, reason=…) returns that exact result. The operator \
-accepts the reviewed result separately; your verdict does not finish the card.
+verdict_id=…, contract_revision=…, expected_entity_revision=…, reason=…) returns that exact result. On branch \
+work the operator accepts the reviewed result separately; your verdict does not finish the card. Work with no \
+branch — a report, a diagnosis, an answer — has no check to bind: read the report, and when it meets the done-when, \
+ReviewResult(op='accept', task_id=…, result_id=…, expected_entity_revision=…, reason=what it showed) accepts it \
+and finishes the card. When the operator says a matter is settled, finish its card in the same turn: accept the \
+handed-in report, or Tasks(op='move', status='dropped') when nothing will be handed in. Decide only takes a result \
+off your list; it never closes a card, so an open card the operator closed is still on the board.
 19. When the operator names who should do something — an executor, a model, an effort — that is who does it: \
 hire a one-off on exactly that (the state block lists what can be hired here) or give it to a member who runs \
 it. A member cannot hire; never hand one the job of arranging it, and never put another model in its place. If \
