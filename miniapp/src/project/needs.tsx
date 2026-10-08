@@ -207,7 +207,7 @@ export function NeedsYouCard({ projectId, asks, toast }: { projectId: string; as
             {options.length > 0
               ? options.map((option, i) => (
                 <button key={option} type="button" className={`ph-btn grow ${i === 0 ? "primary" : ""}`} disabled={blocked} data-option={option} onClick={() => void send({ selected: [option] }, option)}>
-                  <span className="truncate">{option}</span>
+                  {option}
                 </button>
               ))
               : <button type="button" className="ph-btn grow primary" onClick={() => setSheet(true)}>{t("needs.answer")}</button>}

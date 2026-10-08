@@ -30,7 +30,7 @@ import { HostCapacity } from "./HostCapacity";
 import { UnknownStops } from "./UnknownStops";
 import { UncertainLaunches } from "./UncertainLaunches";
 import type { AcceptedResultReference } from "./ResultFlow";
-import { NEXT, arrange, chips, columnCount, sections, statusLine, toggleFilter, type Arranged, type Column, type NeedsYou, type ProjectTask, type TaskStatus } from "./board";
+import { NEXT, acceptanceChip, arrange, chips, columnCount, sections, statusLine, toggleFilter, type Arranged, type Column, type NeedsYou, type ProjectTask, type TaskStatus } from "./board";
 
 const enc = encodeURIComponent;
 const boardKey = (projectId: string) => `/api/projects/${enc(projectId)}/board`;
@@ -226,6 +226,7 @@ function statusWords(task: ProjectTask, titles: Titles): { text: string; tone: s
 function TaskRow({ task, titles, onOpen, onMenu }: { task: ProjectTask; titles: Titles; onOpen: () => void; onMenu: () => void }) {
   const done = task.checklist.filter((c) => c.done).length;
   const words = statusWords(task, titles);
+  const accept = acceptanceChip(task);
   const pct = task.checklist.length ? Math.round((100 * done) / task.checklist.length) : 0;
   return (
     <ListRow
@@ -244,6 +245,9 @@ function TaskRow({ task, titles, onOpen, onMenu }: { task: ProjectTask; titles: 
         {task.issue && <a className={`ph-pill ph-issue ${task.issue.state === "conflict" ? "warn" : ""}`} href={task.issue.url} target="_blank" rel="noreferrer" data-issue={task.issue.number}
           title={t("issues.card.title", { repository: task.issue.repository, n: task.issue.number })} onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>#{task.issue.number}</a>}
         {task.priority <= 2 && <span className={`ph-pill ${task.priority === 1 ? "bad" : ""}`}>P{task.priority}</span>}
+        {/* How far handed-in work was accepted, in a word, as the desktop card says it. */}
+        {accept && <span className={`ph-pill pcard-accept ${accept.tone === "ok" ? "ok" : accept.tone === "attn" ? "warn" : ""}`} data-acceptance={accept.state} title={t(`pboard.acceptance.${accept.state}.title`)}>
+          {accept.state === "operator_approved" && <Icon name="check" size={16} />}{t(`pboard.acceptance.${accept.state}`)}</span>}
         {task.checklist.length > 0 && (
           <span className="ph-progress">
             <span className={`ph-bar ${pct === 100 ? "ok" : ""}`} style={{ ["--v" as string]: pct }}><i /></span>

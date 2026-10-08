@@ -56,7 +56,7 @@ def show_done(page: Page, width: int, words: dict) -> None:
     if width >= 1024:
         page.locator(".pboard-col.done .pboard-fold").click()
     else:
-        page.locator(".pboard-chips .chip", has_text=words["done"]).tap()
+        page.locator(".ph-board .ph-chip", has_text=words["done"]).tap()
 
 
 def cards(page: Page, lang: str, width: int) -> None:
@@ -65,18 +65,21 @@ def cards(page: Page, lang: str, width: int) -> None:
     focus = FocusStub.bakery(lang)
     serve(page, focus)
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
-    expect(page.locator(".pcard", has_text=invented["task.photos"])).to_be_visible()
+    # A desktop's cards, or the rows of a phone's list under its chips.
+    card_of = ".pcard" if width >= 1024 else ".ph-row"
+    expect(page.locator(card_of, has_text=invented["task.photos"])).to_be_visible()
     # Work in progress carries no acceptance, even with requirements on it.
     expect(page.locator(".pcard-accept")).to_have_count(0)
     show_done(page, width, words)
     for task, state, text in (("task.menu", "accepted", words["accepted"]), ("task.prices", "handed_in", words["handed_in"]), ("task.hero", "operator_approved", words["approved"])):
-        chip = page.locator(".pcard", has_text=invented[task]).locator(".pcard-accept")
+        chip = page.locator(card_of, has_text=invented[task]).locator(".pcard-accept")
         expect(chip).to_have_attribute("data-acceptance", state)
         expect(chip).to_have_text(text)
-    expect(page.locator(".pcard", has_text=invented["task.hero"]).locator(".pcard-accept svg")).to_have_count(1)
-    expect(page.locator(".pcard", has_text=invented["task.prices"]).locator(".pcard-accept")).not_to_have_class("ok")
-    # The chip sits in the card's last row: a finished card grows no row for it.
-    for task in ("task.menu", "task.prices"):
+    expect(page.locator(card_of, has_text=invented["task.hero"]).locator(".pcard-accept svg")).to_have_count(1)
+    expect(page.locator(card_of, has_text=invented["task.prices"]).locator(".pcard-accept")).not_to_have_class("ok")
+    # The chip sits in the card's last row: a finished card grows no row for it. A phone's row puts it
+    # at the right, beside the row's priority and progress.
+    for task in (("task.menu", "task.prices") if width >= 1024 else ()):
         card = page.locator(".pcard", has_text=invented[task])
         rows = card.evaluate("(c) => [...c.children].filter((e) => e.querySelector('.pcard-accept') || e.classList.contains('pcard-accept')).map((e) => e.className)")
         assert rows == ["pcard-meta"], f"{where}: the acceptance chip of {task} is in {rows}"

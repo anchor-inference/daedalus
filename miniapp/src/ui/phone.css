@@ -392,7 +392,9 @@
   .needs-code { display: block; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); font-family: var(--mono); font-size: var(--fs-mono); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7.5em; overflow: hidden; }
   .needs-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
   .needs-row .ph-btn { padding: 0 var(--space-4); }
-  .needs-row .ph-btn.grow { flex: 1 1 auto; }
+  /* An option is read whole: on a narrower phone it takes a second line inside its button rather than
+     losing its end to an ellipsis, which hid the word that told two options apart. */
+  .needs-row .ph-btn.grow { flex: 1 1 auto; height: auto; min-height: var(--tap); padding: 6px 14px; white-space: normal; line-height: 1.2; text-align: center; overflow-wrap: anywhere; }
   .needs-links { display: flex; flex-wrap: wrap; gap: 0 var(--space-3); margin: -4px 0 -8px -8px; }
   .needs-links .ph-link { color: var(--fg-2); font-weight: 400; }
   .needs-pen { flex: none; color: var(--fg-2); }

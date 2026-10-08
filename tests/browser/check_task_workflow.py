@@ -26,7 +26,7 @@ def check(lang: str, width: int) -> None:
         page = browser.new_page(viewport={"width": width, "height": 560 if width == 320 else 800})
         serve(page, stub, unhandled)
         page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
-        page.locator(".pcard.doing", has_text="Checkout").first.click()
+        page.locator(".pcard.doing, .ph-row.doing", has_text="Checkout").first.click()
         sheet = page.locator(".sheet.pboard-sheet")
         workflow = sheet.locator(".task-workflow-section")
         expect(workflow).to_have_count(1)
