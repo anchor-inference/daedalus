@@ -378,4 +378,152 @@
   .composer[data-shape="idle"] .composer-tools { flex: none; }
   .usage .card, .usage-card, .screen .kpi { border: 0; border-radius: var(--radius-md); background: var(--surface-1); }
   .kpi .value { font-size: var(--fs-22); }
+
+  /* ── the session: a two-line title button, at most one chip and the ⋮ ────────────────────── */
+  /* The bar keeps the desktop header's class, so what hides or measures "the chat's header" (the
+     voice page, the checks) still finds it; only its looks are the phone bar's. */
+  .chat-head.ph-chat-top { height: auto; min-height: calc(var(--top-h) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--space-1) 0; gap: 2px; border-bottom: 0; }
+  .ph-chat-top .ph-top-title { padding-left: var(--space-1); }
+  .ph-chat-state { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+  .ph-chat-state > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+  .ph-chat-state .dot { width: 8px; height: 8px; flex: none; }
+  .ph-chat-state.running, .ph-chat-state.compacting { color: var(--info); }
+  .ph-chat-state.waiting, .ph-chat-state.offline { color: var(--warn); }
+  .ph-chat-state.failed { color: var(--bad); }
+  .ph-chat-fallback { color: var(--warn); }
+  .ph-chat-top .chat-title { display: inline; font: inherit; letter-spacing: 0; }
+  .ph-chat-top .ph-share-tag { height: 18px; margin-right: 6px; padding: 0 6px; font-size: var(--fs-12); font-weight: 600; vertical-align: 1px; }
+  .ph-chat-top .questions-headbtn.attn { color: var(--warn); }
+  .ph-chat-strip { border-bottom: 0; }
+  .ph-tiles.four { grid-template-columns: repeat(4, 1fr); }
+  .ph-tile:disabled { opacity: .4; }
+  .ph-tile.attn, .ph-tile.attn .ic { color: var(--warn); }
+  .ph-session-menu .ph-tiles { padding-top: var(--space-2); }
+  .ph-sheet-pad { padding: 0 var(--gutter) var(--space-2); }
+  .ph-sheet-pad.sub { font-size: var(--fs-13); color: var(--fg-2); }
+  .ph-field { width: 100%; height: 48px; padding: 0 14px; border: 0; border-radius: 14px; background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-16); outline: none; }
+  .ph-field:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+  .ph-foot-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+  .ph-search-sheet .sheet-body { padding: 0 var(--gutter) var(--space-3); }
+
+  /* The conversation: the answer as plain text, the operator's bubble capped at six lines, an
+     icon-only row of 44 px targets under each, and the steps as one quiet two-line summary. */
+  .msg.user { max-width: 85%; padding: 10px 16px; border-radius: var(--radius-xl) var(--radius-xl) 6px var(--radius-xl); font-size: var(--fs-15); line-height: 1.45; }
+  .msg.user.clamped .msg-text { max-height: 6lh; overflow: hidden; }
+  .msg.user.clamped.over .msg-text { -webkit-mask-image: linear-gradient(#000 calc(100% - 1.2lh), transparent); mask-image: linear-gradient(#000 calc(100% - 1.2lh), transparent); }
+  .msg-more { position: relative; display: inline-flex; align-items: center; gap: 4px; min-height: 32px; margin-top: 2px; padding: 0; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-15); font-weight: 500; cursor: pointer; }
+  .msg-more::after { content: ""; position: absolute; inset: -6px -8px; }
+  .msg-actions { gap: 0; min-height: var(--tap); opacity: 1; }
+  .msg-actions .iconbtn.small { width: var(--tap); height: var(--tap); min-width: var(--tap); min-height: var(--tap); padding: 0; gap: 0; border-radius: var(--radius-pill); color: var(--fg-2); }
+  .msg-actions .iconbtn.small .ic { width: 18px; height: 18px; }
+  .turn > .turn-content > .msg-actions { margin-left: -13px; }
+  .msg-wrap .msg-actions { padding-right: 0; margin-right: -8px; }
+  .thinking-head { gap: 2px 8px; min-height: var(--tap); font-size: var(--fs-15); color: var(--fg-2); }
+  .thinking-head .steps { font-size: var(--fs-15); color: var(--fg-2); }
+  .thinking-head .families { font-size: var(--fs-13); color: var(--fg-3); padding-left: 0; }
+  .thinking-head .chev { margin-left: auto; }
+  .composer-jump-anchor .jump-down { right: var(--gutter); width: var(--ctl-round); height: var(--ctl-round); border: 0; background: var(--surface-2); box-shadow: 0 0 0 4px var(--bg); }
+  .composer-jump-anchor .jump-down::after { content: ""; position: absolute; inset: -4px; }
+
+  /* The tray over the field: the queue, a permission request and the agent's question share one
+     shape — a raised card with a 13 px label line, the content, and full-width 44 px answers. */
+  .composer[data-shape] .ph-tray-head { display: flex; align-items: center; gap: 6px; min-height: 24px; font-size: var(--fs-13); font-weight: 600; color: var(--fg-2); }
+  .composer[data-shape] .ph-tray-head.warn { color: var(--warn); }
+  .composer[data-shape] .steers .ph-tray-head { min-height: 36px; padding: 4px 14px 0; font-weight: 500; }
+  .composer[data-shape] .steers .ph-tray-head + .steer { border-top: 0; }
+  .composer[data-shape] .steer > .ic:first-child { display: none; }
+  .composer[data-shape] .steer { grid-template-columns: minmax(0, 1fr) auto auto; row-gap: 1px; }
+  .composer[data-shape] .steer-text { grid-row: 1; grid-column: 1; -webkit-line-clamp: 1; line-clamp: 1; }
+  .composer[data-shape] .steer-hint { grid-row: 2; grid-column: 1; }
+  .composer[data-shape] .steer-now { grid-row: 1 / 3; grid-column: 2; }
+  .composer[data-shape] .steer-x { grid-row: 1 / 3; grid-column: 3; color: var(--fg); }
+  .composer[data-shape] .steer-x .ic { width: 18px; height: 18px; }
+  .composer[data-shape] .steer-now { color: var(--fg); }
+  .composer[data-shape] .steer[data-kind="steer"] .steer-hint { color: var(--info); }
+  .composer[data-shape] .dock.ph-tray { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 12px 14px; border: 0; border-radius: var(--radius-xl); background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line-strong); max-height: 55vh; overflow-y: auto; overscroll-behavior: contain; }
+  .ph-tray-title { font-size: var(--fs-16); line-height: 1.35; color: var(--fg); overflow-wrap: anywhere; }
+  .ph-tray-detail { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--bg); font-size: var(--fs-13); line-height: 1.45; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 6lh; overflow-y: auto; }
+  .ph-tray-actions { display: flex; flex-direction: column; gap: var(--space-2); margin-top: 4px; }
+  .ph-tray-actions .ph-btn { width: 100%; min-width: 0; }
+  .ph-btn.ph-deny { background: none; color: var(--bad); }
+  .ph-tray-q { display: flex; flex-direction: column; gap: var(--space-2); }
+  .ph-tray-q + .ph-tray-q { margin-top: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--line); }
+  .ph-option { width: 100%; min-height: var(--tap); display: flex; flex-direction: column; justify-content: center; padding: 8px 16px; border: 0; border-radius: var(--radius-md); background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-15); text-align: left; cursor: pointer; }
+  .ph-option.on { background: color-mix(in srgb, var(--accent) 16%, var(--surface-2)); box-shadow: inset 0 0 0 1.5px var(--accent); }
+  .ph-option-m { margin-top: 1px; font-size: var(--fs-13); color: var(--fg-2); }
+  .ph-tray-answer { display: flex; gap: var(--space-2); }
+  .ph-tray-answer .ph-field { flex: 1; min-width: 0; height: var(--tap); }
+  .ph-tray-answer .ph-btn { flex: none; }
+  .ph-tray-answer .ph-btn:only-child { flex: 1; }
+
+  /* The session's sheet (details, files, jobs, browser…): the chat's title and a line over a strip of
+     44 px tabs, raised from the bottom with the bar still showing above it, the way every sheet is. */
+  .sheet.full.panel-sheet { height: calc(100% - var(--top-h) - env(safe-area-inset-top) + 2px); border-radius: var(--radius-xl) var(--radius-xl) 0 0; padding-top: 0; }
+  .panel-sheet .sheet-head { flex-wrap: wrap; align-items: center; margin: 0 -16px; padding: 0 var(--space-2) 0 var(--gutter); gap: 0; border-bottom: 1px solid var(--line); }
+  .panel-sheet-title { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 2px 0 4px; }
+  .panel-sheet-title b { font-size: var(--fs-17); font-weight: 600; color: var(--fg); }
+  .panel-sheet-title span { font-size: var(--fs-13); color: var(--fg-2); }
+  .panel-sheet .sheet-head .panel-tabs { order: 3; flex: 1 1 100%; height: var(--tap); margin-left: calc(-1 * var(--space-3)); padding: 0; }
+  .panel-sheet .panel-tab { height: var(--tap); padding: 0 10px; font-size: var(--fs-15); font-weight: 500; }
+  .panel-sheet .panel-tab.on::after { left: 10px; right: 10px; bottom: 0; background: var(--fg); }
+  .panel-sheet .panel-tab .count { font-size: var(--fs-12); }
+
+  /* A failed run and a compaction under way: in the conversation's own column, over the composer. */
+  .ph-runerror { padding: 0 var(--space-3) var(--space-2); }
+  .ph-runerror .ph-note-act .ph-btn.primary { background: var(--primary); color: var(--primary-ink); }
+  .ph-compact-row { padding: 4px var(--gutter) 8px; }
+  .ph-compact-row .livebar { max-width: 100%; gap: var(--space-2); font-size: var(--fs-15); color: var(--fg-2); background: none; border: 0; padding: 0; }
+  .ph-compact-row .livebar b { font-weight: 500; color: var(--fg); }
+
+  /* Details in the sheet: every section a grouped card under a grey label, controls 36–44 px. */
+  .panel-sheet .details { padding: var(--space-2) 4px var(--space-6); }
+  .panel-sheet .dt-section, .panel-sheet .dt-section:first-child { padding: 0; margin: 0 0 var(--space-3); border: 0; }
+  .panel-sheet .details summary.dt-label { min-height: var(--tap); padding: 0 4px; font-size: var(--fs-13); font-weight: 500; color: var(--fg-2); }
+  .panel-sheet .dt-section.danger .dt-label { color: var(--bad); }
+  .panel-sheet .dt-content { padding: 12px var(--space-4); border-radius: var(--radius-xl); background: var(--surface-2); font-size: var(--fs-15); }
+  .panel-sheet .dt-content .sub, .panel-sheet .dt-content p.sub { font-size: var(--fs-13); }
+  .panel-sheet .dt-row { min-height: 40px; }
+  .panel-sheet .details .field { min-height: var(--tap); border: 0; border-radius: 12px; background: var(--surface-1); font-size: var(--fs-16); }
+  .panel-sheet .details .btn.small { position: relative; min-height: 36px; padding: 0 var(--space-4); border: 0; border-radius: var(--radius-pill); background: var(--surface-1); font-size: var(--fs-15); font-weight: 600; }
+  .panel-sheet .details .btn.small::after { content: ""; position: absolute; inset: -4px 0; }
+  /* Files in the sheet: 44 px rows in the body's size, with their ⋮ always in view. */
+  .panel-sheet .files .filerow, .panel-sheet .files .filerow .title { min-height: var(--tap); font-size: var(--fs-16); }
+  .panel-sheet .files .explorer-actions { opacity: 1; }
+  .panel-sheet .files .explorer-actions .iconbtn { color: var(--fg-2); }
+  .panel-sheet .files .field { min-height: var(--tap); border: 0; border-radius: var(--radius-pill); background: var(--surface-2); font-size: var(--fs-16); }
+
+  /* A confirmation: the standard centred dialog with two 44 px pills, the way back plain and the
+     consequential one tinted rather than a solid red block beside it. */
+  .dialog { border-radius: var(--radius-xl); padding: 20px 20px 16px; }
+  .dialog h3 { font-size: var(--fs-17); font-weight: 600; }
+  .dialog-body { font-size: var(--fs-15); }
+  .dialog-actions .btn { min-height: var(--tap); padding: 0 var(--space-5); border: 0; border-radius: var(--radius-pill); font-size: var(--fs-15); font-weight: 600; }
+  .dialog-actions .btn:not(.primary):not(.danger) { background: none; }
+  .dialog-actions .btn.danger.solid { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+
+  /* The model sheet: search, the way back from a stand-in, effort as one row of choices, the models of
+     the provider in use with their marks in words, then the other providers with their key state. */
+  .model-sheet .sheet-head { flex-wrap: wrap; }
+  .model-sheet .sheet-head h3 { flex: 1; }
+  .model-sheet-sub { order: 3; flex: 1 1 100%; margin-top: -6px; font-size: var(--fs-13); color: var(--fg-2); }
+  .ph-model-list { display: flex; flex-direction: column; padding-bottom: var(--space-4); }
+  .ph-model-search { flex: none; height: var(--tap); margin: var(--space-1) 0 var(--space-3); }
+  .ph-model-search .model-search { min-height: 0; padding: 0; border: 0; background: none; }
+  .ph-model-fallback { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: var(--radius-md); background: color-mix(in srgb, var(--warn) 12%, var(--surface-1)); font-size: var(--fs-16); }
+  .ph-model-fallback > .ic { flex: none; margin-top: 2px; color: var(--warn); }
+  .ph-model-fallback .sub { margin-top: 2px; font-size: var(--fs-13); color: var(--fg-2); }
+  .ph-model-fallback .model-row.restore { width: auto; max-width: 100%; min-height: 36px; margin-top: var(--space-2); padding: 0 var(--space-4); border-radius: var(--radius-pill); background: color-mix(in srgb, var(--fg) 10%, transparent); color: var(--fg); font-size: var(--fs-15); font-weight: 600; }
+  .ph-model-effort button { padding: 0 4px; }
+  .ph-model-sec { padding: var(--space-4) 4px 6px; font-size: var(--fs-13); color: var(--fg-2); }
+  .ph-model-list .model-row { min-height: var(--list-row-h-1); padding: 6px 0; gap: var(--space-3); border-radius: 0; font-size: var(--fs-16); }
+  .ph-model-list .model-row:hover, .ph-model-list .model-row:focus-visible { background: none; }
+  .ph-model-list .model-row:active { background: var(--surface-2); }
+  .ph-model-list .model-row .sub { font-size: var(--fs-13); color: var(--fg-2); }
+  .ph-model-list .model-row > .ic { color: var(--fg-3); flex: none; }
+  .ph-model-list .model-row.on > .ic { color: var(--accent); }
+  .ph-model-list .model-text { display: flex; flex-direction: column; min-width: 0; }
+  .ph-model-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .ph-model-tag { flex: none; height: 20px; padding: 0 6px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-12); line-height: 20px; }
+  .ph-model-tag.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+  .ph-model-list .model-custom { padding: var(--space-2) 0; display: flex; flex-direction: column; gap: var(--space-2); font-size: var(--fs-13); }
 }

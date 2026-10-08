@@ -55,7 +55,7 @@ export function ChatSearch({ sessionId, onPick }: { sessionId: string; onPick: (
   );
 }
 
-function ChatSearchBody({ sessionId, onPick }: { sessionId: string; onPick: (seq: number) => void }) {
+export function ChatSearchBody({ sessionId, onPick }: { sessionId: string; onPick: (seq: number) => void }) {
   // Kept across openings of the same chat, so a second look at the hits does not start from nothing.
   const [query, setQuery] = useState(() => remembered.get(sessionId) ?? "");
   const [state, setState] = useState<State>({ kind: "idle" });

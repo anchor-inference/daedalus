@@ -449,7 +449,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // a toolbar once the field has the reader or holds anything. The white circle is a voice
   // conversation while the field is empty and nothing runs, Send with text, Stop while a run is on.
   const empty = !draft.trim() && files.length === 0;
-  const shape = !phone ? undefined : focused || !empty || asking || !!approval || progress !== null || needsReview ? "open" : "idle";
+  // A question or a permission request does not open the field: they sit in the tray above it, and
+  // the field stays the one 48 px row the reader can answer in with words of their own.
+  const shape = !phone ? undefined : focused || !empty || progress !== null || needsReview ? "open" : "idle";
   const voiceCircle = phone && action === "send" && empty && !offline;
   const useCurrent = () => { setSavedTarget(currentTarget); writeDraftTarget(sessionId, currentTarget); clearSendIntent(sessionId); };
 
@@ -466,6 +468,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       {phone && fileStorageError && files.length > 0 && <Banner tone="bad" icon="alert">{t("composer.attachments.unsaved")}</Banner>}
       {props.queued.length > 0 && (
         <div className="steers" aria-label={t("composer.steers")}>
+          {phone && <div className="ph-tray-head"><Icon name="clock" size={14} /><span>{t("composer.tray.queued", { n: props.queued.length })}</span></div>}
           {props.queued.map((s) => (
             <div key={s.id} className="steer" data-steer={s.id} data-kind={s.kind}>
               <Icon name="forward" size={14} />
@@ -483,7 +486,26 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           ))}
         </div>
       )}
-      {approval && (
+      {approval && phone && (
+        // The phone's tray: the same place and shape as the queue above the field, the narrowest
+        // grant first and white, the session-wide grant apart from it, and refusal in red words so a
+        // tired thumb does not take it for the primary.
+        <div ref={dock} className="dock approval ph-tray" role="group" aria-label={t("composer.approval.title", { tool: approval.tool })}>
+          <div className="ph-tray-head warn"><Icon name="shield" size={14} /><span>{t("composer.tray.permission")}</span></div>
+          <div className="ph-tray-title">{t("composer.approval.title", { tool: approval.tool || "tool" })}</div>
+          {approval.detail && <div className="ph-tray-detail mono">{approval.detail}</div>}
+          <div className="ph-tray-actions">
+            <button type="button" className="ph-btn primary" onClick={() => props.onApprove?.(approval)}>{t("composer.approve")}</button>
+            {props.similar && props.onApproveSimilar && (
+              <button type="button" className="ph-btn" data-action="allow-similar" title={t("composer.approve.similar.title")} onClick={() => props.onApproveSimilar?.(approval)}>
+                <span className="truncate">{t("composer.approve.similar", { label: props.similar })}</span>
+              </button>
+            )}
+            <button type="button" className="ph-btn ph-deny" onClick={() => props.onDeny?.(approval)}>{t("composer.deny")}</button>
+          </div>
+        </div>
+      )}
+      {approval && !phone && (
         <div ref={dock} className="dock approval" role="group" aria-label={t("composer.approval.title", { tool: approval.tool })}>
           <div className="dock-title">
             <Icon name="wrench" size={16} />
@@ -502,7 +524,36 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           </div>
         </div>
       )}
-      {asking && !approval && (
+      {asking && !approval && phone && (
+        <div ref={dock} className="dock question ph-tray" role="group" aria-label={t("composer.question")}>
+          <div className="ph-tray-head warn"><Icon name="question" size={14} /><span>{t("composer.question")}</span></div>
+          {questions!.map((q, qi) => {
+            const custom = q.allow_custom || !(q.options ?? []).length;
+            const last = qi === questions!.length - 1;
+            return (
+              <div key={qi} className="ph-tray-q">
+                <div className="ph-tray-title">{q.header ? `${q.header} · ` : ""}{q.question}</div>
+                {(q.options ?? []).map((o) => {
+                  const on = answers[qi]?.selected.includes(o.label);
+                  return (
+                    <button key={o.label} type="button" className={`ph-option ${on ? "on" : ""}`} aria-pressed={on} onClick={() => setAnswers((prev) => prev.map((a, i) => (i !== qi ? a : !q.multiSelect ? { ...a, selected: [o.label] } : { ...a, selected: on ? a.selected.filter((x) => x !== o.label) : [...a.selected, o.label] })))}>
+                      <span className="ph-option-l">{o.label}</span>
+                      {o.description && <span className="ph-option-m">{o.description}</span>}
+                    </button>
+                  );
+                })}
+                {(custom || last) && (
+                  <div className="ph-tray-answer">
+                    {custom && <input className="ph-field" placeholder={t("composer.tray.ownwords")} value={answers[qi]?.custom ?? ""} onChange={(e) => setAnswers((p) => p.map((a, i) => (i === qi ? { ...a, custom: e.target.value } : a)))} onKeyDown={(e) => { if (e.key === "Enter") void reply(); }} aria-label={t("composer.tray.ownwords")} />}
+                    {last && <button type="button" className="ph-btn primary" disabled={!complete} onClick={() => void reply()}>{t("session.answer")}</button>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {asking && !approval && !phone && (
         <div ref={dock} className="dock question" role="group" aria-label={t("composer.question")}>
           {questions!.map((q, qi) => (
             <div key={qi} className="dock-q">
@@ -577,7 +628,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           value={draft}
           disabled={sending || fileReadySession !== sessionId}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder={props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : t(placeholderKey(status, asking))}
+          placeholder={phone && approval ? t("composer.tray.instead") : props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : t(placeholderKey(status, asking))}
           rows={1}
           onPaste={onPaste}
           onKeyDown={onKeyDown}

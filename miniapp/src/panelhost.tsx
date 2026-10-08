@@ -70,6 +70,9 @@ export type PanelHostProps = {
   marks?: Partial<Record<PanelTab, "busy" | "attn">>;
   /** Phones: the tabs in a full sheet instead of a column. */
   sheet?: boolean;
+  /** Phones: what the sheet is about, over its tabs: the chat's title and a line under it. */
+  sheetTitle?: ReactNode;
+  sheetSub?: ReactNode;
   /** Desktop: what dragging the left edge does. */
   drag?: PaneDrag;
 };
@@ -104,7 +107,10 @@ export function Panel(props: PanelHostProps) {
   if (shown.tab === null) return null;
   if (sheet) {
     return (
-      <Sheet size="full" className={`panel-sheet ${local.closing ? "panel-closing" : ""}`} ariaLabel={t("panel.label")} onClose={props.onClose} head={<Tabs {...shownProps} local={local} inSheet />}>
+      <Sheet size="full" className={`panel-sheet ${local.closing ? "panel-closing" : ""}`} ariaLabel={t("panel.label")} onClose={props.onClose} head={<>
+        {props.sheetTitle && <div className="panel-sheet-title"><b className="truncate">{props.sheetTitle}</b>{props.sheetSub && <span className="truncate">{props.sheetSub}</span>}</div>}
+        <Tabs {...shownProps} local={local} inSheet />
+      </>}>
         <Toolbar {...shownProps} local={local} />
         <Body {...shownProps} local={local} />
       </Sheet>

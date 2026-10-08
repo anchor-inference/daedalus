@@ -49,12 +49,14 @@ import { ShareSheet } from "../share";
 import { deviceSaving, useBrowsers } from "../browser/data";
 import { BrowserTab } from "../browser/BrowserPanel";
 import { BrowserPip } from "../browser/pip";
-import { BrowserHeadButton, useFirstOpenToast } from "../browser/phone";
+import { BrowserHeadButton, BrowserNeedsRow, useFirstOpenToast } from "../browser/phone";
 import { pipGroup } from "../browser/model";
 import { orchestrationPathOf } from "../mode";
 import { FullResult, ToolResultView } from "../toolresult";
 import { useQuery } from "../store";
 import { sentMessageReachedTranscript } from "../pending-message";
+import { Banner, IconButton } from "../ui/phone";
+import { RenameSheet, SearchSheet, SessionMenuSheet, SessionTopBar, StateSub, SubagentsSheet, type SessionRow, type SessionTile } from "./SessionPhone";
 
 /**
  * Markdown parsed once per text. `cacheKey` names a message that will never change again, so its
@@ -184,6 +186,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const sessionTerminals = useSessionTerminals(id);
   const [detailsFocus, setDetailsFocus] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
+  // The phone's sheets: the ⋮ menu and the three it leads to that the desktop shows in place.
+  const [phoneSheet, setPhoneSheet] = useState<"menu" | "search" | "rename" | "subagents" | null>(null);
   const [modes, setModes] = useState<ModeInfo[]>([]);
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [skills, setSkills] = useState<SkillEntry[]>([]);
@@ -1138,7 +1142,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   }
 
   async function stop() {
-    if (!(await confirmDialog({ title: t("session.stop.title"), body: t(focus ? "session.stop.projectBody" : "session.stop.body"), action: t("session.stop.action"), danger: true }))) return;
+    if (!(await confirmDialog({ title: t("session.stop.title"), body: t(focus ? "session.stop.projectBody" : "session.stop.body"), action: t("session.stop.action"), danger: true, cancel: phone ? t("session.stop.keep") : undefined }))) return;
     try {
       await api.post(`/api/sessions/${id}/stop`);
       haptic("medium");
@@ -1336,11 +1340,74 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const staffId = focus && detail?.staff ? detail.staff.id : null;
   const hasDetails = panelTabs.includes("details");
   const focusPlaceholder = placeholder ?? (orchestrating ? t("focus.composer") : staffName ? t("focus.composer.staff", { name: staffName }) : undefined);
+
+  // What Retry regenerates after a failed run: the assistant message the run left after the last
+  // operator turn, if it left one; a run that failed before answering has nothing to regenerate.
+  const retrySeq = (() => {
+    for (const message of [...(detail?.messages ?? [])].reverse()) {
+      if (message.role === "user") return null;
+      if (message.role === "assistant" && typeof message.seq === "number") return message.seq;
+    }
+    return null;
+  })();
+  const lastSeq = detail?.messages.reduce<number | null>((last, message) => (typeof message.seq === "number" ? message.seq : last), null) ?? null;
+  // The phone's bar and its ⋮ sheet hold the same commands as the desktop header above; a command
+  // added there belongs in one of these two lists too, or a phone loses it.
+  const phoneTiles: SessionTile[] = phone && !pane ? [
+    { id: "search", icon: "search", label: t("session.phone.search"), onSelect: () => setPhoneSheet("search") },
+    { id: "terminal", icon: "terminal", label: t("session.phone.terminal"), count: sessionTerminals.running.length, disabled: !!terminalDock.reason && sessionTerminals.running.length === 0, onSelect: () => terminalDock.setSheet(true) },
+    ...(hasBrowser ? [{ id: "browser", icon: "globe" as IconName, label: t("panel.tab.browser"), attn: !!browserShown?.needs_you, onSelect: openBrowser }] : []),
+    ...(questionScope ? [{ id: "questions", icon: "ask" as IconName, label: t("panel.tab.questions"), count: waiting, attn: waiting > 0, onSelect: () => panel.open("questions") }] : []),
+    ...(panelTabs.includes("files") && hasDetails ? [{ id: "files", icon: "folder" as IconName, label: t("panel.tab.files"), onSelect: () => panel.open("files") }] : []),
+    ...(hasDetails ? [{ id: "details", icon: "settings" as IconName, label: t("panel.tab.details"), onSelect: () => { setDetailsFocus("session"); panel.open("details"); } }] : []),
+    ...(panelTabs.includes("preview") && panel.state.stack.length > 0 ? [{ id: "preview", icon: "eye" as IconName, label: t("panel.tab.preview"), onSelect: () => panel.open("preview") }] : []),
+    ...(panelTabs.includes("jobs") && hasDetails ? [{ id: "jobs", icon: "clock" as IconName, label: t("panel.tab.jobs"), onSelect: () => panel.open("jobs") }] : []),
+    ...(hasDetails ? [{ id: "mcp", icon: "plug" as IconName, label: t("session.mcp"), onSelect: () => { setDetailsFocus("mcp"); panel.open("details"); } }] : []),
+    ...(sessionDiagrams?.length ? [{ id: "diagrams", icon: "pen" as IconName, label: t("session.phone.diagrams"), count: sessionDiagrams.length, onSelect: () => navigate(pathFor("diagrams", null, { session: id })) }] : []),
+  ] : [];
+  const contextPct = detail?.context?.window ? Math.round((100 * detail.context.tokens) / detail.context.window) : null;
+  const phoneRows: SessionRow[] = phone && !pane ? [
+    { icon: "pen", label: t("session.rename"), onSelect: () => setPhoneSheet("rename") },
+    ...(focus ? [] : [{ icon: "folder" as IconName, label: t("session.project.move"), value: detail?.project?.name, onSelect: () => setMoving(true) }]),
+    ...(detail && ((detail.subagents?.length ?? 0) > 0 || detail.subagent_of) ? [{ icon: "spawn" as IconName, label: t("session.subagents.title"), value: detail.subagents?.length || undefined, onSelect: () => setPhoneSheet("subagents") }] : []),
+    ...(lastSeq !== null && !main && !orchestrating ? [{ icon: "fork" as IconName, label: t("session.phone.fork"), onSelect: () => void turnAction("fork", lastSeq) }] : []),
+    ...(onSplit ? [{ icon: "split" as IconName, label: t("session.split"), onSelect: onSplit }] : []),
+    { icon: "share", label: t("session.share"), value: detail?.share && detail.share.mode !== "local" ? t(detail.share.mode === "public" ? "session.share.chip.public" : "session.share.chip.key") : undefined, onSelect: () => setSharing(true) },
+    { icon: "download", label: t("session.export"), onSelect: exportMarkdown },
+    { icon: "compact", label: t("session.compact"), value: contextPct !== null ? `${contextPct} %` : undefined, disabled: busy, onSelect: compact },
+    ...(detail?.telegram_linked ? [{ icon: "unlink" as IconName, label: t("session.telegram.detach"), onSelect: detachTelegram }] : []),
+    { icon: "trash", label: t("session.clear"), danger: true, disabled: busy, onSelect: clearHistory },
+    { icon: "trash", label: t("session.delete"), danger: true, onSelect: remove },
+  ] : [];
+  const effortWord = detail ? t(detail.thinking === false ? "add.effort.off" : `add.effort.${detail.reasoning_effort || "medium"}`) : "";
+  const phoneSub = offline ? <StateSub tone="offline">{t("session.phone.reconnecting")}</StateSub>
+    : compacting ? <StateSub tone="compacting">{t("session.compacting.bar")}</StateSub>
+    : busy ? <LiveSub status={status} base={tail} live={live} />
+    : saving ? <StateSub tone="saving">{t("session.livebar.saving")}</StateSub>
+    : status === "failed" ? <StateSub tone="failed">{statusWord("failed")}</StateSub>
+    : detail ? <span className={detail.fallback ? "ph-chat-fallback" : undefined}>{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortWord ? ` · ${effortWord}` : ""}</span>
+    : null;
+  const phoneChip = phone && browserShown
+    ? <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />
+    : phone && questionScope && waiting > 0
+      ? <IconButton icon="ask" label={plural("questions.line", waiting)} badge={waiting} className="questions-headbtn attn" onClick={() => panel.open("questions")} />
+      : null;
   return (
     <FocusChatContext.Provider value={focusChat}>
     <div className={`chat ${pane ? `pane pane-${pane}` : ""} ${focus ? `in-project ${focus.kind}` : ""}`} onDragEnter={(e) => { if (e.dataTransfer?.types.includes("Files")) setDragging((d) => d + 1); }} onDragLeave={() => setDragging((d) => Math.max(0, d - 1))} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
       {dragging > 0 && <div className="dropzone"><Icon name="attach" size={28} /> {t("session.drop")}</div>}
-      <div className={`chat-head ${busy || saving || compacting ? "live" : ""}`}>
+      {phone && !pane ? <>
+        <SessionTopBar
+          title={detail?.title ?? "…"}
+          sub={phoneSub}
+          back={main || focus?.kind === "member" ? onBack : undefined}
+          onTitle={hasDetails ? () => { setDetailsFocus("session"); panel.open("details"); } : undefined}
+          chip={phoneChip}
+          onMenu={() => setPhoneSheet("menu")}
+          shared={detail?.share && detail.share.mode !== "local" ? (detail.share.mode === "public" ? "public" : "key") : null}
+        />
+        {offline && <Banner strip tone="warn" icon="reload" className="ph-chat-strip">{t("session.phone.reconnecting")}</Banner>}
+      </> : <div className={`chat-head ${busy || saving || compacting ? "live" : ""}`}>
         {(pane || phone) && (
           <button className="iconbtn" onClick={onBack} aria-label={t(pane === "right" ? "session.closepane" : "shell.back")} title={t(pane === "right" ? "session.closepane" : "shell.back")}>
             <Icon name={pane === "right" ? "close" : "back"} />
@@ -1428,7 +1495,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           />
         </div>
         {(busy || saving || compacting) && <HeadProgress status={status} compacting={compacting} />}
-      </div>
+      </div>}
       {staffId && <StaffHeader projectId={focus!.projectId} staffId={staffId} toast={toast} />}
       {banner}
 
@@ -1472,6 +1539,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 {sendingMessages.filter((pending) => !sentMessageReachedTranscript(detail?.messages, pending.id) && !queuedInput.some((queued) => queued.id === pending.id)).map((pending) => <div className="turn" key={pending.id}><div className="turn-content"><div className="msg-wrap"><div className="msg user"><Md text={pending.text} /></div></div></div></div>)}
               </SessionContext.Provider>
               {flow}
+              {/* The agent waiting in its browser is said in the conversation too, with Open, so the
+                  request is not only a chip in the bar. */}
+              {phone && !pane && panel.state.tab !== "browser" && <BrowserNeedsRow groups={browsers.groups} onOpen={openBrowser} />}
               {/* Not while the Questions tab is the one open: the cards are already beside the chat,
                   and an "Open" that opens what is on screen had people clicking and waiting for
                   something new to appear. */}
@@ -1485,7 +1555,18 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               </button>
             </div>
           )}
-          {!busy && !!detail?.error && (
+          {phone && !pane && compacting && <div className="ph-compact-row"><CompactionBar c={compacting} /></div>}
+          {phone && !pane && !busy && !!detail?.error && (
+            // The phone's failed run: the cause, what ran and when, and Retry on the answer the run
+            // left — the line above the composer said what went wrong and offered nothing to do.
+            <div className="ph-runerror">
+              <Banner tone="bad" icon="alert" sub={[shortModel(detail.model, 28), detail.messages.at(-1)?.created_at ? clock(detail.messages.at(-1)!.created_at) : ""].filter(Boolean).join(" · ")}
+                action={retrySeq !== null ? <button type="button" className="ph-btn sm primary" onClick={() => void turnAction("retry", retrySeq)}><Icon name="reload" size={16} />{t("turn.retry")}</button> : undefined}>
+                {t("session.runerror")}: {detail.error}
+              </Banner>
+            </div>
+          )}
+          {!(phone && !pane) && !busy && !!detail?.error && (
             <div className="runerror" role="status" aria-label={t("session.runerror")}>
               <Icon name="question" size={14} /><span><b>{t("session.runerror")}: </b>{detail.error}</span>
             </div>
@@ -1548,6 +1629,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             root={detail.project?.name ?? t("session.files.crumb")}
             downloadUrl={(e) => downloadHref(e.base, e.path)}
             sheet={phone}
+            sheetTitle={detail.title}
+            sheetSub={[detail.project?.name, detail.context?.messages ? plural("session.phone.messages", detail.context.messages) : null].filter(Boolean).join(" · ")}
             drag={dragPanel}
             tabs={panelTabs}
             pages={{
@@ -1621,6 +1704,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       {preview && <FilePreview src={preview} onClose={() => setPreview(null)} />}
 
       {receipt && <ReceiptDialog sessionId={id} receipt={receipt} onClose={() => setReceipt(null)} />}
+
+      {phoneSheet === "menu" && <SessionMenuSheet tiles={phoneTiles} rows={phoneRows} onClose={() => setPhoneSheet(null)} />}
+      {phoneSheet === "search" && <SearchSheet sessionId={id} onPick={openMessage} onClose={() => setPhoneSheet(null)} />}
+      {phoneSheet === "rename" && <RenameSheet title={detail?.title ?? ""} onSave={(title) => { setPhoneSheet(null); void rename(title); }} onClose={() => setPhoneSheet(null)} />}
+      {phoneSheet === "subagents" && detail && <SubagentsSheet detail={detail} onOpen={onOpen} onClose={() => setPhoneSheet(null)} />}
 
     </div>
     </FocusChatContext.Provider>
@@ -1854,12 +1942,12 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
       <div className="turn-content" hidden={folded && !live}>
       {turn.user && !turn.note && (
         <div className="msg-wrap">
-          <div className="msg user">
+          <UserBubble>
             {inbound && <span className="msg-origin">{t("turn.origin.inbound", { source: inbound })}</span>}
             {turn.user.yagni && <span className="msg-origin msg-yagni" title={t("turn.yagni.title")}>{t(turn.user.yagni === "on" ? "turn.yagni.on" : "turn.yagni.off")}</span>}
             {turn.user.reply_to && <ReplyQuote reply={turn.user.reply_to} />}
-            <Md text={withoutAttachedList(turn.user.text)} cacheKey={live ? undefined : `u${seq ?? turn.key}`} />
-          </div>
+            <Md className="msg-text" text={withoutAttachedList(turn.user.text)} cacheKey={live ? undefined : `u${seq ?? turn.key}`} />
+          </UserBubble>
           <KeptFiles text={turn.user.text} onOpen={preview} />
           {focusChat?.orchestrator && <MessageFate message={turn.user} sessionId={sessionId} projectId={focusChat.projectId} />}
           {/* Under the message, not beside it: a row beside the bubble is off-screen on a phone. */}
@@ -1940,6 +2028,33 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
     </div>
   );
 });
+
+/**
+ * The operator's bubble. On a phone its text stops at six lines with "Show all" under it: a long
+ * voice note filled half the screen and pushed the answer it asked for out of sight. Only the
+ * phone's stylesheet caps the height, so the button appears only where the text actually overflows
+ * — a desktop never measures an overflow and never shows it.
+ */
+function UserBubble({ children }: { children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [over, setOver] = useState(false);
+  const [all, setAll] = useState(false);
+  useLayoutEffect(() => {
+    const text = box.current?.querySelector<HTMLElement>(".msg-text");
+    if (!text || all) return;
+    const measure = () => setOver(text.scrollHeight > text.clientHeight + 2);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(text);
+    return () => observer.disconnect();
+  }, [all]);
+  return (
+    <div ref={box} className={`msg user ${all ? "" : "clamped"} ${over && !all ? "over" : ""}`}>
+      {children}
+      {over && !all && <button type="button" className="msg-more" onClick={() => setAll(true)}>{t("turn.showall")}<Icon name="chevron" size={14} /></button>}
+    </div>
+  );
+}
 
 /** The closing line of a run that produced no answer: that there is none, why the run stopped, and which
  *  step or compaction tier gave out. Part of the turn, so a "Context summary" drawn after it cannot hide it. */
@@ -2062,6 +2177,15 @@ function LiveBar({ status, saving, base, live, workspace, onJump }: { status: St
   );
 }
 
+/** The phone bar's second line during a run: the state and how long the turn has taken. */
+function LiveSub({ status, base, live }: { status: Status; base: Turn | null; live: LiveStore }) {
+  const state = useSyncExternalStore(live.subscribe, live.get);
+  useClock(1000);
+  const turn = applyLive(base, state, Date.now());
+  const waitingNow = status === "waiting";
+  return <StateSub tone={waitingNow ? "waiting" : "running"}>{waitingNow ? t("session.phone.waiting") : `${statusWord("running")} · ${duration(Date.now() - turn.startedAt)}`}</StateSub>;
+}
+
 /** The 2 px line along the header's bottom edge: a shimmer while a run is on, a measured width while
  *  the history is being compacted. */
 function HeadProgress({ status, compacting }: { status: Status; compacting: Compacting | null }) {
@@ -2093,8 +2217,9 @@ type MessageAction = { icon: IconName; label: string; danger?: boolean; onSelect
 
 /** The row of small buttons under a message: copy it, and whatever else the turn allows; the rest behind ⋯. */
 function MessageActions({ text, actions = [], more }: { text: string; actions?: MessageAction[]; more?: MenuItem[] }) {
-  const phone = !useMedia("(min-width: 1024px)");
-  const menu = phone ? [...actions, ...(more ?? [])] : more ?? [];
+  // A phone shows the same icons as a desktop, in 44 px targets (ui/phone.css): the word "Copy"
+  // beside one icon and every other action behind ⋯ made the turn's commands a hunt.
+  const menu = more ?? [];
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     setCopied(await copyText(text));
@@ -2110,9 +2235,8 @@ function MessageActions({ text, actions = [], more }: { text: string; actions?: 
     <div ref={controls} className="msg-actions">
       <button className="iconbtn small" onClick={copy} aria-label={t(copied ? "common.copied" : "common.copy")} title={t(copied ? "common.copied" : "common.copy")}>
         <Icon name={copied ? "check" : "copy"} size={15} />
-        {phone && <span>{t(copied ? "common.copied" : "common.copy")}</span>}
       </button>
-      {!phone && actions.map((a) => (
+      {actions.map((a) => (
         <button key={a.label} className={`iconbtn small ${a.danger ? "danger" : ""}`} onClick={a.onSelect} aria-label={a.label} title={a.label}>
           <Icon name={a.icon} size={15} />
         </button>
