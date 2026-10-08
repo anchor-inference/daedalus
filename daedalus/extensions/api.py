@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, closing, suppress
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qsl, quote, urlencode
 
@@ -2566,7 +2566,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         attachments: list[Attachment] = []
         try:
             for upload_file in files:
-                name = Path(upload_file.filename or "file").name
+                # Either separator ends a directory: a Windows client may name a pasted file by its
+                # whole clipboard path, and on a POSIX host that path is one long name with backslashes.
+                name = PureWindowsPath(upload_file.filename or "file").name or "file"
                 target = staging / f"{secrets.token_hex(16)}.part"
                 digest = hashlib.sha256()
                 with target.open("wb") as fh:

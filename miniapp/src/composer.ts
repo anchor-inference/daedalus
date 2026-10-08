@@ -197,7 +197,7 @@ export function rememberCustomModel(value: string, storage: StorageLike | null =
 
 /** A message the host is holding for a running agent: a `steer` reaches it at the next model call,
  *  a `follow_up` when the turn ends. */
-export type QueuedMessage = { id: string; kind: "steer" | "follow_up"; text: string; queued_at: string | null };
+export type QueuedMessage = { id: string; kind: "steer" | "follow_up"; text: string; queued_at: string | null; files: string[] };
 
 /** What the stream says about the queue; the whole queue rides in every event. */
 export type QueueChange = { reason?: string; count?: number; queued?: unknown };
@@ -216,8 +216,10 @@ export function readQueued(raw: unknown): QueuedMessage[] {
     const r = it as Record<string, unknown>;
     const id = typeof r.id === "string" ? r.id : "";
     const text = typeof r.text === "string" ? r.text : "";
-    if (!id || !text.trim()) continue;
-    out.push({ id, kind: r.kind === "follow_up" ? "follow_up" : "steer", text, queued_at: typeof r.queued_at === "string" ? r.queued_at : null });
+    const files = Array.isArray(r.files) ? r.files.filter((name): name is string => typeof name === "string" && name !== "") : [];
+    // A screenshot sent with no words is a message too: its card has only the file to show.
+    if (!id || (!text.trim() && files.length === 0)) continue;
+    out.push({ id, kind: r.kind === "follow_up" ? "follow_up" : "steer", text, queued_at: typeof r.queued_at === "string" ? r.queued_at : null, files });
   }
   return out;
 }

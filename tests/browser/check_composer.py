@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -44,6 +45,13 @@ PRESETS = {
     "opus": {"provider": "claude", "model": CONFIGURED, "label": "Claude Opus 5", "thinking": True, "reasoning_effort": "high", "images": True, "context_window": 200000, "max_output_tokens": 32000},
     "flash": {"provider": "deepseek", "model": STANDBY, "label": "DeepSeek Flash", "thinking": False, "reasoning_effort": "", "images": False, "context_window": 128000, "max_output_tokens": 16384},
 }
+
+
+# A one-pixel PNG, for a screenshot pasted into the composer.
+PIXEL = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082"
+)
 
 
 def message(seq: int, role: str, text: str, **over: object) -> dict:
@@ -94,6 +102,23 @@ class Host:
 HOST = Host()
 
 
+def upload(route) -> None:  # type: ignore[no-untyped-def]
+    """``POST /upload``, a message with files. The body is multipart and binary, so it is read as
+    bytes, and only for what the card needs: the message's id and the files' names, which is what
+    the host's card quotes back."""
+    req = route.request
+    rel = f"/api/sessions/{SESSION}/upload"
+    raw = req.post_data_buffer.decode("utf-8", "replace") if req.post_data_buffer else ""
+    ident = re.search(r'name="client_message_id"\r\n\r\n([^\r]*)', raw)
+    names = re.findall(r'name="files"; filename="([^"]*)"', raw)
+    item_id = ident.group(1) if ident else "q_upload"
+    HOST.posted.append((req.method, rel, {"client_message_id": item_id, "files": names}))
+    if HOST.status == "running":
+        HOST.queue.append({"id": item_id, "kind": "follow_up", "text": "", "files": names, "queued_at": "2026-09-18T12:01:00+00:00"})
+    receipt = {"status": "queued" if HOST.status == "running" else "consumed"}
+    route.fulfill(status=200, content_type="application/json", body=json.dumps({"run_id": "r2", "files": names, "receipt": receipt}))
+
+
 def stub(route) -> None:  # type: ignore[no-untyped-def]
     req = route.request
     url = req.url
@@ -103,6 +128,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     if rel.endswith("/stream"):
         return route.fulfill(status=200, content_type="text/event-stream", body="event: hello\ndata: {}\n\n")
     if req.method != "GET":
+        if rel == f"/api/sessions/{SESSION}/upload":
+            return upload(route)
         data = json.loads(req.post_data) if req.post_data else None
         HOST.posted.append((req.method, rel, data))
         if rel == f"/api/sessions/{SESSION}/messages":
@@ -376,6 +403,24 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.wait_for_timeout(100)
     if page.locator(".composer .steer").count():
         problems.append("the card stayed after its × was pressed")
+
+    # A screenshot pasted from the Windows clipboard during a run, with no words: it waits as a card
+    # of its own that names the file, and can still be steered.
+    pasted = "{8928C48B-9635-4A10-B7D6-0123456789AB}.png"
+    page.locator(".composer input[type=file][multiple]").first.set_input_files({"name": pasted, "mimeType": "image/png", "buffer": PIXEL})
+    page.wait_for_selector(".composer .attachment", timeout=5000)
+    page.locator(".composer .roundbtn.primary").click()
+    reached(page, "/upload", 0, "sending a pasted screenshot during a run", problems, method="POST")
+    try:
+        page.wait_for_selector(".composer .steer .steer-files", timeout=5000)
+        shot = page.locator(".composer .steer", has=page.locator(".steer-files"))
+        if pasted not in shot.inner_text() or shot.locator(".steer-now").count() != 1:
+            problems.append(f"the queued screenshot's card does not name the file or offer Steer ({shot.inner_text()!r})")
+        shot.locator(".steer-x").click()
+        page.wait_for_timeout(150)
+    except Exception:  # noqa: BLE001
+        cards = page.locator(".composer .steer").all_inner_texts()
+        problems.append(f"a screenshot sent during a run has no card saying it carries a file (cards: {cards}, queue: {HOST.queue})")
 
     field(page).fill("after this run")
     before_queue = len(posts("/messages"))

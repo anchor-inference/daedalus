@@ -4464,6 +4464,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "composer.delivery.unconfirmed": { en: "Couldn't confirm the message was sent. Your draft is kept; send it again and it won't be duplicated.", ru: "Не удалось подтвердить отправку. Черновик сохранён; отправьте снова — дубля не будет." },
   "composer.queued.hint": { en: "after this turn", ru: "после этого хода" },
   "composer.steered.hint": { en: "will be read on the next step", ru: "будет прочитано на следующем шаге" },
+  "composer.queued.files": { en: "Goes with the message: {names}", ru: "Уйдёт вместе с сообщением: {names}" },
   "composer.reply": { en: "Reply", ru: "Ответить" },
   "composer.steers": { en: "waiting for the agent", ru: "ждут агента" },
   "composer.steer.now": { en: "Steer", ru: "Уточнить" },

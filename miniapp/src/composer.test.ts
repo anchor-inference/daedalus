@@ -169,15 +169,27 @@ describe("the queue", () => {
       { id: "q_2", text: "   " }, { text: "no id" }, null, "junk",
     ];
     expect(readQueued(raw)).toEqual([
-      { id: "q_1", kind: "steer", text: "also the log", queued_at: "2026-09-18T11:04:22+00:00" },
-      { id: "q_3", kind: "follow_up", text: "then the docs", queued_at: null },
+      { id: "q_1", kind: "steer", text: "also the log", queued_at: "2026-09-18T11:04:22+00:00", files: [] },
+      { id: "q_3", kind: "follow_up", text: "then the docs", queued_at: null, files: [] },
     ]);
     expect(readQueued({ detail: "not found" })).toEqual([]);
     expect(readQueued(undefined)).toEqual([]);
   });
 
+  it("keeps a message that is only a file, and names the files a message carries", () => {
+    // A screenshot pasted during a run with no words used to be dropped as an empty card.
+    const raw = [
+      { id: "shot", kind: "follow_up", text: "", files: ["{8928C48B-9635-4A10-B7D6-0123456789AB}.png"] },
+      { id: "both", kind: "steer", text: "this window", files: ["window.png", 7, ""] },
+    ];
+    expect(readQueued(raw)).toEqual([
+      { id: "shot", kind: "follow_up", text: "", queued_at: null, files: ["{8928C48B-9635-4A10-B7D6-0123456789AB}.png"] },
+      { id: "both", kind: "steer", text: "this window", queued_at: null, files: ["window.png"] },
+    ]);
+  });
+
   it("is replaced whole by every steer_changed event, whatever the reason", () => {
-    const before = [{ id: "q_1", kind: "follow_up" as const, text: "one", queued_at: null }];
+    const before = [{ id: "q_1", kind: "follow_up" as const, text: "one", queued_at: null, files: [] }];
     expect(queuedAfter(before, { reason: "queued", queued: [{ id: "q_1", kind: "follow_up", text: "one" }, { id: "q_2", kind: "follow_up", text: "two" }] })).toHaveLength(2);
     expect(queuedAfter(before, { reason: "steered", queued: [{ id: "q_1", kind: "steer", text: "one" }] })[0].kind).toBe("steer");
     expect(queuedAfter(before, { reason: "consumed", count: 0, queued: [] })).toEqual([]);

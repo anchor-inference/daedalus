@@ -22,9 +22,9 @@ def sync_directory(directory: Path | str) -> None:
 
     Windows refuses ``os.open`` on a directory with ``PermissionError``: a directory handle there
     needs ``CreateFile`` with backup semantics, which ``os.open`` cannot ask for, and NTFS journals
-    the rename itself. Opening it anyway failed every blob write on a native Windows install, so
-    every picture a vision model was asked about died before it left the machine, and the agent
-    read "Permission denied" as the vision model not taking images.
+    the rename itself. Opening it anyway failed every blob write on a native Windows install: an
+    image pasted into the composer answered 500, and every picture a vision model was asked about
+    died before it left the machine, which the agent read as the vision model not taking images.
     """
     if WINDOWS:
         return

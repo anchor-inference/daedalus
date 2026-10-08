@@ -226,7 +226,14 @@ export function applyLive(base: Turn | null, live: LiveState, now: number): Turn
       return { ...a, result: lt.result, error: lt.error, running: false, length: lt.result.length, clipped: false, ms, groups: lt.groups };
     });
   }
-  const fresh = live.tools.filter((lt) => !t.toolIds.includes(lt.id));
+  // Only what streamed after the last step the history already shows is new. A streamed step older
+  // than that and missing from the history is on a page the screen has not read; added here it went
+  // to the end of the turn, below the steps and the words that came after it.
+  let lastKnown = -1;
+  live.tools.forEach((lt, index) => {
+    if (t.toolIds.includes(lt.id)) lastKnown = index;
+  });
+  const fresh = live.tools.filter((lt, index) => index > lastKnown && !t.toolIds.includes(lt.id));
   const thinkingKnown = t.activity.some((a) => a.kind === "thinking" && a.text === live.thinking);
   if (t.answer && ((live.text && live.text !== t.answer) || (live.thinking && !thinkingKnown) || fresh.length)) {
     // Something newer is streaming, so the text before it was not the final answer.
@@ -423,6 +430,9 @@ export type Merge = {
   gap: boolean;
 };
 
+/** A message's identity before it has a row: the parts the host's transcript key is made of. */
+const identity = (m: MessageView): string => `${m.role}|${m.created_at}|${m.tool_calls[0]?.id ?? m.tool_results[0]?.id ?? ""}`;
+
 const sameMessage = (a: MessageView, b: MessageView): boolean =>
   a.run_id === b.run_id && a.internal === b.internal && a.text === b.text && a.thinking === b.thinking && a.tool_calls.length === b.tool_calls.length && a.tool_results.length === b.tool_results.length && !!a.summary === !!b.summary;
 
@@ -464,12 +474,30 @@ export function reconcile(known: readonly MessageView[], tail: readonly MessageV
     changed = true;
     bySeq.set(m.seq!, m);
   }
+  const base = changed ? [...bySeq.values()].sort((a, b) => a.seq! - b.seq!) : settled;
   // The live tail always trails what is settled, so what the screen holds for it sits at the end.
   const heldLive = known.slice(settled.length);
-  const sameLive = live.length === heldLive.length && live.every((m, i) => sameMessage(m, heldLive[i]));
+  // The transcript is written when the run ends, so every message of a run is live until then, and a
+  // run of more than a dozen steps is longer than the tail an event asks for. The tail used to stand
+  // for the whole live part: the steps that fell off its front left the screen, the stream's copy of
+  // them came back in after the newer ones, and a run's earlier steps jumped below its interim text.
+  // What the screen holds and the tail no longer reaches is kept, in front of the tail. It is matched
+  // by identity as well as by number: a message queued during the run takes a row, and every live
+  // number after it moves up by one, so a number alone can name the wrong message; and a message the
+  // tail does hold is never kept twice, whatever its number says.
+  const inTail = new Set(tail.map(identity));
+  const written = new Set(base.slice(-(heldLive.length + tail.length)).map(identity));
+  const firstLive = live[0]?.seq;
+  const keptLive = firstLive != null ? heldLive.filter((m) => m.seq != null && m.seq < firstLive && !inTail.has(identity(m)) && !written.has(identity(m))) : [];
+  if (live.length && !fresh.length && !heldLive.some((m) => inTail.has(identity(m)))) {
+    // A live tail that starts past everything the screen holds has a hole in front of it.
+    const reach = base.length ? base[base.length - 1].seq! : 0;
+    if (live[0].seq != null && live[0].seq > reach + 1 + keptLive.length) return { messages: known.slice(), gap: true };
+  }
+  const nextLive = [...keptLive, ...live];
+  const sameLive = nextLive.length === heldLive.length && nextLive.every((m, i) => sameMessage(m, heldLive[i]));
   if (!changed && sameLive) return { messages: known as MessageView[], gap: false };
-  const base = changed ? [...bySeq.values()].sort((a, b) => a.seq! - b.seq!) : settled;
-  return { messages: live.length ? [...base, ...live] : base, gap: false };
+  return { messages: nextLive.length ? [...base, ...nextLive] : base, gap: false };
 }
 
 /** An older page, put in front of what is on screen. Anything not actually older is dropped. */
