@@ -1,12 +1,16 @@
 """Codex as a staff member: its TUI in a terminal, driven through the app server it talks to.
 
-Measured against Codex 0.155.1 in a throwaway home; what the app server and the TUI said is in
-``tests/support/fake_cli/recorded/codex`` and the fake Codex replays it. What matters here:
+Measured against Codex 0.155.1 in a throwaway home, and the whole launch again on 0.160.0; what the
+app server and the TUI said is in ``tests/support/fake_cli/recorded/codex`` and the fake Codex replays
+it. What matters here:
 
 - **Two processes.** ``codex app-server --listen unix://<dial dir>/codex.sock`` runs as the launch's
   companion terminal, and the TUI attaches to it with ``codex --remote unix://… resume <thread>``.
   The host reaches the same server through the daemon's ``net.dial``: it speaks JSON-RPC over a
-  WebSocket on that socket (a bare JSON line is met with a closed connection).
+  WebSocket on that socket (a bare JSON line is met with a closed connection). From 0.157 Codex binds
+  the socket itself under ``/tmp/codex-daemon-<uid>/`` and leaves a link at the path it was given
+  (measured on 0.160.0); the daemon follows such a link to a private socket of its own user, and an
+  older daemon's refusal of it ends the launch at once with its reason.
 - **The host starts the thread.** Notifications about a thread's turns and items go only to the
   clients subscribed to it — the one that started it and those that resumed it — while every client
   hears ``thread/started`` and status changes. A thread nobody has written to yet cannot be resumed
@@ -77,6 +81,7 @@ from daedalus.harness.contract import (
 from daedalus.harness.streams import StreamClosed, WebSocket
 from daedalus.harness.team import SKILL_NAME
 from daedalus.harness.tools import tooling
+from daedalus.terminals.model import Forbidden, InvalidRequest, StaleLaunch, Unsupported
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +115,11 @@ def start_modes(permission_mode: str, permission_level: str) -> tuple[str, str]:
     return sandbox, approval
 
 
+PERMANENT_REFUSALS = (Forbidden, InvalidRequest, StaleLaunch, Unsupported)
+"""What the daemon answers a dial with that dialling again will not change: a missing socket and a
+refused connection are a server still starting; these are not."""
+OLD_DAEMON = "the terminal daemon predates Codex 0.157's link at its socket and must be updated"
+"""Said with a refused link, so the operator knows the fix is the daemon's, not Codex's."""
 CONNECT_S = 60.0
 """How long the host keeps dialling the app server's socket while the companion starts."""
 CALL_TIMEOUT_S = 30.0
@@ -349,7 +359,12 @@ class CodexAdapter:
 
     async def _connect(self, term: TerminalPort) -> WebSocket:
         """Dial the companion's socket, again and again while it starts: the app server says nothing
-        when it listens, so the socket answering is the sign."""
+        when it listens, so the socket answering is the sign.
+
+        A refusal that no wait mends ends the dialling at once, in the daemon's words. Codex 0.157
+        began leaving a link where its socket used to be, a daemon that would not follow it refused
+        every dial, and the host went on dialling for a minute while the readiness gate gave up at
+        thirty seconds with "not ready" over an empty screen, the reason never shown."""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + CONNECT_S
         last: Exception | None = None
@@ -357,6 +372,8 @@ class CodexAdapter:
             try:
                 return await WebSocket.connect(await term.dial(f"unix:{SOCKET}"))
             except asyncio.CancelledError:
+                raise
+            except PERMANENT_REFUSALS:
                 raise
             except Exception as exc:  # noqa: BLE001 — not listening yet; the next try may find it
                 last = exc
@@ -379,7 +396,10 @@ class CodexAdapter:
                 raise
             except Exception as exc:  # noqa: BLE001 — the session's failure, shown on it
                 logger.info("codex launch %s did not start: %s", launch.launch_id, exc)
-                state.queue.put_nowait(StaffEvent(EventKind.TURN_FAILED, _now(), {"failure": f"Codex's app server: {exc}"}))
+                failure = f"Codex's app server: {exc}"
+                if isinstance(exc, Forbidden) and f"{SOCKET} is not a socket" in str(exc):
+                    failure += f"; {OLD_DAEMON}"
+                state.queue.put_nowait(StaffEvent(EventKind.TURN_FAILED, _now(), {"failure": failure}))
 
         state.tasks = [asyncio.create_task(until_launch_ends(), name=f"codex-end-{term.id}"), asyncio.create_task(start(), name=f"codex-start-{term.id}")]
         try:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from contextlib import AsyncExitStack
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from daedalus.extensions.resource_runtime import binding, reconcile
@@ -13,6 +14,7 @@ from daedalus.stores.comparison_funding import ComparisonFunding
 from daedalus.stores.control import ControlDenied, now, one
 from daedalus.stores.executions import ACTIVE, AttemptIdentity
 from daedalus.stores.lifecycle import record_owned_exit
+from daedalus.stores.phase_clocks import DEFAULT_TIMEOUTS, PhaseClocks
 
 if TYPE_CHECKING:
     import aiosqlite
@@ -74,8 +76,16 @@ async def observe_no_entry_in(app: Application, conn: aiosqlite.Connection, iden
     return True
 
 
-async def admit_native_run(app: Application, staff_session_id: str, session_id: str, run_id: str) -> None:
-    """Pin a native run before its provider task is scheduled, including the first fast report."""
+async def admit_native_run(app: Application, staff_session_id: str, session_id: str, run_id: str, *,
+                           first_output_s: float = DEFAULT_TIMEOUTS["first_output"]) -> None:
+    """Pin a native run before its provider task is scheduled, including the first fast report.
+
+    An admitted run is a ready one: the agent loop is running and its next sign is the model's
+    output. The attempt's clock is moved on to wait for that output here, because nothing else does
+    for a native run: a command-line member's terminal says when it is ready, a native run never did,
+    so its "ready" phase passed its 30 s deadline in the middle of good work and the deadline sweep
+    stopped the run, which the member's session showed as nothing more than a runtime exit.
+    """
     async with app.db.transaction() as conn:
         identity = await app.executions.check_staff(conn, staff_session_id)
         row = await one(conn, "SELECT a.native_run_id,a.provider_session_ref,s.session_id FROM execution_attempts a"
@@ -98,6 +108,32 @@ async def admit_native_run(app: Application, staff_session_id: str, session_id: 
         await conn.execute("UPDATE staff_sessions SET session_id = ? WHERE id = ?", (session_id, staff_session_id))
         await conn.execute("UPDATE execution_attempts SET native_run_id = ?,provider_session_ref = ?,state = 'running',"
                            "updated_at = ? WHERE id = ?", (run_id, reference, now(), identity.id))
+        clocks = PhaseClocks(app.executions)
+        # Admission can come before the start that binds the attempt returns, so from either phase.
+        await clocks.advance(conn, identity, from_phase="spawn", to_phase="ready")
+        await clocks.advance(conn, identity, from_phase="ready", to_phase="first_output", timeout_seconds=first_output_s)
+
+
+async def observe_native_output(app: Application, staff_session_id: str) -> bool:
+    """The model of a native run answered: its start is over, and its clock is settled.
+
+    From here a native run is watched the way it was before phase clocks: by the session's silence
+    and its own provider timeouts. An idle deadline would stop a run that is only waiting on a long
+    command, which says nothing while it runs. False when there was no clock waiting for output."""
+    async with app.db.transaction() as conn:
+        try:
+            identity = await app.executions.check_staff(conn, staff_session_id)
+        except ControlDenied:
+            return False
+        row = await one(conn, "SELECT phase FROM attempt_phase_clocks WHERE attempt_id = ? AND outcome = 'active'",
+                        (identity.id,))
+        if row is None or row["phase"] not in ("ready", "first_output"):
+            return False
+        clocks = PhaseClocks(app.executions)
+        await clocks.advance(conn, identity, from_phase="ready", to_phase="first_output")
+        await clocks.output(conn, identity, idle_timeout_seconds=DEFAULT_TIMEOUTS["idle"])
+        await clocks.close(conn, identity)
+        return True
 
 
 async def observe_exit(app: Application, *, staff_session_id: str, runtime_ref: str,
@@ -149,9 +185,14 @@ async def observe_exit(app: Application, *, staff_session_id: str, runtime_ref: 
             if (fresh_observation and row["runtime_kind"] == "daedalus" and observed_status == "error"
                     and owner is None and row["state"] != "recovering"):
                 await record_fault(conn, row["id"], "runtime_error")
+            detail = "the host observed the owned runtime exit"
             if owner is not None or row["state"] == "recovering":
+                # The bare "runtime exit" was all a member stopped by a deadline left behind: the
+                # orchestrator read it as a crash and hired around it. The reason goes with the end.
+                detail = await _stop_reason(conn, row["id"], observed_status)
                 await conn.execute("UPDATE staff_sessions SET ended_at = COALESCE(ended_at,?),status = 'exited',"
-                                   "status_at = ?,waiting_for = '' WHERE id = ?", (now(), now(), staff_session_id))
+                                   "status_at = ?,waiting_for = '',end_reason = CASE WHEN end_reason = '' THEN ?"
+                                   " ELSE end_reason END WHERE id = ?", (now(), now(), detail[:500], staff_session_id))
                 if row["state"] in (*ACTIVE, "recovering"):
                     await conn.execute("UPDATE execution_attempts SET state = 'cancelled',updated_at = ? WHERE id = ?",
                                        (now(), row["id"]))
@@ -173,7 +214,7 @@ async def observe_exit(app: Application, *, staff_session_id: str, runtime_ref: 
             if (bus is not None and row["runtime_kind"] != "cli" and before is not None
                     and before["status"] != "exited" and after["status"] == "exited"):
                 event = await bus.persist_in(conn, "staff.status", {"status": "exited", "previous": before["status"],
-                                             "detail": "the host observed the owned runtime exit", "actor": "system"},
+                                             "detail": detail, "actor": "system"},
                                              project_id=row["project_id"], staff_id=row["worker_staff_id"],
                                              session_id=before["session_id"])
         if event is not None:
@@ -187,3 +228,14 @@ async def observe_exit(app: Application, *, staff_session_id: str, runtime_ref: 
                     # held until a later probe proves the whole attempt group empty.
                     logger.exception("the exited terminal's attempt containment could not be reconciled")
         return True
+
+
+async def _stop_reason(conn: aiosqlite.Connection, attempt_id: str, observed_status: str) -> str:
+    """Why the host stopped an owned runtime, in words for the session's end and its event."""
+    clock = await one(conn, "SELECT phase,started_at,deadline_at FROM attempt_phase_clocks"
+                      " WHERE attempt_id = ? AND outcome = 'timed_out'", (attempt_id,))
+    if clock is not None:
+        allowed = datetime.fromisoformat(clock["deadline_at"]) - datetime.fromisoformat(clock["started_at"])
+        return (f"the host stopped it: its {clock['phase']} phase passed its deadline of"
+                f" {round(allowed.total_seconds())} s; the run ended {observed_status}")
+    return f"the host stopped it on a cancellation; the run ended {observed_status}"

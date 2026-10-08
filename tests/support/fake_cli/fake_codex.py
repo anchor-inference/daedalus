@@ -29,6 +29,9 @@ The app server (``codex app-server --listen unix://<path> [-c key=value]…``):
   receive them is ``FAKE_CODEX_APPROVALS``: ``all`` (the default; every subscribed client, the first
   answer wins and the others are told ``serverRequest/resolved``) or ``owner`` (only the client that
   started the thread). The real routing could not be measured: the account was at its usage limit.
+- The ``fail_at_start`` fault makes the app server print a configuration error and exit with 1.
+- ``FAKE_CODEX_SOCKET=link`` binds the socket in a private directory and leaves a link at the path
+  it was told to listen on, as Codex 0.157 and later do.
 - Configuration overrides with ``-c`` are TOML values under dotted keys, as Codex parses them.
   ``mcp_servers.<name>={command=…,args=[…],env={…},env_vars=[…],tool_timeout_sec=N}`` starts an MCP
   server whose tools the script's ``report:`` / ``askorch:`` call; it inherits only a few basic
@@ -53,7 +56,9 @@ import asyncio
 import contextlib
 import json
 import os
+import shutil
 import sys
+import tempfile
 import time
 import tomllib
 from pathlib import Path
@@ -207,7 +212,14 @@ class AppServer:
                 self.say(f"mcp server {name}: {len(client.tools)} tools")
             else:
                 self.say(f"mcp server {name} failed: {client.error}")
-        server = await asyncio.start_unix_server(self.connection, path=self.path, limit=1 << 22)
+        bound = self.path
+        if os.environ.get("FAKE_CODEX_SOCKET") == "link":
+            # As Codex from 0.157 on does (measured on 0.160.0): the socket is bound in a private
+            # directory of its own and the path it was told to listen on becomes a link to it.
+            bound = os.path.join(tempfile.mkdtemp(prefix="codex-daemon-"), "app.sock")
+        server = await asyncio.start_unix_server(self.connection, path=bound, limit=1 << 22)
+        if bound != self.path:
+            os.symlink(bound, self.path)
         self.say(f"codex app-server listening on unix://{self.path}")
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
@@ -216,6 +228,8 @@ class AppServer:
                 loop.add_signal_handler(sig, stop.set)
         await stop.wait()
         server.close()
+        if bound != self.path:
+            shutil.rmtree(os.path.dirname(bound), ignore_errors=True)
         for client in self.mcp.values():
             await client.close()
         return 0
@@ -779,6 +793,9 @@ def main() -> None:
         listen = args.get("--listen")
         if not listen.startswith("unix://"):
             usage_error("codex", "the fake app server listens on unix://<path> only")
+        if Faults.from_env().fail_at_start:
+            print("Error: failed to load configuration: unknown field `model_catalog_json`", flush=True)
+            raise SystemExit(1)
         server = AppServer(listen[len("unix://") :], parse_overrides(args.all("-c")), log)
         exit_with(server.serve)
         return

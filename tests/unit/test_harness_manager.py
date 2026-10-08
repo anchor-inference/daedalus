@@ -345,7 +345,7 @@ async def test_a_failed_updater_is_reported_with_its_words(db: Database) -> None
 
 
 async def test_an_untested_version_is_flagged_and_a_look_alike_grok_is_refused(db: Database) -> None:
-    async with bench(db, env={"FAKE_CODEX_VERSION": "0.160.0"}) as b:
+    async with bench(db, env={"FAKE_CODEX_VERSION": "0.162.0"}) as b:
         script(b.rig.bin / "grok", "\nprint('grok-cli 0.3.1')\n")
         rows = by_harness(await b.manager.check("container"))
         codex = rows["codex"]
@@ -353,7 +353,7 @@ async def test_an_untested_version_is_flagged_and_a_look_alike_grok_is_refused(d
         grok = rows["grok"]
         assert grok["installed"] is False and grok["error"] == "unsupported binary: 'grok-cli 0.3.1' is not Grok Build"
         b.config = HarnessConfig(allow_untested=False)
-        assert await b.manager.unavailable("container", "codex") == "Codex 0.160.0 is outside the tested versions"
+        assert await b.manager.unavailable("container", "codex") == "Codex 0.162.0 is outside the tested versions"
 
 
 async def test_an_install_runs_in_a_terminal_and_is_checked_when_it_ends(db: Database) -> None:
