@@ -1,6 +1,7 @@
 """The rendered conversation loses a deleted tail immediately and after reload."""
 from __future__ import annotations
 
+from api_stub import reveal_composer
 from check_composer import CHROMIUM, HOST, UNHANDLED, message, open_page
 from playwright.sync_api import expect, sync_playwright
 
@@ -39,7 +40,9 @@ def run() -> None:
             page.reload()
             page.wait_for_selector(".composer")
             expect(page.locator(".answer")).to_have_count(0)
-            # Effort is a branch of the model menu at every width.
+            # Effort is a branch of the model menu at every width; a phone's is in the toolbar its
+            # composer opens onto.
+            reveal_composer(page)
             page.locator(".composer .model-select").click()
             page.locator(".effort-entry").click()
             page.locator('.effort-option input[value="off"]').click()
@@ -47,6 +50,7 @@ def run() -> None:
             assert HOST.thinking is False
             page.reload()
             page.wait_for_selector(".composer")
+            reveal_composer(page)
             page.locator(".composer .model-select").click()
             page.locator(".effort-entry").click()
             expect(page.locator('.effort-option input[value="off"]')).to_be_checked()

@@ -8,7 +8,7 @@ from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_composer as composer  # noqa: E402
-from api_stub import expect_app  # noqa: E402
+from api_stub import expect_app, reveal_composer  # noqa: E402
 
 
 def main() -> int:
@@ -22,6 +22,7 @@ def main() -> int:
             context = browser.new_context(viewport={"width": width, "height": 1000}, color_scheme=theme)
             page = composer.open_page(context)
             trigger = page.locator(".composer .model-select")
+            reveal_composer(page)
             trigger.click()
             providers = page.locator(".provider-row")
             expect(providers).to_have_count(4)
@@ -55,6 +56,7 @@ def main() -> int:
             problems: list[str] = []
             assert composer.reached(page, "/model", before, "search selection", problems)
             assert composer.posts("/model")[-1][2] == {"preset": "flash"}
+            reveal_composer(page)
             trigger.click()
             expect(providers).to_have_count(4)
             page.locator('.provider-row[data-provider="local"]').click()

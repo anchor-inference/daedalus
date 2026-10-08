@@ -27,7 +27,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_composer as composer  # noqa: E402
-from api_stub import DEFAULT_APP, FocusStub, MainStub, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, FocusStub, MainStub, expect_app, reveal_composer  # noqa: E402
 from check_main import serve as serve_main  # noqa: E402
 from check_project_focus import PID, fits, serve  # noqa: E402
 
@@ -144,6 +144,8 @@ def composer_fits(browser, lang: str, width: int, model: str, running: bool) -> 
     page.goto(f"{BASE}/agents/{composer.SESSION}?token=t&scheme=dark&lang={lang}")
     page.wait_for_selector(".composer .roundbtn.primary", timeout=15000)
     page.wait_for_timeout(300)
+    # The phone's composer rests as one row; its toolbar (mode, model, effort) is the open shape's.
+    reveal_composer(page)
     try:
         facts = page.evaluate("""() => {
           const box = document.querySelector('.composer-box').getBoundingClientRect();
@@ -159,7 +161,12 @@ def composer_fits(browser, lang: str, width: int, model: str, running: bool) -> 
           return {
             box: { left: box.left, right: box.right },
             outside: shown.filter((e) => { const r = e.getBoundingClientRect(); return r.left < box.left - 0.5 || r.right > box.right + 0.5; }).map((e) => e.className),
-            short: shown.filter((e) => e.getBoundingClientRect().height < 39.5).map((e) => e.className),
+            // A 36 px circle or pill reaches 44 px through its ::after; what counts is the target.
+            short: shown.filter((e) => {
+              const r = e.getBoundingClientRect(), a = getComputedStyle(e, '::after');
+              const grow = a.content !== 'none' && a.position === 'absolute' ? -(parseFloat(a.top) || 0) - (parseFloat(a.bottom) || 0) : 0;
+              return r.height + grow < 43.5;
+            }).map((e) => e.className),
             mode: pill('.composer .composer-mode'), model: pill('.composer .model-select'),
             modeCut: cut('.composer .composer-mode .truncate'), effortCut: cut('.composer .model-select .model-effort'),
             effort: document.querySelector('.composer .model-select .model-effort')?.textContent ?? null,
@@ -173,14 +180,15 @@ def composer_fits(browser, lang: str, width: int, model: str, running: bool) -> 
     if facts["outside"]:
         problems.append(f"{where}: {facts['outside']} leave the pill")
     if facts["short"]:
-        problems.append(f"{where}: {facts['short']} are under 40px tall")
+        problems.append(f"{where}: {facts['short']} are under the 44 px target")
     mode, pill = facts["mode"], facts["model"]
     if not mode:
         problems.append(f"{where}: no mode chip")
     else:
         if facts["modeCut"]:
             problems.append(f"{where}: the mode chip's name is cut")
-        if mode["pad"] < 8 or mode["fs"] > 12:
+        # The phone's pills are the design's: 15 px type with room inside.
+        if mode["pad"] < 8 or mode["fs"] != 15:
             problems.append(f"{where}: the mode chip has {mode['pad']}px inside and {mode['fs']}px type")
     if running:
         if pill:
@@ -188,7 +196,7 @@ def composer_fits(browser, lang: str, width: int, model: str, running: bool) -> 
     elif not pill:
         problems.append(f"{where}: no model pill")
     else:
-        if pill["pad"] < 8 or pill["fs"] > 12:
+        if pill["pad"] < 8 or pill["fs"] != 15:
             problems.append(f"{where}: the model pill has {pill['pad']}px inside and {pill['fs']}px type")
         if not facts["effort"] or facts["effortCut"]:
             problems.append(f"{where}: the effort is missing or cut ({facts['effort']!r})")

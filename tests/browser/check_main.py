@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, MainStub, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, MainStub, expect_app, open_drawer  # noqa: E402
 from screenshots import SETTINGS, UNHANDLED  # noqa: E402
 from screenshots import stub as installation
 
@@ -163,10 +163,14 @@ def phone(page: Page, lang: str) -> None:
     main = MainStub()
     serve(page, main)
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
-    expect(page.locator(".start-list .main-entry")).to_have_count(0)
+    expect(page.locator(".ph-home .main-entry")).to_have_count(0)
     fits(page, f"{lang} phone start")
-    # The tab opens orchestration's list, not the main chat: Main is its first row, with the pill.
-    page.locator(".tabbar a[data-screen='orchestration']").click()
+    # The drawer's Orchestration lists Main and the projects; its "See all" opens orchestration's
+    # list, not the main chat: Main is the list's first row, with the pill.
+    open_drawer(page)
+    page.locator(".ph-drawer .ph-seg button").nth(1).click()
+    expect(page.locator(".ph-drawer-root.open [data-nav='main']")).to_be_visible()
+    page.locator(".ph-drawer-root.open [data-nav='orchestration-list']").click()
     page.wait_for_url("**/app/orchestration/projects**")
     assert ("/api/main", {}) not in main.posts, "the list opened the main chat's session"
     first = page.locator(".orch-list > :first-child .main-entry")

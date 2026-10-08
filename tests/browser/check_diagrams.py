@@ -312,7 +312,9 @@ def phone(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-unt
     route(page, stub)
     page.goto(f"{BASE}/diagrams?token=t&lang={lang}&scheme={SCHEME}")
     expect(page.locator(".diagram-card")).to_have_count(3)
-    expect(page.locator(".tabbar")).to_be_visible()
+    # No bottom bar on a phone: the list's top bar carries the hamburger to the app's drawer.
+    expect(page.locator(".pagehead .ph-menu")).to_be_visible()
+    expect(page.locator("nav.tabbar")).to_have_count(0)
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     expect(page.locator(".diagram-card .diagram-thumb img").first).to_be_visible()
     shot(page, f"phone-list-{lang}-{SCHEME}")
@@ -364,7 +366,7 @@ def phone(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-unt
 
     page.get_by_role("button", name="Назад" if ru else "Back").first.click()
     expect(page.locator(".diagram-card")).to_have_count(3)
-    expect(page.locator(".tabbar")).to_be_visible()
+    expect(page.locator(".pagehead .ph-menu")).to_be_visible()
     assert ids
     context.close()
 

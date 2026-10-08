@@ -281,7 +281,8 @@ def phone(page: Page, lang: str) -> None:
     fits(page, f"{lang} phone orchestrator")
     for where in ("journal", "brief", "team", "board", "wakeups"):
         page.goto(f"{BASE}/project/{PID}/{where}?token=t&lang={lang}")
-        expect(page.locator(".pagehead .iconbtn[href]").first).to_be_visible()
+        # Every page has a way out in its header: back, or the hamburger to the app's drawer.
+        expect(page.locator(".pagehead .iconbtn[href], .pagehead .ph-menu").first).to_be_visible()
         if where == "team":
             # Each member's spend where the member is: dollars and tokens, or the subscription window used.
             # A phone draws the team as its own rows, not the desktop's, and the spend goes with them.

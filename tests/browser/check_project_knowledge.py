@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, Unhandled, expect_app, fulfil_shared  # noqa: E402
+from api_stub import DEFAULT_APP, Unhandled, expect_app, fulfil_shared, open_projects  # noqa: E402
 from check_workspace_archive import PROJECT  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -118,9 +118,8 @@ def check(lang: str, width: int) -> None:
         page.route("**/api/**", stub)
 
         def open_memory():
-            projects = "Projects" if lang == "en" else "Проекты"
             settings = "Settings for Bakery" if lang == "en" else "Настройки: Bakery"
-            page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{projects}']:visible").first.click()
+            open_projects(page)
             page.locator(f".project-row .iconbtn[aria-label='{settings}']").click(force=True)
             section = page.locator("details.sheet-section", has=page.get_by_text("Project memory" if lang == "en" else "Память проекта", exact=True))
             section.locator("summary").first.click()

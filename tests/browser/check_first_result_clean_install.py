@@ -12,6 +12,7 @@ from pathlib import Path
 from queue import Queue
 from uuid import uuid4
 
+from api_stub import open_drawer
 from playwright.sync_api import expect, sync_playwright
 
 from daedalus.app import Application
@@ -148,8 +149,9 @@ def scenario(language: str, width: int) -> None:
 
         page.goto(f"{base}/app/agents?token={token}&lang={language}")
         if width == 320:
-            page.get_by_text("Orchestration" if language == "en" else "Оркестрация", exact=True).last.click()
-            page.get_by_role("button", name="Add a project" if language == "en" else "Добавить проект").click()
+            # A phone adds its first project from the drawer, under Projects.
+            open_drawer(page)
+            page.locator(".ph-drawer-root.open [data-nav='projects']").click()
         else:
             page.locator(".project-chip").click()
         sheet = page.locator(".sheet")

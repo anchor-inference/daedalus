@@ -43,65 +43,72 @@ def run() -> int:
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(executable_path=CHROMIUM)
-        page = browser.new_page(viewport={'width': 390, 'height': 844})
+        # A phone's chats are the Chats page: a project with one chat has no section of its own (its
+        # chat is filed by day), the Voice folder keeps its section, and an empty project is not drawn
+        # (the drawer lists every project). The row's commands are behind its ⋮.
+        page = browser.new_page(viewport={'width': 390, 'height': 844}, is_mobile=True, has_touch=True)
         page.route('**/api/**', route)
-        page.goto(f'{BASE}/agents?token=t&lang=en')
-        expect(page.locator('.folder')).to_have_count(3)
-        assert page.locator('.folder').evaluate_all('(nodes) => nodes.map(n => n.dataset.project)') == ['garden', 'voice', 'empty']
-        garden = page.locator('[data-project="garden"]')
-        expect(garden).to_have_class('folder single  ')
+        page.goto(f'{BASE}/agents?view=chats&token=t&lang=en')
+        expect(page.locator('.ph-row')).to_have_count(2)
+        assert page.locator('.ph-chats section[data-project]').evaluate_all('(nodes) => nodes.map(n => n.dataset.project)') == ['voice']
+        # The lone chat's day group depends on today's date, so only its being a day group is asserted.
+        titles = page.locator('.ph-sec-t').all_inner_texts()
+        assert titles[0] == 'Voice' and len(titles) == 2 and titles[1] in ('Today', 'Yesterday', 'Previous 7 days', 'Previous 30 days', 'Older'), titles
+        garden = page.locator(f'[data-session="{S1}"]')
         expect(garden).to_contain_text('Local model')
         expect(garden).to_contain_text('Needs you')
-        assert garden.locator('.erow-time').get_attribute('title')
-        # The path is available in project settings; mobile navigation spends no row on it. Opening a
-        # project of one agent would show that path and nothing else, so a phone has no chevron for it.
-        expect(garden.locator('.folder-expand')).to_be_hidden()
-        expect(garden.locator('.folder-root')).to_have_count(0)
-        # A single-agent project uses the session menu instead of a second overflow beside it.
-        expect(garden.locator('.folder-actions')).to_have_count(0)
         garden.get_by_role('button', name='Planting plan: More').click()
-        page.get_by_role('menuitem', name='Settings for Garden').click()
+        page.locator('.ph-actions').get_by_role('button', name='Settings for Garden').click()
         expect(page.get_by_role('dialog', name='Garden', exact=True)).to_be_visible()
         page.get_by_role('dialog').get_by_role('button', name='Close', exact=True).click()
-        page.locator('[data-project="empty"] .folder-head').click()
-        expect(page.locator('[data-project="empty"] .folder-add')).to_be_visible()
+        expect(page.locator('[data-project="empty"]')).to_have_count(0)
+        # The search is behind the bar's icon, and the bar becomes the field while it is open.
+        page.locator('.ph-top').get_by_role('button', name='Search conversations').click()
         search = page.get_by_role('searchbox', name='Search conversations')
-        # The phone's composer stands above the list and steps aside while the search has the reader,
-        # so what a search finds is under the field rather than in the lower third of the screen.
-        composer = page.locator('.start-composer')
-        expect(composer).to_be_visible()
-        search.focus()
-        expect(composer).to_be_hidden()
+        expect(search).to_be_focused()
+        expect(page.locator('.ph-chips')).to_have_count(0)
         search.fill('vegetables outside')
-        expect(page.locator('.search-passage')).to_have_text('Grow tomatoes on the balcony')
-        expect(page.locator('.erow')).to_have_count(1)
-        expect(page.locator('.search-notice')).to_contain_text('Matching words and meaning')
+        expect(page.locator('.ph-snip')).to_have_text('Grow tomatoes on the balcony')
+        expect(page.locator('.ph-row')).to_have_count(1)
+        expect(page.locator('.ph-note')).to_contain_text('Matching words and meaning')
         search.fill('exact')
-        expect(page.locator('.search-notice')).to_contain_text('Exact search only')
-        expect(page.locator('.search-notice a')).to_have_attribute('href', '/app/settings/components')
+        expect(page.locator('.ph-note')).to_contain_text('Exact search only')
+        expect(page.locator('.ph-note a')).to_have_attribute('href', '/app/settings/components')
         search.fill('no results')
-        expect(page.locator('.search-notice')).to_contain_text('Matching words and meaning')
-        expect(page.locator('.erow')).to_have_count(0)
-        search.fill('')
-        expect(page.locator('.folder')).to_have_count(3)
-        expect(composer).to_be_hidden()
-        search.blur()
-        expect(composer).to_be_visible()
+        expect(page.locator('.ph-note')).to_contain_text('Matching words and meaning')
+        expect(page.locator('.ph-row')).to_have_count(0)
+        expect(page.locator('.ph-empty')).to_contain_text('Nothing matches.')
+        page.locator('.ph-top').get_by_role('button', name='Back').click()
+        expect(page.locator('.ph-row')).to_have_count(2)
+        # A second chat in the project gives it a section of its own, newest first.
         agents.append({**agents[0], 'id': 'second', 'title': 'Watering schedule', 'last_message_at': '2026-09-19T01:00:00Z'})
         projects[0].update(total=2, members=2, last_message_at=agents[-1]['last_message_at'])
-        expect(garden.locator('.erow')).to_have_count(2, timeout=10000)
-        assert 'single' not in garden.get_attribute('class').split()
-        expect(garden.locator('.erow-title').first).to_have_text('Watering schedule')
-        # A row pressed while the empty field still has focus: the composer returns only after the
-        # press, so the list does not slide under the pointer and the click opens the row it was on.
-        search.focus()
-        expect(composer).to_be_hidden()
-        garden.get_by_text('Planting plan', exact=True).click()
+        garden_section = page.locator('section[data-project="garden"]')
+        expect(garden_section.locator('.ph-row')).to_have_count(2, timeout=10000)
+        expect(garden_section.locator('.ph-row-t').first).to_have_text('Watering schedule')
+        garden_section.get_by_text('Planting plan', exact=True).click()
         expect(page).to_have_url(f'{BASE}/agents/{S1}')
         expect(page.locator('.chat-scroll')).to_be_visible()
         assert requests == ['vegetables outside', 'exact', 'no results']
+        page.close()
+
+        # The desktop's column searches the same way and says which search answered.
+        requests.clear()
+        agents.pop()
+        projects[0].update(total=1, members=1, last_message_at=agents[0]['last_message_at'])
+        page = browser.new_page(viewport={'width': 1280, 'height': 860})
+        page.route('**/api/**', route)
+        page.goto(f'{BASE}/agents?token=t&lang=en')
+        search = page.locator('.sidebar').get_by_role('searchbox', name='Search conversations')
+        search.fill('vegetables outside')
+        expect(page.locator('.sidebar .search-passage')).to_have_text('Grow tomatoes on the balcony')
+        expect(page.locator('.sidebar .search-notice')).to_contain_text('Matching words and meaning')
+        search.fill('exact')
+        expect(page.locator('.sidebar .search-notice')).to_contain_text('Exact search only')
+        expect(page.locator('.sidebar .search-notice a')).to_have_attribute('href', '/app/settings/components')
+        assert requests == ['vegetables outside', 'exact']
         browser.close()
-    print('project recency, hybrid row, transition, conversation search and fallback: passed')
+    print('chats sections, row commands, transition, conversation search and fallback: passed')
     return UNHANDLED.report()
 
 

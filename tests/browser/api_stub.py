@@ -623,6 +623,48 @@ class Unhandled:
         return 1
 
 
+def open_drawer(page) -> None:  # type: ignore[no-untyped-def]
+    """Open the phone's drawer from whatever screen is showing: every top bar has the hamburger."""
+    page.locator(".ph-menu:visible").first.click()
+    page.wait_for_selector(".ph-drawer-root.open .ph-nrow", timeout=10000)
+    page.wait_for_timeout(300)
+
+
+def drawer_go(page, screen: str, mode: str = "") -> None:  # type: ignore[no-untyped-def]
+    """Go to a destination from the phone's drawer: a daily one is a row of it, the rest are in its
+    More sheet. `mode` switches the drawer to that mode's lists first ("agents", "orchestration")."""
+    open_drawer(page)
+    if mode:
+        page.locator(".ph-drawer .ph-seg button").nth(0 if mode == "agents" else 1).click()
+        page.wait_for_timeout(200)
+    row = page.locator(f".ph-drawer-root.open [data-screen='{screen}']")
+    if row.count():
+        row.first.click()
+    else:
+        page.locator(".ph-drawer-root.open [data-nav='more']").click()
+        page.locator(f".ph-more-sheet [data-screen='{screen}']").click()
+    page.wait_for_timeout(400)
+
+
+def open_projects(page) -> None:  # type: ignore[no-untyped-def]
+    """Open the project switcher: the column's project chip on a desktop, the drawer's Projects
+    entry on a phone (where the start screen's own button used to be)."""
+    page.wait_for_selector(".project-chip:visible, .ph-menu:visible")
+    if page.locator(".project-chip:visible").count():
+        page.locator(".project-chip:visible").first.click()
+        return
+    open_drawer(page)
+    page.locator(".ph-drawer-root.open [data-nav='projects']").click()
+
+
+def reveal_composer(page) -> None:  # type: ignore[no-untyped-def]
+    """On a phone the composer rests as one row; the model, the mode and the context ring are in the
+    toolbar it opens onto when its field has the reader. A no-op where they already show."""
+    if not page.locator(".composer .model-select, .composer .composer-mode").first.is_visible():
+        page.locator(".composer textarea").first.click()
+        page.wait_for_timeout(150)
+
+
 def expect_app(base: str) -> None:
     """Refuse to drive a browser at an address that is not the built Mini App.
 

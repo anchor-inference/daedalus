@@ -382,8 +382,11 @@ def phone(browser, lang: str, scheme: str, errors: list[str]) -> None:  # type: 
     fab = page.locator(".cal-fab")
     box = fab.bounding_box()
     assert box and box["width"] >= 44, f"the add button is {box}"
-    tabbar = page.locator(".tabbar").bounding_box()
-    assert tabbar and box["y"] + box["height"] <= tabbar["y"], "the add button sits on the tab bar"
+    # No bottom bar on a phone outside a project: the add button sits above the screen's edge, and the
+    # app's drawer is one tap away from the planner's header.
+    expect(page.locator("nav.tabbar")).to_have_count(0)
+    assert box["y"] + box["height"] <= page.viewport_size["height"] - 8, f"the add button runs off the screen: {box}"
+    expect(page.locator(".cal-head .ph-menu")).to_be_visible()
     shot(page, f"{tag}-3day")
 
     # The views, each readable: words on screen, not only coloured marks.

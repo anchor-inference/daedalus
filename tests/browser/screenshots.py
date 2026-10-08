@@ -966,7 +966,7 @@ def word(key: str) -> str:
     return WORDS[LANG][key]
 
 
-def shot(page: Page, name: str, route: str, *, wait: str = ".screen, .chat", settle: int = 900, before=None, full: bool = False) -> None:  # type: ignore[no-untyped-def]
+def shot(page: Page, name: str, route: str, *, wait: str = ".screen, .chat, .ph-page", settle: int = 900, before=None, full: bool = False) -> None:  # type: ignore[no-untyped-def]
     page.goto(f"{BASE}/{route}{'&' if '?' in route else '?'}token=t&scheme=dark&lang={LANG}")
     page.wait_for_selector(wait, timeout=15000)
     if before:
@@ -1048,10 +1048,19 @@ def pick_a_model(page: Page) -> None:
         page.evaluate("document.querySelector('.addmodel .step-head').scrollIntoView({block: 'start'})")
 
 
+def open_drawer(page: Page) -> None:
+    """The phone's drawer: the two modes as a switch, the destinations, the projects and the recents."""
+    page.locator(".ph-menu:visible").first.click()
+    page.wait_for_selector(".ph-drawer-root.open .ph-nrow", timeout=5000)
+    page.wait_for_timeout(400)
+
+
 def open_more(page: Page) -> None:
-    """The More sheet on a phone: every other destination, and the language switch under them."""
-    page.locator(".tabbar button").last.click()
-    page.wait_for_selector(".more-grid", timeout=5000)
+    """The drawer's More sheet on a phone: every other destination, and the language switch under them."""
+    open_drawer(page)
+    page.locator(".ph-drawer-root.open [data-nav='more']").click()
+    page.wait_for_selector(".ph-more-sheet", timeout=5000)
+    page.wait_for_timeout(300)
 
 
 def scroll_to_voices(page: Page) -> None:
@@ -1251,7 +1260,11 @@ def agents_shots() -> int:
                 context.add_init_script("try { " + script + " } catch (e) {}")
                 page = context.new_page()
                 page.route("**/api/**", stub)
-                shot(page, f"{prefix}{state}", "agents", wait=".folder")
+                # A phone's folders are the Chats page's project sections (open unless closed by hand).
+                if mobile:
+                    shot(page, f"{prefix}{state}", "agents?view=chats", wait=".ph-row")
+                else:
+                    shot(page, f"{prefix}{state}", "agents", wait=".folder")
                 context.close()
         browser.close()
     return out or UNHANDLED.report()
@@ -1935,6 +1948,8 @@ def run() -> int:
         shot(page, "phone-memory", "memory")
         shot(page, "phone-health", "health", settle=900)
         shot(page, "phone-more", "agents", before=open_more)
+        shot(page, "phone-drawer", "agents", wait=".ph-home", before=open_drawer)
+        shot(page, "phone-chats", "agents?view=chats", wait=".ph-row")
         shot(page, "phone-team", f"project/{P1}/team", wait=".phone-staff-row")
         shot(page, "phone-settings-notifications", "settings/notifications", wait=".nrows .nrow", before=open_first_kind, settle=500)
         shot(page, "phone-settings-tools", "settings/tools", wait=".tgroups .tgroup", settle=500)

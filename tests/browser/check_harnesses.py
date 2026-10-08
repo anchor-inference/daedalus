@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import CATALOG, DEFAULT_APP, HarnessesStub, TeamStub, expect_app  # noqa: E402
+from api_stub import CATALOG, DEFAULT_APP, HarnessesStub, TeamStub, drawer_go, expect_app  # noqa: E402
 from event_feed import EventFeed  # noqa: E402
 from screenshots import P1, UNHANDLED, stub  # noqa: E402
 
@@ -161,9 +161,8 @@ def phone(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     harnesses = HarnessesStub()
     context = browser.new_context(viewport=PHONE, color_scheme="dark", is_mobile=True, has_touch=True)
     page = open_page(context, harnesses, None, f"{BASE}/agents?token=t&lang={lang}")
-    page.locator(".tabbar button").last.tap()
-    page.wait_for_selector(".more-grid", timeout=5000)
-    page.locator(".more-item[href='/app/harnesses']").tap()
+    # Harnesses is one of the drawer's More destinations on a phone.
+    drawer_go(page, "harnesses")
     page.wait_for_selector(".harness-cards .harness-card", timeout=10000)
     got = states(page, ".harness-card")
     check.that([h for h, _ in got] == ["claude", "codex", "opencode", "pi", "grok"], f"{lang} phone: the cards are {got}")

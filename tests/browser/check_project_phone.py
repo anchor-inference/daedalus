@@ -242,12 +242,23 @@ def run_one(page: Page, lang: str, width: int) -> None:
     page.wait_for_url("**/app/orchestration/projects**")
     expect(page.locator("nav.project-tabs")).to_have_count(0)
 
-    # The header's back leaves the project for orchestration's list, and the app's own tabs come back.
+    # The header's hamburger opens the app's drawer from inside the project: Inbox, Agents and
+    # Settings are reachable without leaving it first, and a destination leaves the project bar
+    # behind with no app bar in its place.
     page.goto(f"{BASE}/project/{PID}/team?token=t&lang={lang}")
-    page.locator(".pagehead a.iconbtn[href]").first.tap()
-    page.wait_for_url("**/app/orchestration/projects**")
+    page.locator(".pagehead .ph-menu").first.tap()
+    drawer = page.locator(".ph-drawer-root.open")
+    expect(drawer.locator(".ph-seg button").nth(1)).to_have_attribute("aria-checked", "true")
+    expect(drawer.locator("[data-screen='inbox']")).to_be_visible()
+    expect(drawer.locator("[data-screen='settings']")).to_be_visible()
+    drawer.locator("[data-screen='inbox']").tap()
+    page.wait_for_url("**/app/inbox**")
     expect(page.locator("nav.project-tabs")).to_have_count(0)
-    expect(page.locator("nav.tabbar")).to_be_visible()
+    expect(page.locator("nav.tabbar")).to_have_count(0)
+    # The project's bar is the redesign's: 56 px tall above the home indicator.
+    page.goto(f"{BASE}/project/{PID}/team?token=t&lang={lang}")
+    slot = page.locator("nav.project-tabs > a").first.bounding_box()
+    assert slot and round(slot["height"]) == 56, f"{where}: a project tab is {slot}"
 
 
 def main() -> int:

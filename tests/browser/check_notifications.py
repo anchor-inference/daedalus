@@ -380,14 +380,14 @@ def run() -> int:
                     break
                 time.sleep(0.05)
 
-            # The phone: one banner, the More tab's badge, and Needs you first on the Inbox.
+            # The phone: one banner, the home bell's badge, and Needs you first on the Inbox.
             Centre.entries[:] = [e for e in Centre.entries if e["id"] < 6]
             phone = browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2, color_scheme="dark", is_mobile=True, has_touch=True)
             phone.route("**/api/**", route_api)
             page = phone.new_page()
             before = len(Streams.open)
             page.goto(f"{BASE}/agents?token=t&lang=en", wait_until="commit")
-            page.wait_for_selector(".tabbar", timeout=20000)
+            page.wait_for_selector(".ph-top .ph-menu", timeout=20000)
             if not wait(page, lambda: len(Streams.open) > before, 10):
                 problems.append("the phone did not open the event stream")
             page.wait_for_timeout(500)
@@ -399,16 +399,16 @@ def run() -> int:
                 box = page.locator(".notice-toasts.banner").bounding_box()
                 if not box or box["y"] > 40:
                     problems.append(f"the phone's banner is not at the top: {box}")
-                for name in (".composer-box", ".tabbar"):
+                for name in (".composer-box",):
                     other = page.locator(name).first.bounding_box() if page.locator(name).count() else None
                     if box and other and overlap(box, other):
                         problems.append(f"the phone's banner covers {name}: {box} over {other}")
-            # The Inbox is in More on a phone (Terminals took its tab); More carries its unseen count.
-            tab = page.locator(".tabbar button[aria-haspopup='dialog'] .tab-badge")
+            # The home's bell is the Inbox on a phone and carries its unseen count (so does the drawer).
+            bell = page.locator(".ph-top a.ph-ib[href$='/inbox']")
+            tab = bell.locator(".ph-badge")
             if not wait(page, lambda: tab.count() and tab.inner_text() == str(Centre.summary()["unseen"]), 3):
-                problems.append(f"the More tab's badge is {tab.inner_text() if tab.count() else 'missing'}, not {Centre.summary()['unseen']}")
-            page.locator(".tabbar button[aria-haspopup='dialog']").click()
-            page.locator(".more-sheet .more-item[href$='/inbox']").click()
+                problems.append(f"the bell's badge is {tab.inner_text() if tab.count() else 'missing'}, not {Centre.summary()['unseen']}")
+            bell.click()
             page.wait_for_selector(".needs-you .notice-row", timeout=10000)
             first = page.eval_on_selector(".screen", "el => el.firstElementChild && el.firstElementChild.className")
             print("the Inbox starts with:", first)

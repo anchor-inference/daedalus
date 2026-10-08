@@ -24,7 +24,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, Unhandled, expect_app, folders, fulfil_shared  # noqa: E402
+from api_stub import DEFAULT_APP, Unhandled, expect_app, folders, fulfil_shared, reveal_composer  # noqa: E402
 
 UNHANDLED = Unhandled()
 
@@ -152,6 +152,7 @@ def run() -> int:
                 problems.append(f"{name}: the selector does not say what it stands in for ({header!r})")
             if not selector.evaluate("(el) => el.classList.contains('attn')"):
                 problems.append(f"{name}: the selector is not marked as standing in")
+            reveal_composer(page)
             selector.click()
             page.wait_for_selector(".model-list", timeout=5000)
             restore = page.locator(".model-list .model-row.restore")

@@ -116,23 +116,25 @@ def run() -> int:
 
         if os.environ.get("SHOTS"):
             page.screenshot(path="/tmp/daedalus-sidebar-subagents.png", full_page=True)
+        # A phone's rows carry no "+" of their own: a new chat in a project is the first command of
+        # the project's sheet (its section's ⋮) and of each of its rows' sheets.
         phone = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
         phone.route("**/api/**", stub)
-        phone.goto(f"{BASE}/agents?token=t&lang=en&scheme=dark", wait_until="networkidle")
-        expect(phone.locator(".folder-add").first).to_be_visible()
-        phone_plus_error = centres(phone, ".folder-add")
-        if phone_plus_error > 1:
-            problems.append(f"the phone project plus is {phone_plus_error:.1f}px off centre")
-        medium = browser.new_page(viewport={"width": 688, "height": 900}, is_mobile=True, has_touch=True)
-        medium.route("**/api/**", stub)
-        medium.goto(f"{BASE}/agents?token=t&lang=en&scheme=dark", wait_until="networkidle")
-        medium_add = medium.locator(".folder-add").first
-        expect(medium_add).to_be_visible()
-        expect(medium_add.locator("span")).to_have_count(0)
-        medium_plus_error = centres(medium, ".folder-add")
-        if medium_plus_error > 1:
-            problems.append(f"the 688px project plus is {medium_plus_error:.1f}px off centre")
-        medium.close()
+        for page_, width in ((phone, 390), (browser.new_page(viewport={"width": 688, "height": 900}, is_mobile=True, has_touch=True), 688)):
+            if width != 390:
+                page_.route("**/api/**", stub)
+            page_.goto(f"{BASE}/agents?view=chats&token=t&lang=en&scheme=dark", wait_until="networkidle")
+            expect(page_.locator(".folder-add")).to_have_count(0)
+            section = page_.locator(".ph-chats section[data-project]").first
+            name = section.locator(".ph-sec-t").inner_text()
+            section.locator(".ph-sec-act .ph-ib").first.click()
+            expect(page_.locator(".ph-actions .ph-mrow").first).to_have_text(f"New chat in {name}")
+            page_.keyboard.press("Escape")
+            section.locator(".ph-row-more").first.click()
+            expect(page_.locator(".ph-actions .ph-mrow").first).to_have_text(f"New chat in {name}")
+            page_.keyboard.press("Escape")
+            if width != 390:
+                page_.close()
         phone.goto(f"{BASE}/agents/{S1}?token=t&lang=en&scheme=dark", wait_until="networkidle")
         phone.locator(".subagents-trigger").click()
         phone_popover = phone.locator(".subagents-popover")

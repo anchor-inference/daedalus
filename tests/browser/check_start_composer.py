@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -81,26 +82,33 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     page.wait_for_timeout(800)
 
     if phone:
-        box = composer.bounding_box()
-        head = page.locator(".start-list-head").bounding_box()
-        greeting = page.locator(".start-greeting").bounding_box()
+        # A phone's home is a new chat: the composer rests as one 48 px row at the bottom, the
+        # question above it, and the model is the top bar's title.
+        box = composer.locator(".composer-box").bounding_box()
+        greeting = page.locator(".ph-hero h1").bounding_box()
         vh = size["height"]
-        assert box and head and greeting
-        if not 0.42 * vh <= head["y"] <= 0.55 * vh:
-            say(f"the chats begin at {head['y']:.0f} px of {vh}, not about the middle")
-        if box["y"] < 0.2 * vh or box["y"] + box["height"] > head["y"] + 0.5:
-            say(f"the composer {box} is not in the middle, above the chats at {head['y']:.0f}")
+        assert box and greeting
+        if round(box["height"]) != 48 or vh - (box["y"] + box["height"]) > 24:
+            say(f"the composer {box} is not one 48 px row at the bottom")
         if greeting["y"] + greeting["height"] > box["y"]:
             say("the question is not above the composer")
+        expect(page.locator(".ph-top .ph-top-tb")).to_contain_text("gpt-6-luna")
         if page.evaluate("document.documentElement.scrollWidth - innerWidth") > 0:
             say("the page scrolls sideways")
 
-    # The effort: the preset's own first, then a pick.
+    # The effort: the preset's own first, then a pick (from the title's sheet on a phone).
     model = composer.locator(".model-select")
     expect(model.locator(".model-effort")).to_contain_text(words["high"])
-    model.click()
-    page.locator(".effort-entry").click()
-    page.locator(".effort-menu .effort-option input[value='low']").click()
+    if phone:
+        page.locator(".ph-top .ph-top-tb").click()
+        page.locator(".effort-entry").click()
+        page.locator(".sheet .effort-options input[value='low']").click()
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
+    else:
+        model.click()
+        page.locator(".effort-entry").click()
+        page.locator(".effort-menu .effort-option input[value='low']").click()
     expect(model.locator(".model-effort")).to_contain_text(words["low"])
     expect(page.locator(".model-list")).to_have_count(0)
 
@@ -124,7 +132,8 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     field.fill("Check the price")
     expect(composer.locator(".roundbtn.primary")).to_be_visible()
     composer.locator(".plus").click()
-    mic = page.get_by_role("menuitem", name=words["mic"])
+    # A menu item on the desktop, a row of the + sheet on a phone.
+    mic = page.get_by_role("menuitem", name=words["mic"]).or_(page.locator(".ph-plus-sheet .ph-mrow").filter(has_text=re.compile(words["mic"], re.I)))
     expect(mic).to_be_visible()
     mic.click()
     page.wait_for_selector(".start-composer .voicebar[data-phase=recording]", timeout=5000)

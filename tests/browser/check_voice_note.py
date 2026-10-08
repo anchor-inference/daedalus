@@ -115,6 +115,19 @@ def open_page(context) -> Page:  # type: ignore[no-untyped-def]
     return page
 
 
+def target(page: Page, selector: str) -> dict:
+    """What a finger can hit: the control's box, grown by the invisible ::after a 36 px circle carries
+    on a phone to reach 44 px."""
+    return page.evaluate("""(sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return { x: -1, width: 0, height: 0 };
+      const r = el.getBoundingClientRect(), a = getComputedStyle(el, '::after');
+      const px = (v) => (v.endsWith('px') ? parseFloat(v) : 0);
+      const grow = a.content !== 'none' && a.position === 'absolute';
+      return { x: r.x, width: r.width - (grow ? px(a.left) + px(a.right) : 0), height: r.height - (grow ? px(a.top) + px(a.bottom) : 0) };
+    }""", selector)
+
+
 def new_context(browser, **options):  # type: ignore[no-untyped-def]
     context = browser.new_context(color_scheme="dark", **options)
     context.grant_permissions(["microphone"], origin=BASE.split("/app")[0])
@@ -234,13 +247,13 @@ def run(browser) -> list[str]:  # type: ignore[no-untyped-def]
     for label, options in (("phone", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True}), ("tablet", {"viewport": {"width": 1024, "height": 1366}, "is_mobile": True, "has_touch": True})):
         context = new_context(browser, **options)
         page = open_page(context)
-        mic = page.locator(".composer .mic").bounding_box() or {"width": 0, "height": 0}
+        mic = target(page, ".composer .mic")
         check(mic["width"] >= 44 and mic["height"] >= 44, f"{label}: the microphone is a thumb's size ({mic['width']}x{mic['height']})")
         page.locator(".composer .mic").tap()
         page.wait_for_selector(".voicebar[data-phase=recording]", timeout=5000)
         width = options["viewport"]["width"]  # type: ignore[index]
         for selector in (".voicebar-cancel", ".voicebar-stop", ".voicebar-send"):
-            box = page.locator(selector).bounding_box() or {"x": -1, "width": 0, "height": 0}
+            box = target(page, selector)
             check(box["width"] >= 44 and box["height"] >= 44 and 0 <= box["x"] and box["x"] + box["width"] <= width, f"{label}: {selector} is 44px or more and on screen ({box})")
         check(page.evaluate("document.documentElement.scrollWidth") <= width, f"{label}: nothing scrolls sideways")
         page.locator(".voicebar-cancel").tap()

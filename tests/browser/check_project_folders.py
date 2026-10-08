@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, Unhandled, expect_app, folder, fulfil_shared  # noqa: E402
+from api_stub import DEFAULT_APP, Unhandled, expect_app, folder, fulfil_shared, open_projects  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -136,7 +136,7 @@ def scenario(page: Page, lang: str, unhandled: Unhandled, name: str) -> None:
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
     # The switcher is the chip in the sidebar on a desktop and a button over the chats on a phone.
-    page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{words['projects']}']:visible").first.click()
+    open_projects(page)
     # By its name: the row carries the team button as well, before the settings one.
     page.locator(f".project-row .iconbtn[aria-label='{words['settings']}']").click()
     rows = page.locator(".dir-row")
@@ -146,7 +146,7 @@ def scenario(page: Page, lang: str, unhandled: Unhandled, name: str) -> None:
     # Read-only: the switch sends the lock and the sentence under the folder says what it means.
     docs.locator(".dir-lock input").click()
     page.reload()
-    page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{words['projects']}']:visible").first.click()
+    open_projects(page)
     page.locator(f".project-row .iconbtn[aria-label='{words['settings']}']").click()
     expect(page.get_by_text("Try again" if lang == "en" else "Повторить")).to_be_visible()
     page.get_by_text("Try again" if lang == "en" else "Повторить").click()

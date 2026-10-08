@@ -12,7 +12,16 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, BoardStub, TeamStub, Unhandled, expect_app, folder, fulfil_shared  # noqa: E402
+from api_stub import (  # noqa: E402
+    DEFAULT_APP,
+    BoardStub,
+    TeamStub,
+    Unhandled,
+    expect_app,
+    folder,
+    fulfil_shared,
+    open_projects,
+)
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -107,9 +116,8 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
     page.goto(f"{BASE}/project/p1/board?token=t&lang={language}")
     expect(page.locator(".project-budget-chip")).to_have_count(0)
     page.goto(f"{BASE}/agents?token=t&lang={language}")
-    projects = "Projects" if language == "en" else "Проекты"
     settings = "Settings for Bakery" if language == "en" else "Настройки: Bakery"
-    page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{projects}']:visible").first.click()
+    open_projects(page)
     page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
     block = page.locator(".project-budget")
     expect(block).to_be_visible()
@@ -126,14 +134,14 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
     expect(block.locator("input").first).to_have_value("1.000000")
     expect(block.locator("input").last).to_have_value("0.500000")
     page.reload()
-    page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{projects}']:visible").first.click()
+    open_projects(page)
     page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
     block.locator("summary").click()
     expect(block.locator("input").first).to_have_value("1.000000")
     assert page.evaluate("localStorage.getItem('daedalus.project.budget.draft.p1')")
     block.locator("button").last.click()
     page.reload()
-    page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{projects}']:visible").first.click()
+    open_projects(page)
     page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
     retry = "Try again" if language == "en" else "Повторить"
     page.get_by_text(retry).click()
@@ -147,7 +155,7 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
     state["goal"] = 2
     project["entity_revision"] += 1
     page.reload()
-    page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{projects}']:visible").first.click()
+    open_projects(page)
     page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
     block.locator("summary").click()
     expect(block.locator("input").first).to_have_value("2.000000")
@@ -167,7 +175,7 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
     block.locator("button").last.click()
     block.locator("input").first.fill("4.000000")
     page.reload()
-    page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{projects}']:visible").first.click()
+    open_projects(page)
     page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
     block.locator("summary").click()
     expect(block.locator("input").first).to_have_value("4.000000")
@@ -178,7 +186,7 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
     assert page.evaluate("localStorage.getItem('daedalus.project.budget.draft.p1')")
     state["unknown"] = True
     page.reload()
-    page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{projects}']:visible").first.click()
+    open_projects(page)
     page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
     block.locator("summary").click()
     expect(block).to_contain_text("balance is unknown" if language == "en" else "остаток неизвестен")

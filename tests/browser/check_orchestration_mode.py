@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, MAIN_SID, FocusStub, MainStub, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, MAIN_SID, FocusStub, MainStub, expect_app, open_drawer  # noqa: E402
 from screenshots import UNHANDLED  # noqa: E402
 from screenshots import stub as installation
 
@@ -223,30 +223,31 @@ def phone(page: Page, lang: str) -> None:
     serve(page, focus, main, lang)
     go(page, "/agents", lang)
 
-    # The tab bar carries both modes, then Terminals and the Board (the Inbox is in More); the count
-    # waits quietly on Orchestration's tab.
-    bar = page.locator("nav.tabbar")
-    expect(bar).to_be_visible()
-    assert bar.locator("a[data-screen]").evaluate_all("els => els.map(e => e.dataset.screen)") == ["agents", "orchestration", "terminals", "board"]
-    expect(bar.locator("a[data-screen='agents']")).to_have_class(re.compile(r"\bactive\b"))
-    tab = bar.locator("a[data-screen='orchestration']")
-    expect(tab).to_contain_text(words["orchestration"])
-    expect(tab.locator(".mode-count")).to_have_text(WAITING)
-    expect(page.locator(".start-list .main-entry")).to_have_count(0)
-    expect(page.locator(f".start-list [data-project='{PID}']")).to_have_count(0)
-    expect(page.locator(f".start-list .folder[data-project='{GARDEN}']")).to_be_visible()
-    for label in bar.locator(".tab-label").all():
-        assert label.evaluate("e => e.scrollWidth <= e.clientWidth + 1"), f"{lang} phone: a tab's label does not fit: {label.inner_text()}"
+    # No bottom bar: the drawer carries both modes as a switch, the count waiting quietly on
+    # Orchestration's side; Agents mode lists its own projects and none with an orchestrator.
+    expect(page.locator("nav.tabbar")).to_have_count(0)
+    expect(page.locator(".ph-home .main-entry")).to_have_count(0)
+    open_drawer(page)
+    drawer = page.locator(".ph-drawer-root.open")
+    seg = drawer.locator(".ph-seg button")
+    expect(seg.nth(0)).to_have_attribute("aria-checked", "true")
+    expect(seg.nth(1)).to_contain_text(words["orchestration"])
+    expect(seg.nth(1).locator("[data-waiting]")).to_have_text(WAITING)
+    expect(drawer.locator(f"[data-project='{PID}']")).to_have_count(0)
+    expect(drawer.locator(f"[data-project='{GARDEN}']")).to_be_visible()
     fits(page, f"{lang} phone agents")
 
-    # One tap into orchestration: the list the desktop's column holds, Main first, then the projects.
-    tab.click()
+    # One tap into orchestration's lists: Main first, then the projects; "See all" is the list the
+    # desktop's column holds, as a page.
+    seg.nth(1).click()
+    expect(seg.nth(1)).to_have_attribute("aria-checked", "true")
+    expect(drawer.locator("[data-nav='main']")).to_be_visible()
+    expect(drawer.locator(f"[data-project='{PID}'] .ph-badge")).to_have_text("1")
+    drawer.locator("[data-nav='orchestration-list']").click()
     page.wait_for_url("**/app/orchestration/projects**")
-    expect(bar.locator("a[data-screen='orchestration']")).to_have_class(re.compile(r"\bactive\b"))
-    expect(bar.locator(".mode-count")).to_have_count(0)
     listing = page.locator(".orch-list")
     expect(listing.locator("> :first-child .main-entry")).to_be_visible()
-    # Main opens the chat as a detail of the list: no tab bar, and its back returns to the list.
+    # Main opens the chat as a detail of the list: no bar, and its back returns to the list.
     listing.locator(".main-entry").click()
     page.wait_for_url(re.compile(r"/app/orchestration(\?|$)"))
     expect(page.locator(".timeline > .questions-line")).to_be_visible()
@@ -274,13 +275,16 @@ def phone(page: Page, lang: str) -> None:
     page.locator("nav.tabbar.project-tabs button[data-tab='more']").click()
     expect(page.locator(".sheet.more-sheet .more-item[data-more='journal']")).to_be_visible()
     page.keyboard.press("Escape")
-    page.locator(".pagehead .iconbtn[href]").first.click()
-    page.wait_for_url("**/app/orchestration/projects**")
+    # The project's hamburger opens the same drawer, in orchestration mode, with the project marked.
+    page.locator(".pagehead .ph-menu").first.click()
+    expect(drawer.locator(".ph-seg button").nth(1)).to_have_attribute("aria-checked", "true")
+    expect(drawer.locator(f"[data-project='{PID}']")).to_have_class(re.compile(r"\bon\b"))
 
-    # And one tap back to Agents.
-    page.locator("nav.tabbar a[data-screen='agents']").click()
+    # And one tap back to Agents: a new chat is Agents' home.
+    drawer.locator(".ph-seg button").nth(0).click()
+    drawer.locator(".ph-newchat").click()
     page.wait_for_url("**/app/agents**")
-    expect(page.locator(".start-list")).to_be_visible()
+    expect(page.locator(".ph-home")).to_be_visible()
 
     # A notification with the old link, opened from the Inbox.
     go(page, "/inbox", lang)

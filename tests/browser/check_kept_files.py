@@ -115,9 +115,9 @@ def check_chat(page: Page, chat: str, lang: str, where: str, downloads: list[str
     assert SPEC_ID in downloads, f"{where}: the preview did not read the file by its handle"
     page.keyboard.press("Escape")
     fits(page, where)
-    # The chat takes attachments: the composer's plus menu offers them.
+    # The chat takes attachments: the composer's plus menu offers them (a sheet of tiles on a phone).
     page.locator(f"{chat} .composer .plus, {chat} .composer [aria-haspopup='menu']").first.click()
-    expect(page.get_by_role("menuitem", name=words["attach"])).to_be_visible()
+    expect(page.get_by_role("menuitem", name=words["attach"]).or_(page.locator(".ph-plus-sheet .ph-tile", has_text=words["attach"]))).to_be_visible()
     page.keyboard.press("Escape")
 
 

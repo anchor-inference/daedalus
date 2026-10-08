@@ -246,10 +246,11 @@ def check_the_phone(browser, check) -> None:  # type: ignore[no-untyped-def]
         bounds = page.evaluate("""() => {
           const rect = s => { const r = document.querySelector(s).getBoundingClientRect(); return {top:r.top, bottom:r.bottom}; };
           return {row:rect('.voice-read .composer-row'), card:rect('.voice-read .composer-box'),
-            mic:rect('.voice-mic-float'), tab:rect('.tabbar'), messages:rect('.voice-read .chat-scroll')};
+            mic:rect('.voice-mic-float'), messages:rect('.voice-read .chat-scroll')};
         }""")
         check(bounds["row"]["top"] >= 0 and bounds["row"]["bottom"] <= bounds["mic"]["top"], f"{height}: embedded composer controls stay above the microphone ({bounds})")
-        check(bounds["card"]["bottom"] <= bounds["tab"]["top"] <= height, f"{height}: the card stays above the tab bar")
+        # No bottom bar on a phone any more: the card stays on the screen.
+        check(bounds["card"]["bottom"] <= height, f"{height}: the card stays on the screen")
         check(bounds["messages"]["bottom"] <= bounds["card"]["top"], f"{height}: the card leaves the message viewport clear")
     context.close()
 

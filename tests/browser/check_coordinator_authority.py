@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, Unhandled, expect_app, folder, fulfil_shared  # noqa: E402
+from api_stub import DEFAULT_APP, Unhandled, expect_app, folder, fulfil_shared, open_drawer  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -158,7 +158,14 @@ def scenario(page: Page, language: str, unhandled: Unhandled, bundle_id: str = "
     page.route("**/api/**", stub)
 
     def open_authority() -> object:
-        page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{words['projects']}']:visible").first.click()
+        # The desktop's column has the project chip; a phone's project switcher is the drawer's
+        # Projects "See all".
+        page.wait_for_selector(".project-chip:visible, .ph-menu:visible")
+        if page.locator(".project-chip:visible").count():
+            page.locator(".project-chip:visible").first.click()
+        else:
+            open_drawer(page)
+            page.locator(".ph-drawer-root.open [data-nav='projects']").click()
         page.locator(f".project-row .iconbtn[aria-label='{words['settings']}']").click()
         section = page.locator(".sheet-section", has=page.get_by_text(words["title"])).last
         section.locator("summary").first.click()

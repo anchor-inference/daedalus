@@ -36,7 +36,9 @@ def main() -> int:
                 expect(bar.locator(":scope > a, :scope > button")).to_have_count(5)
                 # Waiting questions take the goal line's place above the composer; with none, the goal line is there.
                 expect(page.locator(".goal-headline, .questions-line-text").first).to_be_visible()
-                send = page.locator(".composer [data-action='send']")
+                # The composer's white circle is on screen: a voice conversation while the field is
+                # empty, Send once it holds words.
+                send = page.locator(".composer [data-action='send'], .composer [data-action='voice']").first
                 expect(send).to_be_visible()
                 assert send.bounding_box()["y"] + send.bounding_box()["height"] <= 560
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (lang, width, "home overflow")

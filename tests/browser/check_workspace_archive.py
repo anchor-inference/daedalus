@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, Unhandled, expect_app, folder, fulfil_shared  # noqa: E402
+from api_stub import DEFAULT_APP, Unhandled, expect_app, folder, fulfil_shared, open_projects  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -134,7 +134,7 @@ def scenario(page: Page, lang: str, unhandled: Unhandled) -> None:
 
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
-    page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{words['projects']}']:visible").first.click()
+    open_projects(page)
     page.locator(f".project-row .iconbtn[aria-label='{words['settings']}']").click()
     section = page.locator(".sheet-section", has=page.get_by_text(words["archive"])).last
     assert state["history_reads"] == 0
@@ -152,7 +152,7 @@ def scenario(page: Page, lang: str, unhandled: Unhandled) -> None:
     section.get_by_role("button", name=words["export"]).click()
     expect(section.get_by_text("Couldn't confirm the last action." if lang == "en" else "Не удалось подтвердить последнее действие.", exact=False)).to_be_visible()
     page.reload()
-    page.locator(f".project-chip:visible, .start-list-head .iconbtn[aria-label='{words['projects']}']:visible").first.click()
+    open_projects(page)
     page.locator(f".project-row .iconbtn[aria-label='{words['settings']}']").click()
     section = page.locator(".sheet-section", has=page.get_by_text(words["archive"])).last
     if section.get_attribute("open") is None:

@@ -26,7 +26,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, expect_app, open_drawer  # noqa: E402
 from screenshots import P1, S1, UNHANDLED, stub  # noqa: E402
 from terminal_stub import DEBUG, TerminalStub, load_answer, run, stub_requests, wait_live  # noqa: E402
 
@@ -340,11 +340,12 @@ def navigation(browser, problems: list[str]) -> None:  # type: ignore[no-untyped
     context.close()
 
     phone = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="dark", is_mobile=True, has_touch=True)
-    page = open_page(phone, term, "agents", ".tabbar")
-    # Terminals is a tab of its own on a phone, where the Inbox used to be.
-    more = page.locator(".tabbar a[data-screen='terminals']")
+    page = open_page(phone, term, "agents", ".ph-top .ph-menu")
+    # Terminals is a destination of the drawer on a phone, two taps from anywhere.
+    open_drawer(page)
+    more = page.locator(".ph-drawer-root.open [data-screen='terminals']")
     if not more.count():
-        problems.append("the tab bar has no Terminals")
+        problems.append("the drawer has no Terminals")
     else:
         more.first.click()
         page.wait_for_selector(".term-card", timeout=10000)
@@ -357,8 +358,8 @@ def navigation(browser, problems: list[str]) -> None:  # type: ignore[no-untyped
         page.locator("[data-terminal='k1tests00000'] .term-card-open").tap()
         # On a phone the full-screen address shows the phone's terminal, with its keys (mobile.tsx).
         page.wait_for_selector(".term-phone .term-view[data-terminal-view='k1tests00000']", timeout=10000)
-        if page.locator(".tabbar").count():
-            problems.append("the tab bar stays under a terminal shown full screen on a phone")
+        if page.locator("nav.tabbar").count():
+            problems.append("a bottom bar stays under a terminal shown full screen on a phone")
     phone.close()
 
 

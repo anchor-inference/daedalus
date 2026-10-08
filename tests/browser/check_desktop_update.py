@@ -147,7 +147,7 @@ def phone(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
     page = context.new_page()
     serve(page, LauncherStub())
     go(page, "/agents", "en")
-    page.wait_for_selector(".tabbar", timeout=20000)
+    page.wait_for_selector(".ph-top .ph-menu", timeout=20000)
     page.wait_for_timeout(500)
     if page.locator(".rail-update").count():
         problems.append("the phone draws the rail's update button")
