@@ -651,9 +651,13 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
     field(page).fill("Wire the order form to the sheet")
     if page.locator('.composer .roundbtn[data-action="send"]').count() != 1:
         problems.append("phone: a typed draft does not turn the circle into Send")
+    # The mic stays beside Send with a typed draft (and with an attachment), inside the screen.
     mic = page.locator(".composer .composer-tools > .mic")
-    if mic.count() and mic.is_visible():
-        problems.append("phone: the mic stays beside a typed draft")
+    if mic.count():
+        box = mic.bounding_box()
+        width = page.evaluate("innerWidth")
+        if not mic.is_visible() or not box or box["x"] < 0 or box["x"] + box["width"] > width:
+            problems.append(f"phone: the mic is not beside a typed draft on the screen ({box})")
     page.locator(".composer .iconbtn.plus").click()
     page.wait_for_selector(".ph-plus-sheet", timeout=5000)
     tiles = page.locator(".ph-plus-sheet .ph-tile").count()

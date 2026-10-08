@@ -649,8 +649,9 @@
      than leaving the row without its circle. */
   .composer[data-shape] .composer-tools:has(.roundbtn.voice) > .mic { display: inline-grid; place-items: center; }
   .composer[data-shape][data-primary] .composer-tools:has(.mic) .roundbtn.primary:disabled { display: grid; place-items: center; }
-  /* No mic while typing: at 412 px there is no room for it and the send circle beside the model. */
-  .composer[data-shape="open"][data-typed] .composer-tools > .mic { display: none; }
+  /* The mic stays beside Send while there is text or an attachment: hiding it then left no way to
+     dictate the rest of a message once a photo was attached or a word typed. The model pill gives
+     up its width instead (it shrinks with an ellipsis, below). */
   .composer[data-shape] .iconbtn.plus, .composer[data-shape] .composer-tools > .mic, .composer[data-shape] .stop-aside { position: relative; width: var(--ctl-round); height: var(--ctl-round); min-width: var(--ctl-round); min-height: var(--ctl-round); margin: 0; padding: 0; border-radius: 50%; }
   .composer[data-shape] .iconbtn.plus { background: var(--surface-2); color: var(--fg); }
   .composer[data-shape] .composer-tools > .mic, .composer[data-shape] .stop-aside { background: none; color: var(--fg-2); }

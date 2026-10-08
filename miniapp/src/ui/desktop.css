@@ -104,9 +104,9 @@
 .composer-row span.composer-mode { cursor:default; }
 .composer-tools .roundbtn.primary { border-radius:var(--radius-sm); margin-left:var(--space-2); }
 .composer-tools .mic { margin-left:var(--space-2); color:var(--fg-2); }
-/* Idle voice and typed send share the trailing position; Stop remains available during a run. */
+/* An empty field shows the mic alone in the trailing position; once there is text or an attachment
+   Send joins it, and the mic stays so the rest of the message can still be dictated. */
 .composer[data-primary="send"] .composer-tools:has(.mic) .roundbtn.primary:disabled { display:none; }
-.composer-tools:has(.roundbtn.primary:not(:disabled)) .mic { display:none; }
 .start-composer { max-width:680px; min-width:0; align-self:center; }
 .start-hero { width:100%; min-width:0; }
 /* A narrow composer keeps the phone rules this sheet would otherwise undo, loading after them: the

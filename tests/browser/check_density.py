@@ -364,8 +364,10 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
         m = read("composer-open", ".ph-home .composer")
         if not m["open"]:
             problems.append(f"composer {lang}: typing does not open the composer onto its toolbar")
-        if page.locator(".ph-home .composer .composer-tools > .mic").count() and page.locator(".ph-home .composer .composer-tools > .mic").is_visible():
-            problems.append(f"composer {lang}: the mic stays beside a typed draft")
+        # The mic stays beside Send once something is typed: hiding it left no way to dictate the rest.
+        mic = page.locator(".ph-home .composer .composer-tools > .mic")
+        if mic.count() and not mic.is_visible():
+            problems.append(f"composer {lang}: the mic is gone once a draft is typed")
         page.locator(".ph-home .composer textarea").fill("")
 
         page.locator(".ph-menu").first.click()

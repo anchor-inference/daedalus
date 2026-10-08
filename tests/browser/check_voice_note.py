@@ -49,6 +49,7 @@ class Host:
         self.transcribes: list[str] = []
         self.sent: list[str] = []
         self.deleted: list[str] = []
+        self.status = "idle"
 
     def reset(self) -> None:
         self.__init__()
@@ -59,7 +60,7 @@ HOST = Host()
 
 def detail() -> dict:
     return {
-        "id": SESSION, "title": "A session", "status": "idle", "error": "", "run_id": None, "workspace": "/workspace",
+        "id": SESSION, "title": "A session", "status": HOST.status, "error": "", "run_id": "r1" if HOST.status == "running" else None, "workspace": "/workspace",
         "workspace_name": "ws", "workspace_own": True, "workspace_sessions": [], "pending": None, "model": "Claude Opus 5", "provider": "claude",
         "project": {"id": "p", "name": "Project", "folders": folders("/workspace"), "settings": {"snapshots": True}},
         "configured_model": "opus", "effective_model": "opus", "fallback": None,
@@ -249,6 +250,13 @@ def run(browser) -> list[str]:  # type: ignore[no-untyped-def]
         page = open_page(context)
         mic = target(page, ".composer .mic")
         check(mic["width"] >= 44 and mic["height"] >= 44, f"{label}: the microphone is a thumb's size ({mic['width']}x{mic['height']})")
+        # A typed draft keeps the mic beside Send: hiding it left no way to dictate the rest.
+        page.locator(".composer textarea").fill("Wire the order form to the sheet and send me the link")
+        page.wait_for_timeout(300)
+        width = options["viewport"]["width"]  # type: ignore[index]
+        for selector in (".composer .mic", '.composer .roundbtn[data-action="send"]'):
+            box = target(page, selector)
+            check(page.locator(selector).is_visible() and 0 <= box["x"] and box["x"] + box["width"] <= width, f"{label}: {selector} is on screen beside a typed draft ({box})")
         page.locator(".composer .mic").tap()
         page.wait_for_selector(".voicebar[data-phase=recording]", timeout=5000)
         width = options["viewport"]["width"]  # type: ignore[index]
@@ -258,6 +266,22 @@ def run(browser) -> list[str]:  # type: ignore[no-untyped-def]
         check(page.evaluate("document.documentElement.scrollWidth") <= width, f"{label}: nothing scrolls sideways")
         page.locator(".voicebar-cancel").tap()
         context.close()
+
+    # While a run is on the mic stays beside Stop, empty or typed: it used to share Stop's slot and
+    # vanish, so a follow-up could only be typed.
+    HOST.status = "running"
+    for label, options in (("phone", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True}), ("desktop", {"viewport": {"width": 1280, "height": 800}})):
+        context = new_context(browser, **options)
+        page = open_page(context)
+        page.wait_for_selector('.composer .roundbtn[data-action="stop"]', timeout=15000)
+        width = options["viewport"]["width"]  # type: ignore[index]
+        for draft in ("", "Also check the second sheet"):
+            page.locator(".composer textarea").fill(draft)
+            page.wait_for_timeout(300)
+            box = target(page, ".composer .mic")
+            check(page.locator(".composer .mic").is_visible() and 0 <= box["x"] and box["x"] + box["width"] <= width, f"{label}, running{' with a draft' if draft else ''}: the mic is on screen ({box})")
+        context.close()
+    HOST.status = "idle"
 
     # Reduced motion: the bar draws, and the waveform does not move.
     context = new_context(browser, viewport={"width": 800, "height": 700}, reduced_motion="reduce")
