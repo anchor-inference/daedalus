@@ -2871,7 +2871,7 @@ class SessionManager:
                     if client_message_id:
                         await self.live.consume(session_id, client_message_id, run_id=run_id, step_id="answer", message_seq=None)
                     return run_id
-                queued = {**new_queued_prompt("follow_up", body, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": None if operator_words is None else list(operator_words), "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments)}
+                queued = {**new_queued_prompt("follow_up", body, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": None if operator_words is None else list(operator_words), "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments), **_queued_display(words)}
                 if client_message_id:
                     queued["id"] = client_message_id
                     receipt, created = await self.live.accept(
@@ -2934,7 +2934,7 @@ class SessionManager:
                 # survive every move the queue makes: a follow-up turned into a steer, a round that hands
                 # back what it did not place, the drain that opens the next run. Without them only the
                 # words reached the model, and a pasted screenshot arrived as a path it never looked at.
-                queued = {**new_queued_prompt(kind, placed, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": said, "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments)}
+                queued = {**new_queued_prompt(kind, placed, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": said, "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments), **_queued_display(words)}
                 if client_message_id:
                     queued["id"] = client_message_id
                     receipt, created = await self.live.accept(
@@ -4277,13 +4277,22 @@ class SessionManager:
         await self.steer_changed(state.session.id, reason="consumed")
         texts = [str(item["text"]).strip() for item in items]
         origins = {str(item.get("origin") or "operator") for item in items}
-        # The transcript already holds each item as it was sent; this copy only opens the run and stays hidden.
+        # The queued rows stay hidden; this copy, the one that opens the run, is where the chat shows the words.
         origin = "operator" if "operator" in origins else next(iter(origins))
         message = Message(role=MessageRole.user, content_blocks=[TextBlock(text="\n\n".join(texts))], metadata={"daedalus.origin": origin, "daedalus.delivery": "drained", **_merged_words(items), **_image_refs_metadata(_queued_image_refs(items))})
+        # The app keeps a temporary bubble for each message it sent until a shown row names that message's
+        # receipt id. This copy used to carry none: the queued row that does is hidden, so a message that
+        # arrived as a turn ended stayed drawn twice — the delivered row and, under it, the bubble with the
+        # words as typed — until the page was reloaded. Same as a prompt the core places mid-run.
+        client_message_ids = [str(item["id"]) for item in items if item.get("id") and await self.live.receipt(state.session.id, str(item["id"])) is not None]
+        if client_message_ids:
+            message.metadata["daedalus.client_message_ids"] = client_message_ids
         await self.sessions.append_transcript(state.session.id, [message])
         seqs = await self.sessions.transcript_seqs(state.session.id, [self.sessions.transcript_key(message)])
         await self.checkpoint(state, kind="before", seq=seqs[0] if seqs else None)
-        await self._start_run(state, message)
+        run_id = await self._start_run(state, message)
+        for client_message_id in client_message_ids:
+            await self.live.consume(state.session.id, client_message_id, run_id=run_id, step_id="start", message_seq=seqs[0] if seqs else None)
 
     @staticmethod
     def _rung_label(provider: Any, model: str) -> str:
@@ -5893,13 +5902,35 @@ def _image_refs_metadata(image_refs: Sequence[tuple[str, str]]) -> dict[str, Any
     return {"image_refs": [{"ref": ref, "mime": mime} for ref, mime in image_refs]} if image_refs else {}
 
 
+# What the app draws a message from besides its text. The queued row has it from ``submit``; the copy the
+# core places, or the one that opens the next turn, is written later from the queue item alone, so the item
+# has to carry it. It used to be dropped there: a message with a secret attached showed the host's note
+# about the secret as the operator's words and no chip.
+_DISPLAY_KEYS = ("daedalus.secrets", "daedalus.reply_to")
+
+
+def _queued_display(words: dict[str, Any]) -> dict[str, Any]:
+    display = {key: words[key] for key in _DISPLAY_KEYS if words.get(key)}
+    return {"display": display} if display else {}
+
+
 def _merged_words(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """The mark for one message made of several queued items, each with its own origin."""
+    """The mark for one message made of several queued items, each with its own origin, and what the
+    app draws it with: every item's secrets, and the reply of the first item, the one whose quote
+    opens the joined text."""
     words: list[str] = []
+    secrets: list[dict[str, Any]] = []
     for item in items:
         marked = operator_words_metadata(str(item.get("origin") or "operator"), str(item.get("text") or ""), item.get("operator_words"))
         words += marked[OPERATOR_WORDS_METADATA_KEY] or []
-    return {OPERATOR_WORDS_METADATA_KEY: words or False}
+        secrets += [handed for handed in (item.get("display") or {}).get("daedalus.secrets") or [] if handed not in secrets]
+    merged: dict[str, Any] = {OPERATOR_WORDS_METADATA_KEY: words or False}
+    if secrets:
+        merged["daedalus.secrets"] = secrets
+    reply = (items[0].get("display") or {}).get("daedalus.reply_to") if items else None
+    if reply:
+        merged["daedalus.reply_to"] = reply
+    return merged
 
 
 def operator_passages(history: Sequence[Message]) -> list[tuple[Message, str]]:

@@ -346,6 +346,52 @@ async def test_a_message_sent_in_the_last_seconds_of_a_turn_stays_in_the_chat(se
     await manager.close()
 
 
+async def test_a_message_that_opens_the_next_turn_names_the_receipt_the_app_waits_for(settings: Settings, db: Database) -> None:
+    """A message with a secret attached reached the orchestrator as a turn ended and opened the next one.
+    The row that opened it carried no receipt id, so the app's temporary bubble with the words as typed
+    stayed under the delivered message until the page was reloaded."""
+    from protocore.runtime.live_control import new_queued_prompt
+
+    provider = ScriptedProvider([{"text": "read it"}])
+    manager = await _manager(settings, db, provider)
+    state = await manager.create_session("arrived late")
+    sid = state.session.id
+    note = "[The operator attached a secret for this chat: «secret:wifi» (shell: $DAEDALUS_SECRET_WIFI). The value is not shown to you; use it by its placeholder.]"
+    queued = {**new_queued_prompt("follow_up", f"here is the password\n\n{note}").to_dict(), "origin": "operator", "id": "send-1", "display": {"daedalus.secrets": [{"name": "wifi", "scope": "session"}]}}
+    await manager.live.accept(sid, "send-1", "input", {"text": "here is the password"}, queue_item=queued, queue_kind="follow_up")
+    finished = asyncio.create_task(_await_run(manager))
+    await manager._drain_leftover_follow_ups(state)
+    await finished
+    [opened] = [m for m in await manager.transcript_page(sid) if m.get("delivery") == "drained"]
+    assert not opened["internal"] and opened["client_message_ids"] == ["send-1"]
+    # The chip, not the host's note, is what the chat shows for the secret.
+    assert opened["text"] == "here is the password" and opened["secrets"] == [{"name": "wifi", "scope": "session"}]
+    receipt = await manager.live.receipt(sid, "send-1")
+    assert receipt is not None and receipt["status"] == "consumed" and receipt["run_id"]
+    await manager.close()
+
+
+async def test_a_secret_sent_during_a_turn_is_shown_as_a_chip_where_the_model_read_it(settings: Settings, db: Database) -> None:
+    """The copy of a queued message the model reads is written from the queue item; the secrets the
+    message named were not on the item, so that copy showed the host's note and no chip."""
+    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 1"}}, {"text": "done"}, {"text": "then this"}])
+    manager = await _manager(settings, db, provider)
+    state = await manager.create_session("secret mid-turn")
+    sid = state.session.id
+    await manager.secrets.put("session", sid, "wifi", "wifi-password-9")
+    await manager.submit(sid, "start")
+    await asyncio.sleep(0.2)
+    await manager.submit(sid, "log in with this", follow_up=True, client_message_id="send-2", secrets=["wifi"])
+    await _await_run(manager)
+    for _ in range(50):
+        if len(provider.requests) >= 3:
+            break
+        await asyncio.sleep(0.1)
+    [read] = [m for m in await manager.transcript_page(sid) if m["role"] == "user" and not m["internal"] and "send-2" in (m.get("client_message_ids") or [])]
+    assert read["text"] == "log in with this" and read["secrets"] == [{"name": "wifi", "scope": "session"}]
+    await manager.close()
+
+
 async def test_what_the_operator_allowed_for_a_card_is_the_basis_of_a_grant_within_it(settings: Settings, db: Database, tmp_path: Path) -> None:
     """The operator allowed one test message for a mail check; the orchestrator could only ask them to
     write it into the brief's allowances, which are for what holds everywhere."""

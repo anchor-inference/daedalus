@@ -21,4 +21,16 @@ describe("temporary chat messages", () => {
     expect(sentMessageReachedTranscript([queued, received], "send-1")).toBe(true);
     expect(sentMessageReachedTranscript([queued, received], "send-2")).toBe(true);
   });
+
+  it("retires the bubble of a message that opened the next turn with a secret note appended", () => {
+    // The host appends a line per attached secret, so the stored words never equal the typed ones; the
+    // row that opened the next turn is the shown copy and has to name the receipt for the bubble to go.
+    const typed = "here is the new password";
+    const queued = { role: "user", internal: true, client_message_id: "send-1", text: typed } as MessageView;
+    const opened = { role: "user", internal: false, delivery: "drained", client_message_ids: ["send-1"], text: `${typed}\n\n[The operator attached a secret for this project: «secret:db» (shell: $DAEDALUS_SECRET_DB). The value is not shown to you; use it by its placeholder.]` } as MessageView;
+    expect(sentMessageReachedTranscript([queued], "send-1")).toBe(false);
+    expect(sentMessageReachedTranscript([queued, opened], "send-1")).toBe(true);
+    // Matching by the words could never retire it: they differ.
+    expect(opened.text).not.toBe(typed);
+  });
 });
