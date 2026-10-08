@@ -13,6 +13,7 @@ import logging
 import math
 import mimetypes
 import os
+import posixpath
 import re
 import secrets
 import shutil
@@ -101,6 +102,7 @@ from daedalus.extensions import (
     launcher_updates,
 )
 from daedalus.extensions import commands as slash
+from daedalus.extensions.api_host_pane import HostPane
 from daedalus.extensions.artifact_headers import artifact_headers
 from daedalus.extensions.calendar_sync import sync_loop
 from daedalus.extensions.ci_observations import record_signed_delivery
@@ -122,6 +124,7 @@ from daedalus.host import components as component_list
 from daedalus.host.config_validation import UNKNOWN_REFERENCE_PATHS, ConfigConflict, config_revision, validate_candidate
 from daedalus.host.dependencies import DependencyPlanner
 from daedalus.host.events import EventFilter, event_stream, streamed_types
+from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.policy import sealed_root
 from daedalus.host.presence import MAX_ID_LENGTH, MAX_PROJECTS, MAX_SESSIONS, MAX_TERMINALS, PresenceReport
 from daedalus.host.prompt_changes import PromptChangePlanner
@@ -2215,8 +2218,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "error": state.last_error_message if state.last_error_kind else "",
             "compacting": state.compacting,
             "run_id": state.run_id,
-            "workspace": str(state.workspace),
-            "workspace_name": state.workspace.name,
+            # Where its files are: for a session working on the host, the folder there and not its
+            # directory here, which holds only the inbox. The app places a turn's absolute paths by it
+            # and roots the file pane at it, so the host path is the one that finds them.
+            "workspace": str(manager.work_dir(state)),
+            "workspace_name": manager.work_dir(state).name,
             "workspace_own": bool(state.metadata.get("directory")),
             "env": manager.env_of(session_id, state.metadata, state.project),
             "project": state.project.view(),
@@ -2477,7 +2483,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         raise HTTPException(404, "no such tool result")
 
     @api.get("/api/sessions/{session_id}/sent/{call_id}/download")
-    async def sent_file(session_id: str, call_id: str, _: dict[str, Any] = Depends(auth)) -> FileResponse:
+    async def sent_file(request: Request, session_id: str, call_id: str, _: dict[str, Any] = Depends(auth)) -> Response:
         """The file a SendFile call handed over, by that call: the app attaches it under the answer, wherever the file lives."""
         state = await manager.get_state(session_id)
         if state is None:
@@ -2493,6 +2499,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                         raw = None
                     if not isinstance(raw, str) or not raw.strip():
                         raise HTTPException(404, "the call named no file")
+                    if state.services is not None and isinstance(state.services.exec_backend, HostExecBackend):
+                        # The call ran on the host and named a file there, which this process cannot open.
+                        return await _sent_from_host(state, raw.strip(), request.headers.get("range", ""))
                     candidate = Path(raw).expanduser()
                     target = candidate if candidate.is_absolute() else state.workspace / candidate
                     # The path is read back out of the transcript, so it is checked again rather than
@@ -2503,6 +2512,23 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                         raise HTTPException(404, "the file is gone")
                     return FileResponse(target, media_type=mimetypes.guess_type(target.name)[0] or "application/octet-stream", filename=target.name, headers={"Access-Control-Allow-Origin": "https://web.telegram.org"})
         raise HTTPException(404, "no such call")
+
+    async def _sent_from_host(state: Any, raw: str, range_header: str) -> Response:
+        """A file a session working on the host sent, read back through the bridge: relative to its
+        folder there, or absolute inside it or inside another host folder of its project the session
+        may read. Anything else is refused, as a local path outside the project is."""
+        services = state.services
+        work = posixpath.normpath(str(services.workspace_dir))
+        roots = [work]
+        if state.project is not None:
+            roots += [posixpath.normpath(str(f.path)) for f in state.project.folders if f.env == "host" and services.contains(f.path)]
+        if not raw.startswith("/"):
+            return await _host_pane(work).download(raw, range_header)
+        target = posixpath.normpath(raw)
+        for root in sorted(set(roots), key=len, reverse=True):
+            if target == root or target.startswith(root.rstrip("/") + "/"):
+                return await _host_pane(root).download(posixpath.relpath(target, root), range_header)
+        raise HTTPException(403, "that file is outside this project")
 
     @api.post("/api/media/access")
     async def media_access(request: Request, _: dict[str, Any] = Depends(auth)) -> JSONResponse:
@@ -4958,20 +4984,30 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             current = current.parent
         return {"root": str(anchor), "path": str(target), "parents": list(reversed(parents)), "entries": entries, "truncated": truncated}
 
-    async def _files_root(session_id: str, folder_id: str, *, write: bool = False) -> Path:
+    async def _files_root(session_id: str, folder_id: str, *, write: bool = False) -> Path | HostPane:
         """The directory a session's file pane is rooted at: its workspace, or another folder of its project.
 
         Another folder opens only when the session's walls let it read that folder — a session with
-        a directory of its own reads nothing but that directory, and a folder of the other environment
-        is no folder of this process at all — and an upload only when they let it write there, so the
-        pane cannot put a file where the agent itself could not.
+        a directory of its own reads nothing but that directory — and an upload only when they let it
+        write there, so the pane cannot put a file where the agent itself could not.
+
+        A folder on the host, seen from the container, is no folder of this process: a session whose
+        commands run there (a chat started on the host, a session in a host project folder) keeps its
+        files in that folder while its directory here holds only the inbox, and the pane used to show
+        that inbox and nothing the agent made. Such a root is a :class:`HostPane`, which reads it
+        through the host terminal bridge in the same shapes.
         """
         state = await manager.get_state(session_id)
         if state is None:
             raise HTTPException(404, "no such session")
         services = state.services
+        on_host = False
         if not folder_id:
-            root = state.workspace
+            if services is not None and isinstance(services.exec_backend, HostExecBackend):
+                root = services.workspace_dir
+                on_host = True
+            else:
+                root = state.workspace
         else:
             folder = state.project.folder(folder_id) if state.project is not None else None
             if folder is None:
@@ -4979,11 +5015,23 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             if services is None or not services.contains(folder.path):
                 raise HTTPException(403, f"{folder.path} is not a folder this session can read")
             root = folder.path
+            on_host = folder.env == "host" and manager.projects.local_env != "host"
         if write and services is not None and not services.contains(root, write=True):
             raise HTTPException(403, f"{root} is read-only for this session")
+        if write and on_host and services is not None and services.remote_readonly:
+            # A host session has no walls of this process; its read-only promise is kept here instead.
+            raise HTTPException(403, f"{root} is read-only for this session")
+        if on_host:
+            return _host_pane(str(root))
         return root
 
-    def _pane_target(session_id: str, folder_id: str, root: Path, path: str) -> tuple[Path, str]:
+    def _host_pane(root: str) -> HostPane:
+        bridge = manager.host_bridge
+        if bridge is None:
+            raise HTTPException(503, f"this folder is on the host, and {BRIDGE_DOWN}")
+        return HostPane(bridge, root)
+
+    def _pane_target(session_id: str, folder_id: str, root: Path | HostPane, path: str) -> tuple[Path | HostPane, str]:
         """The root and path the pane reads ``path`` from: the session's log scratch for its own logs.
 
         The app names a job's log ``.jobs/<id>.log`` under the session's folder, as it always was;
@@ -5009,12 +5057,17 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         root = await _files_root(session_id, folder_id, write=True)
         if not files:
             raise HTTPException(400, "no files")
+        if isinstance(root, HostPane):
+            return {"files": await root.store_uploads(files, path)}
         return {"files": await _store_uploads(root, files, path)}
 
     @api.get("/api/sessions/{session_id}/files")
     @api.get("/api/sessions/{session_id}/folders/{folder_id}/files")
     async def list_files(session_id: str, folder_id: str = "", path: str = "", _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        return _read_path(*_pane_target(session_id, folder_id, await _files_root(session_id, folder_id), path))
+        root, where = _pane_target(session_id, folder_id, await _files_root(session_id, folder_id), path)
+        if isinstance(root, HostPane):
+            return await root.read_path(where)
+        return _read_path(root, where)
 
     @api.get("/api/sessions/{session_id}/files/search")
     @api.get("/api/sessions/{session_id}/folders/{folder_id}/files/search")
@@ -5031,7 +5084,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if not query:
             return {"query": "", "results": [], "truncated": False, "engine": "none"}
         wanted = max(1, min(int(limit), FILE_SEARCH_MAX_RESULTS))
-        results, truncated, engine = await _run_search(_search_names, root, query, wanted)
+        if isinstance(root, HostPane):
+            results, truncated, engine = await root.search_names(query, wanted)
+        else:
+            results, truncated, engine = await _run_search(_search_names, root, query, wanted)
         return {"query": query, "results": results, "truncated": truncated, "engine": engine}
 
     @api.get("/api/sessions/{session_id}/files/grep")
@@ -5044,19 +5100,26 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         offering a search that would walk the whole tree in the event loop.
         """
         root = await _files_root(session_id, folder_id)
-        if shutil.which("rg") is None:
+        if not isinstance(root, HostPane) and shutil.which("rg") is None:
             raise HTTPException(501, "content search needs ripgrep (rg), which is not installed here; search by name instead")
         query = q.strip()
         if not query:
             return {"query": "", "hits": [], "truncated": False}
         wanted = max(1, min(int(limit), FILE_SEARCH_MAX_RESULTS))
-        hits, truncated = await _run_search(_search_content, root, query, wanted)
+        if isinstance(root, HostPane):
+            # The host's own ripgrep, or its grep: what this container has installed says nothing about it.
+            hits, truncated = await root.search_content(query, wanted)
+        else:
+            hits, truncated = await _run_search(_search_content, root, query, wanted)
         return {"query": query, "hits": hits, "truncated": truncated}
 
     @api.get("/api/sessions/{session_id}/download")
     @api.get("/api/sessions/{session_id}/folders/{folder_id}/download")
-    async def download(session_id: str, path: str, folder_id: str = "", _: dict[str, Any] = Depends(auth)) -> FileResponse:
-        return _file_response(*_pane_target(session_id, folder_id, await _files_root(session_id, folder_id), path))
+    async def download(request: Request, session_id: str, path: str, folder_id: str = "", _: dict[str, Any] = Depends(auth)) -> Response:
+        root, where = _pane_target(session_id, folder_id, await _files_root(session_id, folder_id), path)
+        if isinstance(root, HostPane):
+            return await root.download(where, request.headers.get("range", ""))
+        return _file_response(root, where)
 
     # -- the queue: what was sent to a working agent and has not reached it yet -------------
 

@@ -2655,6 +2655,8 @@ class SessionManager:
         target = self.folder_workspace(state.session.id, metadata, state.project)
         services.exec_backend = HostExecBackend(lambda: self.host_bridge, str(target))
         services.workspace_dir = target
+        # Its directory here, where a file fetched from the host to be sent or handed on is kept.
+        services.extra["local_home"] = state.workspace
         services.walls = None
         services.writable = []
         services.log_root = None

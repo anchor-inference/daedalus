@@ -36,16 +36,24 @@ async def image_view(context: ToolContext, path: str, task: str, detail: str = "
     target = services.resolve(path)
     if refusal := refuse_protected(context, services, target, "read"):
         return refusal
-    if not target.is_file():
+    # Through the session's filesystem, not ``Path``: a session working on the host resolves a
+    # relative path in its folder there, and this process reading the same name locally answered
+    # "no such file" for every image the agent had just made.
+    fs = services.fs
+    if not await fs.is_file(target):
         return error(context, f"no such file: {target}")
     mime = mimetypes.guess_type(target.name)[0] or ""
     if mime not in SUPPORTED:
         return error(context, f"unsupported image type {mime or 'unknown'}; supported: {sorted(SUPPORTED)}")
-    size = target.stat().st_size
+    size = await fs.size(target)
     if size > MAX_IMAGE_BYTES:
         return error(context, f"image is {size} bytes; downscale it first (limit {MAX_IMAGE_BYTES})")
     try:
-        text, model = await look(services.extra.get("vision"), services.extra.get("manager"), target.read_bytes(), mime, task, detail=detail)
+        data = await fs.read_bytes(target, limit=MAX_IMAGE_BYTES)
+    except (OSError, ValueError) as exc:
+        return error(context, str(exc))
+    try:
+        text, model = await look(services.extra.get("vision"), services.extra.get("manager"), data, mime, task, detail=detail)
     except VisionUnavailable as exc:
         return error(context, str(exc))
     return ok(context, text, model=model, image=str(target))
