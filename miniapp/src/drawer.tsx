@@ -32,13 +32,13 @@ const RECENTS = 8;
 const PROJECTS = 5;
 
 /** Initials for a project's avatar: the first letters of its first two words. */
-function initials(name: string): string {
+export function initials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
   return ((words[0]?.[0] ?? "") + (words[1]?.[0] ?? words[0]?.[1] ?? "")).toUpperCase();
 }
 
 const STAFF_COLOURS = ["orange", "green", "blue", "violet", "rose", "teal", "amber", "slate"];
-function colourOf(id: string): string {
+export function colourOf(id: string): string {
   let h = 0;
   for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return `var(--staff-${STAFF_COLOURS[h % STAFF_COLOURS.length]})`;
