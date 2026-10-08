@@ -95,6 +95,9 @@ def open_orchestrator(context) -> Page:  # type: ignore[no-untyped-def]
     # The worked turns come last, where the reader starts: the stub's own newest messages (a card of a
     # member's steps, receipts under the operator's words) fill a phone's screen with no folded line.
     held["messages"] = [{**m, "seq": 1 + n} for n, m in enumerate(held["messages"])] + worked(1000, 80)
+    # Nothing waits for the operator here: on a phone the Needs-you card above the chat would take the
+    # upper part of the screen this check reads its folded lines in, and the card is not what it is about.
+    focus.asks[:] = [ask for ask in focus.asks if ask.get("routed_to") != "operator"]
     serve(page, focus, main, "en")
     go(page, f"/orchestration/project/{PID}", "en")
     page.wait_for_selector(".chat-scroll .timeline .thinking-head", timeout=15000)

@@ -69,7 +69,8 @@ def check(lang: str, width: int, browser: object, unhandled: Unhandled) -> None:
     chooser = page.locator("#ptask-resume")
     expect(chooser).to_be_visible()
     chooser.select_option("ss-old")
-    page.locator(".sheet-foot .btn.primary").click()
+    # A phone decides a new task at the top of its sheet, where Create sits beside the title.
+    page.locator(".pboard-create:visible, .sheet-foot .btn.primary:visible").first.click()
     expect(page.locator(".sheet")).to_have_count(0)
     assert "resume_from" not in board.created[-1]
     assert board.launched[-1][1]["resume_from"] == "ss-old"

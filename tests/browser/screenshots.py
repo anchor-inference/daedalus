@@ -1654,7 +1654,7 @@ def run_main() -> int:
         phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
         page = phone.new_page()
         page.route("**/api/**", handle)
-        shot(page, "phone-orchestration", "orchestration/projects", wait=".orch-list .main-entry", settle=900)
+        shot(page, "phone-orchestration", "orchestration/projects", wait=".ph-orch [data-main-entry]", settle=900)
         shot(page, "phone-main", "orchestration", wait=".timeline > .questions-line", settle=900)
         phone.close()
         browser.close()
@@ -1770,8 +1770,8 @@ def phone_project_shots(context) -> None:  # type: ignore[no-untyped-def]
     page = context.new_page()
     page.route("**/api/**", focus_stub(focus))
     pid = focus.projects[0]["id"]
-    shot(page, "phone-project", f"project/{pid}/team", wait=".needs-banner .ask-answers-row .btn", settle=700)
-    shot(page, "phone-board", f"project/{pid}/board", wait=".pboard-list .pcard", settle=700)
+    shot(page, "phone-project", f"project/{pid}/team", wait=".needs-card .needs-row .ph-btn", settle=700)
+    shot(page, "phone-board", f"project/{pid}/board", wait=".ph-board .ph-row", settle=700)
     shot(page, "phone-orchestrator", f"project/{pid}", wait=".chat.in-project .event-card", settle=900)
     page.close()
 

@@ -62,7 +62,7 @@ import {
   toggleFilter,
 } from "./board";
 
-type BoardResponse = ProjectBoardData & { project: { id: string; name: string } };
+export type BoardResponse = ProjectBoardData & { project: { id: string; name: string } };
 type TaskCommand = { task: { id: string; entity_revision: number } };
 type LaunchReceipt = { effect_id: string; state: "queued"; entity_revision: number };
 type LaunchIntent = { id: string; body: { staff_id: string; resume_from: string | null; expected_entity_revision: number } };
@@ -481,9 +481,10 @@ function RequirementsSection({ requirements }: { requirements: Requirement[] }) 
 }
 
 /** Creating a task and changing one: the same sheet, because a task is its title, its brief, who does it and what it waits for. */
-function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, toast, onImport }: { projectId: string; data: BoardResponse; task?: ProjectTask; resultReference?: AcceptedResultReference | null; onClose: () => void; onDone: () => void; toast: (text: string) => void; onImport?: () => void }) {
+export function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, toast, onImport }: { projectId: string; data: BoardResponse; task?: ProjectTask; resultReference?: AcceptedResultReference | null; onClose: () => void; onDone: () => void; toast: (text: string) => void; onImport?: () => void }) {
   const route = useRoute();
   const offline = useOffline();
+  const phone = useMedia("(max-width: 1023px)");
   const operation = useRef<{ fingerprint: string; id: string } | null>(null);
   const launchOperation = useRef<{ fingerprint: string; id: string } | null>(null);
   const archiveOperation = useRef<string | null>(null);
@@ -718,8 +719,11 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
     <Sheet
       title={task ? task.title : t("pboard.new")}
       onClose={onClose}
-      className="pboard-sheet"
+      className={`pboard-sheet ${task ? "" : "new"}`}
       head={
+        // A phone's new task is decided at the top, where the thumb starts: Create beside the title,
+        // the close button as Cancel. The footer's pair stays for the desktop.
+        !task && phone ? <button className="ph-btn accent sm pboard-create" disabled={busy || writeBlocked || !title.trim() || !changed} onClick={save}>{t("common.create")}</button> :
         task && (
           <OverflowMenu
             small
