@@ -11,6 +11,8 @@ from typing import Any
 
 import aiosqlite
 
+from daedalus.stores.blobs import sync_directory
+
 
 async def source_identity(conn: aiosqlite.Connection, result_id: str, verdict_id: str) -> dict[str, Any]:
     """Hash the exact report, verdict, evidence, and artifact records selected for merge."""
@@ -72,11 +74,7 @@ def stage_report(root: Path, action_id: str, original: bytes, digest: str, size:
             kept = path.read_bytes()
             if len(kept) != size or hashlib.sha256(kept).hexdigest() != digest:
                 raise ValueError("kept merge source report bytes changed") from None
-        dir_fd = os.open(directory, os.O_RDONLY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
+        sync_directory(directory)
     finally:
         os.unlink(temporary)
     return path

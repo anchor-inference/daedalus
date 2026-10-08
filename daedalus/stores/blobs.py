@@ -14,6 +14,26 @@ from typing import Any
 from protocore.contracts.blob import BlobNotFoundError, IBlobStore
 from protocore.contracts.types import BlobMetadata
 
+WINDOWS = os.name == "nt"
+
+
+def sync_directory(directory: Path | str) -> None:
+    """Make a rename into ``directory`` durable, where the platform lets a directory be flushed.
+
+    Windows refuses ``os.open`` on a directory with ``PermissionError``: a directory handle there
+    needs ``CreateFile`` with backup semantics, which ``os.open`` cannot ask for, and NTFS journals
+    the rename itself. Opening it anyway failed every blob write on a native Windows install, so
+    every picture a vision model was asked about died before it left the machine, and the agent
+    read "Permission denied" as the vision model not taking images.
+    """
+    if WINDOWS:
+        return
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
 
 def _atomic_write(path: Path, data: bytes) -> None:
     descriptor, temporary = tempfile.mkstemp(prefix=".blob-", dir=path.parent)
@@ -23,11 +43,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        sync_directory(path.parent)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)

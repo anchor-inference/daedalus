@@ -30,6 +30,7 @@ from daedalus.extensions.workspace_files import (
     validate_selected,
 )
 from daedalus.host.engine_factory import TENANT
+from daedalus.stores.blobs import sync_directory
 from daedalus.stores.control import ControlConflict, ControlStore, Entity, Principal, Scope, canonical, one
 from daedalus.stores.database import Database
 from daedalus.stores.files import FILES_TENANT, FileStore
@@ -536,11 +537,7 @@ def _stage(root: Path, digest: str, content: bytes) -> bool:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, target)
-        directory = os.open(root, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        sync_directory(root)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
