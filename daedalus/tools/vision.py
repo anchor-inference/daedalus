@@ -99,13 +99,19 @@ async def look(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, 
     for a caller that must say more about what it shows (a web page is not to be obeyed).
     """
     if not vision:
-        raise VisionUnavailable("no vision model is configured (set OPENROUTER_API_KEY or [vision] in the config)")
+        raise VisionUnavailable("no vision model is configured: mark a model as taking images in Settings → Models and pick it under Image understanding")
     provider, model, blobs, tenant = vision
     max_out = int(getattr(getattr(getattr(manager, "config", None), "vision", None), "max_output_tokens", 2000))
     accepts = getattr(provider, "accepts_images", None)
     if accepts is None or not accepts(model):
         raise VisionUnavailable("the vision preset is not marked as image-capable; enable 'images' on it in Settings → Models")
-    meta = await blobs.put(tenant, data, content_type=mime)
+    try:
+        meta = await blobs.put(tenant, data, content_type=mime)
+    except OSError as exc:
+        # The image is staged before any model is asked. A failure here once read, to the agent and
+        # the operator alike, as the chosen model not taking images, when the picture never left
+        # the machine; say which side failed.
+        raise VisionUnavailable(f"the image could not be stored for the vision model {model} ({exc}); the model was not asked") from exc
     text = instruction or (
         "You are the eyes of another AI agent. Look at the image and answer its request precisely. "
         "Quote text verbatim when asked to read; give numbers when asked about data; say clearly "
@@ -128,9 +134,15 @@ async def look(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, 
     try:
         response = await provider.complete_text(request)
     except Exception as exc:  # noqa: BLE001
-        raise VisionUnavailable(f"vision model failed: {exc}") from exc
+        raise VisionUnavailable(f"vision model {model} failed: {exc}") from exc
     answer = "".join(b.text for b in response.message.content_blocks if isinstance(b, TextBlock)).strip()
-    return answer or "(the vision model returned nothing)", str(model)
+    if not answer:
+        # An empty answer handed back as a description let the agent go on as if it had looked.
+        raise VisionUnavailable(
+            f"vision model {model} returned no text for the image; it may have spent its {request.max_tokens} output tokens "
+            "on thinking, or its route dropped the picture"
+        )
+    return answer, str(model)
 
 
 TOOLS = [image_view]

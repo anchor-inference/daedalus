@@ -19,6 +19,7 @@ import aiosqlite
 
 from daedalus.extensions.ci_observations import ci_readiness
 from daedalus.extensions.task_contract import REQUIREMENT_KINDS, RETURNED, check_items
+from daedalus.stores.blobs import sync_directory
 from daedalus.stores.control import ControlStore, Mutation, Principal
 from daedalus.stores.database import Database
 from daedalus.stores.knowledge import enqueue_artifact_change
@@ -283,11 +284,7 @@ class OriginalReports:
                     stream.flush()
                     os.fsync(stream.fileno())
                 os.replace(temporary, name)
-                directory = os.open(self.root, os.O_RDONLY)
-                try:
-                    os.fsync(directory)
-                finally:
-                    os.close(directory)
+                sync_directory(self.root)
             finally:
                 if os.path.exists(temporary):
                     os.unlink(temporary)

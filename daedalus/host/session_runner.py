@@ -969,10 +969,12 @@ class SessionManager:
         found = self.config.vision_preset()
         if found is None:
             return None
-        _, preset = found
+        preset_id, preset = found
         try:
             provider = self.providers.get(preset.provider)
         except KeyError:
+            # The tool then reports no vision model at all; the log keeps the chosen one and why it is out.
+            logger.warning("vision preset %s names provider %s, which has no live endpoint", preset_id, preset.provider)
             return None
         return provider, preset.model, self.blobs, TENANT
 
