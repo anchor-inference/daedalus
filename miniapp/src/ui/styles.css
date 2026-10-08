@@ -477,6 +477,33 @@ button.more-item { border: 0; font-family: inherit; cursor: pointer; }
 .artifact-open-panel { display:contents; }
 .artifact-open-full { display:none; }
 .artifact-thumb .tool-image { max-height:220px; }
+/* The files a turn produced: the sent ones as the cards above, three before "+N more", and the
+   changed ones as one quiet line that opens into one-line rows of relative paths. A card per written
+   file buried the answer under two dozen of them. */
+.turn-files { display:flex; flex-direction:column; gap:6px; margin-top:4px; min-width:0; }
+.turn-files .artifacts { margin-top:0; }
+.artifacts-more { align-self:flex-start; height:var(--ctl-h-sm); padding:0 10px; border:0; border-radius:var(--radius-sm); background:none; color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; }
+.artifacts-more:hover { background:var(--surface-2); color:var(--fg); }
+.changed-files { min-width:0; }
+.changed-files-head { display:inline-flex; align-items:center; gap:6px; max-width:100%; height:var(--ctl-h-sm); padding:0 8px; margin-left:-8px; border:0; border-radius:var(--radius-sm); background:none; color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; }
+.changed-files-head:hover { background:var(--surface-2); color:var(--fg); }
+.changed-file-list { list-style:none; margin:2px 0 0; padding:4px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface-1); max-height:min(360px, 50vh); overflow:auto; }
+.changed-file { display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:center; min-height:26px; border-radius:var(--radius-xs); }
+.changed-file:hover, .changed-file:focus-within { background:var(--surface-2); }
+.changed-file-main { display:flex; align-items:center; gap:8px; min-width:0; height:26px; padding:0 6px; border:0; background:none; color:var(--fg); font:inherit; font-size:var(--fs-13); text-align:left; cursor:pointer; }
+.changed-file-glyph { display:inline-flex; color:var(--fg-3); flex:none; }
+.changed-file-path { min-width:0; font-family:var(--mono); font-size:var(--fs-12); }
+.changed-file-dir { color:var(--fg-3); }
+.changed-file-how { flex:none; font-size:var(--fs-11); color:var(--fg-3); }
+.changed-file-actions { display:inline-flex; align-items:center; gap:2px; padding-right:2px; opacity:0; transition:opacity .12s; }
+.changed-file:hover .changed-file-actions, .changed-file:focus-within .changed-file-actions { opacity:1; }
+.changed-file-actions .iconbtn.small { width:22px; height:22px; background:transparent; color:var(--fg-2); }
+.changed-file-actions .iconbtn.small:hover { background:var(--surface-3); color:var(--fg); }
+/* No hover on a touch screen: the actions are there from the start rather than never. */
+@media (hover: none) { .changed-file-actions { opacity:1; } }
+.reveal-btn { flex:none; background:transparent; color:var(--fg-2); }
+.reveal-btn:hover { background:var(--surface-3); color:var(--fg); }
+.focus-folder .reveal-btn { margin-top:-4px; }
 
 /* ── the first paint: three turn-shaped blocks ── */
 .turn-skeleton { display:flex; flex-direction:column; gap:22px; padding-top:8px; }
@@ -2815,6 +2842,9 @@ input.field[type="range"] {
   .artifacts { gap:0; border:1px solid var(--line); border-radius:var(--radius-md); overflow:hidden; }
   .artifact { border:0; border-radius:0; }
   .artifact + .artifact { border-top:1px solid var(--line); }
+  .artifacts-more { align-self:stretch; min-height:var(--row-h-touch); padding-inline:var(--space-3); border-top:1px solid var(--line); border-radius:0; text-align:left; }
+  .changed-files-head { min-height:var(--row-h-touch); }
+  .changed-file-row .ph-row-t { font-family:var(--mono); font-size:var(--fs-13); }
   .folder .erow { border:0; border-radius:0; background:transparent; margin-inline:0; }
   .folder.single:not(.open) { border:0; border-bottom:1px solid var(--line); border-radius:0; background:transparent; }
   .folder-expand { order:2; min-width:var(--row-h-touch); min-height:var(--row-h-touch); }

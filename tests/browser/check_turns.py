@@ -2,8 +2,8 @@
 
 The turn's pure parts have unit tests (miniapp/src/turnview.test.ts); this is what only exists once
 the turn is drawn over the invented installation the screenshots use: the folded line names the
-work by family and opens into 28 px step rows with their durations, the files the turn produced are
-cards under the answer and one click puts a file in the panel's Preview tab, a step's file name
+work by family and opens into 28 px step rows with their durations, the file the turn sent is a card
+under the answer and one click puts it in the panel's Preview tab, a step's file name
 opens the same way, the loop agent's wake-up is a folded system note and not a bubble, and the
 answer's row of actions copies the text.
 
@@ -87,12 +87,16 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if "menu.html" not in page.locator(".panel-crumbs").inner_text():
         problems.append(f"the step's file did not open in Preview ({page.locator('.panel-crumbs').inner_text()!r})")
 
-    # The files the turn produced are cards under the answer; the sent report opens in the panel.
+    # The file the turn sent is a card under the answer and opens in the panel; the files it only
+    # wrote or edited are one line beneath (check_turn_files.py drives that line on its own).
     cards = page.locator(".artifacts .artifact")
     names = cards.locator(".artifact-name").all_inner_texts()
     print("artifacts:", names)
-    if names != ["menu.json", "menu-check.md"]:
-        problems.append(f"expected the written file and the sent report as cards, got {names}")
+    if names != ["menu-check.md"]:
+        problems.append(f"expected the sent report alone as a card, got {names}")
+    changed = page.locator(".changed-files-head").all_inner_texts()
+    if len(changed) != 1 or "Changed 2 files" not in changed[0]:
+        problems.append(f"expected one line for the written and the edited file, got {changed}")
     if page.locator(".sent-files, .file-chip.sent-file").count():
         problems.append("the old sent-file chips are still drawn beside the cards")
     cards.last.locator(".artifact-main").click()

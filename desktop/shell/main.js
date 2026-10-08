@@ -113,6 +113,19 @@ function start() {
     const result = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
     return result.canceled || result.filePaths.length === 0 ? '' : result.filePaths[0];
   });
+  // Only the app on loopback may ask, and only for a path the host has already confined to a
+  // project's folder or a session's workspace (POST /api/reveal with run: false). A folder opens in
+  // the file manager; a file is selected in its folder and never opened, so nothing is executed.
+  ipcMain.handle('daedalus:reveal', async (event, file) => {
+    if (!event.senderFrame || !policy.isInternal(event.senderFrame.url)) return 'not allowed';
+    const action = policy.revealAction(file, fs.statSync);
+    if (action === 'open') return shell.openPath(file);
+    if (action === 'show') {
+      shell.showItemInFolder(file);
+      return '';
+    }
+    return 'that path cannot be shown';
+  });
   hideCompanion = require('./pet-window')(() => win, showWindow, app.getLocale());
   createWindow();
   win.loadFile(path.join(__dirname, 'pages', 'starting.html'), { query: { text: strings.starting } });

@@ -87,6 +87,7 @@ from daedalus.extensions import (
     api_provider_holds,
     api_recurring,
     api_resource_profiles,
+    api_reveal,
     api_runtime,
     api_runtime_handoff,
     api_skill_quality,
@@ -124,6 +125,7 @@ from daedalus.host.policy import sealed_root
 from daedalus.host.presence import MAX_ID_LENGTH, MAX_PROJECTS, MAX_SESSIONS, MAX_TERMINALS, PresenceReport
 from daedalus.host.prompt_changes import PromptChangePlanner
 from daedalus.host.prompts import DEFAULT_RULES, without_turn_context
+from daedalus.host.reveal import platform_family
 from daedalus.host.services import SCRATCH_DIR_NAME
 from daedalus.host.session_runner import TENANT, Attachment, HostUnreachable, clip_title
 from daedalus.host.transcript_view import full_tool_result, message_view
@@ -1567,6 +1569,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_worktrees.register(api, app, auth)
     # The files orchestration keeps by handle: the cards a chat draws, their bytes, the audit.
     api_files.register(api, app, auth)
+    # The operator's own file manager on a folder or a file of the agent's, natively and on this machine only.
+    api_reveal.register(api, app, auth)
     if isinstance(getattr(app, "db", None), Database):
         # The calendar, its connected accounts and the planner's tasks.
         api_calendar.register(api, app, auth)
@@ -5260,7 +5264,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(404, "self-development is off in this installation")
 
     @api.get("/api/capabilities")
-    async def capability_report(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def capability_report(request: Request, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """What this installation can do and why — the app hides what is not there instead of offering it.
 
         The mode was resolved once at startup; whether a change is waiting for a restart was not, and it is
@@ -5281,6 +5285,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         # says "the browser service is not running" rather than hiding what the agent could use.
         browsers = app.extensions.get("browser")
         answer["browser"]["available"] = any(env["available"] for env in browsers.environments()) if browsers is not None else False  # type: ignore[attr-defined]
+        # Per request rather than per installation: the same native host is the operator's own
+        # machine to the desktop window and a remote server to a phone on the network, and only the
+        # first has a file manager in front of it.
+        answer["reveal"] = {"available": api_reveal.available(settings.native, request), "platform": platform_family()}
         return answer
 
     @api.post("/api/self/restart")

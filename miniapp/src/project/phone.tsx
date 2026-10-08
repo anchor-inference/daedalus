@@ -37,6 +37,7 @@ import { NeedsYouCard } from "./needs";
 import { operatorReviewReady } from "./focus";
 import { absDate } from "../format";
 import { BottomSheet, SheetRow } from "../ui/phone";
+import { useReveal } from "../reveal";
 
 const enc = encodeURIComponent;
 const operatorAsksKey = (projectId: string) => `/api/asks?project=${enc(projectId)}&routed_to=operator`;
@@ -139,6 +140,7 @@ function ProjectMoreSheet({ projectId, current, badge, unknown, parts, onClose }
   const { project } = useProject(projectId);
   const route = useRoute();
   const [settings, setSettings] = useState(false);
+  const revealer = useReveal();
   const here = current ? route.page : null;
   if (settings && project) return <ProjectSettingsSheet project={project} onClose={onClose} onRemoved={() => { onClose(); navigate(ORCHESTRATION_LIST); }} toast={toast} />;
   const goTo = (href: string) => { onClose(); navigate(href); };
@@ -156,6 +158,7 @@ function ProjectMoreSheet({ projectId, current, badge, unknown, parts, onClose }
             data={{ more: page }} onClick={() => goTo(projectPagePath(projectId, page))} />
         ))}
         <SheetRow icon="settings" label={t("phone.more.settings")} hint={t("pmore.settings.hint")} disabled={!project} data={{ more: "settings" }} onClick={() => setSettings(true)} />
+        {revealer && project && <SheetRow icon="external" label={revealer.label} data={{ more: "reveal" }} onClick={() => { onClose(); void revealer.reveal({ project_id: project.id }); }} />}
         <div className="ph-msep" role="separator" />
         <SheetRow icon="grid" label={t("focus.all")} data={{ more: "projects" }} onClick={() => goTo(ORCHESTRATION_LIST)} />
       </div>

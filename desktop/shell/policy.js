@@ -43,6 +43,25 @@ function isExternal(raw) {
   }
 }
 
+// revealAction decides what the window does when the app asks to show a path in the file manager:
+// a folder is opened, a file is shown selected in its folder, and nothing else happens. A file is
+// never handed to openPath, which would run it with its default application — the request comes
+// from a page, and the host's confinement is the only check a page's word has been through. The
+// path must be absolute and must exist; `stat` is fs.statSync, passed in so the decision is tested
+// without a disk.
+function revealAction(file, stat) {
+  if (typeof file !== 'string' || !file || file.includes('\0') || !path.isAbsolute(file)) return null;
+  let info;
+  try {
+    info = stat(file);
+  } catch {
+    return null;
+  }
+  if (info.isDirectory()) return 'open';
+  if (info.isFile()) return 'show';
+  return null;
+}
+
 function linkFrom(argv) {
   return (argv || []).find((arg) => typeof arg === 'string' && arg.toLowerCase().startsWith('daedalus://')) || null;
 }
@@ -122,4 +141,4 @@ function strings(locale) {
   return String(locale || '').toLowerCase().startsWith('ru') ? dictionary.ru : dictionary.en;
 }
 
-module.exports = { isInternal, isOwnFile, isExternal, linkFrom, parseEvent, restoreBounds, sandboxUnavailable, strings, dictionary };
+module.exports = { isInternal, isOwnFile, isExternal, revealAction, linkFrom, parseEvent, restoreBounds, sandboxUnavailable, strings, dictionary };

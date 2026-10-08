@@ -26,6 +26,7 @@ import { chipText, totalsLine } from "./usage";
 import { FocusView, firstWait, splitTeam, staffTone, waitKey } from "./focus";
 import { budgetCompact, useGoalBudget } from "./ProjectBudget";
 import { operatorAttentionCount, type NextAction } from "./attention-model";
+import { RevealButton } from "../reveal";
 
 export type ProjectSidebarProps = {
   projectId: string;
@@ -86,6 +87,7 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
           <div className="focus-project-line">
             <span className="focus-project-name truncate">{project?.name ?? "…"}</span>
             {project && <EnvPill env={project.settings.default_env ?? project.folders[0]?.env ?? "container"} tiny />}
+            {project && <RevealButton target={{ project_id: project.id }} className="focus-project-reveal" />}
           </div>
           {project && (
             <div className="focus-project-meta truncate">

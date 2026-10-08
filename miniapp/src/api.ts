@@ -39,6 +39,9 @@ declare global {
       signIn?: () => void;
       /** Hear why the launcher could not mint that link. Returns the unsubscribe. */
       onSignInFailed?: (callback: (message: string) => void) => () => void;
+      /** Show a path the host has already confined in the system's file manager: a folder opens, a
+       *  file is selected in its folder. Resolves to an error message, or an empty string. */
+      reveal?: (path: string) => Promise<string>;
       /** Set by the desktop launcher's own window, so the page can say which kind of window it is in. */
       window?: boolean;
     };

@@ -28,6 +28,8 @@ export type Capabilities = {
   restart_required?: PendingChange | null;
   last_change?: ChangeResult | null;
   components?: ComponentsSummary | null;
+  /** Whether a folder or a file may be shown in the operator's own file manager, and which one. */
+  reveal?: { available: boolean; platform: "windows" | "macos" | "linux" } | null;
 };
 
 export type Notice = { kind: "pending" | "done" | "failed"; title: string; body: string; commit: string; action: boolean };
