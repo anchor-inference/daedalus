@@ -16,13 +16,12 @@ import { plural, t } from "../i18n";
 import { EnvPill } from "../envpill";
 import { Icon, type IconName } from "../icons";
 import { go, PageHeader } from "../shell";
-import { ORCHESTRATION_LIST, navigate, useRoute, projectHome, projectPagePath, projectSessionPath, projectStaffPath } from "../router";
+import { ORCHESTRATION_LIST, navigate, useRoute, projectHome, projectPagePath } from "../router";
 import { alwaysServer, answeredBy, askWords, canAlways, composerWhen, nowChoice } from "../staff/model";
-import { HealthLine } from "../staff/health";
 import { invalidate, useOffline, useQuery } from "../store";
 import { PhoneTerminal, type PhoneTerminalProps } from "../terminal/mobile";
 import { TerminalCard } from "../terminal/phonecard";
-import { HarnessBadge, StaffAvatar } from "../team/parts";
+import { PhoneTeamList } from "../team/phone";
 import { StaffSheet } from "../team/StaffSheet";
 import { ProjectSettingsSheet } from "../projects";
 import { Setups } from "../team/setups";
@@ -30,9 +29,8 @@ import type { Staff, Team } from "../team/team";
 import type { ProjectBoardData } from "../board/board";
 import { errorText } from "../ui";
 import { boardKey, staffKey, terminalsKey, useProject, useUsage } from "./data";
-import { firstWait, oldestOpen, PHONE_MORE, PHONE_TABS, type PhoneMorePage, type PhoneTab, splitTeam, staffTone, teamCounts, waitKey } from "./focus";
+import { oldestOpen, PHONE_MORE, PHONE_TABS, type PhoneMorePage, type PhoneTab, teamCounts } from "./focus";
 import { useMember } from "./staff";
-import { spendLine, staffUsage } from "./usage";
 import { budgetCompact, useGoalBudget } from "./ProjectBudget";
 import { operatorAttentionCount, type NextAction } from "./attention-model";
 
@@ -305,102 +303,29 @@ export function NeedsYouBanner({ projectId, toast }: { projectId: string; toast:
 
 // ── the team ─────────────────────────────────────────────────────────────────────────────────
 
-/** Where a member leads on a phone: into its conversation, a command-line member's view (its Feed,
- *  with its terminal a tap away), or its card to edit. */
-function memberPath(projectId: string, member: Staff): string | null {
-  if (member.live?.session_id) return projectSessionPath(projectId, member.live.session_id);
-  if (member.harness !== "daedalus" && member.live) return projectStaffPath(projectId, member.id);
-  return null;
-}
-
 export function PhoneTeam({ projectId, toast }: { projectId: string; toast: (text: string) => void }) {
   const { team, board } = useTeamAndBoard(projectId);
   const usage = useUsage(projectId);
   const [hiring, setHiring] = useState(false);
   const [editing, setEditing] = useState<Staff | null>(null);
-  const { team: members, oneOff } = splitTeam(team?.staff ?? []);
   const tasks = new Map((board?.tasks ?? []).map((task) => [task.id, task.title]));
-  const open = (member: Staff) => {
-    const path = memberPath(projectId, member);
-    if (path) navigate(path);
-    else setEditing(member);
-  };
   const reload = () => invalidate(`/api/projects/${enc(projectId)}/staff`);
-  const row = (member: Staff) => (
-    <PhoneStaffRow
-      key={member.id}
-      member={member}
-      task={member.live?.task_id ? tasks.get(member.live.task_id) : undefined}
-      spend={spendLine(staffUsage(usage, member.id))}
-      onOpen={() => open(member)}
-      onEdit={() => setEditing(member)}
-    />
-  );
   return (
     <>
       <ProjectPhoneHead
         projectId={projectId}
         actions={team && !team.project.ephemeral ? <button className="iconbtn" onClick={() => setHiring(true)} aria-label={t("team.hire")} title={t("team.hire")}><Icon name="plus" /></button> : undefined}
       />
-      <div className="screen phone-project">
+      <div className="screen phone-project ph-team">
         <NeedsYouBanner projectId={projectId} toast={toast} />
         {!team && <Skeleton rows={4} />}
-        {team && members.length === 0 && oneOff.length === 0 && (
-          <div className="empty">
-            <b>{t("team.empty")}</b>
-            <div>{t("team.empty.sub")}</div>
-            {!team.project.ephemeral && !team.project.system && <Setups team={team} toast={toast} onDone={reload} />}
-          </div>
-        )}
-        {members.length > 0 && <div className="phone-staff" role="list">{members.map(row)}</div>}
-        {oneOff.length > 0 && (
-          <>
-            <div className="section-title">{t("focus.oneoff")} <span className="n">{oneOff.length}</span></div>
-            <div className="phone-staff" role="list">{oneOff.map(row)}</div>
-          </>
-        )}
+        {/* The rows, their long-press commands and the grouping of a big team live in team/phone.tsx. */}
+        {team && <PhoneTeamList projectId={projectId} team={team} tasks={tasks} usage={usage} toast={toast} onEdit={setEditing} onHire={() => setHiring(true)}
+          empty={!team.project.ephemeral && !team.project.system ? <Setups team={team} toast={toast} onDone={reload} /> : undefined} />}
       </div>
       {hiring && team && <StaffSheet team={team} onClose={() => setHiring(false)} onDone={reload} toast={toast} />}
       {editing && team && <StaffSheet team={team} member={editing} onClose={() => setEditing(null)} onDone={reload} toast={toast} />}
     </>
-  );
-}
-
-/** A member as M8 draws it: who, what runs them and where, what they are on, what they spent today,
- *  and a dot for how it goes. */
-function PhoneStaffRow({ member, task, spend, onOpen, onEdit }: { member: Staff; task?: string; spend: string | null; onOpen: () => void; onEdit: () => void }) {
-  const tone = staffTone(member);
-  const wait = firstWait(member);
-  const line = wait
-    ? t("focus.wait.line", { reason: t(waitKey(wait.reason)), n: wait.position })
-    : [task, member.live?.waiting_for || t(`focus.tone.${tone}`)].filter(Boolean).join(" · ");
-  // The row opens the member's work; editing the member is the small button beside it, so the
-  // common tap goes where the work is and the rare one is still a thumb away.
-  return (
-    <div className="phone-staff-item" role="listitem" data-staff={member.id}>
-    <button className="phone-staff-row" onClick={onOpen} title={wait?.detail || undefined}>
-      <StaffAvatar name={member.name} color={member.color} />
-      <span className="phone-staff-main">
-        <span className="phone-staff-name">
-          <span className="truncate">{member.name}</span>
-          {!member.one_off && member.role && <span className="phone-staff-role truncate">{member.role}</span>}
-          <HarnessBadge harness={member.harness} />
-          {member.env === "host" && <EnvPill env="host" tiny />}
-        </span>
-        {/* Two lines before it gives up: a wait's reason is the one thing that says why the member is
-            stuck, and one line cut "the machine's terminal limit is reached" before its verb. */}
-        <span className={`phone-staff-line clamp-2 ${wait || tone === "waiting" ? "waits" : ""}`}>{line}</span>
-        {/* The spend has a line of its own rather than joining the one above: that line truncates, and
-            the money is the part the operator would lose on a narrow phone. */}
-        {spend && <span className="phone-staff-line staff-spend truncate">{spend}</span>}
-        <HealthLine health={member.health ?? null} compact />
-      </span>
-      <span className={`focus-dot tone-${tone}`} aria-label={t(`focus.tone.${tone}`)} role="img" />
-    </button>
-    <button className="iconbtn phone-staff-edit" onClick={onEdit} aria-label={t("team.edit.for", { name: member.name })} title={t("team.edit.for", { name: member.name })}>
-      <Icon name="more" />
-    </button>
-    </div>
   );
 }
 

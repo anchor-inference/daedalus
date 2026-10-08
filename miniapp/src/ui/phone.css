@@ -157,6 +157,7 @@
   .ph-sec-n { flex: none; font-weight: 400; color: var(--fg-3); }
   .ph-sec-act { margin-left: auto; display: inline-flex; align-items: center; margin-right: -12px; }
   .ph-sec.warn { color: var(--warn); }
+  .ph-sec.bad { color: var(--bad); }
   .ph-link { min-width: var(--tap); min-height: var(--tap); display: inline-flex; align-items: center; justify-content: center; padding: 0 8px; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 500; cursor: pointer; }
   .ph-sec .ph-ib { color: var(--fg-2); }
   .ph-skrow { display: flex; align-items: center; gap: var(--space-3); height: var(--list-row-h); padding: 0 var(--gutter); }
@@ -409,6 +410,93 @@
   :root[data-keyboard="open"] .term-phone .term-keys { margin: 0 var(--space-2); padding: 6px 6px 2px; border-radius: var(--radius-xl) var(--radius-xl) 0 0; background: var(--surface-1); box-shadow: inset 1px 1px 0 var(--line-strong), inset -1px 0 0 var(--line-strong); }
   :root[data-keyboard="open"] .term-phone .term-compose { margin-top: 0; margin-bottom: var(--space-2); border-radius: 0 0 var(--radius-xl) var(--radius-xl); box-shadow: inset 1px -1px 0 var(--line-strong), inset -1px 0 0 var(--line-strong); }
   :root[data-keyboard="open"] .term-phone .term-key { background: var(--surface-2); }
+
+  /* ── the team: a member's row, its long-press sheet, a big team's groups ─────────────────── */
+  .ph-member-av { position: relative; display: inline-grid; }
+  .ph-member-av .staff-avatar { width: 40px; height: 40px; font-size: var(--fs-13); }
+  .ph-member-av .ph-st { position: absolute; right: -1px; bottom: -1px; width: 12px; height: 12px; border-radius: 50%; border: 2.5px solid var(--bg); background: var(--fg-3); }
+  .ph-st[data-tone="working"] { background: var(--info); } .ph-st[data-tone="review"], .ph-st[data-tone="free"] { background: var(--ok); }
+  .ph-st[data-tone="waiting"] { background: var(--warn); } .ph-st[data-tone="error"] { background: var(--bad); }
+  .ph-st[data-tone="off"] { background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--fg-3); }
+  .ph-srow-member { align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
+  .ph-srow-member .ph-row-lead { margin-top: 2px; }
+  .ph-srow-member .ph-row-trail { padding-top: 3px; }
+  .ph-member-t { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .ph-member-t b { flex: none; font-weight: 600; }
+  .ph-member-role { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--fg-2); }
+  .ph-member-t .harness-badge { flex: none; }
+  .ph-host { flex: none; gap: 3px; height: 22px; padding: 0 6px; font-size: var(--fs-12); text-transform: uppercase; }
+  .ph-member-st { flex: none; }
+  .ph-member-st[data-tone="working"] { color: var(--info); } .ph-member-st[data-tone="review"] { color: var(--ok); }
+  .ph-member-st[data-tone="waiting"], .ph-member-st[data-tone="queued"] { color: var(--warn); } .ph-member-st[data-tone="error"] { color: var(--bad); }
+  .ph-row-m .ph-ell.waiting { color: var(--warn); }
+  .ph-member-spend { display: block; margin-top: 2px; font-size: var(--fs-13); color: var(--fg-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-member-tm { white-space: nowrap; }
+  .ph-member-wait { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; font-size: var(--fs-13); line-height: 1.35; color: var(--warn); overflow-wrap: anywhere; }
+  .ph-member-pv { display: inline-flex; align-items: center; gap: 10px; }
+  .ph-showmore { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: var(--nav-row-h); padding: 0 var(--gutter); border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-15); cursor: pointer; }
+  .ph-team .ph-sec .ph-ib { width: var(--tap); height: var(--tap); }
+  .ph-team > .ph-empty { min-height: 60vh; }
+  /* The rows run edge to edge as every phone list does; the request card keeps the page's margin. */
+  .screen.ph-team { padding-left: 0; padding-right: 0; }
+  .screen.ph-team > .needs-banner, .screen.ph-team > .loading, .screen.ph-team > .team-setups { margin-left: var(--gutter); margin-right: var(--gutter); }
+
+  /* A command-line member's own page: the bar with the member, Feed | Terminal, the state line, the
+     feed, the request tray and a composer in the composer's shape. */
+  .ph-who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .ph-who .staff-avatar { width: 36px; height: 36px; font-size: var(--fs-13); }
+  .ph-who-w { display: flex; flex-direction: column; min-width: 0; }
+  .ph-who-n { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-who-s { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-13); font-weight: 400; color: var(--fg-2); }
+  .ph-member-mode { flex: none; padding: 0 var(--gutter) var(--space-2); }
+  .staff-head.compact { padding: 0 var(--gutter) var(--space-2); border: 0; background: var(--bg); }
+  .staff-head.compact .staff-head-row { flex-wrap: nowrap; gap: 8px; }
+  .staff-head-state { flex: 1; min-width: 0; font-size: var(--fs-13); color: var(--fg-2); }
+  .staff-head.compact .ph-btn { padding: 0 12px; gap: 6px; }
+  .staff-head.compact .staff-head-actions { display: flex; gap: var(--space-2); flex: none; }
+  .staff-head.compact .staff-attention { margin-top: 6px; min-height: 32px; font-size: var(--fs-13); }
+  .staff-head.compact .staff-health { margin-top: 4px; font-size: var(--fs-13); }
+  .ph-member .staff-foot { padding: var(--space-2) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom)); gap: var(--space-2); }
+  .ph-asks { gap: var(--space-2); }
+  .ph-ask-card { gap: 10px; padding: 12px 14px; border: 0; border-radius: var(--radius-xl); background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line-strong); }
+  .ph-ask-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-15); font-weight: 600; color: var(--warn); }
+  .ph-ask-head .staff-request-id { margin-left: auto; font-size: var(--fs-12); font-weight: 400; color: var(--fg-3); }
+  .ph-member .staff-compose { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px; padding: 6px; border-radius: var(--radius-xl); background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line-strong); }
+  .ph-member .staff-compose-field { grid-column: 1 / -1; min-height: 36px; padding: 7px 10px; border: 0; background: none; font-size: var(--fs-16); line-height: 22px; }
+  .ph-member .staff-compose .staff-when { justify-self: start; display: flex; gap: 2px; padding: 3px; border: 0; border-radius: var(--radius-pill); background: var(--surface-2); }
+  .ph-member .staff-compose .staff-when button { position: relative; min-height: 30px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); background: none; color: var(--fg-2); font-size: var(--fs-15); }
+  .ph-member .staff-compose .staff-when button::after { content: ""; position: absolute; inset: -7px 0; }
+  .ph-member .staff-compose .staff-when button.on { background: var(--surface-1); color: var(--fg); }
+  .ph-member .staff-compose-send { position: relative; width: var(--ctl-round); height: var(--ctl-round); min-height: var(--ctl-round); border-radius: 50%; background: var(--primary); color: var(--primary-ink); }
+  .ph-member .staff-compose-send::after { content: ""; position: absolute; inset: -4px; }
+  .ph-member .staff-compose-send:disabled { opacity: .35; }
+  /* Its details: the column's tabs as words with a pill under the current one, and the facts in
+     grouped cards. */
+  .ph-member-sheet .staff-panel { display: flex; flex-direction: column; min-height: 0; }
+  .ph-member-sheet .panel-tabs { padding: 0 var(--space-2); border: 0; }
+  .ph-member-sheet .panel-tab { position: relative; min-height: var(--tap); padding: 0 12px; border: 0; border-radius: var(--radius-pill); font-size: var(--fs-15); color: var(--fg-2); }
+  .ph-member-sheet .panel-tab.on { background: var(--surface-2); color: var(--fg); }
+  .ph-member-sheet .panel-body { padding: var(--space-2) var(--gutter); }
+  .ph-member-sheet .staff-details .dt-section { padding: var(--space-2) 0; border: 0; }
+  .ph-member-sheet .staff-details .dt-label { padding: var(--space-2) 4px; font-size: var(--fs-13); color: var(--fg-2); }
+  .ph-member-sheet .staff-details .dt-content { display: flex; flex-direction: column; gap: 2px; }
+  .ph-member-sheet .staff-details .dt-row.sub { align-items: center; min-height: var(--set-row-h); padding: 8px var(--space-4); border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg); font-size: var(--fs-16); }
+  .ph-member-sheet .staff-details .dt-row.sub:first-child { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
+  .ph-member-sheet .staff-details .dt-row.sub:last-child { border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); }
+  .ph-member-sheet .staff-details .dt-key { flex: 1; color: var(--fg); }
+  .ph-member-sheet .staff-details .dt-row > .grow { flex: none; max-width: 60%; text-align: right; color: var(--fg-2); overflow-wrap: anywhere; }
+  .ph-foot-row.wrap { flex-wrap: wrap; }
+  /* Hiring and editing a member: labelled fields in the phone's field shape, choices as pill tracks,
+     and the decision as two wide pills at the foot. */
+  .staff-sheet:not(.ph-member-sheet) label.field, .staff-sheet:not(.ph-member-sheet) legend.field { margin: var(--space-3) 4px 6px; font-size: var(--fs-13); color: var(--fg-2); }
+  .staff-sheet:not(.ph-member-sheet) input.field, .staff-sheet:not(.ph-member-sheet) select.field, .staff-sheet:not(.ph-member-sheet) textarea.field { min-height: var(--tap); padding: 10px 14px; border: 0; border-radius: var(--radius-md); background: var(--surface-2); font-size: var(--fs-16); }
+  .staff-sheet:not(.ph-member-sheet) .segmented { gap: 2px; margin: 0; padding: 3px; border: 0; border-radius: var(--radius-pill); background: var(--surface-2); }
+  .staff-sheet:not(.ph-member-sheet) .segmented button { position: relative; min-height: 38px; border-radius: var(--radius-pill); font-size: var(--fs-15); color: var(--fg-2); }
+  .staff-sheet:not(.ph-member-sheet) .segmented button::after { content: ""; position: absolute; inset: -3px 0; }
+  .staff-sheet:not(.ph-member-sheet) .segmented button.on { background: var(--surface-1); color: var(--fg); }
+  .staff-sheet:not(.ph-member-sheet) .sheet-foot { flex-wrap: nowrap; }
+  .staff-sheet:not(.ph-member-sheet) .sheet-foot .btn { flex: 1; min-height: var(--tap); border: 0; border-radius: var(--radius-pill); font-size: var(--fs-15); font-weight: 600; }
+  .staff-sheet:not(.ph-member-sheet) .sheet-foot .btn.danger { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
 
   /* ── the creation pill ───────────────────────────────────────────────────────────────────── */
   .ph-newchat { height: 48px; display: inline-flex; align-items: center; gap: 8px; padding: 0 20px 0 16px; border: 0; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-ink); font: inherit; font-size: var(--fs-16); font-weight: 600; white-space: nowrap; cursor: pointer; }

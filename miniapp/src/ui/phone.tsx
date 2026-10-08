@@ -306,6 +306,10 @@ const SWIPE_W = 76;
 export function useLongPress(onLong: () => void) {
   const timer = useRef<number | null>(null);
   const fired = useRef(false);
+  // When the held finger last opened the sheet: the contextmenu Android sends for that same press
+  // comes within a moment and is the same request. A flag alone stayed set after a right click (a
+  // mouse's secondary press never reset it), and the next right click on that row did nothing.
+  const firedAt = useRef(0);
   const origin = useRef<{ x: number; y: number } | null>(null);
   const cancel = useCallback(() => {
     if (timer.current !== null) window.clearTimeout(timer.current);
@@ -322,7 +326,7 @@ export function useLongPress(onLong: () => void) {
         origin.current = { x: e.clientX, y: e.clientY };
         cancel();
         if (e.pointerType === "mouse") return;
-        timer.current = window.setTimeout(() => { fired.current = true; timer.current = null; onLong(); }, LONG_PRESS_MS);
+        timer.current = window.setTimeout(() => { fired.current = true; firedAt.current = performance.now(); timer.current = null; onLong(); }, LONG_PRESS_MS);
       },
       onPointerMove: (e: ReactPointerEvent) => {
         const o = origin.current;
@@ -334,7 +338,7 @@ export function useLongPress(onLong: () => void) {
         e.preventDefault();
         e.stopPropagation();
         cancel();
-        if (fired.current) return;
+        if (performance.now() - firedAt.current < 1000) return;
         fired.current = true;
         onLong();
       },
@@ -468,7 +472,7 @@ function stopOnControl(e: { target: EventTarget; stopPropagation: () => void }) 
   if (e.target instanceof Element && e.target.closest("button, a, input, textarea, select")) e.stopPropagation();
 }
 
-export function SectionHeader({ children, count, action, tone }: { children: ReactNode; count?: ReactNode; action?: ReactNode; tone?: "warn" }) {
+export function SectionHeader({ children, count, action, tone }: { children: ReactNode; count?: ReactNode; action?: ReactNode; tone?: "warn" | "bad" }) {
   return (
     <div className={`ph-sec ${tone ?? ""}`}>
       <span className="ph-sec-t">{children}</span>

@@ -135,10 +135,10 @@ def run_one(page: Page, lang: str, width: int) -> None:
     expect(page.locator(".sheet.more-sheet")).to_have_count(0)
     tabs(page, words, "team")
     tall_enough(page, ".needs-banner .ask-answers-row .btn", where)
-    items = page.locator(".phone-staff-item")
+    items = page.locator("[data-staff]")
     expect(items).to_have_count(6)
     expect(items.filter(has_text="Olga")).to_contain_text(invented["olga.role"])
-    tall_enough(page, ".phone-staff-row", where)
+    tall_enough(page, "[data-staff] .ph-row", where)
     fits(page, f"{where} team")
 
     # The board leaves out the request the banner above it already shows: the same question twice, in
@@ -171,7 +171,7 @@ def run_one(page: Page, lang: str, width: int) -> None:
     expect(page.locator("nav.project-tabs button[data-tab='more'] .tab-badge")).to_have_count(0)
 
     # A member with a conversation opens it without the tabs, and its back returns to the team.
-    items.filter(has_text="Lev").locator(".phone-staff-row").tap()
+    items.filter(has_text="Lev").locator(".ph-row").tap()
     page.wait_for_url(f"**/project/{PID}/s/sess-lev**")
     expect(page.locator(".chat.in-project")).to_be_visible()
     expect(page.locator("nav.project-tabs")).to_have_count(0)

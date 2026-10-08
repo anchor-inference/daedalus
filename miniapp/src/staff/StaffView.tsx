@@ -26,8 +26,11 @@ import { useFocus } from "../project/data";
 import { MessageRow, StaffHeader, useMember, useStaffMessages } from "../project/staff";
 import { navigate, pathFor, projectPagePath } from "../router";
 import { invalidate, useOffline, useQuery } from "../store";
-import { HarnessBadge } from "../team/parts";
-import { HARNESS_NAMES, type Staff } from "../team/team";
+import { HarnessBadge, StaffAvatar } from "../team/parts";
+import { HARNESS_BADGES, HARNESS_NAMES, type Staff } from "../team/team";
+import { act } from "../team/phone";
+import { BottomSheet, IconButton, SegmentedControl, TopBar } from "../ui/phone";
+import { PhoneAskAnswers } from "./phoneask";
 import { TerminalView } from "../terminal/view";
 import type { TerminalState } from "../terminal/instance";
 import { errorText } from "../ui";
@@ -198,9 +201,67 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
       browser={hasBrowser ? <BrowserTab groups={browsers.groups} toast={toast} phone={!wide} /> : null}
       expanded={expanded} onExpand={wide ? () => setExpanded((on) => !on) : undefined} />
   );
+  const outbox = outboxRows(messages);
+  if (!wide) {
+    // The phone's page: the bar names the member (its title and ⋮ open the details sheet), Feed and
+    // Terminal under it, the state with the two controls of a turn, then the feed, the member's
+    // requests and the composer. The terminal is the full-screen one, a tap on Terminal away.
+    const who = [member.role, HARNESS_BADGES[member.harness], launch?.model || member.model].filter(Boolean).join(" · ");
+    return (
+      <div className="chat in-project staff-cli ph-member" data-staff={staffId} data-mode={shown}>
+        <TopBar back={onBack} onTitle={() => setSheet(true)} titleLabel={t("staff.side")}
+          title={<span className="ph-who"><StaffAvatar name={member.name} color={member.color} /><span className="ph-who-w"><span className="ph-who-n">{member.name}</span><span className="ph-who-s">{who}</span></span></span>}
+          actions={<>
+            {hasBrowser && <BrowserHeadButton groups={browsers.groups} onOpen={showBrowser} streaming={!sheet} saving={deviceSaving(true)} />}
+            <IconButton icon="vdots" label={t("staff.side")} popup="dialog" onClick={() => setSheet(true)} />
+          </>} />
+        <div className="ph-member-mode">
+          <SegmentedControl label={t("staff.mode")} value={shown} onChange={pick}
+            options={[{ id: "feed", label: t("staff.mode.feed") }, { id: "terminal", label: t("staff.mode.terminal") }]} />
+        </div>
+        <StaffHeader projectId={projectId} staffId={staffId} toast={toast} facts={factsText} compact>
+          {flagged > 0 && (
+            <button className={`staff-attention ${need.failed.length > 0 ? "failed" : "pending"}`} data-attention={need.failed.length > 0 ? "failed" : "pending"} onClick={showMessages} aria-label={`${flaggedText} · ${t("staff.attention.open")}`} title={flaggedText}>
+              <Icon name={need.failed.length > 0 ? "alert" : "send"} size={14} />
+              <span className="staff-attention-n">{flaggedText}</span>
+            </button>
+          )}
+          <HealthLine health={view?.health ?? member.health ?? null} compact />
+        </StaffHeader>
+        <div ref={bodyRef} className="chat-body">
+          <div className="chat-main">
+            <FeedView
+              name={member.name}
+              live={live}
+              feed={feed}
+              tailKey={outbox.map((m) => `${m.id}:${m.state}`).join(",")}
+              tail={outbox.length > 0 ? <FeedOutbox staffId={staffId} name={member.name} rows={outbox} toast={toast} /> : null}
+            />
+            <div className="staff-foot">
+              <KeyboardBanner terminalId={terminalId} messages={messages} watching={false} state={terminalState} toast={toast} />
+              <PermissionBar projectId={projectId} staffId={staffId} caps={caps} toast={toast} name={member.name} phone />
+              <StaffComposer staffId={staffId} name={member.name} caps={caps} live={live} toast={toast} />
+            </div>
+          </div>
+        </div>
+        {sheet && (
+          <BottomSheet full onClose={() => setSheet(false)} className="staff-sheet ph-member-sheet" label={member.name}
+            title={<span className="ph-sheet-kt-w"><span className="ph-sheet-kt-t">{member.name}</span><span className="ph-sheet-kt-m">{[member.role, version].filter(Boolean).join(" · ")}</span></span>}
+            footer={member.live ? (
+              <div className="ph-foot-row wrap">
+                <button type="button" className="ph-btn" disabled={!!member.live.pause_requested} onClick={() => void act(member, projectId, "pause", toast)}><Icon name="pause" size={16} />{t("ph.team.pause")}</button>
+                <button type="button" className="ph-btn" onClick={() => void act(member, projectId, "interrupt", toast)}><Icon name="stop" size={16} />{t("focus.staff.interrupt")}</button>
+                <button type="button" className="ph-btn danger" onClick={() => void act(member, projectId, "release", toast)}>{t("focus.staff.release")}</button>
+              </div>
+            ) : undefined}>
+            {panel}
+          </BottomSheet>
+        )}
+      </div>
+    );
+  }
   const covering = wide && side && expanded;
   const browserInView = (wide ? side : sheet) && tab === "browser";
-  const outbox = outboxRows(messages);
 
   return (
     <div className="chat in-project staff-cli" data-staff={staffId} data-mode={shown}>
@@ -339,9 +400,30 @@ function KeyboardBanner({ terminalId, messages, watching, state, toast }: { term
 }
 
 /** The member's open requests, each answered in place: Allow, Always where the CLI has it, No with a reason. */
-function PermissionBar({ projectId, staffId, caps, toast }: { projectId: string; staffId: string; caps: HarnessCapabilities | null; toast: (text: string) => void }) {
+function PermissionBar({ projectId, staffId, caps, toast, name = "", phone = false }: { projectId: string; staffId: string; caps: HarnessCapabilities | null; toast: (text: string) => void; name?: string; phone?: boolean }) {
   const open = useRequests(projectId, staffId);
   if (open.length === 0) return null;
+  if (phone) {
+    // The tray above the composer: who asks and how long ago, the command, the answers. On the
+    // member's own page the request is in its context, but "Always" still sits beside "Allow once"
+    // as an equal and a refusal stays one tap.
+    return (
+      <div className="staff-requests ph-asks" aria-label={t("perm.label")}>
+        {open.map((ask) => (
+          <section key={ask.id} className={`staff-request ph-ask-card ${ask.kind}`} data-ask={ask.short_id}>
+            <div className="ph-ask-head">
+              <Icon name={ask.kind === "permission" ? "shield" : "question"} size={16} />
+              <span className="ph-ell">{t(ask.kind === "permission" ? "ph.member.asks.permission" : "ph.member.asks.question", { name })} · {relTime(ask.created_at)}</span>
+              <span className="staff-request-id mono">#{ask.short_id}</span>
+            </div>
+            {ask.kind === "permission" ? <pre className="ph-code">{askWords(ask)}</pre> : <div className="ph-prose">{askWords(ask)}</div>}
+            {ask.routed_to === "orchestrator" && <div className="staff-request-routed">{t("perm.routed.orchestrator")}</div>}
+            <PhoneAskAnswers ask={ask} projectId={projectId} toast={toast} always={canAlways(ask, caps)} server={alwaysServer(ask, caps)} />
+          </section>
+        ))}
+      </div>
+    );
+  }
   return (
     <div className="staff-requests" aria-label={t("perm.label")}>
       {open.map((ask) => (

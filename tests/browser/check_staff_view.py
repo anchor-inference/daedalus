@@ -336,13 +336,14 @@ def phone(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     check.that(page.locator(".staff-term").count() == 0, f"{lang} phone: a terminal is drawn under the Feed")
     check.that(page.locator(".staff-foot .staff-message").count() == 0, f"{lang} phone: messages sit above the composer")
     # The marker opens the member sheet at its Messages.
-    page.locator(".staff-cli .chat-head .staff-attention").tap()
+    # The phone's page names the member in its bar; the marker sits on the state line under it.
+    page.locator(".staff-cli .staff-head .staff-attention").tap()
     expect(page.locator(".sheet .staff-messages-section")).to_be_in_viewport(timeout=5000)
     check.that(page.locator(".sheet .staff-messages-section .staff-message").count() == 3, f"{lang} phone: the sheet lists {page.locator('.sheet .staff-messages-section .staff-message').count()} messages")
     check.that(sideways(page) <= 0, f"{lang} phone: the sheet scrolls sideways by {sideways(page)} px")
     page.keyboard.press("Escape")
     expect(page.locator(".sheet .staff-panel")).to_have_count(0, timeout=3000)
-    buttons = page.locator(".staff-request .ask-answers-row .btn")
+    buttons = page.locator(".staff-request .ph-ask .ph-btn")
     expect(buttons).to_have_count(4, timeout=5000)
     heights = [b["height"] for b in (buttons.nth(i).bounding_box() for i in range(buttons.count())) if b]
     check.that(min(heights) >= 44, f"{lang} phone: the request's buttons are {heights} px high")
@@ -351,7 +352,7 @@ def phone(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     check.that(bool(request and composer and request["y"] + request["height"] <= composer["y"] + 0.5), f"{lang} phone: the request is not above the composer")
     check.that(sideways(page) <= 0, f"{lang} phone: the staff view scrolls sideways by {sideways(page)} px")
     # The column beside is a sheet on a phone.
-    page.locator(".staff-cli .chat-head .head-actions .iconbtn").tap()
+    page.locator(".staff-cli .ph-top .ph-ib").last.tap()
     expect(page.locator(".sheet .staff-panel")).to_be_visible(timeout=5000)
     report = page.locator(".sheet .staff-event-report")
     report.locator("button").tap()
@@ -360,7 +361,7 @@ def phone(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     page.keyboard.press("Escape")
     expect(page.locator(".sheet .staff-panel")).to_have_count(0, timeout=3000)
     # Terminal: the phone's own, with the request and "Always" above the keys.
-    page.locator(".staff-mode button[data-mode='terminal']").tap()
+    page.locator(".ph-member-mode button[role='radio']").nth(1).tap()
     page.wait_for_url("**/terminals/tm-ira**")
     page.wait_for_selector(".term-phone-actions .ask-answers-row .btn", timeout=10000)
     above = [b.strip() for b in page.locator(".term-phone-actions .ask-answers-row .btn").all_inner_texts()]
