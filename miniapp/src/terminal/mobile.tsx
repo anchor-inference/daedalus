@@ -23,7 +23,7 @@ import { InputDeduper } from "./dedupe";
 import { copyText, fontSizeStep, setFontSize, storedFontSize, TerminalState } from "./instance";
 import { applyModifiers, composeBytes, keyBytes, PHONE_KEYS, PhoneKey, pinchFont, StickyModifier } from "./phonekeys";
 import { instanceFor } from "./terminals";
-import { copyLastOutput, TerminalView } from "./view";
+import { copyLastOutput, CopyOutputButton, TerminalView } from "./view";
 
 /** A change in rows alone waits this long, so the soft keyboard's slide is one RESIZE (fit.ts). */
 export const KEYBOARD_SETTLE_MS = 150;
@@ -220,12 +220,6 @@ export function PhoneTerminal({ id, row, onBack, onEnd, onRestart, onRemove, wor
   const running = !row || row.status === "running";
   const commands = state?.commands;
   const instance = () => instanceFor(id);
-  const copyAll = async () => {
-    const text = instance()?.screenText(200) ?? "";
-    toast((await copyText(text)) ? t("term.phone.copiedAll") : t("term.phone.copyFailed"));
-  };
-  // The header keeps search and this menu, as every phone bar does; the copies that were buttons in
-  // the header and the key row are the menu's first rows.
   const items: MenuItem[] = [
     { label: t("term.search"), icon: "search", onSelect: () => instance()?.openSearch() },
     { label: t("term.phone.copyAll"), icon: "copy", onSelect: () => { const text = instance()?.screenText(200); if (text !== undefined) void copyText(text).then((ok) => toast(ok ? t("term.phone.copiedAll") : t("term.phone.copyFailed"))); } },

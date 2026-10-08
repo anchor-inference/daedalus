@@ -327,9 +327,6 @@ export function PhoneTeam({ projectId, toast }: { projectId: string; toast: (tex
   );
 }
 
-  );
-}
-
 // ── the terminals ────────────────────────────────────────────────────────────────────────────
 
 export function PhoneTerminals({ projectId, toast }: { projectId: string; toast: (text: string) => void }) {
