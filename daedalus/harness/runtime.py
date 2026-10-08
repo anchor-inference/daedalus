@@ -265,8 +265,8 @@ class RuntimeTerminal:
             return False
         return True
 
-    async def put_file(self, name: str, data: bytes) -> str:
-        return await self.terminals.put_launch_file(self._env, self.launch_id, name, data, actor=self.actor)
+    async def put_file(self, name: str, data: bytes, *, replace: bool = False) -> str:
+        return await self.terminals.put_launch_file(self._env, self.launch_id, name, data, actor=self.actor, replace=replace)
 
     async def dial(self, target: str) -> Any:
         return await self.terminals.net_dial(self._env, target, self.launch_id, actor=self.actor)

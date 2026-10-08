@@ -377,13 +377,20 @@ class SideChannels:
             files=[str(f) for f in result.get("files") or []],
         )
 
-    async def put_launch_file(self, env: str, launch_id: str, name: str, data: bytes, *, actor: str = "system") -> str:
+    async def put_launch_file(self, env: str, launch_id: str, name: str, data: bytes, *, actor: str = "system", replace: bool = False) -> str:
         """Add a file to an open launch's directory and return its path: a message too long to type,
-        which the CLI is told to read. The daemon refuses a name that is a path or already exists."""
+        which the CLI is told to read. The daemon refuses a name that is a path, or one that already
+        exists unless ``replace`` asks it to swap the file whole (a secret handed again with a new value)."""
         detail: dict[str, Any] = {"launch_id": launch_id, "name": name, "sha256": _file_digest(name, data), "length": len(data)}
         terminal_id = self._launch_terminals.get(launch_id, "")
+        params: dict[str, Any] = {"launch_id": launch_id, "name": name, "data": base64.b64encode(data).decode()}
+        if replace:
+            # Sent only when wanted: a daemon older than the option refuses an unknown field, and every
+            # other caller must keep working against it.
+            params["replace"] = True
+            detail["replace"] = True
         try:
-            result = await self._side_call(env, "hooks.put_file", {"launch_id": launch_id, "name": name, "data": base64.b64encode(data).decode()}, what="adding a file to the launch")
+            result = await self._side_call(env, "hooks.put_file", params, what="adding a file to the launch")
         except TerminalError as exc:
             await self.audit(terminal_id, env, actor, "launch_file", {**detail, "error": exc.message})
             raise

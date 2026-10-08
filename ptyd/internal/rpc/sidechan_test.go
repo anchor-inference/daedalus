@@ -557,6 +557,13 @@ func TestLaunchFilesNestedAndAddedLaterOverTheSocket(t *testing.T) {
 	if b, err := os.ReadFile(put.Path); err != nil || string(b) != "long" || filepath.Dir(put.Path) != r.Dir {
 		t.Fatalf("%q %q %v", put.Path, b, err)
 	}
+	if we := f.callErr("hooks.put_file", map[string]any{"launch_id": "files1", "name": "message-1.md", "data": []byte("again")}); we == nil || we.Code != wire.CodeInvalidParams {
+		t.Fatalf("an existing file was overwritten unasked: %v", we)
+	}
+	f.call(t, "hooks.put_file", map[string]any{"launch_id": "files1", "name": "message-1.md", "data": []byte("again"), "replace": true}, &put)
+	if b, err := os.ReadFile(put.Path); err != nil || string(b) != "again" {
+		t.Fatalf("%q %v", b, err)
+	}
 	if we := f.callErr("hooks.put_file", map[string]any{"launch_id": "files1", "name": "../x", "data": []byte("x")}); we == nil || we.Code != wire.CodeInvalidParams {
 		t.Fatalf("a path was written: %v", we)
 	}

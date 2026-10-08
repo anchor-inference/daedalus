@@ -88,6 +88,7 @@ from daedalus.harness.contract import (
 )
 from daedalus.harness.team import SKILL_PATH
 from daedalus.harness.tools import tooling
+from daedalus.security import operator_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,27 @@ TEAM_TOOLS = ("mcp__daedalus_team__Report", "mcp__daedalus_team__AskOrchestrator
 PERMISSION_MODES = {"default": "manual", "manual": "manual", "acceptEdits": "acceptEdits", "auto": "auto", "plan": "plan", "dontAsk": "dontAsk", "bypassPermissions": "bypassPermissions"}
 """The staff store keeps ``default``, the name hooks report; the flag calls the same mode ``manual``."""
 LEVEL_MODES = {"ask": "manual", "edits": "acceptEdits", "all": "bypassPermissions"}
+_SCRIPT = f'"$DAEDALUS_LAUNCH_DIR/{operator_secrets.ENV_SCRIPT_FILE}"'
+SECRET_ENV_HOOK = '[ -z "$CLAUDE_ENV_FILE" ] || printf \'%s\\n\' ' + f"'[ -r {_SCRIPT} ] && . {_SCRIPT}'" + ' >> "$CLAUDE_ENV_FILE"'
+"""A second ``SessionStart`` command: what a hook appends to ``$CLAUDE_ENV_FILE`` Claude Code runs before
+every Bash command of the session (measured on 2.1.294: a file written between two commands was a variable
+in the second). The line it appends sources the launch's :data:`operator_secrets.ENV_SCRIPT`, so a secret
+handed to the running member, or handed again with a new value, is ``$DAEDALUS_SECRET_<NAME>`` from the next
+command on. A plain shell line rather than the daemon's hook command, so no daemon has to be rebuilt for it."""
+SECRET_CLASSIFIER_RULE = (
+    "Using a secret the operator handed over: a command or a script may read a file named secret-<name> in the "
+    "directory $DAEDALUS_LAUNCH_DIR, or the variables DAEDALUS_SECRET_<NAME> and DAEDALUS_SECRET_<NAME>_FILE, and "
+    "pass the value to the service the task is about. The operator stored these values for this agent and handed "
+    "them over for this work, so reading them is not credential exploration. Printing the value, copying it "
+    "anywhere else or sending it to any other destination is not covered."
+)
+"""An allow rule for the auto-mode classifier, which a ``--settings`` overlay may carry (``autoMode`` is read
+from the user's, the flag's and the policy settings). In auto mode the classifier blocks what looks like
+credential use; three blocks in a row turn every later blocked command into a permission request, and only
+an action the classifier itself allows ends that, so one member once sent its orchestrator a request for
+each of eight commands. Telling the classifier which credentials are the operator's to hand is the narrowest
+lever there is: nothing else is allowed, the rest of the command is still judged, and no permission rule
+grows. ``$defaults`` keeps the built-in rules where they stand."""
 
 
 def start_mode(permission_mode: str, permission_level: str) -> str:
@@ -237,6 +259,8 @@ class ClaudeCodeAdapter:
 
     name = "claude"
     capabilities = capabilities("claude")
+    live_secret_variables = True
+    """A secret's launch file is its variable from the next command on (:data:`SECRET_ENV_HOOK`)."""
 
     def __init__(self) -> None:
         self.tooling = tooling("claude")
@@ -294,6 +318,7 @@ class ClaudeCodeAdapter:
                 command += f" --wait-ms {permission_hold}"
                 timeout = permission_hold // 1000 + HOLD_SLACK_S
             hooks[event] = [{"hooks": [{"type": "command", "command": command, "timeout": timeout}]}]
+        hooks["SessionStart"].append({"hooks": [{"type": "command", "command": SECRET_ENV_HOOK, "timeout": HOOK_TIMEOUT_S}]})
         if permission_hold:
             # A question to the operator is answered through this held hook's reply; every other
             # tool's PreToolUse goes by the entry above and is never held.
@@ -303,7 +328,7 @@ class ClaudeCodeAdapter:
         allow = [*TEAM_TOOLS, *(f"mcp__{tools.server}__{name}" for tools in spec.tool_sets for name in tools.read_only)]
         # The operator's standing grants to this member, given by "Always" in an earlier session.
         allow += [rule for rule in spec.allow_rules if rule not in allow]
-        settings: dict[str, Any] = {"hooks": hooks, "permissions": {"allow": allow}}
+        settings: dict[str, Any] = {"hooks": hooks, "permissions": {"allow": allow}, "autoMode": {"allow": ["$defaults", SECRET_CLASSIFIER_RULE]}}
         if mode == "bypassPermissions":
             # The overlay's switch is honoured (measured): the warning would otherwise stop the launch.
             settings["skipDangerousModePermissionPrompt"] = True
@@ -320,7 +345,8 @@ class ClaudeCodeAdapter:
         }
         for tools in spec.tool_sets:
             mcp["mcpServers"][tools.server] = {"command": "sh", "args": ["-c", tools.command()], "env": {"DAEDALUS_TOOLS_HOLD_MS": str(tools.hold_ms)}}
-        files: dict[str, bytes] = {"settings.json": json.dumps(settings, indent=1).encode(), "mcp.json": json.dumps(mcp, indent=1).encode()}
+        files: dict[str, bytes] = {"settings.json": json.dumps(settings, indent=1).encode(), "mcp.json": json.dumps(mcp, indent=1).encode(),
+                                   operator_secrets.ENV_SCRIPT_FILE: operator_secrets.ENV_SCRIPT.encode()}
         files.update({tools.path: tools.file for tools in spec.tool_sets})
         argv: list[str] = ["claude", "--resume" if resume else "--session-id", session, "--settings", f"{LAUNCH_DIR}/settings.json"]
         if spec.team_block:

@@ -1297,21 +1297,28 @@ class Team:
 
         A Daedalus member is a session: its commands take the variables from its next call on. A coding CLI's
         environment was fixed when it started, so the value goes into its launch directory as a file, which
-        the next launch also carries as a variable."""
+        the next launch also carries as a variable; Claude Code re-reads that file into the variable before
+        each command. The file is replaced whenever it is written: a secret handed again is most often a
+        corrected value, and keeping the file already there once left a running member trying the wrong
+        password until it was restarted."""
         if not handed:
             return ""
         if member.harness == "daedalus":
             return operator_secrets.prompt_section(handed)
         live = await self.live_of(member)
-        session = getattr(self.runtimes.get(member.harness), "sessions", {}).get(live.id) if live is not None else None
+        runtime = self.runtimes.get(member.harness)
+        session = getattr(runtime, "sessions", {}).get(live.id) if live is not None else None
         if session is None:
             return operator_secrets.staff_section(handed)
+        undelivered: list[str] = []
         for secret in handed:
             try:
-                await session.term.put_file(operator_secrets.LAUNCH_FILE_PREFIX + secret.name, (secret.value or "").encode("utf-8"))
-            except Exception:  # noqa: BLE001 — a file already there (the project's secret was in the launch) is the file wanted
-                logger.info("secret %s is already in %s's launch, or the launch refused it", secret.name, member.name)
-        return operator_secrets.staff_section(handed, mid_launch=True)
+                await session.term.put_file(operator_secrets.LAUNCH_FILE_PREFIX + secret.name, (secret.value or "").encode("utf-8"), replace=True)
+            except Exception:  # noqa: BLE001 — the member is told the secret did not reach it, not left to hunt for it
+                logger.warning("secret %s could not be written into %s's launch", secret.name, member.name, exc_info=True)
+                undelivered.append(secret.name)
+        live_variables = bool(getattr(getattr(runtime, "adapter", None), "live_secret_variables", False))
+        return operator_secrets.staff_section(handed, mid_launch=True, live_variables=live_variables, undelivered=undelivered)
 
     async def interrupt(self, member: Staff) -> None:
         live = await self.live_of(member)

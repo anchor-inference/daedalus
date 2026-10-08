@@ -718,9 +718,12 @@ ttl_s?}` → `{launch_id, hook_url, hook_token, dir, dial_dir, env{}, files[]}`
   to six joined by `/` for a file a CLI finds only at a fixed place under a directory it is given
   (Claude Code's skills at `.claude/skills/<name>/SKILL.md`); the directories are made 0700 inside
   the new launch directory, and `.`, `..` or an empty part is refused.
-- `hooks.put_file {launch_id, name, data: base64}` → `{path}` adds a file to an open launch later —
-  a message too long to type, which the CLI is told to read by its path. The name is one plain part,
-  the file must be new (never over something there, never through a link), at most 1024 per launch.
+- `hooks.put_file {launch_id, name, data: base64, replace?}` → `{path}` adds a file to an open launch
+  later — a message too long to type, which the CLI is told to read by its path. The name is one plain
+  part, the file must be new (never over something there, never through a link), at most 1024 per
+  launch. With `replace` the content is written to a fresh hidden file and renamed over the name: an
+  operator's secret handed again with a new value reaches a running member that way, whole, and a
+  link planted under the name is replaced rather than followed.
 - `ports` are the loopback ports `net.dial` may reach for it; `net.allow {launch_id, port}` adds one.
 - A terminal created with `launch_id` gets the launch's environment on top of the caller's:
   `DAEDALUS_LAUNCH_ID`, `DAEDALUS_HOOK_URL` (`http://127.0.0.1:<port>/hook/<launch_id>`),

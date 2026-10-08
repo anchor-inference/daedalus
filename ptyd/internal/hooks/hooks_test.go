@@ -183,7 +183,7 @@ func TestNestedFilesAndFilesAddedLater(t *testing.T) {
 	if st, err := os.Stat(filepath.Join(r.Dir, ".claude", "skills")); err != nil || st.Mode().Perm() != 0o700 {
 		t.Fatalf("%v %v", st, err)
 	}
-	path, err := f.reg.PutFile("L1", "message-sm-1.md", []byte("a long message"))
+	path, err := f.reg.PutFile("L1", "message-sm-1.md", []byte("a long message"), false)
 	if err != nil || path != filepath.Join(r.Dir, "message-sm-1.md") {
 		t.Fatalf("%q %v", path, err)
 	}
@@ -193,21 +193,44 @@ func TestNestedFilesAndFilesAddedLater(t *testing.T) {
 	// A file added later is one new plain name: never a path, never over something already there,
 	// never through a link the launch's programs planted.
 	for _, name := range []string{"message-sm-1.md", "a/b.md", "../x", ""} {
-		if _, err := f.reg.PutFile("L1", name, []byte("x")); err == nil {
+		if _, err := f.reg.PutFile("L1", name, []byte("x"), false); err == nil {
 			t.Errorf("%q was written", name)
 		}
 	}
 	if err := os.Symlink("/tmp/elsewhere", filepath.Join(r.Dir, "planted.md")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.reg.PutFile("L1", "planted.md", []byte("x")); err == nil {
+	if _, err := f.reg.PutFile("L1", "planted.md", []byte("x"), false); err == nil {
 		t.Error("a planted link was followed")
 	}
-	if _, err := f.reg.PutFile("L1", "big.md", make([]byte, config.MaxLaunchFileBytes+1)); err == nil {
+	if _, err := f.reg.PutFile("L1", "big.md", make([]byte, config.MaxLaunchFileBytes+1), false); err == nil {
 		t.Error("an oversized file was written")
 	}
+	// Replacing is the one way over an existing name: the new content whole, and a planted link
+	// replaced rather than followed.
+	if p, err := f.reg.PutFile("L1", "message-sm-1.md", []byte("the second value"), true); err != nil || p != path {
+		t.Fatalf("%q %v", p, err)
+	}
+	if b, err := os.ReadFile(path); err != nil || string(b) != "the second value" {
+		t.Fatalf("%q %v", b, err)
+	}
+	if st, err := os.Stat(path); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("%v %v", st, err)
+	}
+	if _, err := f.reg.PutFile("L1", "planted.md", []byte("x"), true); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Lstat(filepath.Join(r.Dir, "planted.md")); err != nil || st.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("the planted link is still there: %v %v", st, err)
+	}
+	entries, _ := os.ReadDir(r.Dir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".put-") {
+			t.Errorf("a temporary file was left: %s", e.Name())
+		}
+	}
 	f.reg.Unregister("L1", "done")
-	if _, err := f.reg.PutFile("L1", "late.md", []byte("x")); !errors.Is(err, ErrNoLaunch) {
+	if _, err := f.reg.PutFile("L1", "late.md", []byte("x"), false); !errors.Is(err, ErrNoLaunch) {
 		t.Fatalf("a file for an ended launch: %v", err)
 	}
 }

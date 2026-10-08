@@ -980,7 +980,10 @@ async def tell(
     if receipt.get("files"):
         line += f", with {len(receipt['files'])} file{'s' if len(receipt['files']) > 1 else ''} copied where they can open {'it' if len(receipt['files']) == 1 else 'them'}"
     if secrets_handed:
-        line += f", handing over {', '.join(secret.placeholder for secret in secrets_handed)}"
+        # The orchestrator once told a running member to use $DAEDALUS_SECRET_…, which its environment did not
+        # have, and then refused the member's look for it; the appended note is the one account of where it is.
+        line += (f", handing over {', '.join(secret.placeholder for secret in secrets_handed)}; the message ends with a note "
+                 f"saying where {member.name} finds it — do not name a variable or path of your own")
     degraded = receipt.get("degraded_to")
     if degraded:
         line += " — " + _degraded(member, degraded)

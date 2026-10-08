@@ -96,8 +96,11 @@ class PtydTerminalPort:
             return False
         return True
 
-    async def put_file(self, name: str, data: bytes) -> str:
-        result = await self.client.call("hooks.put_file", {"launch_id": self.launch_id, "name": name, "data": base64.b64encode(data).decode()})
+    async def put_file(self, name: str, data: bytes, *, replace: bool = False) -> str:
+        params: dict[str, Any] = {"launch_id": self.launch_id, "name": name, "data": base64.b64encode(data).decode()}
+        if replace:
+            params["replace"] = True
+        result = await self.client.call("hooks.put_file", params)
         return str(result["path"])
 
     async def dial(self, target: str) -> ByteStream:
