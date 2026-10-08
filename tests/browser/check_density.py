@@ -309,7 +309,8 @@ READ_PHONE = """
 
 def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-def]
     """The phone redesign's claims at 412 × 915, in both languages: the shell, the home, Chats, the
-    drawer and the composer, each read where the operator meets it."""
+    drawer and the composer, the Inbox, Terminals and a Settings page, each read where the operator
+    meets it."""
     problems: list[str] = []
     seen: dict = {}
     for lang in ("en", "ru"):
@@ -411,6 +412,32 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
         m = read("settings", ".main")
         if m["topBorder"]:
             problems.append(f"settings {lang}: the top bar has a {m['topBorder']} px rule")
+
+        # The Inbox: the phone's bar, 32 px chips, rows at least a row tall, and no white primary on
+        # a row — a request in the Inbox is out of its context.
+        go("inbox", ".ph-inbox .ph-irow")
+        m = read("inbox", ".ph-inbox")
+        if not m["top"] or m["top"]["h"] != 56:
+            problems.append(f"inbox {lang}: the top bar is {m['top']}, not 56 tall")
+        if any(h != 32 for h in m["chips"]):
+            problems.append(f"inbox {lang}: chips {sorted(set(m['chips']))}, not 32")
+        if any(h < 60 for h in m["rows"]):
+            problems.append(f"inbox {lang}: rows {sorted(set(m['rows']))}, some under 60")
+        if page.locator(".ph-inbox .ph-irow .ph-btn.primary").count():
+            problems.append(f"inbox {lang}: a row's answer is drawn as the white primary")
+
+        # Terminals: one capacity line under the bar, the cards inside the gutter.
+        go("terminals", ".ph-terms .ph-page-body")
+        m = read("terminals", ".ph-terms")
+        if not m["top"] or m["top"]["h"] != 56:
+            problems.append(f"terminals {lang}: the top bar is {m['top']}, not 56 tall")
+
+        # A Settings page in grouped cards: its rows are tiles of the phone's settings-row height.
+        go("settings/chat", ".settings-col .settings-row")
+        read("settings-chat", ".main")
+        tiles = page.eval_on_selector_all(".main .settings-col .card > .settings-row", "els => els.map((e) => Math.round(e.getBoundingClientRect().height))")
+        if any(h < 56 for h in tiles):
+            problems.append(f"settings-chat {lang}: rows {sorted(set(tiles))}, some under 56")
         context.close()
     return problems, seen
 
