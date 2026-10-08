@@ -31,7 +31,7 @@ func (d *Daemon) netConfigure(ctx context.Context, c *server.Conn, params json.R
 	// Open pages start or stop judging their own navigations with the allowlist.
 	d.Manager.SyncGuard(ctx)
 	d.Log.Info("network wall configured", "sealed_ports", len(cfg.SealedPorts), "services_ranges", len(cfg.ServicesPorts),
-		"loopback_rewrite", cfg.LoopbackRewrite, "local_sites", cfg.LocalSites, "host_addrs", len(cfg.HostAddrs), "lan_allow", len(cfg.LANAllow), "allowlist", cfg.EgressAllow != nil)
+		"loopback_rewrite", cfg.LoopbackRewrite, "local_sites", cfg.LocalSites, "host_addrs", len(cfg.HostAddrs), "lan_allow", len(cfg.LANAllow), "lan_sites", cfg.LANSites, "allowlist", cfg.EgressAllow != nil)
 	return map[string]any{}, nil
 }
 

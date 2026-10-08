@@ -86,6 +86,16 @@ func TestTheNetworkWallThroughTheDaemon(t *testing.T) {
 	if err := h.call("net.grant", map[string]any{"group_id": "nobody", "host": "127.0.0.1", "port": otherPort}, nil); code(err) != 1001 {
 		t.Fatalf("a grant for no group: %v", err)
 	}
+
+	// With lan_sites "ask" a LAN address outside the list is a question for the host rather than a
+	// refusal; the metadata service is refused as before.
+	h.must("net.configure", map[string]any{"services_ports": [][2]int{{sitePort, sitePort}}, "local_sites": "ask", "lan_allow": []string{}, "lan_sites": "ask"}, nil)
+	if data := blocked(h.call("page.navigate", map[string]any{"tab_id": o.Tab.ID, "url": "http://" + lanAddress(t) + "/"}, nil)); data == nil || data["decision"] != "ask" || data["reason"] != "private" {
+		t.Fatalf("a LAN address with lan_sites ask: %v", data)
+	}
+	if data := blocked(h.call("page.navigate", map[string]any{"tab_id": o.Tab.ID, "url": "http://169.254.169.254/latest/meta-data/"}, nil)); data == nil || data["decision"] != "deny" || data["reason"] != "metadata" {
+		t.Fatalf("the metadata service with lan_sites ask: %v", data)
+	}
 }
 
 // lanAddress is a private address that is not one of this machine's own: a machine's own address is

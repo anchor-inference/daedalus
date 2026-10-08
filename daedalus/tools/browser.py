@@ -38,6 +38,11 @@ READ_ONLY_TOOLS = ("BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserTabs
 """The tools that only read the page or wait on it: a command-line agent's own permission rules may
 let these through without asking; every other one changes something."""
 DOWNLOADS_DIR = "downloads"
+NETWORK_ASK = (
+    "A local or LAN address (a router's page, a device, a dev server on another port) is asked about before it opens: "
+    "say in why what the task needs there; a staff member's request goes to its orchestrator, everyone else's to the operator."
+)
+"""How the two tools that load an address say that some addresses wait for a yes."""
 
 
 def _agent(context: ToolContext) -> BrowserAgent | None:
@@ -161,11 +166,11 @@ async def _run(context: ToolContext, name: str, arguments: dict[str, Any]) -> To
     description=(
         "Start your browser, or come back to it: a real Chromium the operator can watch live and take over. It keeps "
         "your project's logins between sessions. url opens a page at once; fresh=true gives a throwaway browser whose "
-        "cookies are wiped when it closes. Returns the tabs. Next: BrowserSnapshot to see the page."
+        "cookies are wiped when it closes. Returns the tabs. Next: BrowserSnapshot to see the page. " + NETWORK_ASK
     ),
 )
-async def browser_open(context: ToolContext, url: str | None = None, fresh: bool = False) -> ToolResult:
-    return await _run(context, "BrowserOpen", {"url": url, "fresh": fresh})
+async def browser_open(context: ToolContext, url: str | None = None, fresh: bool = False, why: str | None = None) -> ToolResult:
+    return await _run(context, "BrowserOpen", {"url": url, "fresh": fresh, "why": why})
 
 
 @tool_group("browser")
@@ -177,11 +182,11 @@ async def browser_open(context: ToolContext, url: str | None = None, fresh: bool
     name="BrowserNavigate",
     description=(
         "Go to a URL in the current tab (http and https only), or go='back', 'forward' or 'reload'. tab picks another "
-        "tab by id. Next: BrowserSnapshot to see where you are."
+        "tab by id. Next: BrowserSnapshot to see where you are. " + NETWORK_ASK
     ),
 )
-async def browser_navigate(context: ToolContext, url: str | None = None, go: str | None = None, tab: str | None = None) -> ToolResult:
-    return await _run(context, "BrowserNavigate", {"url": url, "go": go, "tab": tab})
+async def browser_navigate(context: ToolContext, url: str | None = None, go: str | None = None, tab: str | None = None, why: str | None = None) -> ToolResult:
+    return await _run(context, "BrowserNavigate", {"url": url, "go": go, "tab": tab, "why": why})
 
 
 @tool_group("browser")

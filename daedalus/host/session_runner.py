@@ -5219,8 +5219,11 @@ class SessionManager:
         known only once the browser has looked at the element, inside the tool. So the tool asks here,
         and the answer follows the policy's own rules: a grant for the key lets that one action through
         once, otherwise the request is recorded and announced once and the agent is refused with the
-        key. It always goes to the operator — for a staff member too, whose other requests go to its
-        orchestrator: money, messages and a person's accounts are the operator's to approve.
+        key. An action on a page goes to the operator — for a staff member too, whose other requests go
+        to its orchestrator: money, messages and a person's accounts are the operator's to approve. The
+        network wall's question about an address (a router's page, a device on the LAN) is a staff
+        member's request like any other, routed by the project's autonomy: the orchestrator allows it
+        when the operator already said so for the work, or hands it to them.
         """
         state = self._states.get(session_id)
         decision = ask.decision
@@ -5233,18 +5236,24 @@ class SessionManager:
             return True, ""
         pending = dict(state.metadata.get("policy_pending") or {})
         fresh = decision.key not in pending
-        said = f"{ask.action} “{ask.element}”" + (f" (the page calls it “{ask.name}”)" if ask.name and ask.name.casefold() not in ask.element.casefold() else "") + f" on {ask.origin}"
-        pending[decision.key] = {"tool": ask.tool, "text": self.redactor.redact(said)[:300], "at": datetime.now(UTC).isoformat()}
+        staff = self.is_staff(state)
+        to_orchestrator = staff and ask.network
+        pending[decision.key] = {"tool": ask.tool, "text": self.redactor.redact(ask.said())[:500], "at": datetime.now(UTC).isoformat()}
         for meta in (state.metadata, state.session.metadata):
             meta["policy_pending"] = dict(list(pending.items())[-20:])
         if fresh:
             payload = self._permission_payload(state, decision, pending[decision.key])
             # Answered in the app, never from a lock screen: whoever holds the phone should not be
             # the whole check on a purchase. The picture of the element rides along for the card.
-            payload.update({"risk": "elevated", "quick": False, "routed_to": "operator", "browser": {"group_id": ask.group, "kinds": list(ask.kinds), "origin": ask.origin, "element": ask.element, "name": ask.name, "thumbnail": ask.thumbnail}})
+            payload.update({"risk": "elevated", "quick": False, "browser": {"group_id": ask.group, "kinds": list(ask.kinds), "origin": ask.origin, "element": ask.element, "name": ask.name, "thumbnail": ask.thumbnail}})
+            if not to_orchestrator:
+                # Without it the team routes the request by the project's autonomy, to the orchestrator.
+                payload["routed_to"] = "operator"
             self._publish_soon(state, "permission.pending", payload)
+        if to_orchestrator:
+            return False, f"needs approval: {decision.reason}. Approval key: {decision.key}. " + prompts.STAFF_BROWSER_NETWORK_HINT
         head = f"needs the operator's approval: {decision.reason} (rule {decision.rule}). Approval key: {decision.key}. "
-        if self.is_staff(state):
+        if staff:
             return False, head + prompts.STAFF_BROWSER_HINT
         return False, head + "Ask the operator with AskUser, quoting the key and what the action does; once they grant it (/allow <key>, or the Mini App), the same action passes once."
 

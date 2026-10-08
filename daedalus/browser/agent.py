@@ -74,6 +74,7 @@ NETWORK_WORDS = {
     "loopback": "a port of this machine that is not one of the agent's services",
     "gateway": "a port of this machine that is not one of the agent's services",
     "lan_allow": "an address on the local network the operator listed",
+    "private": "an address on the local network",
 }
 """Why the wall asks, as a person reads it in the question."""
 PAGE_BUDGET = 40_000
@@ -425,6 +426,21 @@ class SensitiveAsk:
     text_len: int
     thumbnail: str
     """Where the app fetches a picture of the element, or empty."""
+    why: str = ""
+    """For an address the network wall asks about: what the agent said it needs there."""
+
+    @property
+    def network(self) -> bool:
+        """Whether this is the network wall's question about an address rather than an action on a page.
+        It is the one ask a staff member's orchestrator may answer: where the browser may go is the
+        project's business, what it buys or sends is the operator's."""
+        return "network" in self.kinds
+
+    def said(self) -> str:
+        """The request in the words its decider reads."""
+        if self.network:
+            return f"open {self.element} in the browser: {self.decision.reason}" + (f"; the agent says why: “{self.why[:300]}”" if self.why else "")
+        return f"{self.action} “{self.element}”" + (f" (the page calls it “{self.name}”)" if self.name and self.name.casefold() not in self.element.casefold() else "") + f" on {self.origin}"
 
 
 class Gate(Protocol):
@@ -496,6 +512,13 @@ def explain(exc: BrowserError) -> str:
         return f"The page shows a {dialog.get('type') or 'dialog'}: \"{str(dialog.get('message') or '')[:300]}\". Answer it with BrowserDialog(accept=true or false) first."
     if isinstance(exc, NoSuchTab):
         return f"There is no tab {exc.details.get('tab_id') or ''} in your browser; BrowserTabs(action='list') lists them."
+    if isinstance(exc, Blocked) and exc.details.get("reason") == "private":
+        # The operator chose to keep the LAN out of reach; nobody can lift that for one request.
+        return (
+            f"The browser's network wall refused {exc.details.get('host') or 'that address'}: it is on the local network, and the operator's "
+            "browser settings keep the LAN closed to the agent's browser (LAN sites: listed only). Do not work around it with another tool; "
+            "say what the task needs there, and the operator can open it."
+        )
     if isinstance(exc, Blocked):
         return f"The browser's network wall refused {exc.details.get('host') or 'that address'}: {exc.details.get('reason') or exc.message}. It is not reachable from the agent's browser."
     if isinstance(exc, Forbidden) and exc.details.get("covered_by"):
@@ -670,7 +693,7 @@ class BrowserAgent:
 
     # -- the tools --------------------------------------------------------------------------------
 
-    async def open(self, caller: Caller, *, url: str | None = None, fresh: bool = False) -> str:
+    async def open(self, caller: Caller, *, url: str | None = None, fresh: bool = False, why: str | None = None) -> str:
         # Opened blank and then sent to the address, so the address meets the network wall as any
         # navigation does: an ask becomes the operator's question, not a failed start.
         opened = await self.service.open(caller.owner, fresh=fresh, actor=caller.actor)
@@ -678,14 +701,14 @@ class BrowserAgent:
         if url:
             tab = opened.get("tab") or {}
             row = await self._group(caller)
-            await self._through_wall(caller, row, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": tab.get("id"), "url": url, "origin": self._origin(caller), "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25))
+            await self._through_wall(caller, row, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": tab.get("id"), "url": url, "origin": self._origin(caller), "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), url=url, why=why or "")
         if url:
             await self._site_notes(caller, url)
         where = "a throwaway profile, wiped when it closes" if fresh else ("the project's profile, whose logins the project's agents share" if caller.owner.project_id else "your own profile")
         head = f"Browser {'opened' if opened['created'] else 'already open'} ({where})."
         return f"{head} Tabs:\n{await self._tabs_text(group['id'])}\nNext: BrowserSnapshot to see the page and its refs, BrowserNavigate to go elsewhere."
 
-    async def navigate(self, caller: Caller, *, url: str | None = None, go: str | None = None, tab: str | None = None) -> str:
+    async def navigate(self, caller: Caller, *, url: str | None = None, go: str | None = None, tab: str | None = None, why: str | None = None) -> str:
         group = await self._group(caller)
         current = await self._tab(group, tab)
         origin = self._origin(caller)
@@ -697,7 +720,7 @@ class BrowserAgent:
             if not url:
                 raise InvalidRequest("give a url, or go='back', 'forward' or 'reload'")
             await self._watch(group, caller, url)
-            result = await self._through_wall(caller, group, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": current["id"], "url": url, "origin": origin, "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25))
+            result = await self._through_wall(caller, group, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": current["id"], "url": url, "origin": origin, "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), url=url, why=why or "")
         await self._audit(group, caller, "navigate", {"tab": current["id"], "go": go or "", "url": str(result.get("url") or url or "")[:2000]})
         reached = str(result.get("url") or url or "")
         await self._site_notes(caller, reached)
@@ -710,10 +733,12 @@ class BrowserAgent:
         said = self._page_said(result, reached)
         return f"Tab {current['id']} is on {result.get('url') or url}{status}{failed}." + (f" Its title: {fenced(origin_of(str(result.get('url') or '')), title)}" if title else "") + "".join(f"\n{line}" for line in said) + "\nNext: BrowserSnapshot to see it."
 
-    async def _through_wall(self, caller: Caller, group: dict[str, Any], go: Callable[[], Awaitable[Any]]) -> Any:
+    async def _through_wall(self, caller: Caller, group: dict[str, Any], go: Callable[[], Awaitable[Any]], *, url: str = "", why: str = "") -> Any:
         """Run a call that loads an address; when the network wall asks rather than refuses (a host
-        outside the allowlist, a port of this machine natively, an address the operator listed), ask
-        the caller's operator, and on a yes grant exactly that host and port and go once more."""
+        outside the allowlist, a port of this machine, an address on the LAN), ask the caller's gate —
+        the operator, or a staff member's orchestrator for an address — and on a yes grant exactly that
+        host and port and go once more. ``url`` and ``why`` are what the decider is shown: the address
+        as the agent wrote it and the agent's own reason."""
         try:
             return await go()
         except Blocked as exc:
@@ -722,8 +747,9 @@ class BrowserAgent:
             host, port = str(exc.details.get("host") or ""), int(exc.details.get("port") or 0)
             reason = str(exc.details.get("reason") or "")
             what = f"{host}:{port}" if port else host
+            scheme = urlsplit(url).scheme.lower() if url else ""
             decision = Decision(ASK, f"the browser's network wall asks before it reaches {what} ({NETWORK_WORDS.get(reason, reason or 'not on the allowlist')})", "browser.network", key=approval_key("BrowserNavigate", {"group": group["id"], "host": host, "port": port}))
-            ask = SensitiveAsk(decision, "BrowserNavigate", group["id"], "open", ["network"], what, what, host, 0, "")
+            ask = SensitiveAsk(decision, "BrowserNavigate", group["id"], "open", ["network"], what, f"{scheme}://{what}" if scheme in ("http", "https") else what, host, 0, "", why=" ".join(why.split())[:300])
             allowed, why = await caller.gate(ask)
             await self._audit(group, caller, "sensitive", {"kinds": ["network"], "decision": "allow" if allowed else "ask", "key": decision.key, "host": host, "port": port, "reason": reason})
             if not allowed:
@@ -1393,7 +1419,7 @@ class BrowserAgent:
         group = await self._group(caller)
         origin = self._origin(caller)
         if action == "new":
-            created = await self._through_wall(caller, group, lambda: self.service.call(group["id"], "tab.new", {"group_id": group["id"], "url": url or "about:blank", "origin": origin}, what="opening a tab", timeout=40.0))
+            created = await self._through_wall(caller, group, lambda: self.service.call(group["id"], "tab.new", {"group_id": group["id"], "url": url or "about:blank", "origin": origin}, what="opening a tab", timeout=40.0), url=url or "")
             await self._audit(group, caller, "tab_new", {"tab": created.get("id"), "url": (url or "")[:2000]})
         elif action in ("select", "close"):
             if not tab:
@@ -1546,9 +1572,9 @@ class BrowserAgent:
         a = dict(arguments or {})
         try:
             if tool == "BrowserOpen":
-                return await self.open(caller, url=_str(a, "url"), fresh=bool(a.get("fresh"))), False
+                return await self.open(caller, url=_str(a, "url"), fresh=bool(a.get("fresh")), why=_str(a, "why")), False
             if tool == "BrowserNavigate":
-                return await self.navigate(caller, url=_str(a, "url"), go=_str(a, "go"), tab=_str(a, "tab")), False
+                return await self.navigate(caller, url=_str(a, "url"), go=_str(a, "go"), tab=_str(a, "tab"), why=_str(a, "why")), False
             if tool == "BrowserSnapshot":
                 return await self.snapshot(caller, tab=_str(a, "tab"), scope=_str(a, "scope"), view=_str(a, "view")), False
             if tool == "BrowserText":

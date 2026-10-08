@@ -5,7 +5,8 @@ browser calls arrive as held posts on its launch's hook listener, and are answer
 same ``BrowserAgent`` a Daedalus session's native tools use. What differs is the caller: the owner is
 the staff member; where the browser may go is judged by the host's policy before the call, as it is
 for a session; a sensitive action is a question held for the operator (never the orchestrator) on the
-member's own request list; and files are read and delivered through the team's file handoff, so a
+member's own request list, while the network wall's question about an address goes where the member's
+other permissions go, to its orchestrator by the project's autonomy; and files are read and delivered through the team's file handoff, so a
 member on the operator's machine gets a download in its inbox like any file handed to it.
 """
 
@@ -13,13 +14,14 @@ from __future__ import annotations
 
 import json
 import posixpath
-from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Protocol
 
 from daedalus.browser.agent import LOOK_INSTRUCTION, BrowserAgent, Caller, SensitiveAsk
 from daedalus.browser.model import EnvUnavailable, Forbidden, Owner
 from daedalus.harness.contract import ToolSetSpec
 from daedalus.host.policy import ASK, BROWSER_NAV_TOOLS, DENY
+from daedalus.host.prompts import STAFF_BROWSER_NETWORK_HINT
 from daedalus.stores.files import FileRefused, human_size, parse_handle
 from daedalus.tools.browser import READ_ONLY_TOOLS, TOOLS
 from daedalus.tools.vision import VisionUnavailable, look
@@ -55,7 +57,12 @@ def tools_file(hold_ms: int) -> bytes:
     return json.dumps({"server": SERVER, "instructions": INSTRUCTIONS, "hold_ms": hold_ms, "unanswered": UNANSWERED, "tools": tools}, ensure_ascii=False, indent=1).encode()
 
 
-Ask = Callable[[str, str, str], Awaitable[bool | None]]
+class Ask(Protocol):
+    async def __call__(self, key: str, tool: str, summary: str, *, route: str | None = "operator") -> bool | None:
+        """Put a call's question on the member's request list and wait for the answer up to the hold:
+        ``True`` granted, ``False`` refused, ``None`` still open. ``route`` is who decides it:
+        ``operator``, or ``None`` for whoever the project's autonomy names."""
+        ...
 
 
 class StaffFiles:
@@ -129,8 +136,12 @@ class StaffBrowser:
         owner = Owner("staff", live.staff.id, project_id=live.staff.project_id, staff_id=live.staff.id)
 
         async def gate(sensitive: SensitiveAsk) -> tuple[bool, str]:
-            said = f"{sensitive.action} “{sensitive.element}”" + (f" (the page calls it “{sensitive.name}”)" if sensitive.name and sensitive.name.casefold() not in sensitive.element.casefold() else "") + f" on {sensitive.origin}"
-            allowed = await ask(sensitive.decision.key, sensitive.tool, f"{said}: {sensitive.decision.reason}")
+            if sensitive.network:
+                # Where the browser may go is the project's to decide, as the member's other
+                # permissions are; the orchestrator escalates what the operator has not allowed.
+                allowed = await ask(sensitive.decision.key, sensitive.tool, sensitive.said(), route=None)
+                return (True, "") if allowed else (False, self._address_not_granted(allowed, sensitive))
+            allowed = await ask(sensitive.decision.key, sensitive.tool, f"{sensitive.said()}: {sensitive.decision.reason}")
             return (True, "") if allowed else (False, self._not_granted(allowed, sensitive.decision.reason))
 
         async def looked(data: bytes, mime: str, question: str) -> str:
@@ -142,6 +153,13 @@ class StaffBrowser:
 
         caller = Caller(owner=owner, actor=f"staff:{live.staff.name}", gate=gate, files=StaffFiles(team, live, cwd), look=looked, launch_id=launch_id, budget=BUDGET)
         return await self.agent.run(tool, arguments, caller)
+
+    @staticmethod
+    def _address_not_granted(allowed: bool | None, sensitive: SensitiveAsk) -> str:
+        if allowed is False:
+            return f"The request to open {sensitive.element} was refused. Do not reach it another way; carry on with the rest of the task, or Report what it blocks."
+        reason = sensitive.decision.reason
+        return f"{reason[:1].upper()}{reason[1:]}. " + STAFF_BROWSER_NETWORK_HINT
 
     @staticmethod
     def _not_granted(allowed: bool | None, reason: str) -> str:

@@ -1047,7 +1047,9 @@ The proxy speaks `CONNECT` (https, and WebSockets, which Chromium tunnels) and a
 and nothing else: a request without a full destination is `400`. **It resolves the name itself,
 judges every address in the answer, and dials only an address it judged** — the socket checks the
 address it connects to — so a name that answers public at the check and private at the connect
-(DNS rebinding) cannot pass. An answer with several addresses is judged by the strictest. The
+(DNS rebinding) cannot pass. An answer with several addresses is judged by the strictest, and one
+that mixes a public address with a LAN one is refused as `mixed` whatever was granted: an ask names
+the host, so a grant for such a name would open a page's own name pointed at the LAN. The
 proxy adds no `X-Forwarded-For`. A refusal is `403` with the header `X-Browserd-Blocked: <reason>`
 and a one-line page; for a `CONNECT` Chromium shows its own tunnel error.
 
@@ -1066,7 +1068,8 @@ The rules, in the order they are applied to one address and port:
 | the Docker host, a port in `services_ports` | allow | |
 | the Docker host, any other port | by `local_sites`, as natively | `gateway` |
 | a private or link-local address in `lan_allow` | ask | `lan_allow` |
-| any other private (`10/8`, `172.16/12`, `192.168/16`, `100.64/10`, `fc00::/7`, `fec0::/10`) or link-local address | deny | `private`, `link_local` |
+| any other private address (`10/8`, `172.16/12`, `192.168/16`, `100.64/10`, `fc00::/7`, `fec0::/10`) | by `lan_sites`: `listed` deny, `ask` ask | `private` |
+| any other link-local address | deny | `link_local` |
 | a name with no address | deny | `unresolvable` |
 | anything else: the internet | allow | |
 
@@ -1075,8 +1078,9 @@ and `*.localhost` are this machine without a lookup. **Until the host configures
 its strictest**: public addresses only.
 
 `net.configure {sealed_ports: [port], services_ports: [[lo, hi]], loopback_rewrite?, local_sites,
-host_addrs?: [address], lan_allow: [address or prefix], egress_allow?: [host]}` → `{}`, strictly
-decoded. `local_sites` is `services` (the default, and what an empty value means), `ask` or `allow`.
+host_addrs?: [address], lan_allow: [address or prefix], lan_sites?, egress_allow?: [host]}` → `{}`,
+strictly decoded. `local_sites` is `services` (the default, and what an empty value means), `ask` or
+`allow`; `lan_sites` is `listed` (the default) or `ask`.
 The host sends:
 
 - **natively**: `sealed_ports` = its API, the key proxy, the terminal daemons' hook listeners, the
@@ -1090,8 +1094,8 @@ The host sends:
   A server that listens on the host's loopback only is reached through the host's forwarding
   (`deploy/browser-host-loopback.sh`), without which the Docker host answers only on the ports
   bound to every interface;
-- `lan_allow` from the browser settings (empty by default), and `egress_allow` when the operator has
-  an allowlist (absent means none; an empty list allows no host).
+- `lan_allow` and `lan_sites` from the browser settings (an empty list and `ask` by default), and
+  `egress_allow` when the operator has an allowlist (absent means none; an empty list allows no host).
 
 **Top-level navigations** — the agent's `page.navigate`, `tab.new` and `browser.open` with a URL,
 and the operator's address bar — are judged before they happen by the same rules, plus two more:
@@ -1116,10 +1120,20 @@ it on or off in every open tab. While a person drives, their clicks are theirs a
 allowlist nothing is paused: it would cost every navigation a round trip on the pipe for nothing the
 proxy does not already refuse.
 
-A refused navigation is `1102 {host, port, decision, reason}`. An `ask` is a refusal the operator
-can lift: the host asks, and on a yes sends `net.grant {group_id, host, port}`, which opens exactly
-that host and port for the group's browser (every group on it) for `ttl_ms`, at most a day; the
-agent then retries. A grant never lifts a `deny`.
+A refused navigation is `1102 {host, port, decision, reason}`. An `ask` is a refusal that can be
+lifted: the host asks, and on a yes sends `net.grant {group_id, host, port}`, which opens exactly
+that host and port for the group's browser (every group on it) for `ttl_ms`, at most a day (an hour
+when the host names none); the agent then retries. A grant never lifts a `deny`.
+
+Who is asked is the caller's gate. An action on a page that buys, sends or deletes is always the
+operator's. The wall's question about an address is the operator's for their own chats; for a staff
+member — a Daedalus member or a command-line one calling the `daedalus_browser` tools — it is a
+permission request like its others, routed by the project's autonomy: to the orchestrator, which
+grants it when the operator already allowed that site for the work (a scope requirement in their
+words, or a line of the brief's allowances) and escalates it otherwise. The request carries the
+address with its scheme and port, the member, and the reason the agent gave in `why`. The member is
+told the request is with its orchestrator and not to reach the address another way; once it is
+answered, a message says so, and the same call passes once.
 
 `egress` is published for every destination the proxy or a navigation check judged, allowed or not,
 at most once a minute per browser, host, port and decision; the host writes it to `egress_log`

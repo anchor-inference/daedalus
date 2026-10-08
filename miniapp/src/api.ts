@@ -390,6 +390,7 @@ export type BrowserSettings = {
   control_wait_seconds: number;
   local_sites: "services" | "ask" | "allow";
   lan_allow: string[];
+  lan_sites: "listed" | "ask";
   record_frames: boolean;
   record_takeover: boolean;
   record_retention_days: number;
