@@ -23,12 +23,12 @@ from daedalus.stores.database import Database
 from daedalus.stores.staff import Staff
 from tests.support.authorized_launch import operator_task
 from tests.support.authorized_results import return_reviewed_result
-from tests.support.authorized_stop import bind_native_run, finish_native_stop, stop_native_task
+from tests.support.authorized_stop import bind_native_run, stop_native_task
 from tests.support.waiting import until_await
 from tests.unit.test_board_rounds import task_of
 from tests.unit.test_orchestrator import Rig, events, rig
 from tests.unit.test_orchestrator_team import fake, office
-from tests.unit.test_staff_runtime import Capacity, close_team, task_row
+from tests.unit.test_staff_runtime import Capacity, ObservedFakeStaffRuntime, close_team, task_row
 from tests.unit.test_task_contract import SCRIPT, apply_requirement
 
 VIDEO = {
@@ -354,19 +354,18 @@ async def test_a_condition_that_narrows_what_the_operator_allowed_needs_a_reason
         assert webops is not None
         live = await r.team.live_of(webops)
         assert live is not None
-        run_id, stops = await bind_native_run(r.team, live, monkeypatch)
-        staged = json.loads(await r.call(sid, "require", task_id=task_id, text="Send no real mail",
-                                         kind="constraint", why="a test message would reach real customers"))
-        assert staged["state"] == "pending_physical_exit"
-        await finish_native_stop(r.team, live, run_id, staged["stop_effect_id"], stops)
-        applied = json.loads(await r.call(sid, "require", op="apply", task_id=task_id,
-                                          intent_id=staged["intent_id"]))
-        assert applied["state"] == "applied"
+        _, stops = await bind_native_run(r.team, live, monkeypatch)
+        applied = json.loads(await r.call(sid, "require", task_id=task_id, text="Send no real mail",
+                                          kind="constraint", why="a test message would reach real customers"))
+        assert applied["state"] == "applied_live" and stops == []
         posted = r.team.app.notifications.posted[-1]
         assert posted.title.endswith("a condition on what you allowed") and "Send no real mail — a test message would reach real customers" in posted.body
         assert any(e.kind == "narrowing" for e in await r.manager.projects.journal(r.project.id, limit=5))
         # The operator's own condition is theirs to add, and nobody's narrowing.
-        await apply_requirement(r, sid, task_id, text="Do not touch DNS", kind="constraint", source="operator")
+        notices = len(r.team.app.notifications.posted)
+        added = json.loads(await r.call(sid, "require", task_id=task_id, text="Do not touch DNS",
+                                        kind="constraint", source="operator"))
+        assert added["state"] == "applied_live" and len(r.team.app.notifications.posted) == notices
     finally:
         await close_team(r.manager)
         await r.manager.close()
@@ -397,6 +396,46 @@ async def test_a_member_restricted_to_reading_is_widened_rather_than_the_operato
         from tests.unit.test_orchestrator_team import admitted
 
         await until_await(lambda: admitted(r, task_id), "the widened member launched")
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
+async def test_a_requirement_reaches_a_codex_members_run_without_stopping_it(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """A Codex member diagnosing a router was stopped by the requirement the operator added in passing,
+    and the orchestrator's message right after it found no session to go to. A command-line member's
+    run takes the requirement as a message into its turn, like a Daedalus member's."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r)
+        with_clis(r)
+        cli = ObservedFakeStaffRuntime(kind="cli")
+        cli.manager = r.manager
+        r.team.runtimes["codex"] = cli
+        sid = await office(r)
+        await r.call(sid, "hire", name="Speed", role="Network diagnosis", harness="codex", model="gpt-6-sol", one_off=True)
+        task_id = task_of(await r.call(sid, "assign", staff="Speed", title="Why is the router capped", **SCRIPT))
+        from tests.unit.test_orchestrator_team import admitted
+
+        await until_await(lambda: admitted(r, task_id), "the Codex member launched")
+        speed = await r.manager.staff.find(r.project.id, "Speed")
+        assert speed is not None
+        live = await r.team.live_of(speed)
+        assert live is not None and live.session.kind == "cli"
+        added = json.loads(await r.call(sid, "require", task_id=task_id, kind="scope", source="operator",
+                                        text="speedtest is installed on the server; one run is allowed"))
+        assert added["state"] == "applied_live"
+        [(session_id, message)] = cli.sent
+        assert session_id == live.id and message.mode == "now" and "speedtest is installed" in message.text
+        assert await db.fetchone("SELECT 1 FROM effect_outbox WHERE kind = 'task.stop'") is None
+        still = await r.team.live_of(speed)
+        assert still is not None and still.id == live.id
+        attempt = await db.fetchone("SELECT runtime_kind,contract_revision FROM execution_attempts WHERE staff_session_id = ?", (live.id,))
+        assert attempt is not None and (attempt["runtime_kind"], attempt["contract_revision"]) == ("cli", 2)
+        told = await r.team.ingress.report(live, "checkpoint", "will run it once", acknowledged=["R1"],
+                                           call_id=f"fixture-report:{uuid.uuid4().hex}")
+        assert "confirmed R1" in told
+        assert (await task_row(r.manager, task_id))["status"] == "doing"
     finally:
         await close_team(r.manager)
         await r.manager.close()

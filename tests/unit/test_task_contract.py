@@ -5,6 +5,7 @@ approve — each told apart, and a card accepted only with a mark for everything
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import uuid
@@ -53,12 +54,9 @@ async def live(r: Rig, who: Staff) -> Any:
 
 
 async def apply_requirement(r: Rig, sid: str, task_id: str, **request: Any) -> dict[str, Any]:
-    """Use both real receipts when the task has no running attempt."""
-    staged = json.loads(await r.call(sid, "require", task_id=task_id, **request))
-    assert staged["state"] == "ready_to_apply"
-    applied = json.loads(await r.call(sid, "require", op="apply", task_id=task_id,
-                                      intent_id=staged["intent_id"]))
-    assert applied["state"] == "applied"
+    """A requirement on a card nobody works is staged and applied in the same call."""
+    applied = json.loads(await r.call(sid, "require", task_id=task_id, **request))
+    assert applied["state"] == "applied" and applied["staged"]["state"] == "ready_to_apply"
     return applied
 
 
@@ -131,9 +129,55 @@ async def test_a_command_line_member_confirms_its_inputs_in_words(settings: Sett
         await r.manager.close()
 
 
-async def test_a_requirement_added_while_the_member_works_waits_for_a_new_attempt(
+async def test_a_requirement_added_while_the_member_works_goes_into_its_run(
     settings: Settings, db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The operator added "speedtest is installed, you may use it" while a Codex member diagnosed a
+    router. The Require stopped the member's run before writing the requirement, the orchestrator's
+    follow-up message found no session, and the card sat in doing until it was released and assigned
+    again from the start. The requirement goes into the run now, and the run keeps its authority."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        runtime = fake(r)
+        sid = await office(r)
+        mira = await member(r)
+        task_id = task_of(await r.call(sid, "assign", staff="Mira", title="Promo script", **SCRIPT))
+        old = await live(r, mira)
+        _, stops = await bind_native_run(r.team, old, monkeypatch)
+        added = json.loads(await r.call(sid, "require", task_id=task_id, text="English only for now",
+                                        kind="scope", source="operator"))
+        assert added["state"] == "applied_live" and added["contract_revision"] == 2
+        assert "into the run they are in, which keeps working" in added["delivery"]
+        assert stops == [], "the run is not stopped"
+        assert await db.fetchone("SELECT 1 FROM effect_outbox WHERE kind = 'task.stop'") is None
+        [(session_id, message)] = runtime.sent
+        assert session_id == old.id and message.mode == "now"
+        assert "[requirement R1 of task" in message.text and "English only for now" in message.text
+        task = await task_row(r.manager, task_id)
+        assert task["status"] == "doing" and task["assignee_staff_id"] == mira.id
+        attempt = await db.fetchone("SELECT state,contract_revision FROM execution_attempts WHERE id = ?",
+                                    (task["current_attempt_id"],))
+        assert attempt is not None and attempt["state"] in ("queued", "starting", "running", "waiting")
+        assert attempt["contract_revision"] == 2
+        assert (await live(r, mira)).id == old.id
+        told = await r.team.ingress.report(old, "checkpoint", "noted: English cut only",
+                                           acknowledged=["R1", "R9"], call_id=f"fixture-report:{uuid.uuid4().hex}")
+        assert "confirmed R1" in told and "requirements not confirmed: R9" in told
+        assert "R1 [scope, from the operator] English only for now (Mira: confirmed)" in await r.call(sid, "tasks", op="get", task_id=task_id)
+        again = json.loads(await r.call(sid, "require", task_id=task_id, text="English only for now",
+                                        kind="scope", source="operator"))
+        assert again["state"] == "unchanged" and len(runtime.sent) == 1
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
+async def test_a_restart_the_orchestrator_asks_for_ends_with_the_card_ready_to_assign(
+    settings: Settings, db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stop the host made for a contract change left the card in doing with nobody behind it until
+    the orchestrator noticed and released it. The call that asked for the restart waits for the exit,
+    applies the change, and says how the work starts again."""
     r = await rig(settings, db, tmp_path)
     try:
         runtime = fake(r)
@@ -142,31 +186,36 @@ async def test_a_requirement_added_while_the_member_works_waits_for_a_new_attemp
         task_id = task_of(await r.call(sid, "assign", staff="Mira", title="Promo script", **SCRIPT))
         old = await live(r, mira)
         run_id, stops = await bind_native_run(r.team, old, monkeypatch)
-        staged = json.loads(await r.call(sid, "require", task_id=task_id, text="English only for now",
-                                         kind="scope", source="operator"))
-        assert staged["state"] == "pending_physical_exit"
+        call = asyncio.create_task(r.call(sid, "require", task_id=task_id, text="English only for now",
+                                          kind="scope", source="operator", restart=True))
+        effect = None
+
+        async def stop_queued() -> bool:
+            nonlocal effect
+            effect = await db.fetchone("SELECT id FROM effect_outbox WHERE kind = 'task.stop'")
+            return effect is not None
+
+        await until_await(stop_queued, "the restart queued its stop")
+        assert effect is not None
+        await finish_native_stop(r.team, old, run_id, effect["id"], stops)
+        applied = json.loads(await asyncio.wait_for(call, 30))
+        assert applied["state"] == "applied" and applied["contract_revision"] == 2
+        assert applied["staged"]["state"] == "pending_physical_exit"
+        assert f"Assign(task_id='{task_id}')" in applied["next"]
         assert runtime.sent == []
-        assert await r.manager.db.fetchone("SELECT id FROM task_requirements WHERE task_id = ?", (task_id,)) is None
-        await finish_native_stop(r.team, old, run_id, staged["stop_effect_id"], stops)
+        task = await task_row(r.manager, task_id)
+        assert task["status"] == "todo" and task["current_attempt_id"] is None
         with pytest.raises(PermissionError):
             await r.team.ingress.report(old, "checkpoint", "stale acknowledgement", acknowledged=["R1"],
                                         call_id=f"fixture-report:{uuid.uuid4().hex}")
-        applied = json.loads(await r.call(sid, "require", op="apply", task_id=task_id,
-                                          intent_id=staged["intent_id"]))
-        assert applied["state"] == "applied" and applied["contract_revision"] == 2
+        with pytest.raises(Refused, match="Mira has no live session.*; their last session ended at .* UTC: "):
+            await r.call(sid, "tell", staff="Mira", text="one more thing")
         await r.call(sid, "assign", task_id=task_id, staff="Mira")
         from tests.unit.test_orchestrator_team import admitted
 
         await until_await(lambda: admitted(r, task_id), "the new contract launched")
         assert "R1 (scope, from the operator): English only for now" in runtime.started[-1].first_message
-        fresh = await live(r, mira)
-        assert fresh.id != old.id
-        told = await r.team.ingress.report(fresh, "checkpoint", "noted: English cut only",
-                                           acknowledged=["R1", "R9"], call_id=f"fixture-report:{uuid.uuid4().hex}")
-        assert "confirmed R1" in told and "requirements not confirmed: R9" in told
-        state = await r.orch.project_state(await r.refreshed(), session_id=sid)
-        assert "not confirmed" not in state
-        assert "R1 [scope, from the operator] English only for now (Mira: confirmed)" in await r.call(sid, "tasks", op="get", task_id=task_id)
+        assert (await live(r, mira)).id != old.id
     finally:
         await close_team(r.manager)
         await r.manager.close()

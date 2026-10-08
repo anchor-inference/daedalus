@@ -42,15 +42,14 @@ async def test_idle_requirement_is_staged_applied_once_and_sent_on_next_launch(
             await r.call(sid, "require", task_id=task_id, text="Use English", kind="quality", source="operator",
                          client_operation_id="script-language:comparison", expected_entity_revision=revision)
         await db.execute("DELETE FROM comparison_groups WHERE task_id = ?", (task_id,))
-        stage = json.loads(await r.call(sid, "require", task_id=task_id,
-                                        text="Use English", kind="quality", source="operator",
-                                        client_operation_id="script-language", expected_entity_revision=revision))
+        applied = json.loads(await r.call(sid, "require", task_id=task_id,
+                                          text="Use English", kind="quality", source="operator",
+                                          client_operation_id="script-language", expected_entity_revision=revision))
+        stage = applied.pop("staged")
+        applied.pop("next")
         assert stage["state"] == "ready_to_apply"
-        assert (await db.fetchone("SELECT COUNT(*) FROM task_requirements WHERE task_id = ?", (task_id,)))[0] == 0
-        applied = json.loads(await r.call(sid, "require", op="apply", task_id=task_id,
-                                          intent_id=stage["intent_id"], client_operation_id="script-language:apply",
-                                          expected_entity_revision=stage["entity_revision"]))
         assert applied["state"] == "applied" and applied["contract_revision"] == 2
+        assert (await db.fetchone("SELECT COUNT(*) FROM task_requirements WHERE task_id = ?", (task_id,)))[0] == 1
         replay = json.loads(await r.call(sid, "require", op="apply", task_id=task_id,
                                          intent_id=stage["intent_id"], client_operation_id="script-language:apply",
                                          expected_entity_revision=stage["entity_revision"]))
@@ -94,10 +93,12 @@ async def test_active_requirement_waits_for_exact_exit_then_new_attempt(
 
         monkeypatch.setattr(r.manager, "stop_run", stop_run)
         revision = await ControlStore(db).revision(Scope("project", r.project.id), Entity("task", task_id))
-        stage = json.loads(await r.call(sid, "require", task_id=task_id,
+        monkeypatch.setattr("daedalus.extensions.orchestrator_contract.SETTLE_S", 0.0)
+        stage = json.loads(await r.call(sid, "require", task_id=task_id, restart=True,
                                         text="Use English", kind="quality", source="operator",
                                         client_operation_id="active-language", expected_entity_revision=revision))
         assert stage["state"] == "pending_physical_exit"
+        assert f"Require(op='apply', intent_id='{stage['intent_id']}')" in stage["next"]
         assert runtime.sent == []
         assert (await db.fetchone("SELECT COUNT(*) FROM task_requirements WHERE task_id = ?", (task_id,)))[0] == 0
         current = await ControlStore(db).revision(Scope("project", r.project.id), Entity("task", task_id))
@@ -158,11 +159,13 @@ async def test_staged_requirement_can_retry_stop_after_a_run_becomes_observable(
         previous = await live(r, worker)
         scope = Scope("project", r.project.id)
         entity = Entity("task", task_id)
-        stage = json.loads(await r.call(sid, "require", task_id=task_id,
+        monkeypatch.setattr("daedalus.extensions.orchestrator_contract.SETTLE_S", 0.0)
+        stage = json.loads(await r.call(sid, "require", task_id=task_id, restart=True,
                                         text="Use English", kind="quality", source="operator",
                                         client_operation_id="late-run-language",
                                         expected_entity_revision=await ControlStore(db).revision(scope, entity)))
         assert stage["state"] == "stop_unavailable"
+        assert f"Require(op='stop', intent_id='{stage['intent_id']}')" in stage["next"]
         assert "no active native run" in stage["blocker"]
         assert (await db.fetchone("SELECT COUNT(*) FROM task_requirements WHERE task_id = ?", (task_id,)))[0] == 0
         with monkeypatch.context() as patch:
@@ -176,6 +179,30 @@ async def test_staged_requirement_can_retry_stop_after_a_run_becomes_observable(
                                           intent_id=stage["intent_id"], client_operation_id="late-run-language:apply",
                                           expected_entity_revision=await ControlStore(db).revision(scope, entity)))
         assert applied["state"] == "applied" and applied["contract_revision"] == 2
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
+async def test_a_require_with_only_a_task_a_kind_and_a_text_is_taken(
+    settings: Settings, db: Database, tmp_path: Path,
+) -> None:
+    """The orchestrator's first Require of the operator's addition named the task, the kind and the
+    text, and got back only "mutation needs op=stage, stop or apply, client_operation_id and
+    expected_entity_revision". Staging takes the card as it is; a refusal names what is missing."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r)
+        sid = await office(r)
+        task_id = await operator_task(db, r.project.id, "Script", brief=SCRIPT)
+        applied = json.loads(await r.orch.service("require", session_id=sid, task_id=task_id, kind="scope",
+                                                  source="operator", text="speedtest may be used once",
+                                                  client_operation_id="call-first-require"))
+        assert applied["state"] == "applied" and applied["contract_revision"] == 2
+        current = await ControlStore(db).revision(Scope("project", r.project.id), Entity("task", task_id))
+        with pytest.raises(Refused, match=f"op='apply' needs expected_entity_revision: card {task_id} is at entity revision {current} now"):
+            await r.orch.service("require", session_id=sid, task_id=task_id, op="apply",
+                                 intent_id=applied["intent_id"], client_operation_id="call-second-require")
     finally:
         await close_team(r.manager)
         await r.manager.close()

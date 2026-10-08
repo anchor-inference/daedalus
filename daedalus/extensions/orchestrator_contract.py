@@ -10,6 +10,7 @@ videos with sound, because "done" was all a member's report took. The operator d
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from collections.abc import Awaitable, Callable
@@ -29,13 +30,19 @@ from daedalus.extensions.orchestrator_loops import DECIDED
 from daedalus.extensions.orchestrator_ops import Refused, board_principal
 from daedalus.extensions.task_contract import REQUIREMENT_KINDS, Contracts, Requirement
 from daedalus.extensions.task_controls import queue_stop
+from daedalus.host import prompts
 from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.files import FileRefused, StoredFile
 from daedalus.stores.projects import Project
+from daedalus.stores.staff import StaffError
 
 if TYPE_CHECKING:
     from daedalus.extensions.orchestrator import Orchestrators
 
+SETTLE_S = 20.0
+"""How long a Require waits, inside the call, for a stopped run's exit before applying the change.
+A stop the host made used to leave the card in doing with nobody behind it until the orchestrator
+noticed, released it and applied the change by hand; a run usually exits within a second."""
 WHY_MIN = 8
 """The least a reason may be: a clause, so "ok" is not a decision anyone can read later."""
 OPERATOR_SOURCES = ("operator",)
@@ -126,6 +133,7 @@ async def require(
     intent_id: str | None = None,
     client_operation_id: str = "",
     expected_entity_revision: int | None = None,
+    restart: bool = False,
 ) -> str:
     task = await card(orch, project, session_id, task_id)
     if task.get("project_id") != project.id:
@@ -136,8 +144,19 @@ async def require(
             " apply_receipt_id,created_at,applied_at FROM contract_change_intents"
             " WHERE task_id = ? ORDER BY created_at,id", (task["id"],))
         return json.dumps({"task_id": task["id"], "intents": [dict(row) for row in rows]}, ensure_ascii=False)
-    if op not in ("stage", "stop", "apply") or not client_operation_id or not isinstance(expected_entity_revision, int) or isinstance(expected_entity_revision, bool):
-        raise Refused("mutation needs op=stage, stop or apply, client_operation_id and expected_entity_revision")
+    # The bare "mutation needs op=stage, stop or apply, client_operation_id and expected_entity_revision"
+    # was all a first Require with a task, a kind and a text got back: the orchestrator had to guess
+    # what was missing and where to find it. Staging takes the card as it is now, and a refusal names
+    # the missing piece with the value to use.
+    if op not in ("stage", "stop", "apply"):
+        raise Refused("op is stage (the default), stop, apply or inspect")
+    if not client_operation_id:
+        raise Refused("this call carried no operation id; call Require again")
+    if expected_entity_revision is None and op == "stage":
+        expected_entity_revision = await _revision(orch, project, task["id"])
+    if not isinstance(expected_entity_revision, int) or isinstance(expected_entity_revision, bool):
+        raise Refused(f"op='{op}' needs expected_entity_revision: card {task['id']} is at entity revision "
+                      f"{await _revision(orch, project, task['id'])} now")
     if op == "stop":
         if not intent_id:
             raise Refused("stop needs the exact staged intent_id")
@@ -258,7 +277,8 @@ async def require(
     async def stage_effect(conn: Any, mutation: Any) -> dict[str, Any]:
         return await stage_change_in(conn, intent_id=mutation.object_id, receipt_id=mutation.receipt_id,
                                      principal=principal, project_id=project.id, task_id=task["id"],
-                                     client_operation_id=client_operation_id, request=request)
+                                     client_operation_id=client_operation_id, request=request,
+                                     into_live_run=not restart)
     try:
         result = await ControlStore(orch.manager.db).mutate(
             principal, Scope("project", project.id), "contract.withdraw" if withdraw else "contract.require",
@@ -267,7 +287,9 @@ async def require(
             "SELECT state,apply_receipt_id FROM contract_change_intents WHERE id = ?", (result["intent_id"],))
         if current_intent is None:
             raise Refused("the contract intent is missing after its receipt")
-        if current_intent["state"] == "applied":
+        if result["state"] == "applied_live":
+            pass
+        elif current_intent["state"] == "applied":
             result["state"] = "applied"
             result["apply_receipt_id"] = current_intent["apply_receipt_id"]
         elif result["state"] == "pending_stop":
@@ -291,8 +313,94 @@ async def require(
             result["state"] = "ready_to_apply"
     except (ControlConflict, ControlDenied, DomainConflict) as exc:
         raise Refused(str(exc)) from exc
+    if result["state"] == "applied_live":
+        result["delivery"] = await _tell_live(orch, task["id"], request, result, stored)
+        if mode != "withdraw" and kind == "constraint" and literal_source == "orchestrator":
+            condition = await contracts.find(task["id"], result["requirement_id"])
+            grant = next((item for item in await contracts.requirements(task["id"])
+                          if item.kind == "scope" and item.from_operator), None)
+            if condition is not None and grant is not None:
+                await narrowed(orch, project, task, condition, grant, why)
+    elif result["state"] in ("ready_to_apply", "pending_physical_exit"):
+        result = await _settle(orch, project, session_id, task["id"], result, client_operation_id)
+    elif result["state"] == "stop_unavailable":
+        result["next"] = (f"the run could not be stopped ({result.get('blocker', '')}); Require(op='stop', "
+                          f"intent_id='{result['intent_id']}') tries again once it can be")
     await orch._changed(project.id, "board", "orchestrator")
     return json.dumps(result, ensure_ascii=False, sort_keys=True)
+
+
+async def _revision(orch: Orchestrators, project: Project, task_id: str) -> int:
+    return await ControlStore(orch.manager.db).revision(Scope("project", project.id), Entity("task", task_id))
+
+
+async def _tell_live(orch: Orchestrators, task_id: str, request: dict[str, Any], result: dict[str, Any],
+                     stored: StoredFile | None) -> str:
+    """Tell the member at work about the change, into the turn it is in; what happened, in words.
+
+    The message carries the intent's identity, so a replayed call finds the message it already sent
+    instead of telling the member twice."""
+    team = _team(orch)
+    member = await orch.manager.staff.get(result["staff_id"])
+    live = await team.live_of(member) if member is not None else None
+    if member is None or live is None or live.id != result["staff_session_id"]:
+        return "the member's session ended before it could be told; the requirement goes with the card's next brief"
+    message_id = f"sm-{result['intent_id']}"
+    if await orch.manager.staff.message(message_id) is not None:
+        return f"already sent to {member.name} into the run they are in"
+    requirement = await team.contracts.find(task_id, result["requirement_id"])
+    if requirement is None:
+        return "the requirement is on the card; it goes with the card's next brief"
+    if request["mode"] == "withdraw":
+        text = prompts.STAFF_REQUIREMENT_WITHDRAWN.format(label=requirement.label, task_id=task_id,
+                                                          origin=_origin_words(request["source"]), text=requirement.text)
+    else:
+        replaced = await team.contracts.find(task_id, request["target_id"]) if request.get("target_id") else None
+        text = prompts.STAFF_REQUIREMENT.format(label=requirement.label, task_id=task_id, origin=requirement.origin(),
+                                                replaces=f", replaces {replaced.label}" if replaced is not None else "",
+                                                text=requirement.text)
+    try:
+        receipt = await team.tell(member, text, when="now", by="orchestrator",
+                                  files=[stored] if stored is not None else None, message_id=message_id)
+    except StaffError as exc:
+        return f"it could not be sent to {member.name} ({exc}); it goes with the card's next brief"
+    if request["mode"] != "withdraw":
+        path = (receipt.get("files") or [""])[0] if stored is not None else ""
+        await team.contracts.delivered(requirement, staff_session_id=live.id, staff_id=member.id, via="message",
+                                       message_id=str(receipt["message_id"]), path=path)
+    from daedalus.extensions.orchestrator_team import _degraded  # Lazy: the team's module imports this one
+
+    state = receipt["state"] + (f", {receipt['error']}" if receipt.get("error") else "")
+    timing = f" — {_degraded(member, receipt['degraded_to'])}" if receipt.get("degraded_to") else ""
+    return (f"sent to {member.name} into the run they are in, which keeps working (receipt: {state}){timing}; "
+            "their confirmation shows in the state block until it comes")
+
+
+async def _settle(orch: Orchestrators, project: Project, session_id: str, task_id: str,
+                  staged: dict[str, Any], client_operation_id: str) -> dict[str, Any]:
+    """Apply a staged change as soon as nothing stands in its way, waiting a while for a stopped run
+    to exit; what to do next when it still cannot be applied."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + SETTLE_S
+    blocker = ""
+    while True:
+        try:
+            applied: dict[str, Any] = json.loads(await require(
+                orch, project, session_id, task_id=task_id, op="apply", intent_id=staged["intent_id"],
+                client_operation_id=f"{client_operation_id}:apply",
+                expected_entity_revision=await _revision(orch, project, task_id)))
+        except Refused as exc:
+            blocker = str(exc)
+        else:
+            applied["staged"] = staged
+            applied["next"] = f"the card is back in todo under the new contract; Assign(task_id='{task_id}') starts the work again"
+            return applied
+        if loop.time() >= deadline:
+            break
+        await asyncio.sleep(0.25)
+    staged["next"] = (f"not applied yet ({blocker}); once the run has exited, Require(op='apply', "
+                      f"intent_id='{staged['intent_id']}'), then Assign(task_id='{task_id}')")
+    return staged
 
 
 def narrowing_refusal(grant: str) -> str:

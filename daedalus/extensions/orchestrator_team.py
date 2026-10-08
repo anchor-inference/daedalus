@@ -929,7 +929,7 @@ async def tell(orch: Orchestrators, project: Project, session_id: str, *, staff:
     try:
         receipt = await _team(orch).tell(member, body, when=when, by="orchestrator", files=handed)
     except StaffError as exc:
-        raise Refused(str(exc)) from exc
+        raise Refused(str(exc) + await _last_session(orch, member)) from exc
     live = await _team(orch).live_of(member)
     about = live.session.task_id if live is not None else None
     await orch.loops.close(
@@ -951,6 +951,20 @@ async def tell(orch: Orchestrators, project: Project, session_id: str, *, staff:
     if receipt.get("error"):
         line += f" — {receipt['error']}"
     return line
+
+
+async def _last_session(orch: Orchestrators, member: Staff) -> str:
+    """Why a member has no session to tell, when it had one: "has no live session" alone once sent the
+    orchestrator guessing, seconds after a stop the host had made, whether the member had crashed."""
+    row = await orch.manager.db.fetchone(
+        "SELECT s.ended_at,s.end_reason,s.task_id,t.status FROM staff_sessions s LEFT JOIN board_tasks t ON t.id = s.task_id"
+        " WHERE s.staff_id = ? AND s.ended_at IS NOT NULL ORDER BY s.ended_at DESC LIMIT 1", (member.id,))
+    if row is None:
+        return ""
+    said = f"; their last session ended at {str(row['ended_at'])[11:19]} UTC: {row['end_reason'] or 'no reason recorded'}"
+    if row["task_id"] and row["status"] == "doing":
+        said += f". Card {row['task_id']} is still in doing: Assign(task_id='{row['task_id']}', staff='{member.name}') starts it again"
+    return said
 
 
 def _degraded(member: Staff, degraded: str) -> str:
