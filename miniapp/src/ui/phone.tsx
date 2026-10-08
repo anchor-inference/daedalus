@@ -70,7 +70,7 @@ export function navigateFromDrawer(path: string): void {
 export function IconButton({ icon, label, onClick, href, badge, pip, className = "", disabled, expanded, popup }: { icon: IconName; label: string; onClick?: () => void; href?: string; badge?: number | string | null; pip?: boolean; className?: string; disabled?: boolean; expanded?: boolean; popup?: "menu" | "dialog" }) {
   const inner = (
     <>
-      <Icon name={icon} size={22} />
+      <Icon name={icon} size={20} />
       {badge !== undefined && badge !== null && badge !== 0 && <span className="ph-badge" aria-hidden>{typeof badge === "number" && badge > 99 ? "99+" : badge}</span>}
       {pip && <span className="ph-pip" aria-hidden />}
     </>
@@ -236,7 +236,7 @@ export function SheetRow({ icon, label, hint, value, danger, checked, chevron, d
   const attrs = Object.fromEntries(Object.entries(data ?? {}).map(([k, v]) => [`data-${k}`, v]));
   const body = (
     <>
-      {icon && <Icon name={icon} size={22} />}
+      {icon && <Icon name={icon} size={20} />}
       <span className="ph-mrow-main">
         <span className="ph-mrow-t">{label}</span>
         {hint && <span className="ph-mrow-m">{hint}</span>}
@@ -575,7 +575,7 @@ export function Group({ label, children }: { label?: ReactNode; children: ReactN
 export function GroupRow({ icon, title, sub, value, href, onClick, danger, chevron, children }: { icon?: IconName; title: ReactNode; sub?: ReactNode; value?: ReactNode; href?: string; onClick?: () => void; danger?: boolean; chevron?: boolean; children?: ReactNode }) {
   const body = (
     <>
-      {icon && <Icon name={icon} size={22} />}
+      {icon && <Icon name={icon} size={20} />}
       <span className="ph-srow-main">
         <span className="ph-srow-t">{title}</span>
         {sub && <span className="ph-srow-v">{sub}</span>}

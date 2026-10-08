@@ -17,6 +17,7 @@ import { LangPicker, Switch, useMedia } from "../ui/index";
 import { errorText, numInput } from "../ui";
 import { BLANK, ModelEntry, Picked, PricingDraft, REASONING_EFFORTS, prefilled, presetIdFor, priceFor, pricingFromDraft, retyped } from "../models";
 import { FreeModels } from "./FreeModels";
+import { ProviderMark } from "../ui/provider-mark";
 import { Billing, OPENCODE_KEY_URL, OPENCODE_PLANS, OpencodePlan, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
 
 export type { ModelEntry, Picked } from "../models";
@@ -141,7 +142,7 @@ function PhoneProviderRows({ state, chosen, onPick }: { state: OnboardingState |
     const blocked = p.key_held === false;
     return (
       <button key={p.id} className={`pick ph-pickrow ${chosen === p.id ? "on" : ""} ${blocked ? "blocked" : ""}`} aria-disabled={blocked} onClick={() => !blocked && onPick(p.id)} aria-pressed={chosen === p.id}>
-        <span className="ph-pickrow-ico"><Icon name={plan ? "bolt" : ownKind(p) ? "grid" : "model"} size={18} /></span>
+        <ProviderMark id={p.id} kind={p.kind} name={providerName(p.id, p.kind, p.name, p.billing)} className="ph-pickrow-ico" />
         <span className="ph-pickrow-main">
           <b>{providerName(p.id, p.kind, p.name, p.billing)}</b>
           <span className="ph-pickrow-sub">{plan ? planLine(plan) : note || t(`add.kind.${ownKind(p) ? "own" : "provider"}`)}</span>
@@ -150,9 +151,11 @@ function PhoneProviderRows({ state, chosen, onPick }: { state: OnboardingState |
       </button>
     );
   };
-  const fresh = (id: string, title: string, sub: string, icon: "bolt" | "grid" | "link", tag = false) => (
+  // A new endpoint of a known family (an OpenCode plan, a llama.cpp server) shows the mark it will
+  // have once added; only the blank custom address keeps a plain glyph, as it has no name yet.
+  const fresh = (id: string, title: string, sub: string, mark: string | null, tag = false) => (
     <button key={id} className={`pick ph-pickrow dashed ${chosen === id ? "on" : ""}`} onClick={() => onPick(id)} aria-pressed={chosen === id}>
-      <span className="ph-pickrow-ico"><Icon name={icon} size={18} /></span>
+      {mark ? <ProviderMark id={mark} name={title} className="ph-pickrow-ico" /> : <span className="ph-pickrow-ico"><Icon name="link" size={18} /></span>}
       <span className="ph-pickrow-main">
         <b>{title}{tag && <span className="ph-tag ok ph-new">{t("add.custom.new")}</span>}</b>
         <span className="ph-pickrow-sub">{sub}</span>
@@ -164,7 +167,7 @@ function PhoneProviderRows({ state, chosen, onPick }: { state: OnboardingState |
     <div className="ph-picks">
       {(gateways.length > 0 || absent.length > 0) && <>
         <div className="ph-gl">{t("add.group.gateways")}</div>
-        <div className="pickgrid">{gateways.map(row)}{absent.map((plan) => fresh(OPENCODE_NEW + plan.id, plan.name, planLine(plan), "bolt", true))}</div>
+        <div className="pickgrid">{gateways.map(row)}{absent.map((plan) => fresh(OPENCODE_NEW + plan.id, plan.name, planLine(plan), "opencode", true))}</div>
       </>}
       {rest.length > 0 && <>
         <div className="ph-gl">{t("add.group.providers")}</div>
@@ -173,8 +176,8 @@ function PhoneProviderRows({ state, chosen, onPick }: { state: OnboardingState |
       <div className="ph-gl">{t("add.group.own")}</div>
       <div className="pickgrid">
         {own.map(row)}
-        {fresh(LLAMACPP, t("add.llamacpp"), t("add.llamacpp.sub"), "grid")}
-        {fresh(CUSTOM, t("add.custom"), t("add.custom.sub"), "link")}
+        {fresh(LLAMACPP, t("add.llamacpp"), t("add.llamacpp.sub"), "llamacpp")}
+        {fresh(CUSTOM, t("add.custom"), t("add.custom.sub"), null)}
       </div>
       {picked?.base_url && (
         <details className="ph-advanced">

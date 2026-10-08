@@ -7,11 +7,13 @@ the layout and nothing else. Three windows: a laptop, an ultrawide, a phone; and
 and rows at the three sizes the owner uses.
 
 The phone has its own claims since the redesign modelled on the chat apps of the operator's phone
-(check_phone): six type steps (12 / 13 / 15 / 16 / 17 / 22) on every drawn text of the home, the
-Chats page, the drawer and the composer's sheets; a 56 px top bar with no rule under it; 60 px list
-rows; an idle composer of one 48 px row at the bottom of the screen; no bottom bar outside a project;
-and a 44 px target for every control, counting the invisible ::after that a 36 px circle or a 32 px
-chip carries. The desktop claims below are unchanged.
+(check_phone): six type steps (12 / 13 / 14 / 15 / 16 / 17) on every drawn text of the home, the
+Chats page, the drawer and the composer's sheets; a 52 px top bar with no rule under it; 54 px list
+rows and 44 px destinations in the drawer; an idle composer of one 44 px row at the bottom of the
+screen; no bottom bar outside a project; and a 44 px target for every control, counting the invisible
+::after that a 34 px circle or a 28 px chip carries. The numbers are a step under the first cut of the
+redesign (12 / 13 / 15 / 16 / 17 / 22, a 56 px bar, 60 px rows), which the operator measured as too
+large next to Claude and ChatGPT on the same phone. The desktop claims below are unchanged.
 
     cd miniapp && npm run build
     mkdir -p /tmp/app-root/app && cp -r dist/* /tmp/app-root/app/
@@ -253,7 +255,7 @@ def check_settings(browser) -> list[str]:  # type: ignore[no-untyped-def]
     return problems
 
 
-PHONE_STEPS = {12, 13, 15, 16, 17, 22}
+PHONE_STEPS = {12, 13, 14, 15, 16, 17}
 
 # Everything a phone screen draws, read in one pass: the sizes of its text, its targets with their
 # ::after hit areas, and the shell's parts. Code, terminals and the icons' own glyphs are not text.
@@ -274,7 +276,7 @@ READ_PHONE = """
     if (!vis(el) || el.closest('[inert]') || el.type === 'file') continue;
     const r = el.getBoundingClientRect();
     let w = r.width, h = r.height;
-    // The composer's field is 36 px inside its 48 px pill, and a tap on the pill focuses the field.
+    // The composer's field is 34 px inside its 44 px pill, and a tap on the pill focuses the field.
     const pill = el.tagName === 'TEXTAREA' ? el.closest('.composer[data-shape] .composer-box') : null;
     if (pill) h = Math.max(h, pill.getBoundingClientRect().height);
     const after = getComputedStyle(el, '::after');
@@ -339,23 +341,23 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
 
         go("agents", ".ph-home .composer")
         m = read("home", ".ph-home")
-        if not m["top"] or m["top"]["h"] != 56:
-            problems.append(f"home {lang}: the top bar is {m['top']}, not 56 tall")
+        if not m["top"] or m["top"]["h"] != 52:
+            problems.append(f"home {lang}: the top bar is {m['top']}, not 52 tall")
         if m["topBorder"]:
             problems.append(f"home {lang}: the top bar has a {m['topBorder']} px rule")
         if m["topBg"] != m["pageBg"]:
             problems.append(f"home {lang}: the top bar {m['topBg']} is not the page colour {m['pageBg']}")
-        if not m["idle"] or m["idle"]["h"] != 48:
-            problems.append(f"home {lang}: the idle composer is {m['idle']}, not one 48 px row")
+        if not m["idle"] or m["idle"]["h"] != 44:
+            problems.append(f"home {lang}: the idle composer is {m['idle']}, not one 44 px row")
         elif m["idle"]["b"] > 24:
             problems.append(f"home {lang}: the idle composer stands {m['idle']['b']} px above the bottom")
-        if not m["circle"] or (m["circle"]["w"], m["circle"]["h"]) != (36, 36):
-            problems.append(f"home {lang}: the white circle is {m['circle']}, not 36 × 36")
+        if not m["circle"] or (m["circle"]["w"], m["circle"]["h"]) != (34, 34):
+            problems.append(f"home {lang}: the white circle is {m['circle']}, not 34 × 34")
         if m["tabbar"]:
             problems.append(f"home {lang}: a bottom bar is still drawn")
         for h in m["rows"]:
-            if h != 60:
-                problems.append(f"home {lang}: a live row is {h} px, not 60")
+            if h != 54:
+                problems.append(f"home {lang}: a live row is {h} px, not 54")
 
         page.locator(".ph-home .composer textarea").fill("Wire the order form to the sheet")
         page.wait_for_timeout(300)
@@ -372,8 +374,8 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
         m = read("drawer", ".ph-drawer-root.open")
         if not m["drawer"] or m["drawer"]["w"] != 336:
             problems.append(f"drawer {lang}: {m['drawer']}, not 336 wide at 412")
-        if any(h != 48 for h in m["nav"]):
-            problems.append(f"drawer {lang}: destination rows {m['nav']}, not 48")
+        if any(h != 44 for h in m["nav"]):
+            problems.append(f"drawer {lang}: destination rows {m['nav']}, not 44")
         page.keyboard.press("Escape")
         page.wait_for_timeout(400)
         if page.locator(".ph-drawer-root.open").count():
@@ -381,10 +383,10 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
 
         go("agents?view=chats", ".ph-row")
         m = read("chats", ".ph-chats")
-        if any(h != 60 for h in m["rows"]):
-            problems.append(f"chats {lang}: rows {sorted(set(m['rows']))}, not 60")
-        if any(h != 32 for h in m["chips"]):
-            problems.append(f"chats {lang}: chips {sorted(set(m['chips']))}, not 32")
+        if any(h != 54 for h in m["rows"]):
+            problems.append(f"chats {lang}: rows {sorted(set(m['rows']))}, not 54")
+        if any(h != 28 for h in m["chips"]):
+            problems.append(f"chats {lang}: chips {sorted(set(m['chips']))}, not 28")
         page.locator(".ph-row-more").first.click()
         page.wait_for_selector(".ph-actions", timeout=5000)
         page.wait_for_timeout(300)
@@ -408,13 +410,13 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
         if page.locator(".ph-swipe.end .ph-swipe-act").count() < 2:
             problems.append(f"chats {lang}: a swipe to the left does not reveal the row's quick actions")
 
-        # The session: the same 56 px bar with a two-line title and at most two glyphs, the answer's
+        # The session: the same 52 px bar with a two-line title and at most two glyphs, the answer's
         # icon row in 44 px targets, the idle composer, and the ⋮ sheet with its tiles.
         go(f"agents/{S1}", ".ph-chat-top")
         m = read("session", ".chat")
         top = page.locator(".ph-chat-top").bounding_box()
-        if not top or round(top["height"]) != 56:
-            problems.append(f"session {lang}: the bar is {top}, not 56 tall")
+        if not top or round(top["height"]) != 52:
+            problems.append(f"session {lang}: the bar is {top}, not 52 tall")
         if page.evaluate("parseFloat(getComputedStyle(document.querySelector('.ph-chat-top')).borderBottomWidth)"):
             problems.append(f"session {lang}: the bar has a rule under it")
         glyphs = page.locator(".ph-chat-top .ph-top-actions > *").count()
@@ -422,15 +424,15 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
             problems.append(f"session {lang}: {glyphs} glyphs at the right of the bar, more than two")
         if not page.locator(".ph-chat-top .ph-top-sub").count():
             problems.append(f"session {lang}: the title has no second line")
-        if not m["idle"] or m["idle"]["h"] != 48:
-            problems.append(f"session {lang}: the idle composer is {m['idle']}, not one 48 px row")
+        if not m["idle"] or m["idle"]["h"] != 44:
+            problems.append(f"session {lang}: the idle composer is {m['idle']}, not one 44 px row")
         page.locator(".ph-chat-top button[aria-haspopup='menu']").click()
         page.wait_for_selector(".ph-session-menu .ph-tile", timeout=5000)
         page.wait_for_timeout(300)
         read("session-menu", ".ph-session-menu")
         tiles = page.evaluate("[...document.querySelectorAll('.ph-session-menu .ph-tile')].map((e) => Math.round(e.getBoundingClientRect().height))")
-        if any(h != 72 for h in tiles):
-            problems.append(f"session {lang}: tiles {sorted(set(tiles))}, not 72")
+        if any(h != 64 for h in tiles):
+            problems.append(f"session {lang}: tiles {sorted(set(tiles))}, not 64")
         page.keyboard.press("Escape")
         page.wait_for_timeout(300)
 
@@ -439,31 +441,31 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
         if m["topBorder"]:
             problems.append(f"settings {lang}: the top bar has a {m['topBorder']} px rule")
 
-        # The Inbox: the phone's bar, 32 px chips, rows at least a row tall, and no white primary on
+        # The Inbox: the phone's bar, 28 px chips, rows at least a row tall, and no white primary on
         # a row — a request in the Inbox is out of its context.
         go("inbox", ".ph-inbox .ph-irow")
         m = read("inbox", ".ph-inbox")
-        if not m["top"] or m["top"]["h"] != 56:
-            problems.append(f"inbox {lang}: the top bar is {m['top']}, not 56 tall")
-        if any(h != 32 for h in m["chips"]):
-            problems.append(f"inbox {lang}: chips {sorted(set(m['chips']))}, not 32")
-        if any(h < 60 for h in m["rows"]):
-            problems.append(f"inbox {lang}: rows {sorted(set(m['rows']))}, some under 60")
+        if not m["top"] or m["top"]["h"] != 52:
+            problems.append(f"inbox {lang}: the top bar is {m['top']}, not 52 tall")
+        if any(h != 28 for h in m["chips"]):
+            problems.append(f"inbox {lang}: chips {sorted(set(m['chips']))}, not 28")
+        if any(h < 54 for h in m["rows"]):
+            problems.append(f"inbox {lang}: rows {sorted(set(m['rows']))}, some under 54")
         if page.locator(".ph-inbox .ph-irow .ph-btn.primary").count():
             problems.append(f"inbox {lang}: a row's answer is drawn as the white primary")
 
         # Terminals: one capacity line under the bar, the cards inside the gutter.
         go("terminals", ".ph-terms .ph-page-body")
         m = read("terminals", ".ph-terms")
-        if not m["top"] or m["top"]["h"] != 56:
-            problems.append(f"terminals {lang}: the top bar is {m['top']}, not 56 tall")
+        if not m["top"] or m["top"]["h"] != 52:
+            problems.append(f"terminals {lang}: the top bar is {m['top']}, not 52 tall")
 
         # A Settings page in grouped cards: its rows are tiles of the phone's settings-row height.
         go("settings/chat", ".settings-col .settings-row")
         read("settings-chat", ".main")
         tiles = page.eval_on_selector_all(".main .settings-col .card > .settings-row", "els => els.map((e) => Math.round(e.getBoundingClientRect().height))")
-        if any(h < 56 for h in tiles):
-            problems.append(f"settings-chat {lang}: rows {sorted(set(tiles))}, some under 56")
+        if any(h < 48 for h in tiles):
+            problems.append(f"settings-chat {lang}: rows {sorted(set(tiles))}, some under 48")
         context.close()
     return problems, seen
 
@@ -505,10 +507,10 @@ def check_phone_project(browser) -> tuple[list[str], dict]:  # type: ignore[no-u
 
         go("orchestration/projects", ".ph-orch .ph-row")
         m = read("orchestration", ".ph-orch")
-        if not m["top"] or m["top"]["h"] != 56:
-            problems.append(f"orchestration {lang}: the top bar is {m['top']}, not 56 tall")
-        if any(h != 60 for h in m["rows"]):
-            problems.append(f"orchestration {lang}: rows {sorted(set(m['rows']))}, not 60")
+        if not m["top"] or m["top"]["h"] != 52:
+            problems.append(f"orchestration {lang}: the top bar is {m['top']}, not 52 tall")
+        if any(h != 54 for h in m["rows"]):
+            problems.append(f"orchestration {lang}: rows {sorted(set(m['rows']))}, not 54")
 
         go(f"project/{pid}", ".needs-card")
         read("needs card", ".needs-card")
@@ -520,12 +522,12 @@ def check_phone_project(browser) -> tuple[list[str], dict]:  # type: ignore[no-u
 
         go(f"project/{pid}/board", ".ph-board .ph-row")
         m = read("board", ".ph-board")
-        if not m["top"] or m["top"]["h"] != 56:
-            problems.append(f"board {lang}: the top bar is {m['top']}, not 56 tall")
-        if any(h != 32 for h in m["chips"]):
-            problems.append(f"board {lang}: chips {sorted(set(m['chips']))}, not 32")
-        if any(h < 60 for h in m["rows"]):
-            problems.append(f"board {lang}: a row is shorter than 60: {sorted(set(m['rows']))}")
+        if not m["top"] or m["top"]["h"] != 52:
+            problems.append(f"board {lang}: the top bar is {m['top']}, not 52 tall")
+        if any(h != 28 for h in m["chips"]):
+            problems.append(f"board {lang}: chips {sorted(set(m['chips']))}, not 28")
+        if any(h < 54 for h in m["rows"]):
+            problems.append(f"board {lang}: a row is shorter than 54: {sorted(set(m['rows']))}")
         page.locator(".ph-board .ph-row.ph-task:not(.need) .ph-row-more").first.tap()
         page.wait_for_selector(".ph-task-menu", timeout=5000)
         page.wait_for_timeout(300)
@@ -550,9 +552,10 @@ def check_phone_project(browser) -> tuple[list[str], dict]:  # type: ignore[no-u
 def judge(m: dict) -> list[str]:
     problems: list[str] = []
     phone = m["vw"] < 1024
-    # The body is the 14 px step; a phone moves that step to 15, the nearest on its scale.
-    if m["body"] != (15 if phone else 14):
-        problems.append(f"{m['vw']}: body is {m['body']}px, not {15 if phone else 14}")
+    # The body is the 14 px step on both: a phone moved it to 15 until its scale came down a step and
+    # took 14 in.
+    if m["body"] != 14:
+        problems.append(f"{m['vw']}: body is {m['body']}px, not 14")
     if not phone:
         if not m["left"] or m["left"]["w"] != 324:
             problems.append(f"{m['vw']}: the left column is {m['left']}, not 324 wide")
@@ -562,12 +565,12 @@ def judge(m: dict) -> list[str]:
         if h > (44 if phone else 36):
             problems.append(f"{m['vw']}: a one-line row is {h}px")
     for h in m["rowDouble"]:
-        if h > (60 if phone else 52):
+        if h > (54 if phone else 52):
             problems.append(f"{m['vw']}: a two-line row is {h}px")
     if m["avatar"] and m["avatar"]["w"] > 24:
         problems.append(f"{m['vw']}: an avatar in a row is {m['avatar']['w']}px")
-    # A phone's top bar is 56 px, one row of 44 px targets with room around them; a desktop's 48.
-    if m["head"] and m["head"]["h"] > (56 if phone else 48):
+    # A phone's top bar is 52 px, one row of 44 px targets with room around them; a desktop's 48.
+    if m["head"] and m["head"]["h"] > (52 if phone else 48):
         problems.append(f"{m['vw']}: the chat header is {m['head']['h']}px")
     if m["subMeta"]:
         problems.append(f"{m['vw']}: the header still has its second row of chips")
@@ -669,8 +672,8 @@ def run() -> int:
             if name.startswith("session-"):
                 problems += judge(m)
         for h in measured["agents-390"]["phoneRows"]:
-            if h != 60:
-                problems.append(f"390: a row of Chats is {h}px, not 60")
+            if h != 54:
+                problems.append(f"390: a row of Chats is {h}px, not 54")
         problems += judge_sidebar(measured["sidebar"])
     if MEASURE:
         Path(MEASURE).write_text(json.dumps(measured, indent=1) + "\n")

@@ -84,7 +84,7 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onPickProj
     const tag = screenTag(s, selfdev, BETA);
     return (
       <a key={s} className={`ph-nrow ${here(s) ? "on" : ""}`} href={pathFor(s)} data-screen={s} aria-current={here(s) ? "page" : undefined} onClick={(e) => { e.preventDefault(); navigateFromDrawer(pathFor(s)); }}>
-        <Icon name={ICONS[s]} size={22} />
+        <Icon name={ICONS[s]} size={20} />
         <span className="ph-nrow-l">{screenTitle(s)}</span>
         {tag && <span className="ph-tag">{t(tag)}</span>}
         {n > 0 && <span className="ph-badge">{n > 99 ? "99+" : n}</span>}
@@ -93,7 +93,7 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onPickProj
   };
   const nav = (key: string, icon: IconName, label: string, path: string, active: boolean, trail?: React.ReactNode) => (
     <a key={key} className={`ph-nrow ${active ? "on" : ""}`} href={path} data-nav={key} aria-current={active ? "page" : undefined} onClick={(e) => { e.preventDefault(); navigateFromDrawer(path); }}>
-      <Icon name={icon} size={22} />
+      <Icon name={icon} size={20} />
       <span className="ph-nrow-l">{label}</span>
       {trail}
     </a>
@@ -107,7 +107,7 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onPickProj
         : <NewChatPill label={t("ph.newproject")} icon="plus" onClick={() => { closeDrawer(); onProjects(); }} />}
       <span className="grow" />
       <button type="button" className="ph-round" aria-label={screenTitle("settings")} title={screenTitle("settings")} data-screen="settings" onClick={() => navigateFromDrawer(pathFor("settings"))}>
-        <Icon name="settings" size={22} />
+        <Icon name="settings" size={20} />
       </button>
     </>
   );
@@ -133,7 +133,7 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onPickProj
             {nav("chats", "bots", t("ph.chats"), CHATS_PATH, onChats, agents ? <span className="ph-cnt">{agents.sessions.filter((s) => !s.metadata?.subagent_of).length}</span> : undefined)}
             {visibleScreens(AGENTS_PLACES, selfdev).map(place)}
             <button type="button" className="ph-nrow" onClick={() => setMore(true)} aria-haspopup="dialog" data-nav="more">
-              <Icon name="grid" size={22} />
+              <Icon name="grid" size={20} />
               <span className="ph-nrow-l">{t("nav.more")}</span>
               {moreCount > 0 ? <span className="ph-badge">{moreCount}</span> : <span className="ph-cnt">{moreScreens.length}</span>}
             </button>
@@ -169,7 +169,7 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onPickProj
               main && waiting > 0 ? <span className="ph-badge warn">{waiting > 99 ? "99+" : waiting}</span> : undefined)}
             {visibleScreens(ORCHESTRATION_PLACES, selfdev).map(place)}
             <button type="button" className="ph-nrow" onClick={() => setMore(true)} aria-haspopup="dialog" data-nav="more">
-              <Icon name="grid" size={22} />
+              <Icon name="grid" size={20} />
               <span className="ph-nrow-l">{t("nav.more")}</span>
               {moreCount > 0 ? <span className="ph-badge">{moreCount}</span> : <span className="ph-cnt">{moreScreens.length}</span>}
             </button>
