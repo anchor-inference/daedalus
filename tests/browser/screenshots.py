@@ -1950,7 +1950,7 @@ def run() -> int:
         shot(page, "phone-more", "agents", before=open_more)
         shot(page, "phone-drawer", "agents", wait=".ph-home", before=open_drawer)
         shot(page, "phone-chats", "agents?view=chats", wait=".ph-row")
-        shot(page, "phone-team", f"project/{P1}/team", wait=".phone-staff-row")
+        shot(page, "phone-team", f"project/{P1}/team", wait="[data-staff] .ph-row")
         shot(page, "phone-settings-notifications", "settings/notifications", wait=".nrows .nrow", before=open_first_kind, settle=500)
         shot(page, "phone-settings-tools", "settings/tools", wait=".tgroups .tgroup", settle=500)
         shot(page, "phone-session-tool-groups", f"agents/{S1}", wait=".chat-scroll .timeline", before=open_phone_tool_groups, settle=300)

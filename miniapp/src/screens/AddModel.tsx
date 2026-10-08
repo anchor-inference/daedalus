@@ -13,7 +13,7 @@ import { ReactNode, useEffect, useMemo, useState } from "react";
 import { api, Preset, Settings } from "../api";
 import { Icon } from "../icons";
 import { plural, t, useLang } from "../i18n";
-import { LangPicker, Switch } from "../ui/index";
+import { LangPicker, Switch, useMedia } from "../ui/index";
 import { errorText, numInput } from "../ui";
 import { BLANK, ModelEntry, Picked, PricingDraft, REASONING_EFFORTS, prefilled, presetIdFor, priceFor, pricingFromDraft, retyped } from "../models";
 import { FreeModels } from "./FreeModels";
@@ -107,8 +107,93 @@ function Step({ n, title, sub, active, done, children }: { n: number; title: str
   );
 }
 
+/** A plan's line on its row, without the name the row already shows ("OpenCode Go — subscription…"). */
+function planLine(plan: OpencodePlan): string {
+  const hint = t(plan.hint);
+  const rest = hint.startsWith(plan.name) ? hint.slice(plan.name.length).replace(/^\s*[—–-]\s*/, "") : hint;
+  return rest.charAt(0).toLocaleUpperCase() + rest.slice(1);
+}
+
+/** The kinds an operator runs on its own machine or network, listed under "Your own" on a phone. */
+const OWN_KINDS = new Set(["llamacpp", "vllm", "openai_compat"]);
+
+/**
+ * Step 1 on a phone: the endpoints as rows in three groups — the OpenCode plans (a subscription and a
+ * gateway), the providers, and the ones of the operator's own — each with what it costs or what it
+ * needs and one word about its key. An endpoint's address is not on its row: an internal address
+ * such as the key proxy's told a newcomer nothing and pushed the words that did off the screen, so it
+ * is under "Advanced" for the endpoint picked.
+ */
+function PhoneProviderRows({ state, chosen, onPick }: { state: OnboardingState | null; chosen: string; onPick: (id: string) => void }) {
+  const providers = state?.providers ?? [];
+  const ordered = [...providers.filter((p) => p.ready), ...providers.filter((p) => !p.ready)];
+  // An OpenAI-compatible endpoint is the operator's own only when it needs no credential; one that
+  // borrows a CLI's login (Codex, Claude, Grok) is a provider like any other.
+  const ownKind = (p: ProviderCard) => OWN_KINDS.has(p.kind) && (p.kind !== "openai_compat" || p.key_kind === "endpoint");
+  const gateways = ordered.filter((p) => opencodePlanOf(p.kind, p.billing));
+  const own = ordered.filter((p) => !opencodePlanOf(p.kind, p.billing) && ownKind(p));
+  const rest = ordered.filter((p) => !opencodePlanOf(p.kind, p.billing) && !ownKind(p));
+  const absent = missingPlans(providers);
+  const picked = providers.find((p) => p.id === chosen);
+  const row = (p: ProviderCard) => {
+    const { pill, tone, note } = keyWords(p);
+    const plan = opencodePlanOf(p.kind, p.billing);
+    const blocked = p.key_held === false;
+    return (
+      <button key={p.id} className={`pick ph-pickrow ${chosen === p.id ? "on" : ""} ${blocked ? "blocked" : ""}`} aria-disabled={blocked} onClick={() => !blocked && onPick(p.id)} aria-pressed={chosen === p.id}>
+        <span className="ph-pickrow-ico"><Icon name={plan ? "bolt" : ownKind(p) ? "grid" : "model"} size={18} /></span>
+        <span className="ph-pickrow-main">
+          <b>{providerName(p.id, p.kind, p.name, p.billing)}</b>
+          <span className="ph-pickrow-sub">{plan ? planLine(plan) : note || t(`add.kind.${ownKind(p) ? "own" : "provider"}`)}</span>
+        </span>
+        <span className={`pill ${tone}`}>{pill}</span>
+      </button>
+    );
+  };
+  const fresh = (id: string, title: string, sub: string, icon: "bolt" | "grid" | "link", tag = false) => (
+    <button key={id} className={`pick ph-pickrow dashed ${chosen === id ? "on" : ""}`} onClick={() => onPick(id)} aria-pressed={chosen === id}>
+      <span className="ph-pickrow-ico"><Icon name={icon} size={18} /></span>
+      <span className="ph-pickrow-main">
+        <b>{title}{tag && <span className="ph-tag ok ph-new">{t("add.custom.new")}</span>}</b>
+        <span className="ph-pickrow-sub">{sub}</span>
+      </span>
+      {tag ? <span className="pill">{t("add.key.none")}</span> : <Icon name="forward" size={18} />}
+    </button>
+  );
+  return (
+    <div className="ph-picks">
+      {(gateways.length > 0 || absent.length > 0) && <>
+        <div className="ph-gl">{t("add.group.gateways")}</div>
+        <div className="pickgrid">{gateways.map(row)}{absent.map((plan) => fresh(OPENCODE_NEW + plan.id, plan.name, planLine(plan), "bolt", true))}</div>
+      </>}
+      {rest.length > 0 && <>
+        <div className="ph-gl">{t("add.group.providers")}</div>
+        <div className="pickgrid">{rest.map(row)}</div>
+      </>}
+      <div className="ph-gl">{t("add.group.own")}</div>
+      <div className="pickgrid">
+        {own.map(row)}
+        {fresh(LLAMACPP, t("add.llamacpp"), t("add.llamacpp.sub"), "grid")}
+        {fresh(CUSTOM, t("add.custom"), t("add.custom.sub"), "link")}
+      </div>
+      {picked?.base_url && (
+        <details className="ph-advanced">
+          <summary>{t("add.advanced")}</summary>
+          <span className="sub mono">{picked.base_url}</span>
+        </details>
+      )}
+    </div>
+  );
+}
+
 /** Step 1: which endpoint the model runs on. */
 function ProviderStep({ state, chosen, onPick }: { state: OnboardingState | null; chosen: string; onPick: (id: string) => void }) {
+  const phone = !useMedia("(min-width: 1024px)");
+  if (phone) return <PhoneProviderRows state={state} chosen={chosen} onPick={onPick} />;
+  return <DesktopProviderStep state={state} chosen={chosen} onPick={onPick} />;
+}
+
+function DesktopProviderStep({ state, chosen, onPick }: { state: OnboardingState | null; chosen: string; onPick: (id: string) => void }) {
   const providers = state?.providers ?? [];
   const [filter, setFilter] = useState("");
   const query = filter.trim().toLocaleLowerCase();
@@ -203,13 +288,15 @@ function CustomProvider({ kind, busy, onCreate }: { kind: "llamacpp" | "openai_c
 
 /** Step 1b for OpenCode: the plan's endpoint, wired to its route; a key only when there is no key proxy to hold it. */
 function OpencodeProvider({ plan, keyproxyBase, busy, onCreate }: { plan: OpencodePlan; keyproxyBase: string; busy: boolean; onCreate: (body: Record<string, string>) => void }) {
+  const phone = !useMedia("(min-width: 1024px)");
   const [apiKey, setApiKey] = useState("");
   const body = opencodeProvider(plan, keyproxyBase, apiKey.trim());
   return (
     <div className="mfields reveal" style={{ marginTop: 12 }}>
       <div className="mfield wide">
         <span className="sub">{t(plan.hint)}</span>
-        <span className="sub mono truncate">{body.base_url}</span>
+        {/* On a phone the address waits under Advanced, as it does for an endpoint already there. */}
+        {phone ? <details className="ph-advanced"><summary>{t("add.advanced")}</summary><span className="sub mono">{body.base_url}</span></details> : <span className="sub mono truncate">{body.base_url}</span>}
       </div>
       {!keyproxyBase && <label className="mfield wide">
         <span>{t("opencode.key")}</span>

@@ -396,6 +396,11 @@
   .term-phone-cwd.host { color: var(--warn); }
   .term-phone-actions { padding: var(--space-2) var(--space-2) var(--space-1); border: 0; background: var(--bg); }
   .term-phone-ask-text { font-size: var(--fs-13); }
+  /* The member's request above the keys: pills of equal weight, the refusal as easy as the grant. */
+  .term-phone-actions .ask-answers-row { gap: var(--space-2); }
+  .term-phone-actions .ask-answers-row .btn { position: relative; min-height: 36px; padding: 0 14px; border: 0; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg); font-size: var(--fs-15); font-weight: 600; }
+  .term-phone-actions .ask-answers-row .btn::after { content: ""; position: absolute; inset: -4px 0; }
+  .term-phone-actions .ask-answers-row .ask-answers-write { background: none; color: var(--fg-2); border: 0; }
   .term-keys { gap: 6px; padding: 6px 8px; border: 0; background: var(--bg); }
   .term-key { position: relative; min-width: 44px; height: 36px; padding: 0 10px; border: 0; border-radius: 10px; background: var(--surface-2); font-size: var(--fs-15); }
   .term-key::after { content: ""; position: absolute; inset: -4px 0; }
@@ -497,6 +502,89 @@
   .staff-sheet:not(.ph-member-sheet) .sheet-foot { flex-wrap: nowrap; }
   .staff-sheet:not(.ph-member-sheet) .sheet-foot .btn { flex: 1; min-height: var(--tap); border: 0; border-radius: var(--radius-pill); font-size: var(--fs-15); font-weight: 600; }
   .staff-sheet:not(.ph-member-sheet) .sheet-foot .btn.danger { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+
+  /* ── Settings' pages in the grouped-card language ──────────────────────────────────────────
+     A card's heading becomes the grey label over its group, every setting row a 56 px tile with 2 px
+     between, the first and last of a run rounded to 20 px; anything else a card holds (a meter, a
+     list, a theme grid) is a tile of its own. Done here rather than in every section's markup, so the
+     desktop's cards and their rows stay exactly as they are. */
+  .main .settings-col .card { margin: 0 0 var(--space-2); padding: 0; border: 0; border-radius: 0; background: none; }
+  .main .settings-col .card > .section-title { margin: var(--space-5) 4px var(--space-2); font-size: var(--fs-13); font-weight: 400; color: var(--fg-2); }
+  .main .settings-col .card > .section-title:first-child { margin-top: var(--space-2); }
+  .main .settings-col .card > .sub { margin: 0 4px var(--space-2); font-size: var(--fs-13); line-height: 1.4; }
+  .main .settings-col .card > :is(.settings-row, .settings-block) { margin-top: 2px; padding: 8px var(--space-4); border: 0; border-radius: var(--radius-xs); background: var(--surface-1); }
+  .main .settings-col .card > .settings-row { min-height: var(--set-row-h); }
+  .main .settings-col .card > :is(.settings-row, .settings-block):not(:is(.settings-row, .settings-block) + *) { margin-top: 0; border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
+  .main .settings-col .card > :is(.settings-row, .settings-block):not(:has(+ :is(.settings-row, .settings-block))) { border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); }
+  .main .settings-col .card > :not(.section-title):not(.sub):not(.settings-row):not(.settings-block):not(.btnrow):not(details):not(label):not(.field) { border-radius: var(--radius-xl); }
+  .main .settings-col .card > :is(.loadbar, .integrations-list, .passkeys, .tgroups, ul) { padding: 12px var(--space-4); background: var(--surface-1); }
+  .main .settings-col .card > .btnrow { margin: var(--space-2) 0 0; padding: 0; border: 0; }
+  /* The lists inside a card (models, keys, devices, the kinds of notification) are runs of tiles too. */
+  .main .settings-col .card :is(.mlist, .nrows) { display: flex; flex-direction: column; gap: 2px; margin-top: 0; border: 0; }
+  .main .settings-col .card :is(.mlist, .nrows) > :is(.mrow, .nrow) { margin: 0; padding: 8px var(--space-4); border: 0; border-radius: var(--radius-xs); background: var(--surface-1); }
+  .main .settings-col .card :is(.mlist, .nrows) > :first-child { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
+  .main .settings-col .card :is(.mlist, .nrows) > :last-child { border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); }
+  .main .settings-col .card .mlist > .mrow.default { box-shadow: inset 3px 0 0 var(--accent); }
+  .main .settings-col .card > .mrow { margin: 0 0 2px; padding: 8px var(--space-4); border: 0; border-radius: var(--radius-xl); background: var(--surface-1); }
+  .main .settings-col .card .nrow-head { min-height: var(--set-row-h); }
+  .main .settings-col .card > details { margin: var(--space-2) 4px; }
+  .settings-row-title { font-size: var(--fs-16); font-weight: 400; }
+  .settings-row-desc { font-size: var(--fs-13); }
+  .settings-row-ctl .btn { min-height: 36px; border: 0; border-radius: var(--radius-pill); background: var(--surface-2); }
+  .settings-num input.field, .settings-row-ctl input.field, .settings-row-ctl select.field { border: 0; border-radius: 12px; background: var(--surface-2); }
+  .main .settings-col .card > label.field { margin: var(--space-4) 4px 6px; font-size: var(--fs-13); color: var(--fg-2); }
+  /* Inside a tile a long unit ("characters") would push a full-width number past the tile's edge at
+     360 px; the field gives way instead. */
+  .main .settings-col .card .settings-num { max-width: 100%; min-width: 0; }
+  .main .settings-col .card .settings-num input.field { min-width: 0; }
+  .main .settings-col .card .settings-unit { min-width: 0; }
+  .main .settings-col .card > :is(input, select, textarea).field { border: 0; border-radius: var(--radius-md); background: var(--surface-1); }
+
+  /* ── Usage: the period as a segmented pill, the tightest quota first and wide, the rest as the
+     settings' tiles ──────────────────────────────────────────────────────────────────────────── */
+  .pagehead:has(+ .screen.usage) .chips { display: flex; gap: 2px; margin: 0 var(--gutter) var(--space-2); padding: 3px; border-radius: var(--radius-pill); background: var(--surface-2); }
+  .pagehead:has(+ .screen.usage) .chip.select { position: relative; flex: 1; justify-content: center; min-height: 34px; border: 0; border-radius: var(--radius-pill); background: none; color: var(--fg-2); font-size: var(--fs-15); font-weight: 500; }
+  .pagehead:has(+ .screen.usage) .chip.select::after { content: ""; position: absolute; inset: -5px 0; }
+  .pagehead:has(+ .screen.usage) .chip.select[aria-pressed="true"] { background: var(--surface-1); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
+  .usage .kpi-grid { grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+  .usage .kpi { padding: 12px 14px; border-radius: var(--radius-xl); }
+  .usage .kpi:has(.bar) { grid-column: 1 / -1; order: -1; }
+  .usage .kpi .label { font-size: var(--fs-13); color: var(--fg-2); }
+  .usage .kpi .bar { margin-top: var(--space-2); }
+  .usage > .section-title, .usage section > .section-title { margin: var(--space-5) 4px var(--space-2); }
+  .usage .usage-cards { gap: 2px; }
+  .usage .usage-cards .card { padding: 12px var(--space-4); border-radius: var(--radius-xs); }
+  .usage .usage-cards .card:first-child { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
+  .usage .usage-cards .card:last-child { border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); }
+  .usage .card { padding: 4px var(--space-4); border-radius: var(--radius-xl); }
+  .usage .card .kv, .usage .card .usage-row { min-height: var(--set-row-h); }
+  .usage .card .kv { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); font-size: var(--fs-16); }
+  .usage .card .usage-row .what .l1 .name { font-size: var(--fs-16); }
+  .usage .card .usage-row .cost { font-size: var(--fs-15); color: var(--fg-2); }
+
+  /* ── Add model: the endpoints as rows in groups, the steps as plain sections ────────────────── */
+  .addmodel .card.step { padding: 0; border: 0; background: none; }
+  .addmodel .step-head { padding: var(--space-3) 4px var(--space-2); }
+  .addmodel .step-head b { font-size: var(--fs-17); }
+  .ph-picks .ph-gl { padding-left: 4px; padding-right: 4px; }
+  .ph-picks .ph-gl:first-child { padding-top: var(--space-2); }
+  .ph-picks .pickgrid { display: flex; flex-direction: column; gap: 2px; }
+  .ph-picks .pickgrid > .pick.ph-pickrow { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: var(--space-3); width: 100%; min-height: var(--set-row-h); margin: 0; padding: 8px 12px 8px var(--space-4); border: 0; border-radius: var(--radius-xs); background: var(--surface-1); color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+  .ph-picks .pickgrid > .ph-pickrow:first-child { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
+  .ph-picks .pickgrid > .ph-pickrow:last-child { border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); }
+  .ph-picks .pickgrid > .pick.ph-pickrow.on { box-shadow: inset 0 0 0 1.5px var(--accent); }
+  .ph-pickrow.blocked { opacity: .55; }
+  .ph-pickrow.dashed { border: 0; }
+  .ph-pickrow > .ic { flex: none; color: var(--fg-3); }
+  .ph-pickrow-ico { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--surface-2); color: var(--fg-2); }
+  .ph-pickrow-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .ph-pickrow-main b { display: flex; align-items: center; gap: 6px; font-size: var(--fs-16); font-weight: 400; }
+  .ph-pickrow-sub { font-size: var(--fs-13); line-height: 1.35; color: var(--fg-2); overflow-wrap: anywhere; }
+  .ph-pickrow .pill { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-12); }
+  .ph-new { height: 20px; padding: 0 6px; font-size: var(--fs-12); }
+  .ph-advanced { margin: var(--space-3) 4px 0; font-size: var(--fs-13); color: var(--fg-2); }
+  .ph-advanced summary { min-height: var(--tap); display: flex; align-items: center; cursor: pointer; }
+  .ph-advanced .mono { display: block; overflow-wrap: anywhere; }
 
   /* ── the creation pill ───────────────────────────────────────────────────────────────────── */
   .ph-newchat { height: 48px; display: inline-flex; align-items: center; gap: 8px; padding: 0 20px 0 16px; border: 0; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-ink); font: inherit; font-size: var(--fs-16); font-weight: 600; white-space: nowrap; cursor: pointer; }
