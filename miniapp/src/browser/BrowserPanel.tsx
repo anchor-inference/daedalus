@@ -10,21 +10,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { BrowserActionRow, BrowserDraft, BrowserFrame, BrowserGroup } from "../api";
-import { OverflowMenu, Popover, type MenuItem } from "../ui/dialogs";
+import { OverflowMenu, Popover, toast as statusToast, type MenuItem } from "../ui/dialogs";
 import { clock } from "../format";
 import { plural, t } from "../i18n";
 import { Icon, type IconName } from "../icons";
 import { navigate, pathFor } from "../router";
 import { useQuery } from "../store";
 import { confirmAsync, errorText, haptic } from "../ui";
-import { answerDialog, closeBrowser, consumeTake, deleteRecording, deviceSaving, recordingMoved, resizeViewport, setControl, setRecording, takeHandoff, useActions, useLiveSnapshot, useLiveView, useRecording, useWorkflows, workflowsMoved } from "./data";
+import { answerDialog, askTake, closeBrowser, consumeTake, deleteRecording, deviceSaving, recordingMoved, resizeViewport, setControl, setRecording, takeHandoff, useActions, useLiveSnapshot, useLiveView, useRecording, useWorkflows, workflowsMoved } from "./data";
 import { currentRecording, ProcedureEditor, RecordBar, RecordButton, RecordedCard, waitingRecording } from "./steps";
 import { frameOfRow, ReplayStage } from "./replay";
 import type { LiveSnapshot, LiveView } from "./live";
 import { actionWords, agentName, domainOf, driveState, mergeActions, needsOf, needWords, rowOfEvent, secure, type DriveState } from "./model";
 import type { ActionEvent } from "./protocol";
 import { BrowserViewer, focusViewer } from "./viewer";
-import { PhoneDrive } from "./phone";
+import { PhoneBrowserList, PhoneDrive } from "./phone";
 import { copyFromPage, pasteFromClipboard } from "./clipboard";
 import { Favicon } from "./favicon";
 import { attachBox } from "./geometry";
@@ -36,6 +36,7 @@ export function BrowserTab({ groups, toast, phone }: { groups: BrowserGroup[]; t
   const previous = groups.filter((g) => g.status === "closed" || g.status === "lost");
   const [chosen, setChosen] = useState<string | null>(null);
   const group = open.find((g) => g.id === chosen) ?? open[0] ?? null;
+  const saving = useMemo(() => deviceSaving(!!phone), [phone]);
   if (!group) {
     return (
       <div className="bp-empty">
@@ -48,7 +49,12 @@ export function BrowserTab({ groups, toast, phone }: { groups: BrowserGroup[]; t
       </div>
     );
   }
-  return <BrowserPanel key={group.id} group={group} groups={open} onGroup={setChosen} toast={toast} phone={phone} />;
+  // A phone shows one browser at a time: with several, the sheet opens on their list and a row leads
+  // into one, with the way back to the list in its bar.
+  if (phone && open.length > 1 && !open.some((g) => g.id === chosen)) {
+    return <PhoneBrowserList groups={open} saving={saving} onPick={setChosen} onTake={(id) => { askTake(id); setChosen(id); }} />;
+  }
+  return <BrowserPanel key={group.id} group={group} groups={open} onGroup={setChosen} toast={toast} phone={phone} onList={phone && open.length > 1 ? () => setChosen(null) : undefined} />;
 }
 
 type PanelProps = {
@@ -59,6 +65,8 @@ type PanelProps = {
   phone?: boolean;
   /** The page of its own: no panel around it. The log sits beside the picture once it is opened. */
   full?: boolean;
+  /** A phone's way back to the list of the chat's browsers, when it has several. */
+  onList?: () => void;
 }
 
 type BrowserOwnership = {
@@ -191,7 +199,7 @@ function useFillPage(group: string, stage: { current: HTMLDivElement | null }, e
   }, [enabled, group, stage]);
 }
 
-export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = false, full = false }: PanelProps) {
+export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = false, full = false, onList }: PanelProps) {
   const saving = useMemo(() => deviceSaving(phone), [phone]);
   const stage = useRef<HTMLDivElement | null>(null);
   const live = useLiveView(group.id, "live", {
@@ -292,9 +300,17 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
   const tabs = snap.tabs.length ? snap.tabs : group.tabs;
   const viewer = (
     <div className="bp-stage-wrap">
-      <Banner drive={drive} agent={agent} needs={needs} state={snap.state.kind} control={control} viewers={snap.viewers} bare={phone} />
+      {phone
+        ? <PhoneNote drive={drive} needs={needs} state={snap.state.kind} viewers={snap.viewers} />
+        : <Banner drive={drive} agent={agent} needs={needs} state={snap.state.kind} control={control} viewers={snap.viewers} />}
       {(snap.state.kind === "reconnecting" || snap.state.kind === "proxy-blocked" || snap.state.kind === "unavailable") && <OwnershipDisclosure groupId={group.id} />}
       {steps && <RecordBar group={group.id} recording={steps} tab={viewing?.id ?? null} toast={toast} />}
+      {phone && !replaying && (
+        <div className="bp-frame-bar">
+          <Icon name={secure(url) ? "lock" : "globe"} size={14} />
+          <span className="truncate">{url.replace(/^https?:\/\//, "") || t("browser.blank")}</span>
+        </div>
+      )}
       <BrowserViewer
         live={live}
         snap={snap}
@@ -307,6 +323,11 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
         className="bp-viewer"
         style={phone ? { aspectRatio: `${group.viewport.w} / ${group.viewport.h}` } : undefined}
       >
+        {phone && drive !== "you" && drive !== "closed" && snap.painted && (
+          // A tap on the picture says how to use the page and offers the button that hands it over,
+          // instead of doing nothing at all.
+          <div className="bp-tapveil" onClick={() => statusToast(t("browser.take.hint"), { action: { label: t("browser.take"), run: () => void control.take() } })} />
+        )}
         {drive !== "you" && !phone && snap.painted && (
           // A click on the picture must not take the page from the agent by accident: it points at the
           // button that does, and says so.
@@ -317,7 +338,7 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
       </BrowserViewer>
       {snap.dialog && <DialogChip group={group.id} tab={viewing?.id ?? null} dialog={snap.dialog} canAnswer={drive === "you"} toast={toast} />}
       {replaying && (
-        <ReplayStage group={group.id} viewportW={group.viewport.w} frames={frames} index={replay} rows={rows} agent={agent} onIndex={setReplay} onLive={() => setReplay(null)} />
+        <ReplayStage group={group.id} viewportW={group.viewport.w} frames={frames} index={replay} rows={rows} agent={agent} onIndex={setReplay} onLive={() => setReplay(null)} phone={phone} />
       )}
       {draft ? (
         <section className="bp-rec" data-state="draft"><ProcedureEditor draft={draft} toast={toast} onDone={() => setDraft(null)} /></section>
@@ -328,9 +349,9 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
   );
 
   return (
-    <div className={`bp ${phone ? "phone" : ""} ${full ? "full" : ""} ${logOpen ? "log-open" : ""}`} data-group={group.id} data-drive={drive}>
+    <div className={`bp ${phone ? "phone" : ""} ${full ? "full" : ""} ${logOpen ? "log-open" : ""} ${phone && replaying ? "replaying" : ""}`} data-group={group.id} data-drive={drive}>
       {phone ? (
-        <PhoneBar group={group} url={url} tabs={tabs.length} control={control} />
+        <PhoneBar group={group} url={url} tabs={tabs.length} drive={drive} state={snap.state.kind} onList={onList} />
       ) : (
         <Toolbar group={group} groups={groups} onGroup={onGroup} live={live} snap={snap} url={url} tabs={tabs} viewing={viewing?.id ?? null} drive={drive} control={control} toast={toast} full={full} fit={fit} onFit={setFit}
           recording={recording.recording.frames} frames={frames} onReplay={() => setReplay(frames.length - 1)} recordable={drive === "you" && !steps} />
@@ -339,8 +360,10 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
         {viewer}
         {/* A phone's sheet is taller than the page's picture: the log fills what is left under it. */}
         <ActionLog group={group.id} recent={snap.recent} open={phone || logOpen} onToggle={() => setLogOpen((o) => !o)} onFocus={(a) => live?.focus(a)} agent={agent} page={phone}
-          frames={frames} onReplay={(i) => setReplay(i)} />
+          frames={frames} onReplay={(i) => setReplay(i)} current={phone && replaying ? frames[replay]?.action_id ?? null : null} />
       </div>
+      {/* The decision in the thumb's reach, the full width of the sheet, under everything it decides. */}
+      {phone && <div className="bp-foot"><ControlButton control={control} phone ready={snap.state.kind === "live" && !!snap.clientId} /></div>}
       {phone && drive === "you" && live && (
         createPortal(<PhoneDrive group={group} live={live} snap={snap} agent={agent} url={url} saving={saving} onGiveBack={(note) => void control.giveBack(note)} />, document.body)
       )}
@@ -403,10 +426,22 @@ function useControl(group: BrowserGroup, live: LiveView | null, snap: LiveSnapsh
 }
 
 /** The primary button: what this window can do about who drives. */
-export function ControlButton({ control, compact }: { control: ControlApi; compact?: boolean }) {
+export function ControlButton({ control, compact, phone, ready = true }: { control: ControlApi; compact?: boolean; phone?: boolean; ready?: boolean }) {
   const [giving, setGiving] = useState<HTMLElement | null>(null);
   const { drive, busy } = control;
   if (drive === "closed") return null;
+  if (phone && drive !== "you") {
+    // The sheet's one decision, full width: amber when the agent asked for it, the plain filled button
+    // otherwise. Disabled until the stream is live, because there is no client to hand the page to yet.
+    const word = drive === "paused" ? t("browser.resume") : drive === "other" ? t("browser.ph.takeover") : t("browser.take");
+    return (
+      <button type="button" className={`bp-control ${drive === "paused" ? "resume" : "take"} ${drive === "needs" ? "needs" : ""}`} disabled={busy || (drive !== "paused" && !ready)}
+        onClick={() => void (drive === "paused" ? control.resume() : control.take())}>
+        <Icon name={drive === "paused" ? "play" : "user"} size={18} />
+        {word}
+      </button>
+    );
+  }
   if (drive === "you") {
     return (
       <>
@@ -624,23 +659,55 @@ function TabStrip({ tabs, viewing, active, onPick }: { tabs: { id: string; url: 
   );
 }
 
-function PhoneBar({ group, url, tabs, control }: { group: BrowserGroup; url: string; tabs: number; control: ControlApi }) {
+/** The phone sheet's head: the site, and one line on what is happening there now. */
+function PhoneBar({ group, url, tabs, drive, state, onList }: { group: BrowserGroup; url: string; tabs: number; drive: DriveState; state: string; onList?: () => void }) {
   const active = group.tabs.find((x) => x.active) ?? group.tabs[0];
+  const sub = state === "connecting" ? t("browser.ph.sub.connecting")
+    : state === "reconnecting" || state === "proxy-blocked" ? t("browser.state.reconnecting")
+    : state === "unavailable" ? t("browser.state.gone")
+    : t(`browser.ph.sub.${drive}`);
   return (
     <div className="bp-phonebar">
-      <Favicon url={active?.favicon_url ?? ""} page={url} size={16} />
-      <span className="bp-phonebar-domain truncate">{domainOf(url) || t("browser.blank")}</span>
-      {tabs > 1 && <span className="bp-phonebar-tabs">{plural("browser.tabs.n", tabs)}</span>}
-      <ControlButton control={control} />
+      {onList && <button type="button" className="bp-phonebar-back" onClick={onList} aria-label={t("browser.ph.list.back")} title={t("browser.ph.list.back")}><Icon name="back" size={22} /></button>}
+      <Favicon url={active?.favicon_url ?? ""} page={url} size={20} />
+      <span className="bp-phonebar-main">
+        <span className="bp-phonebar-domain truncate">{domainOf(url) || t("browser.blank")}</span>
+        <span className={`bp-phonebar-sub truncate ${drive}`}>{sub}{tabs > 1 ? ` · ${plural("browser.tabs.n", tabs)}` : ""}</span>
+      </span>
     </div>
   );
+}
+
+/** A phone's note over the picture: only what asks something of the operator or explains a wait. */
+function PhoneNote({ drive, needs, state, viewers }: { drive: DriveState; needs: { reason: string; what?: string } | null; state: string; viewers: LiveSnapshot["viewers"] }) {
+  if (state === "reconnecting" || state === "proxy-blocked") return <div className="bp-pnote warn" role="status" data-banner="offline"><Icon name="reload" size={18} /><span className="bp-pnote-main"><b>{t("browser.banner.offline")}</b></span></div>;
+  if (drive === "needs") {
+    return (
+      <div className="bp-pnote warn" role="status" data-banner="needs">
+        <Icon name="user" size={18} />
+        <span className="bp-pnote-main"><b>{t("browser.ph.needs.title", { what: needWords(needs) })}</b><span>{t("browser.ph.needs.sub")}</span></span>
+      </div>
+    );
+  }
+  if (drive === "other") {
+    const who = viewers.others.find((o) => o.label)?.label;
+    return (
+      <div className="bp-pnote info" role="status" data-banner="other">
+        <Icon name="user" size={18} />
+        <span className="bp-pnote-main"><b>{t("browser.ph.other.title")}</b><span>{t("browser.ph.other.sub", { who: who || t("browser.ph.other.device") })}</span></span>
+      </div>
+    );
+  }
+  if (drive === "paused") return <div className="bp-pnote" role="status" data-banner="paused"><Icon name="pause" size={18} /><span className="bp-pnote-main"><b>{t("browser.banner.paused", { name: t("browser.agent") })}</b></span></div>;
+  if (drive === "closed") return <div className="bp-pnote" role="status" data-banner="closed"><Icon name="stop" size={18} /><span className="bp-pnote-main"><b>{t("browser.banner.closed")}</b></span></div>;
+  return null;
 }
 
 // ── the banner over the picture ──────────────────────────────────────────────────────────────
 
 const BANNER_ICON: Record<DriveState, IconName> = { acting: "bolt", idle: "globe", you: "user", other: "user", paused: "pause", needs: "alert", closed: "stop" };
 
-function Banner({ drive, agent, needs, state, control, viewers, bare }: { drive: DriveState; agent: string; needs: { reason: string; what?: string } | null; state: string; control: ControlApi; viewers: LiveSnapshot["viewers"]; bare?: boolean }) {
+function Banner({ drive, agent, needs, state, control, viewers }: { drive: DriveState; agent: string; needs: { reason: string; what?: string } | null; state: string; control: ControlApi; viewers: LiveSnapshot["viewers"] }) {
   const offline = state === "reconnecting" || state === "proxy-blocked";
   let text: ReactNode;
   let action: ReactNode = null;
@@ -662,9 +729,7 @@ function Banner({ drive, agent, needs, state, control, viewers, bare }: { drive:
   } else {
     text = drive === "acting" ? t("browser.banner.acting", { name: agent }) : t("browser.banner.idle", { name: agent });
   }
-  // A phone's bar above already holds the one button, and has no room for who else watches.
-  if (bare) action = null;
-  const others = bare ? [] : viewers.others.filter((o) => o.label);
+  const others = viewers.others.filter((o) => o.label);
   return (
     <div className={`bp-banner ${offline ? "offline" : drive}`} role="status" data-banner={offline ? "offline" : drive}>
       <span className="bp-banner-icon"><Icon name={offline ? "reload" : BANNER_ICON[drive]} size={13} /></span>
@@ -703,7 +768,7 @@ function DialogChip({ group, tab, dialog, canAnswer, toast }: { group: string; t
 
 const ACTOR_ICON: Record<string, IconName> = { agent: "bolt", operator: "user", page: "globe", system: "shield" };
 
-export function ActionLog({ group, recent, open, onToggle, onFocus, agent, page = false, frames = [], onReplay }: { group: string; recent: ActionEvent[]; open: boolean; onToggle: () => void; onFocus: (a: ActionEvent) => void; agent: string; page?: boolean; frames?: BrowserFrame[]; onReplay?: (index: number) => void }) {
+export function ActionLog({ group, recent, open, onToggle, onFocus, agent, page = false, frames = [], onReplay, current = null }: { group: string; recent: ActionEvent[]; open: boolean; onToggle: () => void; onFocus: (a: ActionEvent) => void; agent: string; page?: boolean; frames?: BrowserFrame[]; onReplay?: (index: number) => void; current?: string | null }) {
   const listed = useActions(group);
   const rows = useMemo(() => mergeActions(listed, recent.map(rowOfEvent)), [listed, recent]);
   const latest = rows[0];
@@ -739,7 +804,7 @@ export function ActionLog({ group, recent, open, onToggle, onFocus, agent, page 
         {rows.length === 0 && <li className="bp-log-empty sub">{t("browser.log.empty")}</li>}
         {rows.map((row) => (
           <li key={row.id}>
-            <button type="button" className={`bp-log-row ${focused === row.id ? "on" : ""} ${row.ok === false ? "failed" : ""}`} onClick={() => pick(row)} data-action={row.id}>
+            <button type="button" className={`bp-log-row ${focused === row.id || (current && (row.action_id || row.id) === current) ? "on" : ""} ${row.ok === false ? "failed" : ""}`} onClick={() => pick(row)} data-action={row.id}>
               <span className="bp-log-time">{clock(row.at)}</span>
               <span className={`bp-log-actor ${row.actor}`} title={row.actor === "operator" ? t("browser.actor.you") : row.actor === "page" ? t("browser.actor.page") : agent}><Icon name={ACTOR_ICON[row.actor] ?? "bolt"} size={12} /></span>
               <span className="bp-log-text"><ActionText row={row} agent={agent} /></span>

@@ -13,7 +13,8 @@ Desktop, English and Russian:
 
 Phone (390 × 844, touch):
 
-- the header's button carries a live thumbnail, and amber "!" when the agent needs the operator;
+- the header's chip listens to the browser on a small read-only stream, and turns amber with "Needs
+  you" when the agent needs the operator;
 - the first time a browser opens a line says so and offers to view it;
 - the button opens the sheet on the Browser tab; the page never scrolls sideways;
 - taking control fills the screen; a tap is a click at the page's pixels, a finger dragged up scrolls
@@ -206,7 +207,14 @@ def phone(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     page = open_page(context, bs, stub, f"{BASE}/agents/{S1}?token=t&scheme=dark&lang={lang}", wait=".browser-headbtn")
     if page.locator(".bp-pip").count():
         say("a phone shows the floating preview")
-    wait_frames(page, ".browser-headbtn", 1)
+    # The chip draws no picture any more; what it needs is its stream, which says a request has arrived
+    # before the listing is read again.
+    for _ in range(100):
+        if any(c.tier == "thumb" and c.attached and not c.closed for c in bs.clients):
+            break
+        page.wait_for_timeout(100)
+    else:
+        say("the header's chip never opened its stream")
     toast = page.locator(".toast")
     toast.wait_for(timeout=5000)
     print(f"[{lang}] phone toast: {toast.inner_text()!r}")
@@ -214,6 +222,10 @@ def phone(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
         say("the first browser has no line offering to view it")
     bs.needs_you(gid, "login", "Sign in to accounts.example.com")
     page.wait_for_selector(".browser-headbtn.needs .browser-dot.needs", timeout=5000)
+    chip = page.locator(".browser-headbtn").inner_text()
+    print(f"[{lang}] phone chip: {chip!r}")
+    if not chip.strip():
+        say("the header's chip does not say that the agent needs the operator")
     bs.set_control(gid, "agent")
     bs.groups[gid].needs = None
 

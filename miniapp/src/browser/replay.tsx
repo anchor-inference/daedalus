@@ -42,7 +42,7 @@ export function placeBox(box: { x: number; y: number; w: number; h: number }, re
   return { x: rect.x + box.x * scale, y: rect.y + box.y * scale, w: box.w * scale, h: box.h * scale };
 }
 
-export function ReplayStage({ group, viewportW, frames, index, rows, agent, onIndex, onLive }: {
+export function ReplayStage({ group, viewportW, frames, index, rows, agent, onIndex, onLive, phone = false }: {
   group: string;
   viewportW: number;
   frames: BrowserFrame[];
@@ -51,6 +51,9 @@ export function ReplayStage({ group, viewportW, frames, index, rows, agent, onIn
   agent: string;
   onIndex: (index: number) => void;
   onLive: () => void;
+  /** A phone: the step as a page of its own in the sheet, with its words and previous / next under
+   *  the picture instead of a scrubber over it. */
+  phone?: boolean;
 }) {
   const frame = frames[Math.max(0, Math.min(index, frames.length - 1))];
   const box = useRef<HTMLDivElement>(null);
@@ -121,6 +124,37 @@ export function ReplayStage({ group, viewportW, frames, index, rows, agent, onIn
   const point = row?.point && rect.w ? placeBox({ ...row.point, w: 0, h: 0 }, rect, cssW) : null;
   if (!frame) return null;
   const words = row ? actionWords(row) : null;
+  const picture = (
+    <div className="bp-replay-stage" ref={box} style={phone ? { aspectRatio: `${frame.w} / ${frame.h}` } : undefined}>
+      {url && <img className="bp-replay-img" src={url} alt="" style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }} draggable={false} />}
+      {failed && <div className="bp-replay-gone sub">{t("browser.replay.gone")}</div>}
+      {placed && (
+        <div className="bp-replay-box" style={{ left: placed.x, top: placed.y, width: placed.w, height: placed.h }}>
+          {words && !phone && <span className="bp-replay-label truncate">{t(words.key, { ...words.vars, name: agent })}</span>}
+        </div>
+      )}
+      {point && <i className="bp-replay-point" style={{ left: point.x, top: point.y }} aria-hidden="true" />}
+    </div>
+  );
+  if (phone) {
+    return (
+      <div className="bp-replay phone" data-no={frame.no} role="region" aria-label={t("browser.replay")}>
+        <div className="bp-replay-phead">
+          <button type="button" className="bp-replay-live" onClick={onLive} aria-label={t("browser.replay.live")} title={t("browser.replay.live")}><Icon name="back" size={22} /></button>
+          <span className="bp-replay-ptitle">
+            <b>{t("browser.ph.step", { n: index + 1, of: frames.length })}</b>
+            <span>{t("browser.ph.step.sub", { time: clock(new Date(frame.at).toISOString()) })}</span>
+          </span>
+        </div>
+        {picture}
+        {words && <p className="bp-replay-words">{t(words.key, { ...words.vars, name: agent })}</p>}
+        <div className="bp-replay-nav">
+          <button type="button" disabled={index <= 0} onClick={() => onIndex(index - 1)}><Icon name="back" size={18} />{t("browser.ph.step.n", { n: Math.max(1, index) })}</button>
+          <button type="button" disabled={index >= frames.length - 1} onClick={() => onIndex(index + 1)}>{t("browser.ph.step.n", { n: Math.min(frames.length, index + 2) })}<Icon name="forward" size={18} /></button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="bp-replay" data-no={frame.no} role="region" aria-label={t("browser.replay")}>
       <div className="bp-replay-bar">
@@ -141,16 +175,7 @@ export function ReplayStage({ group, viewportW, frames, index, rows, agent, onIn
           {t("browser.replay.live")}
         </button>
       </div>
-      <div className="bp-replay-stage" ref={box}>
-        {url && <img className="bp-replay-img" src={url} alt="" style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }} draggable={false} />}
-        {failed && <div className="bp-replay-gone sub">{t("browser.replay.gone")}</div>}
-        {placed && (
-          <div className="bp-replay-box" style={{ left: placed.x, top: placed.y, width: placed.w, height: placed.h }}>
-            {words && <span className="bp-replay-label truncate">{t(words.key, { ...words.vars, name: agent })}</span>}
-          </div>
-        )}
-        {point && <i className="bp-replay-point" style={{ left: point.x, top: point.y }} aria-hidden="true" />}
-      </div>
+      {picture}
     </div>
   );
 }

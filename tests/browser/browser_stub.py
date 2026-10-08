@@ -46,10 +46,14 @@ class Scene:
     size: tuple[int, int]
     thumb_size: tuple[int, int]
     boxes: dict[str, dict[str, float]]
+    sizes: dict[tuple[int, int], bytes] = field(default_factory=dict)
+    """The same page rendered at other viewport sizes (``render_scenes(sizes=...)``), for a picture of
+    a page the app asked to take another shape: a phone driving it at its own width."""
 
 
-def render_scenes(browser: Any, quality: int = 72) -> dict[str, Scene]:
-    """Every page of ``browser_pages.SCENES`` as a 1280×800 JPEG, a 320×200 one, and its elements' boxes."""
+def render_scenes(browser: Any, quality: int = 72, sizes: tuple[tuple[int, int], ...] = ()) -> dict[str, Scene]:
+    """Every page of ``browser_pages.SCENES`` as a 1280×800 JPEG, a 320×200 one, and its elements' boxes;
+    with ``sizes``, also as a JPEG at each of those viewport sizes."""
     context = browser.new_context(viewport={"width": VIEWPORT[0], "height": VIEWPORT[1]}, device_scale_factor=1)
     page = context.new_page()
     out: dict[str, Scene] = {}
@@ -65,6 +69,12 @@ def render_scenes(browser: Any, quality: int = 72) -> dict[str, Scene]:
             jpeg = page.screenshot(type="jpeg", quality=quality)
             thumb, thumb_size = _thumbnail(jpeg)
             out[name] = Scene(name, url, title, favicon, jpeg, thumb, VIEWPORT, thumb_size, boxes)
+        for w, h in sizes:
+            page.set_viewport_size({"width": w, "height": h})
+            for name, (_url, _title, _favicon, html, _selectors) in SCENES.items():
+                page.set_content(html)
+                page.wait_for_timeout(50)
+                out[name].sizes[(w, h)] = page.screenshot(type="jpeg", quality=quality)
     finally:
         context.close()
     return out
@@ -132,6 +142,8 @@ class Group:
     actions: list[dict[str, Any]] = field(default_factory=list)
     dialog: dict[str, Any] | None = None
     recording: bool = False
+    viewport: tuple[int, int] = VIEWPORT
+    """The page's size: the default, or a size a scene was rendered at that the app asked for."""
     frames: list[dict[str, Any]] = field(default_factory=list)
     """Keyframes while recording: one when it starts and one after every action, each the picture of
     the scene on screen then (``scene`` names it; the REST answer leaves it out)."""
@@ -223,7 +235,7 @@ class BrowserStub:
             "profile": f"{g.owner_kind}-{g.owner_id}"[:64],
             "env": "container",
             "status": g.status,
-            "viewport": {"w": VIEWPORT[0], "h": VIEWPORT[1]},
+            "viewport": {"w": g.viewport[0], "h": g.viewport[1]},
             "tabs": [self.tab_view(t) for t in g.tabs],
             "active_tab": self.active(g).id,
             "control": {"owner": g.owner, "holder": holder if g.owner == "human" else None, "until": None, "reason": g.reason},
@@ -240,7 +252,12 @@ class BrowserStub:
         s = self.scenes[tab.scene]
         thumb = client.tier == "thumb"
         (w, h), image = (s.thumb_size, s.thumb) if thumb else (s.size, s.jpeg)
-        meta = {"tab": tab.id, "tier": client.tier, "w": w, "h": h, "vw": VIEWPORT[0], "vh": VIEWPORT[1], "scroll_x": 0, "scroll_y": 0, "offset_top": 0, "page_scale": 1, "ts": int(time.time() * 1000)}
+        vw, vh = VIEWPORT
+        shaped = s.sizes.get(client.group.viewport)
+        if shaped and not thumb:
+            (w, h), image = client.group.viewport, shaped
+            vw, vh = client.group.viewport
+        meta = {"tab": tab.id, "tier": client.tier, "w": w, "h": h, "vw": vw, "vh": vh, "scroll_x": 0, "scroll_y": 0, "offset_top": 0, "page_scale": 1, "ts": int(time.time() * 1000)}
         return meta, image
 
     def viewed(self, client: Client) -> Tab:
@@ -534,6 +551,10 @@ class BrowserStub:
             w, h = int(body.get("w") or 0), int(body.get("h") or 0)
             if not (320 <= w <= 3840 and 320 <= h <= 3840):
                 return 400, {"detail": "viewport sides must be 320-3840"}
+            # A size some scene was rendered at (or the default again) is taken, and the picture follows.
+            if (w, h) == VIEWPORT or any((w, h) in sc.sizes for sc in self.scenes.values()):
+                g.viewport = (w, h)
+                self.paint(g.id)
             return 200, {"viewport": {"w": w, "h": h}}
         if action == "control" and method == "POST":
             owner = body.get("owner")

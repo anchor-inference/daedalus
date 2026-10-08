@@ -26,8 +26,10 @@ import legacy from "./ui/styles.css?raw";
 import tokens from "./ui/tokens.css?raw";
 import desktop from "./ui/desktop.css?raw";
 import phone from "./ui/phone.css?raw";
+import browserPhone from "./browser/phone.css?raw";
 import petHost from "./pethost.tsx?raw";
-const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone;
+// The browser's phone sheet keeps its looks beside its component; it answers to the same scale.
+const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone;
 
 type Rule = { selector: string; media: string; body: string };
 
@@ -140,7 +142,9 @@ const BOX_LIMIT = 40;
  *  attachment tiles of the + sheet and the home's greeting, each a block that holds content rather
  *  than being a row. */
 const PHONE_BOX_LIMIT = 61;
-const PHONE_SURFACES = [".ph-empty", ".ph-tile", ".ph-hero"];
+// The browser list's rows carry a live thumbnail, and the give-back note is a field for a sentence or
+// two: both are taller than a text row on purpose.
+const PHONE_SURFACES = [".ph-empty", ".ph-tile", ".ph-hero", ".bp-list-open", ".bp-give-note"];
 
 /** Content with an intentional height: two-line file cards and search hits, a message placeholder,
  *  and the document viewport. Keep their limits explicit so larger boxes still fail the guard. */
@@ -357,7 +361,7 @@ describe("the phone", () => {
   });
 
   it("keeps every phone rule inside the phone media query, so a desktop never reads one", () => {
-    const outside = rules(phone).filter((r) => !r.media.includes(PHONE)).map((r) => r.selector);
+    const outside = rules(phone + "\n" + browserPhone).filter((r) => !r.media.includes(PHONE)).map((r) => r.selector);
     expect(outside).toEqual([]);
   });
 });
