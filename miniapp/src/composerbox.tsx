@@ -4,6 +4,9 @@
 import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, AsrStatus, ModelFallback, Question, SkillEntry, SlashCommand } from "./api";
 import { Popover } from "./ui/dialogs";
+import { Banner, BottomSheet, SheetRow } from "./ui/phone";
+import { navigate, pathFor } from "./router";
+import { useOffline } from "./store";
 import { Icon } from "./icons";
 import { fileGlyph, previewKind, canPreview } from "./preview";
 import { enterSends, errorText, fmtBytes, fmtTok, haptic } from "./ui";
@@ -121,9 +124,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [progress, setProgress] = useState<number | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
+  const focus = useComposerFocus(phone);
+  const focused = focus.focused;
+  const offline = useOffline();
   const textarea = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
+  const photosInput = useRef<HTMLInputElement>(null);
   const plusButton = useRef<HTMLButtonElement>(null);
   const dock = useRef<HTMLDivElement>(null);
 
@@ -438,9 +445,25 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const primaryLabel = action === "stop" ? t("session.stop") : action === "reply" ? t("composer.reply") : action === "queue" ? t("composer.queue") : t("session.send");
   const place = composerContext(props.place);
 
+  // A phone draws the composer in two shapes (ui/phone.css): one 48 px row at rest, and the text over
+  // a toolbar once the field has the reader or holds anything. The white circle is a voice
+  // conversation while the field is empty and nothing runs, Send with text, Stop while a run is on.
+  const empty = !draft.trim() && files.length === 0;
+  const shape = !phone ? undefined : focused || !empty || asking || !!approval || progress !== null || needsReview ? "open" : "idle";
+  const voiceCircle = phone && action === "send" && empty && !offline;
+  const useCurrent = () => { setSavedTarget(currentTarget); writeDraftTarget(sessionId, currentTarget); clearSendIntent(sessionId); };
+
   return (
-    <div className="composer" data-primary={action}>
+    <div className="composer" data-primary={action} data-shape={shape} data-typed={phone && draft.trim() ? "" : undefined}
+      onFocus={phone ? focus.onFocus : undefined}
+      onBlur={phone ? focus.onBlur : undefined}>
       {props.above}
+      {phone && needsReview && (
+        <Banner tone="warn" icon="alert" sub={draftChange(savedTarget, currentTarget)} action={<button type="button" className="ph-btn sm" onClick={useCurrent}>{t("composer.draft.useCurrent")}</button>}>
+          {t("composer.draft.targetChanged")}
+        </Banner>
+      )}
+      {phone && fileStorageError && files.length > 0 && <Banner tone="bad" icon="alert">{t("composer.attachments.unsaved")}</Banner>}
       {props.queued.length > 0 && (
         <div className="steers" aria-label={t("composer.steers")}>
           {props.queued.map((s) => (
@@ -526,7 +549,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         </div>
       )}
       <VoiceNoteFailed note={note} />
-      <div className={`composer-box ${voiceBar ? "voicing" : ""}`}>
+      {/* A tap anywhere on the phone's pill that is not a control is a tap on its field: the field is
+          36 px inside a 48 px pill, and the pill is the target the reader sees. */}
+      <div className={`composer-box ${voiceBar ? "voicing" : ""}`} onClick={phone ? (e) => { if (e.target === e.currentTarget) textarea.current?.focus(); } : undefined}>
         {voiceBar && <VoiceBar note={note} />}
         {!phone && !voiceBar && place.length > 0 && (
           <div className="composer-place" aria-label={t("composer.place")}>
@@ -536,9 +561,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           </div>
         )}
         {progress !== null && <div className="sub upload-progress" role="status">{t("upload.progress", { percent: Math.floor(progress * 100) })}</div>}
-        {fileStorageError && files.length > 0 && <div className="sub upload-progress" role="status">{t("composer.attachments.unsaved")}</div>}
+        {!phone && fileStorageError && files.length > 0 && <div className="sub upload-progress" role="status">{t("composer.attachments.unsaved")}</div>}
         {fileReadySession !== sessionId && <div className="sub upload-progress" role="status">{t("composer.attachments.restoring")}</div>}
-        {needsReview && <div className="sub upload-progress" role="status">{t("composer.draft.targetChanged")} <button type="button" className="btn small" onClick={() => { setSavedTarget(currentTarget); writeDraftTarget(sessionId, currentTarget); clearSendIntent(sessionId); }}>{t("composer.draft.useCurrent")}</button></div>}
+        {!phone && needsReview && <div className="sub upload-progress" role="status">{t("composer.draft.targetChanged")} <button type="button" className="btn small" onClick={useCurrent}>{t("composer.draft.useCurrent")}</button></div>}
         {files.length > 0 && !voiceBar && (
           <div className="attachments" aria-label={t("session.attachments")}>
             {files.map((f, i) => (
@@ -561,10 +586,22 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         <div className="composer-row" hidden={voiceBar}>
           <input ref={fileInput} type="file" multiple hidden onChange={(e) => { addFiles(e.target.files ?? []); e.target.value = ""; }} />
           <input ref={photoInput} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { addFiles(e.target.files ?? []); e.target.value = ""; }} />
+          {phone && <input ref={photosInput} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => { addFiles(e.target.files ?? []); e.target.value = ""; }} />}
           <button ref={plusButton} type="button" className={`iconbtn flat plus ${plusOpen ? "on" : ""}`} disabled={sending || fileReadySession !== sessionId} onClick={() => setPlusOpen((o) => !o)} aria-label={t("composer.plus")} title={t("composer.plus")} aria-haspopup="menu" aria-expanded={plusOpen}>
             <Icon name="plus" />
           </button>
-          {plusOpen && (
+          {plusOpen && phone && (
+            <PlusSheet onClose={() => setPlusOpen(false)}
+              onPhoto={() => photoInput.current?.click()}
+              onPhotos={() => photosInput.current?.click()}
+              onFiles={() => fileInput.current?.click()}
+              onPaste={() => void pasteFromClipboard()}
+              onRecord={props.asr?.configured && note.supported && note.state.phase === "idle" ? () => void note.start() : undefined}
+              onCommands={commands.length || props.skills?.length ? () => { setDraft("/"); window.setTimeout(() => textarea.current?.focus(), 0); } : undefined}
+              commandsHint={commands.length || props.skills?.length ? t("ph.plus.commands.hint", { n: commands.length + (props.skills?.length ?? 0) }) : undefined}
+              place={place.map((chip) => chip.name).join(" · ") || undefined} />
+          )}
+          {plusOpen && !phone && (
             <Popover anchor={plusButton.current} onClose={() => setPlusOpen(false)} className="plus-menu" label={t("composer.plus")}>
               <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><Icon name="attach" size={16} />{t("session.attach")}</button>
               {phone && <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); photoInput.current?.click(); }}><Icon name="image" size={16} />{t("composer.photo")}</button>}
@@ -575,6 +612,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           {props.onChooseMode && props.onYagni
             ? <ModeSelect mode={props.mode ?? ""} modes={props.modes ?? []} yagni={!!props.yagni} onChooseMode={props.onChooseMode} onYagni={props.onYagni} sheet={phone} />
             : <span className="composer-mode">{t("composer.mode.agent")}</span>}
+          {phone && offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">
             {(!phone || status !== "running") && <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={setModelOpen} onChoose={props.onChooseModel} sheet={phone}
               effort={props.reasoningEffort} thinking={props.thinking} onChooseEffort={props.onChooseEffort} />}
@@ -589,15 +627,103 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             {/* A written pill turns the circle into Queue, and Stop must not go with it: the run is
                 still on, and the shortcut alone is not a way to stop it on a phone. */}
             {action === "queue" && <button type="button" className="iconbtn flat stop-aside" onClick={onStop} aria-label={t("session.stop")} title={t("session.stop")}><Icon name="stop" size={16} /></button>}
-            <button type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled || fileReadySession !== sessionId || needsReview} aria-label={primaryLabel} title={primaryLabel} data-action={action}>
-              <Icon name={action === "stop" ? "stop" : action === "reply" ? "send" : "up"} />
-            </button>
+            {voiceCircle ? <VoiceCircle /> : (
+              <button type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled || fileReadySession !== sessionId || needsReview || (phone && offline && action !== "stop")} aria-label={primaryLabel} title={primaryLabel} data-action={action}>
+                <Icon name={action === "stop" ? "stop" : action === "reply" ? "send" : "up"} />
+              </button>
+            )}
           </div>
         </div>
       </div>
     </div>
   );
 });
+
+/**
+ * Whether the phone's composer has the reader, for its open shape. Leaving it closes the shape only
+ * once the finger is up: closing on the blur that a press causes shrank the composer by a toolbar's
+ * height under that finger, everything above it slid down, and the tap landed on whatever moved
+ * into its place (the newest-message button was missed every time). And only the field opens it:
+ * opened by a press on a line inside the composer (the goal line, a queued card), it grew under that
+ * press and the press landed on the field instead of on the line.
+ */
+export function useComposerFocus(enabled: boolean) {
+  const [focused, setFocused] = useState(false);
+  const held = useRef(false);
+  useEffect(() => {
+    if (!enabled) return;
+    const down = () => { held.current = true; };
+    const up = () => { held.current = false; };
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", up, true);
+    return () => {
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", up, true);
+    };
+  }, [enabled]);
+  const onFocus = useCallback((event: React.FocusEvent<HTMLElement>) => { if (event.target instanceof HTMLTextAreaElement) setFocused(true); }, []);
+  const onBlur = useCallback((event: React.FocusEvent<HTMLElement>) => {
+    const root = event.currentTarget;
+    if (root.contains(event.relatedTarget as Node | null)) return;
+    // A sheet the toolbar opened (the model, the mode, the +) holds the focus without leaving the
+    // composer: the toolbar stays open behind it, and focus comes back to it when the sheet closes.
+    const settle = () => window.setTimeout(() => {
+      const active = document.activeElement;
+      if (!root.contains(active) && !active?.closest(".overlay-root")) setFocused(false);
+    }, 0);
+    if (held.current) window.addEventListener("pointerup", settle, { once: true });
+    else settle();
+  }, []);
+  return { focused, onFocus, onBlur };
+}
+
+/** What changed under a draft since it was written, in one line: "Model: A → B · workspace: C". */
+function draftChange(saved: DraftTarget | null, now: DraftTarget): string {
+  if (!saved) return "";
+  const parts: string[] = [];
+  if (saved.model !== now.model) parts.push(t("ph.draft.model", { from: saved.model || "—", to: now.model || "—" }));
+  if (saved.workspace !== now.workspace || saved.project !== now.project) parts.push(t("ph.draft.workspace", { name: now.workspace || now.project || "—" }));
+  if (saved.mode !== now.mode || saved.effort !== now.effort) parts.push(t("ph.draft.mode"));
+  if (saved.reply !== now.reply) parts.push(t("ph.draft.reply"));
+  return parts.join(" · ");
+}
+
+/** The composer's white circle on a phone while the field is empty: a spoken conversation, on the
+ *  voice page. The microphone beside it records a note into the field instead. */
+export function VoiceCircle() {
+  return (
+    <button type="button" className="roundbtn primary voice" onClick={() => navigate(pathFor("voice"))} aria-label={t("ph.voice.talk")} title={t("ph.voice.talk")} data-action="voice">
+      <Icon name="wave" size={18} />
+    </button>
+  );
+}
+
+/**
+ * The composer's "+" on a phone: three tiles for what is attached most (a photo now, a picture from the
+ * gallery, a file) and rows for the rest. Each command is offered only where the composer has it.
+ */
+export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onRecord, onCommands, commandsHint, place, extra }: {
+  onClose: () => void; onPhoto: () => void; onPhotos?: () => void; onFiles: () => void; onPaste?: () => void; onRecord?: () => void;
+  onCommands?: () => void; commandsHint?: string; place?: string; extra?: ReactNode;
+}) {
+  const run = (fn: () => void) => () => { onClose(); fn(); };
+  return (
+    <BottomSheet onClose={onClose} className="ph-plus-sheet" label={t("composer.plus")}>
+      <div className="ph-tiles">
+        <button type="button" className="ph-tile" onClick={run(onPhoto)}><Icon name="camera" size={22} /><span>{t("composer.photo")}</span></button>
+        <button type="button" className="ph-tile" onClick={run(onPhotos ?? onFiles)}><Icon name="image" size={22} /><span>{t("ph.plus.photos")}</span></button>
+        <button type="button" className="ph-tile" onClick={run(onFiles)}><Icon name="attach" size={22} /><span>{t("session.attach")}</span></button>
+      </div>
+      {onPaste && <SheetRow icon="paste" label={t("composer.paste")} hint={t("ph.plus.paste.hint")} onClick={onPaste} />}
+      {onRecord && <SheetRow icon="mic" label={t("session.mic")} onClick={run(onRecord)} />}
+      {onCommands && <SheetRow icon="bolt" label={t("ph.plus.commands")} hint={commandsHint} chevron onClick={run(onCommands)} />}
+      {place && <SheetRow icon="folder" label={t("ph.plus.place")} hint={t("ph.plus.place.hint")} value={place} />}
+      {extra}
+    </BottomSheet>
+  );
+}
 
 /** The context in use, as an arc: full circle is the whole window. Numbers live in the tooltip. */
 function Ring({ pct }: { pct: number }) {
