@@ -89,9 +89,11 @@ def check(page: Page, lang: str, unhandled: Unhandled, where: str) -> None:
     stub = board()
     serve(page, stub, unhandled)
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
-    existing = page.locator(".pcard", has_text="Seasonal menu page")
-    expect(existing.locator(".pcard-issue")).to_have_text("#11")
-    expect(existing.locator(".pcard-issue")).to_have_attribute("href", f"https://github.com/{REPOSITORY}/issues/11")
+    # A desktop's card, or the row of a phone's list, each with the issue's number as its link.
+    card, issue = (".ph-row", ".ph-issue") if where == "phone" else (".pcard", ".pcard-issue")
+    existing = page.locator(card, has_text="Seasonal menu page")
+    expect(existing.locator(issue)).to_have_text("#11")
+    expect(existing.locator(issue)).to_have_attribute("href", f"https://github.com/{REPOSITORY}/issues/11")
 
     page.get_by_role("button", name=words["new"]).first.click()
     page.locator(".pboard-sheet .pboard-import", has_text=words["open"]).click()
@@ -123,8 +125,8 @@ def check(page: Page, lang: str, unhandled: Unhandled, where: str) -> None:
     assert sent["repository"] == REPOSITORY and sent["expected_collection_revision"] == 2, sent
     assert sent["items"] == [{"issue_number": 12, "action": "import", "preview_digest": f"{12:064d}", "expected_entity_revision": None}], sent
     assert sent["client_operation_id"], sent
-    card = page.locator(".pcard", has_text="Checkout rejects a valid postcode")
-    expect(card.locator(".pcard-issue")).to_have_text("#12")
+    imported = page.locator(card, has_text="Checkout rejects a valid postcode")
+    expect(imported.locator(issue)).to_have_text("#12")
     fits(page, f"{lang} {where} board")
 
 

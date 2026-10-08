@@ -134,6 +134,18 @@ def desktop(page: Page, lang: str) -> None:
     fits(page, f"{lang} desktop review")
 
 
+def diff_tab(page: Page) -> None:
+    """On a phone the task is a page of three tabs; the branch is on the last, Diff."""
+    page.locator(".ph-taskpage-tabs [role='radio']").last.tap()
+
+
+def merge_button(page: Page, words: dict, phone: bool):  # type: ignore[no-untyped-def]
+    """Merge: in the review page's footer on a phone, in the result's own actions on a desktop."""
+    if phone:
+        return page.locator(".ph-taskpage .ph-decide").get_by_role("button", name=words["merge"])
+    return page.locator(".sheet.pboard-sheet .result-flow").get_by_role("button", name=words["merge"])
+
+
 def merging(page: Page, lang: str, *, phone: bool) -> None:
     words = WORDS[lang]
     focus = FocusStub.bakery(lang)
@@ -145,10 +157,13 @@ def merging(page: Page, lang: str, *, phone: bool) -> None:
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}&task=t-endpoint")
     sheet = page.locator(".sheet.pboard-sheet")
     panel = sheet.locator(".review-panel")
+    # A phone's review page holds the branch on its Diff tab and the decision in its footer.
+    if phone:
+        diff_tab(page)
     expect(panel).to_be_visible()
-    merge = sheet.locator(".result-flow").get_by_role("button", name=words["merge"])
+    merge = merge_button(page, words, phone)
     expect(merge).to_be_disabled()
-    expect(sheet.locator(".result-action .result-warning").first).to_contain_text(words["dirty"])
+    expect(sheet.locator(".ph-decide-why" if phone else ".result-action .result-warning").first).to_contain_text(words["dirty"])
     if phone:
         box = merge.bounding_box()
         assert box is not None and box["height"] >= 28, box
@@ -157,24 +172,24 @@ def merging(page: Page, lang: str, *, phone: bool) -> None:
     # The operator commits in the folder; the review is read again and Merge goes through.
     del focus.board.reviews["t-endpoint"]
     page.reload()
-    merge = page.locator(".sheet.pboard-sheet .result-flow").get_by_role("button", name=words["merge"])
+    merge = merge_button(page, words, phone)
     expect(merge).to_be_enabled()
     merge.click()
     expect(page.locator(".toast")).to_contain_text(words["merged"])
     assert len(focus.board.merge_requests) == 1, focus.board.merge_requests
     assert focus.board.merge_requests[0][1]["verdict_id"] == "verdict-endpoint"
     page.reload()
-    expect(page.locator(".sheet.pboard-sheet .result-flow").get_by_role("button", name=words["merge"])).to_be_disabled()
+    expect(merge_button(page, words, phone)).to_be_disabled()
     assert len(focus.board.merge_requests) == 1
     focus.board.merge_receipts["t-endpoint"]["state"] = "merged"
     task.update(status="done", merge_state="merged", acceptance_state="operator_approved")
     focus.board.result_rows["t-endpoint"][0].update(accepted=True, acceptance_state="operator_approved")
     page.reload()
-    expect(page.locator(".sheet.pboard-sheet .result-flow").get_by_role("button", name=words["merge"])).to_have_count(0)
+    expect(merge_button(page, words, phone)).to_have_count(0)
     assert len(focus.board.merge_requests) == 1
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}&task=t-hero")
-    expect(page.locator(".sheet.pboard-sheet .result-flow")).to_be_visible()
-    expect(page.locator(".sheet.pboard-sheet .result-flow").get_by_role("button", name=words["merge"])).to_have_count(0)
+    expect(page.locator(".sheet.pboard-sheet .result-flow")).to_be_attached() if phone else expect(page.locator(".sheet.pboard-sheet .result-flow")).to_be_visible()
+    expect(merge_button(page, words, phone)).to_have_count(0)
     refused = page.evaluate("async () => (await fetch('/api/board/t-hero/results/res-hero/merge', {method: 'POST'})).status")
     assert refused == 409 and len(focus.board.merge_requests) == 1, (refused, focus.board.merge_requests)
     fits(page, f"{lang} {'phone' if phone else 'desktop'} merged")
@@ -200,6 +215,8 @@ def reworked(page: Page, lang: str, *, phone: bool) -> None:
     serve(page, focus)
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}&task=t-endpoint")
     panel = page.locator(".sheet.pboard-sheet .review-panel")
+    if phone:
+        diff_tab(page)
     expect(panel).to_be_visible()
     base = panel.locator(".review-base")
     expect(base).to_contain_text("7c6b5a4")

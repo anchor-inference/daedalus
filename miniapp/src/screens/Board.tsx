@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, ApiError, Project, SessionList, SessionSummary } from "../api";
 import { Skeleton, copyText } from "../ui/components";
-import { OverflowMenu, Sheet } from "../ui/dialogs";
+import { OverflowMenu, Sheet, type MenuItem } from "../ui/dialogs";
+import { BottomSheet, Chip, ChipBar, EmptyState, IconButton, ListRow, SegmentedControl, SheetRow, TopBar } from "../ui/phone";
+import { colourOf, initials } from "../drawer";
+import { useMedia } from "../shell";
+import { StaffAvatar } from "../team/parts";
 import { absTime, relTime } from "../format";
 import { useEdgeFade } from "../edgefade";
 import { Icon } from "../icons";
@@ -46,6 +50,7 @@ const NEXT: Record<Status, Status[]> = { todo: ["blocked", "dropped"], doing: []
 
 export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: string) => void; onOpen: (id: string) => void; selected?: string | null; project?: Project | null }) {
   const offline = useOffline();
+  const phone = useMedia("(max-width: 1023px)");
   const [showDone, setShowDone] = useState(false);
   // The shell's project lens narrows this board as it narrows the list of agents.
   const key = `/api/board?include_done=${showDone ? 1 : 0}${project ? `&project=${encodeURIComponent(project.id)}` : ""}`;
@@ -147,6 +152,12 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
 
   const kanban = useRef<HTMLDivElement>(null);
   useEdgeFade(kanban, `${showDone}:${all.length}`);
+  const sheets = <>
+    {creating && <NewTaskSheet onClose={() => setCreating(false)} onCreated={() => { setCreating(false); reload(); }} toast={toast} />}
+    {open && <TaskSheet t={open} owner={open.session_id ? titles[open.session_id] : undefined} board={open.origin_session_id ? titles[open.origin_session_id] : undefined} onClose={() => navigate(pathFor("board"), { replace: true })} onMove={move} onCheck={check} onRemove={remove} onOpenSession={onOpen} toast={toast} />}
+  </>;
+  if (phone) return <PhoneBoardView tasks={tasks} error={error} loading={loading} refresh={refresh} showDone={showDone} setShowDone={setShowDone} project={project ?? null}
+    titles={titles} offline={offline} onNew={() => setCreating(true)} onMove={move} onRemove={remove} onOpenSession={onOpen} toast={toast} sheets={sheets} />;
   return (
     <>
       <PageHeader
@@ -198,9 +209,119 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
           </div>
         )}
       </div>
-      {creating && <NewTaskSheet onClose={() => setCreating(false)} onCreated={() => { setCreating(false); reload(); }} toast={toast} />}
-      {open && <TaskSheet t={open} owner={open.session_id ? titles[open.session_id] : undefined} board={open.origin_session_id ? titles[open.origin_session_id] : undefined} onClose={() => navigate(pathFor("board"), { replace: true })} onMove={move} onCheck={check} onRemove={remove} onOpenSession={onOpen} toast={toast} />}
+      {sheets}
     </>
+  );
+}
+
+type PhoneBoardProps = {
+  tasks: Task[] | null | undefined; error: string | null | undefined; loading: boolean; refresh: () => void; showDone: boolean; setShowDone: (v: boolean) => void; project: Project | null;
+  titles: Record<string, string>; offline: boolean; onNew: () => void; onMove: (t: Task, s: Status) => void; onRemove: (t: Task) => void;
+  onOpenSession: (id: string) => void; toast: (text: string) => void; sheets: ReactNode;
+};
+
+/**
+ * The board of every project on a phone: chips for the columns over one list, grouped by project with
+ * the way into each project's own board at its head, and the tasks of no project last. A task's
+ * commands (open, move, its session, copy, archive) are its long-press sheet; what the list shows
+ * (open or with finished, the project lens) is behind the options glyph, so the bar keeps two glyphs.
+ */
+function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone, project, titles, offline, onNew, onMove, onRemove, onOpenSession, toast, sheets }: PhoneBoardProps) {
+  const [filter, setFilter] = useState<Status | "finished" | null>(null);
+  const [options, setOptions] = useState(false);
+  const all = tasks ?? [];
+  const inColumn = (task: Task) => filter === null ? true : filter === "finished" ? FINISHED.includes(task.status) : task.status === filter;
+  const shown = all.filter((task) => (showDone || !FINISHED.includes(task.status)) && inColumn(task))
+    .sort((a, b) => a.priority - b.priority || Date.parse(b.updated_at) - Date.parse(a.updated_at));
+  const groups = new Map<string, { id: string | null; name: string; items: Task[] }>();
+  for (const task of shown) {
+    const key = task.project_id ?? "";
+    if (!groups.has(key)) groups.set(key, { id: task.project_id ?? null, name: task.project_name ?? task.project_id ?? "", items: [] });
+    groups.get(key)!.items.push(task);
+  }
+  const ordered = [...groups.values()].sort((a, b) => Number(!a.id) - Number(!b.id) || a.name.localeCompare(b.name));
+  const columns = [...COLUMNS, ...(showDone ? ["finished" as const] : [])].map((column) => ({ column, count: all.filter((task) => column === "finished" ? FINISHED.includes(task.status) : task.status === column).length })).filter((c) => c.count > 0);
+  const openCount = all.filter((task) => !FINISHED.includes(task.status)).length;
+  const row = (task: Task) => {
+    const done = task.checklist.filter((c) => c.done).length;
+    const pct = task.checklist.length ? Math.round((100 * done) / task.checklist.length) : 0;
+    const owner = task.session_id ? titles[task.session_id] : undefined;
+    const blocked = offline || !Number.isInteger(task.entity_revision);
+    const open = () => navigate(pathFor("board", task.id));
+    const actions: MenuItem[] = [
+      { label: t("common.open"), icon: "expand", onSelect: open },
+      ...NEXT[task.status].map((status) => ({ label: t("pbph.moveto", { column: columnLabel(status) }), icon: "forward" as const, disabled: blocked, onSelect: () => onMove(task, status) })),
+      ...(task.session_id ? [{ label: owner ? t("board.open.owner", { name: owner }) : t("board.open.session"), icon: "bots" as const, onSelect: () => onOpenSession(task.session_id!) }] : []),
+      ...(task.project_id ? [{ label: t("board.on.project", { name: task.project_name ?? task.project_id }), icon: "board" as const, onSelect: () => navigate(projectPagePath(task.project_id!, "board", { task: task.id })) }] : []),
+      { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
+      { label: t("pboard.archive.action"), icon: "archive", danger: true, disabled: blocked || !["todo", "blocked"].includes(task.status), hint: t("pboard.archive.unavailable"), onSelect: () => onRemove(task) },
+    ];
+    return (
+      <ListRow key={task.id} className={`ph-task p${Math.min(task.priority, 4)} ${task.status}`} data={{ task: task.id }} title={task.title} label={task.title}
+        meta={<>
+          {task.assignee && <StaffAvatar name={task.assignee.name} color={task.assignee.color} size="small" />}
+          <span className={`ph-ell ${task.status === "doing" ? "running" : task.status === "blocked" ? "waiting" : ""}`}>{[columnLabel(task.status), owner ?? task.assignee?.name, relTime(task.updated_at)].filter(Boolean).join(" · ")}</span>
+        </>}
+        trail={<>
+          {task.priority <= 2 && <span className={`ph-pill ${task.priority === 1 ? "bad" : ""}`}>P{task.priority}</span>}
+          {task.checklist.length > 0 && <span className="ph-progress"><span className={`ph-bar ${pct === 100 ? "ok" : ""}`} style={{ ["--v" as string]: pct }}><i /></span><span className="num">{done}/{task.checklist.length}</span></span>}
+        </>}
+        actions={actions} preview={{ title: task.title, meta: [columnLabel(task.status), task.project_name, t("pbph.id", { id: task.id })].filter(Boolean).join(" · ") }}
+        onOpen={open} />
+    );
+  };
+  return (
+    <div className="ph-page ph-board ph-gboard">
+      <TopBar center title={screenTitle("board")} sub={undefined}
+        actions={<>
+          <IconButton icon="sliders" label={t("pbph.options")} onClick={() => setOptions(true)} />
+          <IconButton icon="plus" label={t("board.new")} onClick={onNew} />
+        </>} />
+      {tasks && tasks.length > 0 && (
+        <ChipBar label={t("pboard.filter")}>
+          <Chip on={filter === null} count={showDone ? all.length : openCount} onClick={() => setFilter(null)}>{t("pbph.all")}</Chip>
+          {columns.map(({ column, count }) => (
+            <Chip key={column} on={filter === column} tone={column === "blocked" ? "warn" : undefined} count={count} onClick={() => setFilter(filter === column ? null : column)}>{column === "finished" ? t("board.finished") : columnLabel(column)}</Chip>
+          ))}
+        </ChipBar>
+      )}
+      <div className="ph-page-body list">
+        {project && <div className="ph-page-pad"><span className="ph-pill">{t("board.lens", { name: project.name })}</span></div>}
+        {loading && !tasks && !error && [0, 1, 2, 3].map((i) => <div key={i} className="ph-board-sk-row"><span className="ph-sk" style={{ height: 14, width: `${60 - i * 8}%` }} /><span className="ph-sk" style={{ height: 11, width: "40%" }} /></div>)}
+        {error && !tasks && <EmptyState icon="alert" tone="bad" title={t("board.error")} body={error} action={<button type="button" className="ph-btn primary" onClick={refresh}>{t("common.retry")}</button>} />}
+        {tasks && tasks.length === 0 && <EmptyState icon="board" title={t("board.empty")} body={t("board.empty.sub")} action={<button type="button" className="ph-btn accent" onClick={onNew}><Icon name="plus" size={18} />{t("board.new")}</button>} />}
+        {tasks && tasks.length > 0 && shown.length === 0 && <EmptyState icon="board" title={t("pbph.filtered")} action={<button type="button" className="ph-btn" onClick={() => setFilter(null)}>{t("pbph.all")}</button>} />}
+        {ordered.map((group) => (
+          <section key={group.id ?? "none"} className="ph-gboard-group" data-project={group.id ?? ""}>
+            {group.id ? (
+              <button type="button" className="ph-gboard-head" onClick={() => navigate(projectPagePath(group.id!, "board"))} aria-label={t("board.on.project", { name: group.name })}>
+                <span className="ph-avatar" style={{ ["--c" as string]: colourOf(group.id) }} aria-hidden>{initials(group.name)}</span>
+                <b className="truncate">{group.name}</b>
+                <span className="ph-gboard-n">{group.items.length}</span>
+                <Icon name="forward" size={18} />
+              </button>
+            ) : (
+              <div className="ph-gboard-head">
+                <span className="ph-avatar" aria-hidden><Icon name="bots" size={18} /></span>
+                <b className="truncate">{t("pbph.noproject")}</b>
+                <span className="ph-gboard-n">{group.items.length}</span>
+              </div>
+            )}
+            {group.items.map(row)}
+          </section>
+        ))}
+      </div>
+      {options && (
+        <BottomSheet title={t("pbph.options")} onClose={() => setOptions(false)} className="ph-board-options">
+          <div className="ph-gl">{t("pbph.show")}</div>
+          <div className="ph-board-opt"><SegmentedControl label={t("pbph.show")} value={showDone ? "done" : "open"} onChange={(v) => setShowDone(v === "done")}
+            options={[{ id: "open", label: t("board.filter.open") }, { id: "done", label: t("board.filter.done") }]} /></div>
+          {project && !project.system && !project.settings.ephemeral && <SheetRow icon="board" label={t("board.lens.project")} onClick={() => { setOptions(false); navigate(projectPagePath(project.id, "board")); }} />}
+          <SheetRow icon="reload" label={t("pboard.launch.refresh")} onClick={() => { refresh(); setOptions(false); }} />
+        </BottomSheet>
+      )}
+      {sheets}
+    </div>
   );
 }
 

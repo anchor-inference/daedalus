@@ -200,10 +200,11 @@ def check(page: Page, lang: str, width: int) -> None:
     expect(page.locator(".result-flow [role=alert]")).to_contain_text(words["unavailable"])
     expect(page.locator(".result-original")).to_have_count(0)
 
-    # When a direct question arrives, its own actionable line replaces the generic goal alert.
+    # When a direct question arrives, its own actionable line replaces the generic goal alert; on a
+    # phone that is the Needs-you card above the chat, the tab's one place for what waits.
     focus.asks = pending_asks
     page.goto(f"{BASE}/orchestration/project/{PID}?token=t&lang={lang}")
-    expect(page.locator(".chat.in-project.orchestrator .questions-line")).to_be_visible()
+    expect(page.locator(".needs-card" if width < 1024 else ".chat.in-project.orchestrator .questions-line")).to_be_visible()
     expect(page.locator(".chat.in-project.orchestrator .goal-strip")).to_have_count(0)
 
 

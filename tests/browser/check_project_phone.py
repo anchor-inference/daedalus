@@ -5,11 +5,11 @@ project's other pages (the decisions, the history, the brief, the wake-ups, the 
 and the way back to every project, and carries the count of decisions waiting so nothing hides behind
 it. The header names the project, says how its work goes and leads back to orchestration's list of
 projects, where the app's own tabs return.
-The request that has waited longest for the operator is a banner answered with one tap — an option, or
-words of the operator's own — and the next one takes its place until none is left. The team lists its
+The request that has waited longest for the operator is a compact card answered with one tap — an option,
+or words of the operator's own behind its pen — and the next one takes its place until none is left. The team lists its
 members with what each is on and opens a member's conversation, which gives the whole height to it and
-goes back to the team. The board is the list under chips, and a task in review is accepted (merged, for a
-staff branch) with one tap. The terminals are rows that open the phone's terminal. The orchestrator's composer ends above the
+goes back to the team. The board is the list under chips, and a task in review opens its review page, whose footer holds the
+decision (accept, or merge for a staff branch). The terminals are rows that open the phone's terminal. The orchestrator's composer ends above the
 tabs. Every answer is a touch row high, and nothing scrolls sideways.
 """
 
@@ -34,11 +34,11 @@ PID = "b4k3ry20f0c5"
 
 WORDS = {
     "en": {"tabs": ["Orchestrator", "Board", "Team", "Terminals", "More"],
-           "more": ["Needs decision", "History", "Brief", "Wake-ups", "Folders", "Project settings", "All projects"], "needs": "Needs you", "ira": "Ira asks:", "orchestrator": "The orchestrator asks:", "write": "Answer…", "head": "3 working · 1 in review",
-           "own": "Your own answer…", "send": "Answer", "working": "working", "review": "Review", "merge": "Merge", "board": "Board · Bakery 2.0"},
+           "more": ["Needs decision", "History", "Brief", "Wake-ups", "Folders", "Project settings", "All projects"], "needs": "Needs you", "ira": "Ira asks", "orchestrator": "the orchestrator asks", "head": "3 working · 1 in review",
+           "own": "Your own answer…", "send": "Answer", "working": "working", "review": "Review", "merge": "Merge", "board": "Board"},
     "ru": {"tabs": ["Оркестратор", "Доска", "Команда", "Терминалы", "Ещё"],
-           "more": ["Требуют решения", "История", "Бриф", "Будильники", "Папки", "Настройки проекта", "Все проекты"], "needs": "Нужны вы", "ira": "Ira спрашивает:", "orchestrator": "Оркестратор спрашивает:", "write": "Ответить…", "head": "3 работают · 1 на проверке",
-           "own": "Свой ответ…", "send": "Ответить", "working": "работает", "review": "Проверка", "merge": "Слить", "board": "Доска · Bakery 2.0"},
+           "more": ["Требуют решения", "История", "Бриф", "Будильники", "Папки", "Настройки проекта", "Все проекты"], "needs": "Нужны вы", "ira": "спрашивает Ira", "orchestrator": "спрашивает оркестратор", "head": "3 работают · 1 на проверке",
+           "own": "Свой ответ…", "send": "Ответить", "working": "работает", "review": "Проверка", "merge": "Слить", "board": "Доска"},
 }
 
 
@@ -99,10 +99,10 @@ def more_sheet(page: Page, words: dict, badge: str | None) -> None:
     page.locator("nav.project-tabs button[data-tab='more']").tap()
     sheet = page.locator(".sheet.more-sheet")
     expect(sheet).to_be_visible()
-    items = sheet.locator(".more-item")
+    items = sheet.locator(".ph-mrow")
     expect(items).to_have_count(len(words["more"]))
-    assert [x.strip().split("\n")[0] for x in items.all_inner_texts()] == words["more"], items.all_inner_texts()
-    count = sheet.locator(".more-item[data-more='attention'] .tab-badge")
+    assert [x.strip() for x in items.locator(".ph-mrow-t").all_inner_texts()] == words["more"], items.all_inner_texts()
+    count = sheet.locator(".ph-mrow[data-more='attention'] .ph-badge")
     if badge is None:
         expect(count).to_have_count(0)
     else:
@@ -122,7 +122,7 @@ def run_one(page: Page, lang: str, width: int) -> None:
     expect(page.locator(".pagehead h1")).to_have_text("Bakery 2.0")
     expect(page.locator(".pagehead .sub")).to_have_text(words["head"])
     tabs(page, words, "team")
-    banner = page.locator(".needs-banner")
+    banner = page.locator(".needs-card")
     expect(banner).to_have_attribute("data-ask", "q9w2e1")
     expect(banner).to_contain_text(words["needs"])
     expect(banner).to_contain_text(words["ira"])
@@ -134,38 +134,37 @@ def run_one(page: Page, lang: str, width: int) -> None:
     page.keyboard.press("Escape")
     expect(page.locator(".sheet.more-sheet")).to_have_count(0)
     tabs(page, words, "team")
-    tall_enough(page, ".needs-banner .ask-answers-row .btn", where)
+    tall_enough(page, ".needs-card .needs-row .ph-btn, .needs-card .needs-pen", where)
     items = page.locator(".phone-staff-item")
     expect(items).to_have_count(6)
     expect(items.filter(has_text="Olga")).to_contain_text(invented["olga.role"])
     tall_enough(page, ".phone-staff-row", where)
     fits(page, f"{where} team")
 
-    # The board leaves out the request the banner above it already shows: the same question twice, in
-    # two different sets of controls, took the top half of the screen. The orchestrator's stays listed.
+    # The board draws no card of its own: every request is a row of its Needs-you section, with an
+    # Answer that opens the one decision sheet, so the same question is never shown twice on a tab.
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
     page.wait_for_url(f"**/project/{PID}/board**")
-    expect(page.locator(".needs-banner")).to_have_attribute("data-ask", "q9w2e1")
-    needs = page.locator(".pboard-list .pcard.need")
-    expect(needs).to_have_count(1)
-    expect(needs.locator(".pcard-short")).to_have_text("q4r8tz")
+    expect(page.locator(".ph-board .ph-task.need").first).to_be_visible()
+    expect(page.locator(".needs-card")).to_have_count(0)
+    expect(page.locator(".ph-board .ph-task.need .ph-short", has_text="q4r8tz")).to_have_count(1)
     page.goto(f"{BASE}/project/{PID}/team?token=t&lang={lang}")
     page.wait_for_url(f"**/project/{PID}/team**")
     expect(banner).to_have_attribute("data-ask", "q9w2e1")
 
     # One tap answers Ira; the orchestrator's own question takes the banner, and is answered in words.
-    banner.locator(".ask-answers-row .btn", has_text=invented["ask.before"]).tap()
+    banner.locator(".needs-row .ph-btn", has_text=invented["ask.before"]).tap()
     expect(banner).to_have_attribute("data-ask", "q4r8tz")
     assert focus.answers[-1] == ("ask-ira", {"selected": [invented["ask.before"]]}), focus.answers
     expect(banner).to_contain_text(words["orchestrator"])
-    banner.locator(".ask-answers-row .btn", has_text=words["write"]).tap()
-    field = banner.locator(".ask-answers-own .field")
+    banner.locator(".needs-pen").tap()
+    field = banner.locator(".needs-own .field")
     expect(field).to_be_focused()
     size = field.evaluate("(e) => parseFloat(getComputedStyle(e).fontSize)")
     assert size >= 16, f"{where}: the answer field is {size}px, and Safari would zoom into it"
     field.fill("after, like last spring")
-    banner.locator(".ask-answers-own .btn.primary").tap()
-    expect(page.locator(".needs-banner")).to_have_count(0)
+    banner.locator(".needs-own .ph-btn.primary").tap()
+    expect(page.locator(".needs-card")).to_have_count(0)
     assert focus.answers[-1] == ("ask-spring", {"text": "after, like last spring"}), focus.answers
     expect(page.locator("nav.project-tabs a[data-tab='team'] .tab-badge")).to_have_count(0)
     expect(page.locator("nav.project-tabs button[data-tab='more'] .tab-badge")).to_have_count(0)
@@ -183,18 +182,19 @@ def run_one(page: Page, lang: str, width: int) -> None:
     page.locator("nav.project-tabs a[data-tab='board']").tap()
     page.wait_for_url(f"**/project/{PID}/board**")
     tabs(page, words, "board")
-    expect(page.locator(".pagehead h1")).to_have_text(words["board"])
+    expect(page.locator(".ph-board .ph-top-t")).to_have_text(words["board"])
     expect(page.locator(".pboard-cols")).to_have_count(0)
-    page.locator(".pboard-chips .chip", has_text=words["review"]).tap()
-    # A branch result cannot be accepted without the exact current receipt and verdict.
-    page.locator(".pboard-list .pcard").tap()
-    expect(page.locator(".sheet.pboard-sheet .result-flow button", has_text="Accept" if lang == "en" else "Принять")).to_be_disabled()
+    page.locator(".ph-board .ph-chip", has_text=words["review"]).tap()
+    # A branch result cannot be accepted or merged without the exact current receipt and verdict: the
+    # review page's footer holds the decision, disabled under its reason.
+    page.locator(".ph-board .ph-task:not(.need)").first.tap()
+    expect(page.locator(".ph-taskpage .ph-decide .ph-btn.primary")).to_be_disabled()
     assert not focus.board.accepted
     fits(page, f"{where} board")
 
-    # The terminals: rows that lead to the phone's terminal. The task's sheet is closed first.
+    # The terminals: rows that lead to the phone's terminal. The task's page is closed first.
     page.keyboard.press("Escape")
-    expect(page.locator(".sheet.pboard-sheet")).to_have_count(0)
+    expect(page.locator(".ph-taskpage")).to_have_count(0)
     page.locator("nav.project-tabs a[data-tab='terminals']").tap()
     page.wait_for_url(f"**/project/{PID}/terminals**")
     tabs(page, words, "terminals")
@@ -216,7 +216,7 @@ def run_one(page: Page, lang: str, width: int) -> None:
     # More opens its sheet over the page; the history opens from it, and the bar stays with More lit.
     more_sheet(page, words, None)
     fits(page, f"{where} more")
-    page.locator(".sheet.more-sheet .more-item[data-more='journal']").tap()
+    page.locator(".sheet.more-sheet .ph-mrow[data-more='journal']").tap()
     page.wait_for_url(f"**/project/{PID}/journal**")
     page.wait_for_selector(".journal-entry", timeout=10000)
     expect(page.locator(".sheet.more-sheet")).to_have_count(0)
@@ -224,21 +224,21 @@ def run_one(page: Page, lang: str, width: int) -> None:
     # Every other page of the sheet keeps the bar too, and its own item is the one marked.
     for key in ("attention", "brief", "wakeups", "folders"):
         more_sheet(page, words, None)
-        page.locator(f".sheet.more-sheet .more-item[data-more='{key}']").tap()
+        page.locator(f".sheet.more-sheet .ph-mrow[data-more='{key}']").tap()
         page.wait_for_url(f"**/project/{PID}/{key}**")
         tabs(page, words, "more")
         fits(page, f"{where} {key}")
     more_sheet(page, words, None)
-    expect(page.locator(".sheet.more-sheet .more-item.active")).to_have_attribute("data-more", "folders")
+    expect(page.locator(".sheet.more-sheet .ph-mrow.on")).to_have_attribute("data-more", "folders")
     # The project's settings open in place of the sheet.
-    page.locator(".sheet.more-sheet .more-item[data-more='settings']").tap()
+    page.locator(".sheet.more-sheet .ph-mrow[data-more='settings']").tap()
     expect(page.locator(".sheet.more-sheet")).to_have_count(0)
     expect(page.get_by_role("dialog").get_by_role("textbox", name="Name" if lang == "en" else "Название")).to_have_value("Bakery 2.0")
     page.keyboard.press("Escape")
     expect(page.get_by_role("dialog")).to_have_count(0)
     # And "All projects" leaves for orchestration's list.
     more_sheet(page, words, None)
-    page.locator(".sheet.more-sheet .more-item[data-more='projects']").tap()
+    page.locator(".sheet.more-sheet .ph-mrow[data-more='projects']").tap()
     page.wait_for_url("**/app/orchestration/projects**")
     expect(page.locator("nav.project-tabs")).to_have_count(0)
 

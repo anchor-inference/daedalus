@@ -268,7 +268,7 @@ def phone(page: Page, lang: str) -> None:
     expect(page.locator(".ph-drawer-root.open [data-nav='main']")).to_be_visible()
     page.locator(".ph-drawer-root.open [data-nav='orchestration-list']").click()
     page.wait_for_url("**/app/orchestration/projects**")
-    expect(page.locator(".orch-list > :first-child .main-entry")).to_be_visible()
+    expect(page.locator(".ph-orch [data-main-entry] .ph-row")).to_be_visible()
     fits(page, f"{lang} phone orchestration")
 
 

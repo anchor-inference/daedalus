@@ -75,7 +75,9 @@ def run() -> None:
                 expect(blocked).to_contain_text("result is not verified" if lang == "en" else "результат не проверен")
                 expect(blocked).not_to_contain_text("Review needed" if lang == "en" else "Нужна проверка")
                 expect(blocked.get_by_role("button", name="Open task" if lang == "en" else "Открыть задачу")).to_be_visible()
-                expect(cards.filter(has_text="Result to review" if lang == "en" else "Результат на проверке")).to_have_count(1)
+                # A phone lists the result under its section's heading rather than naming it on its card.
+                reviews = page.locator(".focus-attention-item[data-kind='review']") if width < 600 else cards.filter(has_text="Result to review" if lang == "en" else "Результат на проверке")
+                expect(reviews).to_have_count(1)
                 budget = cards.filter(has_text="No budget remains" if lang == "en" else "Бюджет исчерпан")
                 expect(budget).to_have_count(1)
                 budget.get_by_role("button", name="Review budget" if lang == "en" else "Проверить бюджет").click()
@@ -93,7 +95,7 @@ def run() -> None:
                 focus.next_actions[PROJECT] = [row for row in focus.next_actions[PROJECT]
                                                if row["action_id"] != "same-review"]
                 page.reload()
-                expect(cards.filter(has_text="Result to review" if lang == "en" else "Результат на проверке")).to_have_count(0)
+                expect(reviews).to_have_count(0)
 
                 focus.budget_views[PROJECT]["total"] = balance(None, "unknown_usage")
                 page.reload()

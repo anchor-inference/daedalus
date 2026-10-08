@@ -1,7 +1,7 @@
 // Rich views share the same downloaded bytes. Numbered source is bounded in the DOM so a long
 // generated file does not make the conversation expensive just because its panel is open.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { highlightLines, langOf, HIGHLIGHT_MAX_LINES } from "./highlight";
 import { jsonRows, parseJsonText, toggleRow } from "./jsontree";
 import { diffFileName, lineAnchor, parseDiff } from "./diff";
@@ -49,17 +49,22 @@ export function JsonView({ text }: { text: string }) {
  * hands its file and line to a review note; a plain click is the gesture because it is the only one a
  * phone has, and a drag that selects text is not taken for it.
  */
-export function DiffView({ text, onLine }: { text: string; onLine?: (anchor: { path: string; line: number }) => void }) {
-  const files = useMemo(() => parseDiff(text), [text]);
+/** `file` shows that one file of the patch (a phone's review opens files one at a time); `notes`
+ *  draws what was said about a line under it, by the new line's number. */
+export function DiffView({ text, onLine, file, notes }: { text: string; onLine?: (anchor: { path: string; line: number }) => void; file?: string; notes?: (anchor: { path: string; line: number }) => ReactNode }) {
+  const all = useMemo(() => parseDiff(text), [text]);
+  const files = file === undefined ? all : all.filter((f) => diffFileName(f) === file);
   return <div className={`diff-view${onLine ? " commentable" : ""}`}>{files.map((f, i) => <section key={i}>
     <div className="diff-file">{diffFileName(f)} <span className="tk-add">+{f.added}</span> <span className="tk-del">−{f.removed}</span></div>
     {f.hunks.map((h, j) => <div key={j}><div className="diff-hunk">{h.header}</div>{h.lines.map((l, k) => {
       const anchor = onLine ? lineAnchor(f, h, k) : null;
       const pick = anchor && onLine ? () => { if (!window.getSelection()?.toString()) onLine(anchor); } : undefined;
-      return <div key={k} className={`diff-line diff-${l.type}`} role={pick ? "button" : undefined} tabIndex={pick ? 0 : undefined}
+      const row = <div key={k} className={`diff-line diff-${l.type}`} role={pick ? "button" : undefined} tabIndex={pick ? 0 : undefined}
         title={anchor ? t("diff.commentAt", { path: anchor.path, line: anchor.line }) : undefined}
         onClick={pick} onKeyDown={pick ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); pick(); } } : undefined}>
         <span className="linenum">{l.oldNo}</span><span className="linenum">{l.newNo}</span><span className="diff-sign">{l.type === "add" ? "+" : l.type === "del" ? "−" : " "}</span><span>{l.text}</span></div>;
+      const said = notes && l.newNo != null && f.newPath && f.newPath !== "/dev/null" ? notes({ path: f.newPath, line: l.newNo }) : null;
+      return said ? <Fragment key={k}>{row}{said}</Fragment> : row;
     })}</div>)}
     {!f.hunks.length && <pre className="filetext">{text}</pre>}
   </section>)}{!files.length && <pre className="filetext">{text}</pre>}</div>;

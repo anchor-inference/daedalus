@@ -34,7 +34,11 @@ import { firstWait, oldestOpen, PHONE_MORE, PHONE_TABS, type PhoneMorePage, type
 import { useMember } from "./staff";
 import { spendLine, staffUsage } from "./usage";
 import { budgetCompact, useGoalBudget } from "./ProjectBudget";
-import { operatorAttentionCount, type NextAction } from "./attention-model";
+import { budgetAttention, distinctOperatorActions, operatorAttentionCount, type NextAction } from "./attention-model";
+import { NeedsYouCard } from "./needs";
+import { operatorReviewReady } from "./focus";
+import { absDate } from "../format";
+import { BottomSheet, SheetRow } from "../ui/phone";
 
 const enc = encodeURIComponent;
 const operatorAsksKey = (projectId: string) => `/api/asks?project=${enc(projectId)}&routed_to=operator`;
@@ -90,6 +94,9 @@ export function ProjectTabs({ projectId, current }: { projectId: string; current
   const countKnown = !offline && !asksUnverified && !!board.data && !board.error
     && !!next.data && !next.error && !!budget.data && !budget.error;
   const decisions = operatorAttentionCount(openAsks, board.data?.tasks ?? [], next.data?.actions ?? [], budget.data);
+  const tasks = board.data?.tasks ?? [];
+  const parts = { asks: openAsks.length, review: tasks.filter(operatorReviewReady).length,
+    blocked: distinctOperatorActions(next.data?.actions ?? [], openAsks, tasks).length + (budgetAttention(budget.data) ? 1 : 0) };
   // A count that cannot be confirmed shows as "?" rather than vanishing: no badge would read as
   // "nothing waits", which is the one thing it cannot say.
   const badge = countKnown ? (decisions > 0 ? (decisions > 99 ? "99+" : String(decisions)) : null) : "?";
@@ -117,38 +124,44 @@ export function ProjectTabs({ projectId, current }: { projectId: string; current
           <span className="tab-label">{t("nav.more")}</span>
         </button>
       </nav>
-      {moreOpen && <ProjectMoreSheet projectId={projectId} current={current === "more"} badge={badge} unknown={unknown} onClose={() => setMoreOpen(false)} />}
+      {moreOpen && <ProjectMoreSheet projectId={projectId} current={current === "more"} badge={badge} unknown={unknown} parts={parts} onClose={() => setMoreOpen(false)} />}
     </>
   );
 }
 
-/** The project's other pages on a phone, in the sheet the app's own More opens and drawn the same
- *  way, with the project's settings and the way back to every project after them. */
-function ProjectMoreSheet({ projectId, current, badge, unknown, onClose }: { projectId: string; current: boolean; badge: string | null; unknown?: string; onClose: () => void }) {
+/** What the More sheet says under "Needs decision": how many to answer, to review and blocked. */
+type DecisionParts = { asks: number; review: number; blocked: number };
+
+const MORE_HINTS: Partial<Record<PhoneMorePage, string>> = { journal: "pmore.journal.hint" };
+
+/** The project's other pages on a phone, as the design's sheet: the project's name and where it runs at
+ *  the top, a row for each page with what waits there, its settings, and the way back to every project
+ *  after a divider. */
+function ProjectMoreSheet({ projectId, current, badge, unknown, parts, onClose }: { projectId: string; current: boolean; badge: string | null; unknown?: string; parts: DecisionParts; onClose: () => void }) {
   const { project } = useProject(projectId);
   const route = useRoute();
   const [settings, setSettings] = useState(false);
   const here = current ? route.page : null;
   if (settings && project) return <ProjectSettingsSheet project={project} onClose={onClose} onRemoved={() => { onClose(); navigate(ORCHESTRATION_LIST); }} toast={toast} />;
-  const item = (key: string, href: string, icon: IconName, label: string, active: boolean, count?: ReactNode) => (
-    <a key={key} href={href} data-more={key} className={`more-item ${active ? "active" : ""}`} onClick={(e) => { go(e, href); onClose(); }}>
-      <Icon name={icon} size={22} />
-      <span>{label}</span>
-      {count}
-    </a>
-  );
+  const goTo = (href: string) => { onClose(); navigate(href); };
+  const env: TerminalEnvName = project?.settings.default_env ?? project?.folders[0]?.env ?? "container";
+  const decisionHint = [parts.asks ? plural("pmore.asks", parts.asks) : "", parts.review ? plural("pmore.review", parts.review) : "", parts.blocked ? plural("pmore.blocked", parts.blocked) : ""].filter(Boolean).join(" · ");
+  const hint = (page: PhoneMorePage) => page === "attention" ? (decisionHint || undefined) : MORE_HINTS[page] ? t(MORE_HINTS[page]!) : undefined;
+  const value = (page: PhoneMorePage) => page === "attention" && badge ? <span className="ph-badge warn" title={unknown} aria-label={unknown ?? plural("phone.more.decisions", parts.asks + parts.review + parts.blocked)}>{badge}</span>
+    : page === "folders" && project ? project.folders.length : undefined;
   return (
-    <Sheet onClose={onClose} size="narrow" className="more-sheet" title={t("nav.more")}>
-      <div className="more-grid">
-        {PHONE_MORE.map((page) => item(page, projectPagePath(projectId, page), MORE_ICONS[page], t(MORE_LABELS[page]), here === page,
-          page === "attention" && badge ? <span className="tab-badge" title={unknown} aria-label={unknown}>{badge}</span> : undefined))}
-        <button type="button" data-more="settings" className="more-item" disabled={!project} onClick={() => setSettings(true)}>
-          <Icon name="settings" size={22} />
-          <span>{t("phone.more.settings")}</span>
-        </button>
-        {item("projects", ORCHESTRATION_LIST, "back", t("focus.all"), false)}
+    <BottomSheet onClose={onClose} className="more-sheet ph-more-sheet" label={t("nav.more")}
+      title={<span className="ph-sheet-title two"><span className="truncate">{project?.name ?? t("nav.more")}</span>{project && <span className="ph-sheet-sub truncate">{[t(`term.env.${env}`), t("pmore.created", { date: absDate(project.created_at) })].join(" · ")}</span>}</span>}>
+      <div role="menu" className="ph-more-list">
+        {PHONE_MORE.map((page) => (
+          <SheetRow key={page} icon={MORE_ICONS[page]} label={t(MORE_LABELS[page])} hint={hint(page)} value={value(page)} checked={here === page ? true : undefined}
+            data={{ more: page }} onClick={() => goTo(projectPagePath(projectId, page))} />
+        ))}
+        <SheetRow icon="settings" label={t("phone.more.settings")} hint={t("pmore.settings.hint")} disabled={!project} data={{ more: "settings" }} onClick={() => setSettings(true)} />
+        <div className="ph-msep" role="separator" />
+        <SheetRow icon="grid" label={t("focus.all")} data={{ more: "projects" }} onClick={() => goTo(ORCHESTRATION_LIST)} />
       </div>
-    </Sheet>
+    </BottomSheet>
   );
 }
 
@@ -281,26 +294,11 @@ export function AskAnswers({ ask, projectId, toast, always = false, server = "",
   );
 }
 
-/** The request that has waited longest for the operator, at the top of a tab, answered in place. */
+/** The request that has waited longest for the operator, at the top of a tab, answered in place: the
+ *  compact card of project/needs.tsx, whose "+N more" opens the one decision sheet. */
 export function NeedsYouBanner({ projectId, toast }: { projectId: string; toast: (text: string) => void }) {
-  const { ask, waiting, unverified } = useOperatorAsks(projectId);
-  const { data: team } = useQuery<{ staff: Staff[] }>(staffKey(projectId), { staleMs: 5000 });
-  if (!ask) return null;
-  const names = new Map((team?.staff ?? []).map((m) => [m.id, m.name]));
-  return (
-    <section className="needs-banner" data-ask={ask.short_id} aria-label={t("phone.needs")}>
-      <div className="needs-banner-head">
-        <Icon name="alert" size={14} />
-        <span className="grow">{t("phone.needs")}</span>
-        {/* The age first, then the count behind a dot: "+1 more 4d" run together left it unclear whose
-            age that was. The age is the shown question's. */}
-        <span className="needs-banner-when">{relTime(ask.created_at)}</span>
-        {waiting > 1 && <span className="needs-banner-more">· {t("phone.needs.more", { n: waiting - 1 })}</span>}
-      </div>
-      <div className="needs-banner-text"><b>{askerLine(ask, names)}</b> {askWords(ask)}</div>
-      <AskAnswers key={ask.id} ask={ask} projectId={projectId} toast={toast} unverified={unverified} />
-    </section>
-  );
+  const asks = useOperatorAsks(projectId);
+  return <NeedsYouCard projectId={projectId} asks={asks} toast={toast} />;
 }
 
 // ── the team ─────────────────────────────────────────────────────────────────────────────────
@@ -401,24 +399,6 @@ function PhoneStaffRow({ member, task, spend, onOpen, onEdit }: { member: Staff;
       <Icon name="more" />
     </button>
     </div>
-  );
-}
-
-// ── the board ────────────────────────────────────────────────────────────────────────────────
-
-/** `board` is handed the request the banner shows, so the board does not show it a second time. */
-export function PhoneBoard({ projectId, toast, board }: { projectId: string; toast: (text: string) => void; board: (bannered: string | null) => ReactNode }) {
-  const { project } = useProject(projectId);
-  const { ask } = useOperatorAsks(projectId);
-  // The board's own bar under the header carries its counts and its "+": the header only names it.
-  return (
-    <>
-      <ProjectPhoneHead projectId={projectId} title={project ? t("pboard.title.of", { name: project.name }) : t("focus.page.board")} subtitle="" />
-      <div className="phone-project phone-board">
-        <NeedsYouBanner projectId={projectId} toast={toast} />
-        {board(ask?.id ?? null)}
-      </div>
-    </>
   );
 }
 

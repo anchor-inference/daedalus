@@ -1,10 +1,11 @@
 // A task's result is one immutable candidate with its own verification and acceptance. The exact
 // result, verdict, contract and current branch must agree before the operator can accept it.
 
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api, ApiError } from "../api";
 import { absTime, bytes } from "../format";
-import { t } from "../i18n";
+import { plural, t } from "../i18n";
 import { navigate, projectSessionPath, sessionPath } from "../router";
 import { useOffline, useQuery, invalidate } from "../store";
 import { errorText } from "../ui";
@@ -18,6 +19,9 @@ import { ManualReopen } from "./ManualReopen";
 import { ArtifactCard } from "../artifact";
 import { filesKey, keptBase, type KeptFile } from "../keptfiles";
 import { downloadHref } from "../preview";
+import { Icon } from "../icons";
+import { BottomSheet, EmptyState, SegmentedControl } from "../ui/phone";
+import { DecisionSlot } from "./slot";
 
 export type ResultReceipt = {
   result_id: string;
@@ -200,6 +204,10 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
   const [notesOpen, setNotesOpen] = useState(false);
   const [locationOpen, setLocationOpen] = useState(false);
   const commentBox = useRef<HTMLTextAreaElement | null>(null);
+  // On a phone's review page the decision footer is drawn into the page's slot, and a tapped diff
+  // line opens a note sheet over the diff instead of scrolling to the form in another tab.
+  const slot = useContext(DecisionSlot);
+  const [noteAt, setNoteAt] = useState<{ path: string; line: number } | null>(null);
   const [resolving, setResolving] = useState<string | null>(null);
   const [resolution, setResolution] = useState<"resolved" | "waived">("resolved");
   const [resolutionReason, setResolutionReason] = useState("");
@@ -226,6 +234,7 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
   useCommentAnchor(task.id, !!result && !!task.branch, (anchor) => {
     setCommentPath(anchor.path);
     setCommentLine(String(anchor.line));
+    if (slot) { setNoteAt(anchor); return; }
     setNotesOpen(true);
     setLocationOpen(true);
     requestAnimationFrame(() => {
@@ -343,10 +352,10 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
     } finally { setBusy(false); }
   }
 
-  async function addComment() {
-    if (!result || !contract.data || !commentText.trim() || offline || busy) return;
+  async function addComment(): Promise<boolean> {
+    if (!result || !contract.data || !commentText.trim() || offline || busy) return false;
     const line = Number(commentLine);
-    if (commentLine && (!task.branch || !review.data?.head_sha || !commentPath.trim() || !Number.isInteger(line) || line < 1)) return;
+    if (commentLine && (!task.branch || !review.data?.head_sha || !commentPath.trim() || !Number.isInteger(line) || line < 1)) return false;
     const body = { priority: commentPriority, body: commentText.trim(), manifest_id: commentArtifact || null, verdict_id: result.verdict_id, path: commentLine ? commentPath.trim() : null, head: commentLine ? review.data?.head_sha : null, line_start: commentLine ? line : null, expected_entity_revision: contract.data.entity_revision };
     const fingerprint = JSON.stringify(body);
     if (commentOperation.current?.fingerprint !== fingerprint) commentOperation.current = { fingerprint, id: crypto.randomUUID() };
@@ -360,11 +369,13 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
       toast(t("result.commentAdded"));
       comments.refresh();
       contract.refresh();
+      return true;
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) commentOperation.current = null;
       toast(errorText(error));
       comments.refresh();
       contract.refresh();
+      return false;
     } finally { setBusy(false); }
   }
 
@@ -392,7 +403,15 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
 
   return <section className="result-flow" aria-label={t("result.title")}>
     <h3>{t("result.title")}</h3>
-    {!result && !results.error && <p className="sub">{t(results.loading ? "result.loading" : "result.none")}</p>}
+    {!result && !results.error && !(slot && results.loading) && <p className="sub">{t(results.loading ? "result.loading" : "result.none")}</p>}
+    {/* A phone holds the result's place while it loads, and says plainly when it could not be read:
+        the footer's Accept stays off with the reason, and Retry is the one thing to do here. */}
+    {slot && !result && !results.error && results.loading && <div className="ph-result-sk" aria-busy="true" aria-label={t("result.loading")}>
+      <span className="ph-sk" style={{ height: 12, width: "40%" }} /><span className="ph-sk" style={{ height: 12, width: "100%" }} /><span className="ph-sk" style={{ height: 12, width: "90%" }} /><span className="ph-sk" style={{ height: 12, width: "70%" }} />
+      <span className="ph-sk ph-result-sk-card" /><span className="ph-sk ph-result-sk-card" /><span className="ph-sk ph-result-sk-card" />
+    </div>}
+    {slot && !result && results.error && <EmptyState icon="question" title={t("pres.unconfirmed")} body={t("pres.unconfirmed.sub")}
+      action={<button type="button" className="ph-btn primary" onClick={() => { results.refresh(); contract.refresh(); review.refresh(); }}><Icon name="reload" size={18} />{t("common.retry")}</button>} />}
     {result && <>
       <div className="result-summary">{result.original_preview?.split("\n")[0] || t("result.noSummary")}</div>
       {result.origin_kind === "operator_manual" && <p className="sub">{t("manual.origin")}</p>}
@@ -473,7 +492,35 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
         </div>
       </details>
     </>}
-    <div className="result-action">
+    {slot && createPortal(<PhoneDecision task={task} hasResult={!!result} busy={busy} block={block} mergeReason={mergeReason}
+      branchPending={!!task.branch && task.merge_state !== "merged" && review.data?.merge_receipt?.state !== "merged"} mergeQueued={review.data?.merge_receipt?.state === "queued"}
+      returnBlocked={returnBlocked} blocking={blockingComments.length} onAccept={() => void accept()} onMerge={() => void merge()} onReturn={() => setReturning(true)}
+      onShow={() => setNotesOpen(true)} />, slot)}
+    {slot && returning && (
+      <BottomSheet title={t("pres.return.title")} onClose={() => setReturning(false)} className="ph-return"
+        footer={<><button type="button" className="ph-btn" onClick={() => setReturning(false)}>{t("common.cancel")}</button>
+          <button type="button" className="ph-btn primary" disabled={busy || returnBlocked || !returnNote.trim()} onClick={() => void returnResult()}>{t("result.sendBack")}</button></>}>
+        <div className="ph-form">
+          <label htmlFor={`return-${task.id}`}>{t("result.returnReason")}</label>
+          <textarea id={`return-${task.id}`} className="field" rows={4} autoFocus value={returnNote} onChange={(event) => setReturnNote(event.target.value)} />
+        </div>
+      </BottomSheet>
+    )}
+    {slot && noteAt && (
+      <BottomSheet onClose={() => setNoteAt(null)} className="ph-note-sheet" label={t("pres.note.title")}
+        title={<span className="ph-sheet-title two"><span>{t("pres.note.title")}</span><span className="ph-sheet-sub truncate">{t("pres.note.where", { path: noteAt.path, line: noteAt.line })}</span></span>}
+        footer={<><button type="button" className="ph-btn" onClick={() => setNoteAt(null)}>{t("common.cancel")}</button>
+          <button type="button" className="ph-btn primary" disabled={busy || offline || !commentText.trim() || !contract.data} onClick={async () => { if (await addComment()) setNoteAt(null); }}>{t("pres.note.save")}</button></>}>
+        <div className="ph-form">
+          <div className="ph-gl">{t("pres.note.importance")}</div>
+          <SegmentedControl label={t("pres.note.importance")} value={commentPriority} onChange={setCommentPriority}
+            options={(["blocking", "important", "suggestion"] as const).map((id) => ({ id, label: t(`pres.priority.${id}`) }))} />
+          <label htmlFor={`note-${task.id}`}>{t("pres.note.label")}</label>
+          <textarea id={`note-${task.id}`} className="field" rows={3} autoFocus value={commentText} onChange={(event) => setCommentText(event.target.value)} />
+        </div>
+      </BottomSheet>
+    )}
+    <div className={`result-action${slot ? " slotted" : ""}`}>
       {task.branch && task.merge_state !== "merged" && review.data?.merge_receipt?.state !== "merged" && <>
         <button type="button" className="btn" disabled={busy || mergeReason !== null} onClick={() => void merge()}>{t("result.merge")}</button>
         {mergeReason && <div className="result-warning" role="status">{t(`result.block.${mergeReason}`)}</div>}
@@ -490,4 +537,39 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
       {block && <div id={`result-block-${task.id}`} className="result-warning" role="status">{t(`result.block.${block}`)}</div>}</>}
     </div>
   </section>;
+}
+
+/**
+ * The review page's footer on a phone: why the decision waits, in one line above it, then Return and
+ * the one decision the result is ready for. A branch still to merge makes Merge that decision, since
+ * acceptance waits for the merge; otherwise it is Accept. Neither is hidden while it waits: it is shown
+ * disabled under its reason, so the operator sees what to fix rather than wonder where the button went.
+ */
+function PhoneDecision({ task, hasResult, busy, block, mergeReason, branchPending, mergeQueued, returnBlocked, blocking, onAccept, onMerge, onReturn, onShow }: {
+  task: ProjectTask; hasResult: boolean; busy: boolean; block: string | null; mergeReason: string | null; branchPending: boolean; mergeQueued: boolean;
+  returnBlocked: boolean; blocking: number; onAccept: () => void; onMerge: () => void; onReturn: () => void; onShow: () => void;
+}) {
+  const reviewing = task.status === "review";
+  const canReturn = hasResult && task.acceptance_state !== "operator_approved";
+  if (!reviewing && !canReturn && !branchPending) return null;
+  const why = branchPending ? mergeReason : block;
+  return (
+    <div className="ph-decide-in">
+      {mergeQueued ? (
+        <div className="ph-decide-why"><span className="ph-spin" aria-hidden />{t("pres.merge.waiting")}</div>
+      ) : why ? (
+        <div className={`ph-decide-why ${why === "comments" || why === "unconfirmed" ? "bad" : "warn"}`} role="status">
+          <Icon name={why === "unconfirmed" ? "offline" : "alert"} size={18} />
+          <span className="grow">{why === "comments" ? plural("pres.blocking", blocking) : t(`result.block.${why}`)}</span>
+          {why === "comments" && <button type="button" className="ph-link" onClick={onShow}>{t("pres.show")}</button>}
+        </div>
+      ) : null}
+      <div className="ph-decide-row">
+        {canReturn && <button type="button" className="ph-btn grow" disabled={busy || returnBlocked} onClick={onReturn}>{t("pres.return")}</button>}
+        {branchPending
+          ? <button type="button" className="ph-btn primary grow" disabled={busy || mergeReason !== null} onClick={onMerge}><Icon name="fork" size={18} />{t("result.merge")}</button>
+          : reviewing && <button type="button" className="ph-btn primary grow" disabled={busy || block !== null} onClick={onAccept}>{t("result.accept")}</button>}
+      </div>
+    </div>
+  );
 }

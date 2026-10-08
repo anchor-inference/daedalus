@@ -8,11 +8,12 @@ import { Skeleton } from "../ui/components";
 import { Sheet } from "../ui/dialogs";
 import { t } from "../i18n";
 import { ORCHESTRATION, ORCHESTRATION_LIST, back as goBack, navigate, projectHome, projectPagePath, useRoute } from "../router";
-import { useProject } from "./data";
+import { staffKey, useProject } from "./data";
 import { focusView } from "./focus";
 import { BriefPage, EnableOrchestrator, FoldersPage, JournalPage, TerminalsPage, WakeupsPage } from "./pages";
 import { SetupLine } from "../main/cards";
-import { PhoneBoard, PhoneTeam, PhoneTerminals } from "./phone";
+import { NeedsYouBanner, PhoneTeam, PhoneTerminals } from "./phone";
+import { SetupCard } from "./needs";
 import { AttentionPage } from "./attention";
 import { GuidedGoal } from "./GuidedGoal";
 import { rememberProjectView } from "./lastview";
@@ -21,6 +22,7 @@ import { ContextErrorBoundary } from "./ContextErrorBoundary";
 
 const TeamPage = lazy(retried(() => import("../team/TeamPage"), (m) => ({ default: m.TeamPage })));
 const ProjectBoard = lazy(retried(() => import("../board/ProjectBoard"), (m) => ({ default: m.ProjectBoard })));
+const PhoneProjectBoard = lazy(retried(() => import("../board/PhoneBoard"), (m) => ({ default: m.PhoneProjectBoard })));
 const StaffView = lazy(retried(() => import("../staff/StaffView"), (m) => ({ default: m.StaffView })));
 
 export function ProjectScreen({ projectId, page, inner, toast, wide }: { projectId: string; page: string | null; inner: string | null; toast: (text: string) => void; wide: boolean }) {
@@ -29,6 +31,8 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
   const { project, loading } = useProject(projectId);
   const { data: currentGoal } = useQuery<{ body: string; project_id: string }>(
     `/api/projects/${encodeURIComponent(projectId)}/scope-revisions/current`, { staleMs: 5000 });
+  // The setup card counts the team; the query is the one the team tab reads, so it costs nothing more.
+  const { data: team } = useQuery<{ staff: unknown[] }>(!wide && project?.setup_by === "dispatcher" ? staffKey(projectId) : null, { staleMs: 5000 });
   const view = focusView(page, inner);
   useEffect(() => {
     const coordinator = project?.settings.orchestrator;
@@ -53,7 +57,12 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
         // A project the main orchestrator is setting up says so, with the button that ends the setup.
         // What waits for the operator is in the Questions tab, which a phone opens from the header.
         banner={<>
-          {project.setup_by === "dispatcher" && <SetupLine projectId={projectId} name={project.name} toast={toast} />}
+          {project.setup_by === "dispatcher" && (wide
+            ? <SetupLine projectId={projectId} name={project.name} toast={toast} />
+            : <SetupCard project={project} goal={!!currentGoal?.body} staff={Array.isArray(team?.staff) ? team!.staff.length : null} toast={toast} />)}
+          {/* A phone has no Questions column beside the chat: the one card answers the oldest request
+              and opens the decision sheet for the rest. */}
+          {!wide && <NeedsYouBanner projectId={projectId} toast={toast} />}
           {!currentGoal?.body && <div className="main-setup" data-goal-setup>
             <span className="grow">{t("goal.start.missing")}</span>
             <button className="linkbtn" onClick={() => setGoalOpen(true)}>{t("goal.start.title")}</button>
@@ -78,11 +87,11 @@ export function ProjectScreen({ projectId, page, inner, toast, wide }: { project
     // A command-line member, reached from its row: on a phone back leads to the team it came from.
     body = <StaffView key={view.id} projectId={projectId} staffId={view.id} wide={wide} toast={toast} onBack={() => (wide ? navigate(home) : goBack(projectPagePath(projectId, "team")))} />;
   } else if (view.page === "attention") {
-    body = <AttentionPage projectId={projectId} back={back} toast={toast} />;
+    body = <AttentionPage projectId={projectId} back={back} toast={toast} phone={!wide} />;
   } else if (!wide && view.page === "team") {
     body = <PhoneTeam projectId={projectId} toast={toast} />;
   } else if (!wide && view.page === "board") {
-    body = <PhoneBoard projectId={projectId} toast={toast} board={(bannered) => <ProjectBoard projectId={projectId} toast={toast} embedded selected={route.query.get("task")} selectedResult={route.query} bannered={bannered} />} />;
+    body = <PhoneProjectBoard projectId={projectId} toast={toast} selected={route.query.get("task")} selectedResult={route.query} />;
   } else if (!wide && view.page === "terminals") {
     body = <PhoneTerminals projectId={projectId} toast={toast} />;
   } else if (view.page === "team") {

@@ -32,7 +32,7 @@ from pathlib import Path
 from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, FocusStub, expect_app  # noqa: E402
 from screenshots import PROJECTS, S1, UNHANDLED, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -441,6 +441,85 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
     return problems, seen
 
 
+def check_phone_project(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-def]
+    """The same claims over orchestration's phone screens at 412 × 915, in both languages: the list of
+    projects, the one Needs-you card and its decision sheet, the project's More sheet and Needs
+    decision, the board with its chips and a task's sheet, and the review page's bar and footer."""
+    from check_review_merge import reviewed_result
+    from screenshots import focus_stub
+
+    problems: list[str] = []
+    seen: dict = {}
+    for lang in ("en", "ru"):
+        context = browser.new_context(viewport={"width": 412, "height": 915}, color_scheme="dark", is_mobile=True, has_touch=True)
+        page = context.new_page()
+        focus = FocusStub.bakery(lang)
+        focus.questions_of_bakery(lang)
+        reviewed_result(focus)
+        page.route("**/api/**", focus_stub(focus))
+        pid = focus.projects[0]["id"]
+
+        def go(route: str, wait: str, page: Page = page, lang: str = lang) -> None:
+            page.goto(f"{BASE}/{route}{'&' if '?' in route else '?'}token=t&scheme=dark&lang={lang}")
+            page.wait_for_selector(wait, timeout=15000)
+            page.wait_for_timeout(500)
+
+        def read(name: str, scope: str, page: Page = page, lang: str = lang) -> dict:
+            m = page.evaluate(READ_PHONE, scope)
+            seen[f"{name}-{lang}"] = {"sizes": sorted(float(k) for k in m["sizes"]), "rows": m["rows"], "chips": m["chips"]}
+            off = {k: v[:3] for k, v in m["sizes"].items() if float(k) not in PHONE_STEPS}
+            if off:
+                problems.append(f"{name} {lang}: text off the six steps {off}")
+            if m["targets"]:
+                problems.append(f"{name} {lang}: targets under 44 px {m['targets'][:4]}")
+            if m["scroll"][0] > m["scroll"][1]:
+                problems.append(f"{name} {lang}: the page scrolls sideways {m['scroll']}")
+            return m
+
+        go("orchestration/projects", ".ph-orch .ph-row")
+        m = read("orchestration", ".ph-orch")
+        if not m["top"] or m["top"]["h"] != 56:
+            problems.append(f"orchestration {lang}: the top bar is {m['top']}, not 56 tall")
+        if any(h != 60 for h in m["rows"]):
+            problems.append(f"orchestration {lang}: rows {sorted(set(m['rows']))}, not 60")
+
+        go(f"project/{pid}", ".needs-card")
+        read("needs card", ".needs-card")
+        page.locator(".needs-card .needs-more").tap()
+        page.wait_for_selector(".ph-decisions .q-card", timeout=5000)
+        page.wait_for_timeout(300)
+        read("decision sheet", ".ph-decisions")
+        page.keyboard.press("Escape")
+
+        go(f"project/{pid}/board", ".ph-board .ph-row")
+        m = read("board", ".ph-board")
+        if not m["top"] or m["top"]["h"] != 56:
+            problems.append(f"board {lang}: the top bar is {m['top']}, not 56 tall")
+        if any(h != 32 for h in m["chips"]):
+            problems.append(f"board {lang}: chips {sorted(set(m['chips']))}, not 32")
+        if any(h < 60 for h in m["rows"]):
+            problems.append(f"board {lang}: a row is shorter than 60: {sorted(set(m['rows']))}")
+        page.locator(".ph-board .ph-row.ph-task:not(.need) .ph-row-more").first.tap()
+        page.wait_for_selector(".ph-task-menu", timeout=5000)
+        page.wait_for_timeout(300)
+        read("task sheet", ".ph-task-menu")
+        page.keyboard.press("Escape")
+        page.locator("nav.project-tabs button[data-tab='more']").tap()
+        page.wait_for_selector(".ph-more-sheet", timeout=5000)
+        page.wait_for_timeout(300)
+        read("more sheet", ".ph-more-sheet")
+        page.keyboard.press("Escape")
+
+        go(f"project/{pid}/attention", ".ph-attention .ph-row")
+        read("needs decision", ".ph-attention")
+
+        go(f"project/{pid}/board?task=t-endpoint", ".ph-taskpage .ph-decide .ph-btn")
+        read("review bar", ".ph-taskpage-top")
+        read("review footer", ".ph-decide")
+        context.close()
+    return problems, seen
+
+
 def judge(m: dict) -> list[str]:
     problems: list[str] = []
     phone = m["vw"] < 1024
@@ -553,6 +632,8 @@ def run() -> int:
             problems += check_settings(browser)
             phone_problems, measured["phone"] = check_phone(browser)
             problems += phone_problems
+            project_problems, measured["phone-project"] = check_phone_project(browser)
+            problems += project_problems
         browser.close()
     for name, m in measured.items():
         print(name, json.dumps(m))

@@ -4,7 +4,7 @@
 // reason rather than hidden: the operator should see that the folder is dirty, not wonder where the
 // button went.
 
-import { useRef, useState } from "react";
+import { useContext, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { Skeleton } from "../ui/components";
 import { Sheet } from "../ui/dialogs";
@@ -15,6 +15,8 @@ import { DiffView } from "../previewparts";
 import { invalidate, useOffline, useQuery } from "../store";
 import { BLOCKER_CODES, Review, ReviewBlocker, ReviewSince, mergeBlock } from "./board";
 import { requestCommentAt } from "./commentAnchor";
+import { DecisionSlot } from "./slot";
+import { FileDiff, FileRow, useLineNotes } from "./TaskPage";
 
 export const reviewKey = (taskId: string) => `/api/board/${encodeURIComponent(taskId)}/review`;
 const sinceKey = (taskId: string, head: string) => `${reviewKey(taskId)}/since-previous?head=${encodeURIComponent(head)}`;
@@ -113,6 +115,11 @@ function CiRequirements({ taskId, checks, onChanged, toast }: { taskId: string; 
 export function ReviewPanel({ taskId, onChanged, toast }: { taskId: string; onChanged: () => void; toast: (text: string) => void }) {
   const { data, error, loading, refresh } = useQuery<Review>(reviewKey(taskId), { staleMs: 2000 });
   const [diff, setDiff] = useState(false);
+  // On a phone's review page the files are rows that open one at a time, with their notes.
+  const phone = useContext(DecisionSlot) !== null;
+  const [fileAt, setFileAt] = useState<number | null>(null);
+  const [allFiles, setAllFiles] = useState(false);
+  const notes = useLineNotes(taskId, phone);
   const [since, setSince] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
@@ -161,7 +168,19 @@ export function ReviewPanel({ taskId, onChanged, toast }: { taskId: string; onCh
           {hidden > 0 && <li><button className="linkbtn" onClick={() => setShowAll(true)}>{t("pboard.review.commits.more", { n: hidden })}</button></li>}
         </ul>
       )}
-      {data.files.length > 0 && (
+      {phone && data.files.length > 0 && (
+        <div className="ph-frows">
+          {(allFiles ? data.files : data.files.slice(0, 6)).map((f, i) => (
+            <FileRow key={f.path} path={f.path} added={f.added} removed={f.removed ?? 0} notes={notes.filter((n) => n.path === f.path)} onOpen={() => setFileAt(i)} />
+          ))}
+          {!allFiles && data.files.length > 6 && <button type="button" className="ph-frow more" onClick={() => setAllFiles(true)}><Icon name="more" size={22} /><span className="ph-frow-main">{plural("pres.files.more", data.files.length - 6)}</span><Icon name="chevron" size={18} /></button>}
+        </div>
+      )}
+      {phone && fileAt !== null && data.files[fileAt] && (
+        <FileDiff patch={data.patch} files={data.files.map((f) => ({ path: f.path, added: f.added, removed: f.removed ?? 0 }))} index={fileAt} notes={notes}
+          onIndex={setFileAt} onClose={() => setFileAt(null)} onLine={(anchor) => { if (!requestCommentAt(taskId, anchor)) toast(t("diff.commentNoResult")); }} />
+      )}
+      {!phone && data.files.length > 0 && (
         <ul className="review-files">
           {data.files.slice(0, 12).map((f) => (
             <li key={f.path}>

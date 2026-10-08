@@ -34,8 +34,9 @@ def main() -> int:
                 page.goto(f"{BASE}/orchestration/project/{PROJECT}?token=t&lang={lang}")
                 bar = page.locator("nav.project-tabs")
                 expect(bar.locator(":scope > a, :scope > button")).to_have_count(5)
-                # Waiting questions take the goal line's place above the composer; with none, the goal line is there.
-                expect(page.locator(".goal-headline, .questions-line-text").first).to_be_visible()
+                # Waiting questions take the goal line's place: on a phone as the Needs-you card above the
+                # chat; with none, the goal line is there.
+                expect(page.locator(".goal-headline, .needs-card").first).to_be_visible()
                 # The composer's white circle is on screen: a voice conversation while the field is
                 # empty, Send once it holds words.
                 send = page.locator(".composer [data-action='send'], .composer [data-action='voice']").first
@@ -62,9 +63,12 @@ def main() -> int:
                 expect(page.locator(".composer .attachments")).to_contain_text("evidence.txt")
 
                 bar.locator("button[data-tab='more']").click()
-                page.locator(".sheet.more-sheet .more-item[data-more='attention']").click()
+                page.locator(".sheet.more-sheet .ph-mrow[data-more='attention']").click()
                 expect(page.locator(".focus-attention-item")).not_to_have_count(0)
-                expect(page.locator(".focus-attention-item .ask-answers-row .btn").first).to_be_visible()
+                # A request is a row that opens the one decision sheet, where it is answered.
+                page.locator("[data-kind='ask'] .focus-attention-item").first.click()
+                expect(page.locator(".ph-decisions .q-card").first).to_be_visible()
+                page.keyboard.press("Escape")
                 expect(page.locator(".focus-attention-item")).to_have_count(3)
                 blocked = page.locator(".focus-attention-item").last
                 expect(blocked).to_contain_text("dependent work is unfinished" if lang == "en" else "зависимая работа не закончена")
@@ -72,7 +76,7 @@ def main() -> int:
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (lang, width, "attention overflow")
 
                 bar.locator("button[data-tab='more']").click()
-                page.locator(".sheet.more-sheet .more-item[data-more='journal']").click()
+                page.locator(".sheet.more-sheet .ph-mrow[data-more='journal']").click()
                 expect(page.locator(".journal-entry")).not_to_have_count(0)
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (lang, width, "history overflow")
                 context.close()

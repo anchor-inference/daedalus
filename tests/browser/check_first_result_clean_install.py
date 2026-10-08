@@ -251,6 +251,9 @@ def scenario(language: str, width: int) -> None:
         assert bad.status == 409 and "evidence" in bad.text().lower()
         sheet.get_by_role("textbox", name="What did you observe?" if language == "en" else "Что вы наблюдали?").fill("Compared bread with the approved price")
         sheet.get_by_role("button", name="Record observation" if language == "en" else "Записать наблюдение").click()
+        # The click only starts the request: the host is asked for the evidence once the page shows it
+        # recorded, or a loaded machine reads the list before the observation has reached it.
+        expect(sheet).to_contain_text("Compared bread with the approved price")
         evidence = api("GET", f"/api/board/{task_id}/results/{result_id}/evidence")
         assert len(evidence) == 1 and evidence[0]["criterion_id"] == "C1"
         assert evidence[0]["manifest_digest_before"] == evidence[0]["manifest_digest_after"]
@@ -261,7 +264,8 @@ def scenario(language: str, width: int) -> None:
         expect(page.locator(".toast")).to_contain_text("Result accepted" if language == "en" else "Результат принят")
         page.reload()
         expect(sheet.locator(".result-state")).to_contain_text("Operator approved" if language == "en" else "Оператор принял")
-        sheet.locator(".result-details summary").first.click()
+        # A phone's task page keeps its other tabs mounted and hidden; the result's own fold is the visible one.
+        sheet.locator(".result-details summary:visible").first.click()
         sheet.get_by_role("button", name="Show original report" if language == "en" else "Показать исходный отчёт").click()
         expect(sheet.locator(".result-original")).to_contain_text("Bread 3 EUR")
         task = next(row for row in api("GET", f"/api/projects/{project_id}/board?include_done=1")["tasks"] if row["id"] == task_id)

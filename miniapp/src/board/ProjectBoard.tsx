@@ -31,6 +31,7 @@ import { TaskContext } from "./TaskContext";
 import { ManualResult } from "./ManualResult";
 import { ManualReopenRecovery } from "./ManualReopen";
 import { IssueImport } from "./IssueImport";
+import { PhoneTaskPage } from "./TaskPage";
 import { Harness, statusTone } from "../team/team";
 import { confirmAsync, errorText } from "../ui";
 import {
@@ -62,7 +63,7 @@ import {
   toggleFilter,
 } from "./board";
 
-type BoardResponse = ProjectBoardData & { project: { id: string; name: string } };
+export type BoardResponse = ProjectBoardData & { project: { id: string; name: string } };
 type TaskCommand = { task: { id: string; entity_revision: number } };
 type LaunchReceipt = { effect_id: string; state: "queued"; entity_revision: number };
 type LaunchIntent = { id: string; body: { staff_id: string; resume_from: string | null; expected_entity_revision: number } };
@@ -481,9 +482,10 @@ function RequirementsSection({ requirements }: { requirements: Requirement[] }) 
 }
 
 /** Creating a task and changing one: the same sheet, because a task is its title, its brief, who does it and what it waits for. */
-function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, toast, onImport }: { projectId: string; data: BoardResponse; task?: ProjectTask; resultReference?: AcceptedResultReference | null; onClose: () => void; onDone: () => void; toast: (text: string) => void; onImport?: () => void }) {
+export function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, toast, onImport }: { projectId: string; data: BoardResponse; task?: ProjectTask; resultReference?: AcceptedResultReference | null; onClose: () => void; onDone: () => void; toast: (text: string) => void; onImport?: () => void }) {
   const route = useRoute();
   const offline = useOffline();
+  const phone = useMedia("(max-width: 1023px)");
   const operation = useRef<{ fingerprint: string; id: string } | null>(null);
   const launchOperation = useRef<{ fingerprint: string; id: string } | null>(null);
   const archiveOperation = useRef<string | null>(null);
@@ -714,26 +716,9 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
     </Sheet>
   );
 
-  return (
-    <Sheet
-      title={task ? task.title : t("pboard.new")}
-      onClose={onClose}
-      className="pboard-sheet"
-      head={
-        task && (
-          <OverflowMenu
-            small
-            label={t("board.actions")}
-            items={[
-              ...(task.assignee?.session_id ? [{ label: t("pboard.open.staff", { name: task.assignee.name }), icon: "bots" as const, onSelect: () => navigate(projectSessionPath(projectId, task.assignee!.session_id!)) }] : []),
-              { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
-              "-",
-              { label: t("pboard.archive.action"), icon: "trash", danger: true, disabled: writeBlocked || busy || !["todo", "blocked"].includes(task.status), hint: t("pboard.archive.unavailable"), onSelect: () => void archiveTask() },
-            ]}
-          />
-        )
-      }
-    >
+  // The sheet's parts, named so a phone can lay them out as the review page's three tabs (Task,
+  // Result, Diff) while the desktop keeps them in this one order.
+  const taskHead = <>
       {task && (
         <div className="erow-meta pboard-sheet-status">
           <span className="chip">{t(`board.col.${task.status}`)}</span>
@@ -750,9 +735,13 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
           {asksFirst && <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id, grant: task.assignee ? "execution" : "assignment_execution" }))}>{t(task.assignee ? "pboard.grant.execution.open" : "pboard.grant.open")}</button>}
         </div>
       )}
+  </>;
+  const diffPart = <>
       {task && task.status === "review" && task.branch && (
         <ReviewPanel taskId={task.id} onChanged={onDone} toast={toast} />
       )}
+  </>;
+  const resultPart = <>
       {task && resultReference && <AcceptedResultDetail task={task} reference={resultReference} />}
       {task && !resultReference && (task.status === "review" || task.acceptance_state === "operator_approved") && <ResultFlow task={task} onAccepted={onDone} toast={toast} />}
       {task?.status === "done" && task.acceptance_state === "operator_approved" && (
@@ -767,6 +756,8 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
           <span> · <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "journal"))}>{t("pboard.cost.coordination")}</button></span>
         </p>
       )}
+  </>;
+  const taskMiddle = <>
       {task && (NEXT[task.status].length > 0 || task.status === "review") && (
         <div className="btnrow pboard-moves" role="group" aria-label={t("board.moveto")}>
           {NEXT[task.status].length > 0 && <span className="sub">{t("board.moveto")}</span>}
@@ -786,8 +777,12 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
       {task && <TaskComparison task={task} staff={data.staff} onChanged={onDone} toast={toast} />}
       {task && <RuntimeHandoff task={task} onChanged={onDone} toast={toast} />}
 
+  </>;
+  const acceptancePart = <>
       {task && hasAcceptance(task) && <AcceptanceSection task={task} />}
 
+  </>;
+  const formPart = <>
       {/* Bringing in work that is already written down as issues sits beside making a card by hand,
           rather than as another button in the board's header. */}
       {!task && onImport && <button type="button" className="linkbtn pboard-import" onClick={onImport}>{t("issues.open")}</button>}
@@ -906,6 +901,41 @@ function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, to
         <button className="btn primary" disabled={busy || writeBlocked || !title.trim() || !changed} onClick={save}>{task ? t("common.save") : t("common.create")}</button>
       </div>
       {writeBlocked && <div className="result-warning" role="status">{t("result.block.unconfirmed")}</div>}
+  </>;
+  if (phone && task) return (
+    <PhoneTaskPage projectId={projectId} task={task} onClose={onClose} toast={toast} busy={busy} writeBlocked={writeBlocked} onArchive={() => void archiveTask()} onMove={(status) => void move(status)}
+      taskTab={<>{taskHead}{taskMiddle}{formPart}</>} resultTab={task.status === "review" || task.acceptance_state === "operator_approved" || !!resultReference || hasAcceptance(task) ? <>{resultPart}{acceptancePart}</> : null}
+      diffTab={task.status === "review" && task.branch ? diffPart : null} />
+  );
+  return (
+    <Sheet
+      title={task ? task.title : t("pboard.new")}
+      onClose={onClose}
+      className={`pboard-sheet ${task ? "" : "new"}`}
+      head={
+        // A phone's new task is decided at the top, where the thumb starts: Create beside the title,
+        // the close button as Cancel. The footer's pair stays for the desktop.
+        !task && phone ? <button className="ph-btn accent sm pboard-create" disabled={busy || writeBlocked || !title.trim() || !changed} onClick={save}>{t("common.create")}</button> :
+        task && (
+          <OverflowMenu
+            small
+            label={t("board.actions")}
+            items={[
+              ...(task.assignee?.session_id ? [{ label: t("pboard.open.staff", { name: task.assignee.name }), icon: "bots" as const, onSelect: () => navigate(projectSessionPath(projectId, task.assignee!.session_id!)) }] : []),
+              { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
+              "-",
+              { label: t("pboard.archive.action"), icon: "trash", danger: true, disabled: writeBlocked || busy || !["todo", "blocked"].includes(task.status), hint: t("pboard.archive.unavailable"), onSelect: () => void archiveTask() },
+            ]}
+          />
+        )
+      }
+    >
+      {taskHead}
+      {diffPart}
+      {resultPart}
+      {taskMiddle}
+      {acceptancePart}
+      {formPart}
     </Sheet>
   );
 }

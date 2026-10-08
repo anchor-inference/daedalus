@@ -82,7 +82,7 @@ def check(language: str, width: int) -> None:
 
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/project/p1/board?token=t&lang={language}")
-        page.locator(".pcard", has_text="Prepare catalog").first.click()
+        page.locator(".pcard, .ph-row", has_text="Prepare catalog").first.click()
         sheet = page.locator(".sheet.pboard-sheet")
         control = sheet.get_by_role("button", name="Task context" if language == "en" else "Контекст задачи")
         control.focus()

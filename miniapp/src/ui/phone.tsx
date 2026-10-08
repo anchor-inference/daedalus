@@ -345,6 +345,9 @@ export type ListRowProps = {
   onOpen: () => void;
   /** The row's commands: long-press, right click and the ⋮ all open them as an ActionSheet. */
   actions?: MenuItem[];
+  /** A sheet of the row's own instead of the ActionSheet (a board task's sheet has a row of chips the
+   *  menu cannot hold): long-press, right click and the ⋮ call this, and the caller draws the sheet. */
+  onMenu?: () => void;
   preview?: Preview;
   /** Revealed by a swipe to the left (up to three), or `swipeStart` by a swipe to the right (one). */
   swipe?: SwipeAction[];
@@ -359,11 +362,13 @@ export type ListRowProps = {
   data?: Record<string, string>;
 };
 
-export function ListRow({ title, meta, lead, trail, onOpen, actions, preview, swipe, swipeStart, one, unread, current, label, className = "", data }: ListRowProps) {
-  const [sheet, setSheet] = useState(false);
+export function ListRow({ title, meta, lead, trail, onOpen, actions, onMenu, preview, swipe, swipeStart, one, unread, current, label, className = "", data }: ListRowProps) {
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
-  const hasActions = !!actions && actions.some((a) => a !== "-");
+  const hasActions = !!onMenu || (!!actions && actions.some((a) => a !== "-"));
+  const sheet = sheetOpen && !onMenu;
+  const setSheet = (open: boolean) => { if (open && onMenu) onMenu(); else setSheetOpen(open); };
   const press = useLongPress(() => { if (hasActions) setSheet(true); });
   const drag = useRef<{ x: number; y: number; base: number; horizontal: boolean | null } | null>(null);
   const leftMax = swipe?.length ? -SWIPE_W * Math.min(3, swipe.length) : 0;

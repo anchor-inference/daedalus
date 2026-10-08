@@ -106,7 +106,8 @@ def check(page: Page, lang: str, unhandled: Unhandled) -> None:
     created.get_by_role("button", name="Create" if lang == "en" else "Создать").click()
     expect(created).to_have_count(0)
     assert stub.created[-1]["client_operation_id"] and stub.created[-1]["expected_collection_revision"] == 3
-    page.locator(".task", has_text="Check plants").click()
+    # A desktop's card, or the row of a phone's list.
+    page.locator(".task, .ph-task", has_text="Check plants").first.click()
     task_sheet = page.locator(".sheet")
     task_id = next(task["id"] for task in stub.tasks if task["title"] == "Check plants")
     with page.expect_response(lambda response: urlsplit(response.url).path.endswith(f"/api/board/{task_id}") and response.request.method == "PUT"):

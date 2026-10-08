@@ -39,8 +39,8 @@ export function MainFlow({ view, toast }: { view: MainView; toast: Toast }) {
   );
 }
 
-/** A project that the main orchestrator is setting up, and the button that ends the setup by hand. */
-export function SetupLine({ projectId, name, toast }: { projectId: string; name: string; toast: Toast }) {
+/** Ending a project's setup by hand: the desktop's line and the phone's setup card share it. */
+export function useFinishSetup(projectId: string, name: string, toast: Toast): { busy: boolean; finish: () => Promise<void> } {
   const [busy, setBusy] = useState(false);
   async function finish() {
     if (busy) return;
@@ -56,6 +56,12 @@ export function SetupLine({ projectId, name, toast }: { projectId: string; name:
       invalidate("/api/projects");
     }
   }
+  return { busy, finish };
+}
+
+/** A project that the main orchestrator is setting up, and the button that ends the setup by hand. */
+export function SetupLine({ projectId, name, toast }: { projectId: string; name: string; toast: Toast }) {
+  const { busy, finish } = useFinishSetup(projectId, name, toast);
   return (
     <div className="main-setup" data-setup={projectId}>
       <Icon name="conductor" size={14} />
@@ -101,6 +107,8 @@ export function DispatchCard({ dispatch, toast }: { dispatch: Dispatch; toast: T
       {open && <DispatchDetail dispatch={dispatch} />}
       {going && (
         <div className="dispatch-actions">
+          {/* A phone has no column of projects beside the chat: the card is the way into its project. */}
+          <a className="btn small phone-only dispatch-open" href={home} onClick={(e) => go(e, home)}>{t("common.open")}</a>
           <button className="btn small ghost" disabled={busy} onClick={() => void cancel()}>{t("main.dispatch.cancel")}</button>
         </div>
       )}

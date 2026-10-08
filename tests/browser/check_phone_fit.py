@@ -119,7 +119,7 @@ def main_questions(browser, lang: str, width: int) -> list[str]:  # type: ignore
     if phone:
         # On a phone the main chat is the first row of orchestration's list, and its questions a sheet away.
         page.goto(f"{BASE}/orchestration/projects?token=t&lang={lang}")
-        page.locator(".orch-list > :first-child .main-entry").click()
+        page.locator(".ph-orch [data-main-entry] .ph-row").click()
         page.locator(".chat-head .questions-headbtn").tap()
         scope = ".panel-sheet"
     else:
