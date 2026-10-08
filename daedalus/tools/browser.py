@@ -23,10 +23,11 @@ from protocore.tools.decorator import tool
 
 from daedalus.browser.agent import LOOK_INSTRUCTION, BrowserAgent, Caller, SensitiveAsk
 from daedalus.browser.model import EnvUnavailable, Forbidden, NotFound, Owner
+from daedalus.host.filesystem import ShellFS
 from daedalus.host.services import SessionServices
 from daedalus.stores.files import FileRefused, human_size, parse_handle, safe_name
 from daedalus.tools import search_hint, tool_group
-from daedalus.tools._common import FRAME_CHARS, error, ok, output_limit, services_for
+from daedalus.tools._common import FETCH_MAX_BYTES, FRAME_CHARS, error, ok, output_limit, services_for
 from daedalus.tools.vision import VisionUnavailable, look
 
 BROWSER_TOOLS = (
@@ -75,6 +76,15 @@ class SessionFiles:
             raise Forbidden(str(exc)) from None
         if self.services.is_protected(target):
             raise Forbidden(f"{target} is protected and cannot be uploaded by tools")
+        fs = self.services.fs
+        if fs.remote:
+            # A session working on the host names a file there, which this process cannot open.
+            try:
+                return target.name, await fs.read_bytes(target, limit=FETCH_MAX_BYTES)
+            except FileNotFoundError:
+                raise NotFound(f"no such file: {target}") from None
+            except (OSError, ValueError) as exc:
+                raise Forbidden(str(exc)) from None
         if not target.is_file():
             raise NotFound(f"no such file: {target}")
         return target.name, await asyncio.to_thread(target.read_bytes)
@@ -88,7 +98,12 @@ class SessionFiles:
             raise Forbidden(str(exc)) from None
         if self.services.is_protected(target):
             raise Forbidden(f"{target} is protected and cannot be written by tools")
-        target = await asyncio.to_thread(_write_new, target, data, keep=to is not None)
+        fs = self.services.fs
+        if isinstance(fs, ShellFS):
+            # The download belongs where the session works: on the host for a session working there.
+            target = await _write_new_remote(fs, target, data, keep=to is not None)
+        else:
+            target = await asyncio.to_thread(_write_new, target, data, keep=to is not None)
         said = f"Saved {clean} ({human_size(len(data))}) to {target}."
         store = getattr(self.manager, "files", None)
         if store is not None and self.owner.project_id:
@@ -98,6 +113,21 @@ class SessionFiles:
             except FileRefused:
                 pass  # past the store's size: the copy in the workspace is what there is
         return said
+
+
+async def _write_new_remote(fs: ShellFS, target: Path, data: bytes, *, keep: bool) -> Path:
+    """:func:`_write_new` on the machine the session's shell reaches."""
+    final = target
+    if not keep:
+        n = 1
+        while await fs.exists(final):
+            final = target.with_name(f"{target.stem}-{n}{target.suffix}")
+            n += 1
+    try:
+        await fs.write_bytes(final, data)
+    except OSError as exc:
+        raise Forbidden(f"could not save {final.name}: {exc}") from None
+    return final
 
 
 def _write_new(target: Path, data: bytes, *, keep: bool) -> Path:

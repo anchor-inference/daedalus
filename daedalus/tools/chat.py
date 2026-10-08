@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
 from daedalus.tools import search_hint, tool_group
-from daedalus.tools._common import error, ok, refuse_protected, services_for
+from daedalus.tools._common import error, local_copy, ok, refuse_protected, services_for
 
 
 @search_hint(
@@ -31,12 +29,19 @@ async def send_file(context: ToolContext, path: str, caption: str | None = None)
     target = services.resolve(path)
     if refusal := refuse_protected(context, services, target, "sent"):
         return refusal
-    if not target.is_file():
-        return error(context, f"no such file: {target}")
     if services.send_file is None:
         return error(context, "file delivery is not available in this session")
-    result = await services.send_file(target, caption)
-    return ok(context, f"sent {target.name} ({target.stat().st_size} bytes): {result}")
+    try:
+        # A session working on the host names a file there; the chat is sent a copy fetched here.
+        local = await local_copy(services, target)
+    except FileNotFoundError:
+        return error(context, f"no such file: {target}")
+    except (OSError, ValueError) as exc:
+        return error(context, str(exc))
+    if not local.is_file():
+        return error(context, f"no such file: {target}")
+    result = await services.send_file(local, caption)
+    return ok(context, f"sent {target.name} ({local.stat().st_size} bytes): {result}")
 
 
 @search_hint(
@@ -73,9 +78,15 @@ async def attach_media(context: ToolContext, items: list[dict[str, str]], layout
         target = services.resolve(raw)
         if refusal := refuse_protected(context, services, target, "attached"):
             return refusal
-        if not target.is_file():
+        try:
+            local = await local_copy(services, target)
+        except FileNotFoundError:
             return error(context, f"no such file: {target}")
-        resolved.append({"path": str(target), "alt": str(item.get("alt") or ""), "caption": str(item.get("caption") or "")})
+        except (OSError, ValueError) as exc:
+            return error(context, str(exc))
+        if not local.is_file():
+            return error(context, f"no such file: {target}")
+        resolved.append({"path": str(local), "alt": str(item.get("alt") or ""), "caption": str(item.get("caption") or "")})
     try:
         attached = await services.attach_media(resolved, layout)
     except (OSError, ValueError) as exc:
@@ -125,8 +136,21 @@ async def spawn_agent(
     loop = None
     if loop_instruction and loop_instruction.strip():
         loop = {"instruction": loop_instruction.strip(), "mode": "interval" if loop_interval_minutes else "dynamic", "interval_seconds": int(loop_interval_minutes) * 60 if loop_interval_minutes else None, "max_runs": loop_max_runs}
-    paths = [str(services.resolve(f)) for f in files or []]
-    missing = [p for p in paths if not Path(p).exists()]
+    paths: list[str] = []
+    missing: list[str] = []
+    for name in files or []:
+        target = services.resolve(name)
+        try:
+            # The new agent's inbox is filled here, so a file on the host is fetched first.
+            local = await local_copy(services, target)
+        except FileNotFoundError:
+            missing.append(str(target))
+            continue
+        except (OSError, ValueError) as exc:
+            return error(context, str(exc))
+        if not local.exists():
+            missing.append(str(target))
+        paths.append(str(local))
     if missing:
         return error(context, "these files do not exist: " + ", ".join(missing))
     try:

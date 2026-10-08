@@ -59,6 +59,13 @@ class LocalFS:
     async def size(self, path: Path) -> int:
         return path.stat().st_size
 
+    async def read_bytes(self, path: Path, *, limit: int) -> bytes:
+        """The file's bytes; a ``ValueError`` naming the size when it holds more than ``limit``."""
+        size = path.stat().st_size
+        if size > limit:
+            raise ValueError(f"{path} is {size} bytes, more than the {limit} read here")
+        return await asyncio.to_thread(path.read_bytes)
+
     async def listdir(self, path: Path) -> list[str]:
         return sorted(os.listdir(path))
 
@@ -88,6 +95,9 @@ class LocalFS:
 
 BINARY_MARKER = "__DAEDALUS_BINARY__"
 WRITE_CHUNK_CHARS = 60_000
+READ_CHUNK_BYTES = 384 * 1024
+"""Bytes read per command by :meth:`ShellFS.read_bytes`: their base64 is 512 KiB, under the 640 KiB
+the host terminal daemon carries back in one reply."""
 """Base64 characters per command when writing through a shell: well under the kernel's 128 KiB per-argument cap."""
 
 
@@ -112,6 +122,42 @@ class ShellFS:
             raise FileNotFoundError(outcome.output.strip() or str(path))
         return outcome.output
 
+    async def read_bytes(self, path: Path, *, limit: int) -> bytes:
+        """The file's bytes, through the shell as base64, a piece per command.
+
+        Text read with ``cat`` would come back decoded and lose every byte that is not UTF-8, which is
+        every image; base64 is plain ASCII whatever the file holds. A piece is small enough that its
+        encoding fits the host daemon's cap on one reply, so a large file is many round trips rather
+        than one cut short. A ``FileNotFoundError`` when it is not a file, a ``ValueError`` naming the
+        size when it holds more than ``limit``.
+        """
+        quoted = shlex.quote(str(path))
+        probe = await self._run(f"test -f {quoted} && wc -c < {quoted}")
+        try:
+            size = int(probe.output.strip().splitlines()[-1]) if probe.exit_code == 0 else -1
+        except (ValueError, IndexError):
+            size = -1
+        if size < 0:
+            raise FileNotFoundError(f"no such file: {path}")
+        if size > limit:
+            raise ValueError(f"{path} is {size} bytes, more than the {limit} read here")
+        data = bytearray()
+        while len(data) < size:
+            wanted = min(READ_CHUNK_BYTES, size - len(data))
+            outcome = await self._run(f"tail -c +{len(data) + 1} {quoted} | head -c {wanted} | base64")
+            try:
+                piece = base64.b64decode("".join(outcome.output.split()), validate=True)
+            except ValueError:
+                piece = b""
+            if outcome.exit_code != 0 or not piece:
+                raise OSError(f"could not read {path} at byte {len(data)}: {outcome.output.strip()[-300:] or 'no answer'}")
+            data += piece
+        return bytes(data)
+
+    async def write_bytes(self, path: Path, data: bytes) -> None:
+        """Write ``data`` byte for byte, as :meth:`write_text` writes text."""
+        await self._write_encoded(path, base64.b64encode(data).decode("ascii"))
+
     async def write_text(self, path: Path, content: str) -> None:
         """Write the content byte for byte: base64 over the shell, in pieces small enough for one argument.
 
@@ -119,7 +165,9 @@ class ShellFS:
         has neither problem, and splitting the encoded text keeps every command under the kernel's
         per-argument limit (128 KiB on Linux). The first piece replaces the file, the rest append.
         """
-        encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        await self._write_encoded(path, base64.b64encode(content.encode("utf-8")).decode("ascii"))
+
+    async def _write_encoded(self, path: Path, encoded: str) -> None:
         pieces = [encoded[i : i + WRITE_CHUNK_CHARS] for i in range(0, len(encoded), WRITE_CHUNK_CHARS)] or [""]
         target = shlex.quote(str(path))
         for index, piece in enumerate(pieces):

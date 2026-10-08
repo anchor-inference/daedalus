@@ -9,7 +9,7 @@ from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
 from daedalus.tools import search_hint, tool_group
-from daedalus.tools._common import error, ok, services_for
+from daedalus.tools._common import error, local_copy, ok, services_for
 
 
 @tool_group("scheduling")
@@ -58,13 +58,18 @@ async def schedule_create(
         return error(context, "the host did not identify this schedule command")
     command_id = "schedule-tool:" + hashlib.sha256(f"{context.run_id}:{call_id}".encode()).hexdigest()
     try:
+        # The schedule opens its files here when it fires; one of a session on the host is fetched now.
+        attached = [str(await local_copy(services, services.resolve(f))) for f in files or []]
+    except (OSError, ValueError) as exc:
+        return error(context, str(exc))
+    try:
         created = await services.schedule(
             "create",
             name=name,
             prompt=prompt,
             cron=cron,
             run_at=run_at,
-            files=[str(services.resolve(f)) for f in files or []],
+            files=attached,
             model=model,
             created_by_session=context.session_id,
             source_run_id=context.run_id,

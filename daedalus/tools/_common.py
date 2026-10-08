@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
+import tempfile
 from pathlib import Path
 
 from protocore.contracts.tools import ToolContext
@@ -29,6 +32,39 @@ def refuse_protected(context: ToolContext, services: SessionServices, target: Pa
     if services.is_protected(target):
         return error(context, f"{target} is protected and cannot be {verb} by tools")
     return None
+
+
+FETCH_MAX_BYTES = 200 << 20
+"""The largest file brought over from the machine a session works on to be sent, attached or handed
+on: every few hundred kilobytes is a round trip there, and a chat delivers nothing larger anyway."""
+
+
+async def local_copy(services: SessionServices, target: Path, *, limit: int = FETCH_MAX_BYTES) -> Path:
+    """``target`` as a file of this process: itself when the session's files are here, else a copy
+    fetched from the machine its commands run on (the host, a benchmark container).
+
+    What hands a file on — to the chat, to the media store, to another agent's inbox, to a schedule —
+    opens it here, and a session working on the host named a file this process does not have: every
+    SendFile of such a session failed with "no such file" while the file sat in its folder. The copy
+    is kept in the session's own directory here when it has one (``local_home``), which lives as long
+    as the session does, so a schedule that names it later still finds it; it is named by its bytes, so
+    fetching the same file twice keeps one copy. ``FileNotFoundError`` when it is not a file there,
+    ``ValueError`` when it is larger than ``limit``.
+    """
+    fs = services.fs
+    if not fs.remote:
+        return target
+    data = await fs.read_bytes(target, limit=limit)
+    home = services.extra.get("local_home")
+    base = Path(home) / ".from-remote" if home else Path(tempfile.gettempdir()) / "daedalus-from-remote" / re.sub(r"[^A-Za-z0-9_-]", "_", services.session_id)
+    folder = base / hashlib.sha256(data).hexdigest()[:16]
+    folder.mkdir(parents=True, exist_ok=True)
+    copy = folder / (target.name or "file")
+    if not copy.exists():
+        partial = folder / f".{copy.name}.part"
+        partial.write_bytes(data)
+        partial.replace(copy)
+    return copy
 
 
 def tool_config(context: ToolContext):  # type: ignore[no-untyped-def]
