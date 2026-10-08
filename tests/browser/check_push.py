@@ -170,7 +170,7 @@ def iphone(playwright, problems: list[str]) -> None:  # type: ignore[no-untyped-
             problems.append(f"the iPhone card shows {steps} steps and a button={bool(page.query_selector('.push-card button'))}")
     shot(page, "push-iphone")
     page.goto(f"{BASE}/inbox?token=t&lang=en")
-    page.wait_for_selector(".screen", timeout=10000)
+    page.wait_for_selector(".ph-inbox .ph-page-body", timeout=10000)
     page.wait_for_timeout(500)
     if page.query_selector(".push-nudge"):
         problems.append("the iPhone list nudges to turn on push, which it cannot do there")

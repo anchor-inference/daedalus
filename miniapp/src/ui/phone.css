@@ -235,6 +235,88 @@
   .ph-srow.danger, .ph-srow.danger > .ic { color: var(--bad); }
   .ph-srow:active { background: var(--surface-2); }
 
+  /* ── sheet contents shared by the slice pages: a padded body, facts, code, fields, footers ── */
+  .ph-sheet-pad { padding: var(--space-1) var(--gutter) var(--space-2); display: flex; flex-direction: column; gap: var(--space-3); }
+  .ph-sheet-kt { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+  .ph-sheet-kt-w { display: flex; flex-direction: column; min-width: 0; }
+  .ph-sheet-kt-t { font-size: var(--fs-17); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+  .ph-sheet-kt-m { font-size: var(--fs-13); font-weight: 400; color: var(--fg-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-code { margin: 0; padding: 12px; border-radius: var(--radius-md); background: #000; color: var(--fg); font-family: var(--mono); font-size: var(--fs-13); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow-y: auto; }
+  :root[data-scheme="light"] .ph-code { background: var(--surface-2); }
+  .ph-prose { font-size: var(--fs-15); line-height: 1.45; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ph-prose.quiet { color: var(--fg-2); }
+  .ph-kv { display: flex; align-items: baseline; gap: var(--space-4); min-height: 28px; font-size: var(--fs-15); }
+  .ph-kv > :first-child { flex: none; color: var(--fg-2); }
+  .ph-kv > :last-child { flex: 1; min-width: 0; text-align: right; overflow-wrap: anywhere; }
+  .ph-label { font-size: var(--fs-13); color: var(--fg-2); margin-bottom: -6px; }
+  .ph-field { width: 100%; min-height: var(--tap); padding: 10px 14px; border: 0; border-radius: var(--radius-md); background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-16); outline: none; }
+  .ph-field.area { resize: vertical; line-height: 1.4; }
+  .ph-field:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+  .ph-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .ph-tag.mono { font-family: var(--mono); font-weight: 400; }
+  .ph-tag.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+  .ph-tag.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+  .ph-sheet-foot > .ph-foot-row, .ph-sheet-foot > .ph-foot-stack { flex: 1; min-width: 0; }
+  .ph-foot-row { display: flex; align-items: center; gap: var(--space-2); }
+  .ph-foot-row.even > .ph-btn { flex: 1; }
+  .ph-foot-stack { display: flex; flex-direction: column; gap: var(--space-2); }
+  .ph-btn.ghost { background: none; color: var(--fg-2); }
+  .ph-btn.danger { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+  .ph-btn.ghost.danger { background: none; }
+  .ph-btn.warn { background: var(--warn); color: #1a1405; }
+  .ph-btn.chosen { box-shadow: inset 0 0 0 1.5px var(--accent); }
+  .ph-row-b { display: flex; flex-direction: column; min-width: 0; }
+
+  /* ── the Inbox: a kind square, the time on the title line, answers on the row ────────────── */
+  .ph-irow { align-items: flex-start; padding-top: 12px; padding-bottom: 12px; }
+  .ph-irow .ph-row-lead { margin-top: 1px; }
+  .ph-irow .ph-row-t { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+  .ph-irow .ph-row-trail { flex-direction: row; align-items: center; gap: 6px; padding-top: 2px; }
+  .ph-irow.dim { opacity: .55; }
+  .ph-irow-tm { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .ph-irow-n { color: var(--fg-2); font-weight: 400; }
+  .ph-irow-d { display: block; margin-top: 3px; font-family: var(--mono); font-size: var(--fs-13); color: var(--fg); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-irow-d.quiet { color: var(--fg-2); }
+  .ph-irow-d.text { font-family: inherit; color: var(--fg-2); }
+  .ph-irow-m { display: block; margin-top: 6px; font-size: var(--fs-13); color: var(--fg-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-irow-m.wrap { white-space: normal; line-height: 1.4; }
+  .ph-kico { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 10px; background: var(--surface-1); color: var(--fg-2); }
+  .ph-kico.warning { background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); }
+  .ph-kico.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
+  .ph-kico.error { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); }
+  .ph-kico.info { background: color-mix(in srgb, var(--info) 12%, transparent); color: var(--info); }
+  .ph-answers { display: flex; flex-wrap: nowrap; gap: var(--space-2); margin-top: 10px; overflow-x: auto; scrollbar-width: none; }
+  .ph-answers .ph-btn { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+  .ph-answers.grid { display: grid; grid-template-columns: 1fr 1fr; margin-top: 0; overflow: visible; }
+  .ph-answers.grid .ph-btn { max-width: none; height: var(--tap); }
+  .ph-answers.grid .ph-btn::after { display: none; }
+  .ph-check { width: 24px; height: 24px; margin: 6px; flex: none; display: grid; place-items: center; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--fg-3); color: var(--accent-ink); }
+  .ph-check.on { background: var(--accent); box-shadow: none; }
+  .ph-selbar { flex: none; display: flex; gap: 4px; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--bg); }
+  .ph-selbar button { flex: 1; min-width: 0; min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 0 4px; border: 0; border-radius: 12px; background: none; color: var(--fg); font: inherit; font-size: var(--fs-12); font-weight: 500; cursor: pointer; }
+  .ph-selbar button:active { background: var(--surface-2); }
+  .ph-selbar button:disabled { opacity: .4; }
+  .ph-selbar button.warn { color: var(--warn); }
+  .ph-inbox .push-nudge { margin: var(--space-2) var(--gutter) 0; }
+  .ph-proposal-t { font-size: var(--fs-17); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+  /* The pop-up at the top: one raised card holding the newest entry and the links under it. It is out
+     of context too, so its Allow is no whiter than Deny, as on an Inbox row. */
+  .notice-toasts.banner { margin: calc(8px + env(safe-area-inset-top)) 12px 0; padding: 4px 4px 0; border: 0; border-radius: var(--radius-md); background: var(--surface-2); box-shadow: 0 8px 28px rgba(0, 0, 0, .5); gap: 0; }
+  .notice-toasts.banner .notice-toast { padding: 10px 10px 6px; border: 0; border-radius: var(--radius-md); background: none; box-shadow: none; }
+  .notice-toasts.banner .notice-toast-head { align-items: center; gap: 10px; }
+  .notice-toasts.banner .notice-toast-head .kind { width: 28px; height: 28px; border-radius: 8px; }
+  .notice-toasts.banner .notice-title { font-size: var(--fs-15); padding-top: 0; }
+  .notice-toasts.banner .notice-body { font-size: var(--fs-13); color: var(--fg-2); }
+  .notice-toasts.banner .notice-toast-head .iconbtn { position: relative; width: 32px; height: 32px; min-height: 32px; }
+  .notice-toasts.banner .notice-toast-head .iconbtn::after { content: ""; position: absolute; inset: -6px; }
+  .notice-toasts.banner .notice-actions { gap: var(--space-2); margin-top: 6px; }
+  .notice-toast .notice-actions .btn { position: relative; height: 36px; min-height: 36px; padding: 0 16px; border: 0; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--fg) 10%, transparent); color: var(--fg); font-size: var(--fs-15); font-weight: 600; }
+  .notice-toast .notice-actions .btn::after { content: ""; position: absolute; inset: -4px 0; }
+  .notice-toast .notice-actions .btn.ghost { background: none; color: var(--fg-2); }
+  .notice-toast .notice-actions .btn.danger { color: var(--bad); }
+  .notice-toasts.banner .notice-foot { padding: 0 2px; border: 0; background: none; }
+  .notice-toasts.banner .notice-foot .btn, .notice-toasts.banner .notice-more { min-height: var(--tap); padding: 0 8px; border: 0; background: none; color: var(--fg-2); font-size: var(--fs-13); }
+
   /* ── the creation pill ───────────────────────────────────────────────────────────────────── */
   .ph-newchat { height: 48px; display: inline-flex; align-items: center; gap: 8px; padding: 0 20px 0 16px; border: 0; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-ink); font: inherit; font-size: var(--fs-16); font-weight: 600; white-space: nowrap; cursor: pointer; }
   .ph-newchat.fab { position: fixed; right: var(--gutter); bottom: calc(env(safe-area-inset-bottom) + 16px); z-index: 14; box-shadow: 0 6px 20px rgba(0, 0, 0, .4); }

@@ -16,6 +16,7 @@
 //   SegmentedControl a pill of two to four choices; each choice may carry a badge
 //   Chip, ChipBar   a 32 px filter pill (44 px to the finger) and the scrolling row that holds them
 //   EmptyState      a title, the hint and one action, centred, for empty, error and filtered-empty
+//   RowSkeleton     a list's placeholder rows at the real row height while it loads
 //   Banner          a 32 px strip under the top bar (offline) or a tinted note with an action
 //   Group, GroupRow a grouped card of 56 px settings rows with 2 px gaps and 20/6 px corners
 //   NewChatPill     the one accent creation pill: in the drawer's foot, or floating over a list
@@ -96,12 +97,16 @@ export function MenuButton({ pip }: { pip?: boolean }) {
 
 export type TopBarProps = {
   title: ReactNode;
-  /** The second line, on a detail page: the model, the live state. A page with one turns the title left. */
+  /** The second line: the model, the live state, a count. A detail page's title with one sits left;
+   *  a top-level page that asks for `center` keeps both lines centred (the Inbox's "4 unread"). */
   sub?: ReactNode;
   /** Centred, as a top-level page's title is. */
   center?: boolean;
   /** A pushed page: the back arrow instead of the hamburger. */
   back?: () => void;
+  /** The way out drawn as another glyph and name (a selection's ✕ "Done selecting"). */
+  backIcon?: IconName;
+  backLabel?: string;
   /** No hamburger and no back (a full-screen flow with its own way out). */
   bare?: boolean;
   pip?: boolean;
@@ -113,7 +118,7 @@ export type TopBarProps = {
   className?: string;
 };
 
-export function TopBar({ title, sub, center, back, bare, pip, onTitle, titleLabel, actions, className = "" }: TopBarProps) {
+export function TopBar({ title, sub, center, back, backIcon, backLabel, bare, pip, onTitle, titleLabel, actions, className = "" }: TopBarProps) {
   const words = (
     <>
       <span className="ph-top-t">{title}</span>
@@ -122,11 +127,11 @@ export function TopBar({ title, sub, center, back, bare, pip, onTitle, titleLabe
   );
   return (
     <header className={`ph-top ${className}`}>
-      {back ? <IconButton icon="back" label={t("shell.back")} onClick={back} /> : !bare && <MenuButton pip={pip} />}
-      <div className={`ph-top-title ${center && !sub ? "center" : ""}`}>
+      {back ? <IconButton icon={backIcon ?? "back"} label={backLabel ?? t("shell.back")} onClick={back} /> : !bare && <MenuButton pip={pip} />}
+      <div className={`ph-top-title ${center ? "center" : ""}`}>
         {onTitle ? <button type="button" className="ph-top-tb" onClick={onTitle} aria-label={titleLabel}>{words}</button> : words}
       </div>
-      {actions ? <div className="ph-top-actions">{actions}</div> : center && !sub ? <span className="ph-top-spacer" aria-hidden /> : null}
+      {actions ? <div className="ph-top-actions">{actions}</div> : center ? <span className="ph-top-spacer" aria-hidden /> : null}
     </header>
   );
 }
@@ -351,6 +356,11 @@ export type ListRowProps = {
   swipeStart?: SwipeAction;
   /** One line only (52 px): a title without a meta line. */
   one?: boolean;
+  /** More under the meta line: a command's text, answers. Presses on it do not open the row. */
+  body?: ReactNode;
+  /** The ⋮ beside the row; off where the row's commands are reachable elsewhere on the page (a
+   *  selection mode, the detail sheet), so a dense list keeps its width for the words. */
+  more?: boolean;
   unread?: boolean;
   current?: boolean;
   /** The accessible name of the ⋮; the title is used when it is a string. */
@@ -359,7 +369,7 @@ export type ListRowProps = {
   data?: Record<string, string>;
 };
 
-export function ListRow({ title, meta, lead, trail, onOpen, actions, preview, swipe, swipeStart, one, unread, current, label, className = "", data }: ListRowProps) {
+export function ListRow({ title, meta, lead, trail, onOpen, actions, preview, swipe, swipeStart, one, body, more = true, unread, current, label, className = "", data }: ListRowProps) {
   const [sheet, setSheet] = useState(false);
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -438,9 +448,10 @@ export function ListRow({ title, meta, lead, trail, onOpen, actions, preview, sw
         <span className="ph-row-main">
           <span className="ph-row-t">{title}</span>
           {meta && !one && <span className="ph-row-m">{meta}</span>}
+          {body && <span className="ph-row-b" onClick={stopOnControl} onPointerDown={stopOnControl}>{body}</span>}
         </span>
         {trail !== undefined && <span className="ph-row-trail">{trail}</span>}
-        {hasActions && (
+        {hasActions && more && (
           <button type="button" className="ph-row-more" aria-label={`${name}: ${t("dlg.menu")}`} title={t("dlg.menu")} aria-haspopup="menu"
             onClick={(e) => { e.stopPropagation(); setSheet(true); }} onPointerDown={(e) => e.stopPropagation()}>
             <Icon name="vdots" size={18} />
@@ -450,6 +461,11 @@ export function ListRow({ title, meta, lead, trail, onOpen, actions, preview, sw
       {sheet && actions && <ActionSheet items={actions} preview={preview ?? { title, meta }} onClose={() => setSheet(false)} />}
     </div>
   );
+}
+
+/** A press on a control inside a row's body is the control's, not the row's: no open, no long press. */
+function stopOnControl(e: { target: EventTarget; stopPropagation: () => void }) {
+  if (e.target instanceof Element && e.target.closest("button, a, input, textarea, select")) e.stopPropagation();
 }
 
 export function SectionHeader({ children, count, action, tone }: { children: ReactNode; count?: ReactNode; action?: ReactNode; tone?: "warn" }) {
@@ -499,6 +515,21 @@ export function EmptyState({ icon, tone, title, body, action, className = "" }: 
       <span className="ph-empty-t">{title}</span>
       {body && <span className="ph-empty-m">{body}</span>}
       {action}
+    </div>
+  );
+}
+
+/** A list's rows while it loads, at the rows' real height, so nothing jumps when they arrive. */
+export function RowSkeleton({ rows = 6, lead = "round" }: { rows?: number; lead?: "round" | "square" | "none" }) {
+  const widths = [[62, 38], [48, 44], [70, 30], [55, 35], [66, 42], [40, 33], [58, 40], [52, 36]];
+  return (
+    <div aria-busy="true" aria-label={t("common.loading")}>
+      {widths.slice(0, rows).map(([a, b], i) => (
+        <div key={i} className="ph-skrow">
+          {lead !== "none" && <span className="ph-sk" style={{ width: 36, height: 36, borderRadius: lead === "round" ? "50%" : 10 }} />}
+          <span className="grow"><span className="ph-sk" style={{ height: 14, width: `${a}%` }} /><span className="ph-sk" style={{ height: 11, width: `${b}%`, marginTop: 8 }} /></span>
+        </div>
+      ))}
     </div>
   );
 }
