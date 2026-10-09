@@ -26,6 +26,7 @@ from daedalus.stores.provider_holds import (
     pin_resumed_run_in,
     pinned_target_in,
     recovery_candidate_in,
+    resting_providers_in,
     resume_target_in,
     validate_hold_in,
 )
@@ -251,3 +252,42 @@ async def test_interrupted_resume_reconciles_only_consumed_pinned_run(db: Databa
     assert resolution is not None and resolution.state == "completed"
     assert resolution.evidence["run_id"] == "continued"
     assert (await db.fetchone("SELECT state,resumed_run_id FROM provider_resume_holds"))["resumed_run_id"] == "continued"
+
+
+async def _observe(db: Database, ident: str, provider: str, failure_class: str, observed_at: str,
+                   retry_after_at: str | None = None, reset_at: str | None = None) -> None:
+    await db.execute(
+        "INSERT INTO provider_failure_observations(id,session_id,run_id,provider_id,provider_kind,model,status,"
+        "failure_class,reset_at,reset_source,retry_after_at,evidence_digest,observed_at)"
+        " VALUES (?,'session','failed',?,'opencode','m',429,?,?,?,?,?,?)",
+        (ident, provider, failure_class, reset_at, "x" if reset_at else None, retry_after_at, "a" * 64, observed_at))
+
+
+@pytest.mark.asyncio
+async def test_only_a_provider_still_spent_is_resting(db: Database) -> None:
+    await _run(db)
+    at = datetime(2026, 10, 9, 12, 0, tzinfo=UTC)
+    stamp = at.isoformat()
+    day = (at + timedelta(hours=26)).isoformat()
+    await _observe(db, "spent", "opencode", "limited_unknown", stamp, retry_after_at=day)  # superseded below
+    await _observe(db, "spent2", "opencode", "quota", stamp, retry_after_at=day)
+    await _observe(db, "blip", "grok", "rate", stamp, retry_after_at=(at + timedelta(seconds=30)).isoformat())
+    await _observe(db, "old", "done", "quota", stamp, retry_after_at=(at - timedelta(hours=1)).isoformat())
+    await _observe(db, "undated", "empty", "billing", (at - timedelta(minutes=30)).isoformat())
+    await _observe(db, "stale", "empty2", "quota", (at - timedelta(hours=2)).isoformat())
+    await _observe(db, "key", "badkey", "auth", stamp)
+    async with db.transaction() as conn:
+        resting = await resting_providers_in(conn, ["opencode", "grok", "done", "empty", "empty2", "badkey", "new"], at)
+    assert set(resting) == {"opencode", "empty"}
+    assert "quota" in resting["opencode"]
+
+
+@pytest.mark.asyncio
+async def test_a_later_transient_refusal_lifts_the_rest(db: Database) -> None:
+    await _run(db)
+    at = datetime(2026, 10, 9, 12, 0, tzinfo=UTC)
+    await _observe(db, "first", "opencode", "quota", (at - timedelta(minutes=5)).isoformat(),
+                   retry_after_at=(at + timedelta(hours=26)).isoformat())
+    await _observe(db, "later", "opencode", "rate", at.isoformat())
+    async with db.transaction() as conn:
+        assert await resting_providers_in(conn, ["opencode"], at) == {}

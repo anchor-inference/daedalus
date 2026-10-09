@@ -107,6 +107,12 @@ _PERMANENT_ERROR_TYPES = {
 
 Read from the body as well as the status because a stream reports its error in a chunk, after the 200."""
 
+_EXHAUSTED_ERROR_TYPES = {"gousagelimiterror"}
+"""Error types that mean the account has spent its allowance, carried on a 429 that looks like a blip.
+
+The reset is hours or days away, so retrying the same endpoint only burns backoff; the verdict is
+permanent for this run and the chain moves on."""
+
 _PERMANENT_STATUS = {401: "auth", 402: "billing", 403: "auth", 404: "model_not_found"}
 
 _MODEL_REFUSAL_MARKERS = ("version_too_old", "does not support this model", "model_not_found")
@@ -148,7 +154,8 @@ def classify_failure(status: int, text: str) -> ProviderVerdict:
     lowered = f"{code} {message}".lower()
     if status in (401, 403):
         return ProviderVerdict("auth", False)
-    if status == 402 or code in {"insufficient_quota", "billing_hard_limit_reached", "billing_not_active"}:
+    if (status == 402 or code in {"insufficient_quota", "billing_hard_limit_reached", "billing_not_active"}
+            or kind.lower() in _EXHAUSTED_ERROR_TYPES):
         return ProviderVerdict("billing", False)
     if status == 429 or kind == "rate_limit_error":
         return ProviderVerdict("rate_limit", True)
@@ -354,6 +361,11 @@ class OpenAICompatibleProvider(ILLMProvider):
                     await self._observe_failure(request, reservation, response.status_code, text, response.headers)
                     self._raise_for_status(response.status_code, text)
                 async for data in _sse_data(response):
+                    if data is None:
+                        # A comment line (the key proxy's keepalive, OpenRouter's processing note):
+                        # no content, but proof the upstream is alive during a silent think.
+                        yield ProviderDelta(kind=ProviderDeltaKind.progress)
+                        continue
                     if data == "[DONE]":
                         break
                     try:
@@ -364,6 +376,7 @@ class OpenAICompatibleProvider(ILLMProvider):
                         self._raise_for_status(500, json.dumps(chunk["error"]))
                     if chunk.get("usage"):
                         usage_raw = chunk["usage"]
+                    spoke = bool(chunk.get("usage"))  # the trailing usage chunk is bookkeeping, not liveness
                     for choice in chunk.get("choices") or []:
                         delta = choice.get("delta") or {}
                         reasoning = delta.get("reasoning_content") or delta.get("reasoning")
@@ -379,6 +392,11 @@ class OpenAICompatibleProvider(ILLMProvider):
                                 yield out
                         if choice.get("finish_reason"):
                             finish_reason = choice["finish_reason"]
+                        spoke = spoke or bool(reasoning or content or delta.get("tool_calls") or choice.get("finish_reason"))
+                    if not spoke:
+                        # A role-only or empty-delta chunk still resets the core's idle clock;
+                        # without it a model that reasons silently was killed as a stalled stream.
+                        yield ProviderDelta(kind=ProviderDeltaKind.progress)
         except httpx.TimeoutException as exc:
             raise LLMTimeoutError(f"{self.endpoint.id}: {exc}") from exc
         except httpx.HTTPError as exc:
@@ -839,8 +857,11 @@ def parse_json_text(text: str) -> dict[str, Any] | None:
     return None
 
 
-async def _sse_data(response: httpx.Response) -> AsyncIterator[str]:
-    """Yield the ``data:`` payload of each SSE event."""
+async def _sse_data(response: httpx.Response) -> AsyncIterator[str | None]:
+    """Yield the ``data:`` payload of each SSE event, and ``None`` for each comment line.
+
+    A comment carries no data but is the only sign of life some upstreams give while they think.
+    """
     buffer: list[str] = []
     async for line in response.aiter_lines():
         if line == "":
@@ -849,6 +870,7 @@ async def _sse_data(response: httpx.Response) -> AsyncIterator[str]:
                 buffer = []
             continue
         if line.startswith(":"):
+            yield None
             continue
         if line.startswith("data:"):
             buffer.append(line[5:].lstrip())

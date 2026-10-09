@@ -21,6 +21,9 @@ _CODES = {
     "tokens_limit_exceeded": "rate",
     "overloaded_error": "capacity",
     "capacity_exceeded": "capacity",
+    # opencode's subscription gateway answers a spent monthly allowance with a plain 429 whose only
+    # marker is this error type; without it the refusal reads as a blip and the chain keeps coming back.
+    "gousagelimiterror": "quota",
 }
 
 

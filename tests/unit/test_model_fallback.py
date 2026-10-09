@@ -9,11 +9,13 @@ endpoint and finish on another — with no event, no mark on the message and no 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
-from protocore.contracts.llm import LLMRateLimitError, LLMRequest, ProviderDelta, ProviderDeltaKind
+import pytest
+from protocore.contracts.llm import LLMRateLimitError, LLMRequest, LLMStreamIdleError, ProviderDelta, ProviderDeltaKind
+from protocore.contracts.runtime_constants import LoopConstants
 from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
 
@@ -211,3 +213,90 @@ async def test_telegram_says_nothing_when_the_configured_model_answered(tmp_path
     await renderer.finish("completed", workspace=tmp_path)
     assert all("answered by" not in text for text, _ in outbox.sent)
     renderer.close()
+
+
+class _Verdict:
+    """What the core's idle watchdog pins on the error it raises; nothing above the core can label it."""
+
+    reason = "timeout"
+
+
+class SilentProvider(ScriptedProvider):
+    """A model that thinks past the idle budget on its first ``silences`` calls, then answers.
+
+    It raises what the core's watchdog raises at the deadline rather than sleeping until it, so no
+    test here waits on a clock.
+    """
+
+    def __init__(self, endpoint_id: str, silences: int, text: str) -> None:
+        super().__init__([{"text": text}])
+        self.endpoint = type("_Endpoint", (), {"id": endpoint_id})()
+        self.silences = silences
+        self.attempts = 0
+
+    async def stream_with_tools(self, request: LLMRequest) -> AsyncIterator[ProviderDelta]:
+        self.attempts += 1
+        if self.attempts <= self.silences:
+            error = LLMStreamIdleError("LLM stream idle for >90.0s (window=baseline, last_delta_seen=thinking=False)")
+            object.__setattr__(error, "classified", _Verdict())
+            raise error
+        async for delta in super().stream_with_tools(request):
+            yield delta
+
+
+@pytest.fixture
+def no_backoff() -> Iterator[None]:
+    """The in-place retry waits a backoff on the real clock; these tests are about where it goes, not how long."""
+    field = LoopConstants.model_fields["llm_transient_error_retry_backoff_base_seconds"]
+    original = field.default
+    field.default = 0.0
+    LoopConstants.model_rebuild(force=True)
+    try:
+        yield
+    finally:
+        field.default = original
+        LoopConstants.model_rebuild(force=True)
+
+
+async def test_one_long_silent_think_keeps_the_run_on_its_model(settings: Settings, db: Database, no_backoff: None) -> None:
+    """The first silence is retried on the same model: no demotion, no notice, no hold on the model."""
+    primary = SilentProvider("primary", silences=1, text="opus answered after a long think")
+    standby = _named(ScriptedProvider([{"text": "the standby answered"}]), "standby")
+    manager = await _manager_with_chain(settings, db, [(primary, "opus-5"), (standby, "flash")])
+    events: list[TurnEvent] = []
+
+    async def sink(session_id: str, event: TurnEvent) -> None:
+        events.append(event)
+
+    manager.add_sink(sink)
+    state = await manager.create_session("t")
+    waiter = asyncio.create_task(_wait_finished(manager))
+    await manager.submit(state.session.id, "hello")
+    assert (await waiter)[0][2] == "completed"
+
+    assert primary.attempts == 2
+    assert standby.requests == []
+    assert _changes(events) == []
+    assert manager.model_status(state)["fallback"] is None
+    await manager.close()
+
+
+async def test_a_silence_that_repeats_moves_the_run_and_says_it_stalled(settings: Settings, db: Database, no_backoff: None) -> None:
+    primary = SilentProvider("primary", silences=2, text="never")
+    standby = _named(ScriptedProvider([{"text": "the standby answered"}]), "standby")
+    manager = await _manager_with_chain(settings, db, [(primary, "opus-5"), (standby, "flash")])
+    events: list[TurnEvent] = []
+
+    async def sink(session_id: str, event: TurnEvent) -> None:
+        events.append(event)
+
+    manager.add_sink(sink)
+    state = await manager.create_session("t")
+    waiter = asyncio.create_task(_wait_finished(manager))
+    await manager.submit(state.session.id, "hello")
+    assert (await waiter)[0][2] == "completed"
+
+    changes = _changes(events)
+    assert primary.attempts == 2
+    assert [(c["to"], c["reason"]) for c in changes] == [("flash", "stalled")], "a silent stream is not an unreachable provider"
+    await manager.close()

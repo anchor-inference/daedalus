@@ -481,3 +481,27 @@ async def test_a_summary_the_output_cap_cut_is_still_refused() -> None:
     body = json.dumps({"choices": [{"message": {"content": cut}, "finish_reason": "length"}], "usage": {"prompt_tokens": 5, "completion_tokens": 3}})
     with pytest.raises(LLMProviderError, match="truncated"):
         await _provider(body).complete_structured(_request(), {"type": "object"})
+
+
+async def test_stream_turns_comments_and_empty_chunks_into_progress() -> None:
+    # A model that reasons silently sends only comments and a role-only chunk; the core's idle
+    # watchdog needs those as progress deltas, and nothing else about the sequence may change.
+    body = (
+        ": OPENROUTER PROCESSING\n\n"
+        + f"data: {json.dumps(_chunk({'role': 'assistant'}))}\n\n"
+        + ": keepalive\n\n"
+        + f"data: {json.dumps(_chunk({'content': 'Hello'}))}\n\n"
+        + f"data: {json.dumps(_chunk({}, finish='stop'))}\n\n"
+        + "data: [DONE]\n\n"
+    )
+    provider = _provider(body)
+    deltas = [d async for d in provider.stream_with_tools(_request())]
+    assert [d.kind for d in deltas] == [
+        ProviderDeltaKind.progress,
+        ProviderDeltaKind.progress,
+        ProviderDeltaKind.progress,
+        ProviderDeltaKind.text,
+        ProviderDeltaKind.usage,
+        ProviderDeltaKind.finish,
+    ]
+    assert deltas[3].content == "Hello"

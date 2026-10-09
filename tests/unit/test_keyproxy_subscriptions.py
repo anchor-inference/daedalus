@@ -449,3 +449,52 @@ async def test_the_daily_flag_refuses_zen_but_not_the_prepaid_go_plan(monkeypatc
         refused = await client.post("/opencode_zen/chat/completions", data=body)
         assert refused.status == 402
         assert (await refused.json())["error"]["type"] == "budget_exceeded"
+
+
+async def test_claude_silent_thinking_forwards_keepalive_comments() -> None:
+    # display "omitted" yields no thinking text, so these events are the only sign of life
+    # during a long think; dropping them let the caller's idle watchdog kill a healthy stream.
+    events = [
+        {"type": "message_start", "message": {"usage": {"input_tokens": 3}}},
+        {"type": "ping"},
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}},
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": ""}},
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "sig"}},
+        {"type": "content_block_stop", "index": 0},
+        {"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "t1", "name": "Read"}},
+        {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{}"}},
+        {"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 2}},
+    ]
+    out = [c async for c in claude_mod.messages_events_to_chunks(_lines(events), model="m")]
+    keepalives = [i for i, c in enumerate(out) if c == subs.KEEPALIVE]
+    assert subs.KEEPALIVE.startswith(":") and subs.KEEPALIVE.endswith("\n\n")
+    assert keepalives[:6] == [0, 1, 2, 3, 4, 5]
+    data = [json.loads(c[6:]) for c in out if c.startswith("data: {")]
+    assert data[0]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] == "Read"
+    assert data[1]["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"] == "{}"
+    assert data[-1]["choices"][0]["finish_reason"] == "tool_calls"
+    full = await subs.collect_completion(claude_mod.messages_events_to_chunks(_lines(events), model="m"), model="m")
+    call = full["choices"][0]["message"]["tool_calls"][0]
+    assert call["id"] == "t1" and call["function"] == {"name": "Read", "arguments": "{}"}
+    assert full["choices"][0]["finish_reason"] == "tool_calls"
+
+
+async def test_claude_silent_upstream_stays_silent() -> None:
+    assert [c async for c in claude_mod.messages_events_to_chunks(_lines([]), model="m") if c == subs.KEEPALIVE] == []
+
+
+async def test_codex_reasoning_phase_forwards_keepalive_comments() -> None:
+    events = [
+        {"type": "response.created", "response": {}},
+        {"type": "response.in_progress", "response": {}},
+        {"type": "response.output_item.added", "item": {"type": "reasoning", "id": "rs_1"}},
+        {"type": "response.reasoning_summary_part.added", "item_id": "rs_1"},
+        {"type": "response.output_item.done", "item": {"type": "reasoning", "id": "rs_1"}},
+        {"type": "response.output_text.delta", "delta": "Hi"},
+        {"type": "response.completed", "response": {"status": "completed", "usage": {}}},
+    ]
+    out = [c async for c in subs.responses_events_to_chunks(_lines(events), model="m")]
+    assert out[:5] == [subs.KEEPALIVE] * 5
+    assert json.loads(out[5][6:])["choices"][0]["delta"]["content"] == "Hi"
+    full = await subs.collect_completion(subs.responses_events_to_chunks(_lines(events), model="m"), model="m")
+    assert full["choices"][0]["message"]["content"] == "Hi"

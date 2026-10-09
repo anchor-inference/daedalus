@@ -76,3 +76,19 @@ async def test_a_rung_whose_window_cannot_hold_the_prompt_is_skipped_with_that_r
     chain2 = ProviderChain([(big, "m"), (small, "q"), (other, "o")], room=room, prompt_tokens=lambda: 240_000)
     assert await chain2.advance(reason="llm_stream_idle") is False
     assert chain2.current_model_name() == "m" and chain2.attempted() == ()
+
+
+async def test_a_resting_fallback_is_skipped_with_its_reason_and_the_primary_never() -> None:
+    resting = {"a": "a is empty", "b": "b is empty"}
+    chain = ProviderChain([(_provider("a"), "m1"), (_provider("b"), "m2"), (_provider("c"), "m3")], resting=resting)
+    assert chain.current_model_name() == "m1"  # the primary is the operator's choice, whatever was observed
+    assert await chain.advance(reason="overloaded") is True
+    assert chain.current_model_name() == "m3"
+    assert chain.attempted() == (("a:m1", "overloaded"), ("b:m2", "b is empty"))
+
+
+async def test_a_chain_of_only_resting_fallbacks_does_not_advance() -> None:
+    chain = ProviderChain([(_provider("a"), "m1"), (_provider("b"), "m2")], resting={"b": "b is empty"})
+    assert await chain.advance(reason="429") is False
+    assert chain.current_model_name() == "m1"
+    assert chain.attempted() == ()
