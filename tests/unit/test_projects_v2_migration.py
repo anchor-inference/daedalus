@@ -165,7 +165,7 @@ async def test_every_project_keeps_its_folder_and_every_session_its_directory(tm
             "writer_attempt_bindings", "writer_attempt_observations",
         "calendar_accounts", "calendar_events", "diagrams", "diagram_revisions", "calendars",
         "calendar_remote_instances", "calendar_reminders_sent", "planner_lists", "planner_tasks",
-        "operator_secrets", "operator_secret_grants",
+        "operator_secrets", "operator_secret_grants", "session_imports",
     })
     assert new - later == {"project_folders", "project_briefs", "project_journal", "staff", "staff_sessions", "staff_messages", "asks", "watches"}
     assert after["project_folders"] == counts["projects"]

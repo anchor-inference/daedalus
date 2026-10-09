@@ -198,6 +198,23 @@ class TerminalProgress(TypedDict):
     percent: NotRequired[int]
 
 
+class ImportProgress(TypedDict):
+    """How far a session import from another program got: its stage and counts, and, once it is
+    done, the session it made or why it failed. The same shape ``GET /api/imports/{job_id}`` answers."""
+
+    job_id: str
+    state: str
+    stage: str
+    harness: NotRequired[str]
+    id: NotRequired[str]
+    stages: NotRequired[list[str]]
+    counts: NotRequired[dict[str, int]]
+    session_id: NotRequired[str | None]
+    error: NotRequired[dict[str, Any] | None]
+    started_at: NotRequired[str]
+    finished_at: NotRequired[str | None]
+
+
 class BrowserOpened(TypedDict):
     """An agent's browser group opened (or came back after its browser had closed): the app's cue to
     offer the Browser tab and the corner preview for its owner."""
@@ -563,6 +580,7 @@ REGISTRY: dict[str, EventSpec] = {
     "terminal.notify": EventSpec(TerminalNotify),
     # Progress changes many times a second while a bar moves; only the latest value is worth anything.
     "terminal.progress": EventSpec(TerminalProgress, persist=False),
+    "import.progress": EventSpec(ImportProgress, persist=False),
     "browser.opened": EventSpec(BrowserOpened),
     "browser.needs_you": EventSpec(BrowserNeedsYou),
     "browser.returned": EventSpec(BrowserReturned),

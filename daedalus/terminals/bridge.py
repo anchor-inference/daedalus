@@ -68,6 +68,10 @@ OUTDATED_BROWSE = ("the host terminal daemon is older than this version and cann
                    "(bash deploy/host-terminal.sh install, which ends the open host terminals)")
 
 
+OUTDATED_SESSIONS = ("the host terminal daemon is older than this version and cannot read other programs' sessions; update it "
+                     "(bash deploy/host-terminal.sh install, which ends the open host terminals)")
+
+
 class HostBridge:
     """The host environment through its terminal daemon. The service is looked up on each call,
     because the bridge is installed and removed while this process runs, and the terminals service
@@ -117,6 +121,26 @@ class HostBridge:
             return await self._side(lambda service: service.fs_browse(HOST, path, hidden=hidden, limit=limit))
         except _Outdated:
             raise HostDaemonOutdated(OUTDATED_BROWSE) from None
+
+    async def sessions_harnesses(self) -> dict[str, Any]:
+        """Which agent programs keep sessions on the machine (``sessions.harnesses``)."""
+        return await self._sessions(lambda service: service.sessions_harnesses(HOST))
+
+    async def sessions_scan(self, harness: str, path: str = "", *, query: str = "", deep: bool = False, limit: int = 200, cursor: str = "") -> dict[str, Any]:
+        """One program's sessions under one folder of the machine (``sessions.scan``)."""
+        return await self._sessions(lambda service: service.sessions_scan(HOST, harness=harness, path=path, query=query, deep=deep, limit=limit, cursor=cursor))
+
+    async def sessions_read(self, harness: str, session: str, *, start: Any = 0, max_bytes: int = 512 << 10, sidechains: bool = True, raw: bool = False) -> dict[str, Any]:
+        """One page of a session of another program, normalised, or its raw bytes (``sessions.read``)."""
+        return await self._sessions(lambda service: service.sessions_read(HOST, harness=harness, session=session, start=start, max_bytes=max_bytes, sidechains=sidechains, raw=raw))
+
+    async def _sessions(self, call: Callable[[Terminals], Awaitable[_T]]) -> _T:
+        """A ``sessions.*`` call: a daemon without it is ``HostDaemonOutdated``; down, missing and
+        refused are as ``_side`` says."""
+        try:
+            return await self._side(call)
+        except _Outdated:
+            raise HostDaemonOutdated(OUTDATED_SESSIONS) from None
 
     async def stat_folder(self, path: str) -> dict[str, Any]:
         """``{exists, type, writable, …}`` of a folder that is to be a project's, held to the rules a
