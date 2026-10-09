@@ -5,7 +5,7 @@ import { ConfirmHost, Sheet, ToastHost, toast as showToast } from "./ui/dialogs"
 import type { AuthConfig } from "./screens/Login";
 import type { OnboardingState } from "./screens/AddModel";
 import * as passkeys from "./passkeys";
-import { ORCHESTRATION, ORCHESTRATION_LIST, back, migrateLegacyLocation, navigate, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
+import { ORCHESTRATION, ORCHESTRATION_LIST, PROJECTS_PAGE, back, migrateLegacyLocation, navigate, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
 import { Counts, Palette, PaletteItem, go, screenTitle, useMedia, useShortcuts } from "./shell";
 import { AppDrawer } from "./drawer";
 import { closeDrawer } from "./ui/phone";
@@ -169,6 +169,8 @@ export function App() {
   // rather than a destination, so it lives in the shell and not in the route.
   const [project, setProject] = useState(storedProject);
   const [switching, setSwitching] = useState(false);
+  // "All projects": a desktop's page in the conversation's place, a phone's sheet over the screen.
+  const openProjects = useCallback(() => (wide ? navigate(PROJECTS_PAGE) : setSwitching(true)), [wide]);
   const pickProject = useCallback((id: string) => {
     rememberProject(id);
     setProject(id);
@@ -504,7 +506,7 @@ export function App() {
       { id: "mode", label: t(mode === "agents" ? "mode.to.orchestration" : "mode.to.agents"), icon: mode === "agents" ? "compass" : "bots", run: () => navigate(modeHome(mode === "agents" ? "orchestration" : "agents", wide)) },
       { id: "main", label: t("main.title"), icon: "compass", run: () => navigate(ORCHESTRATION) },
       { id: "new-project", label: t(mode === "orchestration" ? "np.orch.title" : "np.title"), icon: "plus", run: () => openNewProject() },
-      { id: "projects", label: t("shell.projects"), hint: agentProjects.find((p) => p.id === project)?.name ?? t("shell.projects.all"), icon: "folder", run: () => { navigate(pathFor("agents")); setSwitching(true); } },
+      { id: "projects", label: t("shell.projects"), hint: agentProjects.find((p) => p.id === project)?.name ?? t("shell.projects.all"), icon: "folder", run: () => { if (wide) navigate(PROJECTS_PAGE); else { navigate(pathFor("agents")); setSwitching(true); } } },
       ...agentProjects.map((p) => ({ id: `p-${p.id}`, label: t("shell.search.workin", { name: p.name }), hint: projectPath(p), icon: "folder" as const, run: () => { pickProject(p.id); navigate(pathFor("agents")); } })),
       ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `open-${p.id}`, label: t("focus.palette", { name: p.name }), icon: "conductor" as const, run: () => navigate(projectHome(p.id)) })),
       ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `team-${p.id}`, label: t("shell.search.team", { name: p.name }), icon: "bots" as const, run: () => navigate(projectPagePath(p.id, "team")) })),
@@ -667,7 +669,7 @@ export function App() {
           onToggle={sidebarToggle}
           projects={agentProjects}
           project={project}
-          onProjects={() => setSwitching(true)}
+          onProjects={openProjects}
           onOpen={open}
           toast={showToast}
         />

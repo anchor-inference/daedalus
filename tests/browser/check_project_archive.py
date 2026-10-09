@@ -1,7 +1,7 @@
-"""Archive a project and restore it from the switcher's fold; clean up worker worktrees safely.
+"""Archive a project and restore it from the projects page's fold; clean up worker worktrees safely.
 
-What the operator relies on: an archived project leaves the project list and appears under a small
-"Archived (n)" fold, Restore brings it back, and the write carries the project's revision. In the
+What the operator relies on: an archived project leaves the projects table and appears under a small
+"Archived" fold with its count, Restore brings it back, and the write carries the project's revision. In the
 settings sheet, "Worker worktrees" lists each worktree with its member, branch, size, uncommitted
 changes, live worker and last commit; Remove is offered only for one nobody works in and with
 nothing uncommitted, and a merged branch is deleted only when the operator ticks that.
@@ -108,29 +108,32 @@ def run() -> int:
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/agents?token=t&lang=en")
 
-        # Archive "Old shop" from its settings: it leaves the list for the fold.
+        # Archive "Old shop" from its settings: it leaves the table for the fold. The column's
+        # projects chip opens the projects page on a desktop.
         page.locator(".project-chip").click()
-        expect(page.locator(".project-row:not(.archived)")).to_have_count(2)
-        expect(page.locator(".project-archived")).to_have_count(0)
-        page.locator(".project-row", has_text="Old shop").get_by_role("button", name="Settings for Old shop").click()
+        rows = page.locator(".projects-row:not(.head)")
+        expect(rows).to_have_count(2)
+        expect(page.locator(".projects-archived")).to_have_count(0)
+        page.locator(".projects-row", has_text="Old shop").get_by_role("button", name="Settings for Old shop").click()
         page.get_by_role("button", name="Archive", exact=True).click()
         expect(page.locator(".sheet-backdrop.confirm .dialog")).to_contain_text("Nothing is deleted")
         confirm(page)
-        fold = page.locator("details.project-archived")
-        expect(fold.locator("summary")).to_have_text("Archived (1)")
+        fold = page.locator("details.projects-archived")
+        expect(fold.locator("summary")).to_contain_text("Archived")
+        expect(fold.locator("summary .num")).to_have_text("1")
         assert patches[-1]["archived"] is True and patches[-1]["expected_entity_revision"] == 1, patches[-1]
-        expect(page.locator(".project-row:not(.archived)")).to_have_count(1)
-        expect(page.locator(".project-row:not(.archived)")).to_contain_text("Bakery")
+        expect(rows).to_have_count(1)
+        expect(rows).to_contain_text("Bakery")
 
-        # Restore it from the fold: back in the list, the fold gone.
+        # Restore it from the fold: back in the table, the fold gone.
         fold.locator("summary").click()
-        fold.locator(".project-row", has_text="Old shop").get_by_role("button", name="Restore").click()
-        expect(page.locator(".project-row:not(.archived)")).to_have_count(2)
-        expect(page.locator("details.project-archived")).to_have_count(0)
+        fold.locator(".projects-archived-row", has_text="Old shop").get_by_role("button", name="Restore").click()
+        expect(rows).to_have_count(2)
+        expect(page.locator("details.projects-archived")).to_have_count(0)
         assert patches[-1]["archived"] is False and patches[-1]["expected_entity_revision"] == 2, patches[-1]
 
         # Worker worktrees, folded until opened.
-        page.locator(".project-row", has_text="Bakery").get_by_role("button", name="Settings for Bakery").click()
+        page.locator(".projects-row", has_text="Bakery").get_by_role("button", name="Settings for Bakery").click()
         section = page.locator("details.project-worktrees")
         expect(section.locator(".worktree-row")).to_have_count(0)
         section.locator("summary").click()
@@ -151,6 +154,11 @@ def run() -> int:
             page.set_viewport_size({"width": width, "height": 800})
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), f"worktrees overflow at {width}px"
         page.set_viewport_size({"width": 1440, "height": 900})
+        # The projects page is a desktop's: a phone's width put the start screen in its place and the
+        # settings sheet went with it, so it is opened again where it was.
+        if not section.count():
+            page.locator(".projects-row", has_text="Bakery").get_by_role("button", name="Settings for Bakery").click()
+            section.locator("summary").click()
         cy.get_by_role("checkbox").check()
         cy.get_by_role("button", name="Remove").click()
         expect(page.locator(".sheet-backdrop.confirm .dialog")).to_contain_text("all of it is already in main")

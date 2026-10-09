@@ -5,6 +5,8 @@ import { api, ApiError, AsrStatus, ModelFallback, ProviderUsage, Schedule, Sessi
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
 import { MenuItem, OverflowMenu, Popover, confirmDialog, Overlay } from "../ui/dialogs";
 import { absDate, clock, commandPreview, duration, plainPreview, shortDateTime } from "../format";
+import { HostMark } from "../runon";
+import { isProject } from "../isproject";
 import { EVIDENCE_EVENT, EvidenceRequest, codeBlock, renderCached, renderMarkdown } from "../md";
 import { confirmAsync, errorText, fmtBytes, haptic } from "../ui";
 import { Icon, IconName } from "../icons";
@@ -1455,20 +1457,34 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               }}
             />
           ) : (
-            <span className="chat-title truncate">{detail?.title ?? "…"}</span>
+            <span className="chat-title-line">
+              <span className="chat-title truncate">{detail?.title ?? "…"}</span>
+              <HostMark env={detail?.env} />
+            </span>
           )}
-          {detail?.subagent_of && (
+          {detail?.subagent_of ? (
             <button className="leader-link" onClick={() => onOpen?.(detail.subagent_of!)} title={t("session.leader")}>
               ↳ {detail.leader_title ?? t("session.leader.word")}
             </button>
+          ) : detail && (
+            // The second line says what the phone's title button says: the project, the model and its
+            // thinking, and the live state, which the line carries itself rather than a bar beside it.
+            <span className="chat-sub">
+              {isProject(detail.project) && detail.project.name !== detail.title && <><span className="truncate chat-sub-project">{detail.project.name}</span><span className="sep">·</span></>}
+              <span className="truncate chat-sub-model">{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortWord && <span className="chat-sub-effort"> {effortWord}</span>}</span>
+              {compacting ? null : busy || saving ? <><span className="sep">·</span><LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail.workspace} onJump={jumpToBottom} /></>
+                : status === "failed" ? <><span className="sep">·</span><span className="head-status failed" role="status"><b>{statusWord(status)}</b></span></> : null}
+            </span>
           )}
         </div>
         {compacting ? (
           <CompactionBar c={compacting} />
-        ) : busy || saving ? (
-          <LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail?.workspace} onJump={jumpToBottom} />
-        ) : status === "failed" ? (
-          <span className="head-status failed" role="status"><Dot status={status} /><b>{statusWord(status)}</b></span>
+        ) : !detail || detail.subagent_of ? (
+          busy || saving ? (
+            <LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail?.workspace} onJump={jumpToBottom} />
+          ) : status === "failed" ? (
+            <span className="head-status failed" role="status"><Dot status={status} /><b>{statusWord(status)}</b></span>
+          ) : null
         ) : null}
         {offline && <span className="head-status offline">{t("session.reconnecting")}</span>}
         <div className="head-actions">
