@@ -29,6 +29,7 @@ from daedalus.host.setting_refs import (
     VISION_MODEL,
     SettingProblem,
     SettingRef,
+    preset_images,
     setting_from_link,
     setting_of,
 )
@@ -233,10 +234,10 @@ class _Manager:
         self.session_model = session_model
         self.notices: list[dict[str, Any]] = []
 
-    async def session_vision(self, session_id: str | None) -> tuple[Any, str]:
+    async def session_vision(self, session_id: str | None) -> tuple[Any, str, Any]:
         if not self.session_model.accepts_images("main"):
-            return None, "the session's model main does not take images"
-        return (self.session_model, "main", _Blobs(), "daedalus"), ""
+            return None, "the session's model main is not marked as taking images", preset_images("main")
+        return (self.session_model, "main", _Blobs(), "daedalus"), "", None
 
     async def setting_notice(self, session_id: str | None, **notice: Any) -> None:
         self.notices.append({"session_id": session_id, **notice})
@@ -251,12 +252,13 @@ async def test_with_no_vision_model_set_the_session_model_looks_when_it_takes_im
     assert "no vision model is configured" in manager.notices[0]["detail"]
 
 
-async def test_with_no_vision_model_set_a_session_model_that_cannot_see_is_a_clear_error_with_the_row() -> None:
+async def test_with_no_vision_model_set_a_session_model_that_cannot_see_is_a_clear_error_with_its_own_row() -> None:
+    # The fix is the session model's Images switch, not the vision row: the toast's button goes there.
     manager = _Manager(_Eyes(images=False), fallback=True)
-    with pytest.raises(vision.VisionUnavailable, match="does not take images") as failure:
+    with pytest.raises(vision.VisionUnavailable, match="is not marked as taking images") as failure:
         await vision.look(None, manager, b"\x89PNG", "image/png", "read it", session_id="s1")
-    assert failure.value.setting == VISION_MODEL
-    assert [n["outcome"] for n in manager.notices] == ["failed"]
+    assert failure.value.setting == preset_images("main") == SettingRef("models", "presets.main.images")
+    assert [(n["outcome"], n["setting"]) for n in manager.notices] == [("failed", preset_images("main"))]
 
 
 async def test_with_the_fallback_off_no_vision_model_is_an_error_and_the_session_model_is_not_asked() -> None:
@@ -285,11 +287,14 @@ async def test_the_session_model_is_the_vision_fallback_only_when_it_takes_image
     provider = ScriptedProvider([])
     manager = await _manager(settings, db, provider)
     state = await manager.create_session("eyes")
-    route, why = await manager.session_vision(state.session.id)
-    assert route is None and "does not take images" in why
+    preset_id = manager.config.model.preset
+    manager.config.presets[preset_id].model = "scripted-model"  # the default preset is the first rung
+    route, why, setting = await manager.session_vision(state.session.id)
+    assert route is None and "is not marked as taking images" in why
+    assert setting == preset_images(preset_id)
     provider.accepts_images = lambda model: True  # type: ignore[attr-defined]
-    route, why = await manager.session_vision(state.session.id)
-    assert route is not None and route[0] is provider and route[1] == "scripted-model" and why == ""
+    route, why, setting = await manager.session_vision(state.session.id)
+    assert route is not None and route[0] is provider and route[1] == "scripted-model" and why == "" and setting is None
     await manager.close()
 
 

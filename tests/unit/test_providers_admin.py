@@ -27,7 +27,8 @@ def test_extend_model_list_appends_ids_the_endpoint_did_not_name() -> None:
     extend_model_list(result, ["gpt-6-astra", " gpt-6-sol ", "", "gpt-5.5"])
     assert result["models"] == ["gpt-6-astra", "gpt-6-sol", "gpt-5.5"]
     assert result["entries"][0] == {"id": "gpt-6-astra", "context_length": 1}
-    assert result["entries"][1:] == [{"id": "gpt-6-sol"}, {"id": "gpt-5.5"}]
+    # Codex GPTs read pictures, and an id alone is all this list has to say so.
+    assert result["entries"][1:] == [{"id": "gpt-6-sol", "images": True}, {"id": "gpt-5.5", "images": True}]
 
 
 def test_apply_provider_patch_merges_partials_and_creates_new_entries() -> None:

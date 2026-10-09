@@ -5,12 +5,12 @@ from __future__ import annotations
 import mimetypes
 from typing import Any
 
-from protocore.contracts.llm import LLMRequest
+from protocore.contracts.llm import LLMRequest, LLMResponse
 from protocore.contracts.tools import ToolContext
-from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResult
+from protocore.contracts.types import Message, MessageRole, StopReason, TextBlock, ToolResult
 from protocore.tools.decorator import tool
 
-from daedalus.host.setting_refs import VISION_MODEL
+from daedalus.host.setting_refs import VISION_MODEL, VISION_OUTPUT, SettingRef
 from daedalus.tools import search_hint
 from daedalus.tools._common import error, ok, refuse_protected, services_for
 
@@ -99,11 +99,12 @@ class VisionUnavailable(Exception):
     """No vision model can look now; the message says what to change and ``setting`` where.
 
     ``model_fault`` is false when the model was never the problem (the picture could not be staged):
-    asking the session's model instead would fail the same way, so no fallback is tried."""
+    asking the session's model instead would fail the same way, so no fallback is tried. ``setting``
+    is the vision model's row unless the fix is somewhere else (the session model's Images switch)."""
 
-    def __init__(self, message: str, *, model_fault: bool = True) -> None:
+    def __init__(self, message: str, *, model_fault: bool = True, setting: SettingRef = VISION_MODEL) -> None:
         super().__init__(message)
-        self.setting = VISION_MODEL
+        self.setting = setting
         self.model_fault = model_fault
 
 
@@ -120,9 +121,11 @@ async def look(
 
     When no vision model is set, or it refuses, and ``model.fallback_to_session`` is on, the
     session's own model looks instead if it takes images, and the operator is warned with the way to
-    the vision model's row; with it off, or with a session model that cannot see, the refusal is an
-    error that carries the same row. Before this, an installation with no image-capable preset could
-    not look at a screenshot at all although the model it ran on read pictures.
+    the vision model's row; with it off the refusal is an error that carries the same row. With a
+    session model whose Images switch is off, the error carries that model's own row instead, since
+    turning the switch on is what would have let it look. Before this, an installation with no
+    image-capable preset could not look at a screenshot at all although the model it ran on read
+    pictures.
     """
     try:
         return await _ask(vision, manager, data, mime, task, detail=detail, instruction=instruction)
@@ -133,31 +136,49 @@ async def look(
     falls_back = bool(getattr(getattr(getattr(manager, "config", None), "model", None), "fallback_to_session", False))
     session_vision = getattr(manager, "session_vision", None)
     if not falls_back or session_vision is None:
-        await _notice(manager, session_id, "failed", str(primary))
+        await _notice(manager, session_id, "failed", str(primary), setting=primary.setting)
         raise primary
-    route, why = await session_vision(session_id)
+    route, why, setting = await session_vision(session_id)
     if route is None:
         message = f"{primary}; {why}, so it cannot look instead"
-        await _notice(manager, session_id, "failed", message)
-        raise VisionUnavailable(message) from primary
+        where = setting or primary.setting
+        await _notice(manager, session_id, "failed", message, setting=where)
+        raise VisionUnavailable(message, setting=where) from primary
     try:
         text, model = await _ask(route, manager, data, mime, task, detail=detail, instruction=instruction)
     except VisionUnavailable as exc:
         message = f"{primary}; the session's model {route[1]} could not look either: {exc}"
-        await _notice(manager, session_id, "failed", message)
+        await _notice(manager, session_id, "failed", message, setting=primary.setting)
         raise VisionUnavailable(message, model_fault=exc.model_fault) from exc
-    await _notice(manager, session_id, "fallback", str(primary), model=model)
+    await _notice(manager, session_id, "fallback", str(primary), model=model, setting=primary.setting)
     return text, model
 
 
-async def _notice(manager: Any, session_id: str | None, outcome: str, detail: str, *, model: str = "") -> None:
+async def _notice(manager: Any, session_id: str | None, outcome: str, detail: str, *, model: str = "", setting: SettingRef = VISION_MODEL) -> None:
     notice = getattr(manager, "setting_notice", None)
     if notice is not None:
-        await notice(session_id, kind="vision", outcome=outcome, detail=detail, model=model, setting=VISION_MODEL)
+        await notice(session_id, kind="vision", outcome=outcome, detail=detail, model=model, setting=setting)
+
+
+RETRY_CEILING = 32_000
+"""The most output a starved vision call is retried with: the upper bound of ``[vision] max_output_tokens``."""
+
+IMAGE_TOKEN_FLOOR = 64
+"""Fewer prompt tokens than the text alone plus this, and the picture cannot have been in the prompt."""
 
 
 async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, detail: str, instruction: str) -> tuple[str, str]:
-    """One vision route asked once; :class:`VisionUnavailable` says why it gave no answer."""
+    """One vision route asked, and asked again once if thinking ate the answer.
+
+    :class:`VisionUnavailable` says why it gave no answer.
+
+    The budget is ``[vision] max_output_tokens`` whatever the detail. A focused answer used to be
+    capped at 800 tokens behind the operator's back, and a model that thinks by default (every Claude
+    model from the fifth generation on, even with thinking not asked for) spent all 800 thinking and
+    wrote nothing; the operator's 16384 never applied. Brevity comes from the instruction instead.
+    Thinking is asked off, which the endpoints that can switch it honour; for a model that thinks
+    anyway, a reply cut off with no text is retried once at twice the budget.
+    """
     if not vision:
         raise VisionUnavailable("no vision model is configured: mark a model as taking images in Settings → Models and pick it under Image understanding")
     provider, model, blobs, tenant = vision
@@ -178,33 +199,70 @@ async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, 
         "when something is not visible. "
     )
     text += "Be exhaustive and structured." if detail == "full" else "Be concise and specific."
-    request = LLMRequest(
-        model=model,
-        messages=[
-            Message(role=MessageRole.system, content_blocks=[TextBlock(text=text)]),
-            Message(
-                role=MessageRole.user,
-                content_blocks=[TextBlock(text=f"Request: {task}")],
-                metadata={"image_refs": [{"ref": meta.ref, "mime": mime}]},
-            ),
-        ],
-        max_tokens=max_out if detail == "full" else min(800, max_out),
-        temperature=0.1,
-    )
-    try:
-        response = await provider.complete_text(request)
-    except Exception as exc:  # noqa: BLE001
-        raise VisionUnavailable(f"vision model {model} failed: {exc}") from exc
-    answer = "".join(b.text for b in response.message.content_blocks if isinstance(b, TextBlock)).strip()
+    messages = [
+        Message(role=MessageRole.system, content_blocks=[TextBlock(text=text)]),
+        Message(
+            role=MessageRole.user,
+            content_blocks=[TextBlock(text=f"Request: {task}")],
+            metadata={"image_refs": [{"ref": meta.ref, "mime": mime}]},
+        ),
+    ]
+    budget = max_out
+    response = await _complete(provider, model, messages, budget)
+    answer = _answer(response)
+    retried = 0
+    if not answer and response.stop_reason == StopReason.max_tokens and budget < RETRY_CEILING:
+        retried = min(RETRY_CEILING, budget * 2)
+        response = await _complete(provider, model, messages, retried)
+        answer = _answer(response)
     if not answer:
         # An empty answer handed back as a description let the agent go on as if it had looked.
-        raise VisionUnavailable(
-            f"vision model {model} returned no text for the image; it may have spent its {request.max_tokens} output tokens "
-            "on thinking, or its route dropped the picture"
-        )
+        prompt_text = len(text) + len(task) + len("Request: ")
+        # Starved, the fix is the budget, and the row it opens is that number's.
+        starved = response.stop_reason == StopReason.max_tokens
+        reason = empty_answer_reason(model, response, retried or budget, prompt_text // 4, retried=bool(retried))
+        raise VisionUnavailable(reason, setting=VISION_OUTPUT if starved else VISION_MODEL)
     return answer, str(model)
+
+
+async def _complete(provider: Any, model: str, messages: list[Message], budget: int) -> LLMResponse:
+    request = LLMRequest(model=model, messages=messages, max_tokens=budget, temperature=0.1, extra={"enable_thinking": False})
+    try:
+        return await provider.complete_text(request)
+    except Exception as exc:  # noqa: BLE001
+        raise VisionUnavailable(f"vision model {model} failed: {exc}") from exc
+
+
+def _answer(response: LLMResponse) -> str:
+    return "".join(b.text for b in response.message.content_blocks if isinstance(b, TextBlock)).strip()
+
+
+def empty_answer_reason(model: str, response: LLMResponse, budget: int, text_tokens: int, *, retried: bool = False) -> str:
+    """Why a vision call came back with no text, told from the stop reason and the usage.
+
+    The old sentence offered both causes at once ("spent its tokens on thinking, or its route dropped
+    the picture"), and the two want different fixes: a larger budget, or a route that forwards images.
+    """
+    usage = response.usage
+    again = " even when asked a second time with twice the budget" if retried else ""
+    if response.stop_reason == StopReason.max_tokens:
+        return (
+            f"vision model {model} wrote no answer: it used all {budget} of its output tokens{again} before writing any text, "
+            "most likely on thinking; raise Max output tokens under Image understanding or pick a model that thinks less"
+        )
+    if usage.input_tokens <= 0 and usage.output_tokens <= 0:
+        return f"vision model {model} finished without writing an answer, and its route reported no usage, so whether the picture reached it cannot be told"
+    if usage.input_tokens < text_tokens + IMAGE_TOKEN_FLOOR:
+        return (
+            f"vision model {model} finished without writing an answer, and its prompt was only {usage.input_tokens} tokens, "
+            "too few to have carried the picture: its route most likely dropped the image"
+        )
+    return (
+        f"vision model {model} finished without writing an answer, though the picture reached it "
+        f"({usage.input_tokens} prompt tokens) and it stopped on its own after {usage.output_tokens} output tokens"
+    )
 
 
 TOOLS = [image_view]
 
-__all__ = ["TOOLS", "VisionUnavailable", "look"]
+__all__ = ["TOOLS", "VisionUnavailable", "empty_answer_reason", "look"]

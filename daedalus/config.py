@@ -24,6 +24,8 @@ import tomli_w
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from daedalus.model_capabilities import known_image_input
+
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -2008,7 +2010,7 @@ def _seed_presets(raw: dict[str, Any]) -> bool:
     return True
 
 
-SEEDS = ("claude-subscription", "openai-anthropic-keys", "more-provider-endpoints", "opencode-go-subscription")
+SEEDS = ("claude-subscription", "openai-anthropic-keys", "more-provider-endpoints", "opencode-go-subscription", "known-image-models")
 """Every seed a config can have had applied, in the order they were introduced. The seeds that follow
 the setup wizard's environment (``voice-cloud``, ``local-model:<id>``) are not listed: a new file
 should get them, because the wizard's answers are about this installation."""
@@ -2201,6 +2203,28 @@ def _seed_opencode_go_subscription(raw: dict[str, Any]) -> bool:
     return True
 
 
+def _seed_known_image_models(raw: dict[str, Any]) -> bool:
+    """Turn Images on, once, for presets whose model is known to read pictures.
+
+    Add a model prefilled the switch only from what the endpoint said, and the subscription routes
+    say nothing but ids: every Claude, GPT and Grok model added through them was saved with Images
+    off, so the vision fallback refused to let a session's Claude Opus look at a screenshot. The file
+    does not record whether the operator chose that off or merely accepted it, so only the families in
+    :func:`known_image_input` are turned on. Once, recorded in ``seeded``: a switch the operator turns
+    off again afterwards stays off.
+    """
+    seeded = raw.setdefault("seeded", [])
+    if not isinstance(seeded, list):
+        seeded = raw["seeded"] = []
+    if "known-image-models" in seeded:
+        return False
+    seeded.append("known-image-models")
+    for preset in (raw.get("presets") or {}).values():
+        if isinstance(preset, dict) and not preset.get("images") and known_image_input(str(preset.get("model") or "")):
+            preset["images"] = True
+    return True
+
+
 def _migrate_web_search(raw: dict[str, Any]) -> bool:
     """The DuckDuckGo-only fields of ``[tools.web]`` became the ``search`` section with a backend choice."""
     web = (raw.get("tools") or {}).get("web")
@@ -2275,6 +2299,7 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _seed_openai_anthropic_keys(raw) or changed
     changed = _seed_provider_endpoints(raw) or changed
     changed = _seed_opencode_go_subscription(raw) or changed
+    changed = _seed_known_image_models(raw) or changed
     changed = _seed_from_setup(raw) or changed
     changed = _migrate_web_search(raw) or changed
     for provider in (raw.get("providers") or {}).values():
