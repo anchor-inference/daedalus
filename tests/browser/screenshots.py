@@ -1086,10 +1086,10 @@ def scroll_to_voices(page: Page) -> None:
 
 
 def open_new_project(page: Page) -> None:
-    """The new-project dialog from the switcher, on an existing folder: the browser with its places,
-    a repository chosen, and the line that says what was found about it."""
+    """The new-project dialog from the projects page, on an existing folder: the browser with its
+    places, a repository chosen, and the line that says what was found about it."""
     open_projects(page)
-    page.locator(".sheet .sheet-foot .btn.primary").click()
+    page.locator(".projects-new").click()
     page.wait_for_selector(".sheet.np-sheet", timeout=5000)
     page.locator("#project-name").fill(word("project.name"))
     page.locator(".np-card").nth(1).click()
