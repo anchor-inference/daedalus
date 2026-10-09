@@ -105,8 +105,6 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
             return answer(route, {"latest": None, "available": False})
         if path == "/api/settings":
             return answer(route, {"presets": {}, "model": {}})
-        if path == "/api/project-directories":
-            return answer(route, {"roots": [], "docker": True})
         if fulfil_shared(route):
             return None
         unhandled.record(path)

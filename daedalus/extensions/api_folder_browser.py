@@ -397,7 +397,8 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         listing["here"] = describe({"path": listing["path"]}, here, titles)
         listing["env"] = env
         listing["recent"] = recent(env, ordered)
-        listing["favourites"] = await favourites(env)
+        # Every side's: the browser filters them, and keeps the machine's to offer while it is down.
+        listing["favourites"] = await favourites()
         return listing
 
     # -- routes ------------------------------------------------------------------------------------
@@ -502,7 +503,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             rows.insert(0, {"env": body.env, "path": body.path, "name": _basename(body.path)})
         rows = rows[:FAVOURITES_MAX]
         await app.db.kv_set(FAVOURITES_KEY, [{"env": row["env"], "path": row["path"]} for row in rows])
-        return {"favourites": [row for row in rows if row["env"] == body.env]}
+        return {"favourites": rows}
 
 
 def _basename(path: str) -> str:

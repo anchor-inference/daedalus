@@ -6,12 +6,13 @@ import os
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, Unhandled, expect_app, folders, fulfil_shared  # noqa: E402
+from folder_stub import FolderStub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -20,6 +21,7 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 def run() -> int:
     projects: list[dict] = []
     created: list[dict] = []
+    folder_stub = FolderStub()
     installed: list[dict] = []
     staged: list[dict] = []
     lifecycle_commands: list[dict] = []
@@ -225,14 +227,8 @@ def run() -> int:
                 return answer(route, {"detail": "owned work changed since preview"}, status=409)
             lifecycle_commands.append(payload)
             return answer(route, {"parent_kind": "project_goal", "parent_id": "p1", "cancel_state": "requested", "generation": 1, "children": [], "receipt_id": "lifecycle-receipt", "entity_revision": 2})
-        if path == "/api/project-directories":
-            query = parse_qs(url.query)
-            if not query:
-                return answer(route, {"roots": [{"name": "work", "path": "/work", "readable": True, "writable": True, "project_id": None}], "docker": True})
-            selected = query.get("path", ["/work"])[0]
-            entries = [{"name": "existing", "path": "/work/existing", "readable": True, "writable": True, "project_id": None}] if selected == "/work" else []
-            parents = [{"name": "work", "path": "/work"}] + ([{"name": "existing", "path": "/work/existing"}] if selected != "/work" else [])
-            return answer(route, {"root": "/work", "path": selected, "parents": parents, "entries": entries, "truncated": False})
+        if folder_stub.fulfil(route):
+            return None
         if fulfil_shared(route):
             return None
         unhandled.record(path)
@@ -248,26 +244,26 @@ def run() -> int:
         name = page.locator("#project-name")
         expect(name).to_be_visible()
         name.fill("Plain")
-        page.get_by_role("button", name="Start with a clear first task").click()
-        page.get_by_role("button", name="Add", exact=True).click()
+        # The goal and first task moved to orchestration mode: the plain dialog has no such fold.
+        expect(page.locator("#project-start-goal")).to_have_count(0)
+        page.get_by_role("button", name="Create project", exact=True).click()
         expect(page.locator(".sheet")).to_have_count(0)
-        assert created[0] == {"name": "Plain"}, created[0]
+        assert created[0] == {"name": "Plain", "snapshots": True, "folder_name": "plain"}, created[0]
 
         page.reload()
         page.locator(".project-chip").click()
         expect(page.locator(".project-row")).to_have_count(1)
         page.get_by_role("button", name="Add a project", exact=True).click()
         page.locator("#project-name").fill("Existing")
-        page.get_by_role("button", name="Use an existing folder").click()
-        expect(page.get_by_text("the bot sees a folder only once it is mounted", exact=False)).to_be_visible()
-        page.get_by_role("button", name="work", exact=True).click()
-        page.get_by_role("button", name="existing", exact=True).click()
-        expect(page.locator("#project-root")).to_have_value("/work/existing")
-        page.get_by_role("button", name="Add", exact=True).click()
+        page.locator(".np-card", has_text="Existing folder").click()
+        page.locator(".fb-place.fav", has_text="projects").click()
+        page.locator(".fb-row", has_text="esp32-door").click()
+        expect(page.locator(".fb-foot")).to_contain_text("/srv/projects/esp32-door")
+        page.get_by_role("button", name="Create project", exact=True).click()
         # The sheet closes once the request has been answered; read what was posted only then, as
         # for the first project. Read at once, it raced the request on a loaded machine.
         expect(page.locator(".sheet")).to_have_count(0)
-        assert created[1] == {"name": "Existing", "folders": [{"path": "/work/existing"}]}, created[1]
+        assert created[1] == {"name": "Existing", "snapshots": False, "folders": [{"path": "/srv/projects/esp32-door"}]}, created[1]
         page.locator(".project-chip").click()
         page.locator(".project-row", has_text="Plain").get_by_role("button", name="Settings for Plain").click()
         resources = page.locator("details.project-resources")

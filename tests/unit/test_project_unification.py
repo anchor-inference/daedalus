@@ -161,7 +161,10 @@ async def test_the_folder_browser_names_owners_makes_folders_and_keeps_favourite
 
             pinned = (await client.put("/api/folders/favourites", headers=HEADERS, json={"env": "container", "path": str(root), "on": True})).json()
             assert pinned["favourites"] == [{"env": "container", "path": str(root), "name": root.name}]
-            assert (await client.get("/api/folders", headers=HEADERS, params={"path": str(root)})).json()["favourites"] == pinned["favourites"]
+            both = (await client.put("/api/folders/favourites", headers=HEADERS, json={"env": "host", "path": "/home/operator/projects", "on": True})).json()
+            assert [row["env"] for row in both["favourites"]] == ["host", "container"], "the machine's favourites are kept beside the container's"
+            assert (await client.get("/api/folders", headers=HEADERS, params={"path": str(root)})).json()["favourites"] == both["favourites"]
+            await client.put("/api/folders/favourites", headers=HEADERS, json={"env": "host", "path": "/home/operator/projects", "on": False})
             unpinned = (await client.put("/api/folders/favourites", headers=HEADERS, json={"env": "container", "path": str(root), "on": False})).json()
             assert unpinned["favourites"] == []
     finally:

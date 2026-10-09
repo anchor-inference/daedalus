@@ -12,7 +12,6 @@ from pathlib import Path
 from queue import Queue
 from uuid import uuid4
 
-from api_stub import open_drawer
 from playwright.sync_api import expect, sync_playwright
 
 from daedalus.app import Application
@@ -147,13 +146,10 @@ def scenario(language: str, width: int) -> None:
             assert response.ok, f"{method} {path}: {response.status} {response.text()}"
             return response.json()
 
-        page.goto(f"{base}/app/agents?token={token}&lang={language}")
-        if width == 320:
-            # A phone adds its first project from the drawer, under Projects.
-            open_drawer(page)
-            page.locator(".ph-drawer-root.open [data-nav='projects']").click()
-        else:
-            page.locator(".project-chip").click()
+        # The first project with a goal and a first task is made in orchestration mode, from the empty
+        # list's own button: on a phone its page, on a desktop the column.
+        page.goto(f"{base}/app/orchestration{'/projects' if width == 320 else ''}?token={token}&lang={language}")
+        page.get_by_role("button", name="New orchestration project" if language == "en" else "Новый проект оркестрации").first.click()
         sheet = page.locator(".sheet")
         sheet.locator("#project-name").fill("Bakery")
         sheet.locator("#project-start-goal").fill("Publish a clear menu")

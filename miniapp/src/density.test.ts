@@ -30,9 +30,10 @@ import tokens from "./ui/tokens.css?raw";
 import desktop from "./ui/desktop.css?raw";
 import phone from "./ui/phone.css?raw";
 import browserPhone from "./browser/phone.css?raw";
+import newProject from "./project/newproject.css?raw";
 import petHost from "./pethost.tsx?raw";
 // The browser's phone sheet keeps its looks beside its component; it answers to the same scale.
-const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone;
+const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject;
 
 type Rule = { selector: string; media: string; body: string };
 

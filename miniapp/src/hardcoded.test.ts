@@ -26,7 +26,6 @@ const ALLOWED: Record<string, string[]> = {
   // prose on a page.
   "./api.ts": ["*"],
   // Placeholders that are examples of what to type, not words: an address, a path, a cron line.
-  "./projects.tsx": ["/home/you/projects/bakery"],
   "./screens/Settings.tsx": [
     // A product's own name, as its own documentation writes it.
     "Serper (Google)",
