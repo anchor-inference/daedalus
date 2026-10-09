@@ -13,7 +13,14 @@ from daedalus.extensions.board_commands import insert_task
 from daedalus.host.events import AppEvent, EventBus
 from daedalus.stores.control import ControlStore, Entity, Mutation, Principal, Scope, now
 from daedalus.stores.database import Database
-from daedalus.stores.projects import FolderSpec, ProjectError, ProjectSettings, ProjectStore, normalise_root
+from daedalus.stores.projects import (
+    FolderSpec,
+    ProjectError,
+    ProjectSettings,
+    ProjectStore,
+    folder_name,
+    normalise_root,
+)
 
 
 async def _rows(conn: aiosqlite.Connection, sql: str) -> list[aiosqlite.Row]:
@@ -33,7 +40,7 @@ class ProjectStart:
     async def create(self, principal: Principal, *, client_operation_id: str,
                      expected_collection_revision: int, name: str, goal: str, constraints: str,
                      task_title: str, checks: list[str], owner_intent: str,
-                     folder: FolderSpec | None = None) -> dict[str, Any]:
+                     folder: FolderSpec | None = None, managed_name: str = "") -> dict[str, Any]:
         if principal.origin_class != "operator":
             raise PermissionError("the first project needs an authenticated operator")
         label, objective, boundaries, title = name.strip(), goal.strip(), constraints.strip(), task_title.strip()
@@ -51,17 +58,26 @@ class ProjectStart:
             raise ProjectError("automatic project folders are not configured")
         if folder is not None and folder.env not in (None, "container", "host"):
             raise ProjectError("a folder lives in the container or on the host")
+        if managed_name and folder is not None:
+            raise ProjectError("a folder name is for a new folder; a chosen folder names itself")
+        scratch_name = folder_name(managed_name) if managed_name else ""
         payload = {"name": label, "goal": objective, "constraints": boundaries,
                    "task_title": title, "checks": checked, "owner_intent": owner_intent,
                    "folder": {"path": folder.path, "label": folder.label, "env": folder.env,
                               "readonly": folder.readonly} if folder else None}
+        # Only when named: the receipt compares a replay's payload with the first one, and a command
+        # sent before folder names existed must still read as the same command.
+        if scratch_name:
+            payload["folder_name"] = scratch_name
         events: list[AppEvent] = []
 
         async def effect(conn: aiosqlite.Connection, mutation: Mutation) -> dict[str, Any]:
             project_id = mutation.object_id[:12]
             if folder is None:
                 assert managed_root is not None
-            chosen = normalise_root(folder.path) if folder else managed_root / project_id
+            chosen = normalise_root(folder.path) if folder else managed_root / (scratch_name or project_id)
+            if scratch_name and chosen.exists():
+                raise ProjectError(f"{chosen} already exists; choose another folder name")
             self.projects._refuse_reserved(chosen)
             for row in await _rows(conn, "SELECT path FROM project_folders"):
                 other = Path(row["path"])

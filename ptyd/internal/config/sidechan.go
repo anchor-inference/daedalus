@@ -40,6 +40,12 @@ const (
 	MaxFSList     = 5000
 	DefaultFSList = 1000
 
+	// MaxBrowse and DefaultBrowse bound the folders of one fs.browse, and BrowseBudget the time its
+	// per-folder stats may take: a picker listing a slow network mount answers with what it has.
+	MaxBrowse     = 2000
+	DefaultBrowse = 500
+	BrowseBudget  = 1500 * time.Millisecond
+
 	// MaxTailFollow is the longest a tail waits for new bytes, and TailPoll how often it looks.
 	// Polling a stat is cheap and portable; a watcher per tail would be a descriptor per tail.
 	MaxTailFollow = time.Minute

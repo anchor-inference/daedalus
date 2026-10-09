@@ -20,6 +20,11 @@ export const ORCHESTRATION = `${BASE}/orchestration`;
  *  home there. */
 export const ORCHESTRATION_LIST = `${BASE}/orchestration/projects`;
 
+/** The desktop's page of projects: a table in the conversation's place, where a phone opens the
+ *  projects sheet instead. A query on the start screen rather than a screen of its own, because it is
+ *  Agents mode's and keeps the mode's column beside it. */
+export const PROJECTS_PAGE = `${BASE}/agents?view=projects`;
+
 export type Route = {
   screen: Screen;
   /** The session open on the agents screen. */

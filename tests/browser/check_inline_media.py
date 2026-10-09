@@ -133,7 +133,9 @@ def run() -> int:
             if geometry["centre"] > 2 or geometry["width"] > 2 or any(delta > 2 for delta in geometry["siblings"] + geometry["content"]) or geometry["scroll"] <= 0 or geometry["caption"] != "absolute":
                 problems.append(f"{name}: media does not fill the answer column or album is not swipeable and overlaid ({geometry})")
 
-            page.locator(".inline-media.album .inline-media-surface").first.click()
+            # Near the tile's corner, clear of its actions in the other one: with the column at 288 px
+            # a 1440 window's album tiles are small enough that the centre falls on those buttons.
+            page.locator(".inline-media.album .inline-media-surface").first.click(position={"x": 12, "y": 12})
             page.wait_for_selector(".media-viewer")
             page.wait_for_timeout(300)
             viewer = page.locator(".media-viewer").bounding_box()

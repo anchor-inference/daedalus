@@ -5,7 +5,7 @@ import { ConfirmHost, Sheet, ToastHost, toast as showToast } from "./ui/dialogs"
 import type { AuthConfig } from "./screens/Login";
 import type { OnboardingState } from "./screens/AddModel";
 import * as passkeys from "./passkeys";
-import { ORCHESTRATION, ORCHESTRATION_LIST, back, migrateLegacyLocation, navigate, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
+import { ORCHESTRATION, ORCHESTRATION_LIST, PROJECTS_PAGE, back, migrateLegacyLocation, navigate, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
 import { Counts, Palette, PaletteItem, go, screenTitle, useMedia, useShortcuts } from "./shell";
 import { AppDrawer } from "./drawer";
 import { closeDrawer } from "./ui/phone";
@@ -15,6 +15,8 @@ import { shortcutFor } from "./navigation";
 import { PaneHandle, clampWidth, pixelDrag, readSidebar, rememberSidebar, usePaneWidth } from "./layout";
 import { Capabilities, SelfDevMode, visibleScreens } from "./capabilities";
 import { ProjectSwitcher, rememberProject, storedProject, useProjects } from "./projects";
+import { NewProjectHost, openNewProject } from "./project/NewProject";
+import { rememberFolder } from "./grouping";
 import { projectViewPath, storedProjectView } from "./project/lastview";
 import { projectPath } from "./folders";
 import { ChangeStrip } from "./change";
@@ -135,8 +137,9 @@ function sessionStore(): Storage | null {
   }
 }
 
-/** The sidebar's width: its default, and the range a drag is held to. */
-const SIDEBAR_W = 272;
+/** The sidebar's width: its default, and the range a drag is held to. 288 rather than 272 since its
+ *  rows went to two lines: a Russian chat title was cut at eighteen characters in the narrower one. */
+const SIDEBAR_W = 288;
 const SIDEBAR_W_MIN = 232;
 const SIDEBAR_W_MAX = 360;
 
@@ -167,6 +170,8 @@ export function App() {
   // rather than a destination, so it lives in the shell and not in the route.
   const [project, setProject] = useState(storedProject);
   const [switching, setSwitching] = useState(false);
+  // "All projects": a desktop's page in the conversation's place, a phone's sheet over the screen.
+  const openProjects = useCallback(() => (wide ? navigate(PROJECTS_PAGE) : setSwitching(true)), [wide]);
   const pickProject = useCallback((id: string) => {
     rememberProject(id);
     setProject(id);
@@ -279,7 +284,7 @@ export function App() {
   const proposals = useQuery<{ status: string }[]>(authed && selfdev !== "off" ? "/api/proposals" : null, { pollMs: 60000, staleMs: 30000 });
   const counts: Counts = { inbox: notifications.unseen, changes: (proposals.data ?? []).filter((p) => p.status === "pending").length };
   useShortcuts(openPalette, selfdev);
-  // Two more on a desktop: the menu and the sidebar, both with a modifier so a text field never eats them.
+  // Three more on a desktop: the menu, the sidebar and a new chat, each with a modifier so a text field never eats them.
   useEffect(() => {
     if (!wide) return;
     const onKey = (e: KeyboardEvent) => {
@@ -289,6 +294,7 @@ export function App() {
       if (!which) return;
       e.preventDefault();
       if (which === "menu") setMenu((m) => !m);
+      else if (which === "newchat") navigate(pathFor("agents"));
       else sidebarToggle();
     };
     document.addEventListener("keydown", onKey);
@@ -500,7 +506,8 @@ export function App() {
       { id: "new-agent", label: t("shell.search.newagent"), icon: "plus", run: () => navigate(pathFor("agents", null, { new: "1" })) },
       { id: "mode", label: t(mode === "agents" ? "mode.to.orchestration" : "mode.to.agents"), icon: mode === "agents" ? "compass" : "bots", run: () => navigate(modeHome(mode === "agents" ? "orchestration" : "agents", wide)) },
       { id: "main", label: t("main.title"), icon: "compass", run: () => navigate(ORCHESTRATION) },
-      { id: "projects", label: t("shell.projects"), hint: agentProjects.find((p) => p.id === project)?.name ?? t("shell.projects.all"), icon: "folder", run: () => { navigate(pathFor("agents")); setSwitching(true); } },
+      { id: "new-project", label: t(mode === "orchestration" ? "np.orch.title" : "np.title"), icon: "plus", run: () => openNewProject() },
+      { id: "projects", label: t("shell.projects"), hint: agentProjects.find((p) => p.id === project)?.name ?? t("shell.projects.all"), icon: "folder", run: () => { if (wide) navigate(PROJECTS_PAGE); else { navigate(pathFor("agents")); setSwitching(true); } } },
       ...agentProjects.map((p) => ({ id: `p-${p.id}`, label: t("shell.search.workin", { name: p.name }), hint: projectPath(p), icon: "folder" as const, run: () => { pickProject(p.id); navigate(pathFor("agents")); } })),
       ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `open-${p.id}`, label: t("focus.palette", { name: p.name }), icon: "conductor" as const, run: () => navigate(projectHome(p.id)) })),
       ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `team-${p.id}`, label: t("shell.search.team", { name: p.name }), icon: "bots" as const, run: () => navigate(projectPagePath(p.id, "team")) })),
@@ -663,7 +670,7 @@ export function App() {
           onToggle={sidebarToggle}
           projects={agentProjects}
           project={project}
-          onProjects={() => setSwitching(true)}
+          onProjects={openProjects}
           onOpen={open}
           toast={showToast}
         />
@@ -680,6 +687,8 @@ export function App() {
       </div>
       {palette && <Palette items={paletteItems()} onClose={() => setPalette(false)} />}
       {switching && <ProjectSwitcher projects={agentProjects} archived={archivedProjects} current={project} onPick={pickProject} onClose={() => setSwitching(false)} toast={showToast} />}
+      {/* A project just made has no chat yet: its folder opens in the sidebar so it is seen at once. */}
+      <NewProjectHost mode={mode === "orchestration" ? "orchestration" : "agents"} toast={showToast} onCreated={(created) => { rememberFolder(created.id, true); pickProject(created.id); }} />
       {projectBar?.bar && focusProject && (
         <ErrorBoundary key={`tabs-${focusProject}`}>
           <Suspense fallback={<nav className="tabbar five project-tabs" aria-hidden />}>

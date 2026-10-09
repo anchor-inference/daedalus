@@ -3,9 +3,9 @@ import { openContextMenu } from "./ui/context-menu";
 // the shell (the sidebar on a desktop, the Agents header on a phone) because a project is a lens
 // over every list of agents, not a destination of its own.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ApiError, Project, ProjectDir, ProjectEnvironments } from "./api";
-import { folderName, needsMount, pathProblem, projectPath, projectReachable, reachIsProblem, reachKey } from "./folders";
+import { folderName, projectPath, projectReachable, reachIsProblem, reachKey } from "./folders";
 import { Sheet } from "./ui/dialogs";
 import { EnvPill } from "./envpill";
 import { Icon } from "./icons";
@@ -23,6 +23,8 @@ import { ProjectArchive } from "./project/ProjectArchive";
 import { ProjectBudget, budgetKey } from "./project/ProjectBudget";
 import { ProjectResources, resourceProfileKey } from "./project/ProjectResources";
 import { RevealButton } from "./reveal";
+import { FolderBrowser, type FolderChoice } from "./project/FolderBrowser";
+import { openNewProject } from "./project/NewProject";
 
 const PICKED = "daedalus.project";
 
@@ -168,7 +170,6 @@ export function ProjectChip({ projects, current, onOpen, collapsed }: { projects
 
 /** Pick a project, add one, or open one's settings. */
 export function ProjectSwitcher({ projects, archived = [], current, onPick, onClose, toast }: { projects: Project[]; archived?: Project[]; current: string; onPick: (id: string) => void; onClose: () => void; toast: (t: string) => void }) {
-  const [adding, setAdding] = useState(projects.length === 0 && archived.length === 0);
   const [editing, setEditing] = useState<Project | null>(null);
   const [restoring, setRestoring] = useState("");
   const offline = useOffline();
@@ -187,7 +188,12 @@ export function ProjectSwitcher({ projects, archived = [], current, onPick, onCl
     onPick(id);
     onClose();
   };
-  if (adding) return <AddProjectSheet firstProject={projects.length === 0} onClose={() => (projects.length ? setAdding(false) : onClose())} onAdded={(p) => { setAdding(false); pick(p.id); }} toast={toast} />;
+  const add = () => { onClose(); openNewProject("agents"); };
+  // With nothing to switch between, the list would be a heading over an empty space: the operator came
+  // to make the first project, so the dialog that makes it opens instead.
+  const empty = projects.length === 0 && archived.length === 0;
+  useEffect(() => { if (empty) add(); }, []);
+  if (empty) return null;
   if (editing) return <ProjectSettingsSheet project={editing} onClose={() => setEditing(null)} onRemoved={() => { setEditing(null); if (editing.id === current) onPick(""); onClose(); }} toast={toast} />;
   return (
     <Sheet title={t("shell.projects")} onClose={onClose} size="narrow">
@@ -259,7 +265,7 @@ export function ProjectSwitcher({ projects, archived = [], current, onPick, onCl
       )}
       <div className="sheet-foot">
         <button className="btn ghost" onClick={onClose}>{t("common.close")}</button>
-        <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" size={15} /> {t("shell.projects.add")}</button>
+        <button className="btn primary" onClick={add}><Icon name="plus" size={15} /> {t("shell.projects.add")}</button>
       </div>
     </Sheet>
   );
@@ -277,225 +283,9 @@ function savedSettingsDraft(projectId: string): SettingsDraft | null {
   } catch { return null; }
 }
 
-type DirectoryEntry = { name: string; path: string; readable: boolean; writable: boolean; project_id?: string | null };
-type DirectoryListing = { roots?: DirectoryEntry[]; docker?: boolean; root?: string; path?: string; parents?: { name: string; path: string }[]; entries?: DirectoryEntry[]; truncated?: boolean };
-
 /** Where a folder may live, asked once and kept: it changes only when the host terminal bridge is installed. */
 export function useEnvironments() {
   return useQuery<ProjectEnvironments>("/api/project-environments", { staleMs: 60000 });
-}
-
-/** The environment choice, drawn only when there is a choice to make. */
-function EnvSelect({ id, value, onChange, environments }: { id: string; value: Env; onChange: (env: Env) => void; environments?: ProjectEnvironments }) {
-  if (!environments || environments.available.length < 2) return null;
-  return (
-    <>
-      <label className="field" htmlFor={id}>{t("folder.env")}</label>
-      <select id={id} className="field" value={value} onChange={(e) => onChange(e.target.value as Env)}>
-        {environments.available.map((env) => <option key={env} value={env}>{t(`folder.env.${env}.long`)}</option>)}
-      </select>
-    </>
-  );
-}
-
-/** What adding a folder in this environment means, said before the operator adds it. */
-function EnvNote({ env, environments }: { env: Env; environments?: ProjectEnvironments }) {
-  if (environments && env !== environments.local) return <div className="sub">{t(environments.host_bridge ? "folder.host.hint" : "folder.host.hint.nobridge")}</div>;
-  if (needsMount(env, environments)) return <div className="sub attn dir-mount">{t("folder.mount.warning")}</div>;
-  return null;
-}
-
-/** A name is enough. Choosing an existing folder is the optional second step. */
-type StartDraft = { name: string; root: string; env: Env | ""; guided: boolean; goal: string;
-  constraints: string; taskTitle: string; checks: string; owner: "manual" | "later" };
-type StartIntent = { client_operation_id: string; expected_collection_revision: number; name: string;
-  goal: string; constraints: string; task_title: string; checks: string[]; owner_intent: "manual" | "later";
-  folder?: { path: string; env?: Env } };
-
-function savedStart<T>(key: string): T | null {
-  try { return JSON.parse(sessionStorage.getItem(key) ?? "null") as T | null; }
-  catch { return null; }
-}
-
-function keepStart(key: string, value: unknown | null): void {
-  try { if (value === null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, JSON.stringify(value)); }
-  catch { /* the mounted form retains the draft and exact request */ }
-}
-
-export function AddProjectSheet({ onClose, onAdded, toast, firstProject = false }: { onClose: () => void; onAdded: (p: Project) => void;
-  toast: (t: string) => void; firstProject?: boolean }) {
-  const environments = useEnvironments().data;
-  const [initial] = useState(() => savedStart<StartDraft>("daedalus.project.start.draft"));
-  const [name, setName] = useState(initial?.name ?? "");
-  const [root, setRoot] = useState(initial?.root ?? "");
-  const [env, setEnv] = useState<Env | "">(initial?.env ?? "");
-  const [guided, setGuided] = useState(initial?.guided ?? firstProject);
-  const [goal, setGoal] = useState(initial?.goal ?? "");
-  const [constraints, setConstraints] = useState(initial?.constraints ?? "");
-  const [taskTitle, setTaskTitle] = useState(initial?.taskTitle ?? "");
-  const [checks, setChecks] = useState(initial?.checks ?? "");
-  const [owner, setOwner] = useState<"manual" | "later">(initial?.owner ?? "manual");
-  const [pending, setPending] = useState<StartIntent | null>(() => savedStart<StartIntent>("daedalus.project.start.pending"));
-  const [conflict, setConflict] = useState(false);
-  const [choosing, setChoosing] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const offline = useOffline();
-  const typed = root.trim();
-  const where: Env = env || environments?.local || "container";
-  const local = !environments || where === environments.local;
-  const rootProblem = pathProblem(typed) ? t("project.root.problem") : "";
-  const criteria = checks.split("\n").map((line) => line.trim()).filter(Boolean);
-  const tooMany = criteria.length > 12;
-  useEffect(() => keepStart("daedalus.project.start.draft", { name, root, env, guided, goal, constraints, taskTitle, checks, owner }),
-            [name, root, env, guided, goal, constraints, taskTitle, checks, owner]);
-
-  async function sendStart(intent: StartIntent) {
-    if (busy || offline) return;
-    setBusy(true);
-    try {
-      const receipt = await api.post<{ project_id: string; task_id: string; receipt_id: string }>("/api/project-start", intent);
-      if (!receipt?.receipt_id || !receipt?.project_id || !receipt?.task_id) throw new Error(t("project.start.badReceipt"));
-      const projects = await api.get<Project[]>("/api/projects");
-      const created = projects.find((item) => item.id === receipt.project_id);
-      if (!created) throw new Error(t("project.start.projectMissing"));
-      keepStart("daedalus.project.start.pending", null);
-      keepStart("daedalus.project.start.draft", null);
-      setPending(null);
-      afterChange();
-      toast(t("project.start.created"));
-      onAdded(created);
-      navigate(projectPagePath(created.id, "board", { task: receipt.task_id }));
-    } catch (failure) {
-      if (failure instanceof ApiError && failure.status === 409 &&
-          !failure.message.includes("command identity was reused with a different request")) {
-        keepStart("daedalus.project.start.pending", null);
-        setPending(null);
-        setConflict(true);
-      }
-      toast(errorText(failure));
-    } finally { setBusy(false); }
-  }
-
-  async function reviewConflict() {
-    if (busy || offline) return;
-    setBusy(true);
-    try {
-      await api.get<Project[]>("/api/projects");
-      await api.get<{ collection_revision: number }>("/api/control/revisions");
-      setConflict(false);
-    } catch (failure) { toast(errorText(failure)); }
-    finally { setBusy(false); }
-  }
-
-  async function add() {
-    if (!name.trim() || rootProblem || busy || offline || pending || conflict) return;
-    if (guided) {
-      if (!goal.trim() || !constraints.trim() || !taskTitle.trim() || !criteria.length || tooMany) return;
-      setBusy(true);
-      try {
-        const revisions = await api.get<{ collection_revision: number }>("/api/control/revisions");
-        if (!Number.isInteger(revisions.collection_revision)) throw new Error(t("project.start.unavailable"));
-        const intent: StartIntent = { client_operation_id: crypto.randomUUID(),
-          expected_collection_revision: revisions.collection_revision, name: name.trim(), goal: goal.trim(),
-          constraints: constraints.trim(), task_title: taskTitle.trim(), checks: criteria, owner_intent: owner,
-          ...(typed ? { folder: { path: typed, ...(env ? { env } : {}) } } : {}) };
-        keepStart("daedalus.project.start.pending", intent);
-        setPending(intent);
-        setBusy(false);
-        await sendStart(intent);
-      } catch (failure) { setBusy(false); toast(errorText(failure)); }
-      return;
-    }
-    setBusy(true);
-    try {
-      const folders = typed ? [{ path: typed, ...(env ? { env } : {}) }] : undefined;
-      const created = await api.post<Project>("/api/projects", { name: name.trim(), folders });
-      afterChange();
-      toast(t(projectReachable(created) || !local ? "project.added" : "project.added.unmounted", { name: created.name }));
-      onAdded(created);
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Sheet title={t("shell.projects.add")} onClose={onClose} size="narrow">
-      <label className="field" htmlFor="project-name">{t("common.name")}</label>
-      <input id="project-name" className="field" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t("project.name.placeholder")} />
-      <button className="disclosure" type="button" onClick={() => setGuided((value) => !value)} aria-expanded={guided} disabled={!!pending || busy}>
-        <span className={`chev ${guided ? "down" : ""}`}>›</span> {t("project.start.title")}
-      </button>
-      {guided && <div className="project-start-fields">
-        <p className="sub">{t("project.start.intro")}</p>
-        <p className="sub">{t("goal.start.cost")}</p>
-        <label className="field" htmlFor="project-start-goal">{t("project.start.goal")}</label>
-        <textarea id="project-start-goal" className="field" rows={3} maxLength={4000} value={goal} disabled={!!pending || busy} onChange={(event) => setGoal(event.target.value)} />
-        <label className="field" htmlFor="project-start-constraints">{t("project.start.constraints")}</label>
-        <textarea id="project-start-constraints" className="field" rows={2} maxLength={4000} value={constraints} disabled={!!pending || busy} onChange={(event) => setConstraints(event.target.value)} />
-        <label className="field" htmlFor="project-start-task">{t("project.start.task")}</label>
-        <input id="project-start-task" className="field" maxLength={200} value={taskTitle} disabled={!!pending || busy} onChange={(event) => setTaskTitle(event.target.value)} />
-        <label className="field" htmlFor="project-start-checks">{t("project.start.checks")}</label>
-        <textarea id="project-start-checks" className="field" rows={3} value={checks} disabled={!!pending || busy} onChange={(event) => setChecks(event.target.value)} placeholder={t("project.start.checksHint")} />
-        {tooMany && <p className="sub attn" role="status">{t("project.start.tooMany")}</p>}
-        <label className="field" htmlFor="project-start-owner">{t("project.start.owner")}</label>
-        <select id="project-start-owner" className="field" value={owner} disabled={!!pending || busy} onChange={(event) => setOwner(event.target.value as "manual" | "later")}>
-          <option value="manual">{t("project.start.ownerManual")}</option>
-          <option value="later">{t("project.start.ownerLater")}</option>
-        </select>
-        <p className="sub">{t("project.start.ownerHelp")}</p>
-      </div>}
-      <button className="disclosure" type="button" onClick={() => setChoosing((value) => !value)} aria-expanded={choosing}><span className={`chev ${choosing ? "down" : ""}`}>›</span> {t("project.existing")}</button>
-      {choosing ? (
-        <>
-          <EnvSelect id="project-env" value={where} onChange={(next) => { setEnv(next); setRoot(""); }} environments={environments} />
-          {local ? <DirectoryPicker value={root} onChange={setRoot} toast={toast} /> : <PathInput value={root} onChange={setRoot} />}
-          <EnvNote env={where} environments={environments} />
-        </>
-      ) : <div className="sub">{t("project.automatic.hint")}</div>}
-      {rootProblem && <div className="sub attn">{rootProblem}</div>}
-      {pending && <p className="sub attn" role="status">{t("project.start.pending")} <button type="button" className="linkbtn" disabled={busy || offline} onClick={() => void sendStart(pending)}>{t("common.retry")}</button></p>}
-      {conflict && <p className="sub attn" role="status">{t("project.start.conflict")} <button type="button" className="linkbtn" disabled={busy || offline} onClick={() => void reviewConflict()}>{t("project.start.reviewChange")}</button></p>}
-      {offline && <p className="sub attn" role="status">{t("result.block.unconfirmed")}</p>}
-      <div className="sheet-foot">
-        <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" onClick={add} disabled={busy || offline || !!pending || conflict || !name.trim() || !!rootProblem ||
-          (guided && (!goal.trim() || !constraints.trim() || !taskTitle.trim() || !criteria.length || tooMany))}>{t(guided ? "project.start.create" : "common.add")}</button>
-      </div>
-    </Sheet>
-  );
-}
-
-/** A path typed by hand: a folder of the other environment cannot be browsed from here. */
-function PathInput({ value, onChange }: { value: string; onChange: (path: string) => void }) {
-  return (
-    <>
-      <label className="field" htmlFor="project-root">{t("project.folder")}</label>
-      <input id="project-root" className="field mono" value={value} onChange={(e) => onChange(e.target.value)} placeholder={t("project.path.placeholder")} />
-    </>
-  );
-}
-
-function DirectoryPicker({ value, onChange, toast }: { value: string; onChange: (path: string) => void; toast: (text: string) => void }) {
-  const [listing, setListing] = useState<DirectoryListing | null>(null);
-  const [root, setRoot] = useState("");
-  const load = useCallback(async (nextRoot: string, path: string) => {
-    try {
-      const result = await api.get<DirectoryListing>(`/api/project-directories?root=${encodeURIComponent(nextRoot)}&path=${encodeURIComponent(path)}`);
-      setListing(result);
-      if (result.path) onChange(result.path);
-    } catch (e) { toast(errorText(e)); }
-  }, [onChange, toast]);
-  useEffect(() => { api.get<DirectoryListing>("/api/project-directories").then(setListing).catch((e) => toast(errorText(e))); }, [toast]);
-  return (
-    <div className="directory-picker">
-      <PathInput value={value} onChange={onChange} />
-      {listing?.roots && <div className="directory-roots">{listing.roots.map((entry) => <button key={entry.path} className="btn ghost" onClick={() => { setRoot(entry.path); void load(entry.path, entry.path); }}><Icon name="folder" size={14} /> {entry.name}</button>)}</div>}
-      {listing?.parents && <div className="directory-crumbs">{listing.parents.map((entry) => <button key={entry.path} className="linkbtn mono" onClick={() => void load(root, entry.path)}>{entry.name}</button>)}</div>}
-      {listing?.entries?.map((entry) => <button key={entry.path} className="menu-item" disabled={!entry.readable} onClick={() => void load(root, entry.path)}><Icon name="folder" size={15} /><span className="grow truncate">{entry.name}</span>{entry.project_id && <span className="badge">{t("project.already")}</span>}{!entry.writable && <span className="badge attn">{t("project.readonly.short")}</span>}</button>)}
-      {listing?.truncated && <div className="sub attn">{t("project.browser.truncated")}</div>}
-    </div>
-  );
 }
 
 /** One folder of a project: what it is, who can reach it, the read-only switch and the way to forget it. */
@@ -541,28 +331,25 @@ function FolderRow({ project, folder, environments, write, canWrite }: { project
   );
 }
 
-/** Another folder for a project: where it lives, the path, a label, and whether agents may write in it. */
+/** Another folder for a project: chosen in the folder browser, with a label and whether agents may write in it. */
 function AddFolder({ project, environments, onDone, toast, write, canWrite }: { project: Project; environments?: ProjectEnvironments; onDone: () => void; toast: (t: string) => void; write: WriteProject; canWrite: boolean }) {
-  const [env, setEnv] = useState<Env>(environments?.local ?? "container");
-  const [path, setPath] = useState("");
+  const [choice, setChoice] = useState<FolderChoice | null>(null);
   const [label, setLabel] = useState("");
   const [readonly, setReadonly] = useState(false);
   const [busy, setBusy] = useState(false);
-  const local = !environments || env === environments.local;
-  const problem = pathProblem(path) ? t("project.root.problem") : "";
+  // A folder some project already owns is refused here as in the new-project dialog: two records of
+  // one folder are two sets of rules for the same files.
+  const usable = !!choice && !choice.problem;
   async function add() {
-    if (!path.trim() || problem || busy || !canWrite) return;
+    if (!usable || busy || !canWrite || !choice) return;
     setBusy(true);
     await write("POST", `/api/projects/${encodeURIComponent(project.id)}/folders`,
-      { path: path.trim(), label: label.trim(), env, readonly }, t("folder.added", { name: label.trim() || path.trim() }), onDone);
+      { path: choice.path, label: label.trim(), env: choice.env, readonly }, t("folder.added", { name: label.trim() || choice.path }), onDone);
     setBusy(false);
   }
   return (
     <div className="dir-form">
-      <EnvSelect id="folder-env" value={env} onChange={(next) => { setEnv(next); setPath(""); }} environments={environments} />
-      {local ? <DirectoryPicker value={path} onChange={setPath} toast={toast} /> : <PathInput value={path} onChange={setPath} />}
-      {problem && <div className="sub attn">{problem}</div>}
-      <EnvNote env={env} environments={environments} />
+      <FolderBrowser environments={environments} choice={choice} onChoice={setChoice} toast={toast} launcher={!!window.daedalus?.window} />
       <label className="field" htmlFor="folder-label">{t("folder.label")}</label>
       <input id="folder-label" className="field" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("folder.label.placeholder")} />
       <label className="toggle-row">
@@ -572,7 +359,7 @@ function AddFolder({ project, environments, onDone, toast, write, canWrite }: { 
       </label>
       <div className="dir-form-foot">
         <button className="btn ghost" onClick={onDone}>{t("common.cancel")}</button>
-        <button className="btn primary" onClick={add} disabled={busy || !canWrite || !path.trim() || !!problem}>{t("folder.add.action")}</button>
+        <button className="btn primary" onClick={add} disabled={busy || !canWrite || !usable}>{t("folder.add.action")}</button>
       </div>
     </div>
   );

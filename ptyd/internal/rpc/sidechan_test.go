@@ -244,6 +244,42 @@ func TestAFolderIsCheckedAndMadeOverTheSocket(t *testing.T) {
 	}
 }
 
+func TestFoldersAreBrowsedOverTheSocket(t *testing.T) {
+	f, _ := startSide(t)
+	home := filepath.Join(f.dir, "home")
+	for _, d := range []string{filepath.Join(home, "repo", ".git"), filepath.Join(home, ".ssh")} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// No root is set: browsing is not held to them, so a folder for a new project can be found.
+	var b sidechan.Browse
+	f.call(t, "fs.browse", map[string]any{"path": "~", "hidden": true}, &b)
+	if b.Path != home || len(b.Entries) != 1 || b.Entries[0].Name != "repo" || !b.Entries[0].IsGit || len(b.Places) == 0 {
+		t.Fatalf("%+v", b)
+	}
+	f.call(t, "fs.browse", map[string]any{"path": f.dir}, &b)
+	for _, e := range b.Entries {
+		if e.Name == "state" || e.Name == "run" {
+			t.Fatalf("the daemon's own %s listed", e.Name)
+		}
+	}
+	for _, p := range []string{filepath.Join(f.dir, "state"), filepath.Join(home, ".ssh")} {
+		if we := f.callErr("fs.browse", map[string]any{"path": p}); we == nil || we.Code != wire.CodeForbidden {
+			t.Fatalf("%s: %v", p, we)
+		}
+	}
+	if we := f.callErr("fs.browse", map[string]any{"path": filepath.Join(f.dir, "missing")}); we == nil || we.Code != wire.CodeNotFound {
+		t.Fatalf("missing: %v", we)
+	}
+	if we := f.callErr("fs.browse", map[string]any{"path": home, "extra": 1}); we == nil || we.Code != wire.CodeInvalidParams {
+		t.Fatalf("an unknown field: %v", we)
+	}
+	if we := f.callErr("fs.browse", map[string]any{"path": "relative"}); we == nil || we.Code != wire.CodeInvalidParams {
+		t.Fatalf("relative: %v", we)
+	}
+}
+
 func TestAFileIsWrittenIntoAnInboxOverTheSocket(t *testing.T) {
 	f, _ := startSide(t)
 	project := filepath.Join(f.dir, "project")

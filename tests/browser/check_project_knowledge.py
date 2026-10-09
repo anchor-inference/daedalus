@@ -120,7 +120,7 @@ def check(lang: str, width: int) -> None:
         def open_memory():
             settings = "Settings for Bakery" if lang == "en" else "Настройки: Bakery"
             open_projects(page)
-            page.locator(f".project-row .iconbtn[aria-label='{settings}']").click(force=True)
+            page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{settings}']").click(force=True)
             section = page.locator("details.sheet-section", has=page.get_by_text("Project memory" if lang == "en" else "Память проекта", exact=True))
             section.locator("summary").first.click()
             return section

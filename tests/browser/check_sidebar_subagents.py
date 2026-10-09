@@ -55,7 +55,7 @@ def run() -> int:
         page.goto(f"{BASE}/agents?token=t&lang=en&scheme=dark", wait_until="networkidle")
         expect(page.locator(".start-greeting")).to_be_visible()
         expect(page.locator(".start .composer-box")).to_be_visible()
-        expect(page.locator(".sidebar .folder").first).to_be_visible()
+        expect(page.locator(".sidebar .sb-prow").first).to_be_visible()
         main_plus_error = centres(page, ".start .iconbtn.plus")
         if main_plus_error > 1:
             problems.append(f"the start composer plus is {main_plus_error:.1f}px off centre")
@@ -68,22 +68,24 @@ def run() -> int:
             problems.append(f"the first message was not sent: {posted[1:]}")
 
         page.goto(f"{BASE}/agents/{S1}?token=t&lang=en&scheme=dark&panel=details", wait_until="networkidle")
-        expect(page.locator(".sidebar-new-agent")).to_be_visible()
+        expect(page.locator(".sidebar .sb-new")).to_be_visible()
         project = page.locator('.sidebar [data-project="9f3c2a1b7d40"]')
-        expect(project.locator(".erow")).to_have_count(3)
-        folder_height = project.locator(".folder-top").evaluate("node => node.getBoundingClientRect().height")
-        row_height = project.locator(".erow").first.evaluate("node => node.getBoundingClientRect().height")
-        if folder_height > 44 or row_height > 44:
-            problems.append(f"the sidebar is still card-dense: folder={folder_height:.0f}px row={row_height:.0f}px")
+        # The project of the open chat opens itself: its three chats on the guide line.
+        expect(project.locator("[data-session]")).to_have_count(3)
+        folder_height = project.locator(".sb-prow").evaluate("node => node.getBoundingClientRect().height")
+        row_height = project.locator("[data-session]").first.evaluate("node => node.getBoundingClientRect().height")
+        if folder_height > 36 or row_height > 40:
+            problems.append(f"the sidebar rows are taller than designed: project={folder_height:.0f}px nested chat={row_height:.0f}px")
 
-        project.locator(".folder-top").hover()
-        expect(project.locator(".folder-add")).to_be_visible()
-        sidebar_plus_error = centres(page, '.sidebar [data-project="9f3c2a1b7d40"] .folder-add')
+        project.locator(".sb-prow").hover()
+        expect(project.locator(".sb-padd")).to_be_visible()
+        sidebar_plus_error = centres(page, '.sidebar [data-project="9f3c2a1b7d40"] .sb-padd')
         if sidebar_plus_error > 1:
             problems.append(f"the project plus is {sidebar_plus_error:.1f}px off centre")
 
-        row_menu = project.locator(".erow").first.locator(".session-row-menu button")
-        row_menu.click()
+        first = project.locator("[data-session]").first
+        first.hover()
+        first.locator(".sb-acts button[aria-haspopup='menu']").click()
         menu = page.locator(".menu[role='menu']")
         expect(menu).to_be_visible()
         geometry = menu.evaluate(

@@ -111,3 +111,33 @@ async def test_guided_start_rejects_thirteenth_check_without_side_effect(tmp_pat
         assert not (tmp_path / "managed").exists()
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_guided_start_names_its_new_folder_and_replays_the_same_command(tmp_path: Path) -> None:
+    db = Database(tmp_path / "state.sqlite")
+    await db.open()
+    bus = EventBus(db)
+    await bus.start()
+    projects = ProjectStore(db, managed_root=tmp_path / "managed", local_env=db.local_env)
+    request = {"client_operation_id": "named-project", "expected_collection_revision": 1,
+               "name": "DevHub", "goal": "One board for three repositories", "constraints": "Review before merge",
+               "task_title": "List the repositories", "checks": ["All three are listed"],
+               "owner_intent": "later", "managed_name": "devhub"}
+    principal = Principal.operator({"via": "token", "user_id": 1})
+    try:
+        start = ProjectStart(db, projects, bus)
+        first = await start.create(principal, **request)
+        project = await projects.get(first["project_id"])
+        assert project and project.primary.path == tmp_path / "managed" / "devhub" and project.primary.path.is_dir()
+        assert project.settings.ephemeral is False
+        assert await start.create(principal, **request) == first, "a lost reply replays without a second folder"
+        with pytest.raises(ControlConflict, match="different request"):
+            await start.create(principal, **{**request, "managed_name": "other"})
+        (tmp_path / "managed" / "taken").mkdir()
+        with pytest.raises(Exception, match="already exists"):
+            await start.create(principal, **{**request, "client_operation_id": "taken", "expected_collection_revision": 2,
+                                             "managed_name": "taken"})
+        assert len(await projects.list()) == 1, "a refused name leaves nothing behind"
+    finally:
+        await db.close()

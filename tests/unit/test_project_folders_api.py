@@ -99,7 +99,9 @@ async def test_a_host_folder_needs_the_host_bridge(running: Any, tmp_path: Path,
     manager, client = running
     (site,) = _dirs(tmp_path, "site")
     environments = (await client.get("/api/project-environments", headers=HEADERS)).json()
-    assert environments == {"local": "container", "available": ["container"], "host_bridge": False, "docker": True}
+    assert {key: environments[key] for key in ("local", "available", "host_bridge", "docker", "host_configured")} == {
+        "local": "container", "available": ["container"], "host_bridge": False, "docker": True, "host_configured": False}
+    assert environments["workspaces_root"] == str(manager.settings.workspaces_dir)
     refused = await client.post("/api/projects", headers=HEADERS, json={"name": "Host", "folders": [{"path": "/somewhere/on/the/host", "env": "host"}]})
     assert refused.status_code == 400 and "host terminal bridge" in refused.json()["detail"]
     project = (await client.post("/api/projects", headers=HEADERS, json={"name": "Bakery", "folders": [{"path": str(site)}]})).json()
@@ -294,7 +296,8 @@ def test_who_can_reach_a_folder(tmp_path: Path) -> None:
     assert api_projects.reach(folder("host"), "container", True) == "terminals"
     assert api_projects.reach(folder("host"), "container", False) == "none"
     assert api_projects.reach(folder("host"), "host", False) == "agents"
-    assert api_projects.environments(SimpleNamespace(), "host") == {"local": "host", "available": ["host"], "host_bridge": False, "docker": False}
+    assert api_projects.environments(SimpleNamespace(), "host") == {"local": "host", "available": ["host"], "host_bridge": False, "docker": False,
+                                                                   "host_configured": False, "workspaces_root": "", "home": str(Path.home())}
     bridge = tmp_path / "bridge"
     bridge.mkdir()
     assert api_projects.host_bridge(SimpleNamespace(terminals_host_dir=bridge)) is False, "an empty run directory is a bridge not installed"

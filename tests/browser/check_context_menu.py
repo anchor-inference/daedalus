@@ -22,7 +22,7 @@ def run() -> None:
         page.context.grant_permissions(["clipboard-read", "clipboard-write"])
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/agents?token=t&lang=en")
-        page.locator(f".folder[data-project='{P1}'] .folder-head").click()
+        page.locator(f"[data-project='{P1}'] .sb-prow").click()
         row = page.locator(f"nav.sidebar [data-session='{S1}']")
         expect(row).to_be_visible()
         row.click(button="right")

@@ -269,6 +269,20 @@ class SideChannels:
         result: dict[str, Any] = await self._side_call(env, "fs.list", params, what=f"listing {path}")
         return result
 
+    async def fs_browse(self, env: str, path: str, *, hidden: bool = False, limit: int = 500) -> dict[str, Any]:
+        """The folders of one directory, for the new-project folder picker: ``{path, parent, home,
+        writable, is_git, entries: [{name, path, mtime, writable, readable, is_git, link}], truncated,
+        places}``. ``path`` empty or starting with ``~`` is the home directory.
+
+        Unlike every other read here it is not held to the roots, since a folder being chosen for a
+        new project is under none yet; the daemon lists directories only, never a file, and leaves out
+        what is denied or its own. A daemon older than the call raises ``Unsupported``."""
+        params: dict[str, Any] = {"path": path, "limit": limit}
+        if hidden:
+            params["hidden"] = True
+        result: dict[str, Any] = await self._side_call(env, "fs.browse", params, what=f"browsing {path or '~'}")
+        return result
+
     async def fs_read(self, env: str, path: str, *, offset: int = 0, max_bytes: int = 64 << 10) -> FileChunk:
         """Up to ``max_bytes`` at ``offset``. One reply carries at most about 640 KiB; ``eof`` says
         whether the end was reached, and a longer read continues at ``next_offset``."""

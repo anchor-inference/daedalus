@@ -63,7 +63,9 @@ async def test_sessions_can_share_a_project_directory_and_deleting_one_keeps_it(
     assert [u["id"] for u in await manager.workspace_users(first.workspace)] == [second.session.id]
     assert await manager.delete_session(second.session.id)
     assert first.workspace.is_dir()
-    assert await manager.projects.get(first.project.id) is None
+    # Two chats made it a project, and a project is not taken away with its last chat.
+    kept = await manager.projects.get(first.project.id)
+    assert kept is not None and not kept.settings.ephemeral
     third = await manager.create_session("third", workspace=first.workspace)
     manager._states.pop(third.session.id)
     assert (await manager.get_state(third.session.id)).workspace == first.workspace  # type: ignore[union-attr]

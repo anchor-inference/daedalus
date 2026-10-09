@@ -101,7 +101,7 @@ async def test_directory_picker_and_explorer_hide_sealed_and_escaping_paths(
         protected = manager.protected_paths()
         monkeypatch.setattr(manager, "protected_paths", lambda: (*protected, root / "sealed"))
         async with await _client(settings, config, db, manager) as client:
-            picker = await client.get("/api/project-directories", headers=HEADERS, params={"root": str(root), "path": str(root)})
+            picker = await client.get("/api/folders", headers=HEADERS, params={"path": str(root)})
             explorer = await client.get(f"/api/sessions/{state.session.id}/files", headers=HEADERS)
             assert picker.status_code == explorer.status_code == 200
             for response in (picker, explorer):
@@ -109,7 +109,7 @@ async def test_directory_picker_and_explorer_hide_sealed_and_escaping_paths(
                 assert "visible" in names
                 assert not names & {"sealed", "sealed-link", "escape", "broken"}
             for name in ("sealed", "sealed-link", "escape"):
-                folder = await client.get("/api/project-directories", headers=HEADERS, params={"root": str(root), "path": str(root / name)})
+                folder = await client.get("/api/folders", headers=HEADERS, params={"path": str(root / name)})
                 files = await client.get(f"/api/sessions/{state.session.id}/files", headers=HEADERS, params={"path": name})
                 assert folder.status_code == 403
                 assert files.status_code in (400, 403)

@@ -81,9 +81,10 @@ P1, P2, P3, P4, PV = "9f3c2a1b7d40", "2e7b5c9a1f88", "4c6d8e0f2a13", "6e8f0a2b4c
 
 PROJECTS = [
     {"id": P1, "name": "Bakery site", "folders": folders("/home/operator/work/bakery"), "created_at": ago(days=9), "settings": {"snapshots": True}, "sessions": [{"id": "a1b2c3d4e5f6", "title": "Bakery site", "running": True}, {"id": "b2c3d4e5f6a1", "title": "Bakery site: photos", "running": False}, {"id": "e5f6a1b2c3d4", "title": "Bakery site (fork @412)", "running": False}]},
-    {"id": P2, "name": "Expenses", "folders": folders("/home/operator/work/expenses"), "created_at": ago(days=4), "settings": {"snapshots": False}, "sessions": [{"id": "f6a1b2c3d4e5", "title": "Expense tracker", "running": False}]},
+    # Two chats' own scratch projects: listed as the chats, not as projects (isProject in grouping.ts).
+    {"id": P2, "name": "Expenses", "folders": folders("/home/operator/work/expenses"), "created_at": ago(days=4), "settings": {"snapshots": False, "ephemeral": True}, "sessions": [{"id": "f6a1b2c3d4e5", "title": "Expense tracker", "running": False}]},
     {"id": P3, "name": "Support", "folders": folders("/home/operator/work/support"), "created_at": ago(days=6), "settings": {"snapshots": True}, "sessions": [{"id": S3, "title": "Support inbox", "running": False}]},
-    {"id": P4, "name": "Weekly digest", "folders": folders("/home/operator/work/digest"), "created_at": ago(days=5), "settings": {"snapshots": True}, "sessions": [{"id": S4, "title": "Weekly digest", "running": True}]},
+    {"id": P4, "name": "Weekly digest", "folders": folders("/home/operator/work/digest"), "created_at": ago(days=5), "settings": {"snapshots": True, "ephemeral": True}, "sessions": [{"id": S4, "title": "Weekly digest", "running": True}]},
     # A folder added but not mounted yet: in Docker that is a restart away, and the app says so.
     {"id": "5a8d1c0b6e22", "name": "Courier rates", "folders": folders("/home/operator/documents/courier", reachable=False), "created_at": ago(hours=2), "settings": {"snapshots": False}, "sessions": []},
     # The installation's own: the concierge and what it started by being spoken to.
@@ -960,10 +961,12 @@ PHONE = {"width": 390, "height": 844}
 WORDS = {
     "en": {"steps": "8 steps", "panel": "Panel", "access": "Access", "actions": "Session actions", "details": "Details", "role": "Writes the delivery page",
            "permission": "waiting for permission · 1 min", "answer": "Answer", "checkout": "Checkout page", "q.note": "like last spring",
-           "queued": "Then put the opening hours from the shop calendar in the footer.", "steered": "Keep the old prices on the archive page."},
+           "queued": "Then put the opening hours from the shop calendar in the footer.", "steered": "Keep the old prices on the archive page.",
+           "project.name": "ESP32 firmware"},
     "ru": {"steps": "8 шагов", "panel": "Панель", "access": "Доступ", "actions": "Действия с сессией", "details": "Сведения", "role": "Пишет страницу доставки",
            "permission": "ждёт разрешения · 1 мин", "answer": "Ответить", "checkout": "Оформление заказа", "q.note": "как прошлой весной",
-           "queued": "Потом добавь в подвал часы работы из календаря магазина.", "steered": "На странице архива оставь старые цены."},
+           "queued": "Потом добавь в подвал часы работы из календаря магазина.", "steered": "На странице архива оставь старые цены.",
+           "project.name": "Прошивка ESP32"},
 }
 
 
@@ -1082,13 +1085,36 @@ def scroll_to_voices(page: Page) -> None:
     page.wait_for_timeout(400)
 
 
+def open_new_project(page: Page) -> None:
+    """The new-project dialog from the projects page, on an existing folder: the browser with its
+    places, a repository chosen, and the line that says what was found about it."""
+    open_projects(page)
+    page.locator(".projects-new").click()
+    page.wait_for_selector(".sheet.np-sheet", timeout=5000)
+    page.locator("#project-name").fill(word("project.name"))
+    page.locator(".np-card").nth(1).click()
+    page.locator(".fb-place.fav").first.click()
+    page.locator(".fb-row", has_text="esp32-door").click()
+    page.wait_for_selector(".fb-foot[data-chosen]", timeout=5000)
+
+
+def open_phone_new_project(page: Page) -> None:
+    """The same dialog on a phone, where it fills the screen and the places are a row of chips."""
+    page.evaluate("window.dispatchEvent(new CustomEvent('daedalus:new-project', { detail: 'agents' }))")
+    page.wait_for_selector(".sheet.np-sheet", timeout=5000)
+    page.locator("#project-name").fill(word("project.name"))
+    page.locator(".np-card").nth(1).click()
+    page.locator(".fb-place.fav").first.click()
+    page.locator(".fb-row", has_text="esp32-door").click()
+
+
 def open_projects(page: Page) -> None:
-    """The switcher over a list already grouped by project: the folders on one side, the agents in them on the other."""
+    """The projects page beside the list already grouped by project: the folders in the column, the table in the conversation's place."""
     # A picture before this one folds the sidebar, and folded there is only the rail: unfold it first.
     if not page.locator("nav.sidebar").count():
         page.locator(".rail .rail-home.folded").click()
     page.locator(".sidebar .project-chip").click()
-    page.wait_for_selector(".project-row", timeout=5000)
+    page.wait_for_selector(".projects-row:not(.head)", timeout=5000)
 
 
 def open_hire(page: Page) -> None:
@@ -1273,7 +1299,7 @@ def agents_shots() -> int:
                 if mobile:
                     shot(page, f"{prefix}{state}", "agents?view=chats", wait=".ph-row")
                 else:
-                    shot(page, f"{prefix}{state}", "agents", wait=".folder")
+                    shot(page, f"{prefix}{state}", "agents", wait=".sb-row")
                 context.close()
         browser.close()
     return out or UNHANDLED.report()
@@ -1913,6 +1939,7 @@ def run() -> int:
         # either timed out here and stopped every picture after this one; the rail is there either
         # way, and the switcher opens from the sidebar it unfolds.
         shot(page, "projects", "agents", wait=".rail", before=open_projects)
+        shot(page, "new-project", "agents", wait=".rail", before=open_new_project, settle=600)
         shot(page, "voice", "voice")
         shot(page, "voice-settings", "settings/voice", wait=".stt-list .stt-card", before=scroll_to_voices, settle=700)
         shot(page, "board", "board")
@@ -1959,6 +1986,7 @@ def run() -> int:
         shot(page, "phone-more", "agents", before=open_more)
         shot(page, "phone-drawer", "agents", wait=".ph-home", before=open_drawer)
         shot(page, "phone-chats", "agents?view=chats", wait=".ph-row")
+        shot(page, "phone-new-project", "agents", wait=".ph-page", before=open_phone_new_project, settle=600)
         shot(page, "phone-team", f"project/{P1}/team", wait="[data-staff] .ph-row")
         shot(page, "phone-settings-notifications", "settings/notifications", wait=".nrows .nrow", before=open_first_kind, settle=500)
         shot(page, "phone-settings-tools", "settings/tools", wait=".tgroups .tgroup", settle=500)

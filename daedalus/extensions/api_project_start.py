@@ -36,6 +36,8 @@ class StartBody(BaseModel):
     checks: list[str] = Field(min_length=1, max_length=12)
     owner_intent: Literal["manual", "later"]
     folder: Folder | None = None
+    folder_name: str = Field(default="", max_length=80)
+    """The new folder's name under the workspaces when no folder is chosen; empty is the project's id."""
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
@@ -50,7 +52,8 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                 Principal.operator(who), client_operation_id=body.client_operation_id,
                 expected_collection_revision=body.expected_collection_revision, name=body.name,
                 goal=body.goal, constraints=body.constraints, task_title=body.task_title,
-                checks=body.checks, owner_intent=body.owner_intent, folder=spec)
+                checks=body.checks, owner_intent=body.owner_intent, folder=spec,
+                managed_name=body.folder_name)
         except ControlConflict as exc:
             raise HTTPException(409, {"reason": str(exc), "current_revision": exc.current_revision}) from exc
         except ControlDenied as exc:

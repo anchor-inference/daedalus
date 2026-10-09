@@ -1,4 +1,8 @@
-"""The first project form preserves a typed goal and exact command through a lost reply."""
+"""The orchestration project form preserves a typed goal and exact command through a lost reply.
+
+The goal, the first task and its checks live in orchestration mode's "New orchestration project",
+opened from that mode's empty list; the plain new-project dialog no longer holds them.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +19,12 @@ from api_stub import DEFAULT_APP, expect_app, folders, fulfil_shared  # noqa: E4
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
+
+
+def open_form(page, language: str) -> None:  # type: ignore[no-untyped-def]
+    """Orchestration mode with no orchestrated project offers the form under its empty list."""
+    page.goto(f"{BASE}/orchestration?token=t&lang={language}")
+    page.get_by_role("button", name="New orchestration project" if language == "en" else "Новый проект оркестрации").first.click()
 
 
 def scenario(language: str, width: int) -> None:
@@ -71,12 +81,10 @@ def scenario(language: str, width: int) -> None:
             answer(route, [])
 
         page.route("**/api/**", stub)
-        page.goto(f"{BASE}/agents?token=t&lang={language}")
-        page.locator(".project-chip").click()
+        open_form(page, language)
         page.set_viewport_size({"width": width, "height": 560 if width == 320 else 900})
-        sheet = page.locator(".sheet")
+        sheet = page.locator(".sheet.np-orch")
         expect(sheet).to_be_visible()
-        expect(sheet.get_by_role("button", name="Start with a clear first task" if language == "en" else "Начать с понятной первой задачи")).to_have_attribute("aria-expanded", "true")
         sheet.locator("#project-name").fill("Bakery")
         sheet.locator("#project-start-goal").fill("Publish a clear menu")
         sheet.locator("#project-start-constraints").fill("Keep current prices")
@@ -84,20 +92,17 @@ def scenario(language: str, width: int) -> None:
         sheet.locator("#project-start-checks").fill("\n".join(f"Check {index}" for index in range(13)))
         expect(sheet.get_by_role("button", name="Create project and first task" if language == "en" else "Создать проект и первую задачу")).to_be_disabled()
         page.set_viewport_size({"width": 1440, "height": 900})
-        page.reload()
-        page.locator(".project-chip").click()
+        open_form(page, language)
         page.set_viewport_size({"width": width, "height": 560 if width == 320 else 900})
-        sheet = page.locator(".sheet")
+        sheet = page.locator(".sheet.np-orch")
         expect(sheet.locator("#project-start-checks")).to_have_value("\n".join(f"Check {index}" for index in range(13)))
         sheet.locator("#project-start-checks").fill("All items listed\nWording checked")
         sheet.get_by_role("button", name="Create project and first task" if language == "en" else "Создать проект и первую задачу").click()
         expect(sheet).to_contain_text("Couldn't confirm the project was created" if language == "en" else "Не удалось подтвердить создание проекта")
         page.set_viewport_size({"width": 1440, "height": 900})
-        page.reload()
-        page.locator(".project-chip").click()
-        page.get_by_role("button", name="Add a project" if language == "en" else "Добавить проект", exact=True).click()
+        open_form(page, language)
         page.set_viewport_size({"width": width, "height": 560 if width == 320 else 900})
-        sheet = page.locator(".sheet")
+        sheet = page.locator(".sheet.np-orch")
         sheet.get_by_role("button", name="Try again" if language == "en" else "Ещё раз").click()
         expect(sheet).to_have_count(0)
         page.wait_for_url("**/project/p1/board?task=task-one*")
@@ -136,9 +141,8 @@ def conflict_scenario(language: str) -> None:
             answer(route, [])
 
         page.route("**/api/**", stub)
-        page.goto(f"{BASE}/agents?token=t&lang={language}")
-        page.locator(".project-chip").click()
-        sheet = page.locator(".sheet")
+        open_form(page, language)
+        sheet = page.locator(".sheet.np-orch")
         sheet.locator("#project-name").fill("Bakery")
         sheet.locator("#project-start-goal").fill("Publish a clear menu")
         sheet.locator("#project-start-constraints").fill("Keep current prices")

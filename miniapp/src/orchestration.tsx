@@ -23,6 +23,7 @@ import { FoldButton } from "./sidebar";
 import { go, useMedia } from "./shell";
 import { useQuery } from "./store";
 import { useStreamUp } from "./events";
+import { openNewProject } from "./project/NewProject";
 
 /** The listing both modes read: the Agents list filters it, orchestration mode picks its projects out
  *  of it. One key, so the sidebar and the rail's count share one request. */
@@ -83,7 +84,10 @@ function OrchestrationRows({ onMain, onProjects }: { onMain: boolean; onProjects
         {onProjects ? <>
           <p>{t(data.projects.length === 0 ? "orch.empty.noProjects" : "orch.empty.touch")}</p>
           <button className="btn primary" onClick={onProjects}>{t(data.projects.length === 0 ? "shell.projects.add" : "shell.projects")}</button>
-        </> : t(keyboard ? "orch.empty" : "orch.empty.touch")}
+        </> : <>
+          <p>{t(keyboard ? "orch.empty" : "orch.empty.touch")}</p>
+          <button className="btn primary" onClick={() => openNewProject("orchestration")}><Icon name="plus" size={14} /> {t("np.orch.title")}</button>
+        </>}
       </div>}
     </>
   );
@@ -148,10 +152,10 @@ export function OrchestrationList({ onProjects }: { onProjects: () => void }) {
         {projects.map((p) => <PhoneProjectRow key={p.id} project={p} sessions={sessions} />)}
         {!loading && data && projects.length === 0 && (
           <EmptyState icon="conductor" title={t("orch.empty.title")} body={t(data.projects.length === 0 ? "orch.empty.noProjects" : "orch.empty.touch")}
-            action={<button type="button" className="ph-btn" onClick={onProjects}>{t(data.projects.length === 0 ? "shell.projects.add" : "shell.projects")}</button>} />
+            action={<button type="button" className="ph-btn" onClick={data.projects.length === 0 ? () => openNewProject("orchestration") : onProjects}>{t(data.projects.length === 0 ? "np.orch.title" : "shell.projects")}</button>} />
         )}
       </div>
-      <NewChatPill floating icon="plus" label={t("ph.newproject")} onClick={onProjects} />
+      <NewChatPill floating icon="plus" label={t("ph.newproject")} onClick={() => openNewProject("orchestration")} />
     </div>
   );
 }

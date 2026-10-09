@@ -29,10 +29,11 @@ def run() -> None:
 
         page.route(f"**/api/sessions/{S2}", rename)
         page.goto(f"{BASE}/agents/{S1}?token=t&lang=en&scheme=dark")
-        row = page.locator(f'.sidebar .erow[data-session="{S2}"]')
+        row = page.locator(f'.sidebar .sb-chat[data-session="{S2}"]')
         expect(row).to_be_visible()
         original_url = page.url
-        row.locator('.session-row-menu button').click()
+        row.hover()
+        row.locator(".sb-acts button[aria-haspopup='menu']").click()
         menu = page.get_by_role("menu")
         expect(menu.get_by_role("menuitem", name="Rename", exact=True)).to_be_visible()
         # Delete is a bare verb like the other items: the row it hangs off already names the session.
@@ -42,9 +43,10 @@ def run() -> None:
         menu.get_by_role("menuitem", name="Rename", exact=True).click()
         page.get_by_role("textbox", name="Rename", exact=True).fill("Renamed session")
         page.get_by_role("button", name="Save", exact=True).click()
-        expect(row.locator(".erow-title")).to_contain_text("Renamed session")
+        expect(row.locator(".sb-t")).to_contain_text("Renamed session")
         assert changed == ["Renamed session"] and page.url == original_url
-        assert page.locator(".sidebar .folder-top").first.evaluate("el => { const head = el.querySelector('.folder-head'); return !head || getComputedStyle(head).backgroundColor === 'rgba(0, 0, 0, 0)'; }")
+        # A project row lies flat on the column like the chats under it: no band of its own.
+        assert page.locator(".sidebar .sb-prow").last.evaluate("el => getComputedStyle(el).backgroundColor === 'rgba(0, 0, 0, 0)'")
         if os.environ.get("SHOTS"):
             page.screenshot(path=f"{os.environ['SHOTS']}/sidebar-session-actions.png")
         browser.close()

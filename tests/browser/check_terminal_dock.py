@@ -65,7 +65,7 @@ def desktop(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-de
     if count != "3":
         problems.append(f"the header button counts {count!r} running terminals, not 3")
     # The session's row in the sidebar carries the same count (the listing says 3).
-    row_pill = page.locator(f".erow[data-session='{S1}'] .erow-terms")
+    row_pill = page.locator(f".sidebar [data-session='{S1}'] .sb-terms")
     if not row_pill.count() or row_pill.first.inner_text().strip() != "3":
         problems.append("the session's row in the sidebar does not show its terminal count")
 

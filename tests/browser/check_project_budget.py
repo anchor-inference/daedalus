@@ -105,8 +105,6 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
             return answer(route, {"latest": None, "available": False})
         if path == "/api/settings":
             return answer(route, {"presets": {}, "model": {}})
-        if path == "/api/project-directories":
-            return answer(route, {"roots": [], "docker": True})
         if fulfil_shared(route):
             return None
         unhandled.record(path)
@@ -118,7 +116,7 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
     page.goto(f"{BASE}/agents?token=t&lang={language}")
     settings = "Settings for Bakery" if language == "en" else "Настройки: Bakery"
     open_projects(page)
-    page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
+    page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{settings}']").click()
     block = page.locator(".project-budget")
     expect(block).to_be_visible()
     block.locator("summary").click()
@@ -129,20 +127,20 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
     block.locator("input").first.fill("1.000000")
     block.locator("input").last.fill("0.500000")
     page.locator(".sheet-head button").click()
-    page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
+    page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{settings}']").click()
     block.locator("summary").click()
     expect(block.locator("input").first).to_have_value("1.000000")
     expect(block.locator("input").last).to_have_value("0.500000")
     page.reload()
     open_projects(page)
-    page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
+    page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{settings}']").click()
     block.locator("summary").click()
     expect(block.locator("input").first).to_have_value("1.000000")
     assert page.evaluate("localStorage.getItem('daedalus.project.budget.draft.p1')")
     block.locator("button").last.click()
     page.reload()
     open_projects(page)
-    page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
+    page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{settings}']").click()
     retry = "Try again" if language == "en" else "Повторить"
     page.get_by_text(retry).click()
     expect(block.locator("summary")).to_contain_text("$0.700000")
@@ -156,7 +154,7 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
     project["entity_revision"] += 1
     page.reload()
     open_projects(page)
-    page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
+    page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{settings}']").click()
     block.locator("summary").click()
     expect(block.locator("input").first).to_have_value("2.000000")
     expect(block).to_contain_text("goal or saved caps changed" if language == "en" else "Цель или сохранённые пределы изменились")
@@ -176,7 +174,7 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
     block.locator("input").first.fill("4.000000")
     page.reload()
     open_projects(page)
-    page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
+    page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{settings}']").click()
     block.locator("summary").click()
     expect(block.locator("input").first).to_have_value("4.000000")
     page.get_by_text(retry).click()
@@ -187,7 +185,7 @@ def scenario(page: Page, language: str, width: int, unhandled: Unhandled) -> Non
     state["unknown"] = True
     page.reload()
     open_projects(page)
-    page.locator(f".project-row .iconbtn[aria-label='{settings}']").click()
+    page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{settings}']").click()
     block.locator("summary").click()
     expect(block).to_contain_text("balance is unknown" if language == "en" else "остаток неизвестен")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")

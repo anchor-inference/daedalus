@@ -13,7 +13,11 @@ rows and 44 px destinations in the drawer; an idle composer of one 44 px row at 
 screen; no bottom bar outside a project; and a 44 px target for every control, counting the invisible
 ::after that a 34 px circle or a 28 px chip carries. The numbers are a step under the first cut of the
 redesign (12 / 13 / 15 / 16 / 17 / 22, a 56 px bar, 60 px rows), which the operator measured as too
-large next to Claude and ChatGPT on the same phone. The desktop claims below are unchanged.
+large next to Claude and ChatGPT on the same phone.
+
+The desktop's session header is two lines inside its 48 px since the desktop redesign, the title and
+then the project, the model and the live state; the start screen and the projects page that came with
+it have their own claims (check_start).
 
     cd miniapp && npm run build
     mkdir -p /tmp/app-root/app && cp -r dist/* /tmp/app-root/app/
@@ -57,6 +61,12 @@ READ = """
   const single = rows.filter((r) => !r.querySelector('.erow-meta') && !r.querySelector('.erow-line2'));
   const double = rows.filter((r) => r.querySelector('.erow-meta') || r.querySelector('.erow-line2'));
   const acts = all('.act:not(.head)');
+  // The sidebar's own rows: a chat two lines at 44, a project one at 36, a chat under a project 40;
+  // a chat's plate is round and a project's tile square.
+  const sbChat = all('.sidebar .sb-chat:not(.nested)').map((r) => box(r).h);
+  const sbNested = all('.sidebar .sb-chat.nested').map((r) => box(r).h);
+  const sbProject = all('.sidebar .sb-prow').map((r) => box(r).h);
+  const radius = (el) => el ? getComputedStyle(el).borderTopLeftRadius : null;
   // Only what is drawn: the desktop-only buttons are display:none on a phone and measure 0×0.
   const icons = all('.chat-head .iconbtn', '.pagehead .iconbtn').filter((el) => el.getBoundingClientRect().width > 0);
   return {
@@ -70,6 +80,7 @@ READ = """
     headModel: box(one('.composer .model-select')),
     composerRow: box(one('.composer-row')),
     subMeta: box(one('.chat-head .sub.meta')),
+    headSub: box(one('.chat-head .chat-sub')),
     chat: box(one('.chat')),
     head: box(one('.chat-head')),
     timeline: box(one('.timeline')),
@@ -78,6 +89,8 @@ READ = """
     answerFs: px(one('.answer'), 'fontSize'),
     userFs: px(one('.msg.user'), 'fontSize'),
     userW: box(one('.msg.user')),
+    sbChat, sbNested, sbProject,
+    plate: box(one('.sidebar .sb-chat:not(.nested) .sb-plate')), plateRadius: radius(one('.sidebar .sb-chat:not(.nested) .sb-plate')), tileRadius: radius(one('.sidebar .sb-tile')),
     rowSingle: single.map((r) => box(r).h),
     rowDouble: double.map((r) => box(r).h),
     rowFs: px(one('.erow-title'), 'fontSize'),
@@ -125,7 +138,7 @@ def measure_agents(browser, width: int, height: int, mobile: bool) -> dict:  # t
     context = browser.new_context(viewport={"width": width, "height": height}, color_scheme="dark", is_mobile=mobile, has_touch=mobile)
     context.add_init_script(OPEN_FOLDERS)
     # A phone's list of chats is the Chats page now; its home holds only the live ones.
-    page = open_page(context, "agents?view=chats", ".ph-row") if mobile else open_page(context, "agents", ".folder")
+    page = open_page(context, "agents?view=chats", ".ph-row") if mobile else open_page(context, "agents", ".sb-row")
     out = page.evaluate(READ)
     out["vw"] = width
     context.close()
@@ -559,8 +572,20 @@ def judge(m: dict) -> list[str]:
     if m["body"] != 14:
         problems.append(f"{m['vw']}: body is {m['body']}px, not 14")
     if not phone:
-        if not m["left"] or m["left"]["w"] != 324:
-            problems.append(f"{m['vw']}: the left column is {m['left']}, not 324 wide")
+        # 52 px of rail and the 288 px column: 272 until the rows went to two lines, where a Russian
+        # title was cut at eighteen characters.
+        if not m["left"] or m["left"]["w"] != 340:
+            problems.append(f"{m['vw']}: the left column is {m['left']}, not 340 wide")
+        for name, rows, want in (("chat", m["sbChat"], 44), ("nested chat", m["sbNested"], 40), ("project", m["sbProject"], 36)):
+            for h in rows:
+                if h != want:
+                    problems.append(f"{m['vw']}: a sidebar {name} row is {h}px, not {want}")
+        if not m["sbChat"] or not m["sbProject"]:
+            problems.append(f"{m['vw']}: the sidebar drew {len(m['sbChat'])} chat rows and {len(m['sbProject'])} project rows")
+        if m["plate"] and m["plate"]["w"] != 24:
+            problems.append(f"{m['vw']}: a chat's plate is {m['plate']['w']}px, not 24")
+        if m["plateRadius"] != "50%" or m["tileRadius"] in (None, "50%"):
+            problems.append(f"{m['vw']}: a chat's plate is not round or a project's tile not square ({m['plateRadius']}, {m['tileRadius']})")
         if m["list"]:
             problems.append(f"{m['vw']}: a second list column is still there ({m['list']})")
     for h in m["rowSingle"]:
@@ -576,6 +601,10 @@ def judge(m: dict) -> list[str]:
         problems.append(f"{m['vw']}: the chat header is {m['head']['h']}px")
     if m["subMeta"]:
         problems.append(f"{m['vw']}: the header still has its second row of chips")
+    # The desktop header is two lines inside the same 48 px: the title, then the project, the model
+    # and the live state in the meta size — the phone's title button, not a second row of chips.
+    if not phone and (not m["headSub"] or m["headSub"]["h"] > 18):
+        problems.append(f"{m['vw']}: the header's second line is {m['headSub']}, not one 12 px line")
     if m["chips"]:
         problems.append(f"{m['vw']}: {len(m['chips'])} chip(s) are still in the header")
     if not phone:
@@ -615,8 +644,8 @@ def judge(m: dict) -> list[str]:
             problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px, over the {stripe} stripe")
         if m["vw"] >= 1024 and m["composerBox"] and abs(m["composerBox"]["w"] - m["timeline"]["w"]) > 2:
             problems.append(f"{m['vw']}: the composer is {m['composerBox']['w']}px against a {m['timeline']['w']}px timeline")
-        # Beside the 42 % panel a 1440 window keeps a 647 px conversation column: 1440 less the 52 px
-        # rail and the 272 px sidebar is a 1116 px chat area, 58 % of it the conversation, and the
+        # Beside the 42 % panel a 1440 window keeps a 638 px conversation column: 1440 less the 52 px
+        # rail and the 288 px sidebar is a 1100 px chat area, 58 % of it the conversation, and the
         # timeline is that less the gutters. The rail took 52 px the old 677 px figure did not count
         # (the sidebar's strip then stood only where the column was folded), so the floor is 590.
         if m["vw"] == 1440 and m["timeline"]["w"] < 590:
@@ -628,7 +657,8 @@ def judge_sidebar(s: dict) -> list[str]:
     problems: list[str] = []
     # A 52 px icon rail stands beside the contextual list, whose boundary reserves one pixel.
     # Folding retains a 52 px icon column; the conversation starts at its edge.
-    want = {"open": (324, 271, 324), "collapsed": (52, 0, 52), "collapsedAfterReload": (52, 0, 52), "reopened": (324, 271, 324)}
+    # The column is 288 wide since its rows went to two lines (272 before).
+    want = {"open": (340, 287, 340), "collapsed": (52, 0, 52), "collapsedAfterReload": (52, 0, 52), "reopened": (340, 287, 340)}
     for key, (rail, sidebar, main) in want.items():
         got = s[key]
         if (got["rail"], got["sidebar"], got["main"]) != (rail, sidebar, main):
@@ -649,6 +679,48 @@ def judge_sidebar(s: dict) -> list[str]:
     return problems
 
 
+START = """
+() => {
+  const box = (el) => el ? { w: Math.round(el.getBoundingClientRect().width), h: Math.round(el.getBoundingClientRect().height) } : null;
+  const circle = document.querySelector('.start-composer .composer-tools .roundbtn.primary');
+  return {
+    composer: box(document.querySelector('.start-composer .composer-box')),
+    circle: box(circle),
+    radius: circle ? getComputedStyle(circle).borderRadius : null,
+    chips: [...document.querySelectorAll('.start-where-chip')].map((el) => box(el).h),
+    live: [...document.querySelectorAll('.start-live-row')].map((el) => box(el).h),
+    projectRows: [...document.querySelectorAll('.projects-row:not(.head)')].map((el) => box(el).h),
+  };
+}
+"""
+
+
+def check_start(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-def]
+    """The desktop's start screen and projects page, at 1440: the composer in a 720 px column (the
+    mockup's, a step over the 680 it had when it stood alone, so the chips and the live rows under
+    it share its edges), the primary a 32 px circle, the project chips 28 px like every filter chip,
+    a live row two lines in at most 52 px, and a project row two lines in at most 64 px."""
+    problems: list[str] = []
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
+    page = open_page(context, "agents", ".start-live-row")
+    start = page.evaluate(START)
+    page.goto(f"{BASE}/agents?view=projects&token=t&scheme=dark&lang=en")
+    page.wait_for_selector(".projects-row:not(.head)", timeout=15000)
+    start["projectRows"] = page.evaluate(START)["projectRows"]
+    context.close()
+    if not start["composer"] or start["composer"]["w"] != 720:
+        problems.append(f"start: the composer is {start['composer']}, not 720 wide")
+    if not start["circle"] or start["circle"]["w"] != 32 or start["circle"]["h"] != 32 or start["radius"] != "50%":
+        problems.append(f"start: the primary is {start['circle']} with radius {start['radius']}, not a 32 px circle")
+    if not start["chips"] or any(h != 28 for h in start["chips"]):
+        problems.append(f"start: the project chips are {start['chips']}, not 28")
+    if not start["live"] or any(h > 52 for h in start["live"]):
+        problems.append(f"start: the live rows are {start['live']}")
+    if not start["projectRows"] or any(h > 64 for h in start["projectRows"]):
+        problems.append(f"projects: the rows are {start['projectRows']}")
+    return problems, start
+
+
 def run() -> int:
     problems: list[str] = []
     measured: dict = {}
@@ -666,6 +738,8 @@ def run() -> int:
             problems += phone_problems
             project_problems, measured["phone-project"] = check_phone_project(browser)
             problems += project_problems
+            start_problems, measured["start"] = check_start(browser)
+            problems += start_problems
         browser.close()
     for name, m in measured.items():
         print(name, json.dumps(m))

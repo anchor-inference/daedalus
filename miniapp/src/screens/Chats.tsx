@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Project, type SessionList, type SessionSummary } from "../api";
 import { relTime, shortModel, untilShort } from "../format";
-import { type Folder, type Row, agentName, arrange, kindOf } from "../grouping";
+import { type Folder, type Row, agentName, arrange, dayGroup, kindOf } from "../grouping";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { agentsListingOf } from "../mode";
@@ -35,29 +35,17 @@ function rememberSection(key: string, closed: boolean): void {
   } catch { /* private mode: the section forgets between visits */ }
 }
 
-/** The day group a chat falls in, by its last message: today, yesterday, the week, the month, older. */
-export function dayGroup(iso: string, now = new Date()): "today" | "yesterday" | "week" | "month" | "older" {
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return "older";
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const day = 86_400_000;
-  if (at.getTime() >= start) return "today";
-  if (at.getTime() >= start - day) return "yesterday";
-  if (at.getTime() >= start - 7 * day) return "week";
-  if (at.getTime() >= start - 30 * day) return "month";
-  return "older";
-}
-
 const DAYS = ["today", "yesterday", "week", "month", "older"] as const;
 
 /**
- * The page's sections: a project with more than one chat (or a chat with forks or subagents under
- * it) is a section of its own, in recency order; every other chat falls into its day. Projects with no
- * chat in the current view are left out, as the drawer lists every project anyway.
+ * The page's sections: a project (`isProject`, the same rule the desktop's sidebar splits by) is a
+ * section of its own, in recency order; every chat falls into its day, with its forks and subagents
+ * under it. Projects with no chat in the current view are left out, as the drawer lists every
+ * project anyway.
  */
 export function chatSections(folders: Folder[], now = new Date()): { key: string; folder?: Folder; day?: typeof DAYS[number]; rows: Row[] }[] {
-  const projects = folders.filter((f) => f.rows.length > 0 && (!f.single || f.system));
-  const loose = folders.filter((f) => f.rows.length > 0 && f.single && !f.system).flatMap((f) => f.rows);
+  const projects = folders.filter((f) => f.rows.length > 0 && !f.chat);
+  const loose = folders.filter((f) => f.rows.length > 0 && f.chat).flatMap((f) => f.rows);
   const days = DAYS.map((day) => ({ key: `day:${day}`, day, rows: loose.filter((r) => dayGroup(r.s.last_message_at || r.s.created_at, now) === day) }))
     .filter((d) => d.rows.length > 0);
   return [...projects.map((f) => ({ key: f.key, folder: f, rows: f.rows })), ...days];

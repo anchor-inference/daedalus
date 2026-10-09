@@ -76,6 +76,7 @@ from daedalus.extensions import (
     api_coordinator_authority,
     api_diagrams,
     api_files,
+    api_folder_browser,
     api_goal_budget,
     api_harnesses,
     api_integrations,
@@ -1602,6 +1603,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_coordinator_authority.register(api, app, auth)
     api_projects.register(api, app, auth)
     api_project_start.register(api, app, auth)
+    api_folder_browser.register(api, app, auth)
     api_goal_budget.register(api, app, auth)
     api_provider_holds.register(api, app, auth)
     api_knowledge.register(api, app, auth)
@@ -4952,92 +4954,6 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                     fh.write(chunk)
             names.append(target.name)
         return names
-
-    # -- project directory picker ---------------------------------------------------
-
-    DIRECTORY_PICKER_MAX_ENTRIES = 250
-    DIRECTORY_PICKER_BUDGET_SECONDS = 0.25
-
-    def _picker_roots(project_roots: list[Path]) -> list[Path]:
-        candidates = [Path.home(), settings.workspaces_dir, settings.state_dir.parent, *project_roots]
-        roots: list[Path] = []
-        for candidate in candidates:
-            try:
-                real = candidate.resolve()
-            except OSError:
-                continue
-            if real in roots or sealed_root(str(real), [str(p) for p in manager.protected_paths()]) is not None:
-                continue
-            if real.is_dir() and os.access(real, os.R_OK):
-                roots.append(real)
-        return roots
-
-    def _picker_path(raw_root: str, raw_path: str, offered: list[Path]) -> tuple[Path, Path]:
-        if ".." in Path(raw_path).parts:
-            raise HTTPException(400, "parent traversal is not allowed")
-        root = Path(raw_root).expanduser().resolve() if raw_root else (offered[0] if offered else None)
-        if root is None or root not in offered:
-            raise HTTPException(403, "that browser root is not offered")
-        candidate = Path(raw_path).expanduser()
-        target = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
-        if target != root and root not in target.parents:
-            raise HTTPException(403, "that directory escapes the browser root")
-        if sealed_root(str(target), [str(p) for p in manager.protected_paths()]) is not None:
-            raise HTTPException(403, "that directory belongs to the installation")
-        if not target.is_dir():
-            raise HTTPException(404, "no such directory")
-        return root, target
-
-    @api.get("/api/project-directories")
-    async def project_directories(root: str = "", path: str = "", _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """List one safe, bounded directory level for the project folder picker."""
-        known_projects = await manager.projects.list()
-        folders = [folder for project in known_projects for folder in project.local_folders(manager.projects.local_env)]
-        offered = _picker_roots([folder.path for folder in folders if folder.reachable])
-        project_ids = {str(folder.path.resolve()): folder.project_id for folder in folders if folder.path.exists()}
-        if not root and not path:
-            return {
-                "roots": [{"name": p.name or str(p), "path": str(p), "readable": True, "writable": os.access(p, os.W_OK), "project_id": project_ids.get(str(p))} for p in offered],
-                "docker": not settings.native,
-            }
-        anchor, target = _picker_path(root, path, offered)
-        entries: list[dict[str, Any]] = []
-        truncated = False
-        deadline = time.monotonic() + DIRECTORY_PICKER_BUDGET_SECONDS
-        children = []
-        try:
-            with os.scandir(target) as scanner:
-                for child in scanner:
-                    if len(children) >= DIRECTORY_PICKER_MAX_ENTRIES or time.monotonic() >= deadline:
-                        truncated = True
-                        break
-                    children.append(child)
-        except OSError as exc:
-            raise HTTPException(403, f"that directory cannot be read: {exc.strerror or 'permission denied'}") from exc
-        for child in sorted(children, key=lambda entry: entry.name.lower()):
-            try:
-                if child.is_symlink() or not child.is_dir(follow_symlinks=False):
-                    continue
-                real = Path(child.path).resolve()
-                if anchor not in real.parents or sealed_root(str(real), [str(p) for p in manager.protected_paths()]) is not None:
-                    continue
-                entries.append({
-                    "name": child.name,
-                    "path": str(real),
-                    "readable": os.access(real, os.R_OK),
-                    "writable": os.access(real, os.W_OK),
-                    "project_id": project_ids.get(str(real)),
-                })
-            except OSError:
-                entries.append({"name": child.name, "path": str(target / child.name), "readable": False, "writable": False, "project_id": None})
-        parents = []
-        current = target
-        while True:
-            parents.append({"name": current.name or str(current), "path": str(current)})
-            if current == anchor:
-                break
-            current = current.parent
-        return {"root": str(anchor), "path": str(target), "parents": list(reversed(parents)), "entries": entries, "truncated": truncated}
 
     async def _files_root(session_id: str, folder_id: str, *, write: bool = False) -> Path | HostPane:
         """The directory a session's file pane is rooted at: its workspace, or another folder of its project.

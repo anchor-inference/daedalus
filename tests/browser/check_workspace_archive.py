@@ -125,8 +125,6 @@ def scenario(page: Page, lang: str, unhandled: Unhandled) -> None:
             return answer(route, {"receipt_id": "receipt-import", "project_id": "restored", "archive_digest": "a" * 64, "runtime_state": "inactive"})
         if path == "/api/settings" and method == "GET":
             return answer(route, {"presets": {}, "model": {}})
-        if path == "/api/project-directories" and method == "GET":
-            return answer(route, {"roots": [], "docker": True})
         if fulfil_shared(route):
             return None
         unhandled.record(path)
@@ -135,7 +133,7 @@ def scenario(page: Page, lang: str, unhandled: Unhandled) -> None:
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
     open_projects(page)
-    page.locator(f".project-row .iconbtn[aria-label='{words['settings']}']").click()
+    page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{words['settings']}']").click()
     section = page.locator(".sheet-section", has=page.get_by_text(words["archive"])).last
     assert state["history_reads"] == 0
     if section.get_attribute("open") is None:
@@ -153,7 +151,7 @@ def scenario(page: Page, lang: str, unhandled: Unhandled) -> None:
     expect(section.get_by_text("Couldn't confirm the last action." if lang == "en" else "Не удалось подтвердить последнее действие.", exact=False)).to_be_visible()
     page.reload()
     open_projects(page)
-    page.locator(f".project-row .iconbtn[aria-label='{words['settings']}']").click()
+    page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{words['settings']}']").click()
     section = page.locator(".sheet-section", has=page.get_by_text(words["archive"])).last
     if section.get_attribute("open") is None:
         section.locator("summary").first.click()

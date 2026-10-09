@@ -28,6 +28,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote, unquote_plus
 
 from calendar_stub import CalendarStub
+from folder_stub import DEFAULT as FOLDERS
 
 # Outside services_port_range (8100-8119), the range this product hands to an agent's own preview
 # servers: a harness that serves its build into that range competes with the installation running
@@ -50,7 +51,8 @@ def folders(path: str, *, reachable: bool = True, writable: bool | None = None) 
     return [folder(path, reachable=reachable, writable=writable)]
 
 
-ENVIRONMENTS = {"local": "container", "available": ["container"], "host_bridge": False, "docker": True}
+ENVIRONMENTS = {"local": "container", "available": ["container"], "host_bridge": False, "docker": True,
+                "host_configured": True, "workspaces_root": "/data/workspaces", "home": "/home/you"}
 """Where a folder may live: a Docker installation without the host terminal bridge."""
 
 NOTIFICATION_CATEGORIES = ["run_finished", "question", "permission", "run_failed", "staff_turn", "staff_review", "orchestrator_report", "agent_notify", "reminder", "spend", "system"]
@@ -480,6 +482,12 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str | bytes] | None
         return status, "application/json", json.dumps(payload)
     if path in GATES:
         return 200, "application/json", json.dumps(GATES[path])
+    if method.upper() == "GET" and path.startswith("/api/folders"):
+        # The new-project dialog's folder browser, over the invented trees; a check that drives it
+        # installs a FolderStub of its own to change the host's state and read the writes back.
+        answered = FOLDERS.answer("GET", path, query, None)
+        if answered is not None:
+            return answered[0], "application/json", json.dumps(answered[1])
     parts = path.split("/")
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "providers" and parts[4] == "limits":
         return 200, "application/json", json.dumps({"provider_id": parts[3], "observations": []})
@@ -661,11 +669,12 @@ def drawer_go(page, screen: str, mode: str = "") -> None:  # type: ignore[no-unt
 
 
 def open_projects(page) -> None:  # type: ignore[no-untyped-def]
-    """Open the project switcher: the column's project chip on a desktop, the drawer's Projects
-    entry on a phone (where the start screen's own button used to be)."""
+    """Open the projects: the column's project chip on a desktop, which opens the projects page in the
+    conversation's place, and the drawer's Projects entry on a phone, which opens the sheet."""
     page.wait_for_selector(".project-chip:visible, .ph-menu:visible")
     if page.locator(".project-chip:visible").count():
         page.locator(".project-chip:visible").first.click()
+        page.wait_for_selector(".projects-page")
         return
     open_drawer(page)
     page.locator(".ph-drawer-root.open [data-nav='projects']").click()
