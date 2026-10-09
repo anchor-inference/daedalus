@@ -166,7 +166,7 @@ def scenario(page: Page, language: str, unhandled: Unhandled, bundle_id: str = "
         else:
             open_drawer(page)
             page.locator(".ph-drawer-root.open [data-nav='projects']").click()
-        page.locator(f".project-row .iconbtn[aria-label='{words['settings']}']").click()
+        page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{words['settings']}']").click()
         section = page.locator(".sheet-section", has=page.get_by_text(words["title"])).last
         section.locator("summary").first.click()
         return section

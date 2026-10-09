@@ -153,6 +153,7 @@ def scenario(language: str, width: int) -> None:
             open_drawer(page)
             page.locator(".ph-drawer-root.open [data-nav='projects']").click()
         else:
+            # A desktop's projects chip opens the projects page, which opens onto adding the first.
             page.locator(".project-chip").click()
         sheet = page.locator(".sheet")
         sheet.locator("#project-name").fill("Bakery")

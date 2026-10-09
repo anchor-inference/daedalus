@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -15,6 +16,21 @@ from api_stub import DEFAULT_APP, expect_app, folders, fulfil_shared  # noqa: E4
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
+
+
+
+def open_add(page) -> None:  # type: ignore[no-untyped-def]
+    """Open the add-project sheet: the column's projects chip opens the projects page, which opens onto
+    adding one while there is none; a reload that lands back on that page has it open already."""
+    page.wait_for_selector(".project-chip")
+    if not page.locator("#project-name").count():
+        page.locator(".project-chip").click()
+    page.wait_for_selector(".projects-page")
+    try:
+        page.wait_for_selector("#project-name", timeout=3000)
+    except PlaywrightTimeout:
+        page.locator(".projects-new").click()
+        page.wait_for_selector("#project-name")
 
 
 def scenario(language: str, width: int) -> None:
@@ -72,7 +88,7 @@ def scenario(language: str, width: int) -> None:
 
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/agents?token=t&lang={language}")
-        page.locator(".project-chip").click()
+        open_add(page)
         page.set_viewport_size({"width": width, "height": 560 if width == 320 else 900})
         sheet = page.locator(".sheet")
         expect(sheet).to_be_visible()
@@ -85,7 +101,7 @@ def scenario(language: str, width: int) -> None:
         expect(sheet.get_by_role("button", name="Create project and first task" if language == "en" else "Создать проект и первую задачу")).to_be_disabled()
         page.set_viewport_size({"width": 1440, "height": 900})
         page.reload()
-        page.locator(".project-chip").click()
+        open_add(page)
         page.set_viewport_size({"width": width, "height": 560 if width == 320 else 900})
         sheet = page.locator(".sheet")
         expect(sheet.locator("#project-start-checks")).to_have_value("\n".join(f"Check {index}" for index in range(13)))
@@ -94,8 +110,7 @@ def scenario(language: str, width: int) -> None:
         expect(sheet).to_contain_text("Couldn't confirm the project was created" if language == "en" else "Не удалось подтвердить создание проекта")
         page.set_viewport_size({"width": 1440, "height": 900})
         page.reload()
-        page.locator(".project-chip").click()
-        page.get_by_role("button", name="Add a project" if language == "en" else "Добавить проект", exact=True).click()
+        open_add(page)
         page.set_viewport_size({"width": width, "height": 560 if width == 320 else 900})
         sheet = page.locator(".sheet")
         sheet.get_by_role("button", name="Try again" if language == "en" else "Ещё раз").click()
@@ -137,7 +152,7 @@ def conflict_scenario(language: str) -> None:
 
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/agents?token=t&lang={language}")
-        page.locator(".project-chip").click()
+        open_add(page)
         sheet = page.locator(".sheet")
         sheet.locator("#project-name").fill("Bakery")
         sheet.locator("#project-start-goal").fill("Publish a clear menu")

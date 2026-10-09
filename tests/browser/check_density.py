@@ -13,7 +13,11 @@ rows and 44 px destinations in the drawer; an idle composer of one 44 px row at 
 screen; no bottom bar outside a project; and a 44 px target for every control, counting the invisible
 ::after that a 34 px circle or a 28 px chip carries. The numbers are a step under the first cut of the
 redesign (12 / 13 / 15 / 16 / 17 / 22, a 56 px bar, 60 px rows), which the operator measured as too
-large next to Claude and ChatGPT on the same phone. The desktop claims below are unchanged.
+large next to Claude and ChatGPT on the same phone.
+
+The desktop's session header is two lines inside its 48 px since the desktop redesign, the title and
+then the project, the model and the live state; the start screen and the projects page that came with
+it have their own claims (check_start).
 
     cd miniapp && npm run build
     mkdir -p /tmp/app-root/app && cp -r dist/* /tmp/app-root/app/
@@ -70,6 +74,7 @@ READ = """
     headModel: box(one('.composer .model-select')),
     composerRow: box(one('.composer-row')),
     subMeta: box(one('.chat-head .sub.meta')),
+    headSub: box(one('.chat-head .chat-sub')),
     chat: box(one('.chat')),
     head: box(one('.chat-head')),
     timeline: box(one('.timeline')),
@@ -576,6 +581,10 @@ def judge(m: dict) -> list[str]:
         problems.append(f"{m['vw']}: the chat header is {m['head']['h']}px")
     if m["subMeta"]:
         problems.append(f"{m['vw']}: the header still has its second row of chips")
+    # The desktop header is two lines inside the same 48 px: the title, then the project, the model
+    # and the live state in the meta size — the phone's title button, not a second row of chips.
+    if not phone and (not m["headSub"] or m["headSub"]["h"] > 18):
+        problems.append(f"{m['vw']}: the header's second line is {m['headSub']}, not one 12 px line")
     if m["chips"]:
         problems.append(f"{m['vw']}: {len(m['chips'])} chip(s) are still in the header")
     if not phone:
@@ -649,6 +658,48 @@ def judge_sidebar(s: dict) -> list[str]:
     return problems
 
 
+START = """
+() => {
+  const box = (el) => el ? { w: Math.round(el.getBoundingClientRect().width), h: Math.round(el.getBoundingClientRect().height) } : null;
+  const circle = document.querySelector('.start-composer .composer-tools .roundbtn.primary');
+  return {
+    composer: box(document.querySelector('.start-composer .composer-box')),
+    circle: box(circle),
+    radius: circle ? getComputedStyle(circle).borderRadius : null,
+    chips: [...document.querySelectorAll('.start-where-chip')].map((el) => box(el).h),
+    live: [...document.querySelectorAll('.start-live-row')].map((el) => box(el).h),
+    projectRows: [...document.querySelectorAll('.projects-row:not(.head)')].map((el) => box(el).h),
+  };
+}
+"""
+
+
+def check_start(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-def]
+    """The desktop's start screen and projects page, at 1440: the composer in a 720 px column (the
+    mockup's, a step over the 680 it had when it stood alone, so the chips and the live rows under
+    it share its edges), the primary a 32 px circle, the project chips 28 px like every filter chip,
+    a live row two lines in at most 52 px, and a project row two lines in at most 64 px."""
+    problems: list[str] = []
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
+    page = open_page(context, "agents", ".start-live-row")
+    start = page.evaluate(START)
+    page.goto(f"{BASE}/agents?view=projects&token=t&scheme=dark&lang=en")
+    page.wait_for_selector(".projects-row:not(.head)", timeout=15000)
+    start["projectRows"] = page.evaluate(START)["projectRows"]
+    context.close()
+    if not start["composer"] or start["composer"]["w"] != 720:
+        problems.append(f"start: the composer is {start['composer']}, not 720 wide")
+    if not start["circle"] or start["circle"]["w"] != 32 or start["circle"]["h"] != 32 or start["radius"] != "50%":
+        problems.append(f"start: the primary is {start['circle']} with radius {start['radius']}, not a 32 px circle")
+    if not start["chips"] or any(h != 28 for h in start["chips"]):
+        problems.append(f"start: the project chips are {start['chips']}, not 28")
+    if not start["live"] or any(h > 52 for h in start["live"]):
+        problems.append(f"start: the live rows are {start['live']}")
+    if not start["projectRows"] or any(h > 64 for h in start["projectRows"]):
+        problems.append(f"projects: the rows are {start['projectRows']}")
+    return problems, start
+
+
 def run() -> int:
     problems: list[str] = []
     measured: dict = {}
@@ -666,6 +717,8 @@ def run() -> int:
             problems += phone_problems
             project_problems, measured["phone-project"] = check_phone_project(browser)
             problems += project_problems
+            start_problems, measured["start"] = check_start(browser)
+            problems += start_problems
         browser.close()
     for name, m in measured.items():
         print(name, json.dumps(m))

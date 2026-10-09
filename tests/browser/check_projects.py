@@ -255,8 +255,8 @@ def run() -> int:
 
         page.reload()
         page.locator(".project-chip").click()
-        expect(page.locator(".project-row")).to_have_count(1)
-        page.get_by_role("button", name="Add a project", exact=True).click()
+        expect(page.locator(".projects-row:not(.head)")).to_have_count(1)
+        page.locator(".projects-new").click()
         page.locator("#project-name").fill("Existing")
         page.get_by_role("button", name="Use an existing folder").click()
         expect(page.get_by_text("the bot sees a folder only once it is mounted", exact=False)).to_be_visible()
@@ -269,7 +269,7 @@ def run() -> int:
         expect(page.locator(".sheet")).to_have_count(0)
         assert created[1] == {"name": "Existing", "folders": [{"path": "/work/existing"}]}, created[1]
         page.locator(".project-chip").click()
-        page.locator(".project-row", has_text="Plain").get_by_role("button", name="Settings for Plain").click()
+        page.locator(".projects-row", has_text="Plain").get_by_role("button", name="Settings for Plain").click()
         resources = page.locator("details.project-resources")
         expect(resources).to_be_visible()
         resources.locator("summary").click()

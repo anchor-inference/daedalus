@@ -1078,12 +1078,12 @@ def scroll_to_voices(page: Page) -> None:
 
 
 def open_projects(page: Page) -> None:
-    """The switcher over a list already grouped by project: the folders on one side, the agents in them on the other."""
+    """The projects page beside the list already grouped by project: the folders in the column, the table in the conversation's place."""
     # A picture before this one folds the sidebar, and folded there is only the rail: unfold it first.
     if not page.locator("nav.sidebar").count():
         page.locator(".rail .rail-home.folded").click()
     page.locator(".sidebar .project-chip").click()
-    page.wait_for_selector(".project-row", timeout=5000)
+    page.wait_for_selector(".projects-row:not(.head)", timeout=5000)
 
 
 def open_hire(page: Page) -> None:

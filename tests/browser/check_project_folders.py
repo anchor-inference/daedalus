@@ -138,7 +138,7 @@ def scenario(page: Page, lang: str, unhandled: Unhandled, name: str) -> None:
     # The switcher is the chip in the sidebar on a desktop and a button over the chats on a phone.
     open_projects(page)
     # By its name: the row carries the team button as well, before the settings one.
-    page.locator(f".project-row .iconbtn[aria-label='{words['settings']}']").click()
+    page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{words['settings']}']").click()
     rows = page.locator(".dir-row")
     expect(rows).to_have_count(2)
     docs = page.locator(".dir-row[data-folder='f-docs']")
@@ -147,7 +147,7 @@ def scenario(page: Page, lang: str, unhandled: Unhandled, name: str) -> None:
     docs.locator(".dir-lock input").click()
     page.reload()
     open_projects(page)
-    page.locator(f".project-row .iconbtn[aria-label='{words['settings']}']").click()
+    page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{words['settings']}']").click()
     expect(page.get_by_text("Try again" if lang == "en" else "Повторить")).to_be_visible()
     page.get_by_text("Try again" if lang == "en" else "Повторить").click()
     expect(docs.locator(".dir-reach")).to_have_text(words["readonly"])

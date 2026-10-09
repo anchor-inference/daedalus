@@ -3,7 +3,7 @@
 // On a phone it is the home of the redesign: the composer at the bottom, the model in the title and
 // only the live chats above it; the full list is the Chats page (Chats.tsx), at ?view=chats.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, AsrStatus, Preset, Project, SessionList, SessionSummary, Settings } from "../api";
 import { fieldHeight } from "../composer";
 import { AttachmentCard, PlusSheet, VoiceCircle, useComposerFocus } from "../composerbox";
@@ -23,13 +23,16 @@ import { useSummary } from "../notifications";
 import { agentsListingOf } from "../mode";
 import { agentName, kindOf } from "../grouping";
 import { relTime, shortModel, untilShort } from "../format";
-import { fmtInterval, statusWord } from "../ui/components";
+import { Dot, fmtInterval, statusWord } from "../ui/components";
 import { screenTitle, useMedia } from "../ui/index";
 import { Banner, IconButton, ListRow, SectionHeader, SheetRow, TopBar } from "../ui/phone";
 import { enterSends, errorText } from "../ui";
 import { t } from "../i18n";
 import { EnvPill } from "../envpill";
-import { RunOn, RunOnRow, RunOnSelect, useRunOn } from "../runon";
+import { HostMark, RunOn, RunOnRow, RunOnSelect, useRunOn } from "../runon";
+import { isProject } from "../isproject";
+import { projectReachable } from "../folders";
+import { ProjectsPage } from "./Projects";
 
 export function StartScreen({ onOpen, toast, project = "", projects = [], onProjects, onPickProject }: { onOpen: (id: string) => void; toast: (t: string) => void; project?: string; projects?: Project[]; onProjects?: () => void; onPickProject?: (id: string) => void }) {
   const phone = !useMedia("(min-width: 1024px)");
@@ -39,6 +42,15 @@ export function StartScreen({ onOpen, toast, project = "", projects = [], onProj
   const model = useStartModel();
   const run = useRunOn(project);
   const sheet = creating && <NewAgentSheet onClose={closeNew} onCreated={onOpen} toast={toast} project={project} />;
+  // The projects page is opened from a desktop's column; a phone opens the projects sheet instead.
+  // It stays mounted at any width all the same, so a window narrowed with a project's settings open
+  // keeps the sheet and what was typed in it rather than swapping the page for the phone's home.
+  if (route.query.get("view") === "projects") {
+    return <>
+      <ProjectsPage toast={toast} onPickProject={onPickProject} />
+      {sheet}
+    </>;
+  }
   if (phone && route.query.get("view") === "chats") {
     return <>
       <ChatsScreen onOpen={onOpen} toast={toast} project={project} projects={projects} onPickProject={onPickProject} />
@@ -53,15 +65,146 @@ export function StartScreen({ onOpen, toast, project = "", projects = [], onProj
   }
   return (
     <>
-      <div className="start">
-        <div className="start-hero">
-          <h1 className="start-greeting">{t("start.greeting")}</h1>
-          <StartComposer phone={false} project={project} toast={toast} model={model} run={run} />
-        </div>
-      </div>
+      <DesktopStart onOpen={onOpen} toast={toast} project={project} projects={projects} model={model} />
       {sheet}
     </>
   );
+}
+
+/**
+ * A desktop's new chat: the mark and the question, the composer in the middle of the window where the
+ * eye already is, the projects it can start in under it, and what is live under those. The phone's
+ * home holds the same three things in a column ending at the composer; a desktop keeps the composer
+ * under the question, because the field at the bottom of a large window is where nobody looks.
+ */
+function DesktopStart({ onOpen, toast, project, projects, model }: { onOpen: (id: string) => void; toast: (t: string) => void; project: string; projects: Project[]; model: StartModel }) {
+  const route = useRoute();
+  const live = useStreamUp();
+  const { data } = useQuery<SessionList>("/api/sessions?view=all", { pollMs: live ? 60000 : 5000, staleMs: 3000 });
+  const listing = useMemo(() => agentsListingOf(data), [data]);
+  // Where the chat starts: the project the projects page asked for, else the one in view, else a chat
+  // of its own. Picked here it stays here; the lens of the whole column is not this choice.
+  const asked = route.query.get("in") ?? "";
+  const [target, setTarget] = useState(asked || project);
+  useEffect(() => setTarget(asked || project), [asked, project]);
+  const startable = useMemo(() => {
+    const recent = new Map((listing?.projects ?? []).map((folder) => [folder.id, Date.parse(folder.last_message_at) || 0]));
+    // The installation's own project goes last: it is where talking lands, rarely where one types.
+    return projects.filter((p) => isProject(p) && projectReachable(p))
+      .sort((a, b) => Number(!!a.system) - Number(!!b.system) || (recent.get(b.id) ?? 0) - (recent.get(a.id) ?? 0));
+  }, [projects, listing]);
+  const known = !target || startable.some((p) => p.id === target);
+  const run = useRunOn(known ? target : "");
+  return (
+    <div className="start">
+      <div className="start-hero">
+        <div className="start-mark">
+          <Icon name="logo" size={34} />
+          <h1 className="start-greeting">{t("start.greeting")}</h1>
+        </div>
+        <StartComposer phone={false} project={known ? target : ""} toast={toast} model={model} run={run} />
+        {startable.length > 0 && <StartWhere projects={startable} target={known ? target : ""} onPick={setTarget} />}
+        <LiveNow listing={listing} project={project} onOpen={onOpen} />
+      </div>
+    </div>
+  );
+}
+
+/** How many projects the start screen names under its composer before the rest go behind "N more". */
+const WHERE = 3;
+
+/** "Start in …": a chat of its own, or one of the projects, so a chat starts in a project without the
+ *  new-agent sheet. The project picked stays in the row even when it was one of the hidden ones. */
+function StartWhere({ projects, target, onPick }: { projects: Project[]; target: string; onPick: (id: string) => void }) {
+  const more = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  let shown = projects.slice(0, WHERE);
+  const picked = projects.find((p) => p.id === target);
+  if (picked && !shown.includes(picked)) shown = [...shown.slice(0, WHERE - 1), picked];
+  const hidden = projects.filter((p) => !shown.includes(p));
+  const chip = (id: string, name: string, icon: "bots" | "folder" | "mic") => (
+    <button key={id || "chat"} type="button" className={`start-where-chip ${target === id ? "on" : ""}`} aria-pressed={target === id} data-project={id || undefined} onClick={() => onPick(id)}>
+      <span className="start-where-tile"><Icon name={icon} size={12} /></span>
+      <span className="truncate">{name}</span>
+    </button>
+  );
+  return (
+    <div className="start-where" role="group" aria-label={t("start.where.label")}>
+      <span className="start-where-word">{t("start.where")}</span>
+      {chip("", t("start.where.chat"), "bots")}
+      {shown.map((p) => chip(p.id, p.name, p.system === "voice" ? "mic" : "folder"))}
+      {hidden.length > 0 && (
+        <button ref={more} type="button" className="start-where-chip more" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {t("start.where.more", { n: hidden.length })}<Icon name="chevron" size={12} />
+        </button>
+      )}
+      {open && (
+        <Popover anchor={more.current} onClose={() => setOpen(false)} className="plus-menu start-where-menu" label={t("start.where.label")}>
+          {hidden.map((p) => (
+            <button key={p.id} type="button" role="menuitem" data-project={p.id} onClick={() => { setOpen(false); onPick(p.id); }}>
+              <Icon name={p.system === "voice" ? "mic" : "folder"} size={16} /><span className="truncate">{p.name}</span>
+            </button>
+          ))}
+        </Popover>
+      )}
+    </div>
+  );
+}
+
+/**
+ * "Active now" on a desktop: the phone home's rows, wider, with the project in the meta — the chats
+ * that need the operator first, then the ones at work, then the loops; three, and the rest a click
+ * away in place. A waiting chat's Reply is neutral, not the white primary: the question is out of its
+ * context here, and the white button stays the composer's.
+ */
+function LiveNow({ listing, project, onOpen }: { listing: SessionList | null; project: string; onOpen: (id: string) => void }) {
+  const [all, setAll] = useState(false);
+  const rows = useMemo(() => {
+    const rank = (s: SessionSummary) => ({ waiting: 0, working: 1, loop: 2, idle: 3 })[kindOf(s, false)];
+    return (listing?.sessions ?? [])
+      .filter((s) => !s.metadata?.subagent_of && !s.archived && (!project || s.project_id === project) && rank(s) < 3)
+      .sort((a, b) => rank(a) - rank(b) || Date.parse(b.last_message_at) - Date.parse(a.last_message_at));
+  }, [listing, project]);
+  if (!rows.length) return null;
+  const folders = new Map((listing?.projects ?? []).map((folder) => [folder.id, folder]));
+  const shown = all ? rows : rows.slice(0, LIVE);
+  return (
+    <section className="start-live" aria-label={t("start.live")}>
+      <div className="start-live-head">
+        <span>{t("start.live")}</span>
+        <span className="num">{rows.length}</span>
+        <span className="grow" />
+        {rows.length > LIVE && <button type="button" className="start-live-more" onClick={() => setAll(!all)}>{all ? t("start.live.fewer") : t("start.live.all", { n: rows.length })}</button>}
+      </div>
+      {shown.map((s) => {
+        const folder = folders.get(s.project_id);
+        const where = folder && isProject(folder) && folder.name !== agentName(s) ? folder.name : "";
+        return (
+          <div key={s.id} data-session={s.id} className={`start-live-row ${s.status}`} role="link" tabIndex={0} onClick={() => onOpen(s.id)}
+            onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(s.id); } }}>
+            <span className="start-live-plate"><Icon name={s.metadata?.loop ? "loop" : "bots"} size={15} />{s.status !== "idle" && <Dot status={s.status} />}</span>
+            <span className="start-live-main">
+              <span className="start-live-title truncate">{agentName(s)}</span>
+              <span className="start-live-meta"><DesktopLiveMeta s={s} where={where} /></span>
+            </span>
+            <span className="start-live-time num">{relTime(s.last_message_at)}</span>
+            {s.status === "waiting" && <button type="button" className="btn small start-live-reply" onClick={(e) => { e.stopPropagation(); onOpen(s.id); }}>{t("start.live.reply")}</button>}
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+function DesktopLiveMeta({ s, where }: { s: SessionSummary; where: string }) {
+  const loop = s.metadata?.loop;
+  const parts: ReactNode[] = [];
+  if (s.status === "waiting" || s.status === "running" || s.status === "failed") parts.push(<span key="state" className={`start-live-state ${s.status}`}>{statusWord(s.status)}</span>);
+  else if (loop) parts.push(<span key="loop">{[loop.mode === "interval" ? t("loop.every", { t: fmtInterval(loop.interval_seconds) }) : t("loop.selfpaced"), loop.next_run_at ? t("ph.loop.next", { t: untilShort(loop.next_run_at) }) : ""].filter(Boolean).join(" · ")}</span>);
+  const mark = <HostMark key="host" env={s.env} />;
+  if (where) parts.push(<span key="where" className="start-live-where truncate">{where}</span>);
+  if (s.model) parts.push(<span key="model" className="truncate">{shortModel(s.model, 28)}</span>);
+  return <>{parts.map((part, i) => <Fragment key={i}>{i > 0 && <span className="sep">·</span>}{part}{i === 0 && mark}</Fragment>)}</>;
 }
 
 /** How many live chats the home shows above its composer; the rest are one tap away in Chats. */
@@ -340,12 +483,19 @@ function StartComposer({ phone, project, toast, model, run }: { phone: boolean; 
             <input ref={fileInput} type="file" multiple hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
             <button ref={plusButton} type="button" className="iconbtn flat plus" aria-haspopup="menu" aria-expanded={plusOpen} onClick={() => setPlusOpen(!plusOpen)} aria-label={t("composer.plus")} title={t("composer.plus")}><Icon name="plus" /></button>
             {plusOpen && <Popover anchor={plusButton.current} onClose={() => setPlusOpen(false)} className="plus-menu" label={t("composer.plus")}>{plusItems}</Popover>}
+            {/* What the chat will be and where it runs read together on the left, as the chat's own
+                composer has its mode there; the model and the circle keep the right. */}
+            <span className="composer-mode">{t("composer.mode.agent")}</span>
+            <RunOnSelect run={run} />
             <div className="composer-tools">
-              <RunOnSelect run={run} />
               <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone}
                 effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} />
               {asr?.configured && <MicButton note={note} />}
-              <button type="button" className="roundbtn primary" onClick={() => void send()} disabled={busy || (!draft.trim() && files.length === 0)} aria-label={t("session.send")}><Icon name="up" /></button>
+              {/* One white circle, as on the phone: a voice conversation while the field is empty, Send
+                  once it holds something. Offline it stays Send, greyed, so the draft has its button. */}
+              {empty && !offline
+                ? <VoiceCircle />
+                : <button type="button" className="roundbtn primary" data-action="send" onClick={() => void send()} disabled={busy || empty} aria-label={t("session.send")} title={t("session.send")}><Icon name="up" /></button>}
             </div>
           </div>
         </div>

@@ -120,3 +120,136 @@
 .effort-branch:has(.floating[data-side="left"]) .effort-entry > .ic:last-child { transform:rotate(90deg); }
 .effort-branch:has(.inline) .effort-entry > .ic:last-child { transform:none; }
 .effort-submenu .effort-option:has(input:focus-visible) { outline:2px solid var(--accent); outline-offset:-2px; }
+
+/* The composer's primary is the phone's white circle on a desktop too: one round button that is a
+   voice conversation, Send or Stop, so the three read as one control changing its word. */
+@media (min-width:1024px) {
+  .composer-tools .roundbtn.primary { border-radius:50%; }
+}
+
+/* The session header in two lines: the title with the host mark, then the project, the model and the
+   live state in the meta size — what the phone's title button holds. The live state used to be a bar
+   of its own between the title and the actions, where it pushed the title into an ellipsis. */
+.chat-title-line { display:flex; align-items:center; gap:var(--space-2); min-width:0; max-width:100%; line-height:1.25; }
+.chat-title-line .chat-title { min-width:0; }
+.chat-sub { display:flex; align-items:center; gap:5px; min-width:0; max-width:100%; color:var(--fg-3); font-size:var(--fs-12); line-height:1.3; white-space:nowrap; }
+.chat-sub .sep { flex:none; }
+.chat-sub-project { flex:0 1 auto; min-width:0; }
+.chat-sub-model { flex:0 1 auto; min-width:0; color:var(--fg-3); }
+.chat-sub .head-status { height:auto; max-width:none; padding:0; gap:var(--space-1); font-size:var(--fs-12); flex:0 1 auto; }
+.chat-sub .head-status b { font-weight:500; }
+.chat-sub .head-status .dot { display:none; }
+.chat-sub .head-status.livebar:hover { background:none; color:var(--fg); }
+
+@media (min-width:1024px) {
+  /* The start canvas: the mark and the question, the composer, "Start in …" and what is live, in one
+     720 px column held a little above the middle of the window. */
+  .start-hero { justify-content:center; gap:0; padding:var(--space-6) var(--space-6) 6vh; }
+  .start-mark { display:flex; flex-direction:column; align-items:center; gap:var(--space-3); margin-bottom:var(--space-6); }
+  .start-mark > .ic { color:var(--accent); }
+  .start-mark h1 { font-size:var(--fs-20); font-weight:600; letter-spacing:-0.01em; }
+  .start-composer, .start-where, .start-live { width:100%; max-width:720px; }
+  .start-composer .composer-row .composer-mode { flex:none; }
+  /* The chat's composer pads itself off the conversation's edges; here the box is the column, so the
+     chips and the live rows under it start where its border does. */
+  .start-composer.composer { padding:0; }
+
+  .start-where { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-top:var(--space-3); padding-inline:2px; font-size:var(--fs-12); color:var(--fg-3); }
+  .start-where-word { margin-right:2px; }
+  .start-where-chip { display:inline-flex; align-items:center; gap:6px; max-width:220px; height:var(--ctl-h-sm); padding:0 10px 0 4px; border:0; border-radius:var(--radius-pill); background:var(--surface-1); box-shadow:inset 0 0 0 1px var(--line); color:var(--fg-2); font:inherit; font-size:var(--fs-12); cursor:pointer; }
+  .start-where-chip:hover { background:var(--surface-2); color:var(--fg); }
+  .start-where-chip.on { box-shadow:inset 0 0 0 1.5px var(--accent); color:var(--fg); }
+  .start-where-chip.more { padding-left:10px; }
+  .start-where-chip:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .start-where-tile { display:grid; place-items:center; flex:none; width:20px; height:20px; border-radius:var(--radius-xs); background:var(--surface-2); color:var(--fg-2); }
+
+  .start-live { margin-top:var(--space-7); }
+  .start-live-head { display:flex; align-items:center; gap:6px; height:var(--ctl-h-sm); padding-inline:2px; font-size:var(--fs-12); font-weight:500; color:var(--fg-2); }
+  .start-live-head .num { color:var(--fg-3); font-weight:400; }
+  .start-live-head .grow { flex:1; }
+  .start-live-more { border:0; background:none; padding:0; color:var(--fg-3); font:inherit; font-size:var(--fs-12); cursor:pointer; }
+  .start-live-more:hover { color:var(--fg); }
+  .start-live-row { display:flex; align-items:center; gap:var(--space-3); padding:6px 10px; border-radius:var(--radius-sm); cursor:pointer; }
+  .start-live-row:hover { background:var(--surface-1); }
+  .start-live-row:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+  .start-live-plate { position:relative; display:grid; place-items:center; flex:none; width:28px; height:28px; border-radius:50%; background:var(--surface-2); color:var(--fg-2); }
+  .start-live-plate > .dot { position:absolute; right:-1px; bottom:-1px; box-shadow:0 0 0 2px var(--bg); }
+  .start-live-main { display:flex; flex-direction:column; flex:1; min-width:0; gap:1px; }
+  .start-live-title { color:var(--fg); font-size:var(--fs-14); }
+  .start-live-meta { display:flex; align-items:center; gap:5px; min-width:0; color:var(--fg-3); font-size:var(--fs-13); white-space:nowrap; }
+  .start-live-meta .host-mark { margin-left:2px; }
+  .start-live-state.waiting { color:var(--warn); }
+  .start-live-state.running { color:var(--accent); }
+  .start-live-state.failed { color:var(--bad); }
+  .start-live-where { color:var(--fg-2); flex:0 1 auto; min-width:0; }
+  .start-live-time { flex:none; align-self:flex-start; padding-top:4px; color:var(--fg-3); font-size:var(--fs-12); }
+  .start-live-reply { flex:none; background:var(--surface-2); border-color:transparent; color:var(--fg); }
+}
+
+/* The projects page: a head the height of a chat's, then one table in a 1080 px column. Not held to
+   a desktop's width: a window narrowed with the page open keeps it (Start.tsx), its table then
+   down to the name, what is live and the actions. */
+.projects-page { display:flex; flex-direction:column; flex:1; min-height:0; }
+.projects-head { display:flex; align-items:center; flex:none; height:var(--head-h); padding:0 var(--space-3) 0 var(--space-4); }
+.projects-head h1 { margin:0; font-size:var(--fs-14); font-weight:600; }
+.projects-body { flex:1; min-height:0; overflow:auto; padding:var(--space-2) var(--space-8) var(--space-6); }
+.projects-col { max-width:1080px; margin:0 auto; }
+.projects-tools { display:flex; align-items:center; gap:var(--space-2); margin:var(--space-2) 0 var(--space-4); }
+.projects-tools .grow { flex:1; }
+.projects-search { display:flex; align-items:center; gap:var(--space-2); width:320px; height:var(--ctl-h); padding:0 var(--space-3); border-radius:var(--radius-sm); background:var(--surface-1); box-shadow:inset 0 0 0 1px var(--line); color:var(--fg-3); }
+.projects-search input { flex:1; min-width:0; border:0; background:none; outline:none; color:var(--fg); font:inherit; font-size:var(--fs-13); }
+.projects-search:focus-within { box-shadow:inset 0 0 0 1px var(--fg-3); }
+.projects-chips { display:flex; gap:6px; }
+.projects-chip { display:inline-flex; align-items:center; gap:5px; height:var(--ctl-h-sm); padding:0 10px; border:0; border-radius:var(--radius-pill); background:var(--surface-1); color:var(--fg-2); font:inherit; font-size:var(--fs-12); font-weight:500; cursor:pointer; }
+.projects-chip .num { color:var(--fg-3); }
+.projects-chip.warn { color:var(--warn); }
+.projects-chip.on { background:var(--fg); color:var(--bg); }
+.projects-chip.on .num { color:inherit; opacity:.7; }
+.projects-new { background:color-mix(in srgb, var(--accent) 22%, var(--surface-2)); border-color:transparent; color:var(--fg); font-weight:500; }
+.projects-new:hover { background:color-mix(in srgb, var(--accent) 30%, var(--surface-2)); }
+
+.projects-table { display:flex; flex-direction:column; }
+.projects-row { display:grid; grid-template-columns:minmax(0,1fr) 110px 180px 110px 90px 96px; align-items:center; gap:var(--space-4); padding:var(--space-3); border-radius:var(--radius-sm); color:var(--fg-2); font-size:var(--fs-13); cursor:pointer; }
+.projects-row + .projects-row { box-shadow:0 -1px 0 var(--line); }
+.projects-row:not(.head):hover, .projects-row:not(.head):focus-within { background:var(--surface-1); box-shadow:none; }
+.projects-row:not(.head):hover + .projects-row, .projects-row:not(.head):focus-within + .projects-row { box-shadow:none; }
+.projects-row:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.projects-row.head { padding-block:var(--space-2); color:var(--fg-3); font-size:var(--fs-11); cursor:default; box-shadow:0 1px 0 var(--line); }
+.projects-name { display:flex; align-items:center; gap:var(--space-3); min-width:0; }
+.projects-tile { position:relative; display:grid; place-items:center; flex:none; width:var(--ctl-h); height:var(--ctl-h); border-radius:var(--radius-sm); background:var(--surface-2); box-shadow:inset 0 0 0 1px var(--line); color:var(--fg-2); }
+.projects-tile > .dot { position:absolute; right:-3px; bottom:-3px; box-shadow:0 0 0 2px var(--bg); }
+.projects-text { display:flex; flex-direction:column; min-width:0; gap:2px; }
+.projects-name b { color:var(--fg); font-size:var(--fs-14); font-weight:500; }
+.projects-name .mono { color:var(--fg-3); font-family:var(--mono); font-size:var(--fs-12); }
+.projects-state { display:flex; flex-wrap:wrap; gap:var(--space-1); }
+.projects-pill { display:inline-flex; align-items:center; height:18px; padding:0 6px; border-radius:var(--radius-xs); background:var(--surface-2); color:var(--fg-2); font-size:var(--fs-11); font-weight:600; white-space:nowrap; }
+.projects-pill.warn { background:color-mix(in srgb, var(--warn) 14%, transparent); color:var(--warn); }
+.projects-pill.info { background:color-mix(in srgb, var(--accent) 14%, transparent); color:var(--accent); }
+.projects-none, .projects-when { color:var(--fg-3); }
+/* Faded rather than hidden: a hidden button cannot take the keyboard's focus that reveals it. */
+.projects-acts { display:flex; justify-content:flex-end; gap:2px; opacity:0; transition:opacity var(--t-fast); }
+.projects-row:hover .projects-acts, .projects-row:focus-within .projects-acts { opacity:1; }
+.projects-empty { padding:var(--space-6) var(--space-3); color:var(--fg-3); font-size:var(--fs-13); text-align:center; }
+
+.projects-archived { margin-top:var(--space-4); }
+.projects-archived > summary { display:flex; align-items:center; gap:6px; height:var(--ctl-h); padding:0 var(--space-2); border-radius:var(--radius-sm); color:var(--fg-2); font-size:var(--fs-12); font-weight:500; cursor:pointer; list-style:none; }
+.projects-archived > summary::-webkit-details-marker { display:none; }
+.projects-archived > summary .num { color:var(--fg-3); font-weight:400; }
+.projects-archived > summary .grow { flex:1; }
+.projects-archived > summary > .ic { color:var(--fg-3); transform:rotate(-90deg); }
+.projects-archived[open] > summary > .ic { transform:none; }
+.projects-archived > summary:hover { background:var(--surface-1); }
+.projects-archived-row { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2) var(--space-3); }
+.projects-archived-row .projects-name { flex-direction:column; align-items:flex-start; gap:2px; }
+.projects-note { display:flex; align-items:center; gap:var(--space-2); margin-top:var(--space-5); padding:10px var(--space-3); border-radius:var(--radius-md); background:var(--surface-1); box-shadow:inset 0 0 0 1px var(--line); color:var(--fg-2); font-size:var(--fs-13); }
+.projects-note .grow { flex:1; min-width:0; }
+.projects-note a { flex:none; color:var(--accent); font-weight:500; text-decoration:none; }
+.projects-note a:hover { text-decoration:underline; }
+@media (max-width:1023px) {
+  .projects-body { padding:var(--space-2) var(--space-4) var(--space-6); }
+  .projects-tools { flex-wrap:wrap; }
+  .projects-search { width:100%; }
+  .projects-row { grid-template-columns:minmax(0,1fr) auto auto; }
+  .projects-row > :nth-child(2), .projects-row > :nth-child(4), .projects-row > :nth-child(5) { display:none; }
+  .projects-acts { opacity:1; }
+}

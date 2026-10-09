@@ -650,11 +650,12 @@ def drawer_go(page, screen: str, mode: str = "") -> None:  # type: ignore[no-unt
 
 
 def open_projects(page) -> None:  # type: ignore[no-untyped-def]
-    """Open the project switcher: the column's project chip on a desktop, the drawer's Projects
-    entry on a phone (where the start screen's own button used to be)."""
+    """Open the projects: the column's project chip on a desktop, which opens the projects page in the
+    conversation's place, and the drawer's Projects entry on a phone, which opens the sheet."""
     page.wait_for_selector(".project-chip:visible, .ph-menu:visible")
     if page.locator(".project-chip:visible").count():
         page.locator(".project-chip:visible").first.click()
+        page.wait_for_selector(".projects-page")
         return
     open_drawer(page)
     page.locator(".ph-drawer-root.open [data-nav='projects']").click()
