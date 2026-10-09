@@ -272,3 +272,17 @@ describe("the card layout", () => {
     expect(composerContext({ workspace: "a1b2c3d4e5f6" })).toEqual([]);
   });
 });
+
+describe("Voice mode in ordinary chats", () => {
+  // Voice mode is a beta with a chat of its own. A round button that led there sat beside the
+  // microphone in every chat's composer, on the phone in both modes and on the start screen; the
+  // composers offer dictation and nothing else, and Voice mode is reached from the navigation.
+  const sources = import.meta.glob(["./composerbox.tsx", "./screens/Start.tsx", "./screens/Session.tsx", "./orchestration.tsx"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+
+  it("is not offered by any chat composer", () => {
+    expect(Object.keys(sources).length).toBe(4);
+    for (const [file, text] of Object.entries(sources)) {
+      expect(text, file).not.toMatch(/pathFor\("voice"\)|data-action="voice"|VoiceCircle/);
+    }
+  });
+});

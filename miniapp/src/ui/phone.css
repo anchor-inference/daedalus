@@ -634,7 +634,7 @@
   .composer[data-shape] .composer-box textarea::placeholder { color: var(--fg-2); }
   .composer[data-shape] .composer-row { gap: 4px; align-items: center; }
   .composer[data-shape] .composer-tools { gap: 4px; }
-  /* At rest: [+] [the field] [mic] [white circle], one row. The toolbar's other controls wait. */
+  /* At rest: [+] [the field] [mic] [Send, greyed while empty], one row. The toolbar's other controls wait. */
   .composer[data-shape="idle"] .composer-box { flex-direction: row; align-items: center; min-height: var(--composer-h); }
   .composer[data-shape="idle"] .composer-row, .composer[data-shape="idle"] .composer-tools { display: contents; }
   .composer[data-shape="idle"] .composer-box > textarea { order: 1; flex: 1; width: auto; overflow: hidden; }
@@ -644,10 +644,8 @@
   .composer[data-shape="idle"] .composer-mode, .composer[data-shape="idle"] .model-select, .composer[data-shape="idle"] .ctx-ring, .composer[data-shape="idle"] .stop-aside { display: none; }
   .composer[data-shape="open"] .composer-box { border-radius: var(--radius-xl); }
   .composer[data-shape="open"] .composer-box > textarea { padding: 8px 10px 4px; }
-  /* The desktop gives the mic and Send one slot; the phone shows the mic beside the white circle
-     while that circle is the voice conversation, and keeps a disabled Send in view (offline) rather
-     than leaving the row without its circle. */
-  .composer[data-shape] .composer-tools:has(.roundbtn.voice) > .mic { display: inline-grid; place-items: center; }
+  /* The desktop gives the mic and Send one slot; the phone keeps a disabled Send in view beside the
+     mic rather than leaving the row without its circle. */
   .composer[data-shape][data-primary] .composer-tools:has(.mic) .roundbtn.primary:disabled { display: grid; place-items: center; }
   /* The mic stays beside Send while there is text or an attachment: hiding it then left no way to
      dictate the rest of a message once a photo was attached or a word typed. The model pill gives

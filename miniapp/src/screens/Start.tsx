@@ -6,7 +6,7 @@
 import { Fragment, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, AsrStatus, Preset, Project, SessionList, SessionSummary, Settings } from "../api";
 import { fieldHeight } from "../composer";
-import { AttachmentCard, PlusSheet, VoiceCircle, useComposerFocus } from "../composerbox";
+import { AttachmentCard, PlusSheet, useComposerFocus } from "../composerbox";
 import { Popover } from "../ui/dialogs";
 import { effortBody, effortOf, presetEffort, type Effort } from "../starteffort";
 import { ModelChoice, ModelSelect } from "../modelselect";
@@ -490,11 +490,9 @@ function StartComposer({ phone, project, toast, model, run }: { phone: boolean; 
               <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone}
                 effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} />
               {asr?.configured && <MicButton note={note} />}
-              {/* One white circle, as on the phone: a voice conversation while the field is empty, Send
-                  once it holds something. Offline it stays Send, greyed, so the draft has its button. */}
-              {empty && !offline
-                ? <VoiceCircle />
-                : <button type="button" className="roundbtn primary" data-action="send" onClick={() => void send()} disabled={busy || empty} aria-label={t("session.send")} title={t("session.send")}><Icon name="up" /></button>}
+              {/* One white circle, as on the phone: Send, greyed while the field is empty. Voice mode is
+                  not offered here: it is a beta with a chat of its own, and a new chat offers dictation. */}
+              <button type="button" className="roundbtn primary" data-action="send" onClick={() => void send()} disabled={busy || empty} aria-label={t("session.send")} title={t("session.send")}><Icon name="up" /></button>
             </div>
           </div>
         </div>
@@ -503,8 +501,8 @@ function StartComposer({ phone, project, toast, model, run }: { phone: boolean; 
   }
 
   // A phone: one 48 px row at rest, the text above a toolbar once the field has the reader or holds
-  // something (ui/phone.css reads data-shape). The white circle is a voice conversation while the
-  // field is empty and Send once it is not; offline the draft waits here and Send waits with it.
+  // something (ui/phone.css reads data-shape). The white circle is Send, greyed while the field is
+  // empty; offline the draft waits here and Send waits with it.
   const shape = focused || !empty || progress !== null ? "open" : "idle";
   return (
     <div className="start-composer composer" data-primary="send" data-shape={shape} data-typed={draft.trim() ? "" : undefined}
@@ -531,9 +529,7 @@ function StartComposer({ phone, project, toast, model, run }: { phone: boolean; 
             <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet
               effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} />
             {asr?.configured && <MicButton note={note} />}
-            {empty && !offline
-              ? <VoiceCircle />
-              : <button type="button" className="roundbtn primary" onClick={() => void send()} disabled={busy || offline || empty} aria-label={t("session.send")}><Icon name="up" /></button>}
+            <button type="button" className="roundbtn primary" data-action="send" onClick={() => void send()} disabled={busy || offline || empty} aria-label={t("session.send")} title={t("session.send")}><Icon name="up" /></button>
           </div>
         </div>
       </div>

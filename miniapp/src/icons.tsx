@@ -5,7 +5,7 @@ export type IconName =
   | "question" | "skill" | "spawn" | "bulb" | "wrench" | "clock" | "calendar" | "plug" | "dot" | "compact"
   | "folder" | "settings" | "bots" | "inbox" | "board" | "changes" | "chart" | "loop" | "pause" | "play" | "trash" | "check" | "close" | "send"
   | "download" | "share" | "split" | "key" | "link" | "unlink" | "down" | "copy" | "paste" | "columns" | "eye" | "mic" | "fork" | "undo" | "phone" | "expand" | "external" | "reload" | "forward" | "panel" | "chevron" | "bolt" | "volume" | "mute" | "lock" | "bell" | "shield" | "conductor" | "journal" | "alert" | "compass" | "user" | "ask" | "archive" | "braces" | "sidebar" | "reply" | "flag" | "menu" | "pin"
-  | "wave" | "compose" | "grid" | "vdots" | "camera" | "offline" | "logo" | "sliders";
+  | "compose" | "grid" | "vdots" | "camera" | "offline" | "logo" | "sliders";
 
 const PATHS: Record<IconName, string> = {
   back: "M15 18l-6-6 6-6",
@@ -96,7 +96,6 @@ const PATHS: Record<IconName, string> = {
   pin: "M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11zM12 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4z",
   // A spoken conversation, as opposed to the microphone of a voice note: the phone composer's white
   // circle when the field is empty.
-  wave: "M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4",
   // A page and a pen: a new chat, the one creation action of the phone drawer.
   compose: "M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6M18.4 2.6a2 2 0 0 1 2.9 2.9L12 15l-4 1 1-4z",
   grid: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",

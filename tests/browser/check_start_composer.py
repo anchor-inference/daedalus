@@ -110,7 +110,7 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     expect(model.locator(".model-effort")).to_contain_text(words["low"])
     expect(page.locator(".model-list")).to_have_count(0)
 
-    # Switching from idle voice to typed Send must reserve exactly the same toolbar geometry.
+    # Switching from an empty field to typed Send must reserve exactly the same toolbar geometry.
     field = composer.locator("textarea")
     field.fill("")
     empty_box = composer.locator(".composer-box").bounding_box()
