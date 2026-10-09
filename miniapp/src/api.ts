@@ -1,6 +1,8 @@
 // Thin client for the Daedalus API. Authenticates with Telegram initData when running
 // inside Telegram, or with ?token=... for a browser session.
 
+import type { ImportedOrigin, MessageImport } from "./imports/model";
+
 declare global {
   interface Window {
     Telegram?: {
@@ -613,6 +615,8 @@ export type SessionSummary = {
   metadata?: { subagent_of?: string; subagent_name?: string; loop?: LoopView; forked_from?: { session_id: string; seq: number }; [k: string]: unknown };
   /** How many of the session's terminals are running. */
   terminals?: number;
+  /** The program the session was imported from, for its plate's corner mark. */
+  imported_from?: string | null;
 };
 
 export type TaskView = {
@@ -759,6 +763,9 @@ export type MessageView = {
   reply_to?: ReplyRef | null;
   /** A member's steps for the operator that the host put into the orchestrator's chat. */
   operator_steps?: OperatorSteps | null;
+  /** Set on a message that came from another program's session: which program, and the names its
+   *  tool calls had there, by call id, for the calls the host renamed to native tools. */
+  imported?: MessageImport | null;
   /** The operator's secrets the message carried, by name and scope; a value never comes back. */
   secrets?: { name: string; scope: "session" | "project" }[] | null;
   text: string;
@@ -840,6 +847,8 @@ export type SessionDetail = {
     recent_cache?: { read_tokens: number; prompt_tokens: number; hit_percent: number } | null;
     prefix_changed?: string[];
   };
+  /** Where the chat came from when it was imported from another program's session. */
+  imported?: ImportedOrigin | null;
   /** The whole session's spend, and today's (UTC) share of it in the `_today` fields. */
   usage: { c?: number; i?: number; o?: number; ch?: number; usd?: number | null; c_today?: number | null; i_today?: number | null; o_today?: number | null; usd_today?: number | null };
 };

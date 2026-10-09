@@ -28,6 +28,8 @@ import { MoveSessionSheet } from "../projects";
 import { panelShortcut } from "../panel";
 import { Panel, usePanel, usePanelWidth } from "../panelhost";
 import { SessionDetails } from "../details";
+import { HandoffLine, ImportBanner } from "../imports/ImportedChat";
+import { harnessMeta } from "../imports/model";
 import { JobsTab } from "../jobs";
 import { markAnchor, navigate, pathFor, projectHome, projectSessionPath, useAnchor, useRoute } from "../router";
 import { turnFor, withOlder } from "../anchor";
@@ -1472,6 +1474,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             <span className="chat-sub">
               {isProject(detail.project) && detail.project.name !== detail.title && <><span className="truncate chat-sub-project">{detail.project.name}</span><span className="sep">·</span></>}
               <span className="truncate chat-sub-model">{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortWord && <span className="chat-sub-effort"> {effortWord}</span>}</span>
+              {detail.imported && <><span className="sep">·</span><span className="truncate chat-sub-from">{t("imp.head.from", { name: harnessMeta(detail.imported.harness, detail.imported.harness_name).name })}</span></>}
               {compacting ? null : busy || saving ? <><span className="sep">·</span><LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail.workspace} onJump={jumpToBottom} /></>
                 : status === "failed" ? <><span className="sep">·</span><span className="head-status failed" role="status"><b>{statusWord(status)}</b></span></> : null}
             </span>
@@ -1550,6 +1553,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           <div className="chat-scroll" ref={scroller} onScroll={onScroll}>
             <div className="timeline">
               {!detail && <TurnSkeleton />}
+              {/* An imported chat begins with where it came from, above whatever older pages load. */}
+              {detail?.imported && <ImportBanner sessionId={id} origin={detail.imported} toast={toast} onPulled={() => void load(true)} />}
               {pageable && <div className="sub older-note">{older === "loading" ? t("session.older") : ""}</div>}
               {snapshots?.pruned && (
                 <div className="sub older-note">
@@ -1574,6 +1579,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                   handle={windowHandle}
                   render={(i) => (
                     <Safe>
+                      {i > 0 && !settled[i].imported && !!settled[i - 1].imported && <HandoffLine at={settled[i].startedAt} />}
                       <TurnView turn={settled[i]} live={false} onTurnAction={turnAction} />
                     </Safe>
                   )}
@@ -2018,7 +2024,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
             <i />
             <i />
           </span>
-          <span className="worked">{t(live ? "session.activity" : "session.worked", { t: duration(elapsed) })}</span>
+          <span className="worked">{turn.imported && !live ? t("imp.worked", { name: harnessMeta(turn.imported).name }) : t(live ? "session.activity" : "session.worked", { t: duration(elapsed) })}</span>
           {currentAction && <span className="activity-current truncate">{currentAction}</span>}
           {steps > 0 && <span className="steps">{plural("session.steps", steps)}</span>}
           {families && <span className="families truncate" title={families}>· {families}</span>}
@@ -2287,11 +2293,14 @@ function MessageActions({ text, actions = [], more }: { text: string; actions?: 
 function SummaryBlock({ message }: { message: MessageView }) {
   const [open, setOpen] = useState(false);
   const meta = message.compaction;
+  // An imported chat starts with the summary of its early part: the other program's own compactions
+  // and Daedalus's summary of the turns after them, said as the start of the conversation.
+  const imported = message.imported?.harness && meta?.reason === "import";
   return (
-    <div className="summary">
+    <div className={`summary ${imported ? "imp-summary" : ""}`}>
       <button className="summary-head" onClick={() => setOpen((o) => !o)}>
-        <Icon name="compact" /> {t("session.summary")}
-        {meta ? t("session.summary.meta", { n: meta.messages ?? 0, reason: meta.reason }) : ""}
+        <Icon name="compact" /> {imported ? t("imp.summary") : t("session.summary")}
+        {imported ? t("imp.summary.meta", { n: meta?.messages ?? 0 }) : meta ? t("session.summary.meta", { n: meta.messages ?? 0, reason: meta.reason }) : ""}
         <Chevron open={open} />
       </button>
       {open && <Md className="summary-body" text={message.text} />}
@@ -2364,6 +2373,23 @@ function describe(item: ToolItem, workspace?: string): { verb: string; family: s
         return { verb: t(`tool.grouploaded.${r ? "on" : "off"}`), family: "ToolSearch", detail, icon: "wrench" };
       }
       return { verb: verb("ToolSearch", r), family: "ToolSearch", detail: str("query") || str("select"), icon: "search" };
+    }
+    // Calls imported from another program that have no native tool of their own: the host keeps
+    // them under their own names, and they read as the native step they amount to.
+    case "Task":
+    case "Agent":
+      return { verb: verb("SubAgent", r), family: "SubAgent", detail: str("description") || str("prompt").split("\n")[0].slice(0, 60), icon: "spawn" };
+    case "TodoWrite":
+    case "todowrite":
+    case "update_plan": {
+      const list = Array.isArray(a.todos) ? a.todos : Array.isArray(a.plan) ? a.plan : [];
+      const finished = list.filter((x) => typeof x === "object" && x && ["completed", "done"].includes(String((x as Record<string, unknown>).status))).length;
+      return { verb: t("imp.tool.plan"), family: "plan", detail: t("imp.tool.plan.n", { n: list.length, done: finished }), icon: "check" };
+    }
+    case "apply_patch": {
+      const patch = str("input") || str("patch") || str("raw");
+      const files = [...patch.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)].map((m) => base(m[1].trim()));
+      return { verb: verb("Edit", r), family: "Edit", detail: files.join(", ").slice(0, 60), icon: "pen" };
     }
     case "HistoryExpand":
       return { verb: t("tool.HistoryExpand"), family: "HistoryExpand", detail: t("tool.HistoryExpand.range", { from: str("from_seq"), to: str("to_seq") }), icon: "file" };
@@ -2563,6 +2589,8 @@ function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {
           <span className="detail">{d.detail}</span>
         ))}
         <span className="act-end">
+          {/* A step imported from another program keeps the name it had there, beside Daedalus's own verb. */}
+          {item.orig && item.orig !== d.verb && <span className="act-orig" title={t("imp.tool.orig", { name: item.orig })}>{item.orig}</span>}
           {item.error && !item.running && <span className="failed">{t("turn.failed")}</span>}
           {item.name === "Verify" && !item.running && (
             <button type="button" className="receipt-link" onClick={(e) => { e.stopPropagation(); openJobs(); }}>{t("turn.receipt")}</button>

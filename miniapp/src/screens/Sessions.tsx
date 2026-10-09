@@ -24,6 +24,8 @@ import { type Folder, type Row as RowModel, type SidebarDay, agentName, arrange,
 import { Icon, type IconName } from "../icons";
 import { MoveSessionSheet, ProjectSettingsSheet, useProjects } from "../projects";
 import { openNewProject } from "../project/NewProject";
+import { openImport } from "../imports/ImportExplorer";
+import { PlateMark, importedHarness } from "../imports/ImportedChat";
 import { navigate, parse, pathFor, sessionPath } from "../router";
 import { agentsListing } from "../mode";
 import { invalidate, useQuery } from "../store";
@@ -163,10 +165,14 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
               <span className="truncate">{lens ? lens.name : t("shell.projects.all")}</span>
             </button>
           )}
-          <button type="button" className="sb-pbtn sb-newproject" onClick={() => openNewProject()}>
-            <Icon name="plus" size={15} />
-            <span className="truncate">{t("ph.newproject")}</span>
-          </button>
+          {/* One button, two ways a project starts: a new one, or a session another program left on
+              the machine, continued here. */}
+          <OverflowMenu className="sb-pbtn sb-newproject" label={t("ph.newproject")}
+            trigger={<><Icon name="plus" size={15} /><span className="truncate">{t("ph.newproject")}</span></>}
+            items={[
+              { label: t("np.title"), icon: "plus", onSelect: () => openNewProject() },
+              { label: t("imp.entry"), icon: "download", hint: t("imp.entry.hint"), onSelect: () => openImport() },
+            ]} />
         </div>
         <label className={`sb-search ${query ? "filled" : ""}`}>
           <Icon name="search" size={15} />
@@ -449,6 +455,7 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
   const here = current === s.id || kids.some((k) => k.id === current);
   const unread = !!s.unread_result;
   const state = rowState(s, kids);
+  const imported = importedHarness(s);
   const icon: IconName = s.archived ? "archive" : s.metadata?.loop ? "loop" : fork || s.metadata?.forked_from ? "fork" : system ? "mic" : "bots";
   const open = () => onOpen(s.id);
   const beside = () => {
@@ -489,7 +496,7 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
   return (
     <div data-session={s.id} data-nav="chat" className={`sb-row sb-chat ${here ? "current" : ""} ${unread ? "unread" : ""} ${nested ? "nested" : ""} ${fork ? "fork" : ""}`}
       title={s.model ? `${s.model} · ${s.id}` : s.id} role="link" aria-current={here ? "page" : undefined} tabIndex={0} onClick={open} onKeyDown={onKey}>
-      <span className="sb-plate"><Icon name={icon} size={nested ? 12 : 14} />{state && <span className={`sb-st ${state}`} />}</span>
+      <span className="sb-plate"><Icon name={icon} size={nested ? 12 : 14} />{state && <span className={`sb-st ${state}`} />}{imported && <PlateMark harness={imported} />}</span>
       <span className="sb-main">
         <span className="sb-l1">
           <span className="sb-t">{agentName(s)}</span>

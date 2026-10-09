@@ -2,6 +2,7 @@
 // value or a row or two, a hairline between sections. It is the old aside's cards and the "Session
 // info" sheet in one place; the right panel hosts it on a desktop and a full sheet on a phone.
 
+import { OriginSection } from "./imports/ImportedChat";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, LoopView, ProviderUsage, Schedule, SessionDetail } from "./api";
 import { projectPath } from "./folders";
@@ -81,6 +82,11 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, modes,
   }, [focus, ids]);
   return (
     <div ref={container} className="details">
+      {detail.imported && (
+        <Section ids={ids} id="origin" label={t("imp.origin")}>
+          <OriginSection sessionId={id} origin={detail.imported} toast={toast} onPulled={() => reload(true)} />
+        </Section>
+      )}
       <Section ids={ids} id="session" label={t("session.card")}>
         <input className="field" defaultValue={detail.title} aria-label={t("session.title")} onBlur={(e) => on.rename(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
         <div className="dt-row">
