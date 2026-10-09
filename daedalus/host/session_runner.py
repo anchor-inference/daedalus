@@ -1342,10 +1342,22 @@ class SessionManager:
         _ensure_inbox(workspace, self.inbox_folder(sid, meta, project))
         session = Session(id=sid, tenant_id=TENANT, title=title, metadata=dict(meta))
         await self.sessions.create(session, project_id=project.id)
+        project = await self._settle_project(project)
         state = SessionState(session=session, workspace=workspace, metadata=dict(meta), project=project)
         self._states[sid] = state
         self.register_services(state)
         return state
+
+    async def _settle_project(self, project: Project) -> Project:
+        """The project as it is after a session was added to it: a chat's scratch project with a
+        second top-level session is a project from now on (:meth:`ProjectStore.settle`). The loaded
+        sessions of it are given the fresh value, since the browser, the secrets and the dispatcher
+        read ``settings.ephemeral`` from the project a session holds."""
+        if not await self.projects.settle(project.id):
+            return project
+        fresh = await self.projects.get(project.id) or project
+        await self.reload_project(fresh, project.id)
+        return fresh
 
     async def _make_host_chat_folder(self, session_id: str) -> str:
         """Make the host scratch folder of a chat (:data:`HOST_CHATS`) and return its absolute path
@@ -1693,14 +1705,16 @@ class SessionManager:
             await conn.execute("DELETE FROM learning_records WHERE session_id = ?", (session_id,))
             await conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             project = state.project
-            # A host chat's scratch project goes the same way, but only while it is still marked
-            # ephemeral: a chat the operator kept as a project is not re-marked here, as an older
-            # managed one is, since its folder is on the operator's machine.
-            host_chat = project is not None and project.folders and project.primary.env == "host" and host_chat_path(project.primary.path, session_id)
-            if project is not None and project.folders and (project.primary.managed or host_chat):
-                # Remember ownership for older projects too, even when their creator goes first.
-                if project.id == session_id and not host_chat:
-                    await conn.execute("UPDATE projects SET settings = json_set(settings, '$.ephemeral', json('true')) WHERE id = ?", (project.id,))
+            # A chat's scratch project goes with its last chat while it is still ephemeral, whatever
+            # its folder is: the installation's own scratch, a host chat's, or a folder the chat was
+            # started in. Only the record goes; a folder on disk is removed by nobody here but the
+            # host chat's below, which tests its exact shape. The flag is read from the row, not
+            # from the copy this state holds, because a second chat may have made it a project since
+            # (and then it stays, with no chat at all). Nothing re-marks a project here any more: an
+            # older chat's project was once marked only when its chat was deleted, which would have
+            # turned a project that a second chat made back into a scratch one; the migration that
+            # introduced the rule marked those once instead.
+            if project is not None:
                 await conn.execute(
                     "DELETE FROM projects WHERE id = ? AND system = '' AND json_extract(settings, '$.ephemeral') = 1 "
                     "AND NOT EXISTS (SELECT 1 FROM sessions WHERE project_id = projects.id)",
@@ -2546,6 +2560,7 @@ class SessionManager:
         metadata.pop(HOME_KEY, None)
         await self.sessions.update_metadata(session_id, metadata)
         await self.projects.attach(session_id, project.id)
+        project = await self._settle_project(project)
         state.session.metadata.clear()  # the Session model is frozen; its dict is the thing that is kept
         state.session.metadata.update(metadata)
         state.metadata = dict(metadata)

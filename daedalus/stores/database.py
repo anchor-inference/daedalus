@@ -77,10 +77,11 @@ class DataMigration:
     step: Callable[[aiosqlite.Connection], Awaitable[None]]
 
 
-Migration = str | Callable[["Database"], str] | tuple[str, bool] | DataMigration
-"""A migration is its SQL, or a function that writes the SQL from what the opening database knows
-(the managed workspaces folder, the environment it runs in). A callable keeps a migration that
-needs such a value in its numbered place instead of being special-cased by its index."""
+Migration = str | Callable[["Database"], "str | DataMigration"] | tuple[str, bool] | DataMigration
+"""A migration is its SQL, or a function that writes the SQL (or a :class:`DataMigration`) from what
+the opening database knows (the managed workspaces folder, the environment it runs in). A callable
+keeps a migration that needs such a value in its numbered place instead of being special-cased by
+its index."""
 
 MIGRATIONS: list[Migration] = [
     # 1 — core stores
@@ -1989,6 +1990,67 @@ CREATE TABLE operator_secret_grants (
 );
 """)
 
+
+def _chat_or_project(db: Database) -> DataMigration:
+    """Build the migration that settles which projects are chats and which are projects.
+
+    The rule is "one chat is a chat, two are a project": a chat's scratch project (``ephemeral``)
+    becomes an ordinary project once it holds a second top-level session, and keeps that for good.
+    Before the rule, a second chat changed nothing, and an older chat's own project was marked
+    ephemeral only at the moment its chat was deleted, so many still carry ``false`` and would be
+    listed as projects. This marks each side once, by the same tests the running code now uses:
+
+    * an ephemeral project (not a system one) with two or more top-level sessions is a project;
+    * a project that is plainly one chat's scratch — its id is its one top-level session's, it has
+      one folder, that folder is the installation's own (inside the managed workspaces folder) or a
+      host chat's, and it has no orchestrator — is marked ephemeral.
+
+    A project made from a folder a chat was started in has an id of its own and is left as it is: it
+    may be a folder of the operator's that they think of as a project. Top-level is the rule
+    ``ProjectStore.summary`` counts by (``top_level_sessions``), with every session id known.
+    """
+    managed_root = Path(os.path.normpath(db.workspaces_dir.expanduser()))
+
+    def host_chat(path: Path, session_id: str) -> bool:
+        # The shape ``host_chat_path`` in daedalus/host/session_runner.py tests; that module is the
+        # whole session runner and imports the stores, so the four conditions are repeated here.
+        return path.is_absolute() and path.name == session_id and path.parent.name == "chats" and path.parent.parent.name == "daedalus"
+
+    async def step(conn: aiosqlite.Connection) -> None:
+        from daedalus.stores.projects import _is_managed, top_level_sessions  # Lazy: the store imports this module.
+
+        sessions = await (await conn.execute("SELECT id, project_id, metadata FROM sessions")).fetchall()
+        top_level = top_level_sessions((r["id"], r["project_id"], r["metadata"]) for r in sessions)
+        counts: dict[str, int] = {}
+        for owner in top_level.values():
+            counts[owner] = counts.get(owner, 0) + 1
+        folders: dict[str, list[str]] = {}
+        for row in await (await conn.execute("SELECT project_id, path FROM project_folders")).fetchall():
+            folders.setdefault(row["project_id"], []).append(str(row["path"]))
+        projects = await (await conn.execute(
+            "SELECT id, json_extract(settings, '$.ephemeral') AS ephemeral,"
+            " json_extract(settings, '$.orchestrator.enabled') AS orchestrator FROM projects"
+            " WHERE system = '' AND json_valid(settings)"
+        )).fetchall()
+        for project in projects:
+            pid = project["id"]
+            if project["ephemeral"] in (1, True):
+                if counts.get(pid, 0) >= 2:
+                    await conn.execute("UPDATE projects SET settings = json_set(settings, '$.ephemeral', json('false')) WHERE id = ?", (pid,))
+                continue
+            paths = folders.get(pid, [])
+            # Its one top-level session is the chat it was made for: the one whose id it took.
+            if counts.get(pid, 0) != 1 or top_level.get(pid) != pid or len(paths) != 1 or project["orchestrator"] in (1, True):
+                continue
+            path = Path(paths[0])
+            if _is_managed(path, managed_root) or host_chat(path, pid):
+                await conn.execute("UPDATE projects SET settings = json_set(settings, '$.ephemeral', json('true')) WHERE id = ?", (pid,))
+
+    return DataMigration("", step)
+
+
+MIGRATIONS.append(_chat_or_project)
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
@@ -2143,12 +2205,12 @@ class Database:
                     await self.conn.execute(f"UPDATE schema_version SET version = {index}")
                 current = index
                 continue
+            if callable(script) and not isinstance(script, DataMigration):
+                script = script(self)
             if isinstance(script, DataMigration):
                 await self._migrate_with_data(index, script, current)
                 current = index
                 continue
-            if callable(script):
-                script = script(self)
             foreign_keys_off = isinstance(script, tuple) and script[1]
             if isinstance(script, tuple):
                 script = script[0]
