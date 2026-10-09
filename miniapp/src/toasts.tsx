@@ -17,9 +17,10 @@ import { setPopupsShown, usePopupsShown } from "./popups";
 import { shownScopes } from "./presence";
 import { navigate, pathFor } from "./router";
 import { useMedia } from "./shell";
-import { ActionButtons, categoryLabel, noticeIcon, openEntry, toneClass } from "./notifications";
+import { ActionButtons, categoryLabel, markSeen, noticeIcon, openEntry, toneClass } from "./notifications";
 import { plural, t } from "./i18n";
 import { usePetPreference } from "./ui/pet";
+import { goToSetting, NOTICE_EVENT, SettingButton, type SettingNotice, settingPath } from "./settinglink";
 
 /** A notification that only reports something: long enough to read two lines twice. */
 export const TOAST_MS = 7000;
@@ -59,13 +60,17 @@ export class ToastQueue {
 
   static duration(entry: Notification): number {
     if (entry.needs_you && entry.actions.some((a) => a.id !== "open")) return ACTIONABLE_MS;
-    if (entry.level === "urgent" || entry.tone === "error") return URGENT_MS;
+    // A way to a setting is something to press, not only to read: the longer stay, warning or error.
+    if (entry.level === "urgent" || entry.tone === "error" || entry.setting) return URGENT_MS;
     return TOAST_MS;
   }
 
   push(entry: Notification, seq: number): void {
     const expires = this.now() + ToastQueue.duration(entry);
-    const here = this.shown.find((i) => i.entry.id === entry.id) ?? this.waiting.find((i) => i.entry.id === entry.id);
+    // One toast per setting and tone: a failed /compact is told by its own answer and by the host's
+    // notification about the same summary model, and two toasts saying it was one too many.
+    const same = (i: ToastItem) => i.entry.id === entry.id || (!!entry.setting && i.entry.setting?.key === entry.setting.key && i.entry.tone === entry.tone);
+    const here = this.shown.find(same) ?? this.waiting.find(same);
     if (here) {
       here.entry = entry;
       here.seq = seq;
@@ -268,6 +273,22 @@ export function NotificationToasts() {
     schedule();
   });
   // Answered or read somewhere else: the toast has nothing left to say.
+  // A notice the app raised itself — an error that names its setting — in the same corner, with the
+  // same button. With pop-ups off (or the companion speaking for them) the status line says it, with
+  // the button as its action: an error the operator must act on is never dropped for a preference.
+  useEffect(() => {
+    const raise = (e: Event) => {
+      const notice = (e as CustomEvent<SettingNotice>).detail;
+      if (!enabled || pet) {
+        statusLine(`${notice.title}: ${notice.body}`, { action: { label: t("setting.go"), run: () => goToSetting(notice.setting) }, ms: 10000 });
+        return;
+      }
+      queue.current.push(localEntry(notice), Date.now());
+      schedule();
+    };
+    window.addEventListener(NOTICE_EVENT, raise);
+    return () => window.removeEventListener(NOTICE_EVENT, raise);
+  }, [enabled, pet, schedule]);
   useEvent(["notify.resolved"], (event) => {
     if (pet) window.dispatchEvent(new CustomEvent("daedalus:pet-clear", { detail: Number(event.payload.id) }));
     if (queue.current.dismiss(Number(event.payload.id))) schedule();
@@ -346,7 +367,7 @@ function Toast({ entry, onDismiss, swipe, onHold, onRelease }: { entry: Notifica
   };
   return (
     <div
-      className={`notice-toast ${entry.level === "urgent" ? "urgent" : ""}`}
+      className={`notice-toast ${entry.level === "urgent" ? "urgent" : ""} ${entry.setting ? `tone-${entry.tone}` : ""}`}
       data-notice={entry.id}
       role={entry.level === "urgent" ? "alert" : "status"}
       style={drag < 0 ? { transform: `translateY(${drag}px)`, opacity: Math.max(0.2, 1 + drag / 120) } : undefined}
@@ -369,9 +390,26 @@ function Toast({ entry, onDismiss, swipe, onHold, onRelease }: { entry: Notifica
         </button>
       </div>
       {entry.body && <div className="notice-body clamp-2">{entry.body}</div>}
+      {entry.setting && (
+        <div className="notice-actions">
+          <SettingButton setting={entry.setting} className="btn small primary" onGo={() => { if (!entry.seen && entry.id > 0) void markSeen([entry.id]); onDismiss(); }} />
+        </div>
+      )}
       <ActionButtons entry={entry} onDone={onDismiss} />
     </div>
   );
+}
+
+/** A notice the app raised, shaped as a notification so the toast draws it like every other one. Its
+ *  id is negative: no entry of the host's has one, so it is never marked seen or answered there. */
+export function localEntry(notice: SettingNotice): Notification {
+  const now = new Date().toISOString();
+  return {
+    id: -notice.id, at: now, updated_at: now, category: "system", kind: "setting", level: "normal", tone: notice.tone,
+    title: notice.title, body: notice.body, link: settingPath(notice.setting), session_id: null, run_id: null, project_id: null,
+    staff_id: null, terminal_id: null, source: "app", dedupe_key: null, request_ref: null, count: 1, actions: [], seen: true,
+    resolved: null, needs_you: false, delivered: {}, setting: notice.setting,
+  };
 }
 
 /**

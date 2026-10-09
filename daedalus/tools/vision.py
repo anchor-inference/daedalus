@@ -10,6 +10,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.host.setting_refs import VISION_MODEL
 from daedalus.tools import search_hint
 from daedalus.tools._common import error, ok, refuse_protected, services_for
 
@@ -53,7 +54,7 @@ async def image_view(context: ToolContext, path: str, task: str, detail: str = "
     except (OSError, ValueError) as exc:
         return error(context, str(exc))
     try:
-        text, model = await look(services.extra.get("vision"), services.extra.get("manager"), data, mime, task, detail=detail)
+        text, model = await look(services.extra.get("vision"), services.extra.get("manager"), data, mime, task, detail=detail, session_id=context.session_id)
     except VisionUnavailable as exc:
         return error(context, str(exc))
     return ok(context, text, model=model, image=str(target))
@@ -65,7 +66,7 @@ KEPT_IMAGE_TASK = (
 )
 
 
-async def describe_kept(manager: Any, data: bytes, mime: str, name: str) -> str:
+async def describe_kept(manager: Any, data: bytes, mime: str, name: str, *, session_id: str | None = None) -> str:
     """A kept image (an operator's screenshot, a member's picture) in words.
 
     Reading one was refused as a binary file, so an orchestrator handed a screenshot of a bug could only
@@ -78,48 +79,99 @@ async def describe_kept(manager: Any, data: bytes, mime: str, name: str) -> str:
         raise VisionUnavailable(f"{name} is {len(data)} bytes, past what the vision model takes; it can still be handed on with files=[…]")
     vision = manager.vision_model() if manager is not None and hasattr(manager, "vision_model") else None
     try:
-        text, model = await look(vision, manager, data, mime, KEPT_IMAGE_TASK, detail="full")
+        text, model = await look(vision, manager, data, mime, KEPT_IMAGE_TASK, detail="full", session_id=session_id)
     except VisionUnavailable as exc:
         raise VisionUnavailable(f"{name} is an image and {exc}; it can still be handed on with files=[…]") from exc
     return f"[{name}, described by {model}]\n{text}"
 
 
-async def kept_body(manager: Any, data: bytes, stored: Any, *, offset: int = 1, limit: int = 200) -> str:
+async def kept_body(manager: Any, data: bytes, stored: Any, *, offset: int = 1, limit: int = 200, session_id: str | None = None) -> str:
     """What reading a kept file shows: an image described, anything else as numbered lines."""
     mime = str(getattr(stored, "mime", "") or mimetypes.guess_type(stored.name)[0] or "")
     if mime.startswith("image/"):
-        return await describe_kept(manager, data, mime, stored.name)
+        return await describe_kept(manager, data, mime, stored.name, session_id=session_id)
     from daedalus.host.peek import text_window  # Lazy: peek is host code this tool module need not load
 
     return text_window(data, stored.name, offset=offset, limit=limit)
 
 
 class VisionUnavailable(Exception):
-    """No vision model can look now; the message says what to change."""
+    """No vision model can look now; the message says what to change and ``setting`` where.
+
+    ``model_fault`` is false when the model was never the problem (the picture could not be staged):
+    asking the session's model instead would fail the same way, so no fallback is tried."""
+
+    def __init__(self, message: str, *, model_fault: bool = True) -> None:
+        super().__init__(message)
+        self.setting = VISION_MODEL
+        self.model_fault = model_fault
 
 
-async def look(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, detail: str = "focused", instruction: str = "") -> tuple[str, str]:
+async def look(
+    vision: Any, manager: Any, data: bytes, mime: str, task: str, *,
+    detail: str = "focused", instruction: str = "", session_id: str | None = None,
+) -> tuple[str, str]:
     """Ask the configured vision model about an image; returns its answer and the model's name.
 
     The one path pixels take to a model: the image goes to a separate vision model and only its
     words come back, so no agent's own context ever carries an image. ``ImageView`` and the browser's
     ``BrowserLook`` both come through here. ``instruction`` replaces the opening words of the request
     for a caller that must say more about what it shows (a web page is not to be obeyed).
+
+    When no vision model is set, or it refuses, and ``model.fallback_to_session`` is on, the
+    session's own model looks instead if it takes images, and the operator is warned with the way to
+    the vision model's row; with it off, or with a session model that cannot see, the refusal is an
+    error that carries the same row. Before this, an installation with no image-capable preset could
+    not look at a screenshot at all although the model it ran on read pictures.
     """
+    try:
+        return await _ask(vision, manager, data, mime, task, detail=detail, instruction=instruction)
+    except VisionUnavailable as exc:
+        if not exc.model_fault:
+            raise
+        primary = exc
+    falls_back = bool(getattr(getattr(getattr(manager, "config", None), "model", None), "fallback_to_session", False))
+    session_vision = getattr(manager, "session_vision", None)
+    if not falls_back or session_vision is None:
+        await _notice(manager, session_id, "failed", str(primary))
+        raise primary
+    route, why = await session_vision(session_id)
+    if route is None:
+        message = f"{primary}; {why}, so it cannot look instead"
+        await _notice(manager, session_id, "failed", message)
+        raise VisionUnavailable(message) from primary
+    try:
+        text, model = await _ask(route, manager, data, mime, task, detail=detail, instruction=instruction)
+    except VisionUnavailable as exc:
+        message = f"{primary}; the session's model {route[1]} could not look either: {exc}"
+        await _notice(manager, session_id, "failed", message)
+        raise VisionUnavailable(message, model_fault=exc.model_fault) from exc
+    await _notice(manager, session_id, "fallback", str(primary), model=model)
+    return text, model
+
+
+async def _notice(manager: Any, session_id: str | None, outcome: str, detail: str, *, model: str = "") -> None:
+    notice = getattr(manager, "setting_notice", None)
+    if notice is not None:
+        await notice(session_id, kind="vision", outcome=outcome, detail=detail, model=model, setting=VISION_MODEL)
+
+
+async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, detail: str, instruction: str) -> tuple[str, str]:
+    """One vision route asked once; :class:`VisionUnavailable` says why it gave no answer."""
     if not vision:
         raise VisionUnavailable("no vision model is configured: mark a model as taking images in Settings → Models and pick it under Image understanding")
     provider, model, blobs, tenant = vision
     max_out = int(getattr(getattr(getattr(manager, "config", None), "vision", None), "max_output_tokens", 2000))
     accepts = getattr(provider, "accepts_images", None)
     if accepts is None or not accepts(model):
-        raise VisionUnavailable("the vision preset is not marked as image-capable; enable 'images' on it in Settings → Models")
+        raise VisionUnavailable(f"the vision model {model} is not marked as taking images; enable 'images' on it in Settings → Models")
     try:
         meta = await blobs.put(tenant, data, content_type=mime)
     except OSError as exc:
         # The image is staged before any model is asked. A failure here once read, to the agent and
         # the operator alike, as the chosen model not taking images, when the picture never left
         # the machine; say which side failed.
-        raise VisionUnavailable(f"the image could not be stored for the vision model {model} ({exc}); the model was not asked") from exc
+        raise VisionUnavailable(f"the image could not be stored for the vision model {model} ({exc}); the model was not asked", model_fault=False) from exc
     text = instruction or (
         "You are the eyes of another AI agent. Look at the image and answer its request precisely. "
         "Quote text verbatim when asked to read; give numbers when asked about data; say clearly "

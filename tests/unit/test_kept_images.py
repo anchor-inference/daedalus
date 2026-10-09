@@ -30,7 +30,7 @@ class Manager:
 async def test_an_image_is_described_by_the_vision_model(monkeypatch: pytest.MonkeyPatch) -> None:
     asked: list[tuple[str, str]] = []
 
-    async def look(model: Any, manager: Any, data: bytes, mime: str, task: str, *, detail: str = "focused", instruction: str = "") -> tuple[str, str]:
+    async def look(model: Any, manager: Any, data: bytes, mime: str, task: str, *, detail: str = "focused", instruction: str = "", session_id: str | None = None) -> tuple[str, str]:
         asked.append((mime, detail))
         return "A login form; the error reads \"Invalid token\".", "small-vision"
 

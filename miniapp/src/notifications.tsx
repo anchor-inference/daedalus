@@ -44,7 +44,7 @@ export function useNotifications(view: NoticeView, project?: string | null, limi
   return useQuery<NotificationPage>(listKey(view, project, limit), { pollMs: live ? 0 : 15000, staleMs: 5000 });
 }
 
-const KIND_ICON: Record<string, IconName> = { rebuild: "wrench", run_cap: "stop", schedule: "clock", schedule_run: "clock", service: "globe", loop: "loop", loop_paused: "pause", heartbeat: "dot", inbound: "inbox", board_stale: "board", webhook_failed: "globe", learning_digest: "bulb", boot_guard: "wrench", change_proposal: "changes", terminal: "terminal", balance: "chart", budget: "chart", browser: "globe", browser_needs_you: "globe" };
+const KIND_ICON: Record<string, IconName> = { rebuild: "wrench", run_cap: "stop", schedule: "clock", schedule_run: "clock", service: "globe", loop: "loop", loop_paused: "pause", heartbeat: "dot", inbound: "inbox", board_stale: "board", webhook_failed: "globe", learning_digest: "bulb", boot_guard: "wrench", change_proposal: "changes", terminal: "terminal", balance: "chart", budget: "chart", browser: "globe", browser_needs_you: "globe", setting: "settings", setting_compaction: "settings", setting_vision: "settings", setting_search: "settings" };
 const CATEGORY_ICON: Record<string, IconName> = { run_finished: "check", question: "question", permission: "key", run_failed: "stop", staff_turn: "bots", staff_review: "board", orchestrator_report: "spawn", agent_notify: "bolt", reminder: "clock", spend: "chart", system: "inbox" };
 
 /** The kind names the producer's own sub-kind when it has a better picture than the category's. */

@@ -1742,6 +1742,13 @@ button.secret-chip:hover { background: var(--card-2); }
 .notice-more { padding: 2px 10px; border: 0; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font: inherit; font-size: var(--fs-11); cursor: pointer; }
 .notice-more:hover { color: var(--fg); }
 @keyframes notice-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* A toast about a setting says by its edge whether the work was done another way (warning) or not at all. */
+.notice-toast.tone-warning { border-color: color-mix(in srgb, var(--warn) 65%, var(--line-strong)); box-shadow: inset 3px 0 0 var(--warn), var(--shadow-pop); }
+.notice-toast.tone-error { border-color: color-mix(in srgb, var(--bad) 60%, var(--line-strong)); box-shadow: inset 3px 0 0 var(--bad), var(--shadow-pop); }
+/* The row a link brought the operator to: two soft pulses of the accent, then nothing. */
+.setting-flash { animation: setting-flash 1.2s var(--ease-out) 2; border-radius: var(--radius-md); }
+@keyframes setting-flash { 0%, 100% { background: transparent; box-shadow: none; } 35% { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .setting-flash { animation: none; background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .notice-toast { animation: none; } }
 .inbox-body { margin-top: 6px; cursor: default; }
 .inbox-entry + .inbox-entry { margin-top: 8px; }
@@ -2745,6 +2752,16 @@ input.field[type="range"] {
 /* The provider's failure stays beside the composer until another run starts. */
 .runerror { flex:none; align-self:center; margin:var(--space-2) var(--space-3) 0; display:flex; align-items:flex-start; gap:var(--space-2); max-width:calc(100% - 24px); padding:var(--space-2) var(--space-3); border:1px solid color-mix(in srgb, var(--bad) 55%, transparent); border-radius:var(--radius-md); background:color-mix(in srgb, var(--bad) 10%, var(--surface-2)); color:var(--fg); font-size:var(--fs-13); overflow-wrap:anywhere; }
 .runerror svg { flex:none; margin-top:2px; color:var(--bad); }
+/* A conversation's notices about its settings, in the composer's column above it, like the run's error line. */
+.setting-notices { flex:none; align-self:center; display:flex; flex-direction:column; gap:var(--space-2); width:min(var(--chat-w, 100%), calc(100% - 24px)); margin:var(--space-2) var(--space-3) 0; }
+.setting-notice { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2) var(--space-3); border:1px solid var(--line-strong); border-radius:var(--radius-md); background:var(--surface-2); font-size:var(--fs-13); overflow-wrap:anywhere; }
+.setting-notice > svg { flex:none; }
+.setting-notice.tone-warning { border-color:color-mix(in srgb, var(--warn) 55%, transparent); background:color-mix(in srgb, var(--warn) 9%, var(--surface-2)); }
+.setting-notice.tone-warning > svg { color:var(--warn); }
+.setting-notice.tone-error { border-color:color-mix(in srgb, var(--bad) 55%, transparent); background:color-mix(in srgb, var(--bad) 9%, var(--surface-2)); }
+.setting-notice.tone-error > svg { color:var(--bad); }
+.setting-notice-text { flex:1; min-width:0; }
+.setting-notice .setting-go { flex:none; }
 .run-outcome { display:flex; align-items:flex-start; gap:var(--space-2); margin-top:var(--space-2); padding:var(--space-2) var(--space-3); border:1px solid color-mix(in srgb, var(--bad) 55%, transparent); border-radius:var(--radius-md); background:color-mix(in srgb, var(--bad) 10%, var(--surface-2)); color:var(--fg); font-size:var(--fs-13); overflow-wrap:anywhere; }
 .run-outcome svg { flex:none; margin-top:2px; color:var(--bad); }
 .run-outcome.cause-cancelled { border-color:var(--line-strong); background:var(--surface-2); }

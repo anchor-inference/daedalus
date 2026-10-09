@@ -10,6 +10,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.host.setting_refs import WEB_SEARCH
 from daedalus.security.untrusted import fenced, origin_of
 from daedalus.tools import search_hint, websearch
 from daedalus.tools._common import clip, error, ok, services_for, tool_config
@@ -93,6 +94,11 @@ async def web_search(
     if not outcome.hits:
         reasons = "; ".join(f"{a.backend}: {a.error or 'no results'}" for a in outcome.attempts)
         if all(a.error for a in outcome.attempts):
+            # Every backend refused: the agent reads why, and the operator is offered the search
+            # backend's row, which is the one thing that changes the answer.
+            manager = services_for(context).extra.get("manager")
+            if manager is not None and hasattr(manager, "setting_notice"):
+                await manager.setting_notice(context.session_id, kind="search", outcome="failed", detail=f"search failed ({reasons})", setting=WEB_SEARCH)
             return error(context, f"search failed ({reasons})", backend="", attempts=tried)
         return ok(context, "(no results)", count=0, backend=outcome.backend, attempts=tried)
     results = fenced(websearch.render(outcome.hits), kind="search results", origin=outcome.backend,

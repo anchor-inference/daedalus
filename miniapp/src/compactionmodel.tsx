@@ -28,6 +28,7 @@ export function CompactionModelSelect({ presets, value, onSave }: { presets: Rec
       title={t("settings.compaction.model")}
       desc={<>{missing && <span className="attn">{t("settings.compaction.model.missing.hint")} </span>}{t("settings.compaction.model.hint")}</>}
       stack
+      data-setting="compaction.preset"
     >
       <Dropdown id="compaction-preset" label={t("settings.compaction.model")} value={value} invalid={missing} onChange={onSave} options={options.map((o) => ({ id: o.value, label: o.label }))} />
     </Row>

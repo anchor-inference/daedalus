@@ -84,9 +84,9 @@ export function NumInput({ id, value, min, max, step, unit, label, onSave, inval
 }
 
 /** A number setting as a row: the commonest row there is. */
-export function NumRow({ title, desc, unit, ...input }: { title: string; desc?: React.ReactNode; unit?: string } & Omit<Parameters<typeof NumInput>[0], "label" | "unit">) {
+export function NumRow({ title, desc, unit, setting, ...input }: { title: string; desc?: React.ReactNode; unit?: string; setting?: string } & Omit<Parameters<typeof NumInput>[0], "label" | "unit">) {
   return (
-    <Row title={title} desc={desc} htmlFor={input.id} stack>
+    <Row title={title} desc={desc} htmlFor={input.id} stack data-setting={setting}>
       <NumInput {...input} unit={unit} label={title} />
     </Row>
   );

@@ -1185,6 +1185,8 @@ export type Notification = {
   resolved: string | null;
   needs_you: boolean;
   delivered: Record<string, unknown>;
+  /** The setting the entry is about, read by the host from its link: the toast's button to the row. */
+  setting?: { page: string; key: string } | null;
 };
 
 export type NotificationPage = { entries: Notification[]; next_before: number | null; summary: NotificationSummary };
@@ -1363,7 +1365,7 @@ export type Preset = {
 
 export type Settings = {
   revision: string;
-  model: { preset: string; chain: string[] };
+  model: { preset: string; chain: string[]; fallback_to_session?: boolean };
   presets: Record<string, Preset>;
   /** What each preset left to its model does with the tool groups on demand, as the host knows the model. */
   on_demand_defaults?: Record<string, boolean>;

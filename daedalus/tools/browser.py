@@ -168,7 +168,7 @@ def _caller(context: ToolContext) -> Caller | None:
 
     async def looked(data: bytes, mime: str, question: str) -> str:
         try:
-            answer, _ = await look(services.extra.get("vision"), manager, data, mime, question, instruction=LOOK_INSTRUCTION)
+            answer, _ = await look(services.extra.get("vision"), manager, data, mime, question, instruction=LOOK_INSTRUCTION, session_id=context.session_id)
         except VisionUnavailable as exc:
             raise EnvUnavailable(str(exc)) from None
         return answer
