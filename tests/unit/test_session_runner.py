@@ -546,3 +546,48 @@ async def test_the_first_message_schedules_a_title_and_a_second_does_not(setting
     await waiter
     assert len(seen) == 1
     await manager.close()
+
+
+async def test_compact_falls_back_to_the_sessions_model_when_the_compaction_model_is_out_of_quota(settings: Settings, db: Database) -> None:
+    # A compaction preset on a provider past its monthly limit used to end /compact in a bare 500.
+    from protocore.contracts.llm import LLMRateLimitError
+
+    provider = ScriptedProvider([{"text": "hi"}])
+    manager = await _manager(settings, db, provider)
+    state = await manager.create_session("quota")
+    waiter = asyncio.create_task(_wait_finished(manager))
+    await manager.submit(state.session.id, "hello there")
+    await waiter
+    session_rung = (await manager._compaction_rungs(state))[0]
+
+    async def out_of_quota(request):  # type: ignore[no-untyped-def]
+        raise LLMRateLimitError("cheap: rate limited: usage limit exceeded")
+
+    async def answers(request):  # type: ignore[no-untyped-def]
+        return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=SECTIONED)]), stop_reason=StopReason.end_turn)
+
+    class Cheap:
+        endpoint = SimpleNamespace(id="cheap")
+        complete_text = staticmethod(out_of_quota)
+
+    cheap = Cheap()
+    provider.complete_text = answers  # type: ignore[attr-defined]
+
+    async def rungs(_state):  # type: ignore[no-untyped-def]
+        return [(cheap, "cheap-model"), session_rung]
+
+    manager._compaction_rungs = rungs  # type: ignore[method-assign]
+    summary = await manager.compact(state.session.id)
+    assert summary.startswith("## Goal")
+
+    async def only_cheap(_state):  # type: ignore[no-untyped-def]
+        return [(cheap, "cheap-model")]
+
+    manager._compaction_rungs = only_cheap  # type: ignore[method-assign]
+    await manager.submit(state.session.id, "again")
+    await until(lambda: not state.running)
+    from daedalus.host.session_runner import CompactionFailed
+
+    with pytest.raises(CompactionFailed, match="usage limit exceeded"):
+        await manager.compact(state.session.id)
+    await manager.close()
