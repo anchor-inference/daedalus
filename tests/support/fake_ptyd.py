@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import fnmatch
 import json
 import os
 import secrets
@@ -110,6 +111,8 @@ class FakePtyd:
         self.roots: list[str] = []
         self.made: list[str] = []
         """Every folder ``fs.mkdir`` was asked for."""
+        self.browse_supported = True
+        """False answers ``fs.browse`` as a daemon older than the call does: method not found."""
         self.launches: dict[str, dict[str, Any]] = {}
         self.pending_replies: dict[str, str] = {}
         """reply_id → launch_id of a held post that waits."""
@@ -457,6 +460,8 @@ class FakePtyd:
             return {"exists": True, "type": "dir", "size": 0, "mtime": stamp(), "mode": "0755", "writable": True, "created": created}
         if method == "fs.write":
             return write_inbox(self._under_root, params)
+        if method == "fs.browse" and self.browse_supported:
+            return browse_folders(params, home=self.home, sealed=[str(self.run_dir)])
         if method == "fs.stat":
             real = self._under_root(params["path"])
             if not real.exists():
@@ -588,4 +593,83 @@ def write_inbox(real_root_check: Any, params: dict[str, Any]) -> dict[str, Any]:
     return {"size": offset + len(data), "created": offset == 0}
 
 
-__all__ = ["FakeChannel", "FakePtyd", "FakeTerminal"]
+BROWSE_DENY = (
+    "**/.claude/.credentials.json", "**/.codex/auth.json", "**/.grok/auth.json", "**/.cursor/**",
+    "**/.local/share/opencode/auth.json", "**/.pi/agent/auth.json", "**/.ssh/**", "**/.gnupg/**",
+    "**/.config/gh/hosts.yml", "**/.netrc", "**/.git-credentials", "**/.docker/config.json", "**/.aws/**",
+    "**/.kube/**", "**/.config/gcloud/**", "**/.azure/**", "**/.npmrc", "**/.pypirc",
+)
+"""The daemon's compiled-in deny list, which ``fs.browse`` holds every folder to."""
+
+
+def _deny_match(pattern: list[str], segments: list[str]) -> bool:
+    """The daemon's segment match: ``**`` any number of folders, each other part a glob of one."""
+    while pattern:
+        if pattern[0] == "**":
+            return any(_deny_match(pattern[1:], segments[i:]) for i in range(len(segments) + 1))
+        if not segments or not fnmatch.fnmatchcase(segments[0], pattern[0]):
+            return False
+        pattern, segments = pattern[1:], segments[1:]
+    return not segments
+
+
+def _browse_refused(path: str, sealed: list[str]) -> bool:
+    segments = path.strip("/").split("/")
+    if any(_deny_match(pattern.lstrip("/").split("/"), segments) for pattern in BROWSE_DENY):
+        return True
+    return any(path == s or path.startswith(s.rstrip("/") + "/") for s in sealed)
+
+
+def browse_folders(params: dict[str, Any], *, home: str, sealed: list[str]) -> dict[str, Any]:
+    """``fs.browse`` as the daemon answers it, over this machine's files: not held to the roots,
+    directories only, sorted without regard to case, the deny list and the daemon's own folders
+    refused when asked for and left out of the listing, dot-folders only with ``hidden``."""
+    unknown = set(params) - {"path", "hidden", "limit"}
+    if unknown:
+        raise _RpcFail(-32602, f"unknown field {sorted(unknown)[0]}")
+    limit = int(params.get("limit") or 500)
+    if limit > 2000:
+        raise _RpcFail(-32602, "limit is at most 2000")
+    path = str(params.get("path") or "")
+    if path in ("", "~"):
+        path = home
+    elif path.startswith("~/"):
+        path = os.path.join(home, path[2:])
+    if not path.startswith("/"):
+        raise _RpcFail(-32602, "the path must be absolute or start with ~")
+    clean = os.path.normpath(path)
+    sealed = [os.path.normpath(s) for s in sealed] + [os.path.realpath(s) for s in sealed]
+    real = os.path.realpath(clean)
+    if _browse_refused(clean, sealed) or _browse_refused(real, sealed):
+        raise _RpcFail(1004, f"forbidden: {clean} is the terminal service's own or a denied path")
+    if not os.path.exists(real):
+        raise _RpcFail(1001, f"not found: {clean}")
+    if not os.path.isdir(real):
+        raise _RpcFail(-32602, f"{clean} is not a directory")
+    entries: list[dict[str, Any]] = []
+    truncated = False
+    for name in sorted(os.listdir(real), key=lambda n: (n.lower(), n)):
+        if not params.get("hidden") and name.startswith("."):
+            continue
+        written, resolved = os.path.join(clean, name), os.path.join(real, name)
+        link = os.path.islink(resolved)
+        target = os.path.realpath(resolved)
+        if any(_browse_refused(p, sealed) for p in (written, resolved, target)) or not os.path.isdir(target):
+            continue
+        if len(entries) >= limit:
+            truncated = True
+            break
+        entries.append({"name": name, "path": written, "mtime": stamp_of_path(target), "writable": os.access(target, os.W_OK),
+                        "readable": os.access(target, os.R_OK | os.X_OK), "is_git": os.path.lexists(os.path.join(target, ".git")), "link": link})
+    parent = os.path.dirname(clean)
+    places = [{"name": os.path.basename(home) or home, "path": home, "kind": "home"}] if not _browse_refused(home, sealed) else []
+    places.append({"name": "/", "path": "/", "kind": "volume"})
+    return {"path": clean, "parent": "" if parent == clean else parent, "home": home, "writable": os.access(real, os.W_OK),
+            "is_git": os.path.lexists(os.path.join(real, ".git")), "entries": entries, "truncated": truncated, "places": places}
+
+
+def stamp_of_path(path: str) -> str:
+    return datetime.fromtimestamp(os.stat(path).st_mtime, UTC).isoformat().replace("+00:00", "Z")
+
+
+__all__ = ["FakeChannel", "FakePtyd", "FakeTerminal", "browse_folders"]

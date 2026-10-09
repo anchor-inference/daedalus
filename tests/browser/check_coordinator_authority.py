@@ -148,8 +148,6 @@ def scenario(page: Page, language: str, unhandled: Unhandled, bundle_id: str = "
                           200 if commands[0] == body else 409)
         if path == "/api/settings" and method == "GET":
             return answer(route, {"presets": {}, "model": {}})
-        if path == "/api/project-directories" and method == "GET":
-            return answer(route, {"roots": [], "docker": True})
         if fulfil_shared(route):
             return None
         unhandled.record(path)

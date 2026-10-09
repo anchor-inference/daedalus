@@ -124,7 +124,10 @@ class ProjectBody(BaseModel):
     folders: list[FolderBody] = Field(default_factory=list)
     """In order, the first the primary. None makes a scratch folder of the installation's own."""
     default_env: Env | None = None
-    snapshots: bool = False
+    snapshots: bool | None = None
+    """None is the default for the folder: on for a new folder, off for one the operator points at."""
+    folder_name: str = Field(default="", max_length=80)
+    """The new folder's name under the workspaces when ``folders`` is empty; empty is the project's id."""
 
 
 class ProjectPatch(MutationBody):
@@ -255,7 +258,14 @@ def environments(settings: Any, local_env: str, terminals: Any = None) -> dict[s
     """
     bridge = host_bridge(settings, terminals)
     available = [local_env] + (["host"] if local_env == "container" and bridge else [])
-    return {"local": local_env, "available": available, "host_bridge": bridge, "docker": local_env == "container"}
+    # ``host_configured`` tells a bridge that is installed but not answering from one never installed:
+    # the folder browser keeps its host tab for the first and says how to start it, rather than
+    # hiding the machine whenever the daemon has stopped.
+    configured = bool(terminals is not None and terminals.configured("host")) or bridge
+    workspaces = getattr(settings, "workspaces_dir", None)
+    return {"local": local_env, "available": available, "host_bridge": bridge, "docker": local_env == "container",
+            "host_configured": local_env == "container" and configured,
+            "workspaces_root": str(workspaces) if workspaces else "", "home": str(Path.home())}
 
 
 def reach(folder: ProjectFolder, local_env: str, bridge: bool) -> str:
@@ -341,10 +351,14 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         refuse_env(body.default_env)
         specs = [FolderSpec(f.path, label=f.label, env=f.env, readonly=f.readonly) for f in body.folders]
         # A scratch folder begins empty, so undo costs nothing there; a folder the operator points at
-        # may be a large repository, where it is theirs to switch on.
-        project_settings = ProjectSettings(snapshots=True if not specs else body.snapshots, default_env=body.default_env or "")
+        # may be a large repository, where it is theirs to switch on. Either way an explicit choice
+        # from the new-project dialog wins. A project made here is never ephemeral: the operator made
+        # it on purpose, so it is a project at once, even before it has a chat.
+        snapshots = body.snapshots if body.snapshots is not None else not specs
+        project_settings = ProjectSettings(snapshots=snapshots, default_env=body.default_env or "", ephemeral=False)
         try:
-            project = await manager.projects.create(body.name, specs or None, settings=project_settings)
+            project = await manager.projects.create(body.name, specs or None, settings=project_settings,
+                                                    managed_name=body.folder_name)
         except ProjectError as exc:
             raise HTTPException(400, str(exc)) from exc
         await manager.bus.publish("project.changed", {"change": "created", "actor": "operator"}, project_id=project.id)

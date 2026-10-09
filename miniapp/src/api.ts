@@ -904,6 +904,11 @@ export type ProjectEnvironments = {
   available: ("container" | "host")[];
   host_bridge: boolean;
   docker: boolean;
+  /** A host bridge is installed in a Docker installation, whether or not it answers now. */
+  host_configured?: boolean;
+  /** Where a new project's own folder is made, and the home folder, to show that path as `~/…`. */
+  workspaces_root?: string;
+  home?: string;
 };
 
 export type OrchestratorSettings = {

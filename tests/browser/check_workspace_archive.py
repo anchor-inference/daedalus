@@ -125,8 +125,6 @@ def scenario(page: Page, lang: str, unhandled: Unhandled) -> None:
             return answer(route, {"receipt_id": "receipt-import", "project_id": "restored", "archive_digest": "a" * 64, "runtime_state": "inactive"})
         if path == "/api/settings" and method == "GET":
             return answer(route, {"presets": {}, "model": {}})
-        if path == "/api/project-directories" and method == "GET":
-            return answer(route, {"roots": [], "docker": True})
         if fulfil_shared(route):
             return None
         unhandled.record(path)
