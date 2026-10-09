@@ -57,6 +57,12 @@ READ = """
   const single = rows.filter((r) => !r.querySelector('.erow-meta') && !r.querySelector('.erow-line2'));
   const double = rows.filter((r) => r.querySelector('.erow-meta') || r.querySelector('.erow-line2'));
   const acts = all('.act:not(.head)');
+  // The sidebar's own rows: a chat two lines at 44, a project one at 36, a chat under a project 40;
+  // a chat's plate is round and a project's tile square.
+  const sbChat = all('.sidebar .sb-chat:not(.nested)').map((r) => box(r).h);
+  const sbNested = all('.sidebar .sb-chat.nested').map((r) => box(r).h);
+  const sbProject = all('.sidebar .sb-prow').map((r) => box(r).h);
+  const radius = (el) => el ? getComputedStyle(el).borderTopLeftRadius : null;
   // Only what is drawn: the desktop-only buttons are display:none on a phone and measure 0×0.
   const icons = all('.chat-head .iconbtn', '.pagehead .iconbtn').filter((el) => el.getBoundingClientRect().width > 0);
   return {
@@ -78,6 +84,8 @@ READ = """
     answerFs: px(one('.answer'), 'fontSize'),
     userFs: px(one('.msg.user'), 'fontSize'),
     userW: box(one('.msg.user')),
+    sbChat, sbNested, sbProject,
+    plate: box(one('.sidebar .sb-chat:not(.nested) .sb-plate')), plateRadius: radius(one('.sidebar .sb-chat:not(.nested) .sb-plate')), tileRadius: radius(one('.sidebar .sb-tile')),
     rowSingle: single.map((r) => box(r).h),
     rowDouble: double.map((r) => box(r).h),
     rowFs: px(one('.erow-title'), 'fontSize'),
@@ -125,7 +133,7 @@ def measure_agents(browser, width: int, height: int, mobile: bool) -> dict:  # t
     context = browser.new_context(viewport={"width": width, "height": height}, color_scheme="dark", is_mobile=mobile, has_touch=mobile)
     context.add_init_script(OPEN_FOLDERS)
     # A phone's list of chats is the Chats page now; its home holds only the live ones.
-    page = open_page(context, "agents?view=chats", ".ph-row") if mobile else open_page(context, "agents", ".folder")
+    page = open_page(context, "agents?view=chats", ".ph-row") if mobile else open_page(context, "agents", ".sb-row")
     out = page.evaluate(READ)
     out["vw"] = width
     context.close()
@@ -559,8 +567,20 @@ def judge(m: dict) -> list[str]:
     if m["body"] != 14:
         problems.append(f"{m['vw']}: body is {m['body']}px, not 14")
     if not phone:
-        if not m["left"] or m["left"]["w"] != 324:
-            problems.append(f"{m['vw']}: the left column is {m['left']}, not 324 wide")
+        # 52 px of rail and the 288 px column: 272 until the rows went to two lines, where a Russian
+        # title was cut at eighteen characters.
+        if not m["left"] or m["left"]["w"] != 340:
+            problems.append(f"{m['vw']}: the left column is {m['left']}, not 340 wide")
+        for name, rows, want in (("chat", m["sbChat"], 44), ("nested chat", m["sbNested"], 40), ("project", m["sbProject"], 36)):
+            for h in rows:
+                if h != want:
+                    problems.append(f"{m['vw']}: a sidebar {name} row is {h}px, not {want}")
+        if not m["sbChat"] or not m["sbProject"]:
+            problems.append(f"{m['vw']}: the sidebar drew {len(m['sbChat'])} chat rows and {len(m['sbProject'])} project rows")
+        if m["plate"] and m["plate"]["w"] != 24:
+            problems.append(f"{m['vw']}: a chat's plate is {m['plate']['w']}px, not 24")
+        if m["plateRadius"] != "50%" or m["tileRadius"] in (None, "50%"):
+            problems.append(f"{m['vw']}: a chat's plate is not round or a project's tile not square ({m['plateRadius']}, {m['tileRadius']})")
         if m["list"]:
             problems.append(f"{m['vw']}: a second list column is still there ({m['list']})")
     for h in m["rowSingle"]:
@@ -615,8 +635,8 @@ def judge(m: dict) -> list[str]:
             problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px, over the {stripe} stripe")
         if m["vw"] >= 1024 and m["composerBox"] and abs(m["composerBox"]["w"] - m["timeline"]["w"]) > 2:
             problems.append(f"{m['vw']}: the composer is {m['composerBox']['w']}px against a {m['timeline']['w']}px timeline")
-        # Beside the 42 % panel a 1440 window keeps a 647 px conversation column: 1440 less the 52 px
-        # rail and the 272 px sidebar is a 1116 px chat area, 58 % of it the conversation, and the
+        # Beside the 42 % panel a 1440 window keeps a 638 px conversation column: 1440 less the 52 px
+        # rail and the 288 px sidebar is a 1100 px chat area, 58 % of it the conversation, and the
         # timeline is that less the gutters. The rail took 52 px the old 677 px figure did not count
         # (the sidebar's strip then stood only where the column was folded), so the floor is 590.
         if m["vw"] == 1440 and m["timeline"]["w"] < 590:
@@ -628,7 +648,8 @@ def judge_sidebar(s: dict) -> list[str]:
     problems: list[str] = []
     # A 52 px icon rail stands beside the contextual list, whose boundary reserves one pixel.
     # Folding retains a 52 px icon column; the conversation starts at its edge.
-    want = {"open": (324, 271, 324), "collapsed": (52, 0, 52), "collapsedAfterReload": (52, 0, 52), "reopened": (324, 271, 324)}
+    # The column is 288 wide since its rows went to two lines (272 before).
+    want = {"open": (340, 287, 340), "collapsed": (52, 0, 52), "collapsedAfterReload": (52, 0, 52), "reopened": (340, 287, 340)}
     for key, (rail, sidebar, main) in want.items():
         got = s[key]
         if (got["rail"], got["sidebar"], got["main"]) != (rail, sidebar, main):

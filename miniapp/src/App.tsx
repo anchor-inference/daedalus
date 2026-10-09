@@ -135,8 +135,9 @@ function sessionStore(): Storage | null {
   }
 }
 
-/** The sidebar's width: its default, and the range a drag is held to. */
-const SIDEBAR_W = 272;
+/** The sidebar's width: its default, and the range a drag is held to. 288 rather than 272 since its
+ *  rows went to two lines: a Russian chat title was cut at eighteen characters in the narrower one. */
+const SIDEBAR_W = 288;
 const SIDEBAR_W_MIN = 232;
 const SIDEBAR_W_MAX = 360;
 
@@ -279,7 +280,7 @@ export function App() {
   const proposals = useQuery<{ status: string }[]>(authed && selfdev !== "off" ? "/api/proposals" : null, { pollMs: 60000, staleMs: 30000 });
   const counts: Counts = { inbox: notifications.unseen, changes: (proposals.data ?? []).filter((p) => p.status === "pending").length };
   useShortcuts(openPalette, selfdev);
-  // Two more on a desktop: the menu and the sidebar, both with a modifier so a text field never eats them.
+  // Three more on a desktop: the menu, the sidebar and a new chat, each with a modifier so a text field never eats them.
   useEffect(() => {
     if (!wide) return;
     const onKey = (e: KeyboardEvent) => {
@@ -289,6 +290,7 @@ export function App() {
       if (!which) return;
       e.preventDefault();
       if (which === "menu") setMenu((m) => !m);
+      else if (which === "newchat") navigate(pathFor("agents"));
       else sidebarToggle();
     };
     document.addEventListener("keydown", onKey);

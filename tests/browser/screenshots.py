@@ -81,9 +81,10 @@ P1, P2, P3, P4, PV = "9f3c2a1b7d40", "2e7b5c9a1f88", "4c6d8e0f2a13", "6e8f0a2b4c
 
 PROJECTS = [
     {"id": P1, "name": "Bakery site", "folders": folders("/home/operator/work/bakery"), "created_at": ago(days=9), "settings": {"snapshots": True}, "sessions": [{"id": "a1b2c3d4e5f6", "title": "Bakery site", "running": True}, {"id": "b2c3d4e5f6a1", "title": "Bakery site: photos", "running": False}, {"id": "e5f6a1b2c3d4", "title": "Bakery site (fork @412)", "running": False}]},
-    {"id": P2, "name": "Expenses", "folders": folders("/home/operator/work/expenses"), "created_at": ago(days=4), "settings": {"snapshots": False}, "sessions": [{"id": "f6a1b2c3d4e5", "title": "Expense tracker", "running": False}]},
+    # Two chats' own scratch projects: listed as the chats, not as projects (isProject in grouping.ts).
+    {"id": P2, "name": "Expenses", "folders": folders("/home/operator/work/expenses"), "created_at": ago(days=4), "settings": {"snapshots": False, "ephemeral": True}, "sessions": [{"id": "f6a1b2c3d4e5", "title": "Expense tracker", "running": False}]},
     {"id": P3, "name": "Support", "folders": folders("/home/operator/work/support"), "created_at": ago(days=6), "settings": {"snapshots": True}, "sessions": [{"id": S3, "title": "Support inbox", "running": False}]},
-    {"id": P4, "name": "Weekly digest", "folders": folders("/home/operator/work/digest"), "created_at": ago(days=5), "settings": {"snapshots": True}, "sessions": [{"id": S4, "title": "Weekly digest", "running": True}]},
+    {"id": P4, "name": "Weekly digest", "folders": folders("/home/operator/work/digest"), "created_at": ago(days=5), "settings": {"snapshots": True, "ephemeral": True}, "sessions": [{"id": S4, "title": "Weekly digest", "running": True}]},
     # A folder added but not mounted yet: in Docker that is a restart away, and the app says so.
     {"id": "5a8d1c0b6e22", "name": "Courier rates", "folders": folders("/home/operator/documents/courier", reachable=False), "created_at": ago(hours=2), "settings": {"snapshots": False}, "sessions": []},
     # The installation's own: the concierge and what it started by being spoken to.
@@ -1268,7 +1269,7 @@ def agents_shots() -> int:
                 if mobile:
                     shot(page, f"{prefix}{state}", "agents?view=chats", wait=".ph-row")
                 else:
-                    shot(page, f"{prefix}{state}", "agents", wait=".folder")
+                    shot(page, f"{prefix}{state}", "agents", wait=".sb-row")
                 context.close()
         browser.close()
     return out or UNHANDLED.report()

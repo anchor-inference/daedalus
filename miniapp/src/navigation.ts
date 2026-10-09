@@ -31,7 +31,7 @@ export function moveIndex(index: number, key: string, count: number): number | n
   return null;
 }
 
-export type Shortcut = "menu" | "sidebar" | null;
+export type Shortcut = "menu" | "sidebar" | "newchat" | null;
 
 /** The Latin letter a key press stands for, whatever the layout. Comparing `key` alone left every
  * letter shortcut dead on a Russian layout, where Ctrl+K arrives as "л"; `code` names the key. */
@@ -39,10 +39,13 @@ export function latinKey(e: { key: string; code?: string }): string {
   return e.code && /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : e.key.toLowerCase();
 }
 
-/** Ctrl/⌘ ⇧ M opens the menu, Ctrl/⌘ \ folds the sidebar. Anywhere, a text field included: both carry a modifier. */
+/** Ctrl/⌘ ⇧ M opens the menu, Ctrl/⌘ \ folds the sidebar, Ctrl/⌘ ⇧ O starts a new chat. Anywhere,
+ *  a text field included: all three carry a modifier. Not Ctrl+N for the chat: the browser keeps
+ *  that one for a new window and never hands it to the page. */
 export function shortcutFor(e: { key: string; code?: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): Shortcut {
   if (!(e.metaKey || e.ctrlKey) || e.altKey) return null;
   if (e.shiftKey && latinKey(e) === "m") return "menu";
+  if (e.shiftKey && latinKey(e) === "o") return "newchat";
   if (!e.shiftKey && e.key === "\\") return "sidebar";
   return null;
 }

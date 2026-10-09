@@ -1,11 +1,9 @@
-"""The Voice row in the list of folders goes to the voice page, and still opens.
+"""The Voice project in the sidebar: a project like the others, and still one step from the voice page.
 
-The Voice project is where the voice agents live, so the list of agents draws it as a folder like any
-other — and clicking its name opened that folder, which is not what the word means to the operator
-reaching for it. The word is the mode. So the row is a link to the voice page and the chevron beside
-it is a disclosure button of its own, with its own label, for the sessions underneath. Two controls
-in one row only work if each says which it is, so that is what is asserted here, in the sidebar
-beside the start canvas and beside every other screen.
+The sidebar draws every project as one row with a square tile, and Voice with a mic on its tile. The
+row opens the list of voice conversations where it stands, as every project row does; the voice page
+itself is the first thing the row's menu (and its right click) offers after a new chat, and the rail's
+mic is the other way there. With one voice conversation the row still opens to show it.
 
     cd miniapp && npm run build
     python3 tests/browser/serve_app.py 8203 /tmp/app-root &
@@ -41,48 +39,48 @@ def open_list(browser, viewport: dict, route: str, single: bool = False):  # typ
 
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/{route}?token=t&scheme=dark&lang=en")
-    page.wait_for_selector(".folder.system", timeout=15000)
+    page.wait_for_selector(".sb-project.system", timeout=15000)
     return context, page
 
 
 def check_the_row(browser, check, where: str, scope: str, viewport: dict, route: str, single: bool = False) -> None:  # type: ignore[no-untyped-def]
     context, page = open_list(browser, viewport, route, single)
-    head = page.locator(f"{scope} .folder.system .folder-head").first
-    link = page.locator(f"{scope} .folder.system .folder-go").first
-    chevron = page.locator(f"{scope} .folder.system .folder-disclose").first
-    check(link.count() == 1 and chevron.count() == 1, f"{where}: the Voice row is a link and a disclosure, not one control doing both")
-    check((link.get_attribute("href") or "").endswith("/voice"), f"{where}: the link goes to the voice page ({link.get_attribute('href')})")
-    label = chevron.get_attribute("aria-label") or ""
-    check("Voice" in label, f"{where}: the disclosure says what it opens ({label!r})")
-    check(head.get_attribute("aria-expanded") is None and chevron.get_attribute("aria-expanded") is not None, f"{where}: and it is the one that carries the expanded state")
-    check("Voice" in (link.inner_text() or ""), f"{where}: the name is on the link, which is what a reader clicks")
+    voice = page.locator(f"{scope} .sb-project.system").first
+    head = voice.locator(".sb-prow")
+    check(head.locator(".sb-tile .ic-mic").count() == 1, f"{where}: the Voice row carries the mic on its square tile")
+    check(head.get_attribute("aria-expanded") is not None and "Voice" in (head.get_attribute("aria-label") or ""), f"{where}: the row says what it opens and whether it is open")
+    plain = page.locator(f"{scope} .sb-project:not(.system) .sb-prow").first
+    check(plain.get_attribute("aria-expanded") is not None, f"{where}: an ordinary project's row is the same kind of control")
 
-    # An ordinary project has nowhere else to go: its whole header stays the one control it was.
-    plain = page.locator(f"{scope} .folder:not(.system) .folder-head").first
-    check(plain.evaluate("el => el.tagName") == "BUTTON", f"{where}: an ordinary folder's header is still a single button")
-    check(plain.get_attribute("aria-expanded") is not None, f"{where}: and still says whether it is open")
-
-    # The chevron opens the folder where it stands, without leaving the screen.
-    was = chevron.get_attribute("aria-expanded")
-    chevron.click()
+    # The row opens the project where it stands, without leaving the screen.
+    was = head.get_attribute("aria-expanded")
+    head.click()
     page.wait_for_timeout(300)
-    check(chevron.get_attribute("aria-expanded") != was, f"{where}: the chevron opens and closes the folder")
+    check(head.get_attribute("aria-expanded") != was, f"{where}: the row opens and closes the project")
     check(page.evaluate("location.pathname").endswith(route), f"{where}: and does not navigate anywhere ({page.evaluate('location.pathname')})")
 
     if single:
-        if chevron.get_attribute("aria-expanded") != "true":
-            chevron.click()
-        rows = page.locator(f"{scope} .folder.system .erow")
-        check(rows.count() == 1 and rows.first.is_visible(), f"{where}: expanding exposes the sole Voice conversation")
+        if head.get_attribute("aria-expanded") != "true":
+            head.click()
+        rows = voice.locator("[data-session]")
+        check(rows.count() == 1 and rows.first.is_visible(), f"{where}: opening it exposes the sole Voice conversation")
         rows.first.click()
         page.wait_for_url(f"**/agents/{shots.S9}")
-        check(page.evaluate("location.pathname").endswith(f"/agents/{shots.S9}"), f"{where}: the agent row opens its conversation")
+        check(page.evaluate("location.pathname").endswith(f"/agents/{shots.S9}"), f"{where}: the conversation row opens its conversation")
         page.goto(f"{BASE}/{route}?token=t&scheme=dark&lang=en")
-        page.wait_for_selector(f"{scope} .folder.system .folder-go")
+        page.wait_for_selector(f"{scope} .sb-project.system")
 
-    link.click()
+    page.locator(f"{scope} .sb-project.system .sb-prow").first.click(button="right")
+    item = page.locator(".context-menu").get_by_role("menuitem", name="Open the voice screen")
+    # The menu draws a frame after the click; counting at once raced it.
+    try:
+        item.wait_for(timeout=5000)
+    except Exception:  # noqa: BLE001 — the check below reports it
+        pass
+    check(item.count() == 1, f"{where}: the row's menu offers the voice page")
+    item.click()
     page.wait_for_selector(".voice-stage, .voice-grid", timeout=15000)
-    check(page.evaluate("location.pathname").endswith("/voice"), f"{where}: clicking the name opens the voice page ({page.evaluate('location.pathname')})")
+    check(page.evaluate("location.pathname").endswith("/voice"), f"{where}: and it opens the voice page ({page.evaluate('location.pathname')})")
     context.close()
 
 

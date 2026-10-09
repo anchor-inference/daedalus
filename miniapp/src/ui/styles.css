@@ -919,57 +919,117 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .sidebar-brand { display: flex; align-items: center; gap: 4px; height: var(--head-h); padding: 0 8px 0 12px; flex: none; }
   .sidebar .brand { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; color: var(--fg); font-weight: 600; font-size: var(--fs-14); letter-spacing: -0.01em; }
   .sidebar .brand img { border-radius: var(--radius-xs); flex: none; }
-  .sidebar-head { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 0 8px 4px; flex: none; }
-  .sidebar-new-agent { display:flex; align-items:center; gap:10px; min-height:var(--row-h); padding:0 9px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg); font:inherit; font-size:var(--fs-14); font-weight:500; text-align:left; cursor:pointer; }
-  .sidebar-new-agent:hover { background:var(--surface-1); }
-  .sidebar-new-agent .ic { color:var(--fg-2); }
-  .sidebar-head .project-chip { flex: none; min-width: 0; margin: 0; border-color: transparent; background: transparent; font-weight:500; color:var(--fg-2); }
-  .sidebar-head .project-chip:hover { background: var(--surface-1); }
   .sidebar-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
   .sidebar .screen { flex: 1; padding: 0 8px 12px; }
-  .sidebar .field.search { margin: 0 8px 6px; width: auto; }
   .sidebar .empty { padding: 24px 8px; font-size: var(--fs-13); }
   .sidebar .empty b { font-size: var(--fs-14); }
-  /* Folders are flat groups here, not cards: a 28 px label with the count, and the rows under it. */
-  .sidebar .folder, .sidebar .folder.open { margin: 6px 0 2px; border: 0; background: none; border-radius: 0; overflow: visible; }
-  .sidebar .folder-top { min-height:var(--row-h); background:transparent; border-radius:var(--radius-sm); }
-  .sidebar .folder-top:hover { background:color-mix(in srgb,var(--surface-1) 72%,transparent); }
-  .sidebar .folder-head.linked { padding: 0; gap: 0; }
-  .sidebar .folder-disclose { padding: 2px 2px 2px 8px; }
-  .sidebar .folder-go { gap: 6px; padding: 2px 8px 2px 4px; }
-  .sidebar .folder-head { min-height: var(--row-h); padding: 3px 6px; gap: 7px; background: transparent; border-radius: var(--radius-sm); font-size: var(--fs-13); font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--fg); }
-  .sidebar .folder-head:hover { background: transparent; }
-  .sidebar .folder.open .folder-head { border-bottom: 0; }
-  .sidebar .folder-name { font-weight: 600; }
-  .sidebar .folder-counts { font-size: var(--fs-11); color: var(--fg-3); }
-  .sidebar .folder-live { display: none; }
-  .sidebar .folder-empty { padding: 4px 8px 6px; font-size: var(--fs-12); }
-  .sidebar .folder.open > .erow, .sidebar .folder.open > .erow:first-of-type { width:calc(100% - 18px); margin: 0 0 1px 18px; }
-  .sidebar .folder.open > .erow.fork { margin-left: 16px; }
-  /* Rows: 36 px, a 6 px dot, no avatar, no card. Hover snaps; the open one sits one step up. */
-  .sidebar .erow { min-height: var(--row-h); padding: 4px 7px; gap: 8px; align-items: center; border: 0; background: none; border-radius: var(--radius-sm); }
-  .sidebar .erow:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
-  .sidebar .erow:active { transform: none; }
-  .sidebar .erow.current { background: var(--surface-2); }
-  .sidebar .erow.fork { border-left: 0; }
-  .sidebar .erow-dot { width: var(--dot); height: var(--dot); }
-  .sidebar .erow-main { gap: 1px; }
-  .sidebar .erow-title { font-weight: 500; }
-  .sidebar .erow.current .erow-title { font-weight: 600; }
-  .sidebar .erow-state { flex: none; font-size: var(--fs-12); font-weight: 600; }
-  .sidebar .erow-state.waiting { color: var(--warn); }
-  .sidebar .erow-state.failed { color: var(--bad); }
-  .sidebar .erow-meta { font-size: var(--fs-12); gap: 4px; }
-  .sidebar .erow-meta .ic { flex: none; }
-  .sidebar .folder-add { display:grid; place-items:center; width:var(--ctl-h-sm); height:var(--ctl-h-sm); min-width:var(--ctl-h-sm); min-height:var(--ctl-h-sm); margin:0; padding:0; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-3); line-height:0; }
-  .sidebar .folder-add:hover { background:var(--surface-2); color:var(--accent); }
-  .sidebar .folder-actions { color:var(--fg-3); }
-  @media (hover:hover) {
-    .sidebar .folder-actions { opacity:0; }
-    .sidebar .folder-top:hover .folder-actions, .sidebar .folder-top:focus-within .folder-actions { opacity:1; }
-  }
   .sidebar .sk-row { grid-template-columns: 1fr; padding: 6px 8px; }
   .sidebar .sk-row .skeleton.avatar { display: none; }
+  /* The tools above the list stay put while the list scrolls under them: the column scrolls as one
+     body (the windowed rows look for that scroller), so they are sticky rather than a pane apart. */
+  .sb-tools { position: sticky; top: 0; z-index: 2; display: flex; flex-direction: column; gap: var(--space-2); padding: 0 var(--space-3) var(--space-2); background: var(--bg); }
+  .sb-tools kbd { font-family: var(--font); font-size: var(--fs-11); font-weight: 500; line-height: 1; color: var(--fg-3); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); padding: 2px 4px; white-space: nowrap; }
+  /* The one accent of the column. */
+  .sb-new { display: flex; align-items: center; gap: var(--space-2); height: var(--ctl-h); padding: 0 var(--space-2) 0 var(--space-3); border: 0; border-radius: var(--radius-sm); background: var(--accent); color: var(--accent-ink); font: inherit; font-size: var(--fs-14); font-weight: 600; cursor: pointer; }
+  .sb-new > span { flex: 1; text-align: left; }
+  .sb-new kbd { color: inherit; border-color: currentColor; opacity: .7; }
+  .sb-new:hover { background: color-mix(in srgb, var(--accent) 88%, var(--fg)); }
+  .sb-new:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  /* Two plain buttons side by side; each label is held whole at 288 px, and only a lens's project
+     name (which can be anything) is cut. */
+  .sb-pbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .sidebar .sb-pbtn, .sb-pbtn { display: flex; align-items: center; justify-content: center; gap: 6px; width: auto; min-width: 0; height: var(--ctl-h-sm); min-height: var(--ctl-h-sm); margin: 0; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg); font: inherit; font-size: var(--fs-13); font-weight: 500; white-space: nowrap; cursor: pointer; }
+  .sb-pbtn .ic { color: var(--fg-2); flex: none; }
+  .sb-pbtn:hover { background: var(--surface-2); }
+  .sb-pbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .sb-search { display: flex; align-items: center; gap: var(--space-2); height: var(--ctl-h); padding: 0 var(--space-1) 0 var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-3); cursor: text; }
+  .sb-search.filled, .sb-search:focus-within { border-color: var(--line-strong); }
+  .sb-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; padding: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); }
+  .sb-search input::placeholder { color: var(--fg-3); }
+  .sb-search input::-webkit-search-cancel-button { display: none; }
+  .sb-search kbd { margin-right: var(--space-1); }
+  .sb-clear { display: grid; place-items: center; width: var(--chip-h-dense); height: var(--chip-h-dense); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-3); cursor: pointer; }
+  .sb-clear:hover { background: var(--surface-2); color: var(--fg); }
+  .sb-chips { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .sidebar .sb-chip, .sb-chip { display: inline-flex; align-items: center; gap: 5px; height: var(--chip-h-dense); min-height: var(--chip-h-dense); width: auto; padding: 0 9px; border: 0; border-radius: var(--radius-pill); background: var(--surface-1); color: var(--fg-2); font: inherit; font-size: var(--fs-12); font-weight: 500; white-space: nowrap; cursor: pointer; }
+  .sb-chip b { font-weight: 500; color: var(--fg-3); }
+  .sb-chip:hover { background: var(--surface-2); color: var(--fg); }
+  .sb-chip.on, .sidebar .sb-chip.on { background: var(--fg); color: var(--bg); }
+  .sb-chip.on b { color: inherit; opacity: .6; }
+  .sb-chip.warn { color: var(--warn); }
+  .sb-chip.warn b { color: var(--warn); opacity: .8; }
+  .sb-chip.warn.on { background: var(--warn); color: var(--bg); }
+  .sb-chip.warn.on b { color: inherit; }
+  .sidebar .sb-chip.icon { width: var(--chip-h-dense); padding: 0; justify-content: center; }
+  .sb-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .sidebar .sb-list { padding: 0 var(--space-2) var(--space-4); }
+  .sb-notice { display: flex; align-items: flex-start; gap: 6px; margin: 0 var(--space-1) 6px; padding: 6px var(--space-2); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--info) 12%, transparent); color: var(--info); font-size: var(--fs-12); }
+  .sb-notice .ic { flex: none; margin-top: 2px; }
+  /* Section headers in sentence case, 12/500 with the count: "Projects 7", not "PROJECTS". */
+  .sb-sec { display: flex; align-items: center; gap: 6px; height: 30px; padding: 8px var(--space-2) 2px; margin-top: var(--space-3); font-size: var(--fs-12); font-weight: 500; color: var(--fg-2); }
+  .sb-sec.first { margin-top: 0; padding-top: 4px; }
+  .sb-sec .n { color: var(--fg-3); font-weight: 400; }
+  .sb-sec-acts { margin-left: auto; display: flex; align-items: center; }
+  .sb-sec-acts .iconbtn.small { width: 22px; height: 22px; min-width: 0; min-height: 0; border-radius: var(--radius-xs); color: var(--fg-3); }
+  .sb-dayhead { display: flex; align-items: flex-end; height: 24px; padding: 0 var(--space-2) 3px; font-size: var(--fs-11); color: var(--fg-3); }
+  /* A row: the phone's plate at a desktop's height. A chat is two lines at 44 px, a project one
+     line at 36, a chat hung from a project 40 with a smaller plate. */
+  .sb-row { position: relative; display: flex; align-items: center; gap: 10px; min-height: var(--row-h-2); padding: 4px var(--space-2); border-radius: var(--radius-sm); color: var(--fg); cursor: pointer; outline: none; }
+  .sb-row:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+  .sb-row.current { background: var(--surface-2); }
+  .sb-row:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+  .sb-plate, .sb-tile { position: relative; display: grid; place-items: center; flex: none; width: var(--plate); height: var(--plate); background: var(--surface-1); color: var(--fg-2); }
+  .sb-plate { border-radius: 50%; }
+  .sb-tile { border-radius: var(--radius-xs); box-shadow: inset 0 0 0 1px var(--line); }
+  .sb-project.system .sb-tile { color: var(--accent); }
+  .sb-row.current .sb-plate { background: var(--surface-3); }
+  .sb-st { position: absolute; right: -2px; bottom: -2px; width: var(--dot); height: var(--dot); border-radius: 50%; box-shadow: 0 0 0 2px var(--bg); }
+  .sb-tile .sb-st { right: -3px; bottom: -3px; }
+  .sb-row.current .sb-st { box-shadow: 0 0 0 2px var(--surface-2); }
+  .sb-st.waiting { background: var(--warn); }
+  .sb-st.running { background: var(--info); }
+  .sb-st.failed { background: var(--bad); }
+  .sb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .sb-l1, .sb-l2 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .sb-t { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-14); line-height: 1.3; }
+  .sb-row.unread .sb-t { font-weight: 600; }
+  .sb-l1 .unread-dot { width: var(--dot); height: var(--dot); }
+  .sb-m { flex: 1; display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; font-size: var(--fs-12); line-height: 1.3; color: var(--fg-3); }
+  .sb-m > * { flex: none; }
+  .sb-m > * + *::before { content: "·"; margin-right: 5px; color: var(--fg-3); font-weight: 400; }
+  .sb-m > .sb-ell { flex: 0 1 auto; }
+  .sb-ell { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .sb-m .search-passage { margin: 0; font-size: var(--fs-12); }
+  .sb-m.paused .sb-ell { color: var(--warn); }
+  .sb-word { font-weight: 500; }
+  .sb-word.waiting { color: var(--warn); }
+  .sb-word.running { color: var(--info); }
+  .sb-word.failed { color: var(--bad); }
+  .sb-terms { display: inline-flex; align-items: center; gap: 2px; }
+  .sb-time { flex: none; font-size: var(--fs-11); color: var(--fg-3); }
+  /* Hover or focus shows the row's actions over its trailing edge, on the row's own colour. */
+  /* Scoped to the column: `.session-row-menu`, which the row's menu also carries, would otherwise
+     show these on every row from later in this sheet. */
+  .sidebar .sb-acts { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: none; align-items: center; padding-left: 16px; background: linear-gradient(90deg, transparent, var(--sb-row-bg, var(--bg)) 14px); }
+  .sb-row:hover, .sb-row:focus-within { --sb-row-bg: color-mix(in srgb, var(--surface-2) 60%, var(--bg)); }
+  .sb-row.current { --sb-row-bg: var(--surface-2); }
+  .sidebar .sb-row:hover .sb-acts, .sidebar .sb-row:focus-within .sb-acts, .sidebar .sb-acts:has([aria-expanded="true"]) { display: flex; }
+  .sb-row:hover .sb-time, .sb-row:focus-within .sb-time, .sb-row:hover .sb-ptrail, .sb-row:focus-within .sb-ptrail { visibility: hidden; }
+  .sb-acts .iconbtn.small { width: 26px; height: 26px; min-width: 0; min-height: 0; border-radius: var(--radius-xs); }
+  .sb-acts .iconbtn.small:hover { background: var(--surface-3); }
+  .sb-prow { min-height: var(--row-h); }
+  .sb-prow .sb-t { font-weight: 500; }
+  .sb-ptrail { flex: none; display: flex; align-items: center; gap: 6px; }
+  .sb-pcount { font-size: var(--fs-11); color: var(--fg-3); }
+  .sb-chev { display: grid; color: var(--fg-3); }
+  /* A project's chats hang from its tile on a hairline. */
+  .sb-kids { position: relative; margin-left: 16px; }
+  .sb-kids::before { content: ""; position: absolute; left: 4px; top: 0; bottom: 8px; width: 1px; background: var(--line); }
+  .sb-kids > .sb-row { min-height: var(--row-h-kid); padding-top: 2px; padding-bottom: 2px; }
+  .sb-kids .sb-plate { width: 20px; height: 20px; }
+  .sb-empty { padding: 6px var(--space-2); font-size: var(--fs-12); }
+  .sb-more { display: flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); width: 100%; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-3); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; }
+  .sb-more:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); color: var(--fg); }
   /* The menu button at the bottom-left: the destinations open over the content from here. */
   .sidebar .iconbtn.quiet { background: transparent; color: var(--fg-2); }
   .sidebar .iconbtn.quiet:hover { background: var(--surface-1); color: var(--fg); }
@@ -1572,52 +1632,10 @@ button.secret-chip:hover { background: var(--card-2); }
 /* ── entity rows: the roster, and every other list of things with a title and a state ─────── */
 .erow-group { margin-bottom: 6px; }
 
-/* Folders on the Agents screen: a project, or the bucket of agents that work alone.
-   Dark elevation, so a folder reads as a surface laid ON the page rather than a hole cut into it:
-   the header is one step lighter than the ground, the open body one step lighter again, and the
-   seams are hairlines. Nothing here is darker than what is behind it. */
-/* The list is as wide as the window. A folder is a full-width band with its counts on the right, so
-   centring it in a column would leave a wide screen mostly gutter and push the counts into the middle. */
+/* The list is as wide as its column. */
 .agents-screen { width: 100%; }
-.folder { margin-bottom: 8px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); overflow: hidden; }
-.folder.open { background: var(--surface-1); border-color: var(--line-strong); }
-.folder-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: calc(var(--row-h-touch) + var(--space-3)); padding: 8px 12px; background: var(--surface-2); border: 0; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; }
-.folder-head:hover { background: var(--surface-3); }
-/* A header that both goes somewhere and opens: the chevron is its own button with its own label,
-   and the rest of the row is the link. Nothing else about the row changes. */
-.folder-head.linked { padding: 0; gap: 0; }
-.folder-disclose { display: flex; align-items: center; align-self: stretch; padding: 4px 2px 4px 12px; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
-.folder-disclose:hover .chev { color: var(--fg); }
-.folder-go { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 4px 12px 4px 6px; color: inherit; text-decoration: none; }
-.folder.open .folder-head { border-bottom: 1px solid var(--line); }
-.folder-head .chev { display: inline-block; color: var(--fg-3); transition: transform .15s; }
-.folder-head .chev.down { transform: rotate(90deg); }
-.folder-head .ic { color: var(--fg-2); flex: none; }
-/* The concierge's own folder: its mic carries the accent, so it is never read as one of the operator's. */
-.folder.system .folder-head .ic { color: var(--accent); }
-.folder-name { font-weight: 600; min-width: 0; }
 .folder-live { display: inline-flex; flex: none; }
-.folder-counts { margin-left: auto; flex: none; font-size: var(--fs-12); }
-.folder-time { flex: none; font-size: var(--fs-12); }
-.folder-root { padding: 6px 12px 0; }
-.folder-empty { padding: 8px 12px; }
-.folder.open > .erow { margin: 4px 8px; }
-.folder.open > .erow:first-of-type { margin-top: 8px; }
-/* A fork keeps its step in from the session it was taken from, inside a folder as outside one. */
-.folder.open > .erow.fork { margin-left: 32px; }
 .chip.tiny { padding: 1px 7px; font-size: var(--fs-11); min-height: 0; flex: none; }
-/* Outside a phone these boxes are not there: the name, the counts and the time are items of the row. */
-.folder-text, .folder-title, .folder-meta { display: contents; }
-@media (max-width: 520px) {
-  /* At 390 px the counts and the time would push the name out; the name is what the folder is. So
-     the name has a line of its own and the counts and the time share the one under it, in the same
-     place on every folder — wrapping one line instead gave "V.." on one row and a lone "52m" in
-     the middle of the next. */
-  .folder-text { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 1px; }
-  .folder-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .folder-meta { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-  .folder-counts { margin-left: 0; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-}
 .erow.fork { margin-left: 22px; border-left: 2px solid var(--line-strong); }
 .erow { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; min-height: var(--row-h); padding: 6px 12px; margin-bottom: 4px; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-md); cursor: pointer; }
 .erow:hover { background: var(--surface-2); }
@@ -1642,12 +1660,6 @@ button.secret-chip:hover { background: var(--card-2); }
 .erow-meta.running .word { color: var(--accent); }
 .erow-meta.waiting .word, .erow-meta.waiting { color: var(--warn); }
 .erow-meta.failed .word { color: var(--bad); }
-.erow-children { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
-.subrow { display: flex; align-items: center; gap: 8px; min-height: var(--row-h-dense); padding: 2px 6px; margin: 0 -6px; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; border-radius: var(--radius-sm); cursor: pointer; min-width: 0; }
-.subrow:hover { background: var(--surface-3); }
-.subrow .truncate { flex: 1; min-width: 0; }
-.subrow .sub { font-size: var(--fs-12); flex: none; }
-.subrow.more { color: var(--fg-2); }
 .disclosure { display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 12px; padding: 10px 0; background: none; border: 0; border-top: 1px solid var(--line); color: var(--fg); font: inherit; font-weight: 600; cursor: pointer; text-align: left; }
 .disclosure .chev { color: var(--fg-2); display: inline-block; transition: transform .15s; font-size: var(--fs-18); line-height: 1; }
 .disclosure .chev.down { transform: rotate(90deg); }
@@ -2821,18 +2833,8 @@ input.field[type="range"] {
 /* A ring of the page's own colour around it: on a phone the text runs to the button's edge, and
    without the gap it sat on the last lines of a log instead of over them. */
 .composer-jump-anchor .jump-down { bottom:var(--space-2); right:var(--space-3); width:var(--ctl-h); height:var(--ctl-h); background:var(--surface-2); box-shadow:0 0 0 4px var(--bg), 0 6px 18px rgba(0,0,0,.45); }
-/* Project controls keep their place when a conversation gains a neighbour. */
-.folder-top { display: flex; align-items: center; gap: var(--space-1); background: var(--surface-2); border-radius: var(--radius-sm); }
-.folder-top > .folder-head { background: transparent; }
-.sidebar .folder-top { background: transparent; }
-.sidebar .folder-top > .folder-head { background: transparent; }
 .session-row-menu { flex: none; display: inline-flex; align-items: center; }
-.folder .erow { grid-template-columns: auto minmax(0, 1fr) auto; }
 @media (pointer: coarse) { .session-row-menu .iconbtn { min-width: var(--row-h-touch); min-height: var(--row-h-touch); } }
-.folder-top > .folder-head, .folder-top > .erow { flex: 1; min-width: 0; }
-.folder-top > .erow { margin: 0; }
-.folder-expand, .folder-actions { flex-shrink: 0; }
-.erow-project { color: var(--muted); font-weight: 400; }
 .search-passage { font-size: var(--fs-12); color: var(--muted); margin-top: var(--space-1); }
 .search-notice { padding: var(--space-2) var(--space-3); }
 .folder-add { width:var(--ctl-h-sm); height:var(--ctl-h-sm); min-width:var(--ctl-h-sm); min-height:var(--ctl-h-sm); margin:var(--space-1); padding:0; flex-shrink:0; display:grid; place-items:center; line-height:0; color:var(--accent); border-color:color-mix(in srgb, var(--accent) 40%, var(--line)); background:color-mix(in srgb, var(--accent) 10%, var(--surface-1)); }

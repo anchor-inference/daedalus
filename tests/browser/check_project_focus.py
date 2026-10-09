@@ -92,7 +92,7 @@ def desktop(page: Page, lang: str, width: int) -> None:
 
     # Agents mode lists nothing of the project; orchestration mode lists it as one entry.
     expect(page.locator(f".sidebar [data-project='{PID}']")).to_have_count(0)
-    expect(page.locator(".sidebar .erow", has_text="Orchestrator · Bakery 2.0")).to_have_count(0)
+    expect(page.locator(".sidebar [data-session]", has_text="Orchestrator · Bakery 2.0")).to_have_count(0)
     chip_before = page.locator(".sidebar .project-chip").inner_text()
     page.locator(".rail [data-rail='orchestration']").click()
     entry = page.locator("nav.orch-sidebar .orch-row", has_text="Bakery 2.0")

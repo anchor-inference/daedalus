@@ -164,7 +164,7 @@ def run() -> int:
             page.goto(f"{BASE}/agents?token=t&lang=en", wait_until="commit")
             row = f'.sidebar [data-session="{S2}"]'
             # The folder opens once and stays open: the second page below finds it open too.
-            page.click(f'.sidebar [data-project="{P1}"] .folder-top', timeout=20000)
+            page.click(f'.sidebar [data-project="{P1}"] .sb-prow', timeout=20000)
             page.wait_for_selector(row, timeout=10000)
             if not wait(page, lambda: len(Streams.open) == 1, 10):
                 problems.append(f"the app did not open the event stream (open: {len(Streams.open)})")

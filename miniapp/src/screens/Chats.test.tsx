@@ -5,9 +5,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectFolder, SessionList, SessionSummary } from "../api";
-import { arrange } from "../grouping";
+import { arrange, dayGroup } from "../grouping";
 import { setLang } from "../i18n";
-import { ChatsScreen, chatSections, dayGroup } from "./Chats";
+import { ChatsScreen, chatSections } from "./Chats";
 
 const listing = vi.hoisted(() => ({ data: null as SessionList | null, error: null as string | null, refresh: () => undefined }));
 vi.mock("../store", () => ({ useQuery: () => ({ data: listing.data ?? undefined, loading: !listing.data && !listing.error, error: listing.error, refresh: listing.refresh }), useOffline: () => false, invalidate: () => undefined }));
@@ -16,8 +16,8 @@ vi.mock("../events", () => ({ useStreamUp: () => true }));
 
 const NOW = new Date("2026-10-08T12:00:00");
 const iso = (hoursAgo: number) => new Date(NOW.getTime() - hoursAgo * 3_600_000).toISOString();
-function folder(id: string, name: string, total: number, last: string): ProjectFolder {
-  return { id, name, created_at: "2026-01-01T00:00:00Z", settings: { snapshots: false }, folders: [], total, members: total, active: 0, loops: 0, last_message_at: last };
+function folder(id: string, name: string, total: number, last: string, ephemeral = false): ProjectFolder {
+  return { id, name, created_at: "2026-01-01T00:00:00Z", settings: { snapshots: false, ephemeral }, folders: [], total, members: total, active: 0, loops: 0, last_message_at: last };
 }
 function chat(id: string, project: string, hoursAgo: number, extra: Partial<SessionSummary> = {}): SessionSummary {
   return { id, title: `Chat ${id}`, project_id: project, project, model: "DeepSeek V4 Flash", status: "idle", created_at: iso(hoursAgo + 1), last_message_at: iso(hoursAgo), run_id: null, ...extra };
@@ -35,12 +35,21 @@ describe("dayGroup", () => {
 });
 
 describe("chatSections", () => {
-  it("gives a project with several chats a section and files lone chats by day", () => {
-    const projects = [folder("bakery", "Bakery site", 2, iso(0.1)), folder("solo", "translator", 1, iso(5)), folder("old", "Router", 1, iso(30))];
+  it("gives a project a section and files the chats by day", () => {
+    const projects = [folder("bakery", "Bakery site", 2, iso(0.1)), folder("solo", "translator", 1, iso(5), true), folder("old", "Router", 1, iso(30), true)];
     const sessions = [chat("a", "bakery", 0.1), chat("b", "bakery", 2), chat("c", "solo", 5), chat("d", "old", 30)];
     const sections = chatSections(arrange(sessions, projects).folders, NOW);
     expect(sections.map((s) => s.folder?.name ?? s.day)).toEqual(["Bakery site", "today", "yesterday"]);
     expect(sections[0].rows.map((r) => r.s.id)).toEqual(["a", "b"]);
+  });
+
+  it("splits by the project rule: a project made by hand with one chat is a project, a chat with a fork is a chat", () => {
+    const projects = [folder("esp", "Firmware", 1, iso(1)), folder("solo", "translator", 1, iso(2), true)];
+    const fork = chat("f", "solo", 1.5, { metadata: { forked_from: { session_id: "c", seq: 4 } } });
+    const sections = chatSections(arrange([chat("e", "esp", 1), chat("c", "solo", 2), fork], projects).folders, NOW);
+    expect(sections.map((s) => s.folder?.name ?? s.day)).toEqual(["Firmware", "today"]);
+    expect(sections[1].rows.map((r) => r.s.id)).toEqual(["c"]);
+    expect(sections[1].rows[0].forks.map((r) => r.s.id)).toEqual(["f"]);
   });
 });
 

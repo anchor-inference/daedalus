@@ -5,7 +5,7 @@
 // fork under the session it was taken from) is decided here too, so one pass over the rows answers
 // both questions and the screen does no bookkeeping of its own.
 
-import { ProjectFolder, SessionSummary } from "./api";
+import { ProjectFolder, ProjectRef, SessionSummary } from "./api";
 
 export type Filter = "all" | "working" | "loops";
 export type Kind = "waiting" | "working" | "loop" | "idle";
@@ -20,7 +20,8 @@ export type Folder = {
   project: ProjectFolder;
   /** True on the installation's own project — the concierge's — which is drawn with a mic. */
   system: boolean;
-  single: boolean;
+  /** True on a chat's own scratch project: it is listed as the chat, not as a project (`isProject`). */
+  chat: boolean;
   rows: Row[];
   /** What the rows of this folder would look different for, built once while they are arranged.
    *  The listing is re-fetched whole every few seconds and every object in it is new, so a folder
@@ -33,6 +34,19 @@ export type Folder = {
   loops: number;
   last_message_at: string;
 };
+
+/**
+ * Whether a project is listed as a project or as the chat it was made for.
+ *
+ * Every chat gets a project of its own; the server marks it `ephemeral` and clears the mark for
+ * good once a second top-level chat lives in it, and a project made by hand never carries it. The
+ * installation's own project (Voice) is a project whatever it holds. The phone's Chats page and the
+ * desktop's sidebar both split by this one rule, so a chat never sits in "Projects" on one screen
+ * and among the chats on the other.
+ */
+export function isProject(p: Pick<ProjectRef, "settings" | "system">): boolean {
+  return !!(p.settings.system || p.system) || !p.settings.ephemeral;
+}
 
 const OPEN_PREFIX = "daedalus.folder.";
 
@@ -52,6 +66,51 @@ export function rememberFolder(key: string, open: boolean): void {
   } catch {
     /* private mode: the folder just forgets between visits */
   }
+}
+
+/** The day group a chat falls in, by its last message: today, yesterday, the week, the month, older. */
+export function dayGroup(iso: string, now = new Date()): "today" | "yesterday" | "week" | "month" | "older" {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "older";
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const day = 86_400_000;
+  if (at.getTime() >= start) return "today";
+  if (at.getTime() >= start - day) return "yesterday";
+  if (at.getTime() >= start - 7 * day) return "week";
+  if (at.getTime() >= start - 30 * day) return "month";
+  return "older";
+}
+
+/** The desktop's day groups: the phone's five less the month, which the narrow column folds into
+ *  "Earlier" — four headers are already a quarter of what the column shows between them. */
+export const SIDEBAR_DAYS = ["today", "yesterday", "week", "older"] as const;
+export type SidebarDay = typeof SIDEBAR_DAYS[number];
+
+/** A row whose chat asks for the operator, works or has failed: what a collapsed project still shows. */
+export function liveRow(r: Row): boolean {
+  const live = (s: SessionSummary) => s.status === "waiting" || s.status === "running" || s.status === "failed" || s.status === "compacting";
+  return live(r.s) || r.kids.some(live);
+}
+
+/**
+ * The desktop sidebar's two sections: the projects, and the chats by day.
+ *
+ * Every project is listed, an empty one included, since a project made by hand is a project before
+ * its first chat; under a filter or a search only those with something in the answer are, or the
+ * section would answer with a list of names that hold nothing. A chat's forks and subagents travel
+ * with its row. The chats are in recency order across their scratch projects.
+ */
+export function sidebarSections(folders: Folder[], opts: { filtered?: boolean; now?: Date } = {}): { projects: Folder[]; days: { day: SidebarDay; rows: Row[] }[]; chats: number } {
+  const now = opts.now ?? new Date();
+  const projects = folders.filter((f) => !f.chat && (!opts.filtered || f.rows.length > 0));
+  const loose = folders.filter((f) => f.chat).flatMap((f) => f.rows)
+    .sort((a, b) => activity(b.s) - activity(a.s) || a.s.id.localeCompare(b.s.id));
+  const bucket = (r: Row): SidebarDay => {
+    const day = dayGroup(r.s.last_message_at || r.s.created_at, now);
+    return day === "month" ? "older" : day;
+  };
+  const days = SIDEBAR_DAYS.map((day) => ({ day, rows: loose.filter((r) => bucket(r) === day) })).filter((d) => d.rows.length > 0);
+  return { projects, days, chats: loose.length };
 }
 
 /** What the status chips count and what the Active filter keeps. */
@@ -150,8 +209,7 @@ export function arrange(
       name: p.name,
       project: p,
       system: !!p.system,
-      single: (p.members ?? p.total) === 1 && (byProject.get(p.id)?.length ?? 0) === 1
-        && !byProject.get(p.id)![0].kids.length && !byProject.get(p.id)![0].forks.length,
+      chat: !isProject(p),
       rows: byProject.get(p.id) ?? [],
       sig: rowSig(byProject.get(p.id) ?? []),
       total: p.total,

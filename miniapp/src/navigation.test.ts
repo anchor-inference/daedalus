@@ -59,6 +59,12 @@ describe("the shortcuts", () => {
     expect(latinKey({ key: "\\", code: "Backslash" })).toBe("\\");
   });
 
+  it("start a new chat on Ctrl or ⌘ with Shift and O, on any layout", () => {
+    expect(shortcutFor(key("O", { ctrl: true, shift: true }))).toBe("newchat");
+    expect(shortcutFor({ ...key("Щ", { meta: true, shift: true }), code: "KeyO" })).toBe("newchat");
+    expect(shortcutFor(key("o", { ctrl: true }))).toBeNull();
+  });
+
   it("fold the sidebar on Ctrl or ⌘ with backslash", () => {
     expect(shortcutFor(key("\\", { meta: true }))).toBe("sidebar");
     expect(shortcutFor(key("\\", { ctrl: true }))).toBe("sidebar");
