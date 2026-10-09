@@ -132,6 +132,15 @@ def _int(value: Any, default: int) -> int:
         return default
 
 
+def _mode(settings: ProjectSettings) -> str | None:
+    """The mode a project lives in, as the app sorts them (``orchestrated`` in mode.ts): ``orchestration``
+    while its orchestrator is switched on, ``agents`` otherwise, and ``None`` for the installation's own,
+    which belongs to neither and so to both."""
+    if settings.system:
+        return None
+    return "orchestration" if settings.orchestrator.enabled else "agents"
+
+
 @dataclass(frozen=True, slots=True)
 class ProjectSettings:
     """What the operator decides per project.
@@ -558,9 +567,10 @@ class ProjectStore:
         checked with this first, so an approval is never spent on a folder that was bound to fail."""
         target = normalise_root(path)
         self._refuse_reserved(target)
-        if await self.get(project_id) is None:
+        project = await self.get(project_id)
+        if project is None:
             raise KeyError(project_id)
-        await self._refuse_overlap(target, project_id)
+        await self._refuse_overlap(target, project_id, mode=_mode(project.settings))
         return target
 
     # -- making projects -------------------------------------------------------------
@@ -605,7 +615,7 @@ class ProjectStore:
         self._refuse_among(p for p, _, _ in planned)
         async with self._write:
             for path, _, _ in planned:
-                await self._refuse_overlap(path)
+                await self._refuse_overlap(path, mode=_mode(settings or ProjectSettings()))
             if managed_name and planned[0][0].exists():
                 raise ProjectError(f"{planned[0][0]} already exists; choose another folder name")
             for path, _, ours in planned:
@@ -628,7 +638,7 @@ class ProjectStore:
             existing = await self.for_path(path)
             if existing is not None:
                 return existing
-            await self._refuse_overlap(path)
+            await self._refuse_overlap(path, mode="agents")
             # Ephemeral like any chat's scratch project: a folder used by one chat is that chat's, and
             # it becomes a project the moment a second chat works in it (:meth:`settle`). Removing the
             # record with its last chat never touches the folder, which may be the operator's own.
@@ -734,7 +744,7 @@ class ProjectStore:
                 await self.ensure_reachable(existing.primary)
                 return existing
             path = Path(os.path.normpath(Path(root).expanduser()))
-            await self._refuse_overlap(path)
+            await self._refuse_overlap(path, mode=None)
             self._make_root(path)
             try:
                 project = await self._insert(uuid.uuid4().hex[:12], name, ProjectSettings(system=kind), [(path, FolderSpec(str(path)))])
@@ -957,6 +967,12 @@ class ProjectStore:
 
         An ephemeral or system project cannot have an orchestrator: the one is removed with its last
         chat and the other is the installation's own. The concurrency stays within the cap.
+
+        Switching it on moves the project into orchestration mode, so its folders are checked against
+        that mode's the way a new folder is (:meth:`_refuse_overlap`). Switching it off is never
+        refused, though it can leave the project nesting with an ordinary one: it is what follows the
+        orchestrator's session being deleted, which has nobody to refuse to, and an orchestrator
+        that cannot be stopped is worse than two projects whose folders nest.
         """
         project = await self.get(project_id)
         if project is None:
@@ -973,6 +989,9 @@ class ProjectStore:
         wanted = current.concurrency if concurrency is None else int(concurrency)
         if concurrency is not None and not 1 <= wanted <= cap:
             raise ProjectError(f"concurrency is between 1 and the cap of {cap}, not {wanted}")
+        if enabled and not current.enabled:
+            for folder in project.folders:
+                await self._refuse_overlap(folder.path, mode="orchestration")
         patch: dict[str, Any] = {"concurrency_cap": cap, "concurrency": min(wanted, cap)}
         if enabled is not None:
             patch["enabled"] = bool(enabled)
@@ -1042,7 +1061,7 @@ class ProjectStore:
 
     async def add_folder(self, project_id: str, path: str, *, label: str = "", env: str | None = None, readonly: bool = False) -> ProjectFolder:
         """Another folder for a project, last in its order. The same rules as the first one: absolute,
-        none of the installation's own, and nesting with no other folder anywhere — this project's
+        none of the installation's own, and nesting with no other folder of its mode — this project's
         included, since two folders of one project that nest would make "read-only" mean one thing
         through one path and another through the other."""
         target = normalise_root(path)
@@ -1054,7 +1073,7 @@ class ProjectStore:
             project = await self.get(project_id)
             if project is None:
                 raise KeyError(project_id)
-            await self._refuse_overlap(target, project_id)
+            await self._refuse_overlap(target, project_id, mode=_mode(project.settings))
             folder = ProjectFolder(
                 id=f"f-{uuid.uuid4().hex[:12]}",
                 project_id=project_id,
@@ -1162,8 +1181,8 @@ class ProjectStore:
                     raise ProjectError(f"{path} and {other} nest; a project's folders are side by side")
             seen.append(path)
 
-    async def _refuse_overlap(self, path: Path, project_id: str | None = None) -> None:
-        """No two folders anywhere may nest, because containment would then mean two different
+    async def _refuse_overlap(self, path: Path, project_id: str | None = None, *, mode: str | None) -> None:
+        """No two folders of one mode may nest, because containment would then mean two different
         things at once; the same folder may belong to several projects, but only once to each.
 
         A session in the outer folder may write anywhere in the inner one while the inner folder's
@@ -1174,13 +1193,26 @@ class ProjectStore:
         second project a repository it plainly worked on, with the refusal reaching nobody. The rule
         holds across environments too: a path is compared as written, and the same absolute path is
         how both environments name a folder mounted into the container.
+
+        It does not hold across modes (``mode`` is the one of the project the folder is for, see
+        :func:`_mode`). An orchestrated project lives only in orchestration mode and gathers several
+        folders, often the operator's repositories, which its staff work on in worktrees of their own:
+        the same reasoning that lets two projects share a folder. Refusing across modes made such a
+        project claim every folder in and around its own, so the operator could not open an ordinary
+        project, or import a session, in a subfolder of a repository the orchestrated project merely
+        lists. ``None`` is the installation's own project, checked against every one, and the
+        installation's projects are checked against every mode in turn.
         """
-        rows = await self._db.fetchall("SELECT f.path, f.project_id, p.name FROM project_folders f JOIN projects p ON p.id = f.project_id")
+        rows = await self._db.fetchall(
+            "SELECT f.path, f.project_id, p.name, p.system, COALESCE(json_extract(p.settings, '$.orchestrator.enabled'), 0) AS orchestrated"
+            " FROM project_folders f JOIN projects p ON p.id = f.project_id")
         for row in rows:
             other = Path(row["path"])
             if other == path:
                 if row["project_id"] == project_id:
                     raise ProjectError(f"{row['name']} already has the folder {path}")
+                continue
+            if mode is not None and not row["system"] and ("orchestration" if row["orchestrated"] else "agents") != mode:
                 continue
             if path in other.parents:
                 raise ProjectError(f"that folder contains the project {row['name']} ({other})")

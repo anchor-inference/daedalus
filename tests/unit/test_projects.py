@@ -844,6 +844,33 @@ async def test_no_two_folders_anywhere_nest_and_none_repeats_in_one_project(db: 
     assert grouped.primary.reachable is False, "a folder that is not there yet is kept, and says so"
 
 
+async def test_folders_nest_only_within_one_mode(db: Database, tmp_path: Path) -> None:
+    """An orchestrated project lists the operator's repositories without being a project of each, so
+    an ordinary project may sit in or around one of its folders; within a mode the rule holds, and
+    switching an orchestrator on is checked against the projects of the mode it moves into. The
+    installation's own projects are checked against both."""
+    store = ProjectStore(db)
+    repo, core = tmp_path / "work" / "repo", tmp_path / "lib" / "core"
+    (repo / "app").mkdir(parents=True)
+    core.mkdir(parents=True)
+    anchor = await store.create("Anchor", [str(repo), str(core)])
+    await store.update_orchestrator(anchor.id, enabled=True)
+    app = await store.create("App", [str(repo / "app")])
+    lib = await store.create("Lib", [str(tmp_path / "lib")])
+    assert app.primary.path == repo / "app" and lib.primary.path == tmp_path / "lib"
+    with pytest.raises(ProjectError, match="inside the project App"):
+        await store.create("Source", [str(repo / "app" / "src")])
+    with pytest.raises(ProjectError, match="inside the project Anchor"):
+        await store.add_folder(anchor.id, str(repo / "docs"))
+    with pytest.raises(ProjectError, match="inside the project Anchor"):
+        await store.ensure_system("voice", name="Voice", root=repo / "voice")
+    with pytest.raises(ProjectError, match="inside the project Anchor"):
+        await store.update_orchestrator(app.id, enabled=True)
+    assert (await store.get(app.id)).settings.orchestrator.enabled is False, "a refused switch writes nothing"
+    off = await store.update_orchestrator(anchor.id, enabled=False)
+    assert off.settings.orchestrator.enabled is False, "switching off is never refused, nesting or not"
+
+
 async def test_folders_are_added_ordered_and_removed_but_never_the_last(db: Database, tmp_path: Path) -> None:
     store = ProjectStore(db)
     for name in ("site", "docs", "data"):

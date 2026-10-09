@@ -13,6 +13,11 @@ imported session sits in the sidebar like any chat, and a second one in the same
 project by the ordinary rule (``ProjectStore.settle``). A folder that holds another project's folder
 cannot be one (``ProjectStore`` refuses nesting) and is refused here with that project's name.
 
+Only the projects of the Agents mode count. An imported session is a chat of that mode, and an
+orchestrated project lives in orchestration mode alone, where one project lists several folders
+without any of them being a project of its own: a session from one of those folders imports as if
+nobody had it, and the store does not refuse nesting across modes either.
+
 The program's file is never written. A session that is still running there is imported as it stands;
 "pull in what is new" later appends what the program wrote since, and nothing goes back the other way.
 """
@@ -360,6 +365,9 @@ class SessionImporter:
         container_same: Project | None = None
         container_around: Project | None = None
         for project in projects if projects is not None else await self.manager.projects.list():
+            if project.settings.orchestrator.enabled:
+                # Orchestration mode's: the session would vanish from the sidebar into it (see the module).
+                continue
             for folder in project.folders:
                 path = normalise_cwd(str(folder.path))
                 if folder.env == "host":
@@ -456,7 +464,7 @@ class SessionImporter:
         def brief(entries: list[Any]) -> list[dict[str, Any]]:
             return [{"role": e.transcript.role.value, "text": e.transcript.text[:600], "at": e.transcript.created_at.isoformat()} for e in entries]
 
-        talk = [e for e in conversion.entries if not e.sidechain and e.transcript.role in (MessageRole.user, MessageRole.assistant) and e.transcript.text.strip()]
+        talk = [e for e in conversion.entries if spoken(e)]
         return {
             "header": header, "harness_name": harness_name(harness),
             "first": brief(talk[:PREVIEW_TURNS]), "last": brief(talk[-PREVIEW_TURNS:]) if read.done else [],
@@ -769,6 +777,20 @@ class SessionImporter:
             return None
         data = await self.manager.blobs.get(TENANT, ref)
         return gzip.decompress(data), str(stored.get("name") or f"{session_id}.jsonl")
+
+
+def spoken(entry: Any) -> bool:
+    """Whether a converted message is a request or an answer in words, which is what the preview's
+    first and last exchanges show. A compaction's summary is a user message too, and a session the
+    program continued from an earlier one begins with it: the preview once showed the operator a
+    ``<compacted-turn>`` as the first request. A reply the program made up itself (an error it
+    reported, "No response requested.") carries the model ``<synthetic>`` and is not an answer."""
+    message = entry.transcript
+    if entry.sidechain or message.role not in (MessageRole.user, MessageRole.assistant) or not message.text.strip():
+        return False
+    if message.metadata.get(COMPACTION_SUMMARY_METADATA_KEY):
+        return False
+    return (message.metadata.get(IMPORTED_KEY) or {}).get("model") != "<synthetic>"
 
 
 def imported_view(metadata: dict[str, Any]) -> dict[str, Any] | None:

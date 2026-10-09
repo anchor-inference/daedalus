@@ -22,9 +22,17 @@ import (
 //   - The file is a tree (uuid, parentUuid). After a rewind or an edited prompt the abandoned branch
 //     stays in the file; the conversation is the path from the last record back to the root. A
 //     compaction starts a new root (parentUuid null) whose logicalParentUuid is the last record
-//     before it, so the walk crosses it and the history before the compaction is kept.
+//     before it, so the walk crosses it and the history before the compaction is kept. A compaction
+//     that preserves the last few messages verbatim (compactMetadata.preservedSegment) may instead
+//     point it at the tail of that segment, which can be written after the summary: a descendant of
+//     the boundary. Following it would close a loop, and the walk used to stop there, so the session
+//     began at the boundary and lost everything before it, the first request included. There the
+//     walk takes the record written just before the boundary, which is the last one before it.
 //   - A compaction is a system record with subtype compact_boundary followed by a user record with
-//     isCompactSummary, which carries the summary: one compaction part.
+//     isCompactSummary, which carries the summary: one compaction part. Newer versions write the
+//     context they re-inject (instructions, session context, the date) as attachments between the
+//     two, so the summary is looked for past those; pairing only an adjacent one made every such
+//     compaction two, the first of them "without its summary".
 //   - The folder name encodes the cwd lossily ("-" stands for "/", ".", "_" and itself); the cwd is
 //     taken from the records, never from the name.
 //   - A large tool output is moved to <session>/tool-results/ and the record keeps a preview; the
@@ -340,12 +348,22 @@ func claudeChain(recs []claudeLine) []claudeLine {
 	}
 	seen := make(map[int]bool)
 	var path []int
-	for i, ok := len(recs)-1, true; ok && !seen[i]; i, ok = byID[recs[i].parent] {
+	for i := len(recs) - 1; i >= 0 && !seen[i]; {
 		seen[i] = true
 		path = append(path, i)
 		if recs[i].parent == "" {
 			break
 		}
+		next, ok := byID[recs[i].parent]
+		if (!ok || seen[next]) && recs[i].boundary {
+			// The logical parent is a preserved message written after the boundary (see the type's
+			// comment), or not in this file: the record before the boundary is the one it follows.
+			next, ok = i-1, true
+		}
+		if !ok {
+			break
+		}
+		i = next
 	}
 	out := make([]claudeLine, len(path))
 	for k, i := range path {
@@ -357,7 +375,11 @@ func claudeChain(recs []claudeLine) []claudeLine {
 // claudeTurns groups a chain into turns.
 func claudeTurns(chain []claudeLine, file int, sidechain string) []TurnRef {
 	var out []TurnRef
+	paired := map[int]bool{} // summaries already joined to the boundary before them
 	for i := 0; i < len(chain); i++ {
+		if paired[i] {
+			continue
+		}
 		r := chain[i]
 		ref := TurnRef{ExtID: r.uuid, Parent: r.parent, At: r.at, Sidechain: sidechain, Spans: []Span{{file, r.off, r.n}}}
 		switch {
@@ -372,9 +394,13 @@ func claudeTurns(chain []claudeLine, file int, sidechain string) []TurnRef {
 			}
 		case r.boundary:
 			ref.Role = RoleNote
-			if i+1 < len(chain) && chain[i+1].summary {
-				i++
-				ref.Spans = append(ref.Spans, Span{file, chain[i].off, chain[i].n})
+			for j := i + 1; j < len(chain) && (chain[j].typ == "attachment" || chain[j].summary); j++ {
+				if chain[j].summary {
+					// The attachments between stay where they are, as their own note after this one.
+					ref.Spans = append(ref.Spans, Span{file, chain[j].off, chain[j].n})
+					paired[j] = true
+					break
+				}
 			}
 		case r.summary:
 			ref.Role = RoleNote // a summary whose boundary is not on the chain

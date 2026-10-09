@@ -286,6 +286,43 @@ async def test_the_folder_decides_the_project(settings: Settings, db: Database, 
         assert moved["state"] == "done", "a session may be continued in a folder chosen by hand"
 
 
+async def test_an_orchestrated_project_owns_no_folder_an_import_comes_from(settings: Settings, db: Database, manager: SessionManager) -> None:
+    """An orchestrated project lives in orchestration mode alone: its folders are listed there, not
+    made projects of. A session from one of them, from inside one or from around one, imports as if
+    nobody had the folder, as a chat of the Agents mode or a project asked for there."""
+    host = host_of(manager)
+    importer = SessionImporter(manager)
+    anchor = await manager.projects.create("Anchor Inference", [FolderSpec(DOOR, env="host"), FolderSpec(f"{HOME}/projects/lab", env="host")])
+    await manager.projects.update_orchestrator(anchor.id, enabled=True)
+    for cwd in (DOOR, f"{DOOR}/firmware", f"{HOME}/projects"):
+        destination = await importer.destination(cwd)
+        assert destination.kind == "new_chat" and destination.project is None and destination.other is None, (cwd, destination)
+    assert (await importer.destination(DOOR, make_project=True)).kind == "new_project"
+
+    host.add("c-door", DOOR, claude_session())
+    host.add("c-fw", f"{DOOR}/firmware", claude_session())
+    host.add("c-lab", f"{HOME}/projects/lab", claude_session())
+    async with await _client(settings, import_config(), db, manager) as client:
+        everywhere = (await client.get("/api/imports/scan", headers=HEADERS, params={"harness": "claude"})).json()
+        assert everywhere["folders"] and all(f["project"] is None for f in everywhere["folders"])
+        listing = (await client.get("/api/imports/scan", headers=HEADERS, params={"harness": "claude", "path": DOOR})).json()
+        assert [h["project"] for h in listing["here"]] == [None] and [c["project"] for c in listing["children"]] == [None], "no chip names the orchestrated project"
+        preview = (await client.get("/api/imports/preview", headers=HEADERS, params={"harness": "claude", "id": "c-door"})).json()
+        assert preview["destination"]["kind"] == "new_chat" and preview["destination"]["project"] is None
+
+        lab = await finished(client, (await client.post("/api/imports", headers=HEADERS, json={"harness": "claude", "id": "c-lab"})).json()["job_id"])
+        lab_project = (await manager.get_state(lab["session_id"])).project
+        assert lab_project.id != anchor.id and lab_project.settings.ephemeral and lab_project.primary.path == Path(f"{HOME}/projects/lab")
+        firmware = await finished(client, (await client.post("/api/imports", headers=HEADERS, json={"harness": "claude", "id": "c-fw", "make_project": True})).json()["job_id"])
+        assert firmware["state"] == "done", "the store does not refuse a folder inside an orchestrated project's"
+        made = (await manager.get_state(firmware["session_id"])).project
+        assert made.id != anchor.id and made.settings.ephemeral is False and made.primary.path == Path(f"{DOOR}/firmware")
+        around = await finished(client, (await client.post("/api/imports", headers=HEADERS, json={"harness": "claude", "id": "c-door"})).json()["job_id"])
+        assert around["state"] == "failed" and around["error"]["code"] == "contains_project", "an ordinary project inside still refuses it"
+        assert (await importer.destination(DOOR)).other.id == made.id, "and the refusal names that one, never the orchestrated project"
+    assert (await manager.projects.get(anchor.id)).settings.orchestrator.enabled, "the orchestrated project is left as it was"
+
+
 async def test_an_ephemeral_chat_becomes_a_project_with_a_second_import(settings: Settings, db: Database, manager: SessionManager) -> None:
     host = host_of(manager)
     host.add("c-1", DOOR, claude_session())
@@ -325,6 +362,29 @@ async def test_a_long_session_starts_from_a_summary_and_its_tail(settings: Setti
         assert len(history) < 400, "the working history is the summary and a tail"
         assert len(await manager.sessions.list_transcript(sid)) == 2402, "the transcript keeps every message and the summary"
         assert (await client.get(f"/api/sessions/{sid}", headers=HEADERS)).json()["imported"]["mode"] == "tail"
+
+
+async def test_the_preview_shows_what_was_said_not_compactions_or_made_up_replies(settings: Settings, db: Database, manager: SessionManager) -> None:
+    """A session the program continued from an earlier one begins with a compaction, and one the
+    daemon could not pair with its summary said "without its summary": the preview showed that as
+    the first request. Its first and last exchanges are the operator's words and the model's."""
+    host = host_of(manager)
+    host.PAGE = 50
+    host.add("c-continued", DOOR, [
+        turn(0, "system_note", {"kind": "compaction", "summary": "", "auto": True}),
+        turn(1, "system_note", {"kind": "meta", "name": "context", "data": {"text": "Caveat: the messages below were generated by the program"}}),
+        turn(2, "user", text("<command-name>/model</command-name>")),
+        turn(3, "assistant", text("No response requested."), model="<synthetic>"),
+        turn(4, "user", text("pick the door work up again")),
+        turn(5, "assistant", text("Picking it up."), model="claude-opus-4-1-20250805"),
+        turn(6, "system_note", {"kind": "compaction", "summary": "Summary: the door works.", "auto": False}),
+        turn(7, "assistant", text("API Error: overloaded"), model="<synthetic>"),
+    ])
+    async with await _client(settings, import_config(), db, manager) as client:
+        preview = (await client.get("/api/imports/preview", headers=HEADERS, params={"harness": "claude", "id": "c-continued"})).json()
+    assert [(e["role"], e["text"]) for e in preview["first"]] == [("user", "pick the door work up again"), ("assistant", "Picking it up.")]
+    assert [e["text"] for e in preview["last"]] == ["pick the door work up again", "Picking it up."]
+    assert preview["counts"]["compactions"] == 2, "the compactions are still counted and imported"
 
 
 async def test_the_routes_list_and_say_what_the_host_cannot(settings: Settings, db: Database, manager: SessionManager) -> None:

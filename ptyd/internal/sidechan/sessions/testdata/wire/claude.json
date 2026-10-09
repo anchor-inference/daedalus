@@ -11,7 +11,7 @@
     "started_at": "2026-03-01T10:00:00Z",
     "updated_at": "2026-03-01T10:00:15Z",
     "messages": 3,
-    "bytes": 5626,
+    "bytes": 5967,
     "branch": "main",
     "model": "claude-test-1",
     "flags": {
@@ -39,7 +39,7 @@
    "started_at": "2026-03-01T10:00:00Z",
    "updated_at": "2026-03-01T10:00:15Z",
    "messages": 3,
-   "bytes": 5626,
+   "bytes": 5967,
    "branch": "main",
    "model": "claude-test-1",
    "flags": {
@@ -305,7 +305,7 @@
    {
     "seq": 11,
     "ext_id": "cb",
-    "parent": "r4",
+    "parent": "tail",
     "role": "system_note",
     "at": "2026-03-01T10:00:12Z",
     "sidechain": "",
@@ -324,8 +324,44 @@
    },
    {
     "seq": 12,
-    "ext_id": "u2",
+    "ext_id": "ctx",
+    "parent": "cb",
+    "role": "system_note",
+    "at": "2026-03-01T10:00:12Z",
+    "sidechain": "",
+    "model": "",
+    "parts": [
+     {
+      "kind": "meta",
+      "type": "attachment:session_context",
+      "data": {
+       "text": ""
+      }
+     }
+    ]
+   },
+   {
+    "seq": 13,
+    "ext_id": "tail",
     "parent": "cs",
+    "role": "system_note",
+    "at": "2026-03-01T10:00:12Z",
+    "sidechain": "",
+    "model": "",
+    "parts": [
+     {
+      "kind": "meta",
+      "type": "attachment:total_tokens_reminder",
+      "data": {
+       "text": ""
+      }
+     }
+    ]
+   },
+   {
+    "seq": 14,
+    "ext_id": "u2",
+    "parent": "tail",
     "role": "user",
     "at": "2026-03-01T10:00:13Z",
     "sidechain": "",
@@ -344,7 +380,7 @@
     ]
    },
    {
-    "seq": 13,
+    "seq": 15,
     "ext_id": "a5",
     "parent": "u2",
     "role": "assistant",
@@ -364,7 +400,7 @@
     }
    },
    {
-    "seq": 14,
+    "seq": 16,
     "ext_id": "a6",
     "parent": "a5",
     "role": "assistant",
@@ -389,11 +425,11 @@
     }
    }
   ],
-  "next": 15,
+  "next": 17,
   "done": true,
   "live": false,
   "masked": 1,
-  "offset": 5046,
-  "total": 15
+  "offset": 5387,
+  "total": 17
  }
 }
