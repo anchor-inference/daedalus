@@ -93,6 +93,7 @@ from daedalus.extensions import (
     api_runtime,
     api_runtime_handoff,
     api_secrets,
+    api_session_import,
     api_skill_quality,
     api_staff,
     api_staff_reports,
@@ -132,6 +133,7 @@ from daedalus.host.prompt_changes import PromptChangePlanner
 from daedalus.host.prompts import DEFAULT_RULES, without_turn_context
 from daedalus.host.reveal import platform_family
 from daedalus.host.services import SCRATCH_DIR_NAME
+from daedalus.host.session_import import imported_view
 from daedalus.host.session_runner import TENANT, Attachment, HostUnreachable, clip_title
 from daedalus.host.setting_refs import LOCAL_SPEECH_MODEL, SPEECH_RECOGNITION, SettingProblem, SettingRef, setting_of
 from daedalus.host.transcript_view import full_tool_result, message_view
@@ -1604,6 +1606,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_projects.register(api, app, auth)
     api_project_start.register(api, app, auth)
     api_folder_browser.register(api, app, auth)
+    api_session_import.register(api, app, auth)
     api_goal_budget.register(api, app, auth)
     api_provider_holds.register(api, app, auth)
     api_knowledge.register(api, app, auth)
@@ -2050,6 +2053,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             """Where its commands run, for the "Host" mark on a row; the app marks only a session
             that runs somewhere other than the installation does."""
             row["project"] = names[row["project_id"]]
+            # The program a session was imported from, for the corner mark on its row.
+            row["imported_from"] = (row["metadata"].get("imported") or {}).get("harness") if isinstance(row["metadata"].get("imported"), dict) else None
             row["terminals"] = running_terminals.get(row["id"], 0)
             overrides = overrides_by_id.get(row["id"], {})
             if overrides.get("preset") and overrides["preset"] in app.config.presets:
@@ -2299,6 +2304,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "services": await app.extensions["services"].list(session_id) if "services" in app.extensions else [],
             "subagent_of": state.metadata.get("subagent_of"),
             "subagent_name": state.metadata.get("subagent_name"),
+            # Where an imported session came from, for the banner and the "Origin" block of its details.
+            "imported": imported_view(state.metadata),
             # What the session is to its project: its orchestrator (current or retired), or the session
             # of a staff member. The app draws the orchestrator's chat and a staff member's header from these.
             "orchestrator_of": state.metadata.get("orchestrator_of") or state.metadata.get("orchestrator_retired_of"),

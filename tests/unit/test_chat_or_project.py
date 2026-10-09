@@ -20,7 +20,7 @@ import httpx
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
 from daedalus.host.session_runner import SessionManager
-from daedalus.stores.database import MIGRATIONS, Database
+from daedalus.stores.database import MIGRATIONS, Database, _chat_or_project
 from daedalus.stores.projects import ProjectSettings, ProjectStore
 
 HEADERS = {"X-Daedalus-Token": "tok"}
@@ -218,7 +218,11 @@ async def _seed(db: Database, workspaces: Path) -> None:
                 "INSERT INTO sessions(id, tenant_id, title, created_at, last_message_at, metadata, project_id) VALUES (?, 't', '', '2026-01-01', '2026-01-01', ?, ?)",
                 (sid, metadata, pid),
             )
-        await conn.execute("UPDATE schema_version SET version = ?", (len(MIGRATIONS) - 1,))
+        await conn.execute("UPDATE schema_version SET version = ?", (BEFORE_THE_RULE,))
+
+
+BEFORE_THE_RULE = MIGRATIONS.index(_chat_or_project)
+"""The schema just before the migration under test: found by name, since later migrations follow it."""
 
 
 async def _flags(db: Database) -> dict[str, Any]:
@@ -248,7 +252,7 @@ async def test_the_migration_marks_chats_and_projects_once(tmp_path: Path) -> No
         assert int((await db.fetchone("SELECT version FROM schema_version"))["version"]) == len(MIGRATIONS)
         assert not await db.fetchall("PRAGMA foreign_key_check")
         before = flags
-        await db.execute("UPDATE schema_version SET version = ?", (len(MIGRATIONS) - 1,))
+        await db.execute("UPDATE schema_version SET version = ?", (BEFORE_THE_RULE,))
     finally:
         await db.close()
 

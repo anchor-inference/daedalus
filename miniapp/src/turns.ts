@@ -20,7 +20,7 @@ export type LiveTool = { id: string; name: string; args: string; result?: string
 export type LiveState = { runId?: string; text: string; thinking: string; tools: LiveTool[]; startedAt: number | null; lastActivityAt: number | null; ended: boolean; model: string; fallback: ModelFallback | null; groups?: GroupLoad[] };
 export const EMPTY_LIVE: LiveState = { text: "", thinking: "", tools: [], startedAt: null, lastActivityAt: null, ended: false, model: "", fallback: null };
 
-export type ToolItem = { kind: "tool"; id: string; name: string; args: Record<string, unknown>; result?: string; error?: boolean; running: boolean; length?: number; clipped?: boolean; /** How long the step took, when both ends of it are known. */ ms?: number; /** The groups a ToolSearch call loaded, while the run that made it streams. */ groups?: GroupLoad[] };
+export type ToolItem = { kind: "tool"; id: string; name: string; args: Record<string, unknown>; result?: string; error?: boolean; running: boolean; length?: number; clipped?: boolean; /** How long the step took, when both ends of it are known. */ ms?: number; /** The groups a ToolSearch call loaded, while the run that made it streams. */ groups?: GroupLoad[]; /** The name the call had in the program it was imported from. */ orig?: string };
 export type NoteItem = { kind: "note"; text: string; seq?: number };
 export type ThinkItem = { kind: "thinking"; text: string };
 export type SummaryItem = { kind: "summary"; text: string; reason: string };
@@ -54,6 +54,8 @@ export type Turn = {
   lastActivityAt?: number | null;
   /** The run ended without an answer: why, and where. Drawn as the turn's closing line. */
   outcome?: RunOutcome;
+  /** The program this turn was imported from, when it was: its work is that program's, not Daedalus's. */
+  imported?: string;
 };
 
 export type ActivityPhase = "preparing_call" | "reading" | "editing" | "testing" | "waiting_provider" | "waiting_user" | "compacting" | "responding";
@@ -167,9 +169,10 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
       current = open(`u${m.seq ?? i}`, at);
       current.runId = m.run_id || undefined;
       current.user = m;
+      if (m.imported?.harness) current.imported = m.imported.harness;
       const note = systemNote(m);
       if (note) current.note = note;
-      mark(`${m.text.length}:${m.origin ?? ""}:${m.run_id ?? ""}`);
+      mark(`${m.text.length}:${m.origin ?? ""}:${m.run_id ?? ""}:${m.imported?.harness ?? ""}`);
       return;
     }
     if (m.role === "system") return;
@@ -181,7 +184,8 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
     current.model = m.model || current.model;
     current.fallback = m.fallback ?? null;
     current.media = m.media?.length ? m.media : current.media;
-    mark(`m${m.seq ?? i}:${m.text.length}:${m.thinking.length}:${m.model ?? ""}:${m.fallback?.reason ?? ""}:${m.run_id ?? ""}:${m.media?.map((p) => p.id).join(",") ?? ""}`);
+    if (m.imported?.harness) current.imported = m.imported.harness;
+    mark(`m${m.imported?.harness ?? ""}:${m.seq ?? i}:${m.text.length}:${m.thinking.length}:${m.model ?? ""}:${m.fallback?.reason ?? ""}:${m.run_id ?? ""}:${m.media?.map((p) => p.id).join(",") ?? ""}`);
     if (current.answer) {
       // Text that turned out not to be final becomes a note.
       current.activity.push({ kind: "note", text: current.answer, seq: current.answerSeq });
@@ -197,7 +201,8 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
       if (running) current.pendingTools++;
       current.toolIds.push(c.id);
       const ms = r && at && r.at >= at ? r.at - at : undefined;
-      current.activity.push({ kind: "tool", id: c.id, name: c.name, args: c.arguments, result: r?.content, error: r?.is_error, running, length: r?.length ?? undefined, clipped: r?.clipped, ms });
+      const orig = m.imported?.tools?.[c.id];
+      current.activity.push({ kind: "tool", id: c.id, name: c.name, args: c.arguments, result: r?.content, error: r?.is_error, running, length: r?.length ?? undefined, clipped: r?.clipped, ms, ...(orig ? { orig } : {}) });
       mark(`t${c.id}:${r ? `${r.content.length}${r.is_error ? "!" : ""}` : "-"}`);
     }
   });
@@ -373,6 +378,10 @@ export type FamilyCount = { family: string; n: number };
 /** Which family a tool belongs to for the folded summary: the search tools share one, everything else is itself. */
 export function familyOf(name: string): string {
   if (name === "Find" || name === "Search" || name === "WebSearch" || name === "HistorySearch") return "search";
+  // Calls imported from another program under their own names count with the native steps they amount to.
+  if (name === "Task" || name === "Agent") return "SubAgent";
+  if (name === "apply_patch") return "Edit";
+  if (name === "TodoWrite" || name === "todowrite" || name === "update_plan") return "plan";
   return name;
 }
 

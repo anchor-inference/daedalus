@@ -31,9 +31,11 @@ import desktop from "./ui/desktop.css?raw";
 import phone from "./ui/phone.css?raw";
 import browserPhone from "./browser/phone.css?raw";
 import newProject from "./project/newproject.css?raw";
+import imports from "./imports/imports.css?raw";
 import petHost from "./pethost.tsx?raw";
-// The browser's phone sheet keeps its looks beside its component; it answers to the same scale.
-const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject;
+// The browser's phone sheet and the session import keep their looks beside their components; they
+// answer to the same scale.
+const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports;
 
 type Rule = { selector: string; media: string; body: string };
 

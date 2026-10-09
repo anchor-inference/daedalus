@@ -285,6 +285,19 @@ func (f *FS) denied(p string) bool {
 	return false
 }
 
+// Refused reports a path no read may open, as written and as the filesystem resolves it: one on the
+// deny list or inside the daemon's own directories. The session reader (sessions.*) reads outside
+// the roots, from each program's fixed store, and holds every file it opens to this.
+func (f *FS) Refused(p string) bool {
+	if f.denied(p) || f.sealedPath(p) {
+		return true
+	}
+	if real, err := filepath.EvalSymlinks(p); err == nil && real != p {
+		return f.denied(real) || f.sealedPath(real)
+	}
+	return false
+}
+
 func (f *FS) sealedPath(p string) bool {
 	for _, dir := range f.sealed {
 		if under(dir, p) {

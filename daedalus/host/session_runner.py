@@ -2045,7 +2045,15 @@ class SessionManager:
     async def _compaction_rung(self, state: SessionState) -> tuple[Any, str]:
         return (await self._compaction_rungs(state))[0]
 
-    async def _compact_progressing(self, state: SessionState, history: list[Message], tail: list[Message], instructions: str, reason: str, *, own_task_ok: bool) -> str:
+    async def summarise_with_fallback(self, state: SessionState, history: Sequence[Message], instructions: str = "", *, progress: Callable[..., Awaitable[None]] | None = None) -> str:
+        """One summary of ``history`` from the first model of the compaction's ladder that answers.
+
+        The ladder is the configured summary model, then the session's own rungs; a model that is out
+        of quota, refuses or times out hands over to the next, and the operator hears once when the
+        chosen summary model was not the one that answered. Shared by a compaction and by an imported
+        session's summary of the turns it does not keep verbatim, so both fall back the same way.
+        Raises :class:`CompactionFailed` when no model could summarise.
+        """
         session_id = state.session.id
         language = self.config.answer_language if self.config.answer_language != "auto" else operator_language(history)
         observability = LLMObservabilityContext(tenant_id=TENANT, session_id=session_id, run_id=state.run_id, call_purpose="compaction", call_category="compaction")
@@ -2059,7 +2067,7 @@ class SessionManager:
         for index, (provider, model) in enumerate(rungs):
             try:
                 with self.providers.hold([provider]):
-                    summary = await self._summarise_history(provider, model, history, language=language, instructions=instructions, observability=observability, progress=lambda **f: self._compaction_progress(state, **f))
+                    summary = await self._summarise_history(provider, model, history, language=language, instructions=instructions, observability=observability, progress=progress)
                 break
             except LLMError as exc:
                 # Out of quota, refused, timed out or too small a window: the next model may well answer.
@@ -2077,6 +2085,11 @@ class SessionManager:
                 session_id, kind="compaction", outcome="fallback", model=f"{used[0]}/{used[1]}",
                 detail=problem or (failures[0] if failures else "the summary model was skipped"), setting=COMPACTION_MODEL,
             )
+        return summary
+
+    async def _compact_progressing(self, state: SessionState, history: list[Message], tail: list[Message], instructions: str, reason: str, *, own_task_ok: bool) -> str:
+        session_id = state.session.id
+        summary = await self.summarise_with_fallback(state, history, instructions, progress=lambda **f: self._compaction_progress(state, **f))
         await self._compaction_progress(state, stage="writing")
         # What the operator said is written by code, never by the summariser: rules do not decay.
         # Their room is a share of the window as well as a fixed bound: a summary that quoted every

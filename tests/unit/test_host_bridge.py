@@ -315,6 +315,23 @@ async def test_the_folder_picker_browses_the_host_outside_the_roots(service: Ter
         await bridge.browse("")
 
 
+async def test_other_programs_sessions_are_read_with_the_calls_the_daemon_knows(service: Terminals, daemon: FakePtyd) -> None:
+    bridge = HostBridge(lambda: service)
+    with pytest.raises(HostDaemonOutdated, match="other programs' sessions"):
+        await bridge.sessions_harnesses()
+    daemon.session_answers = {"sessions.harnesses": {"harnesses": [{"id": "claude", "found": True}]},
+                              "sessions.scan": {"path": "/home/someone/p", "here": [], "children": [], "folders": [], "truncated": False, "cursor": ""},
+                              "sessions.read": {"header": {"id": "s1"}, "turns": [], "next": 0, "done": True, "live": False, "masked": 0}}
+    assert (await bridge.sessions_harnesses())["harnesses"][0]["id"] == "claude"
+    assert daemon.calls[-1] == ("sessions.harnesses", {})
+    await bridge.sessions_scan("claude", "/home/someone/p", query="door", deep=True)
+    assert daemon.calls[-1] == ("sessions.scan", {"harness": "claude", "path": "/home/someone/p", "depth": 1, "query": "door", "limit": 200, "cursor": "", "deep": True})
+    await bridge.sessions_read("claude", "s1", start=12)
+    assert daemon.calls[-1] == ("sessions.read", {"harness": "claude", "id": "s1", "from": 12, "max_bytes": 512 << 10, "sidechains": True, "raw": False})
+    await bridge.sessions_read("claude", "s1", raw=True)
+    assert daemon.calls[-1][1]["raw"] is True and daemon.calls[-1][1]["from"] == 0
+
+
 async def test_browsing_without_a_host_bridge_is_a_connection_error() -> None:
     with pytest.raises(ConnectionError):
         await HostBridge(lambda: None).browse("")

@@ -1,0 +1,399 @@
+{
+ "scan": {
+  "path": "/home/someone/proj",
+  "here": [
+   {
+    "v": 1,
+    "harness": "claude",
+    "id": "c0ffee00-0000-4000-8000-000000000001",
+    "cwd": "/home/someone/proj",
+    "title": "fix the flaky test",
+    "started_at": "2026-03-01T10:00:00Z",
+    "updated_at": "2026-03-01T10:00:15Z",
+    "messages": 3,
+    "bytes": 5626,
+    "branch": "main",
+    "model": "claude-test-1",
+    "flags": {
+     "compacted": 1,
+     "sidechains": 1,
+     "live": false
+    },
+    "source": {
+     "path": "/home/someone/.claude/projects/-home-someone-proj/c0ffee00-0000-4000-8000-000000000001.jsonl"
+    }
+   }
+  ],
+  "children": [],
+  "folders": [],
+  "truncated": false,
+  "cursor": ""
+ },
+ "read": {
+  "header": {
+   "v": 1,
+   "harness": "claude",
+   "id": "c0ffee00-0000-4000-8000-000000000001",
+   "cwd": "/home/someone/proj",
+   "title": "fix the flaky test",
+   "started_at": "2026-03-01T10:00:00Z",
+   "updated_at": "2026-03-01T10:00:15Z",
+   "messages": 3,
+   "bytes": 5626,
+   "branch": "main",
+   "model": "claude-test-1",
+   "flags": {
+    "compacted": 1,
+    "sidechains": 1,
+    "live": false
+   },
+   "source": {
+    "path": "/home/someone/.claude/projects/-home-someone-proj/c0ffee00-0000-4000-8000-000000000001.jsonl"
+   }
+  },
+  "turns": [
+   {
+    "seq": 0,
+    "ext_id": "u1",
+    "parent": "",
+    "role": "user",
+    "at": "2026-03-01T10:00:00Z",
+    "sidechain": "",
+    "model": "",
+    "parts": [
+     {
+      "kind": "text",
+      "text": "fix the flaky test"
+     }
+    ]
+   },
+   {
+    "seq": 1,
+    "ext_id": "a1",
+    "parent": "u1",
+    "role": "assistant",
+    "at": "2026-03-01T10:00:01Z",
+    "sidechain": "",
+    "model": "claude-test-1",
+    "parts": [
+     {
+      "kind": "thinking",
+      "text": "Look first.",
+      "encrypted": false
+     },
+     {
+      "kind": "tool_call",
+      "call_id": "toolu_bash",
+      "name": "Bash",
+      "input": {
+       "command": "pytest -q tests/test_door.py",
+       "timeout": 120000
+      },
+      "tool_kind": "native"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "cache_read": 2
+    }
+   },
+   {
+    "seq": 2,
+    "ext_id": "r1",
+    "parent": "a1b",
+    "role": "user",
+    "at": "2026-03-01T10:00:02Z",
+    "sidechain": "",
+    "model": "",
+    "parts": [
+     {
+      "kind": "tool_result",
+      "call_id": "toolu_bash",
+      "output": "1 failed; GITHUB_TOKEN=•••",
+      "is_error": true,
+      "truncated": false,
+      "images": []
+     }
+    ]
+   },
+   {
+    "seq": 3,
+    "ext_id": "a2",
+    "parent": "r1",
+    "role": "assistant",
+    "at": "2026-03-01T10:00:03Z",
+    "sidechain": "",
+    "model": "claude-test-1",
+    "parts": [
+     {
+      "kind": "tool_call",
+      "call_id": "toolu_todo",
+      "name": "TodoWrite",
+      "input": {
+       "todos": [
+        {
+         "content": "fix",
+         "status": "in_progress"
+        }
+       ]
+      },
+      "tool_kind": "native"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "cache_read": 2
+    }
+   },
+   {
+    "seq": 4,
+    "ext_id": "r2",
+    "parent": "a2",
+    "role": "user",
+    "at": "2026-03-01T10:00:04Z",
+    "sidechain": "",
+    "model": "",
+    "parts": [
+     {
+      "kind": "tool_result",
+      "call_id": "toolu_todo",
+      "output": "ok",
+      "is_error": false,
+      "truncated": false,
+      "images": []
+     }
+    ]
+   },
+   {
+    "seq": 5,
+    "ext_id": "a3",
+    "parent": "r2",
+    "role": "assistant",
+    "at": "2026-03-01T10:00:05Z",
+    "sidechain": "",
+    "model": "claude-test-1",
+    "parts": [
+     {
+      "kind": "tool_call",
+      "call_id": "toolu_task",
+      "name": "Task",
+      "input": {
+       "description": "find callers",
+       "prompt": "look"
+      },
+      "tool_kind": "native"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "cache_read": 2
+    }
+   },
+   {
+    "seq": 6,
+    "ext_id": "r3",
+    "parent": "a3",
+    "role": "user",
+    "at": "2026-03-01T10:00:09Z",
+    "sidechain": "",
+    "model": "",
+    "parts": [
+     {
+      "kind": "tool_result",
+      "call_id": "toolu_task",
+      "output": "two callers",
+      "is_error": false,
+      "truncated": false,
+      "images": []
+     }
+    ]
+   },
+   {
+    "seq": 7,
+    "ext_id": "x1",
+    "parent": "",
+    "role": "user",
+    "at": "2026-03-01T10:00:06Z",
+    "sidechain": "d1",
+    "model": "",
+    "parts": [
+     {
+      "kind": "meta",
+      "type": "sidechain",
+      "data": {
+       "agent_type": "Explore",
+       "call_id": "toolu_task",
+       "description": "find callers",
+       "id": "d1",
+       "model": ""
+      }
+     },
+     {
+      "kind": "text",
+      "text": "look"
+     }
+    ]
+   },
+   {
+    "seq": 8,
+    "ext_id": "x2",
+    "parent": "x1",
+    "role": "assistant",
+    "at": "2026-03-01T10:00:07Z",
+    "sidechain": "d1",
+    "model": "claude-test-1",
+    "parts": [
+     {
+      "kind": "text",
+      "text": "two callers"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "cache_read": 2
+    }
+   },
+   {
+    "seq": 9,
+    "ext_id": "a4",
+    "parent": "r3",
+    "role": "assistant",
+    "at": "2026-03-01T10:00:10Z",
+    "sidechain": "",
+    "model": "claude-test-1",
+    "parts": [
+     {
+      "kind": "tool_call",
+      "call_id": "toolu_mcp",
+      "name": "mcp__notes__append",
+      "input": {
+       "text": "door"
+      },
+      "tool_kind": "mcp",
+      "server": "notes"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "cache_read": 2
+    }
+   },
+   {
+    "seq": 10,
+    "ext_id": "r4",
+    "parent": "a4",
+    "role": "user",
+    "at": "2026-03-01T10:00:11Z",
+    "sidechain": "",
+    "model": "",
+    "parts": [
+     {
+      "kind": "tool_result",
+      "call_id": "toolu_mcp",
+      "output": "appended",
+      "is_error": false,
+      "truncated": false,
+      "images": []
+     }
+    ]
+   },
+   {
+    "seq": 11,
+    "ext_id": "cb",
+    "parent": "r4",
+    "role": "system_note",
+    "at": "2026-03-01T10:00:12Z",
+    "sidechain": "",
+    "model": "",
+    "parts": [
+     {
+      "kind": "compaction",
+      "summary": "Summary: the door test was fixed",
+      "covers": [
+       0,
+       10
+      ],
+      "auto": true
+     }
+    ]
+   },
+   {
+    "seq": 12,
+    "ext_id": "u2",
+    "parent": "cs",
+    "role": "user",
+    "at": "2026-03-01T10:00:13Z",
+    "sidechain": "",
+    "model": "",
+    "parts": [
+     {
+      "kind": "text",
+      "text": "and this picture?"
+     },
+     {
+      "kind": "image",
+      "mime": "image/png",
+      "data_b64": "iVBORw0KGgo=",
+      "bytes": 9
+     }
+    ]
+   },
+   {
+    "seq": 13,
+    "ext_id": "a5",
+    "parent": "u2",
+    "role": "assistant",
+    "at": "2026-03-01T10:00:14Z",
+    "sidechain": "",
+    "model": "claude-test-1",
+    "parts": [
+     {
+      "kind": "text",
+      "text": "A door."
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "cache_read": 2
+    }
+   },
+   {
+    "seq": 14,
+    "ext_id": "a6",
+    "parent": "a5",
+    "role": "assistant",
+    "at": "2026-03-01T10:00:15Z",
+    "sidechain": "",
+    "model": "claude-test-1",
+    "parts": [
+     {
+      "kind": "tool_call",
+      "call_id": "toolu_dangling",
+      "name": "Read",
+      "input": {
+       "file_path": "/home/someone/proj/door.py"
+      },
+      "tool_kind": "native"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "cache_read": 2
+    }
+   }
+  ],
+  "next": 15,
+  "done": true,
+  "live": false,
+  "masked": 1,
+  "offset": 5046,
+  "total": 15
+ }
+}

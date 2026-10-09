@@ -2004,7 +2004,80 @@ def run() -> int:
     harnesses = run_harnesses()
     main = run_main()
     browser = run_browser()
-    return run_focus() or notifications or phone or staff or harnesses or main or browser
+    imports = run_imports()
+    return run_focus() or notifications or phone or staff or harnesses or main or browser or imports
+
+
+def run_imports() -> int:
+    """Importing a session from another program (``ONLY=imports``): the explorer on a folder that is
+    already a project, a large session, the import's stages, the imported chat, and the phone's path."""
+    from import_stub import IMPORTED_ID, ImportStub, imported_row, imported_session
+
+    imports = ImportStub()
+
+    def route(r) -> None:  # type: ignore[no-untyped-def]
+        rel = urlsplit(r.request.url).path
+        rel = rel[rel.index("/api/"):]
+        if imports.fulfil(r):
+            return None
+        if rel == f"/api/sessions/{IMPORTED_ID}" and r.request.method == "GET":
+            return respond(r, imported_session(detail(S1)))
+        if rel == "/api/sessions" and r.request.method == "GET":
+            answer = listing()
+            answer["sessions"] = [imported_row(answer["sessions"][0]), *answer["sessions"]]
+            return respond(r, answer)
+        return stub(r)
+
+    def explorer(page: Page, session: str = "") -> None:
+        page.evaluate("window.dispatchEvent(new CustomEvent('daedalus:import-session', { detail: {} }))")
+        page.wait_for_selector(".sheet.imp-sheet .fb-place", timeout=10000)
+        page.locator(".fb-place[data-place$='/smart-home']").click()
+        page.wait_for_selector(".imp-pv[data-preview]", timeout=10000)
+        if session:
+            page.locator(f".imp-srow[data-session^='{session}']").click()
+            page.wait_for_selector(f".imp-pv[data-preview^='{session}']", timeout=10000)
+
+    def progress(page: Page) -> None:
+        explorer(page)
+        imports.hold = 3
+        page.locator(".imp-go").click()
+        page.wait_for_selector(".imp-pstep.now[data-stage='write']", timeout=10000)
+
+    def phone_session(page: Page) -> None:
+        page.evaluate("window.dispatchEvent(new CustomEvent('daedalus:import-session', { detail: {} }))")
+        page.locator(".imp-ph-row[data-harness='claude']").click()
+        page.locator(".imp-ph-chips button[data-place$='/smart-home']").click()
+        page.locator(".imp-srow").first.click()
+        page.wait_for_selector(".imp-pv[data-preview]", timeout=10000)
+
+    def phone_folder(page: Page) -> None:
+        page.evaluate("window.dispatchEvent(new CustomEvent('daedalus:import-session', { detail: {} }))")
+        page.locator(".imp-ph-row[data-harness='claude']").click()
+        page.locator(".imp-ph-chips button[data-place$='/smart-home']").click()
+        page.wait_for_selector(".imp-ph-sessions .imp-srow", timeout=10000)
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM)
+        desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
+        desk.add_init_script("try { localStorage.setItem('daedalus.session.panel', 'details'); } catch (e) {}")
+        page = desk.new_page()
+        page.route("**/api/**", route)
+        shot(page, "import-explorer", "agents", wait=".rail", before=explorer, settle=600)
+        shot(page, "import-large", "agents", wait=".rail", before=lambda pg: explorer(pg, "7be05d41"), settle=600)
+        shot(page, "import-progress", "agents", wait=".rail", before=progress, settle=400)
+        imports.hold = None
+        shot(page, "import-session", f"agents/{IMPORTED_ID}", wait=".imp-banner", settle=900)
+        desk.close()
+        phone = browser.new_context(viewport=PHONE, device_scale_factor=2, is_mobile=True, has_touch=True, color_scheme="dark")
+        page = phone.new_page()
+        page.route("**/api/**", route)
+        shot(page, "phone-import-folder", "agents", wait=".ph-page", before=phone_folder, settle=600)
+        shot(page, "phone-import-session", "agents", wait=".ph-page", before=phone_session, settle=600)
+        shot(page, "phone-import-chat", f"agents/{IMPORTED_ID}", wait=".imp-banner", settle=900)
+        phone.close()
+        browser.close()
+    return UNHANDLED.report()
 
 
 def run_browser() -> int:
@@ -2193,4 +2266,4 @@ if __name__ == "__main__":
     # Before anything is driven: is the address the built app, or whatever else holds the port?
     expect_app(BASE)
     only = os.environ.get("ONLY")
-    sys.exit(run_modes() if only == "modes" else run_browser() if only == "browser" else run_harnesses() if only == "harnesses" else run_staff() if only == "staff" else run_details() if only == "details" else run_terminals() if only == "terminals" else run_focus() if only == "focus" else run_phone() if only == "phone" else run_main() if only == "main" else run_notifications() if only == "notifications" else run_composer() if only == "composer" else run_voice() if only == "voice" else agents_shots() if only == "agents" else run_workspace() if only == "workspace" else run())
+    sys.exit(run_imports() if only == "imports" else run_modes() if only == "modes" else run_browser() if only == "browser" else run_harnesses() if only == "harnesses" else run_staff() if only == "staff" else run_details() if only == "details" else run_terminals() if only == "terminals" else run_focus() if only == "focus" else run_phone() if only == "phone" else run_main() if only == "main" else run_notifications() if only == "notifications" else run_composer() if only == "composer" else run_voice() if only == "voice" else agents_shots() if only == "agents" else run_workspace() if only == "workspace" else run())

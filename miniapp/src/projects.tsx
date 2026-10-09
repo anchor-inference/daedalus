@@ -25,6 +25,7 @@ import { ProjectResources, resourceProfileKey } from "./project/ProjectResources
 import { RevealButton } from "./reveal";
 import { FolderBrowser, type FolderChoice } from "./project/FolderBrowser";
 import { openNewProject } from "./project/NewProject";
+import { openImport } from "./imports/ImportExplorer";
 
 const PICKED = "daedalus.project";
 
@@ -265,6 +266,7 @@ export function ProjectSwitcher({ projects, archived = [], current, onPick, onCl
       )}
       <div className="sheet-foot">
         <button className="btn ghost" onClick={onClose}>{t("common.close")}</button>
+        <button className="btn" onClick={() => { onClose(); openImport(); }} data-import-entry><Icon name="download" size={15} /> {t("imp.entry")}</button>
         <button className="btn primary" onClick={add}><Icon name="plus" size={15} /> {t("shell.projects.add")}</button>
       </div>
     </Sheet>

@@ -20,6 +20,8 @@ vi.mock("../projects", () => ({
 vi.mock("../events", () => ({ useStreamUp: () => true }));
 const newProject = vi.hoisted(() => ({ open: vi.fn() }));
 vi.mock("../project/NewProject", () => ({ openNewProject: newProject.open }));
+const importer = vi.hoisted(() => ({ open: vi.fn() }));
+vi.mock("../imports/ImportExplorer", () => ({ openImport: importer.open }));
 const dialogs = vi.hoisted(() => ({ confirm: vi.fn(async () => false) }));
 vi.mock("../ui/dialogs", async (original) => ({ ...(await original<typeof import("../ui/dialogs")>()), confirmDialog: dialogs.confirm }));
 
@@ -134,9 +136,16 @@ describe("the sidebar", () => {
     expect(host.querySelector(".sb-new")?.textContent).toContain("New chat");
     await act(async () => host.querySelector<HTMLButtonElement>(".sb-pbtns .project-chip")!.click());
     expect(onProjects).toHaveBeenCalled();
+    // New project is a menu of the two ways a project starts: the one new-project dialog the app
+    // mounts, in the mode on screen, or a session another program left on the machine.
     await act(async () => host.querySelector<HTMLButtonElement>(".sb-newproject")!.click());
-    // The column opens the one new-project dialog the app mounts, in the mode on screen.
+    const items = () => Array.from(document.querySelectorAll<HTMLButtonElement>(".menu [role=menuitem]"));
+    expect(items().map((b) => b.textContent)).toEqual(["New project", "Session from another program…"]);
+    await act(async () => items()[0].click());
     expect(newProject.open).toHaveBeenCalledWith();
+    await act(async () => host.querySelector<HTMLButtonElement>(".sb-newproject")!.click());
+    await act(async () => items()[1].click());
+    expect(importer.open).toHaveBeenCalledWith();
   });
 
   it("is driven from the keyboard: slash, arrows, F2 and Delete", async () => {

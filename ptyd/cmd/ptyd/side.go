@@ -8,6 +8,7 @@ import (
 	"github.com/ascorblack/daedalus/ptyd/internal/hooks"
 	"github.com/ascorblack/daedalus/ptyd/internal/rpc"
 	"github.com/ascorblack/daedalus/ptyd/internal/sidechan"
+	"github.com/ascorblack/daedalus/ptyd/internal/sidechan/sessions"
 	"github.com/ascorblack/daedalus/ptyd/proto/events"
 )
 
@@ -38,6 +39,7 @@ func startSide(cfg *config.Config, evlog *events.Log, environ []string, log *slo
 		FS:       fsys,
 		Dialer:   sidechan.NewDialer(launches),
 		Launches: launches,
+		Sessions: sessions.NewService(sessions.NewEnv(cfg.Home, fsys.Refused), sessions.Parsers()),
 		Listen:   ln.Addr().String(),
 		StateDir: cfg.StateDir,
 	}

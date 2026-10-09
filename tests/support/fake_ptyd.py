@@ -113,6 +113,8 @@ class FakePtyd:
         """Every folder ``fs.mkdir`` was asked for."""
         self.browse_supported = True
         """False answers ``fs.browse`` as a daemon older than the call does: method not found."""
+        self.session_answers: dict[str, Any] = {}
+        """``sessions.*`` method → its answer; a method not here is unknown, as to a daemon older than the calls."""
         self.launches: dict[str, dict[str, Any]] = {}
         self.pending_replies: dict[str, str] = {}
         """reply_id → launch_id of a held post that waits."""
@@ -462,6 +464,8 @@ class FakePtyd:
             return write_inbox(self._under_root, params)
         if method == "fs.browse" and self.browse_supported:
             return browse_folders(params, home=self.home, sealed=[str(self.run_dir)])
+        if method in self.session_answers:
+            return self.session_answers[method]
         if method == "fs.stat":
             real = self._under_root(params["path"])
             if not real.exists():
@@ -594,8 +598,10 @@ def write_inbox(real_root_check: Any, params: dict[str, Any]) -> dict[str, Any]:
 
 
 BROWSE_DENY = (
-    "**/.claude/.credentials.json", "**/.codex/auth.json", "**/.grok/auth.json", "**/.cursor/**",
-    "**/.local/share/opencode/auth.json", "**/.pi/agent/auth.json", "**/.ssh/**", "**/.gnupg/**",
+    "**/.claude/.credentials.json", "**/.codex/auth.json", "**/.codex/accounts.json", "**/.codex/accounts/**",
+    "**/.grok/auth.json", "**/.gemini/oauth_creds.json", "**/.gemini/google_accounts.json", "**/.qwen/oauth_creds.json",
+    "**/.cursor/**", "**/.local/share/opencode/auth.json", "**/opencode/auth.json", "**/.pi/agent/auth.json",
+    "**/.ssh/**", "**/.gnupg/**",
     "**/.config/gh/hosts.yml", "**/.netrc", "**/.git-credentials", "**/.docker/config.json", "**/.aws/**",
     "**/.kube/**", "**/.config/gcloud/**", "**/.azure/**", "**/.npmrc", "**/.pypirc",
 )

@@ -29,6 +29,8 @@ from urllib.parse import unquote, unquote_plus
 
 from calendar_stub import CalendarStub
 from folder_stub import DEFAULT as FOLDERS
+from import_stub import DEFAULT as IMPORTS
+from import_stub import ImportStub
 
 # Outside services_port_range (8100-8119), the range this product hands to an agent's own preview
 # servers: a harness that serves its build into that range competes with the installation running
@@ -452,12 +454,12 @@ def setting_notice_frame(kind: str, outcome: str, detail: str, page: str, key: s
     return f"event: setting_notice\ndata: {json.dumps(payload)}\n\n"
 
 
-def answer_shared(method: str, path: str) -> tuple[int, str, str | bytes] | None:
+def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str, str | bytes] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 
     ``path`` may be a whole URL; the query string and everything before ``/api/`` are ignored. A
     harness asks this where it used to look ``GATES`` up, after its own routes, so what it invented
-    still wins.
+    still wins. ``body`` is the parsed JSON of a write, for the few routes that answer by what was sent.
     """
     query = path.split("?", 1)[1] if "?" in path else ""
     path = path.split("?", 1)[0]
@@ -488,6 +490,12 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str | bytes] | None
         answered = FOLDERS.answer("GET", path, query, None)
         if answered is not None:
             return answered[0], "application/json", json.dumps(answered[1])
+    if path.startswith("/api/imports") or (path.startswith("/api/sessions/") and "/import/" in path):
+        # Bringing in a session from another agent program, over invented transcripts; a check that
+        # drives it installs an ImportStub of its own to fail the host and read the writes back.
+        answered = IMPORTS.answer(method.upper(), path, query, body)
+        if answered is not None:
+            return answered
     parts = path.split("/")
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "providers" and parts[4] == "limits":
         return 200, "application/json", json.dumps({"provider_id": parts[3], "observations": []})
@@ -595,7 +603,12 @@ def answer_shared(method: str, path: str) -> tuple[int, str, str | bytes] | None
 
 def fulfil_shared(route) -> bool:  # type: ignore[no-untyped-def]
     """:func:`answer_shared` for a Playwright route: ``True`` when it answered."""
-    shared = answer_shared(route.request.method, route.request.url)
+    request = route.request
+    try:
+        body = request.post_data_json if request.method in ("POST", "PUT") and request.post_data else None
+    except (ValueError, UnicodeDecodeError):
+        body = None  # an upload or a form: no route here answers by what such a body says
+    shared = answer_shared(request.method, request.url, body)
     if shared is None:
         return False
     status, content_type, body = shared
@@ -610,9 +623,12 @@ def serve_shared_post(handler, unhandled: Unhandled) -> None:  # type: ignore[no
     recorded like an unknown read and answered 404.
     """
     length = int(handler.headers.get("Content-Length") or 0)
-    if length:
-        handler.rfile.read(length)
-    shared = answer_shared("POST", handler.path)
+    raw = handler.rfile.read(length) if length else b""
+    try:
+        sent = json.loads(raw) if raw else None
+    except ValueError:
+        sent = None
+    shared = answer_shared("POST", handler.path, sent)
     if shared is None:
         unhandled.record(handler.path.split("?", 1)[0])
         shared = (404, "application/json", '{"detail": "Not Found"}')
@@ -708,7 +724,7 @@ def expect_app(base: str) -> None:
 
 
 
-__all__ = ["CALENDAR", "CalendarStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tool_groups", "terminal_load"]
+__all__ = ["CALENDAR", "CalendarStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tool_groups", "terminal_load"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent

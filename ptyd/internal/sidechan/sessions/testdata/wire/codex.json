@@ -1,0 +1,234 @@
+{
+ "scan": {
+  "path": "/home/someone/proj",
+  "here": [
+   {
+    "v": 1,
+    "harness": "codex",
+    "id": "019e0000-0000-7000-8000-000000000042",
+    "cwd": "/home/someone/proj",
+    "title": "rename the topic",
+    "started_at": "2026-03-01T10:00:00Z",
+    "updated_at": "2026-03-01T10:00:10Z",
+    "messages": 3,
+    "bytes": 2402,
+    "branch": "main",
+    "model": "gpt-test",
+    "flags": {
+     "compacted": 1,
+     "sidechains": 0,
+     "live": false
+    },
+    "source": {
+     "path": "/home/someone/.codex/sessions/2026/03/01/rollout-2026-03-01T10-00-00-019e0000-0000-7000-8000-000000000042.jsonl"
+    }
+   }
+  ],
+  "children": [],
+  "folders": [],
+  "truncated": false,
+  "cursor": ""
+ },
+ "read": {
+  "header": {
+   "v": 1,
+   "harness": "codex",
+   "id": "019e0000-0000-7000-8000-000000000042",
+   "cwd": "/home/someone/proj",
+   "title": "rename the topic",
+   "started_at": "2026-03-01T10:00:00Z",
+   "updated_at": "2026-03-01T10:00:10Z",
+   "messages": 3,
+   "bytes": 2402,
+   "branch": "main",
+   "model": "gpt-test",
+   "flags": {
+    "compacted": 1,
+    "sidechains": 0,
+    "live": false
+   },
+   "source": {
+    "path": "/home/someone/.codex/sessions/2026/03/01/rollout-2026-03-01T10-00-00-019e0000-0000-7000-8000-000000000042.jsonl"
+   }
+  },
+  "turns": [
+   {
+    "seq": 0,
+    "ext_id": "line:523",
+    "parent": "",
+    "role": "system_note",
+    "at": "2026-03-01T10:00:01Z",
+    "sidechain": "",
+    "model": "gpt-test",
+    "parts": [
+     {
+      "kind": "meta",
+      "type": "cli",
+      "data": {
+       "text": "\u003cenvironment_context\u003e\n  \u003ccwd\u003e/home/someone/proj\u003c/cwd\u003e\n\u003c/environment_context\u003e"
+      }
+     }
+    ]
+   },
+   {
+    "seq": 1,
+    "ext_id": "line:788",
+    "parent": "",
+    "role": "user",
+    "at": "2026-03-01T10:00:02Z",
+    "sidechain": "",
+    "model": "gpt-test",
+    "parts": [
+     {
+      "kind": "text",
+      "text": "rename the topic"
+     }
+    ]
+   },
+   {
+    "seq": 2,
+    "ext_id": "line:951",
+    "parent": "",
+    "role": "assistant",
+    "at": "2026-03-01T10:00:03Z",
+    "sidechain": "",
+    "model": "gpt-test",
+    "parts": [
+     {
+      "kind": "thinking",
+      "text": "",
+      "encrypted": true
+     },
+     {
+      "kind": "tool_call",
+      "call_id": "call_1",
+      "name": "shell",
+      "input": {
+       "command": [
+        "bash",
+        "-lc",
+        "grep -rn topic ."
+       ],
+       "workdir": "/home/someone/proj"
+      },
+      "tool_kind": "native"
+     }
+    ]
+   },
+   {
+    "seq": 3,
+    "ext_id": "line:1314",
+    "parent": "",
+    "role": "user",
+    "at": "2026-03-01T10:00:05Z",
+    "sidechain": "",
+    "model": "gpt-test",
+    "parts": [
+     {
+      "kind": "tool_result",
+      "call_id": "call_1",
+      "output": "a.py:1:topic",
+      "is_error": false,
+      "truncated": false,
+      "images": []
+     }
+    ]
+   },
+   {
+    "seq": 4,
+    "ext_id": "line:1532",
+    "parent": "",
+    "role": "assistant",
+    "at": "2026-03-01T10:00:06Z",
+    "sidechain": "",
+    "model": "gpt-test",
+    "parts": [
+     {
+      "kind": "tool_call",
+      "call_id": "call_2",
+      "name": "apply_patch",
+      "input": {
+       "input": "*** Begin Patch\n*** Update File: a.py\n@@\n-topic\n+subject\n*** End Patch"
+      },
+      "tool_kind": "native"
+     }
+    ]
+   },
+   {
+    "seq": 5,
+    "ext_id": "line:1756",
+    "parent": "",
+    "role": "user",
+    "at": "2026-03-01T10:00:07Z",
+    "sidechain": "",
+    "model": "gpt-test",
+    "parts": [
+     {
+      "kind": "tool_result",
+      "call_id": "call_2",
+      "output": "Success. Updated a.py",
+      "is_error": false,
+      "truncated": false,
+      "images": []
+     }
+    ]
+   },
+   {
+    "seq": 6,
+    "ext_id": "line:1913",
+    "parent": "",
+    "role": "system_note",
+    "at": "2026-03-01T10:00:08Z",
+    "sidechain": "",
+    "model": "gpt-test",
+    "parts": [
+     {
+      "kind": "compaction",
+      "summary": "renamed topic to subject",
+      "covers": [
+       0,
+       5
+      ],
+      "auto": true
+     }
+    ]
+   },
+   {
+    "seq": 7,
+    "ext_id": "line:2091",
+    "parent": "",
+    "role": "user",
+    "at": "2026-03-01T10:00:09Z",
+    "sidechain": "",
+    "model": "gpt-test",
+    "parts": [
+     {
+      "kind": "text",
+      "text": "thanks"
+     }
+    ]
+   },
+   {
+    "seq": 8,
+    "ext_id": "line:2244",
+    "parent": "",
+    "role": "assistant",
+    "at": "2026-03-01T10:00:10Z",
+    "sidechain": "",
+    "model": "gpt-test",
+    "parts": [
+     {
+      "kind": "text",
+      "text": "Done."
+     }
+    ]
+   }
+  ],
+  "next": 9,
+  "done": true,
+  "live": false,
+  "masked": 0,
+  "offset": 2402,
+  "total": 9
+ }
+}
