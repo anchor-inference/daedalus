@@ -125,8 +125,9 @@ search the transcript.
 """
 
 HISTORY_HEADLINE = """- End every final reply to the operator (not tool narration) with one line in this exact form, \
-on its own line: ⟦ task | status: outcome; next: action | anchors: exact identifiers, paths, names ⟧ \
-It is hidden from the operator and becomes the label under which this turn is found later. \
+on a separate line of its own after a line break, never appended to the last sentence: \
+⟦ task | status: outcome; next: action | anchors: exact identifiers, paths, names ⟧ \
+Nothing may follow it. It is hidden from the operator and becomes the label under which this turn is found later. \
 Distinguish completed / attempted / failed / blocked / decided; never write vague phrases such as \
 "made progress"; anchors are the terms someone would search for.
 """
@@ -672,15 +673,24 @@ def concierge_sections(*, answer_language: str, agents: str = "") -> tuple[str, 
 HEADLINE_RE = re.compile(r"(?:^|\n)\s*⟦[^⟦⟧]{3,2000}⟧\s*$", re.DOTALL)
 """The retrieval headline the agent appends to a final reply; hidden from the operator, kept in the transcript."""
 
+INLINE_HEADLINE_RE = re.compile(r"[ \t]*⟦[^⟦⟧\n]{0,2000}\|[^⟦⟧\n]{0,2000}\|[^⟦⟧\n]{0,2000}⟧\s*$")
+"""The same headline glued to the end of the last sentence, which models do despite being told not to.
+
+It is accepted only as the very last thing in the reply and only with the format's two ``|``
+separators, so a sentence that quotes ⟦…⟧ mid-text, or ends on a bracketed word, is left alone.
+"""
+
 
 def split_headline(text: str) -> tuple[str, str]:
     """Return ``(text without the trailing headline, headline)``; the headline is empty when absent.
 
-    The headline must stand on its own line at the very end, so a sentence that merely quotes the
-    format is left alone. A headline still being streamed (an opening ⟦ on its own line with no
-    closing ⟧ after it) is cut too, so a live draft never shows half of one.
+    The headline must be the very last thing in the reply, so a sentence that merely quotes the
+    format is left alone. On its own line any ⟦…⟧ counts; appended to the last sentence it must
+    carry the format's ``|`` separators, because the operator saw it leak into answers that way.
+    A headline still being streamed (an opening ⟦ with no closing ⟧ and no line break after it)
+    is cut too, so a live draft never shows half of one.
     """
-    match = HEADLINE_RE.search(text)
+    match = HEADLINE_RE.search(text) or INLINE_HEADLINE_RE.search(text)
     if match is not None:
         return text[: match.start()].rstrip(), match.group(0).strip()
     open_at = text.rfind("⟦")
@@ -688,6 +698,10 @@ def split_headline(text: str) -> tuple[str, str]:
         line_start = text.rfind("\n", 0, open_at) + 1
         if not text[line_start:open_at].strip():
             return text[:line_start].rstrip(), ""
+        if "\n" not in text[open_at:]:
+            # Glued to the last sentence and still arriving. A stray ⟦ in a finished reply's last
+            # line would be cut as well; that is the price of never flashing half a headline.
+            return text[:open_at].rstrip(), ""
     return text, ""
 
 

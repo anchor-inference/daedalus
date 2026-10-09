@@ -231,3 +231,22 @@ def test_headline_split() -> None:
     body, head = split_headline("All done.\n\n⟦ deploy | status: completed; next: none | anchors: x ⟧")
     assert body == "All done." and head.startswith("⟦ deploy")
     assert split_headline("no headline here") == ("no headline here", "")
+
+
+def test_headline_glued_to_the_last_sentence_is_split() -> None:
+    """Models append the headline to the last paragraph despite the prompt; the operator saw it leak."""
+    from daedalus.host.prompts import split_headline
+
+    glued = "не пересылайте его посторонним. ⟦ проверка записи | status: проверено; next: нет | anchors: a.txt ⟧"
+    body, head = split_headline(glued)
+    assert body == "не пересылайте его посторонним." and head.startswith("⟦ проверка записи") and head.endswith("⟧")
+    assert split_headline(glued + "\n")[0] == "не пересылайте его посторонним."
+    # Mid-text, or a bracketed word without the format's separators, is the reader's text.
+    quoted = "The line looks like ⟦ task | status: x | anchors: y ⟧ and is hidden from you."
+    assert split_headline(quoted) == (quoted, "")
+    assert split_headline("Press ⟦Enter⟧") == ("Press ⟦Enter⟧", "")
+    # Half streamed, inline and on its own line.
+    assert split_headline("The answer. ⟦ проверка | status: пров") == ("The answer.", "")
+    assert split_headline("The answer.\n⟦ проверка | sta") == ("The answer.", "")
+    # An unclosed bracket followed by more lines is not a headline being written.
+    assert split_headline("a ⟦ b\nmore text") == ("a ⟦ b\nmore text", "")

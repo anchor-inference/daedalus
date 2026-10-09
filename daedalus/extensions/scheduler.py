@@ -33,6 +33,7 @@ from daedalus.config import NO_MODEL_MESSAGE, NoModelConfigured
 from daedalus.extensions.notifications import Category, Draft, Level, Tone
 from daedalus.extensions.recurring import Recurring
 from daedalus.extensions.schedule_proposals import ScheduleProposals
+from daedalus.host.prompts import split_headline
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -594,7 +595,8 @@ class Scheduler:
         messages = await manager.sessions.list_messages(session_id, "daedalus", limit=10_000)
         for message in reversed(messages):
             if message.role is MessageRole.assistant:
-                text = "".join(b.text for b in message.content_blocks if isinstance(b, TextBlock)).strip()
+                # The summary is posted to the operator, so the retrieval headline is not part of it.
+                text = split_headline("".join(b.text for b in message.content_blocks if isinstance(b, TextBlock)).strip())[0]
                 if text:
                     return text[-8000:]
         return ""
