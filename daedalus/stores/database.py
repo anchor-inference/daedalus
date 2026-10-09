@@ -2051,6 +2051,23 @@ def _chat_or_project(db: Database) -> DataMigration:
 
 MIGRATIONS.append(_chat_or_project)
 
+# Sessions brought in from other agent programs: which session of which program each Daedalus session
+# continues, so a second import of it offers to pull in what is new instead of making a duplicate, and
+# where in the program's file the last import stopped. Deleting the Daedalus session forgets the link.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS session_imports (
+    harness TEXT NOT NULL,
+    ext_id TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    cwd TEXT NOT NULL,
+    cursor TEXT NOT NULL DEFAULT '',
+    imported_at TEXT NOT NULL,
+    refreshed_at TEXT,
+    PRIMARY KEY (harness, ext_id)
+);
+CREATE INDEX IF NOT EXISTS session_imports_session ON session_imports(session_id);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

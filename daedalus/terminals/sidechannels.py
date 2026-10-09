@@ -283,6 +283,36 @@ class SideChannels:
         result: dict[str, Any] = await self._side_call(env, "fs.browse", params, what=f"browsing {path or '~'}")
         return result
 
+    # -- other programs' sessions ---------------------------------------------------------------
+
+    async def sessions_harnesses(self, env: str) -> dict[str, Any]:
+        """``{harnesses: [{id, name, found, root, sessions, folders, version}]}``: which agent programs
+        keep sessions on this machine. Only their roots are looked at, so it is cheap."""
+        result: dict[str, Any] = await self._side_call(env, "sessions.harnesses", {}, what="looking for other programs' sessions")
+        return result
+
+    async def sessions_scan(self, env: str, *, harness: str, path: str = "", depth: int = 1, query: str = "", deep: bool = False,
+                            limit: int = 200, cursor: str = "") -> dict[str, Any]:
+        """One program's sessions under one folder: ``{path, here: [header], children: [{name, path,
+        sessions, latest}], folders, truncated, cursor}``; ``folders`` (every folder that has sessions)
+        only when ``path`` is empty. The daemon reads the program's own files and indexes, never
+        anything else, and stops after its time budget with ``truncated``."""
+        params: dict[str, Any] = {"harness": harness, "path": path, "depth": depth, "query": query, "limit": limit, "cursor": cursor}
+        if deep:
+            params["deep"] = True
+        result: dict[str, Any] = await self._side_call(env, "sessions.scan", params, what=f"listing {harness} sessions in {path or 'every folder'}", timeout=20.0)
+        return result
+
+    async def sessions_read(self, env: str, *, harness: str, session: str, start: Any = 0, max_bytes: int = 512 << 10,
+                            sidechains: bool = True, raw: bool = False) -> dict[str, Any]:
+        """One page of a session, already normalised: ``{header, turns, next, done, live, masked}``,
+        where ``next`` is passed back as ``from`` for the next page. ``raw`` asks for the file's own
+        bytes instead (``{data_b64, next, done, size}``), for the copy an import keeps. Secrets of the
+        shapes the daemon knows are masked before they cross the socket; ``masked`` counts them."""
+        params: dict[str, Any] = {"harness": harness, "id": session, "from": start, "max_bytes": max_bytes, "sidechains": sidechains, "raw": raw}
+        result: dict[str, Any] = await self._side_call(env, "sessions.read", params, what=f"reading the {harness} session {session}", timeout=60.0)
+        return result
+
     async def fs_read(self, env: str, path: str, *, offset: int = 0, max_bytes: int = 64 << 10) -> FileChunk:
         """Up to ``max_bytes`` at ``offset``. One reply carries at most about 640 KiB; ``eof`` says
         whether the end was reached, and a longer read continues at ``next_offset``."""
