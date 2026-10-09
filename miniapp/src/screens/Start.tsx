@@ -32,6 +32,7 @@ import { EnvPill } from "../envpill";
 import { HostMark, RunOn, RunOnRow, RunOnSelect, useRunOn } from "../runon";
 import { projectReachable } from "../folders";
 import { ProjectsPage } from "./Projects";
+import { PhoneImportCard, StartImportCard } from "../imports/ImportedChat";
 
 export function StartScreen({ onOpen, toast, project = "", projects = [], onProjects, onPickProject }: { onOpen: (id: string) => void; toast: (t: string) => void; project?: string; projects?: Project[]; onProjects?: () => void; onPickProject?: (id: string) => void }) {
   const phone = !useMedia("(min-width: 1024px)");
@@ -104,6 +105,7 @@ function DesktopStart({ onOpen, toast, project, projects, model }: { onOpen: (id
         <StartComposer phone={false} project={known ? target : ""} toast={toast} model={model} run={run} />
         {startable.length > 0 && <StartWhere projects={startable} target={known ? target : ""} onPick={setTarget} />}
         <LiveNow listing={listing} project={project} onOpen={onOpen} />
+        <StartImportCard />
       </div>
     </div>
   );
@@ -264,6 +266,7 @@ function PhoneHome({ onOpen, toast, project, projects, model, run, onProjects }:
             </div>
           </>
         )}
+        <PhoneImportCard />
       </div>
       <StartComposer phone project={project} toast={toast} model={model} run={run} />
     </div>

@@ -43,6 +43,8 @@ const SAME_IN_BOTH = [
   // A CLI's own words for the account it is signed in with, and a dash where it is not installed.
   "harness.signin.absent",
   "harness.signin.as",
+  // The programs a session can be imported from, by their own names.
+  "imp.entry.hint",
   "lang.name.en",
   "lang.name.ru",
   "login.title",

@@ -16,6 +16,7 @@ import { PaneHandle, clampWidth, pixelDrag, readSidebar, rememberSidebar, usePan
 import { Capabilities, SelfDevMode, visibleScreens } from "./capabilities";
 import { ProjectSwitcher, rememberProject, storedProject, useProjects } from "./projects";
 import { NewProjectHost, openNewProject } from "./project/NewProject";
+import { ImportHost, openImport } from "./imports/ImportExplorer";
 import { rememberFolder } from "./grouping";
 import { projectViewPath, storedProjectView } from "./project/lastview";
 import { projectPath } from "./folders";
@@ -507,6 +508,7 @@ export function App() {
       { id: "mode", label: t(mode === "agents" ? "mode.to.orchestration" : "mode.to.agents"), icon: mode === "agents" ? "compass" : "bots", run: () => navigate(modeHome(mode === "agents" ? "orchestration" : "agents", wide)) },
       { id: "main", label: t("main.title"), icon: "compass", run: () => navigate(ORCHESTRATION) },
       { id: "new-project", label: t(mode === "orchestration" ? "np.orch.title" : "np.title"), icon: "plus", run: () => openNewProject() },
+      { id: "import-session", label: t("imp.palette"), hint: t("imp.entry.hint"), icon: "download", run: () => openImport() },
       { id: "projects", label: t("shell.projects"), hint: agentProjects.find((p) => p.id === project)?.name ?? t("shell.projects.all"), icon: "folder", run: () => { if (wide) navigate(PROJECTS_PAGE); else { navigate(pathFor("agents")); setSwitching(true); } } },
       ...agentProjects.map((p) => ({ id: `p-${p.id}`, label: t("shell.search.workin", { name: p.name }), hint: projectPath(p), icon: "folder" as const, run: () => { pickProject(p.id); navigate(pathFor("agents")); } })),
       ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `open-${p.id}`, label: t("focus.palette", { name: p.name }), icon: "conductor" as const, run: () => navigate(projectHome(p.id)) })),
@@ -689,6 +691,7 @@ export function App() {
       {switching && <ProjectSwitcher projects={agentProjects} archived={archivedProjects} current={project} onPick={pickProject} onClose={() => setSwitching(false)} toast={showToast} />}
       {/* A project just made has no chat yet: its folder opens in the sidebar so it is seen at once. */}
       <NewProjectHost mode={mode === "orchestration" ? "orchestration" : "agents"} toast={showToast} onCreated={(created) => { rememberFolder(created.id, true); pickProject(created.id); }} />
+      <ImportHost toast={showToast} />
       {projectBar?.bar && focusProject && (
         <ErrorBoundary key={`tabs-${focusProject}`}>
           <Suspense fallback={<nav className="tabbar five project-tabs" aria-hidden />}>

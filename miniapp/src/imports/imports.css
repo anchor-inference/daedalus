@@ -1,0 +1,226 @@
+/* Importing a session from another program: the explorer, its preview and progress, and what an
+   imported chat carries. Built on the folder browser's frame (project/newproject.css) and the
+   desktop redesign's tokens; nothing here adds a colour or a size outside the scale. The dialog is
+   the wide sheet, because three columns — places, sessions, preview — are the point of it; on a
+   phone the same path is one screen at a time in a sheet that owns the screen. */
+
+.imp { display: flex; flex-direction: column; gap: var(--space-3); min-height: 0; flex: 1; }
+.imp-intro { margin: 0; }
+
+/* A program's tile: its two letters on its colour, white on every theme's staff colours. */
+.imp-mark { width: 28px; height: 28px; border-radius: 7px; display: inline-grid; place-items: center; flex: none; font-size: var(--fs-11); font-weight: 600; letter-spacing: .02em; color: #fff; background: var(--c, var(--staff-slate)); }
+.imp-mark.sm { width: 24px; height: 24px; border-radius: 50%; }
+.imp-mark.lg { width: 32px; height: 32px; border-radius: 8px; font-size: var(--fs-12); }
+
+/* The strip: one tile per program; one not installed stays, dimmed, so it reads as supported. */
+.imp-hstrip { display: flex; gap: 6px; flex: none; overflow-x: auto; scrollbar-width: none; }
+.imp-htile { display: flex; align-items: center; gap: 8px; height: var(--ctl-h-lg); padding: 0 12px 0 6px; border: 0; border-radius: var(--radius-sm); background: var(--field, var(--surface-2)); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg); font: inherit; font-size: var(--fs-13); white-space: nowrap; flex: none; cursor: pointer; }
+.imp-htile:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--line-strong); }
+.imp-htile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.imp-htile b { font-weight: 500; }
+.imp-htile .imp-n { font-size: var(--fs-12); color: var(--fg-3); }
+.imp-htile.on { box-shadow: inset 0 0 0 1.5px var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface-2)); }
+.imp-htile.off { opacity: .45; }
+.imp-htile:disabled { cursor: default; }
+
+.imp-fb { flex: 1; min-height: 0; }
+.imp-main { grid-template-columns: 210px minmax(0, 1fr) 330px; flex: 1; min-height: 0; }
+.imp-main.down { grid-template-columns: 210px minmax(0, 1fr); }
+.imp-hostlbl { display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); padding: 0 10px; border-radius: 6px; background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); font-size: var(--fs-12); font-weight: 600; flex: none; }
+.imp-search { width: 300px; height: var(--ctl-h-sm); display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 6px; background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg-3); flex: none; }
+.imp-search.filled { box-shadow: inset 0 0 0 1.5px var(--accent); background: var(--bg); color: var(--fg); }
+.imp-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-12); }
+.imp-search kbd { font-size: var(--fs-11); }
+.imp-clear { display: inline-flex; background: none; border: 0; padding: 2px; color: var(--fg-3); cursor: pointer; }
+
+.imp-places .fb-place .imp-n { margin-left: auto; font-size: var(--fs-11); color: var(--fg-3); }
+.imp-list { padding: 4px 6px; }
+.imp-lsec { display: flex; align-items: center; gap: 8px; height: 26px; flex: none; padding: 0 8px; font-size: var(--fs-11); color: var(--fg-3); }
+.imp-lsec .grow { flex: 1; }
+.imp-sort { color: var(--fg-2); }
+.imp-deep { height: 20px; padding: 0 8px; border: 0; border-radius: 5px; background: var(--surface-3); color: var(--fg-2); font: inherit; font-size: var(--fs-11); cursor: pointer; }
+.imp-deep.on { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.imp-frow .imp-cnt { font-size: var(--fs-11); color: var(--fg-2); background: var(--surface-3); height: 18px; padding: 0 6px; border-radius: 5px; display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.imp-frow .imp-cnt.zero { background: transparent; color: var(--fg-3); }
+.imp-group + .imp-group { margin-top: 4px; }
+.imp-path { display: flex; align-items: center; gap: 6px; width: 100%; height: 26px; padding: 0 8px; margin-top: 4px; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; }
+.imp-path .mono { font-size: var(--fs-11); }
+.imp-path:hover { color: var(--fg); }
+
+/* A session row: two lines, like a chat row in the sidebar, so it is read the same way. */
+.imp-srow { display: flex; gap: 10px; width: 100%; padding: 7px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--fg); font: inherit; text-align: left; align-items: flex-start; cursor: pointer; flex: none; min-width: 0; }
+.imp-srow + .imp-srow { margin-top: 1px; }
+.imp-srow:hover { background: var(--surface-3); }
+.imp-srow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.imp-sic { width: 22px; height: 22px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); color: var(--fg-2); margin-top: 1px; position: relative; }
+.imp-live { position: absolute; right: -1px; bottom: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--info); box-shadow: 0 0 0 2px var(--surface-2); }
+.imp-smain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.imp-st1 { font-size: var(--fs-13); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.imp-donelbl { color: var(--fg-3); }
+.imp-st2 { display: flex; align-items: center; gap: 0; font-size: var(--fs-11); color: var(--fg-3); white-space: nowrap; overflow: hidden; }
+.imp-st2 > span { display: inline-flex; align-items: center; white-space: nowrap; }
+.imp-st2 .mono { font-size: var(--fs-11); }
+.imp-dot { padding: 0 5px; color: var(--fg-3); }
+.imp-runw { color: var(--info); font-weight: 500; }
+.imp-st2 .big { color: var(--warn); font-weight: 500; }
+.imp-gone { color: var(--warn); }
+.imp-stm { font-size: var(--fs-11); color: var(--fg-3); flex: none; margin-top: 2px; }
+.imp-srow.sel { background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+.imp-srow.sel .imp-sic { background: var(--accent); color: var(--accent-ink, var(--bg)); }
+.imp-srow.done .imp-st1 { color: var(--fg-3); }
+.imp-srow.missing { opacity: .6; }
+.imp-srow mark, .imp-pv mark { background: color-mix(in srgb, var(--warn) 30%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+.imp-snip { display: block; font-size: var(--fs-12); color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.imp-skel { height: 32px; margin: 6px 4px; border-radius: 6px; background: var(--surface-3); flex: none; }
+.imp-skel.short { width: 60%; }
+
+/* The preview: what the session is, how it comes over and where it lands. */
+.imp-pv { border-left: 1px solid var(--line); padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-width: 0; background: color-mix(in srgb, var(--surface-1) 55%, var(--surface-2)); }
+.imp-pv.empty { align-items: center; justify-content: center; text-align: center; color: var(--fg-3); font-size: var(--fs-13); gap: 8px; }
+.imp-pv h3 { margin: 0; font-size: var(--fs-14); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.imp-pmeta { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: var(--fs-11); color: var(--fg-3); margin-top: 4px; }
+.imp-pmeta > span { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.imp-pmeta .mono { font-size: var(--fs-11); }
+.imp-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.imp-stat { padding: 6px 8px; border-radius: 6px; background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line); min-width: 0; }
+.imp-stat b { display: block; font-size: var(--fs-14); font-weight: 600; }
+.imp-stat span { font-size: var(--fs-11); color: var(--fg-3); }
+.imp-q { font-size: var(--fs-12); color: var(--fg-2); line-height: 1.45; padding: 6px 10px; border-left: 2px solid var(--line-strong); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.imp-who { display: block; font-size: var(--fs-11); color: var(--fg-3); margin-bottom: 2px; }
+.imp-plbl { font-size: var(--fs-11); font-weight: 500; color: var(--fg-3); margin-bottom: 5px; }
+.imp-mode { display: flex; flex-direction: column; gap: 4px; }
+.imp-mopt { display: flex; gap: 8px; padding: 6px 8px; border: 0; border-radius: 6px; font: inherit; font-size: var(--fs-12); color: var(--fg); text-align: left; box-shadow: inset 0 0 0 1px var(--line); background: var(--surface-1); cursor: pointer; }
+.imp-mopt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.imp-radio { width: 14px; height: 14px; margin-top: 1px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1.5px var(--fg-3); }
+.imp-mopt.on { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.imp-mopt.on .imp-radio { box-shadow: inset 0 0 0 4px var(--accent); }
+.imp-mopt b, .imp-check b { font-weight: 500; display: block; }
+.imp-d { display: block; color: var(--fg-3); font-size: var(--fs-11); margin-top: 1px; line-height: 1.35; }
+.imp-model-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.imp-model-row .model-select { box-shadow: inset 0 0 0 1px var(--line); border-radius: 6px; }
+.imp-model-hint { font-size: var(--fs-11); color: var(--fg-3); }
+.imp-dest { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 6px; background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line); font-size: var(--fs-12); }
+.imp-dest-tile { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: var(--surface-3); color: var(--fg-2); flex: none; }
+.imp-dest-text { min-width: 0; }
+.imp-dest b { font-weight: 500; }
+.imp-dest.bad { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bad) 60%, transparent); }
+.imp-dest.bad .imp-dest-tile { color: var(--bad); }
+.imp-check { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; font-size: var(--fs-12); cursor: pointer; }
+.imp-check input { margin: 2px 0 0; accent-color: var(--accent); }
+.imp-warnbox, .imp-infobox, .imp-errbox { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 6px; font-size: var(--fs-12); line-height: 1.4; }
+.imp-warnbox { background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.imp-warnbox > svg { color: var(--warn); flex: none; margin-top: 1px; }
+.imp-infobox { background: color-mix(in srgb, var(--info) 12%, transparent); align-items: center; }
+.imp-infobox > svg { color: var(--info); flex: none; }
+.imp-errbox { background: color-mix(in srgb, var(--bad) 12%, transparent); align-items: center; }
+.imp-errbox > svg { color: var(--bad); flex: none; }
+.imp-pv .grow, .imp-infobox .grow, .imp-errbox .grow { flex: 1; }
+.imp-down code { font-family: var(--mono); font-size: var(--fs-12); background: var(--surface-3); padding: 2px 6px; border-radius: 5px; color: var(--fg); user-select: all; overflow-wrap: anywhere; }
+
+/* Progress: a short job with named stages, not a spinner. */
+.imp-prog { display: flex; flex-direction: column; gap: 8px; }
+.imp-pstep { display: flex; align-items: center; gap: 8px; font-size: var(--fs-12); color: var(--fg-2); }
+.imp-pstep > svg { color: var(--ok); flex: none; }
+.imp-pstep.now { color: var(--fg); font-weight: 500; }
+.imp-pstep.todo { color: var(--fg-3); }
+.imp-pstep.todo > svg { color: var(--fg-3); }
+.imp-pstep.failed > svg { color: var(--bad); }
+.imp-spin { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--info); animation: imp-spin 0.9s linear infinite; }
+@keyframes imp-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .imp-spin { animation: none; } }
+.imp-r { margin-left: auto; font-size: var(--fs-11); color: var(--fg-3); }
+.imp-pbar { height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; flex: none; }
+.imp-pbar i { display: block; height: 100%; background: var(--info); transition: width .3s; }
+
+.imp-foot { align-items: center; flex-wrap: nowrap; }
+.imp-hint { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--fg-3); font-size: var(--fs-12); }
+.imp-go kbd { margin-left: 6px; }
+
+/* The imported chat: the banner, the line where Daedalus takes over, a foreign step's own name. */
+.imp-banner { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin: 4px 0 18px; border-radius: var(--radius-md); background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line); font-size: var(--fs-13); color: var(--fg-2); }
+.imp-banner b { color: var(--fg); font-weight: 500; }
+.imp-banner-text { flex: 1; min-width: 0; line-height: 1.5; }
+.imp-banner-text .mono { font-size: var(--fs-12); }
+.imp-banner-acts { display: flex; gap: 6px; flex: none; }
+.imp-handoff { display: flex; align-items: center; gap: 10px; margin: 18px 0; font-size: var(--fs-12); color: var(--fg-3); }
+.imp-handoff::before, .imp-handoff::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.act-orig { font-size: var(--fs-11); color: var(--fg-3); font-family: var(--mono); padding: 0 5px; border-radius: 4px; background: var(--surface-3); flex: none; white-space: nowrap; }
+.imp-origin .dt-key { min-width: 104px; }
+.sb-plate { position: relative; }
+.imp-hmini { position: absolute; right: -5px; top: -5px; width: 14px; height: 14px; border-radius: 4px; font-size: var(--fs-11); line-height: 14px; font-weight: 700; color: #fff; display: grid; place-items: center; background: var(--c); box-shadow: 0 0 0 1.5px var(--bg); }
+
+@media (min-width: 1024px) {
+  .sheet.imp-sheet { width: min(1180px, 96vw); height: min(780px, calc(100% - 48px)); max-height: calc(100% - 48px); }
+  .sheet.imp-sheet .sheet-head h3 { font-size: var(--fs-18); }
+  .sheet.imp-sheet .sheet-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+}
+
+/* The phone: one screen at a time, the phone's scale, 44 px targets. */
+@media (max-width: 1023px) {
+  .sheet.imp-phone .sheet-body { padding: 0 var(--gutter); display: flex; flex-direction: column; }
+  .sheet.imp-phone.ph-sheet .sheet-body { padding-bottom: 0; }
+  .imp-ph-head { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; }
+  .imp-ph-head h3 { margin: 0; font-size: var(--fs-17); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .imp-ph-body { display: flex; flex-direction: column; gap: var(--space-3); padding-bottom: var(--space-4); }
+  .imp-ph-sub { margin: 0; font-size: var(--fs-13); color: var(--fg-3); line-height: 1.45; }
+  .imp-ph-grp { border-radius: var(--radius-md); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+  .imp-ph-grp-h { padding: 4px 6px 0; font-size: var(--fs-12); color: var(--fg-3); }
+  .imp-ph-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: var(--list-row-h); padding: 0 12px; border: 0; background: transparent; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+  .imp-ph-row.one { min-height: var(--list-row-h-1); }
+  .imp-ph-row + .imp-ph-row { border-top: 1px solid var(--line); }
+  .imp-ph-row.off { opacity: .45; }
+  .imp-ph-row > svg { color: var(--fg-3); flex: none; }
+  .imp-ph-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .imp-ph-tx b { font-weight: 500; font-size: var(--fs-15); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .imp-ph-tx span { font-size: var(--fs-12); color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .imp-ph-n { font-size: var(--fs-13); color: var(--fg-3); }
+  .imp-ph-chev { color: var(--fg-3); display: flex; }
+  .imp-ph-crumbs { display: flex; align-items: center; gap: 6px; min-height: var(--tap); padding: 0 4px 0 10px; border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); font-size: var(--fs-13); color: var(--fg-2); }
+  .imp-ph-crumbs .grow { flex: 1; }
+  .imp-ph-search { display: flex; align-items: center; gap: 8px; min-height: var(--tap); padding: 0 12px; border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg-3); }
+  .imp-ph-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-16); }
+  .imp-ph-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; flex: none; }
+  .imp-ph-chips button { height: var(--chip-h); display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); font: inherit; font-size: var(--fs-13); white-space: nowrap; flex: none; }
+  .imp-ph-chips button.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
+  .imp-ph-chips b { font-weight: 500; color: var(--fg-3); }
+  .imp-ph-sessions .imp-srow { min-height: var(--list-row-h); padding: 8px 12px; border-radius: 0; align-items: center; }
+  .imp-ph-sessions .imp-srow + .imp-srow { border-top: 1px solid var(--line); margin-top: 0; }
+  .imp-ph-sessions .imp-st1 { font-size: var(--fs-14); }
+  .imp-ph-sessions .imp-st2, .imp-ph-sessions .imp-stm { font-size: var(--fs-12); }
+  .imp-ph-sessions .imp-sic { width: 28px; height: 28px; }
+  .imp-phone .imp-pv { border: 0; background: transparent; padding: 0 4px; gap: 14px; overflow: visible; }
+  .imp-phone .imp-pv h3 { font-size: var(--fs-17); }
+  .imp-phone .imp-pmeta, .imp-phone .imp-stat span, .imp-phone .imp-plbl, .imp-phone .imp-d, .imp-phone .imp-model-hint { font-size: var(--fs-12); }
+  .imp-phone .imp-stat b { font-size: var(--fs-16); }
+  .imp-phone .imp-q, .imp-phone .imp-dest, .imp-phone .imp-mopt, .imp-phone .imp-warnbox, .imp-phone .imp-infobox, .imp-phone .imp-errbox, .imp-phone .imp-pstep, .imp-phone .imp-check { font-size: var(--fs-13); }
+  .imp-phone .imp-mopt { min-height: var(--tap); align-items: center; }
+  .imp-phone .imp-check input { width: 20px; height: 20px; }
+  .imp-ph-foot { display: flex; gap: 10px; }
+  .imp-ph-foot .btn { flex: 1; min-height: var(--tap); justify-content: center; border-radius: var(--radius-pill); }
+  .imp-ph-foot .btn.primary { flex: 1.6; }
+  .imp-phone .fb-empty { padding: var(--space-4) var(--space-2); }
+  .imp-banner { align-items: flex-start; flex-wrap: wrap; font-size: var(--fs-13); }
+  .imp-banner-acts { flex-basis: 100%; }
+  .imp-banner-acts .btn { min-height: var(--tap); }
+  .imp-handoff { font-size: var(--fs-12); }
+}
+
+/* The start screen's card sits under "Active now" in the same column and borrows its rows; it is a
+   section of its own so a reader of "Active now" never finds these rows among the live chats. */
+@media (min-width: 1024px) {
+  .start-import { width: 100%; max-width: 720px; margin-top: var(--space-6); }
+  .si-head { display: flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); padding-inline: 2px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-2); }
+  .si-head .num { color: var(--fg-3); font-weight: 400; }
+  .si-head .grow { flex: 1; }
+  .si-more { border: 0; background: none; padding: 0; color: var(--fg-3); font: inherit; font-size: var(--fs-12); cursor: pointer; }
+  .si-more:hover { color: var(--fg); }
+  .si-row { display: flex; align-items: center; gap: var(--space-3); padding: 6px 10px; border-radius: var(--radius-sm); cursor: pointer; }
+  .si-row:hover { background: var(--surface-1); }
+  .si-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .si-row .btn { flex: none; }
+  .si-main { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 1px; }
+  .si-title { color: var(--fg); font-size: var(--fs-14); }
+  .si-meta { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--fg-3); font-size: var(--fs-13); white-space: nowrap; }
+  .si-meta .mono { font-size: var(--fs-12); }
+  .si-time { flex: none; align-self: flex-start; padding-top: 4px; color: var(--fg-3); font-size: var(--fs-12); }
+}
