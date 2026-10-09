@@ -135,6 +135,7 @@ from daedalus.host.services import SCRATCH_DIR_NAME
 from daedalus.host.session_runner import TENANT, Attachment, HostUnreachable, clip_title
 from daedalus.host.setting_refs import LOCAL_SPEECH_MODEL, SPEECH_RECOGNITION, SettingProblem, SettingRef, setting_of
 from daedalus.host.transcript_view import full_tool_result, message_view
+from daedalus.model_capabilities import known_image_input
 from daedalus.processes import end_tree
 from daedalus.providers.free_catalog import approved_endpoint, probe_agent_cycle
 from daedalus.providers.free_catalog import catalog as free_catalog
@@ -880,6 +881,10 @@ def model_entry(raw: dict[str, Any]) -> dict[str, Any]:
     if isinstance(modalities, list):
         entry["input_modalities"] = [str(m) for m in modalities]
         entry["images"] = "image" in entry["input_modalities"]
+    elif known_image_input(entry["id"]):
+        # The subscription routes name ids only; a model known to read pictures is prefilled as
+        # one, or Add a model saves it with Images off and nothing can show it an image.
+        entry["images"] = True
     parameters = raw.get("supported_parameters")
     if isinstance(parameters, list):
         entry["reasoning"] = "reasoning" in parameters or "reasoning_effort" in parameters
@@ -979,7 +984,7 @@ def extend_model_list(result: dict[str, Any], extra: list[str]) -> dict[str, Any
             continue
         have.add(name)
         models.append(name)
-        entries.append({"id": name})
+        entries.append({"id": name, "images": True} if known_image_input(name) else {"id": name})
     result["models"] = models
     result["entries"] = entries
     return result
@@ -6102,8 +6107,13 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if not PRESET_ID_RE.fullmatch(preset_id):
             raise HTTPException(400, "preset id: letters, digits, . _ - (max 64)")
         raw = app.config.model_dump(mode="json")
-        entry = dict(raw.setdefault("presets", {}).get(preset_id) or ModelPresetConfig().model_dump(mode="json"))
-        for key, value in body.model_dump(exclude_unset=True).items():
+        existing = raw.setdefault("presets", {}).get(preset_id)
+        entry = dict(existing or ModelPresetConfig().model_dump(mode="json"))
+        sent = body.model_dump(exclude_unset=True)
+        if existing is None and sent.get("images") is None and known_image_input(str(sent.get("model") or "")):
+            # A new model whose caller did not say: the family decides, not a default of "no".
+            entry["images"] = True
+        for key, value in sent.items():
             if value is not None or key == "on_demand_tool_groups":
                 entry[key] = value.strip() if isinstance(value, str) else value
         if entry["provider"] not in raw.get("providers", {}):

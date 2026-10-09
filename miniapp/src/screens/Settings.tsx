@@ -151,7 +151,9 @@ function PresetRow({ id, p, onDemandByModel, isDefault, inChain, providers, onDe
 }) {
   const [label, setLabel] = useState(p.label);
   const [model, setModel] = useState(p.model);
-  const [open, setOpen] = useState(false);
+  // Opened when a link to its Images switch brought the operator here (a vision refusal names the
+  // session model's switch): the switch is inside the fold.
+  const [open, setOpen] = useState(() => new URLSearchParams(window.location.search).get(SETTING_PARAM) === `presets.${id}.images`);
   useEffect(() => setLabel(p.label), [p.label]);
   useEffect(() => setModel(p.model), [p.model]);
   const title = p.label || `${p.provider}/${p.model}`;
@@ -222,7 +224,7 @@ function PresetRow({ id, p, onDemandByModel, isDefault, inChain, providers, onDe
                 ))}
               </div>
             </Row>
-            <Row title={t("settings.preset.imagestoggle")} desc={t("settings.preset.images.title")}>
+            <Row title={t("settings.preset.imagestoggle")} desc={t("settings.preset.images.title")} data-setting={`presets.${id}.images`}>
               <Switch checked={p.images} onChange={(images) => onPatch({ images })} label={t("settings.preset.imagestoggle")} />
             </Row>
             <Row title={t("settings.preset.ondemand")} desc={t("settings.preset.ondemand.title")} stack>
@@ -1354,7 +1356,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
                   ]}
                 />
               </Row>
-              <NumRow id="vision-output" title={t("settings.vision.output")} value={s.vision.max_output_tokens} min={100} step={100} onSave={(v) => save({ vision: { ...s.vision, max_output_tokens: v } })} />
+              <NumRow id="vision-output" title={t("settings.vision.output")} desc={t("settings.vision.output.sub")} setting="vision.max_output_tokens" value={s.vision.max_output_tokens} min={100} step={100} onSave={(v) => save({ vision: { ...s.vision, max_output_tokens: v } })} />
             </div>
             {/* Beside the auxiliary models it governs: the summary model (Limits) and the vision model above. */}
             <div className="card" data-card="auxiliary-fallback">

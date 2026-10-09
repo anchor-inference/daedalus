@@ -36,6 +36,7 @@ class SettingRef:
 
 COMPACTION_MODEL = SettingRef("limits", "compaction.preset")
 VISION_MODEL = SettingRef("models", "vision.preset")
+VISION_OUTPUT = SettingRef("models", "vision.max_output_tokens")
 AUXILIARY_FALLBACK = SettingRef("models", "model.fallback_to_session")
 SPEECH_RECOGNITION = SettingRef("voice", "asr.transcriber")
 LOCAL_SPEECH_MODEL = SettingRef("voice", "stt.local_model")
@@ -47,6 +48,11 @@ WEB_SEARCH = SettingRef("tools", "tools.web.search.backend")
 def provider_spend_cap(provider_id: str) -> SettingRef:
     """One provider's total spend cap, on Settings → Limits."""
     return SettingRef("limits", f"limits.usd_total_per_provider.{provider_id}")
+
+
+def preset_images(preset_id: str) -> SettingRef:
+    """One model's Images switch, in its row on Settings → Models."""
+    return SettingRef("models", f"presets.{preset_id}.images")
 
 
 def provider_key(provider_id: str) -> SettingRef:
@@ -98,9 +104,11 @@ __all__ = [
     "SPEECH_RECOGNITION",
     "SPEND_CAP",
     "VISION_MODEL",
+    "VISION_OUTPUT",
     "WEB_SEARCH",
     "SettingProblem",
     "SettingRef",
+    "preset_images",
     "provider_key",
     "provider_spend_cap",
     "setting_from_link",

@@ -86,6 +86,7 @@ from daedalus.host.setting_refs import (
     SPEND_CAP,
     SettingProblem,
     SettingRef,
+    preset_images,
     provider_spend_cap,
 )
 from daedalus.host.skills import DirectorySkillStore
@@ -2910,23 +2911,46 @@ class SessionManager:
             except Exception:  # noqa: BLE001
                 logger.warning("could not post the %s model notice", kind, exc_info=True)
 
-    async def session_vision(self, session_id: str | None) -> tuple[tuple[Any, str, FileBlobStore, str] | None, str]:
-        """The session's own model as a vision route, or ``None`` with why it cannot look.
+    async def session_vision(self, session_id: str | None) -> tuple[tuple[Any, str, FileBlobStore, str] | None, str, SettingRef | None]:
+        """The session's own model as a vision route, or ``None`` with why it cannot look and where to fix it.
 
         What the vision model falls back to: the session's first rung (the default model for a caller
-        with no session) when it takes images. A model that does not is not asked to pretend."""
+        with no session) when it takes images. A model that does not is not asked to pretend. Taking
+        images is a switch on the preset, not a fact about the model, so the refusal says the switch is
+        off and names that preset's row; it used to say the model "does not take images" about Claude
+        models that read pictures and were only saved with the switch off."""
         try:
             overrides = await self.live.load(session_id) if session_id else {}
             rungs, _ = self.resolve_model(overrides)
         except Exception as exc:  # noqa: BLE001 — no model at all is a reason, not a crash
-            return None, f"the session has no model to look with ({exc})"
+            return None, f"the session has no model to look with ({exc})", None
         if not rungs:
-            return None, "the session has no model to look with"
+            return None, "the session has no model to look with", None
         provider, model = rungs[0]
         accepts = getattr(provider, "accepts_images", None)
         if accepts is None or not accepts(model):
-            return None, f"the session's model {model} does not take images"
-        return (provider, model, self.blobs, TENANT), ""
+            preset_id = self._preset_of_rung(overrides, provider, model)
+            if preset_id is None:
+                return None, f"the session's model {model} is not marked as taking images", None
+            return None, f"the session's model {model} is not marked as taking images (its Images switch in Settings → Models is off)", preset_images(preset_id)
+        return (provider, model, self.blobs, TENANT), "", None
+
+    def _preset_of_rung(self, overrides: dict[str, Any], provider: Any, model: str) -> str | None:
+        """The preset a session's first rung came from: the chosen or default one when it is that
+        model, otherwise any preset naming the model on that provider; ``None`` for a manual pair."""
+        presets = self.config.presets
+        chosen = overrides.get("preset") if overrides.get("preset") in presets else None
+        if chosen is None and not (overrides.get("provider") and overrides.get("model_name")):
+            chosen = self.config.model.preset
+        if chosen in presets and presets[chosen].model == model:
+            return chosen
+        for pid, preset in presets.items():
+            try:
+                if preset.model == model and self.providers.get(preset.provider) is provider:
+                    return pid
+            except KeyError:
+                continue
+        return None
 
     # -- input --------------------------------------------------------------------
 

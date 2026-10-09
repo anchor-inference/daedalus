@@ -3823,6 +3823,10 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "settings.vision.model": { en: "Model", ru: "Модель" },
   "settings.vision.none": { en: "(none image-capable)", ru: "(моделей с картинками нет)" },
   "settings.vision.output": { en: "Max output tokens", ru: "Максимум токенов ответа" },
+  "settings.vision.output.sub": {
+    en: "The budget of every look at a picture, short answers and full descriptions alike. A model that thinks spends part of it thinking before it writes, so a small number can leave no room for the answer.",
+    ru: "Бюджет каждого взгляда на картинку — и короткого ответа, и полного описания. Думающая модель тратит часть бюджета на размышления до ответа, поэтому при малом числе места на ответ может не остаться.",
+  },
   "settings.auxiliary.title": { en: "Auxiliary models", ru: "Вспомогательные модели" },
   "settings.auxiliary.fallback": { en: "Fall back to the session's model", ru: "Подменять моделью сессии" },
   "settings.auxiliary.fallback.sub": { en: "When the summary model or the vision model is not set or fails, the session's own model does the work and you get a warning. Off: the work fails with an error.", ru: "Если модель выжимки или модель зрения не задана или не отвечает, работу делает модель самой сессии, а вы получаете предупреждение. Выключено — работа завершается ошибкой." },

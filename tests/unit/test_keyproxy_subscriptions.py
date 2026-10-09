@@ -211,6 +211,31 @@ def test_claude_prompt_cache_without_tools_marks_identity_and_the_user_turn() ->
     assert _cache_control_count(out) == 2
 
 
+async def test_a_vision_request_reaches_claude_with_its_picture_its_budget_and_no_thinking_asked() -> None:
+    # A look that came back empty could have been the picture lost on the way or the budget spent
+    # thinking; the route keeps the picture, sends the whole budget and asks for no thinking itself.
+    body = {
+        "model": "claude-haiku-5-5",
+        "max_tokens": 16384,
+        "messages": [
+            {"role": "system", "content": "You are the eyes of another AI agent."},
+            {"role": "user", "content": [{"type": "text", "text": "Request: read it"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]},
+        ],
+    }
+    out, _ = claude_mod.chat_to_messages(body)
+    images = [block["source"] for message in out["messages"] for block in message["content"] if block.get("type") == "image"]
+    assert images == [{"type": "base64", "media_type": "image/png", "data": "AAAA"}]
+    assert out["max_tokens"] == 16384 and "thinking" not in out and "output_config" not in out
+    stopped = [
+        {"type": "message_start", "message": {"usage": {"input_tokens": 1600}}},
+        {"type": "message_delta", "delta": {"stop_reason": "max_tokens"}, "usage": {"output_tokens": 800}},
+    ]
+    full = await subs.collect_completion(claude_mod.messages_events_to_chunks(_lines(stopped), model="m"), model="m")
+    # Thinking that filled the budget arrives as a cut-off reply with no text, told apart by its reason.
+    assert full["choices"][0]["finish_reason"] == "length" and not full["choices"][0]["message"].get("content")
+    assert full["usage"]["completion_tokens"] == 800
+
+
 async def test_proxy_routes_codex_and_grok(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     seen: list[httpx.Request] = []
 
