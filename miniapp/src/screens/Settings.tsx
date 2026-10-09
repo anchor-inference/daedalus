@@ -38,6 +38,7 @@ import { DesktopAppCard } from "../updatedialog";
 import { ProviderLimit } from "./ProviderLimit";
 import { OPENCODE_KEY_URL, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
 import { SecretsCard } from "../secrets";
+import { revealSetting, SETTING_PARAM } from "../settinglink";
 
 const DEFAULT_KINDS = ["deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"];
 /** The generic protocol also serves remote vendors, so temperature is available there too. */
@@ -280,7 +281,8 @@ function ProviderBlock({ id, p, kinds, available, viaProxy, onPatch, onRemove }:
   onPatch: Patch;
   onRemove: (id: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  // Opened when a link to its key brought the operator here: the key field is inside the fold.
+  const [open, setOpen] = useState(() => new URLSearchParams(window.location.search).get(SETTING_PARAM) === `providers.${id}.api_key`);
   const [name, setName] = useState(p.name ?? "");
   const [baseUrl, setBaseUrl] = useState(p.base_url);
   const [keyDraft, setKeyDraft] = useState("");
@@ -290,7 +292,7 @@ function ProviderBlock({ id, p, kinds, available, viaProxy, onPatch, onRemove }:
   useEffect(() => setName(p.name ?? ""), [p.name]);
   useEffect(() => setKeyDraft(""), [p.api_key_set]);
   return (
-    <div className={`mrow ${open ? "open" : ""}`}>
+    <div className={`mrow ${open ? "open" : ""}`} data-setting={`providers.${id}.api_key`}>
       <div className="mline noradio">
         <button className="mmain" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
           <span className="mtitle"><ProviderMark id={id} kind={p.kind} name={providerTitle(id, p)} className="phone-only" />{p.name || id}</span>
@@ -526,14 +528,14 @@ function TotalCaps({ s, save }: { s: Settings; save: (patch: any) => Promise<voi
         {spend.total.unmetered > 0 && <p className="sub">{t("settings.limits.balance.unpriced", { n: spend.total.unmetered })}</p>}
         {held > 0 && <p className="sub">{t("settings.limits.balance.reset")}</p>}
       </details>}
-      <Row title={t("settings.limits.total")} htmlFor="limits-total" desc={spend ? t("settings.limits.total.sub", { sum: usd(spent) }) : t(spendState === "loading" ? "settings.limits.balance.loading" : "settings.limits.balance.unknown")} stack>
+      <Row data-setting="limits.usd_total" title={t("settings.limits.total")} htmlFor="limits-total" desc={spend ? t("settings.limits.total.sub", { sum: usd(spent) }) : t(spendState === "loading" ? "settings.limits.balance.loading" : "settings.limits.balance.unknown")} stack>
         <NumInput id="limits-total" label={t("settings.limits.total")} value={cap} min={0} step={1} unit="USD" onSave={(v) => save({ limits: { usd_total: v } })} />
       </Row>
       {providers.map((pid) => (
         <Row key={pid} title={t("settings.limits.provider", { id: pid })} desc={spend ? spend.per_provider[pid]?.reserved_usd > 0
           ? t("settings.limits.provider.held", { spent: usd(spend.per_provider[pid].spent_usd), held: usd(spend.per_provider[pid].reserved_usd) })
           : t("settings.limits.spent", { sum: usd(spend.per_provider[pid]?.spent_usd ?? 0) })
-          : t(spendState === "loading" ? "settings.limits.balance.loading" : "settings.limits.balance.unknown")} stack data-provider={pid}>
+          : t(spendState === "loading" ? "settings.limits.balance.loading" : "settings.limits.balance.unknown")} stack data-provider={pid} data-setting={`limits.usd_total_per_provider.${pid}`}>
           <NumInput label={t("settings.limits.provider", { id: pid })} value={caps[pid] ?? 0} min={0} step={1} unit="USD" onSave={(v) => save({ limits: { usd_total_per_provider: { [pid]: v } } })} />
         </Row>
       ))}
@@ -573,7 +575,7 @@ function SearchBlock({ s, save }: { s: Settings; save: (patch: any) => Promise<v
     <div className="card search-card">
       <div className="section-title" style={{ marginTop: 0 }}>{t("settings.search.title")}</div>
       <div className="sub">{t("settings.search.sub")}</div>
-      <Row title={t("settings.search.backend")} stack>
+      <Row title={t("settings.search.backend")} stack data-setting="tools.web.search.backend">
         <Dropdown
           id="search-backend"
           label={t("settings.search.backend")}
@@ -1080,9 +1082,10 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
   const caps = useQuery<Capabilities>("/api/capabilities", { staleMs: 20000 });
   const [s, setS] = useState<Settings | null>(null);
   const [adding, setAdding] = useState(false);
-  const [modelsTab, setModelsTab] = useState<"my" | "free" | "providers">(
-    () => new URLSearchParams(window.location.search).get("tab") === "free" ? "free" : "my",
-  );
+  const [modelsTab, setModelsTab] = useState<"my" | "free" | "providers">(() => {
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    return tab === "free" || tab === "providers" ? tab : "my";
+  });
   const [status, setStatus] = useState<any>(null);
   const wide = useMedia("(min-width: 1024px)");
   const [query, setQuery] = useState("");
@@ -1112,6 +1115,25 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
     return () => window.clearInterval(timer);
   }, [anchor]);
   const shown: Section | null = current ?? (wide ? "models" : null);
+  // A link to one setting (`?setting=<key>`, from an error's button): the tab that holds it is opened,
+  // the row is scrolled to once it has drawn and blinks, and the name leaves the address so a reload
+  // does not blink it again and the next press of the same button is a change the page sees.
+  const target = new URLSearchParams(window.location.search).get(SETTING_PARAM);
+  useEffect(() => {
+    if (!target || !shown) return;
+    if (shown === "models") setModelsTab(target.startsWith("providers.") ? "providers" : "my");
+    let cancelled = false;
+    void revealSetting(target).then(() => {
+      if (cancelled) return;
+      const query = new URLSearchParams(window.location.search);
+      query.delete(SETTING_PARAM);
+      const rest = query.toString();
+      navigate(window.location.pathname + (rest ? `?${rest}` : ""), { replace: true });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [target, shown]);
   useEffect(() => {
     api.get<Settings>("/api/settings").then(setS).catch((e) => toast((e as Error).message));
     api.get("/api/status").then(setStatus).catch(() => setStatus(null));
@@ -1320,7 +1342,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
             <div className="card vision-card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.vision.title")}</div>
               <div className="sub">{t("settings.vision.sub")}</div>
-              <Row title={t("settings.vision.model")} stack>
+              <Row title={t("settings.vision.model")} stack data-setting="vision.preset">
                 <Dropdown
                   id="vision-preset"
                   label={t("settings.vision.title")}
@@ -1333,6 +1355,13 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
                 />
               </Row>
               <NumRow id="vision-output" title={t("settings.vision.output")} value={s.vision.max_output_tokens} min={100} step={100} onSave={(v) => save({ vision: { ...s.vision, max_output_tokens: v } })} />
+            </div>
+            {/* Beside the auxiliary models it governs: the summary model (Limits) and the vision model above. */}
+            <div className="card" data-card="auxiliary-fallback">
+              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.auxiliary.title")}</div>
+              <Row title={t("settings.auxiliary.fallback")} desc={t("settings.auxiliary.fallback.sub")} data-setting="model.fallback_to_session">
+                <Switch checked={s.model.fallback_to_session ?? true} onChange={(fallback_to_session) => save({ model: { fallback_to_session } as any })} label={t("settings.auxiliary.fallback")} />
+              </Row>
             </div>
             </>}
             {modelsTab === "providers" && <div className="card">
@@ -1374,7 +1403,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
             {/* Only where the environment sets one: without it the line read "daily cap: $undefined". */}
             {typeof (s as any).usd_per_day === "number" && <div className="sub">{t("settings.limits.daily", { n: (s as any).usd_per_day })}</div>}
             <NumRow id="limits-iterations" title={t("settings.limits.iterations")} value={s.limits.max_iterations} min={1} onSave={(v) => save({ limits: { ...s.limits, max_iterations: v } })} />
-            <NumRow id="limits-perrun" title={t("settings.limits.perrun")} desc={t("settings.limits.perrun.sub")} unit="USD" step="0.5" value={s.limits.usd_per_run} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_run: v } })} />
+            <NumRow id="limits-perrun" setting="limits.usd_per_run" title={t("settings.limits.perrun")} desc={t("settings.limits.perrun.sub")} unit="USD" step="0.5" value={s.limits.usd_per_run} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_run: v } })} />
             <TotalCaps s={s} save={save} />
             <div className="section-title">{t("settings.compaction")}</div>
             <div className="sub">{t("settings.compaction.sub")}</div>

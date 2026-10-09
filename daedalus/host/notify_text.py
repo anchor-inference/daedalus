@@ -46,6 +46,11 @@ TEXT: dict[str, dict[str, str]] = {
         "calendar.reminder.lead.now": "now",
         "task.reminder.due": "Due {when}",
         "task.reminder.block": "Planned for {when}",
+        "setting.compaction.fallback": "The summary model failed; the session's model summarised instead",
+        "setting.compaction.failed": "The history could not be summarised",
+        "setting.vision.fallback": "The vision model is not set or failed; the session's model looked instead",
+        "setting.vision.failed": "No model could look at the image",
+        "setting.search.failed": "Web search failed on every backend",
     },
     "ru": {
         "run.finished": "Готово: {title}",
@@ -79,6 +84,11 @@ TEXT: dict[str, dict[str, str]] = {
         "calendar.reminder.lead.now": "сейчас",
         "task.reminder.due": "Срок: {when}",
         "task.reminder.block": "Запланировано на {when}",
+        "setting.compaction.fallback": "Модель выжимки не сработала; выжимку сделала модель сессии",
+        "setting.compaction.failed": "Не удалось сжать историю",
+        "setting.vision.fallback": "Модель зрения не задана или не сработала; картинку посмотрела модель сессии",
+        "setting.vision.failed": "Ни одна модель не смогла посмотреть картинку",
+        "setting.search.failed": "Веб-поиск не ответил ни через один бэкенд",
     },
 }
 

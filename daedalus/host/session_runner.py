@@ -80,6 +80,14 @@ from daedalus.host.presence import Presence
 from daedalus.host.request_manifests import RequestManifestStore
 from daedalus.host.run_outcome import outcome_message, run_outcome
 from daedalus.host.services import SessionServices, locator, session_scratch_dir
+from daedalus.host.setting_refs import (
+    COMPACTION_MODEL,
+    RUN_SPEND_CAP,
+    SPEND_CAP,
+    SettingProblem,
+    SettingRef,
+    provider_spend_cap,
+)
 from daedalus.host.skills import DirectorySkillStore
 from daedalus.host.transcript_view import TranscriptViewBuilder, message_view
 from daedalus.host.worktrees import append_exclude, exclude_lines
@@ -174,6 +182,8 @@ class HostEventType(StrEnum):
 
     STEER_CHANGED = "steer_changed"
     HISTORY_CUT = "history_cut"
+    SETTING_NOTICE = "setting_notice"
+    """An auxiliary model was not set or refused: what was done instead, and the setting that fixes it."""
 
 
 @dataclass(slots=True)
@@ -447,9 +457,13 @@ class HostUnreachable(ValueError):
     for the operator says this one too; the text names the fix."""
 
 
-class CompactionFailed(RuntimeError):
+class CompactionFailed(SettingProblem):
     """Every model a compaction may use refused to summarise; the message names each and why, so the
-    operator reads a quota or a refusal instead of "Server unavailable (500)"."""
+    operator reads a quota or a refusal instead of "Server unavailable (500)", and the summary model's
+    row is offered as the place to fix it."""
+
+    def __init__(self, message: str, setting: SettingRef = COMPACTION_MODEL) -> None:
+        super().__init__(message, setting)
 
 
 class WorkspaceUnreachable(RuntimeError):
@@ -1969,17 +1983,40 @@ class SessionManager:
             except Exception:  # noqa: BLE001
                 logger.exception("event sink failed")
 
+    def _compaction_preset_rung(self) -> tuple[tuple[Any, str] | None, str]:
+        """The summary model's rung and, when it cannot be used, why; ``(None, "")`` when none is chosen.
+
+        An empty choice is the operator's "the session's own model" and is no fault; a chosen preset
+        that was deleted, or whose endpoint has no key, is one, and says so."""
+        chosen = self.config.compaction.preset
+        if not chosen:
+            return None, ""
+        if chosen not in self.config.presets:
+            return None, f"the summary model {chosen!r} is no longer among the models"
+        try:
+            return self.providers.rungs_for(self.config, chosen)[0], ""
+        except Exception as exc:  # noqa: BLE001 — an endpoint without a key, a preset whose provider is gone
+            return None, f"the summary model {chosen!r} cannot be used: {exc}"
+
     async def _compaction_rungs(self, state: SessionState) -> list[tuple[Any, str]]:
         """The models a compaction may summarise with, in order: the preset configured for it, then the
         session's own rungs. A preset whose provider is out of quota used to end a manual /compact in a
-        bare 500 while the session's own model stood ready; each rung after the first is that fallback."""
+        bare 500 while the session's own model stood ready; each rung after the first is that fallback.
+
+        With ``model.fallback_to_session`` off, a chosen preset is the only model asked, and one that
+        cannot be used refuses the compaction here with the reason and the row to fix it."""
         rungs, _ = self.resolve_model(await self.live.load(state.session.id))
         chosen: list[tuple[Any, str]] = []
-        if self.config.compaction.preset and self.config.compaction.preset in self.config.presets:
-            try:
-                chosen.append(self.providers.rungs_for(self.config, self.config.compaction.preset)[0])  # a cheaper one configured for it
-            except Exception:  # noqa: BLE001 — an unusable compaction preset falls back to the session's model
-                logger.warning("compaction preset %r is not usable; summarising with the session's model", self.config.compaction.preset)
+        preset_rung, problem = self._compaction_preset_rung()
+        if preset_rung is not None:
+            chosen.append(preset_rung)  # a cheaper one configured for it
+        elif problem:
+            if not self.config.model.fallback_to_session:
+                await self.setting_notice(state.session.id, kind="compaction", outcome="failed", detail=problem, setting=COMPACTION_MODEL)
+                raise CompactionFailed(problem)
+            logger.warning("%s; summarising with the session's model", problem)
+        if self.config.compaction.preset and not self.config.model.fallback_to_session:
+            return chosen
         for rung in rungs:  # the session's own model summarises its own history
             if all((rung[0].endpoint.id, rung[1]) != (p.endpoint.id, m) for p, m in chosen):
                 chosen.append(rung)
@@ -1994,6 +2031,9 @@ class SessionManager:
         observability = LLMObservabilityContext(tenant_id=TENANT, session_id=session_id, run_id=state.run_id, call_purpose="compaction", call_category="compaction")
         exceeded = self.budget_exceeded()
         rungs = [(p, m) for p, m in await self._compaction_rungs(state) if not exceeded or self.provider_costs_nothing(p.endpoint.id, m)]
+        if not rungs:
+            raise CompactionFailed(f"no model may summarise the history now: the daily budget is exceeded ({exceeded}) and every model that could is a paid one" if exceeded else "no model may summarise the history")
+        preset_rung, problem = self._compaction_preset_rung()
         failures: list[str] = []
         summary = ""
         for index, (provider, model) in enumerate(rungs):
@@ -2005,8 +2045,18 @@ class SessionManager:
                 # Out of quota, refused, timed out or too small a window: the next model may well answer.
                 failures.append(f"{provider.endpoint.id}/{model}: {exc}"[:400])
                 if index == len(rungs) - 1:
+                    await self.setting_notice(session_id, kind="compaction", outcome="failed", detail="; ".join(failures), setting=COMPACTION_MODEL)
                     raise CompactionFailed("no model could summarise the history: " + "; ".join(failures)) from exc
                 logger.warning("compaction of %s with %s/%s failed (%s); trying %s/%s", session_id, provider.endpoint.id, model, exc, rungs[index + 1][0].endpoint.id, rungs[index + 1][1])
+        used = (provider.endpoint.id, model)
+        if self.config.compaction.preset and (preset_rung is None or used != (preset_rung[0].endpoint.id, preset_rung[1])):
+            # The chosen summary model did not make this summary: the operator hears it once, as a
+            # warning with the way to the row, instead of not at all (a silent fallback hides a quota
+            # running out) or as a failure (the summary was made).
+            await self.setting_notice(
+                session_id, kind="compaction", outcome="fallback", model=f"{used[0]}/{used[1]}",
+                detail=problem or (failures[0] if failures else "the summary model was skipped"), setting=COMPACTION_MODEL,
+            )
         await self._compaction_progress(state, stage="writing")
         # What the operator said is written by code, never by the summariser: rules do not decay.
         # Their room is a share of the window as well as a fixed bound: a summary that quoted every
@@ -2821,6 +2871,47 @@ class SessionManager:
                 payload={"session_id": session_id, "reason": reason, "count": len(waiting), "queued": _steer_cards(waiting)},
             ),
         )
+
+    async def setting_notice(
+        self, session_id: str | None, *, kind: str, outcome: str, detail: str, setting: SettingRef, model: str = "",
+    ) -> None:
+        """Tell the operator that an auxiliary model was not set or refused, and where that is fixed.
+
+        ``outcome`` is ``fallback`` (the session's model did the work: a warning) or ``failed`` (an
+        error). The conversation hears it as a ``setting_notice`` session event, drawn inline; the
+        notifications hear it through the ``setting_notice`` service hook and raise a toast with the
+        button. Neither may fail the work it reports on, so both are best effort."""
+        payload = {"kind": kind, "outcome": outcome, "detail": detail[:600], "model": model, "setting": setting.as_dict()}
+        if session_id:
+            state = self._states.get(session_id)
+            try:
+                await self._notify_sinks(session_id, HostEvent(HostEventType.SETTING_NOTICE, (state.run_id if state is not None else "") or "", {"session_id": session_id, **payload}))
+            except Exception:  # noqa: BLE001
+                logger.warning("could not tell session %s about its %s model", session_id, kind, exc_info=True)
+        hook = self.service_hooks.get("setting_notice")
+        if hook is not None:
+            try:
+                await hook(session_id, payload)
+            except Exception:  # noqa: BLE001
+                logger.warning("could not post the %s model notice", kind, exc_info=True)
+
+    async def session_vision(self, session_id: str | None) -> tuple[tuple[Any, str, FileBlobStore, str] | None, str]:
+        """The session's own model as a vision route, or ``None`` with why it cannot look.
+
+        What the vision model falls back to: the session's first rung (the default model for a caller
+        with no session) when it takes images. A model that does not is not asked to pretend."""
+        try:
+            overrides = await self.live.load(session_id) if session_id else {}
+            rungs, _ = self.resolve_model(overrides)
+        except Exception as exc:  # noqa: BLE001 — no model at all is a reason, not a crash
+            return None, f"the session has no model to look with ({exc})"
+        if not rungs:
+            return None, "the session has no model to look with"
+        provider, model = rungs[0]
+        accepts = getattr(provider, "accepts_images", None)
+        if accepts is None or not accepts(model):
+            return None, f"the session's model {model} does not take images"
+        return (provider, model, self.blobs, TENANT), ""
 
     # -- input --------------------------------------------------------------------
 
@@ -5642,6 +5733,7 @@ class SessionManager:
         spent, unmetered = await self.spend(run_id=run_id)
         note: str | None = None
         kind = "run_cap"
+        setting: SettingRef | None = None
         limits = self.config.limits
         if limits.max_run_tokens > 0:
             row = await self.db.fetchone("SELECT sum(input_tokens + output_tokens) t FROM usage_events WHERE run_id = ?", (run_id,))
@@ -5657,6 +5749,7 @@ class SessionManager:
         elif (run_cap > 0 or mode_cap is not None) and spent >= run_cap:
             source = (f"mode {state.metadata.get('mode')}" if state.metadata.get("mode") else "orchestrator.usd_per_run") if mode_cap is not None else "limits.usd_per_run"
             note = f"💸 per-run cap reached: ${spent:.2f} spent of ${run_cap:.2f} ({source}); stopping this run. Send a message to continue in a new run."
+            setting = RUN_SPEND_CAP if mode_cap is None else None
             if unmetered:
                 note += f" {unmetered} call(s) had no known price and are not counted."
         else:
@@ -5664,12 +5757,15 @@ class SessionManager:
             breach = await self.cap_breach(state, last["provider_id"] if last else None, last["model"] if last else None)
             if breach is not None:
                 kind, note = breach[0], f"💸 {breach[1]}; stopping this run."
+                setting = {"total_cap": SPEND_CAP, "provider_cap": provider_spend_cap(str(last["provider_id"] if last else ""))}.get(kind)
         if note is None:
             return
         self._capped_runs.add(run_id)
         logger.warning("run %s stopped (%s): %s", run_id, kind, note)
         state.engine.stop()
-        await self._dispatch_event(state, TurnEvent(type=EventType.ERROR, run_id=run_id, payload={"message": note, "kind": kind}))
+        # The cap's row travels with the message, so the chat's error line can offer the way to it.
+        payload: dict[str, Any] = {"message": note, "kind": kind, **({"setting": setting.as_dict()} if setting is not None else {})}
+        await self._dispatch_event(state, TurnEvent(type=EventType.ERROR, run_id=run_id, payload=payload))
 
     # -- recovery -------------------------------------------------------------------
 

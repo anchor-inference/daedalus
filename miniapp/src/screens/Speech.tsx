@@ -200,7 +200,7 @@ export function SpeechModels({ toast }: { toast: (t: string) => void }) {
       <div className="section-title" style={{ marginTop: 0 }}>{t("stt.title")}</div>
       <div className="sub">{t("stt.intro")}</div>
 
-      <Row title={t("stt.inuse")}>
+      <Row title={t("stt.inuse")} data-setting="stt.local_model">
         <span className="settings-value">{view.selected ? view.models.find((m) => m.id === view.selected)?.label ?? view.selected : t("stt.inuse.none")}</span>
       </Row>
       <Row title={t("stt.ondisk")}>

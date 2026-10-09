@@ -61,6 +61,7 @@ import { Banner, IconButton } from "../ui/phone";
 import { SecretChip } from "../secrets";
 import { RawHtml } from "../rawhtml";
 import { RenameSheet, SearchSheet, SessionMenuSheet, SessionTopBar, StateSub, SubagentsSheet, type SessionRow, type SessionTile } from "./SessionPhone";
+import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines, settingRef } from "../settinglink";
 
 /**
  * Markdown parsed once per text. `cacheKey` names a message that will never change again, so its
@@ -711,6 +712,14 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         // Keep the provider's reason even when it failed before producing any reply.
         const message = String(p.message ?? "");
         if (message) setDetail((prev) => (prev ? { ...prev, error: message } : prev));
+        // A stop a setting answers (a spend cap) offers the way to it in the conversation; the
+        // host's notification about the same stop brings the toast.
+        const setting = settingRef(p.setting);
+        if (setting && message) raiseSettingNotice({ tone: "error", title: t("setting.notice.refused"), body: message, setting, sessionId: id, toast: false });
+      } else if (event === "setting_notice") {
+        // An auxiliary model was not set or refused. Inline only: the host posts the toast itself.
+        const notice = noticeFromEvent(id, p);
+        if (notice) raiseSettingNotice({ ...notice, toast: false });
       } else if (event === "message_stop") {
         // The streamed copy is dropped only once the written one is on the screen, so the answer
         // never blinks out and back in. The cursor does not wait for that read — `liveAfter` has
@@ -1097,7 +1106,16 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     const name = line.slice(1).split(" ")[0].toLowerCase();
     const spec = commands.find((c) => c.name === name);
     if (spec?.confirm && !(await confirmAsync(t("session.command.confirm", { name })))) return;
-    const r = await api.post<{ text: string }>(`/api/sessions/${id}/command`, { line });
+    let r: { text: string };
+    try {
+      r = await api.post<{ text: string }>(`/api/sessions/${id}/command`, { line });
+    } catch (e) {
+      // A refusal that names its setting (a /compact whose summary model is over its limit) is said
+      // in this conversation as well as in the corner, both with the way to the row; the composer,
+      // which catches it next, sees it was said and does not say it a third time.
+      raiseFromError(e, id);
+      throw e;
+    }
     const short = r.text.length < 140 && !r.text.includes("\n");
     if (short) toast(r.text);
     else setCommandResult({ line, text: r.text });
@@ -1582,6 +1600,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               <Icon name="question" size={14} /><span><b>{t("session.runerror")}: </b>{detail.error}</span>
             </div>
           )}
+          <SettingNoticeLines sessionId={id} />
           {staffId && <StaffMessages staffId={staffId} />}
           {/* A draft written before the first session read would bind to an empty model and workspace,
               then ask for target approval when those initial values arrived. */}

@@ -41,7 +41,7 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from protocore.contracts.llm import LLMObservabilityContext, LLMRequest
+from protocore.contracts.llm import LLMError, LLMObservabilityContext, LLMRateLimitError, LLMRequest
 from protocore.contracts.memory import MemoryScope
 from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResultBlock, ToolUseBlock
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -132,6 +132,7 @@ from daedalus.host.prompts import DEFAULT_RULES, without_turn_context
 from daedalus.host.reveal import platform_family
 from daedalus.host.services import SCRATCH_DIR_NAME
 from daedalus.host.session_runner import TENANT, Attachment, HostUnreachable, clip_title
+from daedalus.host.setting_refs import LOCAL_SPEECH_MODEL, SPEECH_RECOGNITION, SettingProblem, SettingRef, setting_of
 from daedalus.host.transcript_view import full_tool_result, message_view
 from daedalus.processes import end_tree
 from daedalus.providers.free_catalog import approved_endpoint, probe_agent_cycle
@@ -793,8 +794,36 @@ NO_MODEL_LABEL = "no model"
 """Where a model name would go in a list or a chip and there is none yet."""
 
 
+class SettingRefusal(HTTPException):
+    """An HTTP refusal that names its setting, answered as ``{"detail", "setting"}``: ``detail`` stays
+    the sentence every screen already shows, ``setting`` is what offers the button to the row."""
+
+    def __init__(self, status_code: int, detail: str, setting: SettingRef) -> None:
+        super().__init__(status_code, detail)
+        self.setting = setting
+
+
+def refusal(status_code: int, exc: BaseException | str, setting: SettingRef | None = None) -> HTTPException:
+    """The HTTP refusal for an exception or a sentence: one that names its setting when the exception
+    (anything it was raised from included) or the caller does, a plain one otherwise."""
+    found = setting or (setting_of(exc) if isinstance(exc, BaseException) else None)
+    if found is None:
+        return HTTPException(status_code, str(exc))
+    return SettingRefusal(status_code, str(exc), found)
+
+
+def model_refusal(exc: LLMError) -> HTTPException:
+    """A provider's refusal that reached a route unhandled, as a sentence instead of a bare 500.
+
+    Out of quota, out of balance, rate limited or down: none of it is this server failing, and the
+    operator who read "Server unavailable (500)" after a /compact had no way to know that the summary
+    model's monthly limit was the whole story."""
+    status = 429 if isinstance(exc, LLMRateLimitError) else 503
+    return refusal(status, f"the model provider refused: {exc}"[:2000], setting_of(exc))
+
+
 def resolve_model_patch(current: dict[str, Any], patch: dict[str, Any]) -> None:
-    """Merge a ``model`` settings patch (default preset id and/or fallback chain) in place."""
+    """Merge a ``model`` settings patch (default preset id, fallback chain, auxiliary fallback) in place."""
     presets = current.get("presets") or {}
     merged = dict(current.get("model", {}))
     if "preset" in patch:
@@ -805,6 +834,8 @@ def resolve_model_patch(current: dict[str, Any], patch: dict[str, Any]) -> None:
     if "chain" in patch:
         chain = [str(c) for c in (patch.get("chain") or []) if str(c) in presets and str(c) != merged.get("preset")]
         merged["chain"] = chain
+    if "fallback_to_session" in patch:
+        merged["fallback_to_session"] = bool(patch["fallback_to_session"])
     current["model"] = merged
 
 
@@ -1298,6 +1329,23 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         # ``detail`` stays the sentence the app already shows for any refusal; ``code`` and the
         # details beside it are what a screen that acts on the refusal reads (the cap's confirmation).
         return JSONResponse({"detail": exc.message, "code": exc.code, **exc.details}, status_code=exc.status)
+
+    @api.exception_handler(SettingRefusal)
+    async def setting_refusal(_: Request, exc: SettingRefusal) -> JSONResponse:
+        return JSONResponse({"detail": exc.detail, "setting": exc.setting.as_dict()}, status_code=exc.status_code, headers=exc.headers)
+
+    @api.exception_handler(SettingProblem)
+    async def setting_problem(_: Request, exc: SettingProblem) -> JSONResponse:
+        # A refusal a route did not catch is still a refusal, not a crash: 409 with the way to the row.
+        return JSONResponse({"detail": str(exc), "setting": exc.setting.as_dict()}, status_code=409)
+
+    @api.exception_handler(LLMError)
+    async def provider_refusal(_: Request, exc: LLMError) -> JSONResponse:
+        answer = model_refusal(exc)
+        body: dict[str, Any] = {"detail": answer.detail}
+        if isinstance(answer, SettingRefusal):
+            body["setting"] = answer.setting.as_dict()
+        return JSONResponse(body, status_code=answer.status_code)
 
     manager = app.manager
     assert manager is not None
@@ -2702,7 +2750,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         until its words have.
         """
         if not recogniser_available(app.speech, app.config):
-            raise HTTPException(409, "speech-to-text is not set up (Settings → Voice → Speech recognition)")
+            raise refusal(409, "speech-to-text is not set up (Settings → Voice → Speech recognition)", SPEECH_RECOGNITION)
         forget_old_recordings(kept)
         if recording:
             if not KEPT_NAME.fullmatch(recording) or not (kept / recording).is_file():
@@ -2943,7 +2991,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         """One utterance as a recording, for a browser with no speech recognition of its own."""
         extension = voice()
         if not recogniser_available(app.speech, app.config):
-            raise HTTPException(409, "speech-to-text is not set up (Settings → Voice → Speech recognition)")
+            raise refusal(409, "speech-to-text is not set up (Settings → Voice → Speech recognition)", SPEECH_RECOGNITION)
         suffix = Path(audio.filename or "").suffix or mimetypes.guess_extension((audio.content_type or "").split(";")[0]) or ".webm"
         target = settings.state_dir / "tmp" / f"utterance-{secrets.token_hex(4)}{suffix}"
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -3583,7 +3631,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         makes it hear the sentence at three times its speed and answer with noise.
         """
         if not app.speech.available():
-            raise HTTPException(409, "no local speech model is installed and selected (Settings → Voice)")
+            raise refusal(409, "no local speech model is installed and selected (Settings → Voice)", LOCAL_SPEECH_MODEL)
         _prune_streams()
         try:
             clamp_rate(rate)
@@ -3612,7 +3660,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         the browser recognised itself.
         """
         if not app.speech.available():
-            raise HTTPException(409, "no local speech model is installed and selected (Settings → Voice)")
+            raise refusal(409, "no local speech model is installed and selected (Settings → Voice)", LOCAL_SPEECH_MODEL)
         chunk = await request.body()
         if len(chunk) > LISTEN_CHUNK_MAX:
             raise HTTPException(413, f"a chunk may be up to {LISTEN_CHUNK_MAX >> 20} MB of samples")
@@ -4303,13 +4351,18 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         try:
             text = await slash.run_command(app, session_id, body.line)
         except KeyError as exc:
+            if setting_of(exc) is not None:  # a provider without a key, not an unknown command
+                raise refusal(409, exc) from exc
             raise HTTPException(404, f"unknown command or session: {exc}") from exc
         except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
+            raise refusal(400, exc) from exc
         except RuntimeError as exc:
-            raise HTTPException(409, str(exc)) from exc
+            # A compaction no model could make arrives here naming the summary model's row.
+            raise refusal(409, exc) from exc
         except TelegramBusy as exc:
             raise HTTPException(429, str(exc)) from exc
+        except LLMError as exc:
+            raise model_refusal(exc) from exc
         return {"text": redact.redact(text)}
 
     @api.get("/api/limits/spend")
@@ -4507,9 +4560,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         try:
             summary = await manager.compact(session_id, body.instructions)
         except KeyError as exc:
+            if setting_of(exc) is not None:
+                raise refusal(409, exc) from exc
             raise HTTPException(404, "no such session") from exc
         except RuntimeError as exc:
-            raise HTTPException(409, str(exc)) from exc
+            raise refusal(409, exc) from exc
         return {"summary": summary}
 
     @api.post("/api/sessions/{session_id}/clear")

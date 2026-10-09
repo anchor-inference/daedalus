@@ -43,6 +43,7 @@ import {
 import { fmtInt } from "./ui/components";
 import { t } from "./i18n";
 import { insideTerminal } from "./terminal/keys";
+import { raiseFromError } from "./settinglink";
 
 export type Answer = { question: string; selected: string[]; custom: string | null };
 
@@ -271,7 +272,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       await onCommand(line);
     } catch (e) {
       setDraft(line);
-      toast(errorText(e));
+      // An error that names its setting goes to the corner with the button to the row.
+      if (!raiseFromError(e)) toast(errorText(e));
     }
   }
 

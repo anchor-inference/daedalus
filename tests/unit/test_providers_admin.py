@@ -374,4 +374,4 @@ def test_presets_are_seeded_and_resolve_the_default(tmp_path) -> None:  # type: 
     assert loaded.presets["vllm.Qwen3.6"].provider == "vllm" and loaded.presets["vllm.Qwen3.6"].thinking is True
     raw = loaded.model_dump(mode="json")
     resolve_model_patch(raw, {"preset": "vllm.Qwen3.6", "chain": ["vllm.Qwen3.6", "deepseek.deepseek-v4-flash"]})
-    assert raw["model"] == {"preset": "vllm.Qwen3.6", "chain": ["deepseek.deepseek-v4-flash"]}
+    assert raw["model"] == {"preset": "vllm.Qwen3.6", "chain": ["deepseek.deepseek-v4-flash"], "fallback_to_session": True}

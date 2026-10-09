@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from daedalus.config import ProviderConfig, RuntimeConfig, Settings
+from daedalus.host.setting_refs import provider_key
 from daedalus.providers.admission import InferenceAdmission
 from daedalus.providers.openai_compat import (
     ImageLoader,
@@ -29,6 +30,20 @@ VENDOR_HOSTS = {"deepseek": "api.deepseek.com", "openrouter": "openrouter.ai", "
 def _is_vendor_host(kind: str, base_url: str) -> bool:
     host = (urlsplit(base_url if "://" in base_url else "//" + base_url).hostname or "").lower()
     return host == VENDOR_HOSTS.get(kind, "")
+
+
+class ProviderUnavailable(KeyError):
+    """A provider endpoint is not configured or has no key. A ``KeyError``, as it always was, and it
+    names the endpoint's key row so a refusal can take the operator there."""
+
+    def __init__(self, provider_id: str, available: Sequence[str]) -> None:
+        self.message = f"provider {provider_id!r} is not configured or has no API key; available: {list(available)}"
+        super().__init__(self.message)
+        self.setting = provider_key(provider_id)
+
+    def __str__(self) -> str:
+        # A KeyError's own str() is the repr of its argument, quotes and all.
+        return self.message
 
 
 class ProviderRegistry:
@@ -191,10 +206,7 @@ class ProviderRegistry:
         try:
             return self._providers[provider_id]
         except KeyError as exc:
-            raise KeyError(
-                f"provider {provider_id!r} is not configured or has no API key; "
-                f"available: {sorted(self._providers)}"
-            ) from exc
+            raise ProviderUnavailable(provider_id, sorted(self._providers)) from exc
 
     def available(self) -> Sequence[str]:
         return tuple(sorted(self._providers))
@@ -237,4 +249,4 @@ class ProviderRegistry:
             await provider.aclose()
 
 
-__all__ = ["ProviderRegistry"]
+__all__ = ["ProviderRegistry", "ProviderUnavailable"]

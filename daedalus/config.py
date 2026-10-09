@@ -442,6 +442,10 @@ class ModelConfig(BaseModel):
     """Empty until the operator adds one; the first preset in the table stands in for it."""
     chain: list[str] = Field(default_factory=list)
     """Fallback preset ids tried in order after the default one."""
+    fallback_to_session: bool = True
+    """When an auxiliary model (the summary model, the vision model) is not set or refuses, do its
+    work with the session's own model and warn, rather than fail. On by default: a summary or a look
+    at a picture made by the session's model is worth more than an error the operator must chase."""
 
 
 class ModelPresetConfig(BaseModel):

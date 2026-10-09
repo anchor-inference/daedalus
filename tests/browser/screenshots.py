@@ -406,7 +406,7 @@ def usage_data() -> dict:
 
 
 SETTINGS = {
-    "model": {"preset": "deepseek-flash", "chain": ["deepseek-flash", "gpt-5.6-luna"]},
+    "model": {"preset": "deepseek-flash", "chain": ["deepseek-flash", "gpt-5.6-luna"], "fallback_to_session": True},
     "presets": {
         "deepseek-flash": {"provider": "deepseek", "model": "deepseek-flash", "label": "DeepSeek Flash", "thinking": True, "reasoning_effort": "medium", "images": False, "context_window": 128000, "max_output_tokens": 16384},
         "claude-opus-5": {"provider": "claude", "model": "claude-opus-5", "label": "Claude Opus 5", "thinking": True, "reasoning_effort": "high", "images": True, "context_window": 200000, "max_output_tokens": 32000},
@@ -714,6 +714,11 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, {"resolution": resolution, "notification": entry and {**entry, "resolved": resolution, "needs_you": False, "seen": True}})
     if request.method == "POST" and rel == "/api/notifications/seen":
         return respond(route, {"marked": 0, "summary": INBOX_SUMMARY})
+    if request.method == "POST" and rel.startswith("/api/sessions/") and rel.endswith("/command"):
+        # A slash command answers with the chat's text, or — when a scene sets one — refuses as the
+        # host does about a setting: the sentence and the row it names.
+        refused = getattr(stub, "command_refusal", None)
+        return respond(route, refused, status=409) if refused else respond(route, {"text": "Done."})
     if request.method != "GET":
         return respond(route, {"ok": True})
     if rel == "/api/events" and getattr(stub, "events", ""):

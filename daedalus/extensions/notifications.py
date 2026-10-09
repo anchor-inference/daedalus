@@ -56,6 +56,7 @@ from daedalus.host.notify_routing import (
 )
 from daedalus.host.notify_text import render
 from daedalus.host.presence import PresenceSnapshot
+from daedalus.host.setting_refs import SettingRef, setting_from_link
 from daedalus.transport.telegram.front import TelegramOutbox, is_subagent
 from daedalus.transport.telegram.markdown import split_message
 
@@ -250,6 +251,8 @@ class NotificationView(TypedDict):
     resolved: str | None
     needs_you: bool
     delivered: dict[str, Any]
+    setting: dict[str, str] | None
+    """The setting the entry is about (``{page, key}``), read from its link: the app's button to the row."""
 
 
 class NotificationPage(TypedDict):
@@ -296,6 +299,7 @@ def _view(row: Any, now: str) -> NotificationView:
         resolved=row["resolution"] if row["resolved_at"] is not None else None,
         needs_you=row["request_ref"] is not None and row["resolved_at"] is None and not held,
         delivered=_json(row["delivered_json"], {}),
+        setting=(ref.as_dict() if (ref := setting_from_link(row["link"])) else None),
     )
 
 
@@ -876,10 +880,13 @@ class NotificationService:
 
     async def on_event(self, session_id: str, event: TurnEvent) -> None:
         """Run-level outcomes that deserve an entry even when the operator is watching."""
-        if event.type is EventType.ERROR and event.payload.get("kind") == "run_cap":
+        if event.type is EventType.ERROR and event.payload.get("kind") in ("run_cap", "total_cap", "provider_cap"):
+            # Linked to the cap's row when the stop names one: the entry is then the way to raise it.
+            setting = event.payload.get("setting")
+            link = SettingRef(str(setting["page"]), str(setting["key"])).link() if isinstance(setting, dict) and setting.get("page") and setting.get("key") else ""
             await self.post(Draft(
                 "run_failed", "A run hit its spend cap", str(event.payload.get("message") or ""),
-                kind="run_cap", tone="warning", session_id=session_id, run_id=event.run_id,
+                kind="run_cap", tone="warning", session_id=session_id, run_id=event.run_id, link=link,
             ))
 
 
@@ -1337,6 +1344,27 @@ class AgentNotifier:
         return notify_outcome(view)
 
 
+def setting_draft(payload: Mapping[str, Any], lang: str) -> Draft:
+    """The entry for an auxiliary model that was not set or refused: a warning when the session's
+    model did the work, an error when nothing did, linked to the setting's row either way.
+
+    Posted without the session: the router counts a notice about the session the operator is looking
+    at as seen and raises no toast, and this one is about the configuration, which no conversation
+    shows. One open entry per setting and outcome, so a summary model that refuses at every turn is
+    one entry with a count rather than a column of them."""
+    setting = payload["setting"]
+    ref = SettingRef(str(setting["page"]), str(setting["key"]))
+    kind, outcome = str(payload["kind"]), str(payload["outcome"])
+    detail = str(payload.get("detail") or "")
+    used = str(payload.get("model") or "")
+    body = f"{detail}\n\n→ {used}" if used and outcome == "fallback" else detail
+    return Draft(
+        "system", render(f"setting.{kind}.{outcome}", lang), body[:BODY_MAX], kind=f"setting_{kind}",
+        tone="warning" if outcome == "fallback" else "error", link=ref.link(),
+        dedupe_key=f"setting:{ref.key}:{outcome}", source="settings",
+    )
+
+
 def format_entries(entries: Iterable[NotificationView]) -> str:
     """The ``/inbox`` digest: one line an entry, newest first."""
     icons = {"ok": "✓", "info": "·", "warning": "⚠️", "error": "❌"}
@@ -1386,6 +1414,11 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
 
     notifier = AgentNotifier(service, notify_facts)
     manager.service_hooks["notify"] = notifier.notify
+
+    async def setting_notice(session_id: str | None, payload: Mapping[str, Any]) -> None:
+        await service.post(setting_draft(payload, service.language()))
+
+    manager.service_hooks["setting_notice"] = setting_notice
     tasks = [
         manager.bus.on(EventFilter(types=ROUTED_EVENTS), router.handle, name="notifications"),
         asyncio.create_task(service.keep_holds(), name="notification-holds"),

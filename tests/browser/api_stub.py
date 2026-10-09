@@ -439,6 +439,17 @@ def long_history(detail: dict, pairs: int = 700, planted: dict[int, str] | None 
     return questions
 
 
+def setting_refusal(detail: str, page: str, key: str) -> dict[str, object]:
+    """An HTTP refusal that names its setting, as the host answers one: the sentence, and the row."""
+    return {"detail": detail, "setting": {"page": page, "key": key}}
+
+
+def setting_notice_frame(kind: str, outcome: str, detail: str, page: str, key: str, *, model: str = "") -> str:
+    """A session stream's ``setting_notice`` frame: an auxiliary model was not set or refused."""
+    payload = {"kind": kind, "outcome": outcome, "detail": detail, "model": model, "setting": {"page": page, "key": key}}
+    return f"event: setting_notice\ndata: {json.dumps(payload)}\n\n"
+
+
 def answer_shared(method: str, path: str) -> tuple[int, str, str | bytes] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 

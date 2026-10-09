@@ -79,7 +79,7 @@ export function AsrSettingsCard({ s, save }: { s: Settings; save: (patch: { asr:
     <div className="card asr-card">
       <div className="section-title" style={{ marginTop: 0 }}>{t("settings.asr.title")}</div>
       <div className="sub">{t("settings.asr.sub")}</div>
-      <Row title={t("settings.asr.engine")} desc={!anyLocal ? <>{t("settings.asr.nolocal")} <a href="#speech-models" onClick={toCatalogue}>{t("settings.asr.nolocal.link")}</a></> : undefined} stack>
+      <Row data-setting="asr.transcriber" title={t("settings.asr.engine")} desc={!anyLocal ? <>{t("settings.asr.nolocal")} <a href="#speech-models" onClick={toCatalogue}>{t("settings.asr.nolocal.link")}</a></> : undefined} stack>
         <Dropdown id="asr-transcriber" label={t("settings.asr.engine")} value={transcriber} invalid={primary.some((o) => o.missing && o.value === transcriber)} onChange={(next) => put({ transcriber: next, fallback: fallback === next ? "" : fallback })} options={primary.map((o) => ({ id: o.value, label: o.label }))} />
       </Row>
       {transcriber === CLOUD && cloudFields}
