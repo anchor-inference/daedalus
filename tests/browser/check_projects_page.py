@@ -38,11 +38,26 @@ WORDS = {"en": {"waiting": "1 waiting for you", "filter": "Waiting", "note": "De
          "ru": {"waiting": "1 ждёт вас", "filter": "Ждут", "note": "DevHub", "chats": "3 чата"}}
 
 
+def kept_projects() -> list[dict]:
+    """The shared fixture's projects as this page sees them. The fixture leaves Expenses and Weekly
+    digest as single chats' scratch projects; here Weekly digest has been kept, so the page has a
+    project with a waiting chat to show, while Expenses stays a chat and must not be listed."""
+    projects = copy.deepcopy(shots.PROJECTS)
+    for project in projects:
+        if project["id"] == shots.P4:
+            project["settings"]["ephemeral"] = False
+    return projects
+
+
+def is_kept(project: dict) -> bool:
+    return bool(project.get("system") or project["settings"].get("system")) or not project["settings"].get("ephemeral")
+
+
 def serve(page: Page) -> None:
     def route(r) -> None:  # type: ignore[no-untyped-def]
         path = urlsplit(r.request.url).path
         if path.endswith("/api/projects") and r.request.method == "GET":
-            return shots.respond(r, [*copy.deepcopy(shots.PROJECTS), ORCHESTRATED, SCRATCH, ARCHIVED])
+            return shots.respond(r, [*kept_projects(), ORCHESTRATED, SCRATCH, ARCHIVED])
         return shots.stub(r)
 
     page.route("**/api/**", route)
@@ -65,8 +80,9 @@ def run(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
 
     rows = page.locator(".projects-row:not(.head)")
     ids = [rows.nth(i).get_attribute("data-project") for i in range(rows.count())]
-    listed = [p["id"] for p in shots.PROJECTS]
-    check(sorted(ids) == sorted(listed), f"{where}: the table lists the six kept projects ({len(ids)})")
+    listed = [p["id"] for p in kept_projects() if is_kept(p)]
+    check(sorted(ids) == sorted(listed), f"{where}: the table lists the {len(listed)} kept projects ({len(ids)})")
+    check(shots.P2 not in ids, f"{where}: a chat's scratch project is listed as the chat, not here")
     check(SCRATCH["id"] not in ids, f"{where}: a chat's scratch project is not a project")
     check(ORCHESTRATED["id"] not in ids, f"{where}: an orchestrated project lives in orchestration mode")
     check(ARCHIVED["id"] not in ids, f"{where}: an archived project is not in the table")

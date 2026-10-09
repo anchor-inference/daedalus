@@ -16,6 +16,7 @@ import { PaneHandle, clampWidth, pixelDrag, readSidebar, rememberSidebar, usePan
 import { Capabilities, SelfDevMode, visibleScreens } from "./capabilities";
 import { ProjectSwitcher, rememberProject, storedProject, useProjects } from "./projects";
 import { NewProjectHost, openNewProject } from "./project/NewProject";
+import { rememberFolder } from "./grouping";
 import { projectViewPath, storedProjectView } from "./project/lastview";
 import { projectPath } from "./folders";
 import { ChangeStrip } from "./change";
@@ -686,7 +687,8 @@ export function App() {
       </div>
       {palette && <Palette items={paletteItems()} onClose={() => setPalette(false)} />}
       {switching && <ProjectSwitcher projects={agentProjects} archived={archivedProjects} current={project} onPick={pickProject} onClose={() => setSwitching(false)} toast={showToast} />}
-      <NewProjectHost mode={mode === "orchestration" ? "orchestration" : "agents"} toast={showToast} onCreated={(created) => pickProject(created.id)} />
+      {/* A project just made has no chat yet: its folder opens in the sidebar so it is seen at once. */}
+      <NewProjectHost mode={mode === "orchestration" ? "orchestration" : "agents"} toast={showToast} onCreated={(created) => { rememberFolder(created.id, true); pickProject(created.id); }} />
       {projectBar?.bar && focusProject && (
         <ErrorBoundary key={`tabs-${focusProject}`}>
           <Suspense fallback={<nav className="tabbar five project-tabs" aria-hidden />}>

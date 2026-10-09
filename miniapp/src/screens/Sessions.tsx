@@ -22,7 +22,8 @@ import { type MenuItem, OverflowMenu, Sheet, confirmDialog, toast } from "../ui/
 import { relTime, shortModel, untilShort } from "../format";
 import { type Folder, type Row as RowModel, type SidebarDay, agentName, arrange, folderOpen, kindOf, liveRow, rememberFolder, sidebarSections } from "../grouping";
 import { Icon, type IconName } from "../icons";
-import { AddProjectSheet, MoveSessionSheet, ProjectSettingsSheet, useProjects } from "../projects";
+import { MoveSessionSheet, ProjectSettingsSheet, useProjects } from "../projects";
+import { openNewProject } from "../project/NewProject";
 import { navigate, parse, pathFor, sessionPath } from "../router";
 import { agentsListing } from "../mode";
 import { invalidate, useQuery } from "../store";
@@ -63,7 +64,6 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
   const [extra, setExtra] = useState<SessionSummary[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [paging, setPaging] = useState(false);
-  const [addingProject, setAddingProject] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchList | null>(null);
   const [pending, setPending] = useState(false);
@@ -145,8 +145,6 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
       {label}{count !== undefined && <b className="num">{count}</b>}
     </button>
   );
-  // The one place "New project" opens its dialog from: the column's button calls this and nothing else.
-  const openNewProject = () => setAddingProject(true);
   const moreOn = view === "loops" || view === "archive";
   const projectCount = sections.projects.length;
 
@@ -165,7 +163,7 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
               <span className="truncate">{lens ? lens.name : t("shell.projects.all")}</span>
             </button>
           )}
-          <button type="button" className="sb-pbtn sb-newproject" onClick={openNewProject}>
+          <button type="button" className="sb-pbtn sb-newproject" onClick={() => openNewProject()}>
             <Icon name="plus" size={15} />
             <span className="truncate">{t("ph.newproject")}</span>
           </button>
@@ -248,8 +246,6 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
           finally { setPaging(false); }
         }}>{t(paging ? "agents.loading" : "agents.more")}</button>}
       </div>
-      {addingProject && <AddProjectSheet onClose={() => setAddingProject(false)} toast={toast}
-        onAdded={(p) => { setAddingProject(false); rememberFolder(p.id, true); invalidate("/api/sessions"); }} />}
     </>
   );
 }

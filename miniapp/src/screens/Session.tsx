@@ -6,7 +6,7 @@ import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../
 import { MenuItem, OverflowMenu, Popover, confirmDialog, Overlay } from "../ui/dialogs";
 import { absDate, clock, commandPreview, duration, plainPreview, shortDateTime } from "../format";
 import { HostMark } from "../runon";
-import { isProject } from "../isproject";
+import { isProject } from "../grouping";
 import { EVIDENCE_EVENT, EvidenceRequest, codeBlock, renderCached, renderMarkdown } from "../md";
 import { confirmAsync, errorText, fmtBytes, haptic } from "../ui";
 import { Icon, IconName } from "../icons";

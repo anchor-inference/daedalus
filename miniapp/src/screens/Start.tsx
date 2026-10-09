@@ -21,7 +21,7 @@ import { invalidate, useOffline, useQuery } from "../store";
 import { useStreamUp } from "../events";
 import { useSummary } from "../notifications";
 import { agentsListingOf } from "../mode";
-import { agentName, kindOf } from "../grouping";
+import { agentName, isProject, kindOf } from "../grouping";
 import { relTime, shortModel, untilShort } from "../format";
 import { Dot, fmtInterval, statusWord } from "../ui/components";
 import { screenTitle, useMedia } from "../ui/index";
@@ -30,7 +30,6 @@ import { enterSends, errorText } from "../ui";
 import { t } from "../i18n";
 import { EnvPill } from "../envpill";
 import { HostMark, RunOn, RunOnRow, RunOnSelect, useRunOn } from "../runon";
-import { isProject } from "../isproject";
 import { projectReachable } from "../folders";
 import { ProjectsPage } from "./Projects";
 

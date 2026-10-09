@@ -6,11 +6,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api, Project, ProjectFolder, SessionList } from "../api";
-import { AddProjectSheet, ProjectSettingsSheet, useProjects } from "../projects";
-import { isProject } from "../isproject";
+import { ProjectSettingsSheet, useProjects } from "../projects";
+import { openNewProject } from "../project/NewProject";
 import { projectPath, projectReachable } from "../folders";
 import { agentsListingOf, isMainProject, modeHome } from "../mode";
-import { kindOf } from "../grouping";
+import { isProject, kindOf } from "../grouping";
 import { relTime } from "../format";
 import { EnvPill } from "../envpill";
 import { Icon } from "../icons";
@@ -33,7 +33,6 @@ export function ProjectsPage({ toast, onPickProject }: { toast: (text: string) =
   const { data: listing } = useQuery<SessionList>("/api/sessions?view=all", { pollMs: stream ? 60000 : 5000, staleMs: 3000 });
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
   const [restoring, setRestoring] = useState("");
   const offline = useOffline();
@@ -49,7 +48,7 @@ export function ProjectsPage({ toast, onPickProject }: { toast: (text: string) =
   const loaded = !!projects.data;
   const empty = loaded && mine.length === 0;
   useEffect(() => {
-    if (empty) setAdding(true);
+    if (empty) openNewProject("agents");
   }, [empty]);
 
   const folders = useMemo(() => new Map((listing?.projects ?? []).map((folder) => [folder.id, folder])), [listing]);
@@ -113,7 +112,7 @@ export function ProjectsPage({ toast, onPickProject }: { toast: (text: string) =
               {chip("working", t("status.running"), counts.working)}
             </div>
             <span className="grow" />
-            <button type="button" className="btn projects-new" onClick={() => setAdding(true)}><Icon name="plus" size={16} />{t("ph.newproject")}</button>
+            <button type="button" className="btn projects-new" onClick={() => openNewProject("agents")}><Icon name="plus" size={16} />{t("ph.newproject")}</button>
           </div>
           <div className="projects-table" role="table" aria-label={t("shell.projects")}>
             <div className="projects-row head" role="row">
@@ -167,7 +166,6 @@ export function ProjectsPage({ toast, onPickProject }: { toast: (text: string) =
           )}
         </div>
       </div>
-      {adding && <AddProjectSheet firstProject={mine.length === 0} onClose={() => setAdding(false)} onAdded={(p) => { setAdding(false); startIn(p); }} toast={toast} />}
       {editing && <ProjectSettingsSheet project={editing} onClose={() => setEditing(null)} onRemoved={() => setEditing(null)} toast={toast} />}
     </div>
   );

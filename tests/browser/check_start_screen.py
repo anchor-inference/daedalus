@@ -18,6 +18,7 @@ What is checked:
 """
 from __future__ import annotations
 
+import copy
 import json
 import sys
 from pathlib import Path
@@ -39,6 +40,15 @@ def serve(page: Page, posted: list[object]) -> None:
         request = r.request
         path = urlsplit(request.url).path
         path = path[path.index("/api/"):]
+        if request.method == "GET" and path == "/api/projects":
+            # The shared fixture leaves Expenses and Weekly digest as single chats' scratch projects,
+            # which the chips leave out; here both have been kept, so there are more than three
+            # projects for the More chip to hold and ?in= has a kept project to pick.
+            projects = copy.deepcopy(shots.PROJECTS)
+            for project in projects:
+                if project["id"] in (shots.P2, shots.P4):
+                    project["settings"]["ephemeral"] = False
+            return shots.respond(r, projects)
         if request.method == "POST" and path == "/api/sessions":
             posted.append(request.post_data_json)
             return r.fulfill(status=200, content_type="application/json", body=json.dumps({"id": shots.S1}))

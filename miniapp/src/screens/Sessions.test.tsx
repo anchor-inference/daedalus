@@ -16,9 +16,10 @@ vi.mock("../projects", () => ({
   useEnvironments: () => ({ data: { local: environments.docker ? "container" : "host", docker: environments.docker, host_bridge: true, available: [] } }),
   ProjectSettingsSheet: () => <div data-settings />,
   MoveSessionSheet: () => <div data-move />,
-  AddProjectSheet: () => <div data-add-project />,
 }));
 vi.mock("../events", () => ({ useStreamUp: () => true }));
+const newProject = vi.hoisted(() => ({ open: vi.fn() }));
+vi.mock("../project/NewProject", () => ({ openNewProject: newProject.open }));
 const dialogs = vi.hoisted(() => ({ confirm: vi.fn(async () => false) }));
 vi.mock("../ui/dialogs", async (original) => ({ ...(await original<typeof import("../ui/dialogs")>()), confirmDialog: dialogs.confirm }));
 
@@ -134,7 +135,8 @@ describe("the sidebar", () => {
     await act(async () => host.querySelector<HTMLButtonElement>(".sb-pbtns .project-chip")!.click());
     expect(onProjects).toHaveBeenCalled();
     await act(async () => host.querySelector<HTMLButtonElement>(".sb-newproject")!.click());
-    expect(host.querySelector("[data-add-project]")).not.toBeNull();
+    // The column opens the one new-project dialog the app mounts, in the mode on screen.
+    expect(newProject.open).toHaveBeenCalledWith();
   });
 
   it("is driven from the keyboard: slash, arrows, F2 and Delete", async () => {
