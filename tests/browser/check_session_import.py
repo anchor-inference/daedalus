@@ -32,7 +32,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
-from api_stub_imports import IMPORTED_ID, ImportsStub, imported_row, imported_session  # noqa: E402
+from import_stub import IMPORTED_ID, ImportStub, imported_row, imported_session  # noqa: E402
 from screenshots import S1, UNHANDLED, detail, listing, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -64,7 +64,7 @@ WORDS = {
 }
 
 
-def serve(page: Page, imports: ImportsStub) -> None:
+def serve(page: Page, imports: ImportStub) -> None:
     def route(r) -> None:  # type: ignore[no-untyped-def]
         request = r.request
         path = urlsplit(request.url).path
@@ -82,7 +82,7 @@ def serve(page: Page, imports: ImportsStub) -> None:
     page.route("**/api/**", route)
 
 
-def start(browser, lang: str, phone: bool, imports: ImportsStub):  # type: ignore[no-untyped-def]
+def start(browser, lang: str, phone: bool, imports: ImportStub):  # type: ignore[no-untyped-def]
     size = {"width": 390, "height": 844} if phone else {"width": 1440, "height": 900}
     context = browser.new_context(viewport=size, is_mobile=phone, has_touch=phone, color_scheme="dark", accept_downloads=True)
     context.add_init_script("try { localStorage.setItem('daedalus.session.panel', 'details'); } catch (e) {}")
@@ -104,7 +104,7 @@ def sideways(page: Page) -> bool:
 def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
     words = WORDS[lang]
     say = lambda text: problems.append(f"{lang} 1440px: {text}")  # noqa: E731
-    imports = ImportsStub()
+    imports = ImportStub()
     context, page, errors = start(browser, lang, False, imports)
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
     expect(page.locator(".rail")).to_be_visible(timeout=15000)
@@ -240,7 +240,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
 def phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
     words = WORDS[lang]
     say = lambda text: problems.append(f"{lang} 390px: {text}")  # noqa: E731
-    imports = ImportsStub()
+    imports = ImportStub()
     context, page, errors = start(browser, lang, True, imports)
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
     expect(page.locator(".ph-page")).to_be_visible(timeout=15000)

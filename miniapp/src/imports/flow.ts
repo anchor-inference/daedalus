@@ -12,7 +12,7 @@ import { invalidate } from "../store";
 import { errorText } from "../ui";
 import { t } from "../i18n";
 import {
-  firstHarness, importBody, previewUrl, scanUrl, suggestedMode,
+  firstHarness, importBody, mergeScan, previewUrl, scanUrl, suggestedMode,
   type ForeignSession, type HarnessList, type ImportJob, type ImportMode, type ImportPreview, type ScanResult,
 } from "./model";
 
@@ -42,6 +42,10 @@ function steady(job: Partial<ImportJob>, id: string): ImportJob {
 const SEARCH_WAIT_MS = 250;
 /** How often a running import is asked how far it got. */
 const JOB_POLL_MS = 400;
+/** How many further pages a folder's listing follows. The host answers within its time budget and
+ *  says where it stopped; a folder of a few hundred long sessions takes several answers on a cold
+ *  cache, and showing only the first was the bug: the rest of the folder looked empty. */
+const SCAN_PAGES = 20;
 
 /** `onDone` is told the chat the import made and the project it joined, when it joined one. */
 export function useImportFlow(initial: OpenRequest, onDone: (sessionId: string, into: string) => void) {
@@ -113,14 +117,19 @@ export function useImportFlow(initial: OpenRequest, onDone: (sessionId: string, 
     setScanning(true);
     try {
       // A search spans every folder of the program, so it is asked of no folder in particular.
-      const result = await api.get<ScanResult>(scanUrl(harness, asked ? "" : path, asked, deep));
-      if (mine !== scanRequest.current) return;
-      setScan(result);
-      setFailure(null);
-      const want = wanted.current;
-      if (want) {
-        const found = result.here.find((s) => s.id === want);
-        if (found) { setSelected(found); wanted.current = ""; }
+      const where = asked ? "" : path;
+      let result = await api.get<ScanResult>(scanUrl(harness, where, asked, deep));
+      for (let page = 0; ; page++) {
+        if (mine !== scanRequest.current) return;
+        setScan(result);
+        setFailure(null);
+        const want = wanted.current;
+        if (want) {
+          const found = result.here.find((s) => s.id === want);
+          if (found) { setSelected(found); wanted.current = ""; }
+        }
+        if (!result.truncated || !result.cursor || page >= SCAN_PAGES) break;
+        result = mergeScan(result, await api.get<ScanResult>(scanUrl(harness, where, asked, deep, result.cursor)));
       }
     } catch (error) {
       if (mine === scanRequest.current) setFailure(failureOf(error));

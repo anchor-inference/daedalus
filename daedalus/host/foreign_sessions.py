@@ -484,6 +484,16 @@ class Converter:
                 for sub in side[chain]:
                     entries.extend(self._turn(sub, counts, out, sidechain=chain))
         counts["orphan_results"] = sum(1 for call_id in self.results if call_id not in self.consumed)
+        # A summary the program wrote says how many messages came before it, as one of ours does: the
+        # chat labels it "N messages before it", and without the count it said none.
+        before = 0
+        for entry in entries:
+            if entry.summary:
+                compaction = entry.transcript.metadata.get("daedalus.compaction")
+                if isinstance(compaction, dict):
+                    compaction["messages"] = before
+            if not entry.sidechain:
+                before += 1
         if len(entries) > self.transcript_max:
             out.dropped = len(entries) - self.transcript_max
             entries = entries[-self.transcript_max:]
@@ -794,6 +804,10 @@ class Plan:
     kept: list[int]
     gap: list[int]
     archived: list[int]
+    cut: bool = False
+    """Keep the tail's shorter tool outputs: a tail was asked for and the whole session fits the
+    tail's budget only with them. The whole session with whole outputs is the size the tail was
+    asked to avoid — a Codex session of 142 000 tokens came over that way into a 128 000 window."""
 
 
 def large(conversion: Conversion, window: int) -> bool:
@@ -816,6 +830,8 @@ def plan_history(conversion: Conversion, *, mode: str, window: int) -> Plan:
     used = 0
     users = 0
     start = len(after)
+    fits = len(after)
+    """The earliest position whose messages from there on fit the budget, whoever wrote them."""
     for position in range(len(after) - 1, -1, -1):
         entry = entries[after[position]]
         cost = estimate_tokens(entry.tail_history or entry.history)
@@ -823,13 +839,22 @@ def plan_history(conversion: Conversion, *, mode: str, window: int) -> Plan:
             break
         used += cost
         start = position
+        if used <= budget:
+            fits = position
         if entry.operator:
             users += 1
     # The tail starts at a message of the operator's, never between a call and its result.
     while start > 0 and not entries[after[start]].operator:
         start -= 1
+    if start <= 0 and 0 < fits < len(after):
+        # One long run of the agent's after a single request — the usual shape of a Codex session —
+        # has no operator's message late enough to start at, and keeping it all made a "tail" import
+        # a whole one, past the window. It starts instead at the first answer of the model's within
+        # the budget: a call and its results follow the answer that made them, so none is split.
+        start = next((p for p in range(fits, len(after)) if entries[after[p]].history is not None
+                      and entries[after[p]].history.role is MessageRole.assistant), 0)
     if start <= 0 and last_summary < 0:
-        return Plan("full", -1, after, [], [])
+        return Plan("full", -1, after, [], [], cut=True)
     gap = after[:start]
     kept = after[start:]
     first_kept = kept[0] if kept else len(entries)

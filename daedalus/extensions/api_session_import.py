@@ -88,6 +88,16 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         kind = "service" if project.settings.system or project.setup_by == "dispatcher" else ("chat" if project.settings.ephemeral else "project")
         return {"id": project.id, "name": project.name, "kind": kind}
 
+    async def machine_home() -> str:
+        """The machine's home folder, so the app writes ``~/…`` for paths under it. A listing of no
+        folder in particular (the places with sessions, a search) asked the machine for nothing and
+        answered an empty home, and the app then wrote every path out in full."""
+        try:
+            browsed = await importer.bridge().browse("~", limit=1)
+        except (OSError, ConnectionError):
+            return ""
+        return str(browsed.get("home") or browsed.get("path") or "")
+
     async def owner_of(path: str, projects: list[Project]) -> dict[str, Any] | None:
         destination = await importer.destination(path, check=False, projects=projects)
         return owner_view(destination.project)
@@ -102,7 +112,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         rows = [row for row in listed.get("harnesses") or [] if isinstance(row, dict)]
         for row in rows:
             row.setdefault("name", harness_name(str(row.get("id") or "")))
-        return {"harnesses": ordered_harnesses(rows)}
+        return {"harnesses": ordered_harnesses(rows), "home": await machine_home()}
 
     @api.get("/api/imports/scan")
     async def scan(harness: str, path: str = "", q: str = "", deep: bool = False, cursor: str = "", _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -135,7 +145,9 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         out: dict[str, Any] = {**listed, "harness": harness, "here": here, "children": children, "folders": folders,
                                "parent": None, "home": "", "crumbs": [], "browse": None}
         target = str(listed.get("path") or path).strip()
-        if target:
+        if not target:
+            out["home"] = await machine_home()
+        else:
             try:
                 browsed = await importer.bridge().browse(target, limit=500)
             except FileNotFoundError:

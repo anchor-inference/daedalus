@@ -644,3 +644,35 @@ func TestCodexPeekReadsTheHeadAndTheTailOnly(t *testing.T) {
 		t.Fatalf("started %s", got)
 	}
 }
+
+func TestCodexAPageOfAPaginatedThreadIsReadUnderItsOwnName(t *testing.T) {
+	env := testEnv(t, nil)
+	thread, page := cxID(70), cxID(71)
+	cxWrite(t, env, thread,
+		cxMeta(thread, "2026-03-01T10:00:00Z", "/home/someone/proj", map[string]any{"history_mode": "paginated"}),
+		cxMsg("2026-03-01T10:00:01Z", "user", "first page"),
+		cxMsg("2026-03-01T10:00:02Z", "assistant", "one"),
+	)
+	cxWrite(t, env, thread+"_"+page,
+		cxMeta(thread, "2026-03-01T11:00:00Z", "/home/someone/proj", map[string]any{"history_mode": "paginated",
+			"history_base": map[string]any{"thread_id": thread, "end_byte_offset": 100, "end_ordinal_exclusive": 2}}),
+		cxMsg("2026-03-01T11:00:01Z", "user", "second page"),
+		cxMsg("2026-03-01T11:00:02Z", "assistant", "two"),
+		cxMsg("2026-03-01T11:00:03Z", "user", "more"),
+		cxMsg("2026-03-01T11:00:04Z", "assistant", "three"),
+	)
+	s := cxService(env)
+	ids := map[string]int{}
+	for _, h := range cxScan(t, s, "/home/someone/proj").Here {
+		ids[h.ID] = h.Messages
+	}
+	if len(ids) != 2 || ids[thread] != 2 || ids[page] != 4 {
+		t.Fatalf("listed %v", ids)
+	}
+	if got := cxRead(t, s, page, true); len(got) != 4 {
+		t.Fatalf("the page read %d turns", len(got))
+	}
+	if got := cxRead(t, s, thread, true); len(got) != 2 {
+		t.Fatalf("the first file read %d turns", len(got))
+	}
+}

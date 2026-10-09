@@ -5,7 +5,7 @@ import type { MessageView } from "../api";
 import {
   baseName, canLand, cardSessions, crumbs, destinationLine, exchanges, firstHarness, foreignToolName, groupByFolder, harnessMeta, harnessOrder,
   importBody, importedId, isLargePreview, isLargeSession, jobStages, markQuery, offersProject, originMessages, parentOf, previewUrl, progress,
-  scanUrl, sessionMeta, shortId, shortPath, snippetParts, splitTrivial, stageLine, suggestedMode, windowShare,
+  mergeScan, scanUrl, sessionMeta, shortId, shortPath, snippetParts, splitTrivial, stageLine, suggestedMode, windowShare,
   type ForeignSession, type HarnessView, type ImportJob, type ImportPreview,
 } from "./model";
 
@@ -167,7 +167,18 @@ describe("the preview", () => {
   it("asks the host in the shapes it answers", () => {
     expect(scanUrl("claude", "/a b", "", true)).toBe("/api/imports/scan?harness=claude&path=%2Fa+b");
     expect(scanUrl("claude", "", " lock ", true)).toBe("/api/imports/scan?harness=claude&path=&q=lock&deep=1");
+    expect(scanUrl("claude", "/a", "", false, "17")).toBe("/api/imports/scan?harness=claude&path=%2Fa&cursor=17");
     expect(previewUrl("codex", "019d")).toBe("/api/imports/preview?harness=codex&id=019d");
+  });
+
+  it("appends the page after a truncated scan, never listing a session twice", () => {
+    const a = session({ id: "a" });
+    const b = session({ id: "b" });
+    const first = { path: "/p", here: [a], children: [{ path: "/p/x", sessions: 1 }], folders: [], truncated: true, cursor: "1" };
+    const merged = mergeScan(first, { path: "/p", here: [a, b], children: [], folders: [], truncated: false, cursor: "" });
+    expect(merged.here.map((s) => s.id)).toEqual(["a", "b"]);
+    expect(merged.children).toEqual(first.children);
+    expect(merged.truncated).toBe(false);
   });
 });
 

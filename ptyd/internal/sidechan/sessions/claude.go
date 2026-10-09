@@ -696,8 +696,10 @@ func (p claudeParser) blocks(e *Env, idx *Index, r claudeRecord) []Part {
 		case "text":
 			words(b.Text)
 		case "thinking":
-			// The signature is the provider's and is dropped: no other model may be sent it.
-			parts = append(parts, Thinking(b.Thinking, false))
+			// The signature is the provider's and is dropped: no other model may be sent it. Claude
+			// Code keeps most thinking only signed, with an empty text; that is thinking that happened
+			// and cannot be read, as a redacted block is, and passed on as visible it vanished.
+			parts = append(parts, Thinking(b.Thinking, strings.TrimSpace(b.Thinking) == ""))
 		case "redacted_thinking":
 			parts = append(parts, Thinking("", true))
 		case "tool_use", "server_tool_use":

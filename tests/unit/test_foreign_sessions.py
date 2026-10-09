@@ -277,6 +277,37 @@ def test_a_short_session_asked_for_a_tail_stays_whole() -> None:
     assert plan.mode == "full" and not plan.archived
 
 
+def test_a_tail_that_keeps_everything_keeps_the_tails_short_outputs() -> None:
+    # A whole session fits the tail's budget once its outputs are cut to the tail's bound; it must
+    # come over with them cut, or it is the size the tail was asked to avoid.
+    conversion = Converter("codex").convert(long_session(6, output=40_000)[1:])
+    assert conversion.tokens() > 0.25 * 128_000 > conversion.tokens(tail=True)
+    plan = plan_history(conversion, mode="tail", window=128_000)
+    assert plan.mode == "full" and plan.cut
+    assert not plan_history(conversion, mode="full", window=128_000).cut
+
+
+def test_one_request_and_a_long_run_of_the_agents_still_gets_a_tail() -> None:
+    # A Codex session is often one request and then hours of calls: no operator's message is late
+    # enough to start a tail at, and such a session used to come over whole, past the window.
+    turns: list[dict[str, Any]] = [turn(0, "user", text("rename the topic everywhere"))]
+    for n in range(300):
+        turns.append(turn(1 + 2 * n, "assistant", call(f"c{n}", "Bash", {"command": f"grep -rn topic part{n}"})))
+        turns.append(turn(2 + 2 * n, "user", result(f"c{n}", "x" * 3_000)))
+    turns.append(turn(601, "assistant", text("Renamed everywhere.")))
+    conversion = Converter("codex").convert(turns)
+    assert large(conversion, 128_000)
+    plan = plan_history(conversion, mode="tail", window=128_000)
+    entries = conversion.entries
+    assert plan.mode == "tail" and plan.gap and plan.gap[0] == 0, "the request itself is in what the summary stands for"
+    first = entries[plan.kept[0]]
+    assert first.history is not None and first.history.role is MessageRole.assistant
+    assert conversion.tokens([entries[i] for i in plan.kept], tail=True) <= 0.25 * 128_000 + 500
+    calls = {b.tool_call_id for i in plan.kept for b in entries[i].history.content_blocks if isinstance(b, ToolUseBlock)}  # type: ignore[union-attr]
+    answers = {b.tool_call_id for i in plan.kept for b in entries[i].history.content_blocks if isinstance(b, ToolResultBlock)}  # type: ignore[union-attr]
+    assert calls == answers, "no call is kept without its result, nor a result without its call"
+
+
 def test_the_same_model_is_found_whatever_its_spelling() -> None:
     presets = {"ds": ModelPresetConfig(provider="deepseek", model="deepseek-chat"),
                "opus": ModelPresetConfig(provider="openrouter", model="anthropic/claude-opus-4.1")}

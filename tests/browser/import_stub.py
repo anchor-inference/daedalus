@@ -1,315 +1,288 @@
-"""The session importer's API over invented transcripts, for the browser checks and the screenshots.
+"""The session importer's API over invented sessions of other programs, for the browser checks and the screenshots.
 
-``/api/imports/*`` and the two ``/api/sessions/{id}/import/...`` routes in the shapes
-``daedalus/extensions`` answers when a conversation from Claude Code, Codex or another agent program
-is brought in. A check sets ``host`` to ``"down"`` or ``"outdated"`` to draw the host side failing,
-and reads ``started`` (the bodies of the imports it began) and ``refreshed`` (the sessions it
-refreshed) back.
+``/api/imports/harnesses``, ``/scan``, ``/preview``, ``POST /api/imports``, ``/api/imports/{job_id}`` and
+the two ``/api/sessions/{id}/import/...`` routes, shaped as ``daedalus/extensions/api_session_import.py``
+answers over the daemon's own listing: every key the real response carries is here and none it lacks.
+That matters because the app reads these shapes strictly. The daemon lists no folders during a search
+or below the top, has no ``deep`` search and so no snippets, and gives a preview header without the
+host's ``imported_as`` and ``project``; a stub that was kinder than that hid what the screen does with the
+real thing.
 
-The transcripts are chosen so every branch of the screen has one: a session that is live, one so
-large the importer suggests keeping only the tail, one imported already, one whose folder is gone,
-and destinations that join a project, make one, open a chat, or are refused.
+The machine is small: Claude Code with sessions in several folders, Codex in two, Gemini CLI with one,
+opencode installed with none, Cursor not installed. ``answer_shared`` answers through ``DEFAULT``, so every
+harness that opens the start screen gets the card's sessions without inventing them. A check that drives
+the import installs an ``ImportStub`` of its own to stop the machine (``host``), hold a job at a stage
+(``hold``) or fail it (``fail``), and reads the writes back (``posted``, ``refreshed``). ``imported_session``
+is the chat an import makes, with the markers the conversation draws.
 """
 
 from __future__ import annotations
 
 import json
-import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs
 
-NOW = time.time()
-HOUR = 3600.0
-DAY = 86400.0
-
 HOME = "/home/operator"
 PROJECTS = f"{HOME}/projects"
-SMART_HOME = {"id": "p-home", "name": "Smart home", "kind": "project"}
+IMPORTED_ID = "imp0c9e2a1f3"
+"""The Daedalus chat the import makes, and the one an earlier import already made."""
+EARLIER_ID = "imp7be05d41a"
+LOCK_ID = "a1f3c9e2-5b7d-4c11-9e0a-2f6d8c3b4d17"
 
-STAGES = ["read", "parse", "mask", "write", "index", "summarise", "open"]
+
+def _ago(**kw: float) -> str:
+    return (datetime.now(UTC) - timedelta(**kw)).isoformat().replace("+00:00", "Z")
+
+
+def _session(harness: str, id_: str, cwd: str, title: str, *, minutes: float, messages: int, size: int, branch: str = "",
+             compacted: int = 0, sidechains: int = 0, live: bool = False, imported_as: str | None = None, model: str = "",
+             project: dict | None = None) -> dict[str, Any]:
+    """The session as the API lists it: the daemon's header plus the two things the host adds."""
+    return {
+        "v": 1, "harness": harness, "id": id_, "cwd": cwd, "title": title, "started_at": _ago(minutes=minutes + 90), "updated_at": _ago(minutes=minutes),
+        "messages": messages, "bytes": size, "branch": branch, "model": model,
+        "flags": {"compacted": compacted, "sidechains": sidechains, "live": live, "imported_as": imported_as},
+        "source": {"path": f"~/.{harness}/sessions/{id_}.jsonl"},
+        "imported_as": {"session_id": imported_as, "title": title} if imported_as else None, "project": project,
+    }
+
+
+HOME_PROJECT = {"id": "p-home", "name": "Smart home", "kind": "project"}
+MB = 1024 * 1024
+
+
+def sessions() -> list[dict[str, Any]]:
+    """Every session on the invented machine, freshest first within each program."""
+    home = f"{PROJECTS}/smart-home"
+    return [
+        _session("claude", LOCK_ID, home, "Rebind the Aqara lock after the battery change", minutes=120, messages=214, size=int(1.8 * MB),
+                 branch="main", sidechains=2, model="claude-opus-5", project=HOME_PROJECT),
+        _session("claude", "7be05d41-0c2e-4a8f-b3d9-61e4f0a2c5b8", home, "Move automations.yaml to blueprints", minutes=60 * 24, messages=3412, size=38 * MB,
+                 branch="blueprints", compacted=3, sidechains=7, model="claude-opus-5", project=HOME_PROJECT),
+        _session("claude", "c0d4e8aa-91f2-4d6b-8a3c-5e7b9d1f2a64", home, "Zigbee2MQTT: OTA firmware for the plugs", minutes=60 * 48, messages=88, size=640 * 1024,
+                 branch="main", model="claude-sonnet-5", project=HOME_PROJECT),
+        _session("claude", "5e91b2f7-3a6c-4e8d-9b1f-0c2d4e6f8a13", home, "Nursery night light on the motion sensor", minutes=60 * 24 * 5, messages=41, size=210 * 1024,
+                 model="claude-opus-5", project=HOME_PROJECT),
+        _session("claude", "e2aa0c13-7d4b-4f9e-a1c6-3b5d7e9f1a28", home, "Sunset lighting scenes", minutes=60 * 24 * 21, messages=63, size=320 * 1024,
+                 imported_as=EARLIER_ID, model="claude-opus-5", project=HOME_PROJECT),
+        _session("claude", "09f1c2d8-4b6a-4c8e-9d2f-1a3b5c7d9e0f", home, "/init", minutes=60 * 24 * 30, messages=6, size=18 * 1024, project=HOME_PROJECT),
+        _session("claude", "3c8e71b0-6f2a-4d9c-8b1e-7a5c3d1f9e24", f"{PROJECTS}/esp32-door", "Reed switch and door lock on one board", minutes=12, messages=97, size=int(1.1 * MB),
+                 model="claude-opus-5"),
+        _session("claude", "b71d09e5-2c4f-4a6e-8d0b-9f1e3a5c7b42", f"{PROJECTS}/daedalus", "Why the event stream drops after sleep", minutes=0.3, messages=152, size=int(2.2 * MB),
+                 branch="main", live=True, model="claude-opus-5"),
+        _session("claude", "41aa2f60-8e1c-4b3d-a5f7-2c9e0d4b6a81", f"{HOME}/Documents/rent", "Comparing smart locks under 200 euros", minutes=60 * 24 * 30, messages=30, size=95 * 1024),
+        _session("claude", "aa52d0c4-1b3e-4f6a-9c8d-7e0f2a4b6c19", f"{PROJECTS}/smart-home/homeassistant", "Template sensor for the boiler", minutes=60 * 30, messages=24, size=120 * 1024,
+                 project=HOME_PROJECT),
+        _session("codex", "019d4c2e-8a1f-7f30-9b2d-3e5c7a9b1d40", f"{PROJECTS}/esp32-door", "Door sensor: deep sleep between triggers", minutes=40, messages=156, size=int(2.4 * MB),
+                 branch="deep-sleep", compacted=1, model="gpt-5.5-codex"),
+        _session("codex", "019c7b1d-2e4a-7c19-8f3e-5d7a9c1e3a1e4", f"{PROJECTS}/esp32-door", "ESP32-C3 build in GitHub Actions", minutes=60 * 72, messages=72, size=910 * 1024,
+                 branch="main", model="gpt-5.5-codex"),
+        _session("codex", "019b33d0-6c8e-7a2b-9d4f-1e3a5c7e9b02", f"{PROJECTS}/smart-home", "Why the reed switch does not wake it", minutes=60 * 24 * 7, messages=38, size=300 * 1024,
+                 model="gpt-5.5-codex", project=HOME_PROJECT),
+        _session("gemini", "6f2a1c9e-4b7d-4e2f-8a1c-0d3e5f7a9b24", f"{PROJECTS}/thesis-latex", "Bibliography in biblatex", minutes=60 * 24 * 9, messages=19, size=88 * 1024),
+    ]
+
 
 HARNESSES = [
-    {"id": "claude", "name": "Claude Code", "found": True, "root": "~/.claude/projects", "sessions": 106, "folders": 27, "version": "2.4.1"},
-    {"id": "codex", "name": "Codex", "found": True, "root": "~/.codex/sessions", "sessions": 4307, "folders": 41, "version": "0.160.0"},
-    {"id": "gemini", "name": "Gemini CLI", "found": False, "root": "~/.gemini/tmp", "sessions": 0, "folders": 0, "version": ""},
-    {"id": "opencode", "name": "OpenCode", "found": False, "root": "~/.local/share/opencode", "sessions": 0, "folders": 0, "version": ""},
-    {"id": "grok", "name": "Grok CLI", "found": False, "root": "~/.grok/sessions", "sessions": 0, "folders": 0, "version": ""},
-    {"id": "pi", "name": "Pi", "found": False, "root": "~/.pi/agent/sessions", "sessions": 0, "folders": 0, "version": ""},
-    {"id": "cursor", "name": "Cursor", "found": False, "root": "~/.cursor/chats", "sessions": 0, "folders": 0, "version": ""},
+    {"id": "claude", "name": "Claude Code", "found": True, "root": "~/.claude/projects", "version": "2.4.1"},
+    {"id": "codex", "name": "Codex", "found": True, "root": "~/.codex/sessions", "version": "0.160.0"},
+    {"id": "gemini", "name": "Gemini CLI", "found": True, "root": "~/.gemini/tmp", "version": ""},
+    {"id": "opencode", "name": "opencode", "found": True, "root": "~/.local/share/opencode", "version": ""},
+    {"id": "cursor", "name": "Cursor", "found": False, "root": "", "version": ""},
 ]
 NAMES = {row["id"]: row["name"] for row in HARNESSES}
 
-# Folders on the machine that hold no session at all, so the browser draws them greyed out.
-EMPTY_FOLDERS = [f"{PROJECTS}/stream-cuts", f"{HOME}/Documents"]
-# A folder a session remembers but that has since been deleted: it is listed by what the sessions
-# say, and the destination check is what finds that it is gone.
-GONE = f"{PROJECTS}/greenhouse-proto"
+# These two are api_folder_browser's HOST_START and HOST_INSTALL: the screen shows them as commands to copy.
+DOWN = {"code": "host_down", "configured": True, "message": "the host terminal daemon is not answering",
+        "start": "systemctl --user start daedalus-ptyd", "install": "bash deploy/host-terminal.sh install"}
+OUTDATED = {"code": "host_outdated", "message": "the host terminal daemon is older than this version",
+            "install": "bash deploy/host-terminal.sh install"}
 
-OPUS = "claude-opus-4-1-20250805"
-CODEX = "gpt-5-codex"
-
-
-def _session(harness: str, sid: str, cwd: str, title: str, age_hours: float, *, messages: int, size: int, model: str, branch: str = "main",
-             compacted: int = 0, sidechains: int = 0, live: bool = False, imported: tuple[str, str] | None = None,
-             destination: str = "project", code: str | None = None) -> dict[str, Any]:
-    return {"harness": harness, "id": sid, "cwd": cwd, "title": title, "age": age_hours, "messages": messages, "bytes": size,
-            "model": model, "branch": branch, "compacted": compacted, "sidechains": sidechains, "live": live, "imported": imported,
-            "destination": destination, "code": code}
+STAGES = ["read", "parse", "mask", "write", "index", "open"]
+"""The stages a whole import walks through; a summary and its tail adds "summarise" before "open"."""
+STAGES_ALL = ["read", "parse", "mask", "write", "index", "summarise", "open"]
+"""What a job view always lists, whichever of them the import takes."""
+COUNT_KEYS = ("turns_read", "turns_total", "messages", "masked", "written", "gap", "history", "parts_done", "parts_total")
 
 
-SESSIONS = [
-    _session("claude", "7d1c2e0a-4b5f-4c7e-9a1d-2f3e4a5b6c7d", f"{PROJECTS}/smart-home", "Fix the flaky door sensor test", 3,
-             messages=148, size=942113, model=OPUS, compacted=1, sidechains=2),
-    _session("claude", "3b8e51f6-92c4-4d0a-b7e3-6a1f0c9d2e48", f"{PROJECTS}/smart-home", "Add presence detection to the hallway automation", 0.2,
-             messages=64, size=388120, model=OPUS, live=True),
-    _session("claude", "a94c07d2-18be-4f63-8c5a-e07b3d916f25", f"{PROJECTS}/esp32-door", "Port the firmware to C3", 30,
-             messages=4120, size=61_400_000, model=OPUS, branch="c3-port", compacted=6, sidechains=11, destination="new_project"),
-    _session("claude", "e5f2b1c8-6d37-4a90-93be-4c8a7d1f0b36", f"{PROJECTS}/thesis-latex", "Rewrite the related work chapter", 200,
-             messages=96, size=512004, model=OPUS, imported=("s-imp1", "Rewrite the related work chapter"), destination="new_chat"),
-    _session("claude", "0c6d93ae-5f21-48b7-a2e4-b91d7f3c8a50", GONE, "Prototype the greenhouse controller", 700,
-             messages=37, size=204880, model=OPUS, destination="refused", code="missing"),
-    _session("codex", "0199f3a2-7b41-7c3e-8d52-1a9e4c6b0f27", f"{PROJECTS}/smart-home", "Refactor the MQTT topic naming", 26,
-             messages=212, size=1_780_300, model=CODEX),
-    _session("codex", "0199f5c8-02d9-7a14-b36e-9d4f1e8a7c05", f"{PROJECTS}/esp32-door", "Debounce the reed switch in the interrupt handler", 52,
-             messages=88, size=640221, model=CODEX, destination="new_project"),
-    _session("codex", "0199e8b4-6a3f-7d02-9c71-5e2b0a4d8f19", HOME, "Explain the rsync flags for a nightly backup", 120,
-             messages=22, size=96410, model=CODEX, branch="", destination="new_chat"),
-    _session("codex", "0199d471-c8e5-7b36-a4f0-3d9e6b1c2a87", f"{PROJECTS}/thesis-latex", "Fix the bibliography style", 400,
-             messages=51, size=310977, model=CODEX, destination="new_chat"),
-]
-
-
-def _iso(age_hours: float) -> str:
-    return datetime.fromtimestamp(NOW - age_hours * HOUR, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _project_for(cwd: str) -> dict[str, str] | None:
-    return dict(SMART_HOME) if cwd == f"{PROJECTS}/smart-home" else None
-
-
-def _source_path(row: dict[str, Any]) -> str:
-    if row["harness"] == "claude":
-        return f"~/.claude/projects/{row['cwd'].replace('/', '-')}/{row['id']}.jsonl"
-    stamp = datetime.fromtimestamp(NOW - row["age"] * HOUR, UTC)
-    return f"~/.codex/sessions/{stamp:%Y/%m/%d}/rollout-{stamp:%Y-%m-%dT%H-%M-%S}-{row['id']}.jsonl"
-
-
-def header(row: dict[str, Any]) -> dict[str, Any]:
-    imported = {"session_id": row["imported"][0], "title": row["imported"][1]} if row["imported"] else None
-    return {"harness": row["harness"], "id": row["id"], "cwd": row["cwd"], "title": row["title"],
-            "started_at": _iso(row["age"] + max(1.0, row["messages"] / 40)), "updated_at": _iso(row["age"]),
-            "messages": row["messages"], "bytes": row["bytes"], "branch": row["branch"], "model": row["model"],
-            "flags": {"compacted": row["compacted"], "sidechains": row["sidechains"], "live": row["live"],
-                      "imported_as": imported["session_id"] if imported else None},
-            "source": {"path": _source_path(row)}, "imported_as": imported, "project": _project_for(row["cwd"])}
-
-
-def _dirs(harness: str) -> set[str]:
-    """Every folder the browser can step into: those holding sessions, their ancestors and the empty ones."""
-    found: set[str] = set(EMPTY_FOLDERS)
-    for row in SESSIONS:
-        if row["harness"] != harness:
-            continue
-        current = row["cwd"]
-        while current.startswith(HOME):
-            found.add(current)
-            current = current.rsplit("/", 1)[0]
-    found.discard(HOME)
-    found.add(PROJECTS)
-    found.add(f"{HOME}/Documents")
-    return found
+def _norm(path: str) -> str:
+    return path.rstrip("/") if len(path) > 1 else path
 
 
 def _crumbs(path: str) -> list[dict[str, str]]:
-    out = [{"name": "~", "path": HOME}]
+    """The trail from ``~``; a path outside the home folder has none."""
+    if path != HOME and not path.startswith(HOME + "/"):
+        return []
+    trail = [{"name": "~", "path": HOME}]
     current = HOME
     for part in [p for p in path[len(HOME):].split("/") if p]:
         current = f"{current}/{part}"
-        out.append({"name": part, "path": current})
-    return out
+        trail.append({"name": part, "path": current})
+    return trail
 
 
-def _destination(row: dict[str, Any]) -> dict[str, Any]:
-    kind = row["destination"]
-    project = {"id": SMART_HOME["id"], "name": SMART_HOME["name"], "ephemeral": False} if kind == "project" else None
-    problem = f"{row['cwd']} no longer exists on this machine" if row["code"] == "missing" else None
-    return {"kind": kind, "cwd": row["cwd"], "project": project, "folder_id": "f-smart-home" if kind == "project" else None,
-            "worktree_cwd": None, "code": row["code"], "problem": problem, "other_project": None,
-            "exists": row["code"] != "missing", "becomes_project": kind == "new_project"}
-
-
-def _excerpt(row: dict[str, Any]) -> list[dict[str, str]]:
-    title = row["title"][0].lower() + row["title"][1:]
-    return [
-        {"role": "user", "text": f"I would like to {title}. Start by reading how it is set up today.", "at": _iso(row["age"] + 2)},
-        {"role": "assistant", "text": "I will look at the current layout first, then propose a change before editing anything.", "at": _iso(row["age"] + 1.9)},
-    ]
-
-
-def _tail(row: dict[str, Any]) -> list[dict[str, str]]:
-    return [
-        {"role": "user", "text": "Run the tests once more and tell me what is left.", "at": _iso(row["age"] + 0.2)},
-        {"role": "assistant", "text": "Everything passes. The one open item is the retry budget, which I left as it was.", "at": _iso(row["age"] + 0.1)},
-        {"role": "user", "text": "Good, that is enough for now.", "at": _iso(row["age"])},
-    ]
-
-
-def _job(state: dict[str, Any]) -> dict[str, Any]:
-    done = state["state"] == "done"
-    messages = state["messages"]
-    progress = (state["step"] + 1) / len(STAGES)
-    return {"job_id": state["job_id"], "harness": state["harness"], "id": state["id"], "state": state["state"],
-            "stage": STAGES[state["step"]], "stages": list(STAGES),
-            "counts": {"turns_read": int(messages * 1.07), "messages": messages if state["step"] >= 1 else 0,
-                       "written": messages if done else int(messages * progress * (state["step"] >= 3)), "masked": 3 if state["step"] >= 2 else 0},
-            "session_id": "s-imported" if done else None, "error": state.get("error"), "started_at": state["started_at"],
-            "finished_at": state["finished_at"]}
+def _read_header(row: dict[str, Any]) -> dict[str, Any]:
+    """What the daemon itself reads from a transcript: no ``imported_as`` and no ``project``, those are the host's."""
+    flags = {key: row["flags"][key] for key in ("compacted", "sidechains", "live")}
+    return {key: value for key, value in row.items() if key not in ("imported_as", "project", "flags")} | {"flags": flags}
 
 
 class ImportStub:
-    """The importer's routes. ``host``: ``"up"``, ``"down"`` (the bridge is stopped) or ``"outdated"``
-    (a daemon that cannot read other programs' transcripts yet)."""
+    """The machine's other programs; ``host`` is ``"up"``, ``"down"`` or ``"outdated"``."""
 
-    def __init__(self, *, host: str = "up") -> None:
+    def __init__(self, host: str = "up") -> None:
         self.host = host
-        self.started: list[dict[str, Any]] = []
+        self.posted: list[dict[str, Any]] = []
         self.refreshed: list[str] = []
-        self.jobs: dict[str, dict[str, Any]] = {}
+        self.polls = 0
+        self.hold: int | None = None
+        """Keep a job at this stage (an index into ``STAGES``) however often it is asked: a picture of the progress."""
+        self.fail = False
+        self.all = sessions()
+        self._job_of: dict[str, Any] = {}
 
-    def _host_failure(self) -> tuple[int, dict[str, Any]] | None:
-        if self.host == "down":
-            return 503, {"detail": {"code": "host_down", "configured": True, "message": "the host terminal bridge is not available",
-                                    "start": "systemctl --user start daedalus-ptyd", "install": "bash deploy/host-terminal.sh install"}}
-        if self.host == "outdated":
-            return 501, {"detail": {"code": "host_outdated", "message": "the host terminal daemon is older than this version and cannot read other programs' sessions",
-                                    "install": "bash deploy/host-terminal.sh install"}}
-        return None
+    def _mine(self, harness: str) -> list[dict[str, Any]]:
+        return [s for s in self.all if s["harness"] == harness]
 
-    def _find(self, harness: str, sid: str) -> dict[str, Any] | None:
-        return next((row for row in SESSIONS if row["harness"] == harness and row["id"] == sid), None)
+    def _project_of(self, path: str) -> dict[str, Any] | None:
+        return next((s["project"] for s in self.all if s["cwd"] == path and s["project"]), None)
 
-    def scan(self, params: dict[str, str]) -> tuple[int, dict[str, Any]]:
-        harness, path = params.get("harness", ""), params.get("path", "").rstrip("/")
-        needle, deep = params.get("q", "").lower(), params.get("deep", "") in ("1", "true")
-        known = next((row for row in HARNESSES if row["id"] == harness and row["found"]), None)
-        rows = [row for row in SESSIONS if known and row["harness"] == harness]
-        rows = [row for row in rows if needle in row["title"].lower()]
-        empty = {"harness": harness, "path": path, "here": [], "children": [], "folders": [], "truncated": False, "cursor": "",
-                 "parent": None, "home": "", "crumbs": [], "browse": None}
-        if not known:
-            return 200, empty
+    def harnesses(self) -> dict[str, Any]:
+        rows = []
+        for h in HARNESSES:
+            mine = self._mine(h["id"])
+            rows.append({**h, "sessions": len(mine), "folders": len({s["cwd"] for s in mine})})
+        return {"harnesses": rows, "home": HOME}
+
+    def scan(self, harness: str, path: str, query: str) -> dict[str, Any]:
+        mine = self._mine(harness)
+        newest_first = lambda rows: sorted(rows, key=lambda s: s["updated_at"], reverse=True)  # noqa: E731
+        base = {"harness": harness, "path": "", "here": [], "children": [], "folders": [], "truncated": False, "cursor": "",
+                "parent": None, "home": HOME, "crumbs": [], "browse": None}
+        if query:
+            # The daemon lists no folders while it searches, and has no deep search, so no snippets either.
+            q = query.lower()
+            return {**base, "here": newest_first(s for s in mine if q in s["title"].lower() or q in s["id"].lower())}
         if not path:
-            by_folder: dict[str, list[dict[str, Any]]] = {}
-            for row in rows:
-                by_folder.setdefault(row["cwd"], []).append(row)
-            folders = [{"path": cwd, "sessions": len(group), "latest": _iso(min(r["age"] for r in group)), "project": _project_for(cwd)}
-                       for cwd, group in sorted(by_folder.items(), key=lambda kv: min(r["age"] for r in kv[1]))]
-            return 200, {**empty, "folders": folders}
-        dirs = _dirs(harness)
-        if path not in dirs and path != HOME:
-            return 200, {**empty, "parent": path.rsplit("/", 1)[0] or "/", "home": HOME, "crumbs": _crumbs(path) if path.startswith(HOME) else []}
-        here = [row for row in rows if row["cwd"] == path or (deep and row["cwd"].startswith(path + "/"))]
-        children = []
-        for child in sorted(d for d in dirs if d.rsplit("/", 1)[0] == path):
-            inside = [row for row in SESSIONS if row["harness"] == harness and (row["cwd"] == child or row["cwd"].startswith(child + "/"))]
-            children.append({"name": child.rsplit("/", 1)[1], "path": child, "sessions": len(inside),
-                             "latest": _iso(min(r["age"] for r in inside)) if inside else None, "empty": not inside, "project": _project_for(child)})
-        return 200, {**empty, "here": [header(row) for row in sorted(here, key=lambda r: r["age"])], "children": children,
-                     "parent": path.rsplit("/", 1)[0] if path != HOME else None, "home": HOME, "crumbs": _crumbs(path), "browse": "ok"}
+            folders: dict[str, dict[str, Any]] = {}
+            for s in mine:
+                row = folders.setdefault(s["cwd"], {"path": s["cwd"], "sessions": 0, "latest": s["updated_at"], "project": s["project"]})
+                row["sessions"] += 1
+                row["latest"] = max(row["latest"], s["updated_at"])
+            return {**base, "folders": sorted(folders.values(), key=lambda f: f["latest"], reverse=True)}
+        path = _norm(path)
+        children: dict[str, dict[str, Any]] = {}
+        for s in mine:
+            if s["cwd"].startswith(path + "/"):
+                name = s["cwd"][len(path) + 1:].split("/", 1)[0]
+                child = children.setdefault(name, {"name": name, "path": f"{path}/{name}", "sessions": 0, "latest": s["updated_at"],
+                                                   "project": self._project_of(f"{path}/{name}"), "empty": False})
+                child["sessions"] += 1
+                child["latest"] = max(child["latest"], s["updated_at"])
+        if path == f"{PROJECTS}/smart-home":
+            # Folders beside the sessions that hold none, as the host's folder browser adds them.
+            children.setdefault("backups", {"name": "backups", "path": f"{path}/backups", "sessions": 0, "latest": None, "empty": True,
+                                            "project": self._project_of(f"{path}/backups")})
+        return {**base, "path": path, "here": newest_first(s for s in mine if s["cwd"] == path), "parent": path.rsplit("/", 1)[0] or "/",
+                "children": sorted(children.values(), key=lambda c: (bool(c["empty"]), c["name"].lower())), "crumbs": _crumbs(path), "browse": "ok"}
 
-    def preview(self, params: dict[str, str]) -> tuple[int, dict[str, Any]]:
-        harness = params.get("harness", "")
-        row = self._find(harness, params.get("id", ""))
-        if row is None:
+    def preview(self, harness: str, id_: str) -> tuple[int, Any]:
+        s = next((x for x in self.all if x["harness"] == harness and x["id"] == id_), None)
+        if s is None:
             return 404, {"detail": {"code": "missing", "message": "no such session"}}
-        messages = row["messages"]
-        large = messages > 2000
-        tokens = messages * 230
-        claude = harness == "claude"
-        window = 200000 if claude else 400000
-        header_row = header(row)
-        if claude:
-            model = {"source": row["model"], "preset": "opus", "label": "Claude Opus 4.1", "same": True, "window": window}
-            models = [{"id": "opus", "label": "Claude Opus 4.1", "window": 200000}, {"id": "deepseek", "label": "DeepSeek V3.2", "window": 128000}]
+        window = 200_000
+        messages = s["messages"]
+        tokens = messages * 450 if messages < 3000 else 1_900_000
+        project = s["project"]
+        if project:
+            destination = {"kind": "project", "cwd": s["cwd"], "project": {"id": project["id"], "name": project["name"], "ephemeral": False},
+                           "folder_id": "f-home", "worktree_cwd": None, "code": None, "problem": None, "other_project": None, "exists": True}
+        elif s["cwd"].startswith(f"{HOME}/Documents"):
+            destination = {"kind": "refused", "cwd": s["cwd"], "project": None, "folder_id": None, "worktree_cwd": None, "code": "missing",
+                           "problem": f"{s['cwd']} is not on the machine any more; choose the folder to continue in", "other_project": None, "exists": False}
         else:
-            model = {"source": row["model"], "preset": "default", "label": "Default model", "same": False, "window": 128000}
-            models = [{"id": "default", "label": "Default model", "window": 128000}, {"id": "opus", "label": "Claude Opus 4.1", "window": 200000}]
-        tool_calls = messages // 2
-        counts = {"turns": int(messages * 1.07), "user": messages // 7, "assistant": messages // 2 - messages // 7 + messages // 3,
-                  "tool_calls": tool_calls, "native_calls": tool_calls * 4 // 5, "text_calls": tool_calls - tool_calls * 4 // 5,
-                  "compactions": row["compacted"], "sidechains": row["sidechains"], "images": 1 if claude and not large else 0,
-                  "thinking": messages // 5, "meta": messages // 25, "orphan_results": 0}
-        return 200, {"header": header_row, "harness_name": NAMES[harness], "first": _excerpt(row), "last": [] if large else _tail(row),
-                     "complete": not large, "counts": counts, "messages": messages, "tokens": tokens, "window": window,
-                     "suggested_mode": "tail" if tokens > window else "full", "model": model, "models": models,
-                     "destination": _destination(row), "imported_as": header_row["imported_as"], "live": row["live"], "masked": 3}
+            destination = {"kind": "new_chat", "cwd": s["cwd"], "project": None, "folder_id": None, "worktree_cwd": None, "code": None, "problem": None,
+                           "other_project": None, "exists": True}
+        # Only a join into a chat turns that chat into a project; the host says so with this one flag.
+        destination["becomes_project"] = destination["kind"] == "chat"
+        opus = s["model"].startswith("claude-opus")
+        return 200, {
+            "header": _read_header(s), "harness_name": NAMES.get(harness, harness),
+            "first": [{"role": "user", "text": "The Aqara U200 lock stopped answering in Home Assistant after I changed the batteries…", "at": s["started_at"]},
+                      {"role": "assistant", "text": "Let me look at the Zigbee2MQTT logs first.", "at": s["started_at"]}],
+            "last": [{"role": "user", "text": "Then pair it straight to the coordinator.", "at": s["updated_at"]},
+                     {"role": "assistant", "text": "The lock is back on the coordinator and the 23:00 automation is checked.", "at": s["updated_at"]}],
+            "complete": messages < 3000,
+            "counts": {"turns": messages * 2, "user": messages // 3, "assistant": messages - messages // 3, "tool_calls": int(messages * 0.8), "native_calls": int(messages * 0.7),
+                       "text_calls": int(messages * 0.1), "compactions": s["flags"]["compacted"], "sidechains": s["flags"]["sidechains"], "images": 0, "thinking": 0, "meta": 0, "orphan_results": 0},
+            "messages": messages, "tokens": tokens, "window": window, "suggested_mode": "tail" if (tokens > window * 0.6 or messages > 2000) else "full",
+            "model": {"source": s["model"], "preset": "opus" if opus else "flash", "label": "Claude Opus 5" if opus else "DeepSeek Flash", "same": opus, "window": window},
+            "models": [{"id": "opus", "label": "Claude Opus 5", "window": 200_000}, {"id": "flash", "label": "DeepSeek Flash", "window": 128_000}],
+            "destination": destination, "imported_as": s["imported_as"], "live": s["flags"]["live"], "masked": 3,
+        }
 
-    def start(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-        row = self._find(body.get("harness", ""), body.get("id", ""))
-        if row is None:
-            return 404, {"detail": {"code": "missing", "message": "no such session"}}
-        if row["imported"] and not body.get("again"):
-            return 409, {"detail": {"code": "already_imported", "message": "this session was imported before", "session_id": row["imported"][0]}}
-        self.started.append(body)
-        job_id = f"job-{len(self.started)}"
-        self.jobs[job_id] = {"job_id": job_id, "harness": row["harness"], "id": row["id"], "state": "running", "step": 0,
-                             "messages": 800 if body.get("mode") == "tail" or row["messages"] > 2000 else row["messages"],
-                             "started_at": _iso(0), "finished_at": None, "error": None}
-        if row["code"] == "missing" and not body.get("cwd"):
-            # As the server does: the job is accepted and fails when it learns where the session would land.
-            self.jobs[job_id]["fails"] = {"code": "missing", "message": f"{row['cwd']} is not on the machine any more; choose the folder to continue in"}
-        return 200, {"job_id": job_id, "job": _job(self.jobs[job_id])}
+    def _view(self, job_id: str, state: str, stage: str, counts: dict[str, int], **more: Any) -> dict[str, Any]:
+        """A job as the API gives it: every key, and ``stages`` always the whole seven."""
+        sent = self._job_of.get(job_id, {})
+        view = {"job_id": job_id, "harness": sent.get("harness", "claude"), "id": sent.get("id", LOCK_ID), "state": state, "stage": stage, "stages": STAGES_ALL,
+                "counts": counts, "session_id": None, "error": None, "started_at": _ago(minutes=0.1), "finished_at": None}
+        return {**view, **more}
 
-    def poll(self, job_id: str) -> tuple[int, dict[str, Any]]:
-        state = self.jobs.get(job_id)
-        if state is None:
-            return 404, {"detail": {"code": "missing", "message": "no such import"}}
-        if state["state"] == "running":
-            # One stage per poll, so a check can watch the bar move and then follow the job to its end.
-            state["step"] += 1
-            if state.get("fails") and state["step"] == 2:
-                state["state"], state["finished_at"], state["error"] = "failed", _iso(0), state["fails"]
-            elif state["step"] == len(STAGES) - 1:
-                state["state"], state["finished_at"] = "done", _iso(0)
-        return 200, _job(state)
+    def job(self, job_id: str) -> dict[str, Any]:
+        """One poll of a job: each poll moves it one stage on, unless ``hold`` keeps it at one."""
+        self.polls += 1
+        at = min(self.polls if self.hold is None else self.hold, len(STAGES))
+        counts: dict[str, int] = {"turns_read": 428, "turns_total": 428}
+        if at >= 2:
+            counts.update(masked=3, messages=214)
+        if at >= 3:
+            counts.update(written=214 if at > 3 else 132)
+        if at >= 5:
+            counts.update(history=214)
+        if self.fail and at >= 3:
+            return self._view(job_id, "failed", "write", counts, error={"code": "failed", "message": "the transcript could not be written: the disk is full"})
+        if at >= len(STAGES):
+            return self._view(job_id, "done", "open", counts, session_id=IMPORTED_ID, finished_at=_ago(minutes=0))
+        return self._view(job_id, "running", STAGES[at], counts)
 
-    def answer(self, method: str, path: str, query: str, body: Any) -> tuple[int, Any] | None:
-        """``(status, payload)``; a string payload is the original transcript, served as ndjson."""
-        params = {key: values[0] for key, values in parse_qs(query).items()}
-        body = body or {}
+    def answer(self, method: str, path: str, query: str, body: Any) -> tuple[int, str, str] | None:
+        """``(status, content type, body)``, or ``None`` when the path is not one of the importer's."""
+        params = {key: values[0] for key, values in parse_qs(query, keep_blank_values=True).items()}
+        reply = lambda status, payload: (status, "application/json", json.dumps(payload))  # noqa: E731
         parts = path.split("/")
-        if len(parts) == 6 and parts[:3] == ["", "api", "sessions"] and parts[4] == "import":
-            session_id = parts[3]
-            if method == "POST" and parts[5] == "refresh":
-                failure = self._host_failure()
-                if failure:
-                    return failure
-                self.refreshed.append(session_id)
-                return 200, {"session_id": session_id, "added": 6, "turns": 3, "masked": 0, "live": True}
-            if method == "GET" and parts[5] == "original":
-                if session_id not in {row["imported"][0] for row in SESSIONS if row["imported"]} | {"s-imported"}:
-                    return 404, {"detail": {"code": "missing", "message": "no original was kept for this session"}}
-                lines = [{"type": "user", "message": {"role": "user", "content": "Fix the flaky door sensor test"}},
-                         {"type": "assistant", "message": {"role": "assistant", "content": "I will start with the test's timing."}},
-                         {"type": "summary", "summary": "Door sensor test fixed"}]
-                return 200, "".join(json.dumps(line) + "\n" for line in lines)
+        session_route = len(parts) == 6 and parts[2] == "sessions" and parts[4] == "import"
+        if not (path.startswith("/api/imports") or session_route):
             return None
-        if not path.startswith("/api/imports"):
-            return None
-        failure = self._host_failure()
-        if failure:
-            return failure
+        if self.host != "up" and not (session_route and parts[5] == "original"):
+            return reply(503 if self.host == "down" else 501, {"detail": DOWN if self.host == "down" else OUTDATED})
         if method == "GET" and path == "/api/imports/harnesses":
-            return 200, {"harnesses": HARNESSES}
+            return reply(200, self.harnesses())
         if method == "GET" and path == "/api/imports/scan":
-            return self.scan(params)
+            return reply(200, self.scan(params.get("harness", ""), params.get("path", ""), params.get("q", "")))
         if method == "GET" and path == "/api/imports/preview":
-            return self.preview(params)
+            return reply(*self.preview(params.get("harness", ""), params.get("id", "")))
         if method == "POST" and path == "/api/imports":
-            return self.start(body)
-        if method == "GET" and len(parts) == 4 and parts[3]:
-            return self.poll(parts[3])
+            sent = body or {}
+            self.posted.append(sent)
+            done = next((s for s in self.all if s["id"] == sent.get("id") and s["imported_as"]), None)
+            if done and not sent.get("again"):
+                return reply(409, {"detail": {"code": "already_imported", "message": "this session has been imported already; pull in what is new there, or import it again as a new chat",
+                                              "session_id": done["imported_as"]["session_id"]}})
+            self.polls = 0
+            job_id = f"job-{len(self.posted)}"
+            self._job_of[job_id] = sent
+            return reply(200, {"job_id": job_id, "job": self._view(job_id, "running", "read", {})})
+        if method == "GET" and path.startswith("/api/imports/job-"):
+            return reply(200, self.job(parts[-1]))
+        if session_route and method == "POST" and parts[5] == "refresh":
+            self.refreshed.append(parts[3])
+            return reply(200, {"session_id": parts[3], "added": 2, "turns": 5, "masked": 0, "live": True})
+        if session_route and method == "GET" and parts[5] == "original":
+            if parts[3] not in (IMPORTED_ID, EARLIER_ID):
+                return reply(404, {"detail": {"code": "missing", "message": "no original was kept for this session"}})
+            line = json.dumps({"type": "user", "message": {"role": "user", "content": "The lock stopped answering"}, "cwd": f"{PROJECTS}/smart-home"})
+            return 200, "application/x-ndjson", line + "\n"
         return None
 
     def fulfil(self, route) -> bool:  # type: ignore[no-untyped-def]
@@ -323,14 +296,73 @@ class ImportStub:
         answered = self.answer(request.method, path, query, body)
         if answered is None:
             return False
-        status, payload = answered
-        if isinstance(payload, str):
-            route.fulfill(status=status, content_type="application/x-ndjson", body=payload)
-        else:
-            route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+        status, content_type, payload = answered
+        # The real endpoint names the download after the program and its own id for the session.
+        headers = {"Content-Disposition": f'attachment; filename="claude-{LOCK_ID}.jsonl"'} if content_type == "application/x-ndjson" else None
+        route.fulfill(status=status, content_type=content_type, body=payload, headers=headers)
         return True
 
 
 DEFAULT = ImportStub()
-"""What every harness answers when it does not install its own: the host bridge up, over the
-invented transcripts."""
+"""What every harness answers when it does not install its own: a machine that answers."""
+
+
+def _message(role: str, seq: int, minutes: float, text: str = "", *, calls: list | None = None, results: list | None = None,
+             imported: dict | None = None, origin: str = "", summary: bool = False) -> dict[str, Any]:
+    row: dict[str, Any] = {"role": role, "seq": seq, "text": text, "thinking": "", "tool_calls": calls or [], "tool_results": results or [],
+                           "created_at": _ago(minutes=minutes), "origin": origin}
+    if imported:
+        row["imported"] = imported
+    if summary:
+        row.update(summary=True, compaction={"reason": "import", "source": "claude", "messages": 140, "kept": 140})
+    return row
+
+
+def imported_messages() -> list[dict[str, Any]]:
+    """The chat an import of the lock session made: a summary of the early part, the last exchange in
+    Claude Code with its steps under their own names, and then the operator going on in Daedalus."""
+    def cc(seq: int, **more: Any) -> dict[str, Any]:
+        return {"harness": "claude", "ext_id": f"u{seq}", "seq": seq, **more}
+    tools = cc(3, tools={"t1": "Bash", "t2": "Read", "t4": "Edit", "t6": "Bash"})
+    calls = [
+        {"id": "t1", "name": "Exec", "arguments": {"command": "docker logs zigbee2mqtt --since 2h | grep -i u200"}},
+        {"id": "t2", "name": "Read", "arguments": {"path": f"{PROJECTS}/smart-home/zigbee2mqtt/configuration.yaml"}},
+        {"id": "t3", "name": "Task", "arguments": {"description": "Find every automation that uses lock_front", "prompt": "…"}},
+        {"id": "t4", "name": "Edit", "arguments": {"path": f"{PROJECTS}/smart-home/homeassistant/automations.yaml", "old_string": "lock.front_door", "new_string": "lock.lock_front"}},
+        {"id": "t5", "name": "TodoWrite", "arguments": {"todos": [{"content": "rebind", "status": "completed"}, {"content": "fix the automation", "status": "completed"}, {"content": "check", "status": "completed"}]}},
+        {"id": "t6", "name": "Exec", "arguments": {"command": "ha core check"}},
+    ]
+    results = [{"id": c["id"], "content": "ok", "is_error": False} for c in calls]
+    return [
+        _message("user", 1, 300, "Claude Code compacted the first 140 messages: the U200 lock stopped answering after the battery change; the Zigbee2MQTT logs showed it reconnecting through the hallway plug, a router with old firmware; the plug's OTA update did not help.",
+                 summary=True, imported={"harness": "claude", "ext_id": "", "summary": True}),
+        _message("user", 2, 200, "Then pair the lock straight to the coordinator and fix the 23:00 lock automation.", imported=cc(2), origin="operator"),
+        _message("assistant", 3, 199, "", calls=calls, imported=tools),
+        _message("tool", 4, 198, results=results, imported=cc(4)),
+        _message("assistant", 5, 197, "The lock is back on the coordinator at 100 %. The automation pointed at the old `entity_id`; it is `lock.lock_front` now and `ha core check` passes.", imported=cc(5)),
+        _message("user", 6, 3, "Run a test lock and then put it back as it was.", origin="operator"),
+        _message("assistant", 7, 2, "Locked and unlocked once: both answered within a second. Everything is as it was."),
+    ]
+
+
+def imported_origin() -> dict[str, Any]:
+    """``imported`` of the session's detail, as ``session_import.imported_view`` writes it."""
+    return {"harness": "claude", "harness_name": "Claude Code", "id": LOCK_ID, "cwd": f"{PROJECTS}/smart-home",
+            "source_model": "claude-opus-5", "branch": "main", "mode": "tail", "live": True, "complete": True,
+            "imported_at": _ago(minutes=5), "refreshed_at": None, "masked": 3, "transcript_dropped": 0,
+            "counts": {"turns": 428, "user": 60, "assistant": 154, "tool_calls": 171, "native_calls": 150, "text_calls": 21, "compactions": 1, "sidechains": 2,
+                       "images": 0, "thinking": 40, "meta": 12, "orphan_results": 0},
+            "original": {"stored": True, "bytes": 1_800_000, "name": "claude-a1f3c9e2-5b7d-4c11-9e0a-2f6d8c3b4d17.jsonl", "reason": None}}
+
+
+def imported_session(base: dict[str, Any]) -> dict[str, Any]:
+    """A session detail (``screenshots.detail``'s shape) turned into the chat the import made."""
+    return {**base, "id": IMPORTED_ID, "title": "Rebind the Aqara lock after the battery change", "env": "host", "status": "idle", "run_id": None,
+            "messages": imported_messages(), "imported": imported_origin(), "pending": None, "loop": None, "services": [], "subagents": [],
+            "workspace": f"{PROJECTS}/smart-home", "workspace_name": "smart-home"}
+
+
+def imported_row(base: dict[str, Any]) -> dict[str, Any]:
+    """The chat's row in the session list, with the program it came from for its plate's corner mark."""
+    return {**base, "id": IMPORTED_ID, "title": "Rebind the Aqara lock after the battery change", "env": "host", "status": "idle",
+            "last_message_at": _ago(minutes=2), "imported_from": "claude"}

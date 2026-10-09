@@ -511,12 +511,21 @@ export function cardSessions(found: ForeignSession[] | undefined, lastActivity: 
     .slice(0, limit);
 }
 
-/** The scan request for a folder or a search. */
-export function scanUrl(harness: string, path: string, query: string, deep: boolean): string {
+/** The scan request for a folder or a search; `cursor` asks for the page after a truncated answer. */
+export function scanUrl(harness: string, path: string, query: string, deep: boolean, cursor = ""): string {
   const params = new URLSearchParams({ harness, path });
   if (query.trim()) params.set("q", query.trim());
   if (deep && query.trim()) params.set("deep", "1");
+  if (cursor) params.set("cursor", cursor);
   return `/api/imports/scan?${params.toString()}`;
+}
+
+/** A truncated scan with the page after it appended: the folders and the crumbs are the first
+ *  page's, the sessions are both pages' (one session never twice), and whether more remain is the
+ *  later page's to say. */
+export function mergeScan(first: ScanResult, next: ScanResult): ScanResult {
+  const seen = new Set(first.here.map((s) => `${s.harness}:${s.id}`));
+  return { ...first, here: [...first.here, ...next.here.filter((s) => !seen.has(`${s.harness}:${s.id}`))], truncated: next.truncated, cursor: next.cursor };
 }
 
 export function previewUrl(harness: string, id: string): string {

@@ -168,9 +168,16 @@ type codexHead struct {
 
 func (h *codexHead) meta(payload []byte, at time.Time) {
 	m := fields(payload, "id", "timestamp", "cwd", "cli_version", "source", "git", "parent_thread_id",
-		"agent_nickname", "agent_role", "agent_path")
+		"agent_nickname", "agent_role", "agent_path", "history_base")
 	h.sawMeta = true
 	h.id, h.cwd, h.version = str(m[0]), str(m[2]), str(m[3])
+	if len(m[10]) > 0 && m[10][0] == '{' {
+		// A page of a paginated thread (rollout-…-<thread>_<page>.jsonl) carries the thread's id,
+		// as the thread's first file does. Under that id a read found whichever file came first, and
+		// a 58 MB page was listed while its 33-turn first file was imported. Until pages are spliced,
+		// each is a session of its own, named by its file.
+		h.id = ""
+	}
 	if t := stamp(str(m[1])); !t.IsZero() {
 		h.started = t
 	} else {

@@ -734,7 +734,7 @@ reads and never writes, and it runs nothing.
 |---|---|
 | `sessions.harnesses` | `{}` → `{harnesses[{id, name, found, root, sessions, folders, version}]}`: each program, whether its store exists, the store as `~/…`, and how many sessions and folders it holds. Kept for 30 s |
 | `sessions.scan` | `{harness, path?, depth?, query?, deep?, limit? ≤ 2000, cursor?}` → `{path, here[header], children[{name, path, sessions, latest}], folders[{path, sessions, latest}], truncated, cursor}`: the sessions whose folder is `path`, the subfolders of `path` holding sessions further down, and for an empty `path` every folder with sessions (newest first). `query` is a substring of the title, the first request or the id, below `path` |
-| `sessions.read` | `{harness, id, from, max_bytes? 16 KiB..512 KiB, sidechains? (true), raw?, file?}` → `{header, turns[turn], next, done, live, masked, offset}`: turns from number `from`, as many as fit in `max_bytes` (at least one). With `raw`, `from` is a byte offset into file `file` (0 is the main one) and the answer is `{header, file, files[{name, bytes}], data_b64, next, done, live, masked}`, whole records at a time |
+| `sessions.read` | `{harness, id, from, max_bytes? 16 KiB..512 KiB, sidechains? (true), raw?, file?}` → `{header, turns[turn], next, done, live, masked, offset, total}`: turns from number `from`, as many as fit in `max_bytes` (at least one). With `raw`, `from` is a byte offset into file `file` (0 is the main one) and the answer is `{header, file, files[{name, bytes}], data_b64, next, done, live, masked}`, whole records at a time |
 
 A header is `{v, harness, id, cwd, title, started_at, updated_at, messages, bytes, branch, model,
 flags{compacted, sidechains, live}, source{path}}`; a turn is `{seq, ext_id, parent, role
@@ -762,7 +762,10 @@ sessions of the folder asked about are read whole once, for their counts, and ca
 Both stop after 1.5 s and say `truncated`, and `cursor` continues. A read keeps a small index of each
 session it pages through (where each turn's records are, not their content), so a session of
 hundreds of megabytes is paged without being held; while the session is still being written, paging
-keeps one snapshot for a minute and `offset` says how much of the file it covers. `live` is a last
+keeps one snapshot for a minute and `offset` says how much of the file it covers; `total` is how many
+turns the read pages through. A read that starts past the end of the snapshot asks for what was
+written since, and is answered from the files as they are now. A page of a paginated Codex thread
+(`rollout-…-<thread>_<page>.jsonl`) is listed and read under its own id. `live` is a last
 record less than two minutes old and, on Linux, a process of the program with the session's file open
 or working in its folder. A daemon older than these calls answers "method not found".
 

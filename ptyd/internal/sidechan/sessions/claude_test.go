@@ -546,3 +546,40 @@ func TestTheWireShapes(t *testing.T) {
 		}
 	}
 }
+
+func TestAReadPastTheSnapshotSeesWhatTheProgramAppended(t *testing.T) {
+	env := testEnv(t, nil)
+	path := filepath.Join(claudeStore(env), "-p", "s1.jsonl")
+	first := jsonl(t, cUser("u1", "", "2026-03-04T11:59:00Z", "first"), cAssistant("a1", "u1", "2026-03-04T11:59:01Z", "m1", map[string]any{"type": "text", "text": "one"}))
+	writeFile(t, path, first)
+	s := claudeService(t, env)
+	turns, last := readAll(t, s, "claude", "s1", true, MaxPage)
+	if len(turns) != 2 || last.Total != 2 || last.Next != 2 {
+		t.Fatalf("first read: %d turns, total %d, next %d", len(turns), last.Total, last.Next)
+	}
+	// The session is live, so its index is a snapshot that paging keeps reusing; the program then
+	// writes one more exchange, and the host asks from where its import stopped.
+	more := jsonl(t, cUser("u2", "a1", "2026-03-04T11:59:30Z", "second"), cAssistant("a2", "u2", "2026-03-04T11:59:31Z", "m2", map[string]any{"type": "text", "text": "two"}))
+	writeFile(t, path, first+more)
+	r, err := s.Read(ReadRequest{Harness: "claude", ID: "s1", From: last.Next})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply := r.(ReadReply)
+	if len(reply.Turns) != 2 || reply.Turns[0].Seq != 2 || reply.Total != 4 || !reply.Done {
+		t.Fatalf("the read past the snapshot: %d turns, total %d, done %v", len(reply.Turns), reply.Total, reply.Done)
+	}
+}
+
+func TestClaudeSignedThinkingWithoutTextIsHidden(t *testing.T) {
+	env := testEnv(t, nil)
+	writeFile(t, filepath.Join(claudeStore(env), "-p", "s1.jsonl"), jsonl(t,
+		cUser("u1", "", "2026-03-01T10:00:00Z", "go"),
+		cAssistant("a1", "u1", "2026-03-01T10:00:01Z", "m1", map[string]any{"type": "thinking", "thinking": "", "signature": "sig"}),
+		cAssistant("a2", "a1", "2026-03-01T10:00:01Z", "m1", map[string]any{"type": "thinking", "thinking": "Readable.", "signature": "sig"}),
+	))
+	turns, _ := readAll(t, claudeService(t, env), "claude", "s1", true, MaxPage)
+	if p := turns[1].Parts; len(p) != 2 || !p[0].Encrypted || p[0].Text != "" || p[1].Encrypted || p[1].Text != "Readable." {
+		t.Fatalf("thinking %+v", p)
+	}
+}

@@ -531,6 +531,10 @@ type ReadReply struct {
 	// Offset is how many bytes of the main file the turns cover: a later read of only what is new
 	// starts its count there.
 	Offset int64 `json:"offset"`
+	// Total is how many turns the read pages through, for a reader's progress. The header's
+	// `messages` counts only what a person would call a message, so a reader that measured its turns
+	// against it ran far past a hundred percent on a session of many tool calls.
+	Total int `json:"total"`
 }
 
 // RawReply is sessions.read with raw: the source's own bytes, a page of whole records at a time,
@@ -552,15 +556,16 @@ type RawFile struct {
 	Bytes int64  `json:"bytes"`
 }
 
-// find locates a session by its id among the program's sessions.
-func (s *Service) find(p Parser, id string) (lightEntry, error) {
+// find locates a session by its id among the program's sessions. `listed` lets it answer from the
+// last listing when that is recent; a caller that needs the files as they are now passes false.
+func (s *Service) find(p Parser, id string, listed bool) (lightEntry, error) {
 	if id == "" {
 		return lightEntry{}, fmt.Errorf("%w: id is empty", ErrInvalid)
 	}
 	// A read pages through a session in quick calls; listing every file of the program again for
 	// each page (four thousand rollouts for Codex) was most of the time of a read.
 	s.mu.Lock()
-	fresh := time.Since(s.lightAt[p.ID()]) < findFresh
+	fresh := listed && time.Since(s.lightAt[p.ID()]) < findFresh
 	if fresh {
 		for _, e := range s.light {
 			if e.cand.Harness == p.ID() && !e.err && (e.header.ID == id || e.cand.ID == id) {
@@ -595,7 +600,7 @@ func (s *Service) Read(req ReadRequest) (any, error) {
 	if req.From < 0 {
 		return nil, fmt.Errorf("%w: from must not be negative", ErrInvalid)
 	}
-	e, err := s.find(p, req.ID)
+	e, err := s.find(p, req.ID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -608,9 +613,21 @@ func (s *Service) Read(req ReadRequest) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if req.From > 0 && int(req.From) >= len(idx.Turns) {
+		// A read that starts past the end of the snapshot asks for what the program wrote since:
+		// "pull in what is new" right after an import. The snapshot, and the listing it was found
+		// in, would both answer that nothing is, so the files are looked at again as they are now.
+		if e, err = s.find(p, req.ID, false); err != nil {
+			return nil, err
+		}
+		c = s.withChildren(e)
+		if idx, err = s.index(p, &c, sidechains, false); err != nil {
+			return nil, err
+		}
+	}
 	header := idx.Header
 	header.Flags.Live = s.live(p, &c, header)
-	reply := ReadReply{Header: header, Turns: []Turn{}, Live: header.Flags.Live, Offset: idx.Consumed}
+	reply := ReadReply{Header: header, Turns: []Turn{}, Live: header.Flags.Live, Offset: idx.Consumed, Total: len(idx.Turns)}
 	files := map[int]*os.File{}
 	defer func() {
 		for _, f := range files {

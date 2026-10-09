@@ -2011,9 +2011,9 @@ def run() -> int:
 def run_imports() -> int:
     """Importing a session from another program (``ONLY=imports``): the explorer on a folder that is
     already a project, a large session, the import's stages, the imported chat, and the phone's path."""
-    from api_stub_imports import IMPORTED_ID, ImportsStub, imported_row, imported_session
+    from import_stub import IMPORTED_ID, ImportStub, imported_row, imported_session
 
-    imports = ImportsStub()
+    imports = ImportStub()
 
     def route(r) -> None:  # type: ignore[no-untyped-def]
         rel = urlsplit(r.request.url).path

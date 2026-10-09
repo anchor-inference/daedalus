@@ -304,7 +304,9 @@ class SessionImporter:
             out.live = bool(page.get("live")) or out.live
             following = page.get("next")
             if progress is not None:
-                await progress(len(out.turns), int(out.header.get("messages") or 0))
+                # ``total`` is the turns the read pages through; ``messages`` in the header counts only
+                # the visible ones, which a session of many tool calls outnumbers several times over.
+                await progress(len(out.turns), int(page.get("total") or out.header.get("messages") or 0))
             if page.get("done") or following is None or following == cursor:
                 out.done = bool(page.get("done")) or following is None or following == cursor
                 out.next = following if following is not None else cursor
@@ -647,7 +649,7 @@ class SessionImporter:
         if plan.mode == "full":
             history: list[Message] = []
             for index in plan.kept:
-                message = entries[index].history
+                message = (entries[index].tail_history or entries[index].history) if plan.cut else entries[index].history
                 assert message is not None
                 if index == plan.summary and archived:
                     note = f"[archived turns seq {archived[0]}–{archived[-1]}: HistoryExpand({archived[0]}, {archived[-1]}) returns them verbatim]"
@@ -681,7 +683,9 @@ class SessionImporter:
             created_at=max(datetime.now(UTC), last),
             metadata={
                 COMPACTION_SUMMARY_METADATA_KEY: True,
-                "daedalus.compaction": {"reason": "import", "source": harness, "messages": len(gap), "kept": len(kept), "at": _now()},
+                # ``messages`` is everything the summary stands for, which the chat says came "before it";
+                # ``summarised`` is the part a model of ours condensed.
+                "daedalus.compaction": {"reason": "import", "source": harness, "messages": len(archived) or len(gap), "summarised": len(gap), "kept": len(kept), "at": _now()},
                 "daedalus.archived": {"from_seq": archived[0], "to_seq": archived[-1], "seqs": archived} if archived else {"seqs": []},
                 IMPORTED_KEY: {"harness": harness, "ext_id": "", "summary": True},
             },

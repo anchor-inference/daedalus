@@ -27,7 +27,6 @@ import urllib.request
 from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote, unquote_plus
 
-import api_stub_imports
 from calendar_stub import CalendarStub
 from folder_stub import DEFAULT as FOLDERS
 from import_stub import DEFAULT as IMPORTS
@@ -485,11 +484,6 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return status, "application/json", json.dumps(payload)
     if path in GATES:
         return 200, "application/json", json.dumps(GATES[path])
-    if api_stub_imports.handles(path):
-        # The session import's routes live in their own module; the start screen asks for its card on every visit.
-        answered = api_stub_imports.DEFAULT.answer(method.upper(), path, query, None)
-        if answered is not None:
-            return answered
     if method.upper() == "GET" and path.startswith("/api/folders"):
         # The new-project dialog's folder browser, over the invented trees; a check that drives it
         # installs a FolderStub of its own to change the host's state and read the writes back.
@@ -501,9 +495,7 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         # drives it installs an ImportStub of its own to fail the host and read the writes back.
         answered = IMPORTS.answer(method.upper(), path, query, body)
         if answered is not None:
-            if isinstance(answered[1], str):
-                return answered[0], "application/x-ndjson", answered[1]
-            return answered[0], "application/json", json.dumps(answered[1])
+            return answered
     parts = path.split("/")
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "providers" and parts[4] == "limits":
         return 200, "application/json", json.dumps({"provider_id": parts[3], "observations": []})

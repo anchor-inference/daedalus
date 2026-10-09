@@ -305,9 +305,10 @@ class SideChannels:
 
     async def sessions_read(self, env: str, *, harness: str, session: str, start: Any = 0, max_bytes: int = 512 << 10,
                             sidechains: bool = True, raw: bool = False) -> dict[str, Any]:
-        """One page of a session, already normalised: ``{header, turns, next, done, live, masked}``,
-        where ``next`` is passed back as ``from`` for the next page. ``raw`` asks for the file's own
-        bytes instead (``{data_b64, next, done, size}``), for the copy an import keeps. Secrets of the
+        """One page of a session, already normalised: ``{header, turns, next, done, live, masked, offset,
+        total}``, where ``next`` is passed back as ``from`` for the next page and ``total`` is how many
+        turns the read pages through. ``raw`` asks for the file's own
+        bytes instead (``{header, file, files, data_b64, next, done, live, masked}``), for the copy an import keeps. Secrets of the
         shapes the daemon knows are masked before they cross the socket; ``masked`` counts them."""
         params: dict[str, Any] = {"harness": harness, "id": session, "from": start, "max_bytes": max_bytes, "sidechains": sidechains, "raw": raw}
         result: dict[str, Any] = await self._side_call(env, "sessions.read", params, what=f"reading the {harness} session {session}", timeout=60.0)
