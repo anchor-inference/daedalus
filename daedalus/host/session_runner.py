@@ -20,7 +20,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from protocore.contracts.llm import LLMObservabilityContext, LLMRequest
+from protocore.contracts.llm import LLMError, LLMObservabilityContext, LLMRequest
 from protocore.contracts.runtime_constants import LoopConstants
 from protocore.contracts.tool_registry import ToolVisibilityPolicy, policy_admits, tool_group_of
 from protocore.contracts.types import (
@@ -445,6 +445,11 @@ class HostUnreachable(ValueError):
 
     A ``ValueError``, so every caller that already turns a refused ``create_session`` into a message
     for the operator says this one too; the text names the fix."""
+
+
+class CompactionFailed(RuntimeError):
+    """Every model a compaction may use refused to summarise; the message names each and why, so the
+    operator reads a quota or a refusal instead of "Server unavailable (500)"."""
 
 
 class WorkspaceUnreachable(RuntimeError):
@@ -1964,24 +1969,44 @@ class SessionManager:
             except Exception:  # noqa: BLE001
                 logger.exception("event sink failed")
 
-    async def _compaction_rung(self, state: SessionState) -> tuple[Any, str]:
-        session_id = state.session.id
-        rungs, _ = self.resolve_model(await self.live.load(session_id))
-        provider, model = rungs[0]  # the session's own model summarises its own history …
+    async def _compaction_rungs(self, state: SessionState) -> list[tuple[Any, str]]:
+        """The models a compaction may summarise with, in order: the preset configured for it, then the
+        session's own rungs. A preset whose provider is out of quota used to end a manual /compact in a
+        bare 500 while the session's own model stood ready; each rung after the first is that fallback."""
+        rungs, _ = self.resolve_model(await self.live.load(state.session.id))
+        chosen: list[tuple[Any, str]] = []
         if self.config.compaction.preset and self.config.compaction.preset in self.config.presets:
             try:
-                provider, model = self.providers.rungs_for(self.config, self.config.compaction.preset)[0]  # … unless a cheaper one is configured for it
+                chosen.append(self.providers.rungs_for(self.config, self.config.compaction.preset)[0])  # a cheaper one configured for it
             except Exception:  # noqa: BLE001 — an unusable compaction preset falls back to the session's model
                 logger.warning("compaction preset %r is not usable; summarising with the session's model", self.config.compaction.preset)
-        return provider, model
+        for rung in rungs:  # the session's own model summarises its own history
+            if all((rung[0].endpoint.id, rung[1]) != (p.endpoint.id, m) for p, m in chosen):
+                chosen.append(rung)
+        return chosen
+
+    async def _compaction_rung(self, state: SessionState) -> tuple[Any, str]:
+        return (await self._compaction_rungs(state))[0]
 
     async def _compact_progressing(self, state: SessionState, history: list[Message], tail: list[Message], instructions: str, reason: str, *, own_task_ok: bool) -> str:
         session_id = state.session.id
-        provider, model = await self._compaction_rung(state)
         language = self.config.answer_language if self.config.answer_language != "auto" else operator_language(history)
         observability = LLMObservabilityContext(tenant_id=TENANT, session_id=session_id, run_id=state.run_id, call_purpose="compaction", call_category="compaction")
-        with self.providers.hold([provider]):
-            summary = await self._summarise_history(provider, model, history, language=language, instructions=instructions, observability=observability, progress=lambda **f: self._compaction_progress(state, **f))
+        exceeded = self.budget_exceeded()
+        rungs = [(p, m) for p, m in await self._compaction_rungs(state) if not exceeded or self.provider_costs_nothing(p.endpoint.id, m)]
+        failures: list[str] = []
+        summary = ""
+        for index, (provider, model) in enumerate(rungs):
+            try:
+                with self.providers.hold([provider]):
+                    summary = await self._summarise_history(provider, model, history, language=language, instructions=instructions, observability=observability, progress=lambda **f: self._compaction_progress(state, **f))
+                break
+            except LLMError as exc:
+                # Out of quota, refused, timed out or too small a window: the next model may well answer.
+                failures.append(f"{provider.endpoint.id}/{model}: {exc}"[:400])
+                if index == len(rungs) - 1:
+                    raise CompactionFailed("no model could summarise the history: " + "; ".join(failures)) from exc
+                logger.warning("compaction of %s with %s/%s failed (%s); trying %s/%s", session_id, provider.endpoint.id, model, exc, rungs[index + 1][0].endpoint.id, rungs[index + 1][1])
         await self._compaction_progress(state, stage="writing")
         # What the operator said is written by code, never by the summariser: rules do not decay.
         # Their room is a share of the window as well as a fixed bound: a summary that quoted every
