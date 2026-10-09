@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BrowserGroup } from "../api";
-import { actionWords, domainOf, driveState, extraCount, mergeActions, nearestCorner, needsOf, needWords, pipGroup, pipHidden, readCorner, rememberCorner, rowOfEvent, savingData, secure } from "./model";
+import { actionWords, domainOf, driveState, extraCount, isOpenGroup, mergeActions, nearestCorner, needsOf, needWords, pipGroup, pipHidden, readCorner, rememberCorner, rowOfEvent, savingData, secure, viewGone } from "./model";
 
 function group(over: Partial<BrowserGroup> = {}): BrowserGroup {
   return {
@@ -106,6 +106,13 @@ describe("the corner preview", () => {
     const closed = group({ id: "g3", status: "closed", needs_you: { reason: "login", what: "", url: "", at: "" } });
     expect(pipGroup([busy, needs, closed])?.id).toBe("g2");
     expect(pipGroup([closed])).toBeNull();
+    // The host reports a group it closed after ten idle minutes as "idle": that is a closed browser,
+    // and its card stayed in the corner as an empty frame until this was read as closed.
+    const idled = group({ id: "g4", status: "idle", tabs: [] });
+    expect(isOpenGroup(idled)).toBe(false);
+    expect(pipGroup([idled])).toBeNull();
+    expect(driveState(idled)).toBe("closed");
+    expect(extraCount([busy, idled], busy)).toBe(0);
     expect(pipGroup([group({ id: "a", last_activity_at: "1" }), group({ id: "b", last_activity_at: "2" })])?.id).toBe("b");
   });
 
@@ -166,5 +173,15 @@ describe("the action log's rows", () => {
     const listed = { ...live, id: "412", action_id: "a3f-7" };
     const rows = mergeActions([listed], [live]);
     expect(rows.map((r) => r.id)).toEqual(["412"]);
+  });
+});
+
+describe("a browser the host no longer has", () => {
+  it("is gone only when the socket was refused for that reason", () => {
+    expect(viewGone({ kind: "unavailable", reason: "gone" })).toBe(true);
+    expect(viewGone({ kind: "unavailable", reason: "environment" })).toBe(false);
+    expect(viewGone({ kind: "reconnecting" })).toBe(false);
+    expect(isOpenGroup(group())).toBe(true);
+    expect(isOpenGroup(group({ status: "lost" }))).toBe(false);
   });
 });

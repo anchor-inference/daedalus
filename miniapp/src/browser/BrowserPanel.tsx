@@ -21,7 +21,7 @@ import { answerDialog, askTake, closeBrowser, consumeTake, deleteRecording, devi
 import { currentRecording, ProcedureEditor, RecordBar, RecordButton, RecordedCard, waitingRecording } from "./steps";
 import { frameOfRow, ReplayStage } from "./replay";
 import type { LiveSnapshot, LiveView } from "./live";
-import { actionWords, agentName, domainOf, driveState, mergeActions, needsOf, needWords, rowOfEvent, secure, type DriveState } from "./model";
+import { actionWords, agentName, domainOf, driveState, isOpenGroup, mergeActions, needsOf, needWords, rowOfEvent, secure, viewGone, type DriveState } from "./model";
 import type { ActionEvent } from "./protocol";
 import { BrowserViewer, focusViewer } from "./viewer";
 import { PhoneBrowserList, PhoneDrive } from "./phone";
@@ -32,8 +32,8 @@ import type { ViewerChord } from "./keys";
 
 /** The tab's body: the session's groups, the busiest one shown (a session rarely has more than one). */
 export function BrowserTab({ groups, toast, phone }: { groups: BrowserGroup[]; toast: (text: string) => void; phone?: boolean }) {
-  const open = groups.filter((g) => g.status !== "closed" && g.status !== "lost");
-  const previous = groups.filter((g) => g.status === "closed" || g.status === "lost");
+  const open = groups.filter(isOpenGroup);
+  const previous = groups.filter((g) => !isOpenGroup(g));
   const [chosen, setChosen] = useState<string | null>(null);
   const group = open.find((g) => g.id === chosen) ?? open[0] ?? null;
   const saving = useMemo(() => deviceSaving(!!phone), [phone]);
@@ -394,7 +394,9 @@ export type ControlApi = {
 
 function useControl(group: BrowserGroup, live: LiveView | null, snap: LiveSnapshot, toast: (text: string) => void): ControlApi {
   const [busy, setBusy] = useState(false);
-  const drive = driveState({ ...group, needs_you: needsOf(group.needs_you, snap) }, snap.control);
+  // A socket the host refused as gone is a closed browser even while the listing still says open:
+  // nothing here may offer to take or resume it.
+  const drive = viewGone(snap.state) ? "closed" : driveState({ ...group, needs_you: needsOf(group.needs_you, snap) }, snap.control);
   const run = useCallback(async (what: () => Promise<unknown>) => {
     setBusy(true);
     try {

@@ -22,7 +22,7 @@ import { t } from "../i18n";
 import { Icon } from "../icons";
 import { resizeViewport, useLiveSnapshot, useLiveView } from "./data";
 import type { LiveSnapshot, LiveView } from "./live";
-import { agentName, domainOf, driveState, needsOf, needWords, pipGroup } from "./model";
+import { agentName, domainOf, driveState, isOpenGroup, needsOf, needWords, pipGroup, viewGone } from "./model";
 import { tapKey } from "./keys";
 import { copyFromPage, pasteFromClipboard } from "./clipboard";
 import { BrowserViewer, focusViewer } from "./viewer";
@@ -273,8 +273,9 @@ export function BrowserChip({ groups, onOpen, streaming = true, saving = false }
   const live = useLiveView(group && streaming && !saving ? group.id : null, "thumb", { readOnly: true, box: () => ({ max_w: 64, max_h: 40 }) });
   const snap = useLiveSnapshot(live);
   if (!group) return null;
-  const open = groups.filter((g) => g.status !== "closed" && g.status !== "lost");
+  const open = groups.filter(isOpenGroup);
   const needs = needsOf(group.needs_you, snap);
+  if (viewGone(snap.state)) return null;
   const drive = driveState({ ...group, needs_you: needs }, snap.control);
   const waiting = Math.max(drive === "needs" ? 1 : 0, open.filter((g) => g.needs_you).length);
   const tab = group.tabs.find((x) => x.active) ?? group.tabs[0];
@@ -297,7 +298,7 @@ export function BrowserChip({ groups, onOpen, streaming = true, saving = false }
  * browser of the chat waits for the operator.
  */
 export function BrowserNeedsRow({ groups, onOpen }: { groups: BrowserGroup[]; onOpen: () => void }) {
-  const group = groups.find((g) => g.needs_you && g.status !== "closed" && g.status !== "lost");
+  const group = groups.find((g) => g.needs_you && isOpenGroup(g));
   if (!group) return null;
   return (
     <div className="ph-bneeds" role="status">
@@ -346,7 +347,7 @@ function ListItem({ group, onPick, onTake, saving }: { group: BrowserGroup; onPi
   const live = useLiveView(saving ? null : group.id, "thumb", { readOnly: true, box: () => ({ max_w: 160, max_h: 100 }) });
   const snap = useLiveSnapshot(live);
   const tab = group.tabs.find((x) => x.active) ?? group.tabs[0];
-  const drive = driveState(group, snap.control);
+  const drive = viewGone(snap.state) ? "closed" : driveState(group, snap.control);
   const state = t(`browser.ph.row.${drive}`);
   return (
     <div className={`bp-list-row ${drive}`} data-group={group.id}>

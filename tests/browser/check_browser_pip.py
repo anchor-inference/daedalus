@@ -9,7 +9,9 @@ Desktop, English and Russian:
 - it draws the thumbnail tier, and the agent's cursor on it;
 - a click opens the Browser tab (in the address), live;
 - "needs you" turns it amber with the reason; ✕ hides it until something new happens;
-- dragged, it snaps to the nearest corner and the device remembers it.
+- dragged, it snaps to the nearest corner and the device remembers it;
+- a browser the host closed for idleness (listed as "idle") has no card, and its Browser tab offers
+  nothing to take.
 
 Phone (390 × 844, touch):
 
@@ -195,6 +197,21 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
         say(f"in a dual view the preview is in {panes}")
     placement(page, say, "dual view, right pane", ".chat.pane-right")
     context.close()
+
+    # Closed for idleness: the host lists the group as "idle", which is a closed browser. Its card
+    # stayed as an empty frame with a "New tab" strip, and the Browser tab offered Take control.
+    bs.groups["g1"].status = "idle"
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
+    page = open_page(context, bs, stub, f"{BASE}/agents/{S1}?token=t&scheme=dark&lang={lang}")
+    page.wait_for_timeout(1500)
+    if page.locator(".bp-pip").count():
+        say("a browser closed for idleness still has its corner card")
+    page.goto(f"{BASE}/agents/{S1}?panel=browser&token=t&scheme=dark&lang={lang}")
+    page.wait_for_selector(".panel .bp-empty", timeout=10000)
+    if page.locator(".panel .bp-control, .panel .bp-banner-act").count():
+        say("the Browser tab of a closed browser still offers to take it")
+    context.close()
+    bs.groups["g1"].status = "running"
 
 
 def phone(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ignore[no-untyped-def]

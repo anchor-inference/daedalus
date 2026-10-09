@@ -10,7 +10,7 @@ import { useEvent, useStreamUp } from "../events";
 import { invalidate, useQuery } from "../store";
 import { LiveView, type LiveSnapshot } from "./live";
 import type { Tier } from "./protocol";
-import { savingData } from "./model";
+import { savingData, viewGone } from "./model";
 
 const enc = encodeURIComponent;
 export const BROWSERS_KEY = "/api/browsers";
@@ -198,7 +198,16 @@ export function useLiveView(group: string | null, tier: Tier, opts: { readOnly?:
     if (!group) return;
     const v = new LiveView({ group, tier, tab: opts.tab, readOnly: opts.readOnly, box: () => box.current() });
     setView(v);
+    // A refusal because the host no longer has the group means the listing on screen is older than
+    // the browser's close: read it again, so every card and button drawn from it goes too.
+    let told = false;
+    const stop = v.subscribe(() => {
+      if (told || !viewGone(v.get().state)) return;
+      told = true;
+      invalidate(BROWSERS_KEY);
+    });
     return () => {
+      stop();
       v.close();
       setView((cur) => (cur === v ? null : cur));
     };
