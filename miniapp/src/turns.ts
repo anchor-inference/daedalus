@@ -75,14 +75,21 @@ export function activitySummary(turn: Turn, live: boolean, now: number): Activit
   return { phase, steps: turn.activity.filter((item) => item.kind === "tool").length, lastActivityAt, staleSeconds: live && lastActivityAt ? Math.max(0, Math.floor((now - lastActivityAt) / 1000)) : 0 };
 }
 
-/** The trailing retrieval headline ⟦…⟧ is for the transcript index, not for the reader; a half-streamed one is cut too. */
+/**
+ * The trailing retrieval headline ⟦…⟧ is for the transcript index, not for the reader; a half-streamed one is cut too.
+ * The same rules as `split_headline` on the host: it must be the very last thing in the text. On its own line any
+ * ⟦…⟧ counts; glued to the last sentence, which models do despite being told not to, it must carry the format's two
+ * `|` separators, so a sentence that quotes the format mid-text or ends on a bracketed word is left alone.
+ */
 export function stripHeadline(text: string): string {
-  const m = text.match(/(?:^|\n)\s*⟦[^⟦⟧]{3,2000}⟧\s*$/s);
+  const m = text.match(/(?:^|\n)\s*⟦[^⟦⟧]{3,2000}⟧\s*$/s) ?? text.match(/[ \t]*⟦[^⟦⟧\n]{0,2000}\|[^⟦⟧\n]{0,2000}\|[^⟦⟧\n]{0,2000}⟧\s*$/);
   if (m && m.index !== undefined) return text.slice(0, m.index).trimEnd();
   const open = text.lastIndexOf("⟦");
   if (open !== -1 && !text.slice(open).includes("⟧")) {
     const lineStart = text.lastIndexOf("\n", open) + 1;
     if (!text.slice(lineStart, open).trim()) return text.slice(0, lineStart).trimEnd();
+    // Glued to the last sentence and still arriving.
+    if (!text.slice(open).includes("\n")) return text.slice(0, open).trimEnd();
   }
   return text;
 }

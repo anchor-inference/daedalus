@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MessageView } from "./api";
 import type { LiveState } from "./turns";
-import { activitySummary, applyLive, buildTurns, EMPTY_LIVE, isOlderPage, liveAfter, liveBase, prepend, reconcile } from "./turns";
+import { activitySummary, applyLive, buildTurns, EMPTY_LIVE, isOlderPage, liveAfter, liveBase, prepend, reconcile, stripHeadline } from "./turns";
 
 let clock = 1_700_000_000_000;
 
@@ -152,6 +152,20 @@ describe("applyLive", () => {
   it("cuts a trailing retrieval headline off the streamed text", () => {
     const live = applyLive(null, { ...EMPTY_LIVE, text: "the answer\n⟦index: a, b, c⟧" }, 5);
     expect(live.answer).toBe("the answer");
+  });
+
+  it("cuts a headline glued to the last sentence, but only as the very last thing", () => {
+    // Models append it to the last paragraph despite the prompt, and the operator saw it in the chat.
+    const glued = "не пересылайте его посторонним. ⟦ проверка записи | status: проверено; next: нет | anchors: a.txt ⟧";
+    expect(stripHeadline(glued)).toBe("не пересылайте его посторонним.");
+    expect(stripHeadline(glued + "\n")).toBe("не пересылайте его посторонним.");
+    const quoted = "The line looks like ⟦ task | status: x | anchors: y ⟧ and is hidden from you.";
+    expect(stripHeadline(quoted)).toBe(quoted);
+    expect(stripHeadline("Press ⟦Enter⟧")).toBe("Press ⟦Enter⟧");
+    expect(stripHeadline("The answer. ⟦ проверка | status: пров")).toBe("The answer.");
+    expect(stripHeadline("The answer.\n⟦ проверка | sta")).toBe("The answer.");
+    expect(stripHeadline("a ⟦ b\nmore text")).toBe("a ⟦ b\nmore text");
+    expect(applyLive(null, { ...EMPTY_LIVE, text: glued }, 5).answer).toBe("не пересылайте его посторонним.");
   });
 
   it("shows a streamed tool that is not in the history yet, once", () => {

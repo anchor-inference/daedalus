@@ -14,7 +14,7 @@ import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { askTake, handOff, useLiveSnapshot, useLiveView } from "./data";
 import { Favicon } from "./favicon";
-import { agentName, domainOf, driveState, extraCount, nearestCorner, needsOf, needWords, PIP_PILL_BELOW, PIP_PILL_BELOW_TOUCH, pipGroup, pipHidden, readCorner, rememberCorner, type Corner, type DriveState } from "./model";
+import { agentName, domainOf, driveState, extraCount, nearestCorner, needsOf, needWords, PIP_PILL_BELOW, PIP_PILL_BELOW_TOUCH, pipGroup, pipHidden, readCorner, rememberCorner, viewGone, type Corner, type DriveState } from "./model";
 import { BrowserViewer } from "./viewer";
 import { useMedia } from "../shell";
 
@@ -56,6 +56,8 @@ function PipCard({ group, extra, onOpen, onHide }: { group: BrowserGroup; extra:
   const live = useLiveView(pill ? null : group.id, "thumb", { readOnly: true, box: () => ({ max_w: 320, max_h: 200 }) });
   const snap = useLiveSnapshot(live);
   const drive: DriveState = driveState({ ...group, needs_you: needsOf(group.needs_you, snap) }, snap.control);
+  // The corner card is a picture of a live browser; one the host says is gone has nothing to show.
+  const gone = viewGone(snap.state);
   const tab = group.tabs.find((x) => x.id === group.active_tab) ?? group.tabs.find((x) => x.active) ?? group.tabs[0];
   const url = snap.tabs.find((x) => x.id === snap.active)?.url ?? tab?.url ?? "";
   const favicon = snap.tabs.find((x) => x.id === snap.active)?.favicon_url ?? tab?.favicon_url ?? "";
@@ -117,6 +119,7 @@ function PipCard({ group, extra, onOpen, onHide }: { group: BrowserGroup; extra:
     rememberCorner(next);
   };
 
+  if (gone) return null;
   const needs = drive === "needs" ? needsOf(group.needs_you, snap) : null;
   const style: CSSProperties = {
     ...(corner[0] === "t" ? { top: INSET.top } : { bottom: column.bottom }),

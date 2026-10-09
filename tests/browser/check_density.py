@@ -703,6 +703,9 @@ def check_start(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
     problems: list[str] = []
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
     page = open_page(context, "agents", ".start-live-row")
+    # An empty field shows the mic alone in the trailing slot; Send, the circle measured, joins it once
+    # the field holds words. It was the voice circle on an empty field until that left ordinary chats.
+    page.locator(".start-composer textarea").fill("Bake the menu")
     start = page.evaluate(START)
     page.goto(f"{BASE}/agents?view=projects&token=t&scheme=dark&lang=en")
     page.wait_for_selector(".projects-row:not(.head)", timeout=15000)

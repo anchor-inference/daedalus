@@ -89,14 +89,16 @@ def desktop(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     meta = page.locator(f".start-live-row[data-session='{shots.S10}'] .start-live-meta").inner_text()
     check("Voice" in meta, f"{where}: a chat's meta names its project ({meta!r})")
 
-    # The circle: voice while empty, Send with text.
+    # The circle is Send, and nothing in an ordinary composer opens Voice mode: that is a beta with a
+    # chat of its own, and the button that led there from every empty field is gone.
     composer = page.locator(".start-composer")
-    check(composer.locator(".roundbtn.voice").is_visible(), f"{where}: an empty field offers the voice conversation")
-    check(composer.locator(".roundbtn[data-action='send']").count() == 0, f"{where}: and no Send beside it")
-    circle = composer.locator(".roundbtn.voice").bounding_box()
-    check(bool(circle) and abs(circle["width"] - circle["height"]) < 1, f"{where}: the primary is a circle ({circle})")
+    check(composer.locator("[data-action='voice'], .roundbtn.voice").count() == 0, f"{where}: an empty field offers no voice conversation")
+    send = composer.locator(".roundbtn[data-action='send']")
+    check(send.count() == 1 and send.is_disabled(), f"{where}: an empty field's Send waits for words")
     composer.locator("textarea").fill("Bake the menu")
-    check(composer.locator(".roundbtn[data-action='send']").is_visible() and composer.locator(".roundbtn.voice").count() == 0, f"{where}: text turns it into Send")
+    circle = send.bounding_box()
+    check(send.is_visible() and send.is_enabled(), f"{where}: text makes Send live")
+    check(bool(circle) and abs(circle["width"] - circle["height"]) < 1, f"{where}: the primary is a circle ({circle})")
 
     # Start in: a chat of its own first, with the run-on choice; a project drops the choice.
     chips = page.locator(".start-where-chip")

@@ -460,7 +460,8 @@ class BrowserStub:
         ticket = parse_qs(parts.query).get("ticket", [""])[0]
         with self.lock:
             g = self.groups.get(group_id)
-            if g is None or g.status in ("closed", "lost"):
+            # As the host: only an open group is attached; "idle" is one it closed for idleness.
+            if g is None or g.status != "running":
                 ws.close(code=4404, reason="no such browser")
                 return
             issued = next((t for t in self.tickets if t["ticket"] == ticket), None)
@@ -542,6 +543,8 @@ class BrowserStub:
         if action == "" and method == "GET":
             return 200, self.group_view(g)
         if action == "ticket" and method == "POST":
+            if g.status != "running":
+                return 404, {"detail": f"browser {g.id} is not open"}
             ticket = {"ticket": f"bt-{g.id}-{len(self.tickets) + 1}", "tier": body.get("tier", "live"), "read_only": bool(body.get("read_only"))}
             self.tickets.append(ticket)
             return 200, {"ticket": ticket["ticket"], "expires_in": 30}

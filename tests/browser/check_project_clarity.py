@@ -37,9 +37,10 @@ def main() -> int:
                 # Waiting questions take the goal line's place: on a phone as the Needs-you card above the
                 # chat; with none, the goal line is there.
                 expect(page.locator(".goal-headline, .needs-card").first).to_be_visible()
-                # The composer's white circle is on screen: a voice conversation while the field is
-                # empty, Send once it holds words.
-                send = page.locator(".composer [data-action='send'], .composer [data-action='voice']").first
+                # The composer's trailing control is on screen: the mic (a desktop shows it alone while
+                # the field is empty) or Send. Voice mode is never offered in an ordinary chat.
+                assert page.locator(".composer [data-action='voice']").count() == 0, (lang, width, "voice mode offered")
+                send = page.locator(".composer .composer-tools > .mic, .composer [data-action='send']").locator("visible=true").first
                 expect(send).to_be_visible()
                 assert send.bounding_box()["y"] + send.bounding_box()["height"] <= 560
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (lang, width, "home overflow")

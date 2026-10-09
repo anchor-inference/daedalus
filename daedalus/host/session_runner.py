@@ -6442,11 +6442,15 @@ def _forget_if_dropped(state: SessionState) -> Callable[[asyncio.Task[None]], No
 
 
 def _last_answer(history: Sequence[Message]) -> str:
-    """The text of the last assistant turn that said anything, on one line."""
+    """The text of the last assistant turn that said anything, on one line, without its retrieval headline.
+
+    It becomes the "finished" notification's summary, which the operator reads; the headline in it
+    leaked into every push and toast until it was split off here.
+    """
     for message in reversed(history):
         if message.role is not MessageRole.assistant:
             continue
-        text = " ".join(block.text for block in message.content_blocks if isinstance(block, TextBlock)).strip()
+        text = prompts.split_headline(" ".join(block.text for block in message.content_blocks if isinstance(block, TextBlock)).strip())[0]
         if text:
             return " ".join(text.split())
     return ""

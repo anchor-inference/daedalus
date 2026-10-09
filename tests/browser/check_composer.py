@@ -652,7 +652,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
 
 def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
     """The phone's composer: one 44 px row at rest at the bottom of the screen — +, the field, the
-    white circle (a voice conversation while the field is empty) — that opens onto its toolbar
+    white circle (Send, greyed while the field is empty; never Voice mode) — that opens onto its toolbar
     (mode, model and effort, the context ring, Send) once the field has the reader; the model and the
     mode as sheets, the + as a sheet of tiles and rows."""
     problems: list[str] = []
@@ -668,10 +668,15 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append(f"phone: the idle composer is not at the bottom ({pill})")
     if page.locator('.composer[data-shape="idle"]').count() != 1:
         problems.append("phone: the composer does not rest in its idle shape")
-    circle = page.locator('.composer .roundbtn[data-action="voice"]')
+    # Voice mode is a beta with a chat of its own; an ordinary chat offers dictation and nothing more.
+    if page.locator('.composer [data-action="voice"], .composer .roundbtn.voice').count():
+        problems.append("phone: an ordinary chat's composer still offers Voice mode")
+    circle = page.locator('.composer .roundbtn[data-action="send"]')
     box = circle.bounding_box() if circle.count() else None
     if not box or (round(box["width"]), round(box["height"])) != (34, 34):
-        problems.append(f"phone: the empty field's white circle is not the 34 px voice button ({box})")
+        problems.append(f"phone: the empty field's white circle is not the 34 px Send ({box})")
+    elif not circle.is_disabled():
+        problems.append("phone: the empty field's Send is live with nothing to send")
     if page.locator(".composer .model-select").is_visible():
         problems.append("phone: the model selector crowds the idle row")
     if page.locator(".composer .effort-select").count():

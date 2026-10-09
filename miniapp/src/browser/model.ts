@@ -11,6 +11,21 @@ export function agentName(group: Pick<BrowserGroup, "owner">): string {
   return group.owner.kind === "staff" && group.owner.label ? group.owner.label : t("browser.agent");
 }
 
+/**
+ * Whether a group still has a browser behind it. Only "running" does: the host reports a group it
+ * closed after ten idle minutes as "idle", and the app once read every status but "closed" and "lost"
+ * as open, so an idle-closed browser kept its corner card (an empty frame with a "New tab" strip) and
+ * offered "Take control" on a panel whose socket the host had already refused.
+ */
+export function isOpenGroup(group: Pick<BrowserGroup, "status">): boolean {
+  return group.status === "running";
+}
+
+/** Whether a live view was refused because the host no longer has the group: it closed after the listing was read. */
+export function viewGone(state: { kind: string; reason?: string }): boolean {
+  return state.kind === "unavailable" && state.reason === "gone";
+}
+
 /** What the panel's banner, the preview's dot and the header button say, in one word. */
 export type DriveState = "acting" | "idle" | "you" | "other" | "paused" | "needs" | "closed";
 
@@ -21,7 +36,7 @@ export type DriveState = "acting" | "idle" | "you" | "other" | "paused" | "needs
  * says only that a human holds it, which is someone else unless this window's socket says "you".
  */
 export function driveState(group: Pick<BrowserGroup, "status" | "control" | "acting"> & { needs_you: object | null }, live: ViewControl | null = null): DriveState {
-  if (group.status === "closed" || group.status === "lost") return "closed";
+  if (!isOpenGroup(group)) return "closed";
   const control = live ?? group.control;
   if (control.owner === "human") return control.holder === "you" ? "you" : "other";
   if (group.needs_you) return "needs";
@@ -248,7 +263,7 @@ export function rememberCorner(corner: Corner, storage: Pick<Storage, "setItem">
  * a person drives, then the most recently active. A closed browser shows nothing.
  */
 export function pipGroup(groups: BrowserGroup[]): BrowserGroup | null {
-  const open = groups.filter((g) => g.status !== "closed" && g.status !== "lost");
+  const open = groups.filter(isOpenGroup);
   if (!open.length) return null;
   const rank = (g: BrowserGroup) => (g.needs_you ? 3 : g.control.owner === "human" ? 2 : g.acting ? 1 : 0);
   return [...open].sort((a, b) => rank(b) - rank(a) || (a.last_activity_at < b.last_activity_at ? 1 : -1))[0];
@@ -268,7 +283,7 @@ export function pipHidden(group: Pick<BrowserGroup, "id" | "needs_you" | "last_a
 
 /** How many other tabs or groups the card stands for, for its "+2" chip. */
 export function extraCount(groups: BrowserGroup[], shown: BrowserGroup): number {
-  const open = groups.filter((g) => g.status !== "closed" && g.status !== "lost");
+  const open = groups.filter(isOpenGroup);
   const tabs = shown.tabs.length;
   return Math.max(0, open.length - 1) + Math.max(0, tabs - 1);
 }

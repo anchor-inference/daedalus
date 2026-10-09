@@ -5,7 +5,6 @@ import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle
 import { api, ApiError, AsrStatus, ModelFallback, Question, SkillEntry, SlashCommand } from "./api";
 import { Popover } from "./ui/dialogs";
 import { Banner, BottomSheet, SheetRow } from "./ui/phone";
-import { navigate, pathFor } from "./router";
 import { useOffline } from "./store";
 import { Icon } from "./icons";
 import { fileGlyph, previewKind, canPreview } from "./preview";
@@ -467,13 +466,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const place = composerContext(props.place);
 
   // A phone draws the composer in two shapes (ui/phone.css): one 48 px row at rest, and the text over
-  // a toolbar once the field has the reader or holds anything. The white circle is a voice
-  // conversation while the field is empty and nothing runs, Send with text, Stop while a run is on.
+  // a toolbar once the field has the reader or holds anything. The white circle is Send, greyed while
+  // the field is empty, and Stop while a run is on. It used to open Voice mode while the field was
+  // empty; that is a beta with a chat of its own, and an ordinary chat offers only dictation.
   const empty = !draft.trim() && files.length === 0 && secrets.length === 0;
   // A question or a permission request does not open the field: they sit in the tray above it, and
   // the field stays the one 48 px row the reader can answer in with words of their own.
   const shape = !phone ? undefined : focused || !empty || progress !== null || needsReview ? "open" : "idle";
-  const voiceCircle = phone && action === "send" && empty && !offline;
   const useCurrent = () => { setSavedTarget(currentTarget); writeDraftTarget(sessionId, currentTarget); clearSendIntent(sessionId); };
 
   return (
@@ -707,11 +706,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             {/* A written pill turns the circle into Queue, and Stop must not go with it: the run is
                 still on, and the shortcut alone is not a way to stop it on a phone. */}
             {action === "queue" && <button type="button" className="iconbtn flat stop-aside" onClick={onStop} aria-label={t("session.stop")} title={t("session.stop")}><Icon name="stop" size={16} /></button>}
-            {voiceCircle ? <VoiceCircle /> : (
-              <button type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled || fileReadySession !== sessionId || needsReview || (phone && offline && action !== "stop")} aria-label={primaryLabel} title={primaryLabel} data-action={action}>
-                <Icon name={action === "stop" ? "stop" : action === "reply" ? "send" : "up"} />
-              </button>
-            )}
+            <button type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled || fileReadySession !== sessionId || needsReview || (phone && offline && action !== "stop")} aria-label={primaryLabel} title={primaryLabel} data-action={action}>
+              <Icon name={action === "stop" ? "stop" : action === "reply" ? "send" : "up"} />
+            </button>
           </div>
         </div>
       </div>
@@ -768,16 +765,6 @@ function draftChange(saved: DraftTarget | null, now: DraftTarget): string {
   if (saved.mode !== now.mode || saved.effort !== now.effort) parts.push(t("ph.draft.mode"));
   if (saved.reply !== now.reply) parts.push(t("ph.draft.reply"));
   return parts.join(" · ");
-}
-
-/** The composer's white circle on a phone while the field is empty: a spoken conversation, on the
- *  voice page. The microphone beside it records a note into the field instead. */
-export function VoiceCircle() {
-  return (
-    <button type="button" className="roundbtn primary voice" onClick={() => navigate(pathFor("voice"))} aria-label={t("ph.voice.talk")} title={t("ph.voice.talk")} data-action="voice">
-      <Icon name="wave" size={18} />
-    </button>
-  );
 }
 
 /**

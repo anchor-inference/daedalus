@@ -1522,7 +1522,6 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "ph.loop": { en: "Loop", ru: "Цикл" },
   "ph.loop.next": { en: "next {t}", ru: "следующий {t}" },
   "ph.offline.kept": { en: "Kept here until the bot is back", ru: "Сохранено, отправится, когда бот вернётся" },
-  "ph.voice.talk": { en: "Voice conversation", ru: "Голосовой разговор" },
   "ph.plus.photos": { en: "Photos", ru: "Фото" },
   "ph.plus.paste.hint": { en: "Image or text from the clipboard", ru: "Картинка или текст из буфера" },
   "ph.plus.commands": { en: "Skills and commands", ru: "Навыки и команды" },
