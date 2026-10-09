@@ -177,6 +177,55 @@ func TestClaudeCompactionCrossesTheBoundaryAndCoversTheTurnsBefore(t *testing.T)
 	}
 }
 
+// The layout of a compaction that preserves the last messages, as Claude Code 2.1.28x writes it: the
+// boundary's logicalParentUuid names the segment's tail, written after the summary, and the context
+// it re-injects sits as attachments between the boundary and the summary. The walk used to stop at
+// the boundary (its logical parent was already on the path) and lose the first request, and the
+// summary was a second compaction after one "without its summary".
+func TestClaudeCompactionThatPreservesASegmentKeepsTheHistoryAndItsSummary(t *testing.T) {
+	env := testEnv(t, nil)
+	attachment := func(uuid, parent, kind string) claudeRec {
+		return claudeRec{"type": "attachment", "uuid": uuid, "parentUuid": parent, "timestamp": "2026-03-01T10:00:03Z",
+			"attachment": map[string]any{"type": kind}}
+	}
+	recs := []any{
+		cUser("u1", "", "2026-03-01T10:00:00Z", "start"),
+		cAssistant("a1", "u1", "2026-03-01T10:00:01Z", "msg_1", map[string]any{"type": "text", "text": "ok"}),
+		cUser("u2", "a1", "2026-03-01T10:00:02Z", "and the rest"),
+		claudeRec{"type": "system", "subtype": "compact_boundary", "uuid": "cb", "parentUuid": nil, "logicalParentUuid": "tail",
+			"timestamp": "2026-03-01T10:00:03Z", "compactMetadata": map[string]any{"trigger": "auto",
+				"preservedSegment": map[string]any{"headUuid": "a1", "anchorUuid": "cs", "tailUuid": "tail"}}},
+		attachment("in", "cb", "instructions"),
+		attachment("sc", "in", "session_context"),
+		attachment("dt", "sc", "date"),
+		cUser("cs", "dt", "2026-03-01T10:00:03Z", "Summary: started", map[string]any{"isCompactSummary": true, "isVisibleInTranscriptOnly": true}),
+		attachment("tail", "cs", "total_tokens_reminder"),
+		cUser("u3", "tail", "2026-03-01T10:00:04Z", "go on"),
+		cAssistant("a3", "u3", "2026-03-01T10:00:05Z", "msg_3", map[string]any{"type": "text", "text": "continuing"}),
+	}
+	writeFile(t, filepath.Join(claudeStore(env), "-p", "s1.jsonl"), jsonl(t, recs...))
+	turns, last := readAll(t, claudeService(t, env), "claude", "s1", true, MaxPage)
+	var got []string
+	for _, tr := range turns {
+		got = append(got, tr.Role+"["+kinds(tr)+"]")
+	}
+	want := "user[text] assistant[text] user[text] system_note[compaction] system_note[meta:attachment:instructions,meta:attachment:session_context,meta:attachment:date] " +
+		"system_note[meta:attachment:total_tokens_reminder] user[text] assistant[text]"
+	if strings.Join(got, " ") != want {
+		t.Fatalf("turns\n got %s\nwant %s", strings.Join(got, " "), want)
+	}
+	if turns[0].Parts[0].Text != "start" {
+		t.Fatalf("the first request %+v", turns[0])
+	}
+	c := turns[3].Parts[0]
+	if c.Summary != "Summary: started" || !c.Auto || c.Covers == nil || *c.Covers != [2]int{0, 2} {
+		t.Fatalf("compaction %+v", c)
+	}
+	if last.Header.Flags.Compacted != 1 || last.Header.Messages != 5 {
+		t.Fatalf("header %+v", last.Header)
+	}
+}
+
 func TestClaudeSubagentsAreInlinedAfterTheCallThatStartedThem(t *testing.T) {
 	env := testEnv(t, nil)
 	dir := filepath.Join(claudeStore(env), "-p")
