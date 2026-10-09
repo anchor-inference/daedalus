@@ -13,6 +13,7 @@ import (
 	"github.com/ascorblack/daedalus/ptyd/internal/config"
 	"github.com/ascorblack/daedalus/ptyd/internal/hooks"
 	"github.com/ascorblack/daedalus/ptyd/internal/sidechan"
+	"github.com/ascorblack/daedalus/ptyd/internal/sidechan/sessions"
 	"github.com/ascorblack/daedalus/ptyd/internal/term"
 	"github.com/ascorblack/daedalus/ptyd/proto/server"
 	"github.com/ascorblack/daedalus/ptyd/proto/wire"
@@ -24,6 +25,8 @@ type Side struct {
 	FS       *sidechan.FS
 	Dialer   *sidechan.Dialer
 	Launches *hooks.Registry
+	// Sessions reads other agent programs' sessions for import; nil leaves sessions.* unregistered.
+	Sessions *sessions.Service
 	Listen   string // the hook listener's address
 	StateDir string
 }
@@ -47,6 +50,11 @@ func (d *Daemon) registerSide(srv *server.Server) {
 	srv.Handle("hooks.unregister_launch", d.unregisterLaunch)
 	srv.Handle("hooks.reply", d.hookReply)
 	srv.Handle("hooks.put_file", d.putFile)
+	if d.Side.Sessions != nil {
+		srv.Handle("sessions.harnesses", d.sessionsHarnesses)
+		srv.Handle("sessions.scan", d.sessionsScan)
+		srv.Handle("sessions.read", d.sessionsRead)
+	}
 }
 
 // hooksInfo and sideInfo are the side channels' part of daemon.info.
@@ -72,6 +80,14 @@ func sideError(err error) error {
 		return nil
 	case errors.As(err, &we):
 		return err
+	case errors.Is(err, sessions.ErrInvalid):
+		return wire.Errorf(wire.CodeInvalidParams, "%v", err)
+	case errors.Is(err, sessions.ErrForbidden):
+		return wire.Errorf(wire.CodeForbidden, "%v", err)
+	case errors.Is(err, sessions.ErrNotFound):
+		return wire.Errorf(wire.CodeNotFound, "%v", err)
+	case errors.Is(err, sessions.ErrBusy):
+		return wire.Errorf(wire.CodeLimit, "%v", err)
 	case errors.Is(err, sidechan.ErrStaleLaunch), errors.Is(err, hooks.ErrNoLaunch):
 		return wire.Errorf(wire.CodeStaleLaunch, "%v", err)
 	case errors.Is(err, sidechan.ErrInvalid), errors.Is(err, hooks.ErrInvalid):
@@ -279,10 +295,46 @@ func (d *Daemon) fsSetRoots(ctx context.Context, c *server.Conn, params json.Raw
 	return map[string]any{"roots": d.Side.FS.Roots(), "accepted": accepted, "refused": refused}, nil
 }
 
+// sessionsHarnesses lists the agent programs whose sessions this machine holds (sessions.*: read
+// only, from each program's own store, masked; see the sessions package).
+func (d *Daemon) sessionsHarnesses(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct{}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	return map[string]any{"harnesses": d.Side.Sessions.Harnesses()}, nil
+}
+
+func (d *Daemon) sessionsScan(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p sessions.ScanRequest
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	r, err := d.Side.Sessions.Scan(p)
+	if err != nil {
+		d.logRefusal("sessions.scan", p.Path, err)
+		return nil, sideError(err)
+	}
+	return r, nil
+}
+
+func (d *Daemon) sessionsRead(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p sessions.ReadRequest
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	r, err := d.Side.Sessions.Read(p)
+	if err != nil {
+		d.logRefusal("sessions.read", p.Harness+":"+p.ID, err)
+		return nil, sideError(err)
+	}
+	return r, nil
+}
+
 // logRefusal writes a refused read into the daemon's log: a read outside the roots or of a denied
 // file is either a bug in an adapter or someone probing, and either is worth finding afterwards.
 func (d *Daemon) logRefusal(method, path string, err error) {
-	if errors.Is(err, sidechan.ErrForbidden) {
+	if errors.Is(err, sidechan.ErrForbidden) || errors.Is(err, sessions.ErrForbidden) {
 		d.Log.Warn("side channel refused", "method", method, "path", path, "reason", err.Error())
 	}
 }

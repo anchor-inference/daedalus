@@ -594,8 +594,10 @@ def write_inbox(real_root_check: Any, params: dict[str, Any]) -> dict[str, Any]:
 
 
 BROWSE_DENY = (
-    "**/.claude/.credentials.json", "**/.codex/auth.json", "**/.grok/auth.json", "**/.cursor/**",
-    "**/.local/share/opencode/auth.json", "**/.pi/agent/auth.json", "**/.ssh/**", "**/.gnupg/**",
+    "**/.claude/.credentials.json", "**/.codex/auth.json", "**/.codex/accounts.json", "**/.codex/accounts/**",
+    "**/.grok/auth.json", "**/.gemini/oauth_creds.json", "**/.gemini/google_accounts.json", "**/.qwen/oauth_creds.json",
+    "**/.cursor/**", "**/.local/share/opencode/auth.json", "**/opencode/auth.json", "**/.pi/agent/auth.json",
+    "**/.ssh/**", "**/.gnupg/**",
     "**/.config/gh/hosts.yml", "**/.netrc", "**/.git-credentials", "**/.docker/config.json", "**/.aws/**",
     "**/.kube/**", "**/.config/gcloud/**", "**/.azure/**", "**/.npmrc", "**/.pypirc",
 )

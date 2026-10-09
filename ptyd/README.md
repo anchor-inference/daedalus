@@ -36,7 +36,7 @@ The protocol, the run directory, the events and the guarantees about the output 
 | `cmd/ptyd-replay` | plays a terminal recording through the emulator and writes its snapshots, for the cross-check against xterm.js |
 | `libghostty` | the pinned sources of the screen emulator, the patch carried against them, and the script that builds it |
 | `internal/ptyproc` | PTY start, resize, signals, ending a process tree; on Windows a pseudoconsole (ConPTY) and a job object |
-| `internal/sidechan` | `exec.run` and its program list, `fs.*` with its roots and deny list, `net.dial` |
+| `internal/sidechan` | `exec.run` and its program list, `fs.*` with its roots and deny list, `net.dial`; `sessions/` reads other agent programs' sessions (`sessions.*`), one file per program |
 | `internal/hooks` | launches (token, overlay files, dial directory, ports), the loopback hook listener with held replies, `hook-post` and `hook` |
 | `internal/toolsmcp` | `tools-mcp --set <name>` (and `team-mcp`, the `team` set): Daedalus's tools as an MCP server on stdio — the team's (`Report`, `AskOrchestrator`) compiled in, any other set read from the launch's `tools/<name>.json` — posting each call to the hook listener |
 | `internal/wire` | the terminal frames an attachment carries; `testdata/frames.json` is shared byte for byte with the app |
