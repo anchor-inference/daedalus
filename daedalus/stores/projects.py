@@ -367,6 +367,29 @@ PSEUDO_FILESYSTEMS = (Path("/proc"), Path("/sys"), Path("/dev"), Path("/run"))
 one of them would list a running machine's processes and devices as if they were files to edit."""
 
 
+FOLDER_NAME_MAX = 80
+
+
+def folder_name(raw: str) -> str:
+    """A folder name the operator typed for a new folder: one plain path segment.
+
+    It names a new project's folder under the managed tree, or a folder made from the folder browser,
+    so it may hold no separator and climb nowhere. A name starting with a dot is refused as well: the
+    browser hides such folders, and a project whose folder could not be seen in it would be a project
+    the operator could not find their way back to.
+    """
+    name = (raw or "").strip()
+    if not name:
+        raise ProjectError("a folder needs a name")
+    if len(name) > FOLDER_NAME_MAX:
+        raise ProjectError(f"a folder name is at most {FOLDER_NAME_MAX} characters")
+    if name in (".", "..") or name.startswith("."):
+        raise ProjectError(f"{name!r} is not a folder name that can be shown; start it with a letter or a digit")
+    if any(ch in name for ch in "/\\:") or any(ord(ch) < 32 for ch in name):
+        raise ProjectError(f"{name!r} is not one folder name: it holds a separator or a control character")
+    return name
+
+
 def normalise_root(raw: str) -> Path:
     """The path a project folder is anchored at: absolute, ``~`` expanded, no trailing slash, no ``..``.
 
@@ -529,8 +552,14 @@ class ProjectStore:
         project_id: str | None = None,
         initial_goal: str = "",
         confirmation_ask_id: str | None = None,
+        managed_name: str = "",
     ) -> Project:
-        """A project with the folders asked for, in that order; with none, a managed scratch folder of its own."""
+        """A project with the folders asked for, in that order; with none, a managed scratch folder of its own.
+
+        ``managed_name`` names that scratch folder (``workspaces/umnyj-dom``) instead of the project's
+        id. A named folder that is already there is refused rather than adopted: the operator asked for
+        a new, empty folder, and someone else's files under that name would be a surprise.
+        """
         label = (name or "").strip()
         if not label:
             raise ProjectError("a project needs a name")
@@ -543,7 +572,10 @@ class ProjectStore:
         if not specs:
             if self._managed_root is None:
                 raise ProjectError("automatic project folders are not configured")
-            planned.append((self._managed_root / project_id, FolderSpec(str(self._managed_root / project_id)), True))
+            scratch = self._managed_root / (folder_name(managed_name) if managed_name else project_id)
+            planned.append((scratch, FolderSpec(str(scratch)), True))
+        elif managed_name:
+            raise ProjectError("a folder name is for a new folder; a project with folders of its own names none")
         for spec in specs:
             path = normalise_root(spec.path)
             self._refuse_reserved(path)
@@ -552,6 +584,8 @@ class ProjectStore:
         async with self._write:
             for path, _, _ in planned:
                 await self._refuse_overlap(path)
+            if managed_name and planned[0][0].exists():
+                raise ProjectError(f"{planned[0][0]} already exists; choose another folder name")
             for path, _, ours in planned:
                 if ours:
                     self._make_root(path)
@@ -1282,6 +1316,7 @@ class ProjectStore:
 
 __all__ = [
     "BRIEF_SECTIONS",
+    "FOLDER_NAME_MAX",
     "BriefSection",
     "FolderSpec",
     "JournalEntry",
@@ -1296,5 +1331,6 @@ __all__ = [
     "RULE_KIND",
     "RULE_LIFTED_KIND",
     "RULE_TEXT_MAX",
+    "folder_name",
     "normalise_root",
 ]
