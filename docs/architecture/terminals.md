@@ -685,8 +685,10 @@ FIFOs and devices are refused.
   `/`, holds the home directory, or is the daemon's own is refused.
 - **Deny** patterns (`**` any directories, `*` part of a name) are compiled in and only extended by
   the configuration's `fs.deny`: every CLI's login (`**/.claude/.credentials.json`,
-  `**/.codex/auth.json`, `**/.grok/auth.json`, `**/.local/share/opencode/auth.json`,
-  `**/.pi/agent/auth.json`), `**/.ssh/**`, `**/.gnupg/**`, `**/.config/gh/hosts.yml`, `**/.netrc`,
+  `**/.codex/auth.json`, `**/.codex/accounts.json`, `**/.codex/accounts/**`, `**/.grok/auth.json`,
+  `**/.gemini/oauth_creds.json`, `**/.gemini/google_accounts.json`, `**/.qwen/oauth_creds.json`,
+  `**/.local/share/opencode/auth.json`, `**/opencode/auth.json`, `**/.pi/agent/auth.json`,
+  `**/.cursor/**`), `**/.ssh/**`, `**/.gnupg/**`, `**/.config/gh/hosts.yml`, `**/.netrc`,
   `**/.git-credentials`, `**/.docker/config.json`, `**/.aws/**`, `**/.kube/**`,
   `**/.config/gcloud/**`, `**/.azure/**`, `**/.npmrc`, `**/.pypirc`, and the daemon's run and state
   directories. A refusal is `1004` and is written to the daemon's log.
@@ -721,6 +723,48 @@ slow network mount answers with what it has; each cut says `truncated`. It adds 
 makes a folder with `fs.mkdir` and checks the chosen one with `fs.stat {as_root}`, which hold the path
 to the rules a project folder is held to. A daemon older than the call answers "method not found",
 which the host turns into "update the host terminal daemon" instead of a broken picker.
+
+### Sessions of other programs
+
+`sessions.*` reads the sessions other agent programs keep on the machine — Claude Code, Codex, Grok
+CLI and pi in this build — and returns them in one normalised model, for the host to import. It
+reads and never writes, and it runs nothing.
+
+| Method | Params → result |
+|---|---|
+| `sessions.harnesses` | `{}` → `{harnesses[{id, name, found, root, sessions, folders, version}]}`: each program, whether its store exists, the store as `~/…`, and how many sessions and folders it holds. Kept for 30 s |
+| `sessions.scan` | `{harness, path?, depth?, query?, deep?, limit? ≤ 2000, cursor?}` → `{path, here[header], children[{name, path, sessions, latest}], folders[{path, sessions, latest}], truncated, cursor}`: the sessions whose folder is `path`, the subfolders of `path` holding sessions further down, and for an empty `path` every folder with sessions (newest first). `query` is a substring of the title, the first request or the id, below `path` |
+| `sessions.read` | `{harness, id, from, max_bytes? 16 KiB..512 KiB, sidechains? (true), raw?, file?}` → `{header, turns[turn], next, done, live, masked, offset}`: turns from number `from`, as many as fit in `max_bytes` (at least one). With `raw`, `from` is a byte offset into file `file` (0 is the main one) and the answer is `{header, file, files[{name, bytes}], data_b64, next, done, live, masked}`, whole records at a time |
+
+A header is `{v, harness, id, cwd, title, started_at, updated_at, messages, bytes, branch, model,
+flags{compacted, sidechains, live}, source{path}}`; a turn is `{seq, ext_id, parent, role
+"user"|"assistant"|"system_note", at, sidechain, model, parts[], usage?{input, output, cache_read}}`;
+a part is one of `{kind: "text", text}`, `{kind: "thinking", text, encrypted}`, `{kind: "image",
+mime, data_b64?, path?, bytes}`, `{kind: "tool_call", call_id, name, input, tool_kind
+"native"|"mcp"|"custom", server?}`, `{kind: "tool_result", call_id, output, is_error, truncated,
+images[]}`, `{kind: "compaction", summary, covers [from, to]|null, auto}`, `{kind: "meta", type,
+data}`. A tool call's kind is `tool_kind` because `kind` names the part. Tool results travel in a
+`user` turn of their own after the call, as the providers' message shape has them. Times are RFC 3339
+or null. Folders are compared with forward slashes, without a trailing slash, the drive letter in
+upper case, and without regard to case on Windows and macOS.
+
+What it may read is a fixed list of stores per program inside the home folder (each following the
+program's own variable: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, `PI_CODING_AGENT_DIR`). It is
+not held to the roots, like `fs.browse`, and is kept safe the same way: every file it opens must be a
+regular file below that store as written and as resolved, and on neither side denied or the daemon's
+own; a symbolic link in a store is never listed. Every text it returns — words, call arguments,
+outputs, summaries, notes, titles, and the raw records — has been through the same secret shapes as
+the host's redactor (`sk-…`, `ghp_…`, `AKIA…`, JWTs, `Bearer …`, private keys, `*_TOKEN=…`, …) first;
+`masked` counts them, and the host masks again with the values it knows.
+
+A listing reads the head and the tail of each file, cached by size and modification time; the
+sessions of the folder asked about are read whole once, for their counts, and cached the same way.
+Both stop after 1.5 s and say `truncated`, and `cursor` continues. A read keeps a small index of each
+session it pages through (where each turn's records are, not their content), so a session of
+hundreds of megabytes is paged without being held; while the session is still being written, paging
+keeps one snapshot for a minute and `offset` says how much of the file it covers. `live` is a last
+record less than two minutes old and, on Linux, a process of the program with the session's file open
+or working in its folder. A daemon older than these calls answers "method not found".
 
 ### Launches and hooks
 

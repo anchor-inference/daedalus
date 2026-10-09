@@ -24,6 +24,7 @@ import (
 	"github.com/ascorblack/daedalus/ptyd/internal/sandbox"
 	"github.com/ascorblack/daedalus/ptyd/internal/shellint"
 	"github.com/ascorblack/daedalus/ptyd/internal/sidechan"
+	"github.com/ascorblack/daedalus/ptyd/internal/sidechan/sessions"
 	"github.com/ascorblack/daedalus/ptyd/internal/term"
 	"github.com/ascorblack/daedalus/ptyd/proto/events"
 	"github.com/ascorblack/daedalus/ptyd/proto/server"
@@ -90,8 +91,11 @@ func startSideWith(t *testing.T, box *sandbox.Prober) (*fixture, *rpc.Side) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The session reader sees the fixture's home and no variable of the machine running the tests.
+	sessionsEnv := &sessions.Env{Home: cfg.Home, Getenv: func(string) string { return "" }, GOOS: "linux", Refused: fsys.Refused, Now: time.Now}
 	side := &rpc.Side{Exec: sidechan.NewExec(nil, os.Environ(), cfg.Home, log), FS: fsys,
-		Dialer: sidechan.NewDialer(launches), Launches: launches, Listen: hln.Addr().String(), StateDir: cfg.StateDir}
+		Dialer: sidechan.NewDialer(launches), Launches: launches, Listen: hln.Addr().String(), StateDir: cfg.StateDir,
+		Sessions: sessions.NewService(sessionsEnv, sessions.Parsers())}
 	ep, err := server.Prepare(cfg.RunDir, "unix", "ptyd")
 	if err != nil {
 		t.Fatal(err)
@@ -277,6 +281,59 @@ func TestFoldersAreBrowsedOverTheSocket(t *testing.T) {
 	}
 	if we := f.callErr("fs.browse", map[string]any{"path": "relative"}); we == nil || we.Code != wire.CodeInvalidParams {
 		t.Fatalf("relative: %v", we)
+	}
+}
+
+func TestOtherProgramsSessionsAreReadOverTheSocket(t *testing.T) {
+	f, _ := startSide(t)
+	home := filepath.Join(f.dir, "home")
+	store := filepath.Join(home, ".claude", "projects", "-home-someone-proj")
+	if err := os.MkdirAll(store, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	session := `{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-03-01T10:00:00Z","cwd":"/home/someone/proj","message":{"role":"user","content":"push with ` + "gh" + `p_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"}}` + "\n" +
+		`{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-03-01T10:00:01Z","message":{"id":"m1","model":"m","role":"assistant","content":[{"type":"text","text":"done"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(store, "s1.jsonl"), []byte(session), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A session file that is a link to a login: not even listed, whatever it is named.
+	if err := os.WriteFile(filepath.Join(home, ".claude", ".credentials.json"), []byte(`{"token":"x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, ".claude", ".credentials.json"), filepath.Join(store, "creds.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	var h struct {
+		Harnesses []sessions.HarnessInfo `json:"harnesses"`
+	}
+	f.call(t, "sessions.harnesses", map[string]any{}, &h)
+	if len(h.Harnesses) == 0 || h.Harnesses[0].ID != "claude" || !h.Harnesses[0].Found || h.Harnesses[0].Sessions != 1 {
+		t.Fatalf("harnesses %+v", h)
+	}
+	var scan map[string]any
+	f.call(t, "sessions.scan", map[string]any{"harness": "claude", "path": "/home/someone/proj", "depth": 1, "query": "", "limit": 200, "cursor": ""}, &scan)
+	here := scan["here"].([]any)
+	if len(here) != 1 || here[0].(map[string]any)["id"] != "s1" || here[0].(map[string]any)["messages"] != 2.0 {
+		t.Fatalf("scan %v", scan)
+	}
+	var read map[string]any
+	f.call(t, "sessions.read", map[string]any{"harness": "claude", "id": "s1", "from": 0, "max_bytes": 524288, "sidechains": true, "raw": false}, &read)
+	turns := read["turns"].([]any)
+	text := turns[0].(map[string]any)["parts"].([]any)[0].(map[string]any)["text"]
+	if len(turns) != 2 || read["done"] != true || read["next"] != 2.0 || read["masked"] != 1.0 || strings.Contains(text.(string), "ghp_") {
+		t.Fatalf("read %v", read)
+	}
+	if we := f.callErr("sessions.read", map[string]any{"harness": "claude", "id": "creds"}); we == nil || we.Code != wire.CodeNotFound {
+		t.Fatalf("a link to the credentials: %v", we)
+	}
+	if we := f.callErr("sessions.read", map[string]any{"harness": "claude", "id": "missing"}); we == nil || we.Code != wire.CodeNotFound {
+		t.Fatalf("missing: %v", we)
+	}
+	if we := f.callErr("sessions.scan", map[string]any{"harness": "nope"}); we == nil || we.Code != wire.CodeInvalidParams {
+		t.Fatalf("unknown harness: %v", we)
+	}
+	if we := f.callErr("sessions.scan", map[string]any{"harness": "claude", "extra": 1}); we == nil || we.Code != wire.CodeInvalidParams {
+		t.Fatalf("an unknown field: %v", we)
 	}
 }
 
