@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import aiosqlite
@@ -13,6 +14,14 @@ from daedalus.providers.failure_evidence import FailureEvidence
 from daedalus.providers.openai_compat import ProviderEndpoint
 from daedalus.stores.control import ControlConflict, now, one
 from daedalus.stores.database import Database
+
+EXHAUSTED_CLASSES = ("quota", "billing", "auth")
+"""Failure classes that stay true until someone or something changes the account, unlike a rate limit."""
+
+UNDATED_REST = timedelta(hours=1)
+"""How long a quota or billing refusal that named no reset still counts against its provider. Long enough
+that a chain does not retry an empty account on every run, short enough that a top-up is noticed within
+the hour; an auth refusal with no date is not rested at all, as a key is usually fixed at once."""
 
 PROVIDER_RESUME_NOTE = (
     "[The provider declared that its rate limit should reset. The operator approved continuing "
@@ -264,3 +273,35 @@ async def pinned_target_in(conn: aiosqlite.Connection, session_id: str,
     return {"hold_id": row["id"], "action_id": row["action_id"], "provider_id": row["provider_id"],
             "model": row["model"], "run_id": run_id, "session_id": session_id,
             "provider_source_digest": row["provider_source_digest"]}
+
+
+async def resting_providers_in(conn: aiosqlite.Connection, provider_ids: list[str],
+                               at: datetime | None = None) -> dict[str, str]:
+    """Provider id to why it is known to be unusable right now, for the ones that are.
+
+    Scoped to the provider and not the model: a subscription or key is exhausted as a whole, so a refusal
+    on one model of it says the next model would be refused too. Only the latest observation counts, so a
+    later transient refusal (the account answered) lifts the rest. Reads the ``provider_failure_by_provider``
+    index, one row per provider.
+    """
+    moment = at or datetime.now(UTC)
+    resting: dict[str, str] = {}
+    for provider_id in dict.fromkeys(provider_ids):
+        row = await one(conn, "SELECT failure_class,reset_at,retry_after_at,observed_at"
+                        " FROM provider_failure_observations WHERE provider_id = ?"
+                        " ORDER BY observed_at DESC, rowid DESC LIMIT 1", (provider_id,))
+        if row is None or row["failure_class"] not in EXHAUSTED_CLASSES:
+            continue
+        until = None
+        try:
+            for column in ("reset_at", "retry_after_at"):
+                if row[column]:
+                    until = max(filter(None, (until, datetime.fromisoformat(row[column]))))
+            if until is None and row["failure_class"] != "auth":
+                until = datetime.fromisoformat(row["observed_at"]) + UNDATED_REST
+        except ValueError:
+            continue
+        if until is not None and until > moment:
+            resting[provider_id] = (f"{provider_id} refused with {row['failure_class']} and is not expected to "
+                                    f"answer before {until.isoformat(timespec='minutes')}")
+    return resting

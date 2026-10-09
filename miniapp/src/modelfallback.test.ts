@@ -80,7 +80,7 @@ describe("the live turn follows the event stream", () => {
 
 describe("what the chip says", () => {
   it("has a word for every reason the host can send", () => {
-    for (const reason of ["outage", "rate_limit", "chain_step", "live_override"]) {
+    for (const reason of ["outage", "stalled", "rate_limit", "chain_step", "live_override"]) {
       expect(DICT[`session.model.reason.${reason}`]).toBeDefined();
       for (const lang of LANGS) expect(DICT[`session.model.reason.${reason}`][lang]).not.toBe("");
     }

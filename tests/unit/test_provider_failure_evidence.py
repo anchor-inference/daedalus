@@ -61,3 +61,18 @@ def test_bad_or_long_reset_does_not_create_a_timer() -> None:
                                     provider_kind="openai_compat", provider_host="api.openai.com",
                                     observed_at=OBSERVED)
         assert evidence.reset_at is None
+
+
+GO_USAGE_LIMIT = ('{"type":"error","error":{"type":"GoUsageLimitError","message":"Go usage limit exceeded"},'
+                  '"metadata":{"workspace":"wrk_1","limitName":"monthly"}}')
+
+
+def test_an_exhausted_opencode_allowance_is_a_quota_and_not_retried_in_place() -> None:
+    evidence = failure_evidence(429, GO_USAGE_LIMIT, {"Retry-After": "93600"}, provider_kind="opencode",
+                                observed_at=OBSERVED)
+    assert (evidence.failure_class, evidence.provider_code) == ("quota", "gousagelimiterror")
+    assert evidence.reset_at is None
+    assert evidence.retry_after_at is not None
+    verdict = classify_failure(429, GO_USAGE_LIMIT)
+    assert (verdict.reason, verdict.retryable) == ("billing", False)
+    assert classify_failure(429, '{"error":{"type":"rate_limit_error"}}').retryable is True

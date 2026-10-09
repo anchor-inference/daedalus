@@ -114,6 +114,7 @@ from daedalus.stores.provider_holds import (
     pin_resumed_run_in,
     pinned_target_in,
     recovery_candidate_in,
+    resting_providers_in,
     resume_target_in,
 )
 from daedalus.stores.sqlite import (
@@ -152,10 +153,15 @@ every write cannot turn it into a leak."""
 FALLBACK_REASONS = {
     "llm_rate_limit": "rate_limit",
     "llm_timeout": "outage",
-    "llm_stream_idle": "outage",
+    "llm_stream_idle": "stalled",
     "llm_provider_error": "outage",
 }
-"""The core's error class behind a demotion, as the one word the app and the operator read."""
+"""The core's error class behind a demotion, as the one word the app and the operator read.
+
+A silent stream is not an outage: the provider answered and then said nothing for longer than the
+budget, which a model thinking without streaming its reasoning does. The core retries the first
+silence on the same model, so a demotion for it means the silence repeated, and the word says so
+rather than claiming the provider was unreachable."""
 BRIEF_MAX_CHARS = 12_000
 """A spawned agent's brief lives in its system prompt; longer hand-overs belong in files."""
 WORKSPACE_NOTES_CHARS = 6000
@@ -3655,7 +3661,9 @@ class SessionManager:
                     raise
                 except Exception:  # noqa: BLE001
                     logger.warning("MCP warm-up for %s failed; tools may be unavailable this run", server, exc_info=True)
-        chain = build_chain(rungs, room=self.providers.room_for(self.config))
+        async with self.db.transaction() as conn:
+            resting = await resting_providers_in(conn, [provider.endpoint.id for provider, _ in rungs[1:]])
+        chain = build_chain(rungs, room=self.providers.room_for(self.config), resting=resting)
         # What this run was *asked* for. Everything the fallback notice says is measured against it,
         # so it is read once here, from the same rungs the chain is built on, and not re-derived later
         # from a configuration the operator may have changed while the run was going.

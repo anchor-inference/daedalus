@@ -4381,6 +4381,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "session.model.fallback.why": { en: "{from} did not answer: {reason}. The run moved to {to} and stayed there.", ru: "{from} не ответила: {reason}. Запуск перешёл на {to} и остался на ней." },
   "session.model.fallback.calls": { en: "every call of this run, by model", ru: "все вызовы этого запуска, по моделям" },
   "session.model.reason.outage": { en: "the provider was unreachable", ru: "провайдер был недоступен" },
+  "session.model.reason.stalled": { en: "the provider went silent twice in a row", ru: "провайдер дважды подряд замолчал" },
   "session.model.reason.rate_limit": { en: "the provider refused on quota", ru: "провайдер отказал по квоте" },
   "session.model.reason.chain_step": { en: "the next model in the chain took over", ru: "запуск перешёл на следующую модель в цепочке" },
   "session.model.reason.live_override": { en: "the model was changed during the run", ru: "модель сменили во время запуска" },
